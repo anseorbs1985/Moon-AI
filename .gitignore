@@ -1,0 +1,4 @@
+*.json
+lineagem_logs/
+__pycache__/
+*.pyc
