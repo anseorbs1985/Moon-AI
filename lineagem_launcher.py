@@ -1,0 +1,5339 @@
+import ctypes
+_ocr_reader = None
+def _get_ocr_reader():
+    global _ocr_reader
+    if _ocr_reader is None:
+        import ctypes, sys, os
+        # 콘솔 창 숨기기
+        try: ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+        except: pass
+        os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+        import warnings; warnings.filterwarnings("ignore")
+        import easyocr
+        _ocr_reader = easyocr.Reader(['ko', 'en'], gpu=False, verbose=False)
+    return _ocr_reader
+
+# 콘솔 창 숨기기
+try: ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+except: pass
+
+# 단일 인스턴스 보장 — 이미 실행 중이면 기존 창 앞으로 띄우고 종료
+_MUTEX = ctypes.windll.kernel32.CreateMutexW(None, False, "LineageMAutoLauncher_Mutex")
+if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+    import sys
+    sys.exit(0)
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+except Exception:
+    try: ctypes.windll.user32.SetProcessDPIAware()
+    except Exception: pass
+
+import tkinter as tk
+from tkinter import messagebox
+import subprocess, time, threading, json, random
+import pyautogui
+import pygetwindow as gw
+import os
+import win32gui, win32con
+
+def _find_purple_exe():
+    import glob as _glob
+    candidates = _glob.glob(r"C:\Program Files (x86)\NCSOFT\Purple\*\Purple.exe")
+    if candidates:
+        return sorted(candidates)[-1]          # 가장 최신 버전
+    return r"C:\Program Files (x86)\NCSOFT\Purple\Purple.exe"
+PURPLE_EXE    = _find_purple_exe()
+BASE          = os.path.dirname(os.path.abspath(__file__))
+LOGS_DIR      = os.path.join(BASE, "lineagem_logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
+CONFIG_FILE   = os.path.join(BASE, "coords.json")
+pyautogui.FAILSAFE = False
+pyautogui.PAUSE    = 0.05
+
+CLICK_SLOTS    = 16
+GROUP_SIZE     = 8
+HUNT_SLOTS     = 16
+HUNT_CLICKS    = 5
+HUNT_INTERVAL  = 1.4   # 사냥 슬롯 내 클릭 간격(초) — 실제 0.8~1.0초 랜덤
+HUNT_SLOT_INTERVAL = 3.5  # 사냥 슬롯 간 간격(초) — 실제로 2~4초 랜덤
+CLICK_INNER_INTERVAL = 2.5   # 클릭 슬롯 내 클릭 간격(초, 클릭1→클릭2)
+CLICK_SLOT_INTERVAL  = 3.5   # 클릭 슬롯 간 간격(초, #01→#02)
+CLICK_INTERVAL = CLICK_SLOT_INTERVAL  # 하위 호환
+MAIL_SLOTS     = 16
+MAIL_CLICKS    = 6
+MAIL_INTERVAL  = 1.6   # 우편함 클릭 간격(초)
+DUNGEON_SLOTS  = 16
+DUNGEON_CLICKS = 3
+DUNGEON_HOVER  = 1.5
+PAST_SLOTS     = 16
+PAST_CLICKS    = 3
+PAST_INTERVAL  = 4.0   # 과거의말하는섬 클릭 간격(초)
+SCHED_SLOTS        = 16
+SCHED_CLICKS       = 3
+SCHED_INTERVAL     = 2.5
+PASS_SLOTS         = 16
+PASS_CLICKS        = 9
+PASS_INNER_MIN     = 0.9
+PASS_INNER_MAX     = 1.2
+PASS_SLOT_MIN      = 2.0
+PASS_SLOT_MAX      = 8.0
+PASS_LABELS        = [f"클릭{j+1}" for j in range(PASS_CLICKS)]
+DUNGEON_INTERVAL = 2.0 # 클릭 사이 간격(초)
+
+DEFAULT_CFG = {
+    "lineagem":    None,
+    "game_start":  None,
+    "multiplay":   None,
+    "profile_btn": None,
+    "google_acc":  None,
+    "confirm_btn": None,
+    "profile_target_id": "",
+    "profile_id_area": None,
+    "profile_reveal_btn": None,
+    "char_btns":   [],
+    "click_slots": [[None, None]] * CLICK_SLOTS,
+    "hunt_slots":  [{"name": "미등록", "coords": [None] * HUNT_CLICKS}
+                    for _ in range(HUNT_SLOTS)],
+    "mail_slots":  [{"name": "미등록", "coords": [None] * MAIL_CLICKS}
+                    for _ in range(MAIL_SLOTS)],
+    "window_positions": [],
+    "dungeon_slots": [{"name": "미등록", "coords": [None] * DUNGEON_CLICKS}
+                      for _ in range(DUNGEON_SLOTS)],
+    "past_slots":   [{"name": "미등록", "coords": [None] * PAST_CLICKS}
+                     for _ in range(PAST_SLOTS)],
+    "sched_slots":  [{"name": "미등록", "coords": [None] * SCHED_CLICKS}
+                     for _ in range(SCHED_SLOTS)],
+    "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
+}
+
+LABELS = {
+    "lineagem":    "리니지M 버튼 (좌측)",
+    "game_start":  "게임 실행 버튼",
+    "multiplay":   "멀티플레이 버튼",
+    "profile_btn":    "프로필 버튼 (우상단)",
+    "google_acc":     "구글 계정 (프로필 클릭 후)",
+    "confirm_btn":    "확인 버튼 (계정전환 팝업)",
+    "profile_reveal_btn": "아이디 표시 클릭 (확인 전)",
+}
+
+
+def load_cfg():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        cfg = dict(DEFAULT_CFG)
+        cfg.update(data)
+        # char_btns
+        normalized = []
+        for item in cfg.get("char_btns", []):
+            if isinstance(item, dict) and item.get("btn"):
+                normalized.append(item["btn"])
+            elif isinstance(item, list):
+                normalized.append(item)
+        cfg["char_btns"] = normalized
+        # click_slots (5번 슬롯=idx4 은 3개 좌표)
+        slots, norm = cfg.get("click_slots", []), []
+        for i, s in enumerate(slots):
+            size = 3 if i == 4 else 2
+            if isinstance(s, list) and len(s) >= 2 and isinstance(s[0], (list, type(None))):
+                while len(s) < size: s.append(None)
+                norm.append(s[:size])
+            else:
+                norm.append([None] * size)
+        while len(norm) < CLICK_SLOTS:
+            i = len(norm)
+            norm.append([None, None, None] if i == 4 else [None, None])
+        cfg["click_slots"] = norm[:CLICK_SLOTS]
+        # hunt_slots
+        hunt, nh = cfg.get("hunt_slots", []), []
+        for h in hunt:
+            if isinstance(h, dict):
+                c = h.get("coords", [None] * HUNT_CLICKS)
+                while len(c) < HUNT_CLICKS: c.append(None)
+                entry = dict(h)  # 모든 키 보존 (assigned_window 등)
+                entry["name"] = h.get("name", "미등록")
+                entry["coords"] = c[:HUNT_CLICKS]
+                nh.append(entry)
+            else:
+                nh.append({"name": "미등록", "coords": [None] * HUNT_CLICKS})
+        while len(nh) < HUNT_SLOTS:
+            nh.append({"name": "미등록", "coords": [None] * HUNT_CLICKS})
+        cfg["hunt_slots"] = nh[:HUNT_SLOTS]
+        # mail_slots (6 clicks: 기존 5개짜리는 끝에 None 추가)
+        ml, nm = cfg.get("mail_slots", []), []
+        for m in ml:
+            if isinstance(m, dict):
+                c = m.get("coords", [None] * MAIL_CLICKS)
+                while len(c) < MAIL_CLICKS: c.append(None)
+                nm.append({"name": m.get("name", "미등록"), "coords": c[:MAIL_CLICKS]})
+            else:
+                nm.append({"name": "미등록", "coords": [None] * MAIL_CLICKS})
+        while len(nm) < MAIL_SLOTS:
+            nm.append({"name": "미등록", "coords": [None] * MAIL_CLICKS})
+        cfg["mail_slots"] = nm[:MAIL_SLOTS]
+        # past_slots (3 clicks: 기존 2개짜리는 앞에 None 삽입)
+        pl, np2 = cfg.get("past_slots", []), []
+        for p in pl:
+            if isinstance(p, dict):
+                c = p.get("coords", [None] * PAST_CLICKS)
+                if len(c) == 2:  # 구버전 → 앞에 None 삽입
+                    c = [None] + c
+                while len(c) < PAST_CLICKS: c.append(None)
+                np2.append({"name": p.get("name", "미등록"), "coords": c[:PAST_CLICKS]})
+            else:
+                np2.append({"name": "미등록", "coords": [None] * PAST_CLICKS})
+        while len(np2) < PAST_SLOTS:
+            np2.append({"name": "미등록", "coords": [None] * PAST_CLICKS})
+        cfg["past_slots"] = np2[:PAST_SLOTS]
+        # sched_slots (3 clicks: 기존 2개짜리는 앞에 None 삽입)
+        sl, ns = cfg.get("sched_slots", []), []
+        for s in sl:
+            if isinstance(s, dict):
+                c = s.get("coords", [None] * SCHED_CLICKS)
+                if len(c) == 2:  # 구버전 → 앞에 None 삽입
+                    c = [None] + c
+                while len(c) < SCHED_CLICKS: c.append(None)
+                ns.append({"name": s.get("name", "미등록"), "coords": c[:SCHED_CLICKS]})
+            else:
+                ns.append({"name": "미등록", "coords": [None] * SCHED_CLICKS})
+        while len(ns) < SCHED_SLOTS:
+            ns.append({"name": "미등록", "coords": [None] * SCHED_CLICKS})
+        cfg["sched_slots"] = ns[:SCHED_SLOTS]
+        ps = cfg.get("pass_slots", [])
+        while len(ps) < PASS_SLOTS:
+            ps.append({"name": "미등록", "coords": [None]*PASS_CLICKS})
+        for s in ps:
+            c = s.get("coords", [])
+            while len(c) < PASS_CLICKS: c.append(None)
+            s["coords"] = c[:PASS_CLICKS]
+        cfg["pass_slots"] = ps[:PASS_SLOTS]
+        return cfg
+    return dict(DEFAULT_CFG)
+
+def save_cfg(cfg):
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+def find_purple():
+    for w in gw.getAllWindows():
+        if "purple" in w.title.lower() or "lineage" in w.title.lower():
+            return w
+    return None
+
+
+def close_purple_popup_if_visible(cfg, status_fn=None):
+    """Purple 팝업 감지 후 체크박스 → X 버튼 클릭으로 닫기.
+    감지: X버튼 좌표의 픽셀이 등록된 색상과 일치할 때만 클릭.
+    """
+    from PIL import ImageGrab
+    chk  = cfg.get("purple_popup_checkbox")   # [x, y]
+    cls  = cfg.get("purple_popup_close")       # [x, y]
+    det  = cfg.get("purple_popup_detect")      # [x, y]
+    col  = cfg.get("purple_popup_color")       # [r, g, b]
+    tol  = 30  # 색상 허용 오차
+
+    if not (cls and det and col):
+        return  # 미등록
+
+    try:
+        shot = ImageGrab.grab(all_screens=False)
+        px   = shot.getpixel((det[0], det[1]))
+        r, g, b = px[0], px[1], px[2]
+        if (abs(r - col[0]) > tol or
+            abs(g - col[1]) > tol or
+            abs(b - col[2]) > tol):
+            return  # 팝업 없음
+    except Exception:
+        return
+
+    if status_fn:
+        status_fn("⚠ 퍼플 팝업 감지 — 자동으로 닫는 중...")
+    if chk:
+        pyautogui.click(*chk)
+        time.sleep(0.4)
+    pyautogui.click(*cls)
+    time.sleep(0.3)
+    if status_fn:
+        status_fn("✔ 퍼플 팝업 닫기 완료")
+
+
+class WindowSizeLock:
+    """폴링으로 창 크기 고정. 최소화만 허용, 최대화/리사이즈 모두 차단."""
+    SWP_NOZORDER   = 0x0004
+    SWP_NOACTIVATE = 0x0010
+
+    def __init__(self):
+        self._locks   = {}   # hwnd -> (x, y, w, h)
+        self._thread  = None
+        self._running = False
+
+    def lock_all(self, hwnds):
+        self.unlock()
+        for hwnd in hwnds:
+            try:
+                r = win32gui.GetWindowRect(hwnd)
+                self._locks[hwnd] = (r[0], r[1], r[2]-r[0], r[3]-r[1])
+            except Exception:
+                pass
+        if self._locks:
+            self._running = True
+            self._thread = threading.Thread(target=self._watch, daemon=True)
+            self._thread.start()
+        return self._locks
+
+    def unlock(self):
+        self._running = False
+        self._locks = {}
+
+    def is_locked(self):
+        return self._running and bool(self._locks)
+
+    def pause(self, seconds):
+        """일시 정지 후 자동 재개"""
+        self._paused_until = time.time() + seconds
+
+    def _watch(self):
+        user32 = ctypes.windll.user32
+        self._paused_until = 0
+        while self._running:
+            if time.time() < self._paused_until:
+                time.sleep(0.3); continue
+            for hwnd, rect in list(self._locks.items()):
+                try:
+                    if not win32gui.IsWindow(hwnd):
+                        self._locks.pop(hwnd, None); continue
+                    if user32.IsIconic(hwnd):
+                        continue
+                    cr = win32gui.GetWindowRect(hwnd)
+                    cw, ch = cr[2]-cr[0], cr[3]-cr[1]
+                    if cw != rect[2] or ch != rect[3]:
+                        user32.SetWindowPos(hwnd, 0, rect[0], rect[1],
+                                            rect[2], rect[3],
+                                            self.SWP_NOZORDER | self.SWP_NOACTIVATE)
+                except Exception:
+                    pass
+            time.sleep(0.3)
+
+
+class App(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("리니지M 자동 실행")
+        sh = self.winfo_screenheight()
+        self.geometry(f"1341x504+76+75")
+        self.resizable(True, True)
+        self.bind("<Map>", self._on_main_map)
+
+        self.cfg = load_cfg()
+        self._reg_target   = None
+        self._stop_flag      = False
+        self._running        = False  # 전체 자동실행 중 여부
+        self._click_stop     = False
+        self._hunt_stop      = False
+        self._sched_any_stop = False
+        self._mail_on      = True
+        self._mail_triggered_date = None
+        self._past_triggered_date = None
+        self._win_lock     = WindowSizeLock()
+        self._hp_stop      = False
+        self._build_ui()
+        self.after(1000, self._mail_scheduler_tick)
+        self.after(1000, self._past_scheduler_tick)
+        self.after(5 * 60 * 60 * 1000, self._purple_check_tick)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self):
+        self._set_sleep_prevention(False)
+        self.destroy()
+
+    def _open_ocr(self):
+        import subprocess, sys
+        exe = sys.executable.replace("python.exe", "pythonw.exe")
+        self._ocr_proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py")])
+        self.iconify()
+
+    def _open_ocr_scan(self):
+        import subprocess, sys
+        exe = sys.executable.replace("python.exe", "pythonw.exe")
+        self._ocr_proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py"), "--scan"])
+        self.iconify()
+
+    def _open_island(self):
+        import subprocess
+        self.iconify()
+        self._minimize_claude()
+        proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py")])
+        self._island_proc = proc
+        threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
+
+    def _watch_island(self, proc):
+        proc.wait()
+        self._island_proc = None
+        if not (self._pass_win and self._pass_win.winfo_exists()):
+            self.after(0, self.deiconify)
+        self._restore_claude()
+
+    def _restore_claude(self):
+        try:
+            import win32gui, win32con
+            def _do(hwnd, _):
+                title = win32gui.GetWindowText(hwnd)
+                if "Claude" in title and win32gui.IsWindowVisible(hwnd):
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            win32gui.EnumWindows(_do, None)
+        except Exception:
+            pass
+
+
+    # ── UI 빌드 ────────────────────────────────────────────────────────
+    def _build_ui(self):
+        # 제목
+        tk.Label(self, text="리니지M 자동 실행",
+                 font=("맑은 고딕", 13, "bold"), fg="#c8a951").pack(pady=(10, 2))
+
+        # 계정 수
+        row_acc = tk.Frame(self); row_acc.pack(fill="x", padx=16, pady=2)
+        tk.Label(row_acc, text="전환할 계정 수:", font=("맑은 고딕", 9)).pack(side="left")
+        self.acc_count = tk.IntVar(value=2)
+        tk.Spinbox(row_acc, from_=1, to=16, textvariable=self.acc_count,
+                   width=4, font=("맑은 고딕", 9), state="normal").pack(side="left", padx=4)
+
+        # 실행 / 멈춤
+        btn_row = tk.Frame(self); btn_row.pack(pady=6)
+        self.btn_start = tk.Button(btn_row, text="▶  전체 자동 실행",
+            font=("맑은 고딕", 12, "bold"), bg="#c8a951", fg="white",
+            activebackground="#a88930", width=15, height=2, command=self._start)
+        self.btn_start.pack(side="left", padx=(0, 4))
+        self.btn_stop = tk.Button(btn_row, text="■ 멈춤",
+            font=("맑은 고딕", 10, "bold"), bg="#c0392b", fg="white",
+            activebackground="#922b21", width=7, height=2,
+            command=self._stop)
+        self.btn_stop.pack(side="left")
+
+        # 9시 클릭 스케줄러
+        tk.Frame(btn_row, width=10).pack(side="left")
+        self.btn_mail = tk.Button(btn_row, text="🕘 9~10시 클릭  ON",
+            font=("맑은 고딕", 9, "bold"), bg="#27ae60", fg="white",
+            activebackground="#5d6d7e", width=13, height=2,
+            command=self._toggle_mail)
+        self.btn_mail.pack(side="left")
+
+        tk.Frame(btn_row, width=10).pack(side="left")
+        tk.Button(btn_row, text="📐 현재 배치 캡처",
+            font=("맑은 고딕", 9, "bold"), bg="#2c3e50", fg="white",
+            activebackground="#1a252f", width=13, height=2,
+            command=self._capture_window_layout).pack(side="left", padx=(0,3))
+        tk.Button(btn_row, text="🔄 배치\n복구",
+            font=("맑은 고딕", 7), width=5, height=2,
+            command=self._apply_window_layout).pack(side="left", padx=(0,2))
+        tk.Button(btn_row, text="🗂 배치\n초기화",
+            font=("맑은 고딕", 7), width=5, height=2,
+            command=self._clear_window_layout).pack(side="left", padx=(0,2))
+        self._btn_layout_toggle = tk.Button(btn_row, text="🖼 배치보기",
+            font=("맑은 고딕", 7), width=6, height=2,
+            command=self._toggle_layout_preview)
+        self._btn_layout_toggle.pack(side="left")
+
+        tk.Frame(btn_row, width=20).pack(side="left")
+        tk.Button(btn_row, text="🏝 섬/던전 실행기",
+            font=("맑은 고딕", 11, "bold"), bg="#2c3e50", fg="white",
+            width=14, height=2,
+            command=self._open_island).pack(side="left")
+        tk.Button(btn_row, text="🎫 패스권\n새로운 등록",
+            font=("맑은 고딕", 10, "bold"), bg="#6c3483", fg="white",
+            width=10, height=2,
+            command=self._open_pass_win).pack(side="left", padx=(4,0))
+
+        tk.Frame(btn_row, width=10).pack(side="left")
+        popup_box = tk.Frame(btn_row, bd=1, relief="groove", padx=4, pady=2)
+        popup_box.pack(side="left")
+        tk.Label(popup_box, text="퍼플 팝업 자동닫기",
+                 font=("맑은 고딕", 7, "bold"), fg="#8e44ad").pack()
+        pb_row = tk.Frame(popup_box); pb_row.pack()
+        tk.Button(pb_row, text="☑ 체크박스\n좌표 등록", font=("맑은 고딕", 6),
+                  width=8, command=self._reg_popup_checkbox).pack(side="left", padx=1)
+        tk.Button(pb_row, text="✕ 닫기버튼\n좌표 등록", font=("맑은 고딕", 6),
+                  width=8, command=self._reg_popup_close).pack(side="left", padx=1)
+        tk.Button(pb_row, text="🎨 감지픽셀\n등록", font=("맑은 고딕", 6),
+                  width=8, command=self._reg_popup_detect).pack(side="left", padx=1)
+        self._popup_status_var = tk.StringVar(value=self._popup_reg_label())
+        tk.Label(popup_box, textvariable=self._popup_status_var,
+                 font=("맑은 고딕", 6), fg="#7f8c8d").pack()
+
+        # 다야 카운트 데이터 변수 (UI는 별도 창)
+        self._cnt_total_var = tk.StringVar(value="합계: 0")
+        self._cnt_cell_vars = [tk.StringVar(value="-") for _ in range(16)]
+        self._cnt_load  = self._make_cnt_loader()
+        self._cnt_today = self._make_today_fn()
+        self._refresh_count()
+        self._schedule_count_refresh()
+
+
+        # 배치 스크린샷 미리보기 (기본 숨김)
+        self._layout_img_label = None
+        self._layout_preview_frame = tk.Frame(self)
+        self._layout_preview_visible = False
+
+        self.status = tk.StringVar(value="버튼을 눌러 시작하세요")
+        self.status_label_widget = tk.Label(self, textvariable=self.status, font=("맑은 고딕", 8),
+                 fg="#555", wraplength=600)
+        self.status_label_widget.pack(pady=(0, 2))
+
+        tk.Frame(self, height=1, bg="#ccc").pack(fill="x", padx=10, pady=3)
+
+        # ── 섹션 버튼 행 ──
+        self._sec_row = tk.Frame(self); self._sec_row.pack(pady=4)
+        self._build_sec_row()
+
+        # ── 다야 카운트 패널 (메인창 inline) ──
+        tk.Frame(self, height=1, bg="#ccc").pack(fill="x", padx=10, pady=(4,2))
+        daya_row = tk.Frame(self); daya_row.pack(pady=2)
+
+        # 왼쪽: 버튼
+        ctrl = tk.Frame(daya_row); ctrl.pack(side="left", padx=(4,8))
+        tk.Label(ctrl, text="💰 다야 수량", font=("맑은 고딕", 9, "bold"), fg="#2c3e50").pack(anchor="w")
+        tk.Button(ctrl, text="📊 OCR 실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#27ae60", fg="white", width=10,
+                  command=self._open_ocr).pack(fill="x", pady=1)
+        tk.Button(ctrl, text="📋 복사", font=("맑은 고딕", 8, "bold"),
+                  bg="#2471a3", fg="white", width=10,
+                  command=self._copy_daya_counts).pack(fill="x", pady=1)
+        tk.Label(ctrl, textvariable=self._cnt_total_var,
+                 font=("맑은 고딕", 10, "bold"), fg="#c0392b").pack(anchor="w", pady=(4,0))
+
+        # 가운데: 4×4 그리드
+        grid = tk.Frame(daya_row); grid.pack(side="left")
+        for r in range(4):
+            for c in range(4):
+                idx = r * 4 + c
+                cell = tk.Frame(grid, bd=1, relief="flat", width=60, height=38)
+                cell.grid(row=r, column=c, padx=1, pady=1)
+                cell.pack_propagate(False)
+                tk.Label(cell, text=f"{idx+1:02d}", font=("맑은 고딕", 7), fg="#aaa").pack()
+                tk.Label(cell, textvariable=self._cnt_cell_vars[idx],
+                         font=("맑은 고딕", 11, "bold"), fg="#2980b9").pack()
+
+        # 서브창 핸들 초기화
+        self._settings_win = None
+        self._hunt_win     = None
+        self._mail_win     = None
+        self._past_win2    = None
+        self._sched_win    = None
+        self._dungeon_win  = None
+        self._daya_win     = None
+        self._pass_win     = None
+        self._island_proc  = None
+        self._pass_name_vars    = []
+        self._pass_click_vars   = []
+        self._pass_click_btns   = []
+        self._pass_coord_sv     = []
+        self._pass_detail_frames= []
+        self._pass_row_frames   = []
+        self._refresh_ui()
+
+    # ── 섹션 창 열기 ────────────────────────────────────────────────────
+    def _minimize_claude(self):
+        try:
+            import win32gui, win32con
+            def _do(hwnd, _):
+                title = win32gui.GetWindowText(hwnd)
+                if "Claude" in title and win32gui.IsWindowVisible(hwnd):
+                    win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+            win32gui.EnumWindows(_do, None)
+        except Exception:
+            pass
+
+    def _open_section_win(self, attr, title, build_fn, w=420, h=700, pinnable=False):
+        win = getattr(self, attr, None)
+        if win and win.winfo_exists():
+            win.lift(); return
+        win = tk.Toplevel(self)
+        win.title(title)
+        # 저장된 위치가 있으면 복원, 없으면 기본 크기
+        pos_key = f"_win_pos_{attr}"
+        saved = self.cfg.get(pos_key)
+        if saved:
+            win.geometry(f"{w}x{h}+{saved[0]}+{saved[1]}")
+        else:
+            win.geometry(f"{w}x{h}")
+        win.resizable(True, True)
+        setattr(self, attr, win)
+        build_fn(win)
+        if pinnable:
+            self._add_drag_bar(win, attr, pos_key)
+        self._refresh_ui()
+        # 내용 너비에 맞게 창 너비 자동 조정
+        def _fit():
+            win.update_idletasks()
+            needed = win.winfo_reqwidth() + 10
+            win.geometry(f"{needed}x{h}")
+        win.after(80, _fit)
+
+    def _add_drag_bar(self, win, attr, pos_key):
+        """창 하단에 드래그 이동바 추가. 이동 후 위치를 cfg에 저장."""
+        bar = tk.Frame(win, bg="#555", height=18, cursor="fleur")
+        bar.pack(side="bottom", fill="x")
+        lbl = tk.Label(bar, text="⠿ 여기를 드래그해서 창 이동", bg="#555", fg="#ccc",
+                       font=("맑은 고딕", 7), cursor="fleur")
+        lbl.pack()
+
+        _drag = {"x": 0, "y": 0}
+
+        def _start(e):
+            _drag["x"] = e.x_root - win.winfo_x()
+            _drag["y"] = e.y_root - win.winfo_y()
+
+        def _drag_move(e):
+            nx = e.x_root - _drag["x"]
+            ny = e.y_root - _drag["y"]
+            win.geometry(f"+{nx}+{ny}")
+
+        def _end(e):
+            nx = win.winfo_x()
+            ny = win.winfo_y()
+            self.cfg[pos_key] = [nx, ny]
+            self._save_cfg()
+
+        for w in (bar, lbl):
+            w.bind("<ButtonPress-1>", _start)
+            w.bind("<B1-Motion>", _drag_move)
+            w.bind("<ButtonRelease-1>", _end)
+
+    def _open_settings_win(self):
+        self._open_section_win("_settings_win", "⚙ 좌표 등록", self._build_left, w=320, h=680)
+
+    def _open_hunt_win(self):
+        self._open_section_win("_hunt_win", "🏹 사냥", self._build_right, w=440, h=700)
+
+    def _open_mail_win(self):
+        self._open_section_win("_mail_win", "📬 우편함", self._build_mail, w=300, h=700)
+
+    def _open_past_win(self):
+        self._open_section_win("_past_win2", "🏝 과거의말하는섬", self._build_past, w=280, h=700, pinnable=True)
+
+    def _open_past_slot(self, idx):
+        """해당 던전 컬럼만 단독으로 섬/던전 실행기 열기."""
+        self.iconify()
+        self._minimize_claude()
+        proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(idx)])
+        threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
+
+    def _run_island_slot(self, idx):
+        """해당 던전 단독창 열고 자동 실행."""
+        self.iconify()
+        self._minimize_claude()
+        proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(idx), "--run"])
+        threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
+
+    def _open_sched_win(self):
+        self._open_section_win("_sched_win", "📅 매일매일 스케줄", self._build_sched, w=300, h=700)
+
+    def _open_dungeon_win(self):
+        self._open_section_win("_dungeon_win", "🏰 주말던전", self._build_dungeon, w=160, h=700, pinnable=True)
+
+    def _open_daya_win(self):
+        self._open_section_win("_daya_win", "💰 다야 카운트", self._build_daya_panel, w=500, h=260)
+
+    def _build_daya_panel(self, parent):
+        cnt_box = tk.Frame(parent); cnt_box.pack(padx=8, pady=8, fill="both", expand=True)
+        tk.Label(cnt_box, text="현재 다야 수량",
+                 font=("맑은 고딕", 14, "bold"), fg="#2c3e50").grid(row=0, column=0, columnspan=2, sticky="w", padx=4)
+        tk.Button(cnt_box, text="📊 OCR", font=("맑은 고딕", 7, "bold"), bg="#27ae60", fg="white",
+                  width=8, command=self._open_ocr).grid(row=0, column=2, columnspan=2, sticky="w", padx=2)
+        tk.Button(cnt_box, text="📋 복사", font=("맑은 고딕", 7, "bold"), bg="#2471a3", fg="white",
+                  width=8, command=self._copy_daya_counts).grid(row=0, column=4, columnspan=2, sticky="w", padx=2)
+        tk.Label(cnt_box, textvariable=self._cnt_total_var,
+                 font=("맑은 고딕", 14, "bold"), fg="#c0392b").grid(row=0, column=6, columnspan=4, sticky="e", padx=4)
+        for r in range(4):
+            for c in range(4):
+                idx = r * 4 + c
+                cell = tk.Frame(cnt_box, bd=1, relief="flat", width=70, height=44)
+                cell.grid(row=r+1, column=c, padx=2, pady=2)
+                cell.pack_propagate(False)
+                tk.Label(cell, text=f"{idx+1:02d}", font=("맑은 고딕", 10), fg="#aaa").pack()
+                tk.Label(cell, textvariable=self._cnt_cell_vars[idx],
+                         font=("맑은 고딕", 14, "bold"), fg="#2980b9").pack()
+
+    def _make_cnt_loader(self):
+        import datetime as _dt
+        count_file = os.path.join(BASE, "daya_counts.json")
+        def load():
+            try:
+                with open(count_file, encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return load
+
+    def _make_today_fn(self):
+        import datetime as _dt
+        return lambda: _dt.date.today().isoformat()
+
+    def _copy_daya_counts(self):
+        values = [v.get().replace(",", "").replace("-", "0") for v in self._cnt_cell_vars]
+        rows = ["\t".join(values[r*4:(r+1)*4]) for r in range(4)]
+        text = "\n".join(rows)
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.status.set("✔ 다야 수량 클립보드 복사 완료 — 엑셀에 붙여넣기 하세요")
+
+    def _refresh_count(self):
+        data = self._cnt_load()
+        # 가장 최근 날짜 데이터를 항상 표시 (OCR 실행 시만 갱신됨)
+        if not data:
+            day_data = {}
+        else:
+            latest_day = max(data.keys())
+            day_data = data.get(latest_day, {})
+        total = 0
+        for i in range(16):
+            v = day_data.get(str(i), 0)
+            self._cnt_cell_vars[i].set(f"{v:,}" if v else "-")
+            total += v
+        self._cnt_total_var.set(f"합계: {total:,}")
+
+    def _schedule_count_refresh(self):
+        self._refresh_count()
+        self.after(30000, self._schedule_count_refresh)  # 30초마다 자동갱신
+
+    def _preview_coord(self, x, y):
+        """마우스를 해당 좌표로 이동해서 위치 미리보기"""
+        import threading as _th
+        def _move():
+            try:
+                pyautogui.moveTo(x, y, duration=0.25)
+            except Exception:
+                pass
+        self.status.set(f"미리보기: ({x},{y}) — 마우스가 해당 위치로 이동합니다")
+        _th.Thread(target=_move, daemon=True).start()
+
+    def _build_left(self, parent):
+        # 좌표 등록
+        tk.Label(parent, text="좌표 등록  (버튼 → 3초 후 해당 위치 클릭)",
+                 font=("맑은 고딕", 8), fg="#888").pack(anchor="w", padx=4)
+        self._coord_vars = {}
+        for key, label in LABELS.items():
+            row = tk.Frame(parent); row.pack(fill="x", padx=4, pady=1)
+            tk.Label(row, text=label, font=("맑은 고딕", 8),
+                     width=18, anchor="w").pack(side="left")
+            var = tk.StringVar()
+            self._coord_vars[key] = var
+            tk.Label(row, textvariable=var, font=("맑은 고딕", 7),
+                     fg="gray", width=12).pack(side="left")
+            tk.Button(row, text="등록", font=("맑은 고딕", 7),
+                      command=lambda k=key: self._reg_coord(k)).pack(side="right")
+            tk.Button(row, text="👁", font=("맑은 고딕", 7), width=2,
+                      command=lambda k=key: self._preview_label_coord(k)).pack(side="right", padx=1)
+
+        # 프로필 아이디 OCR 설정
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=3)
+        area_row = tk.Frame(parent); area_row.pack(fill="x", padx=4, pady=2)
+        tk.Label(area_row, text="아이디 표시 영역", font=("맑은 고딕", 8), width=18, anchor="w").pack(side="left")
+        self._profile_area_var = tk.StringVar(value="등록됨" if self.cfg.get("profile_id_area") else "미등록")
+        tk.Label(area_row, textvariable=self._profile_area_var, font=("맑은 고딕", 7), fg="gray", width=12).pack(side="left")
+        tk.Button(area_row, text="등록", font=("맑은 고딕", 7),
+                  command=self._reg_profile_id_area).pack(side="right")
+        tk.Button(area_row, text="테스트", font=("맑은 고딕", 7), bg="#7d3c98", fg="white",
+                  command=self._test_profile_ocr).pack(side="right", padx=2)
+
+        pid_row = tk.Frame(parent); pid_row.pack(fill="x", padx=4, pady=2)
+        tk.Label(pid_row, text="사용할 아이디", font=("맑은 고딕", 8), width=18, anchor="w").pack(side="left")
+        self._profile_target_var = tk.StringVar(value=self.cfg.get("profile_target_id", ""))
+        tk.Entry(pid_row, textvariable=self._profile_target_var, font=("맑은 고딕", 8),
+                 fg="#2471a3", width=14).pack(side="left")
+        def _save_pid():
+            self.cfg["profile_target_id"] = self._profile_target_var.get().strip()
+            save_cfg(self.cfg)
+            self.status.set(f"✔ 아이디 저장: '{self.cfg['profile_target_id']}'")
+        tk.Button(pid_row, text="저장", font=("맑은 고딕", 7), bg="#2471a3", fg="white",
+                  command=_save_pid).pack(side="left", padx=2)
+
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=3)
+
+        # 캐릭터 접속 버튼
+        char_hdr = tk.Frame(parent); char_hdr.pack(fill="x", padx=4, pady=1)
+        self._char_count_var = tk.StringVar()
+        tk.Label(char_hdr, text="캐릭터 접속 버튼", font=("맑은 고딕", 9, "bold")).pack(side="left")
+        tk.Label(char_hdr, textvariable=self._char_count_var,
+                 font=("맑은 고딕", 8), fg="#c8a951").pack(side="left", padx=4)
+        tk.Button(char_hdr, text="+ 추가", font=("맑은 고딕", 7),
+                  command=self._reg_char_btn).pack(side="right")
+        tk.Button(char_hdr, text="전체삭제", font=("맑은 고딕", 7), fg="red",
+                  command=self._clear_char_btns).pack(side="right", padx=2)
+        # 캐릭터 버튼 목록 (동적)
+        self._char_rows_frame = tk.Frame(parent)
+        self._char_rows_frame.pack(fill="x", padx=4)
+
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=3)
+
+        # 클릭 슬롯
+        tk.Label(parent, text="클릭 등록  (슬롯당 2번 클릭 등록 / 3초 간격)",
+                 font=("맑은 고딕", 8), fg="#888").pack(anchor="w", padx=4)
+
+        self._slot_vars = []
+        for g in range(CLICK_SLOTS // GROUP_SIZE):
+            grp = tk.LabelFrame(parent,
+                                text=f"그룹 {g+1}  ({g*GROUP_SIZE+1}~{(g+1)*GROUP_SIZE}번)",
+                                font=("맑은 고딕", 7), padx=2, pady=1)
+            grp.pack(fill="x", padx=4, pady=1)
+            for i in range(GROUP_SIZE):
+                idx = g * GROUP_SIZE + i
+                row = tk.Frame(grp); row.pack(fill="x", pady=2)
+                tk.Label(row, text=f"#{idx+1:02d}", font=("맑은 고딕", 8, "bold"),
+                         width=4).pack(side="left", padx=(2,0))
+                var = tk.StringVar()
+                self._slot_vars.append(var)
+                tk.Label(row, textvariable=var, font=("맑은 고딕", 7),
+                         fg="gray", width=16).pack(side="left", padx=(2,4))
+                # 왼쪽부터: ①②(개별등록) — 오른쪽부터: 등록 삭제 👁 ↑복사
+                if idx > 0:
+                    tk.Button(row, text="↑그룹복사", font=("맑은 고딕", 7), width=6,
+                              command=lambda x=idx: self._group_copy_slot(x)).pack(side="right", padx=(0,2))
+                tk.Button(row, text="👁", font=("맑은 고딕", 7), width=2,
+                          command=lambda x=idx: self._preview_slot(x)).pack(side="right", padx=(0,2))
+                tk.Button(row, text="삭제", font=("맑은 고딕", 7), fg="#c0392b",
+                          command=lambda x=idx: self._del_slot(x)).pack(side="right", padx=(0,2))
+                tk.Button(row, text="전체등록", font=("맑은 고딕", 7),
+                          command=lambda x=idx: self._reg_slot(x)).pack(side="right", padx=(0,4))
+                tk.Button(row, text="②등록", font=("맑은 고딕", 7), width=5,
+                          command=lambda x=idx: self._reg_slot_step(x, 1)).pack(side="left", padx=(0,2))
+                tk.Button(row, text="①등록", font=("맑은 고딕", 7), width=5,
+                          command=lambda x=idx: self._reg_slot_step(x, 0)).pack(side="left", padx=(0,2))
+                if idx == 4:
+                    tk.Button(row, text="③등록", font=("맑은 고딕", 7), width=5,
+                              command=lambda x=idx: self._reg_slot_step(x, 2)).pack(side="left", padx=(0,2))
+
+        # 클릭 실행 버튼
+        cr = tk.Frame(parent); cr.pack(pady=4)
+        self.btn_click_run = tk.Button(cr, text="▶  클릭 실행 (32번)",
+            font=("맑은 고딕", 9, "bold"), bg="#2980b9", fg="white",
+            activebackground="#1a5e8a", width=16, height=2, command=self._start_click)
+        self.btn_click_run.pack(side="left", padx=(0, 3))
+        self.btn_click_stop = tk.Button(cr, text="■ 멈춤",
+            font=("맑은 고딕", 8, "bold"), bg="#c0392b", fg="white",
+            activebackground="#922b21", width=6, height=2,
+            command=lambda: setattr(self, "_click_stop", True) or
+                            self.status.set("클릭 멈추는 중..."),
+            state="disabled")
+        self.btn_click_stop.pack(side="left")
+
+    def _build_right(self, parent):
+        tk.Label(parent, text=f"사냥  (슬롯당 {HUNT_CLICKS}번 클릭 / {HUNT_INTERVAL}초 간격)",
+                 font=("맑은 고딕", 9, "bold"), fg="#27ae60").pack(anchor="w", padx=4, pady=(4,2))
+
+        hr = tk.Frame(parent); hr.pack(pady=3)
+        self.btn_hunt_run = tk.Button(hr, text="▶  사냥 실행",
+            font=("맑은 고딕", 9, "bold"), bg="#27ae60", fg="white",
+            activebackground="#1e8449", width=13, height=2, command=self._start_hunt)
+        self.btn_hunt_run.pack(side="left", padx=(0, 3))
+        self.btn_hunt_stop = tk.Button(hr, text="■ 멈춤",
+            font=("맑은 고딕", 8, "bold"), bg="#c0392b", fg="white",
+            activebackground="#922b21", width=6, height=2,
+            command=lambda: setattr(self, "_hunt_stop", True) or
+                            self.status.set("사냥 멈추는 중..."),
+            state="disabled")
+        self.btn_hunt_stop.pack(side="left")
+        tk.Button(hr, text="🔀 그룹복사 (#01→전체)",
+            font=("맑은 고딕", 8), bg="#8e44ad", fg="white", width=18,
+            command=self._group_copy_hunt).pack(side="left", padx=(8,0))
+        tk.Button(hr, text="📍 위치\n전체저장",
+            font=("맑은 고딕", 7, "bold"), bg="#5d6d7e", fg="white", width=6, height=2,
+            command=self._save_all_window_pos).pack(side="left", padx=(6,2))
+        tk.Button(hr, text="📐 창\n전체복원",
+            font=("맑은 고딕", 7, "bold"), bg="#1a5276", fg="white", width=6, height=2,
+            command=self._restore_all_windows).pack(side="left", padx=(2,2))
+        tk.Button(hr, text="🔢 번호\n재지정",
+            font=("맑은 고딕", 7, "bold"), bg="#7d3c98", fg="white", width=6, height=2,
+            command=self._renumber_windows).pack(side="left", padx=(2,2))
+        tk.Button(hr, text="📷 이름\n영역등록",
+            font=("맑은 고딕", 7, "bold"), bg="#b7770d", fg="white", width=6, height=2,
+            command=self._reg_name_area).pack(side="left", padx=(2,2))
+        tk.Button(hr, text="🔍 이름\n자동인식",
+            font=("맑은 고딕", 7, "bold"), bg="#1e8449", fg="white", width=6, height=2,
+            command=self._ocr_all_names).pack(side="left", padx=(2,0))
+
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
+
+        outer = tk.Frame(parent); outer.pack(fill="both", expand=True, padx=2)
+        canvas = tk.Canvas(outer, highlightthickness=0)
+        sb = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        self._hunt_frame = tk.Frame(canvas)
+        fid = canvas.create_window((0, 0), window=self._hunt_frame, anchor="nw")
+        self._hunt_frame.bind("<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+            lambda e: canvas.itemconfig(fid, width=e.width))
+
+        def _on_wheel(e):
+            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        canvas.bind("<MouseWheel>", _on_wheel)
+        self._hunt_frame.bind("<MouseWheel>", _on_wheel)
+
+        self._hunt_name_vars  = []
+        self._hunt_click_vars = []   # [slot][click] StringVar
+        self._hunt_click_btns = []   # [slot][click] Button 위젯
+        self._hunt_assign_btns = []  # 지정 버튼 참조
+        self._hunt_coord_sv   = []   # 좌표 요약 StringVar
+        self._hunt_detail_frames = [] # 접이식 상세 frame
+        self._hunt_row_frames = []    # row 참조 (detail after= 용)
+
+        for i in range(HUNT_SLOTS):
+            row = tk.Frame(self._hunt_frame, bd=1, relief="groove")
+            row.pack(fill="x", padx=2, pady=4)
+            self._hunt_row_frames.append(row)
+
+            # 접이식 상세 frame (기본 숨김)
+            detail = tk.Frame(self._hunt_frame, bg="#ecf0f1", bd=1, relief="flat")
+            self._hunt_detail_frames.append(detail)
+
+            # 지정 버튼
+            aw = self.cfg.get("hunt_slots", [{}]*HUNT_SLOTS)[i].get("assigned_window") if i < len(self.cfg.get("hunt_slots",[])) else None
+            assign_bg = "#27ae60" if aw else "#8e44ad"
+            assign_txt = "✔지정" if aw else "지정"
+            btn_assign = tk.Button(row, text=assign_txt, font=("맑은 고딕", 7), width=4,
+                      bg=assign_bg, fg="white", pady=0,
+                      command=lambda x=i: self._assign_window(x))
+            btn_assign.pack(side="left", padx=(2,1))
+            self._hunt_assign_btns.append(btn_assign)
+            tk.Button(row, text="👁", font=("맑은 고딕", 7), width=2,
+                      bg="#566573", fg="white", pady=0,
+                      command=lambda x=i: self._preview_assigned_window(x)).pack(side="left", padx=(0,1))
+            tk.Button(row, text="📍", font=("맑은 고딕", 7), width=2,
+                      bg="#5d6d7e", fg="white", pady=0,
+                      command=lambda x=i: self._save_window_pos(x)).pack(side="left", padx=(0,1))
+            tk.Button(row, text="📐", font=("맑은 고딕", 7), width=2,
+                      bg="#2c3e50", fg="white", pady=0,
+                      command=lambda x=i: self._restore_single_window(x)).pack(side="left", padx=(0,1))
+            # 번호 + 이름
+            tk.Label(row, text=f"#{i+1:02d}", font=("맑은 고딕", 8, "bold"),
+                     width=4).pack(side="left", padx=(2,0))
+            nv = tk.StringVar()
+            self._hunt_name_vars.append(nv)
+            ent = tk.Entry(row, textvariable=nv, font=("맑은 고딕", 8), width=7)
+            ent.pack(side="left", padx=(2,2))
+            ent.bind("<FocusOut>", lambda e, x=i: self._save_hunt_name(x))
+            ent.bind("<Return>",   lambda e, x=i: self._save_hunt_name(x))
+
+            # 좌표 접이식 버튼 (요약 표시)
+            coords_saved = self.cfg.get("hunt_slots", [{}]*HUNT_SLOTS)[i].get("coords", []) if i < len(self.cfg.get("hunt_slots",[])) else []
+            reg_count = sum(1 for c in coords_saved if c)
+            coord_sv = tk.StringVar(value=f"좌표 {reg_count}/{HUNT_CLICKS} ▾")
+            self._hunt_coord_sv.append(coord_sv)
+            tk.Button(row, textvariable=coord_sv, font=("맑은 고딕", 7),
+                      bg="#2980b9", fg="white", width=8, pady=0,
+                      command=lambda x=i: self._toggle_hunt_detail(x)).pack(side="left", padx=(2,2))
+
+            # 접이식 내부: 1~5 버튼
+            click_vars = []
+            click_btns = []
+            for j in range(HUNT_CLICKS):
+                cv = tk.StringVar()
+                click_vars.append(cv)
+                cell = tk.Frame(detail, bg="#ecf0f1")
+                cell.pack(side="left", padx=4, pady=3)
+                tk.Label(cell, text=f"클릭{j+1}", font=("맑은 고딕", 7),
+                         fg="#555", bg="#ecf0f1").pack()
+                btn = tk.Button(cell, textvariable=cv, font=("맑은 고딕", 7),
+                                width=4, pady=1,
+                                command=lambda x=i, c=j: self._reg_hunt_click(x, c))
+                btn.pack()
+                click_btns.append(btn)
+            self._hunt_click_vars.append(click_vars)
+            self._hunt_click_btns.append(click_btns)
+
+            for w in row.winfo_children():
+                w.bind("<MouseWheel>", _on_wheel)
+            row.bind("<MouseWheel>", _on_wheel)
+            detail.bind("<MouseWheel>", _on_wheel)
+
+            if i > 0:
+                tk.Button(row, text="↑그룹복사", font=("맑은 고딕", 7), width=6,
+                          command=lambda x=i: self._group_copy_hunt_slot(x)).pack(side="right", padx=(0,3))
+            tk.Button(row, text="👁", font=("맑은 고딕", 8), width=2,
+                      command=lambda x=i: self._preview_hunt(x)).pack(side="right", padx=(0,2))
+            tk.Button(row, text="×", font=("맑은 고딕", 8), fg="red", width=2,
+                      command=lambda x=i: self._del_hunt(x)).pack(side="right", padx=(0,2))
+            tk.Button(row, text="▶", font=("맑은 고딕", 8), fg="white", bg="#27ae60", width=2,
+                      command=lambda x=i: self._test_hunt(x)).pack(side="right", padx=(0,2))
+
+        # 창 열릴 때 cfg 값으로 즉시 초기화
+        for i in range(HUNT_SLOTS):
+            h = self.cfg["hunt_slots"][i]
+            self._hunt_name_vars[i].set(h.get("name", "미등록"))
+            coords = h.get("coords", [None]*HUNT_CLICKS)
+            for j in range(HUNT_CLICKS):
+                c = coords[j] if j < len(coords) else None
+                self._hunt_click_vars[i][j].set("✔" if c else "✗")
+                self._hunt_click_btns[i][j].config(
+                    fg="white" if c else "#aaa",
+                    bg="#27ae60" if c else "#7f8c8d")
+
+        # 창 크기 고정
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=(6,2))
+        lf = tk.LabelFrame(parent, text="🔒 창 크기 고정", font=("맑은 고딕", 8, "bold"),
+                           padx=4, pady=4)
+        lf.pack(fill="x", padx=4, pady=(0,4))
+        self._lock_status_var = tk.StringVar(value="고정 꺼짐")
+        tk.Label(lf, textvariable=self._lock_status_var, font=("맑은 고딕", 8),
+                 fg="#888", anchor="w").pack(fill="x")
+        btn_row = tk.Frame(lf); btn_row.pack(fill="x", pady=(3,0))
+        self._btn_lock = tk.Button(btn_row, text="리니지M 창 고정",
+            font=("맑은 고딕", 8, "bold"), bg="#2980b9", fg="white", width=14,
+            command=self._lock_lineagem_window)
+        self._btn_lock.pack(side="left", padx=(0,4))
+        tk.Button(btn_row, text="고정 해제", font=("맑은 고딕", 8),
+            bg="#7f8c8d", fg="white", width=8,
+            command=self._unlock_lineagem_window).pack(side="left", padx=(0,4))
+        tk.Button(btn_row, text="⏸ 10분 임시해제", font=("맑은 고딕", 8),
+            bg="#e67e22", fg="white", width=13,
+            command=self._pause_lock).pack(side="left")
+
+    def _lock_lineagem_window(self):
+        candidates = []
+        def enum_cb(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd): return
+            t = win32gui.GetWindowText(hwnd)
+            if not t: return
+            tl = t.lower()
+            if any(k in tl for k in ("lineagem", "리니지m", "lineage m", "ncsoft")):
+                candidates.append(hwnd)
+        win32gui.EnumWindows(enum_cb, None)
+
+        if not candidates:
+            # 창 제목 목록 팝업으로 보여주기
+            self._pick_window_dialog()
+            return
+
+        self._win_lock.lock_all(candidates)
+        self._lock_status_var.set(f"리사이즈 차단 ON — {len(candidates)}개 창")
+        self._btn_lock.config(bg="#27ae60")
+
+    def _pick_window_dialog(self):
+        """창 목록을 팝업으로 보여주고 선택해서 고정."""
+        wins = []
+        def enum_cb(hwnd, _):
+            if win32gui.IsWindowVisible(hwnd):
+                t = win32gui.GetWindowText(hwnd)
+                if t: wins.append((hwnd, t))
+        win32gui.EnumWindows(enum_cb, None)
+
+        dlg = tk.Toplevel(self)
+        dlg.title("창 선택"); dlg.geometry("500x400"); dlg.grab_set()
+        tk.Label(dlg, text="리니지M 창이 자동으로 감지되지 않았습니다.\n고정할 창을 선택하세요 (Ctrl+클릭으로 다중 선택):",
+                 font=("맑은 고딕", 9), justify="left").pack(padx=8, pady=(8,4), anchor="w")
+        lb = tk.Listbox(dlg, selectmode="extended", font=("맑은 고딕", 8), height=16)
+        lb.pack(fill="both", expand=True, padx=8, pady=4)
+        for hwnd, title in wins:
+            lb.insert("end", f"[{hwnd}] {title}")
+
+        def _apply():
+            sel = lb.curselection()
+            if not sel: return
+            chosen = [wins[i][0] for i in sel]
+            self._win_lock.lock_all(chosen)
+            self._lock_status_var.set(f"리사이즈 차단 ON — {len(chosen)}개 창")
+            self._btn_lock.config(bg="#27ae60")
+            dlg.destroy()
+
+        tk.Button(dlg, text="선택 고정", font=("맑은 고딕", 9, "bold"),
+                  bg="#2980b9", fg="white", command=_apply).pack(pady=6)
+
+    def _unlock_lineagem_window(self):
+        self._win_lock.unlock()
+        self._lock_status_var.set("고정 꺼짐")
+        self._btn_lock.config(bg="#2980b9")
+
+    def _pause_lock(self):
+        if not self._win_lock.is_locked():
+            return
+        self._win_lock.pause(600)
+        self._lock_status_var.set("⏸ 임시 해제 중 (10분)...")
+        self.after(600000, lambda: self._lock_status_var.set(
+            f"리사이즈 차단 ON — {len(self._win_lock._locks)}개 창") if self._win_lock.is_locked() else None)
+
+    def _build_mail(self, parent):
+        tk.Label(parent, text=f"우편함  (슬롯당 {MAIL_CLICKS}번 클릭 / {MAIL_INTERVAL}초 간격)",
+                 font=("맑은 고딕", 9, "bold"), fg="#8e44ad").pack(anchor="w", padx=4, pady=(4,2))
+
+        mr = tk.Frame(parent); mr.pack(pady=3)
+        self._mail_stop = False
+        self.btn_mail_run = tk.Button(mr, text="▶  우편함 실행",
+            font=("맑은 고딕", 9, "bold"), bg="#8e44ad", fg="white",
+            activebackground="#6c3483", width=13, height=2,
+            command=self._start_mail)
+        self.btn_mail_run.pack(side="left", padx=(0,3))
+        self.btn_mail_stop = tk.Button(mr, text="■ 멈춤",
+            font=("맑은 고딕", 8, "bold"), bg="#7f8c8d", fg="white",
+            width=6, height=2, state="disabled",
+            command=self._stop_mail)
+        self.btn_mail_stop.pack(side="left", padx=(0,6))
+        tk.Button(mr, text="🔀 그룹복사 (#01→전체)",
+            font=("맑은 고딕", 8), bg="#6c3483", fg="white", width=18,
+            command=self._group_copy_mail).pack(side="left", padx=(4,0))
+
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
+
+        m_outer = tk.Frame(parent); m_outer.pack(fill="both", expand=True, padx=2)
+        m_canvas = tk.Canvas(m_outer, highlightthickness=0)
+        m_sb = tk.Scrollbar(m_outer, orient="vertical", command=m_canvas.yview)
+        m_canvas.configure(yscrollcommand=m_sb.set)
+        m_sb.pack(side="right", fill="y")
+        m_canvas.pack(side="left", fill="both", expand=True)
+        self._mail_frame = tk.Frame(m_canvas)
+        m_fid = m_canvas.create_window((0,0), window=self._mail_frame, anchor="nw")
+        self._mail_frame.bind("<Configure>",
+            lambda e: m_canvas.configure(scrollregion=m_canvas.bbox("all")))
+        m_canvas.bind("<Configure>",
+            lambda e: m_canvas.itemconfig(m_fid, width=e.width))
+
+        def _on_mwheel(e):
+            m_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        m_canvas.bind("<MouseWheel>", _on_mwheel)
+        self._mail_frame.bind("<MouseWheel>", _on_mwheel)
+
+        self._mail_name_vars  = []
+        self._mail_click_vars = []
+        self._mail_click_btns = []
+        self._mail_coord_sv   = []
+        self._mail_detail_frames = []
+        self._mail_row_frames = []
+
+        for i in range(MAIL_SLOTS):
+            row = tk.Frame(self._mail_frame, bd=1, relief="groove")
+            row.pack(fill="x", padx=2, pady=4)
+            self._mail_row_frames.append(row)
+            detail = tk.Frame(self._mail_frame, bg="#ecf0f1", bd=1, relief="flat")
+            self._mail_detail_frames.append(detail)
+
+            tk.Label(row, text=f"#{i+1:02d}", font=("맑은 고딕", 7, "bold"),
+                     width=3).pack(side="left", padx=(2,0))
+            nv = tk.StringVar()
+            self._mail_name_vars.append(nv)
+            ent = tk.Entry(row, textvariable=nv, font=("맑은 고딕", 8), width=7)
+            ent.pack(side="left", padx=2)
+            ent.bind("<FocusOut>", lambda e, x=i: self._save_mail_name(x))
+            ent.bind("<Return>",   lambda e, x=i: self._save_mail_name(x))
+
+            mail_saved = self.cfg.get("mail_slots", [{}]*MAIL_SLOTS)[i].get("coords", []) if i < len(self.cfg.get("mail_slots",[])) else []
+            mail_reg = sum(1 for c in mail_saved if c)
+            msv = tk.StringVar(value=f"좌표 {mail_reg}/{MAIL_CLICKS} ▾")
+            self._mail_coord_sv.append(msv)
+            tk.Button(row, textvariable=msv, font=("맑은 고딕", 7),
+                      bg="#8e44ad", fg="white", width=8, pady=0,
+                      command=lambda x=i: self._toggle_mail_detail(x)).pack(side="left", padx=(2,2))
+
+            click_vars = []
+            click_btns = []
+            for j in range(MAIL_CLICKS):
+                cv = tk.StringVar()
+                click_vars.append(cv)
+                cell = tk.Frame(detail, bg="#ecf0f1")
+                cell.pack(side="left", padx=4, pady=3)
+                tk.Label(cell, text=f"클릭{j+1}", font=("맑은 고딕", 7),
+                         fg="#555", bg="#ecf0f1").pack()
+                btn = tk.Button(cell, textvariable=cv, font=("맑은 고딕", 7),
+                                width=4, pady=1,
+                                command=lambda x=i, c=j: self._reg_mail_click(x, c))
+                btn.pack()
+                click_btns.append(btn)
+            self._mail_click_vars.append(click_vars)
+            self._mail_click_btns.append(click_btns)
+
+            for w in row.winfo_children():
+                w.bind("<MouseWheel>", _on_mwheel)
+            row.bind("<MouseWheel>", _on_mwheel)
+            detail.bind("<MouseWheel>", _on_mwheel)
+
+            if i > 0:
+                tk.Button(row, text="↑그룹복사", font=("맑은 고딕", 7), width=6,
+                          command=lambda x=i: self._group_copy_mail_slot(x)).pack(side="right", padx=(0,3))
+            tk.Button(row, text="👁", font=("맑은 고딕", 8), width=2,
+                      command=lambda x=i: self._preview_mail(x)).pack(side="right", padx=(0,2))
+            tk.Button(row, text="▶", font=("맑은 고딕", 8), fg="white", bg="#8e44ad", width=2,
+                      command=lambda x=i: self._test_mail(x)).pack(side="right", padx=(0,1))
+            tk.Button(row, text="×", font=("맑은 고딕", 8), fg="red", width=2,
+                      command=lambda x=i: self._del_mail(x)).pack(side="right", padx=2)
+
+        # 창 열릴 때 cfg 값으로 즉시 초기화
+        for i in range(MAIL_SLOTS):
+            m = self.cfg["mail_slots"][i]
+            self._mail_name_vars[i].set(m.get("name", "미등록"))
+            coords = m.get("coords", [None]*MAIL_CLICKS)
+            for j in range(MAIL_CLICKS):
+                c = coords[j] if j < len(coords) else None
+                self._mail_click_vars[i][j].set("✔" if c else "✗")
+                self._mail_click_btns[i][j].config(
+                    fg="white" if c else "#aaa",
+                    bg="#27ae60" if c else "#7f8c8d")
+
+    def _build_dungeon(self, parent):
+        tk.Label(parent, text=f"주말던전  (메뉴→{DUNGEON_HOVER}초→클릭×2)",
+                 font=("맑은 고딕", 9, "bold"), fg="#e67e22").pack(anchor="w", padx=4, pady=(4,2))
+
+        dr = tk.Frame(parent); dr.pack(pady=3)
+        self._dungeon_stop = False
+        self.btn_dungeon_run = tk.Button(dr, text="▶  던전 실행",
+            font=("맑은 고딕", 9, "bold"), bg="#e67e22", fg="white",
+            activebackground="#b35400", width=13, height=2,
+            command=self._start_dungeon)
+        self.btn_dungeon_run.pack(side="left", padx=(0,3))
+        self.btn_dungeon_stop = tk.Button(dr, text="■ 멈춤",
+            font=("맑은 고딕", 8, "bold"), bg="#c0392b", fg="white",
+            activebackground="#922b21", width=6, height=2,
+            command=lambda: setattr(self, "_dungeon_stop", True) or
+                            self.status.set("던전 멈추는 중..."),
+            state="disabled")
+        self.btn_dungeon_stop.pack(side="left")
+
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
+
+        d_outer = tk.Frame(parent); d_outer.pack(fill="both", expand=True, padx=2)
+        d_canvas = tk.Canvas(d_outer, highlightthickness=0)
+        d_sb_y = tk.Scrollbar(d_outer, orient="vertical", command=d_canvas.yview)
+        d_sb_x = tk.Scrollbar(parent, orient="horizontal", command=d_canvas.xview)
+        d_canvas.configure(yscrollcommand=d_sb_y.set, xscrollcommand=d_sb_x.set)
+        d_sb_x.pack(side="bottom", fill="x")
+        d_sb_y.pack(side="right", fill="y")
+        d_canvas.pack(side="left", fill="both", expand=True)
+        self._dungeon_frame = tk.Frame(d_canvas)
+        d_fid = d_canvas.create_window((0,0), window=self._dungeon_frame, anchor="nw")
+        self._dungeon_frame.bind("<Configure>",
+            lambda e: d_canvas.configure(scrollregion=d_canvas.bbox("all")))
+
+        def _on_dwheel(e):
+            d_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        d_canvas.bind("<MouseWheel>", _on_dwheel)
+        self._dungeon_frame.bind("<MouseWheel>", _on_dwheel)
+
+        self._dungeon_name_vars  = []
+        self._dungeon_click_vars = []
+        self._dungeon_click_btns = []
+        self._dungeon_coord_sv   = []
+        self._dungeon_detail_frames = []
+        self._dungeon_row_frames = []
+
+        LABELS_D = ["메뉴", "클릭1", "클릭2"]
+        for i in range(DUNGEON_SLOTS):
+            row = tk.Frame(self._dungeon_frame, bd=1, relief="groove")
+            row.pack(fill="x", padx=2, pady=4)
+            self._dungeon_row_frames.append(row)
+            detail = tk.Frame(self._dungeon_frame, bg="#ecf0f1", bd=1, relief="flat")
+            self._dungeon_detail_frames.append(detail)
+
+            tk.Label(row, text=f"#{i+1:02d}", font=("맑은 고딕", 7, "bold"),
+                     width=3).pack(side="left", padx=(2,0))
+            nv = tk.StringVar()
+            self._dungeon_name_vars.append(nv)
+            ent = tk.Entry(row, textvariable=nv, font=("맑은 고딕", 8), width=6)
+            ent.pack(side="left", padx=2)
+            ent.bind("<FocusOut>", lambda e, x=i: self._save_dungeon_name(x))
+            ent.bind("<Return>",   lambda e, x=i: self._save_dungeon_name(x))
+
+            dung_saved = self.cfg.get("dungeon_slots", [{}]*DUNGEON_SLOTS)[i].get("coords", []) if i < len(self.cfg.get("dungeon_slots",[])) else []
+            dung_reg = sum(1 for c in dung_saved if c)
+            dsv = tk.StringVar(value=f"좌표 {dung_reg}/{DUNGEON_CLICKS} ▾")
+            self._dungeon_coord_sv.append(dsv)
+            tk.Button(row, textvariable=dsv, font=("맑은 고딕", 7),
+                      bg="#e67e22", fg="white", width=8, pady=0,
+                      command=lambda x=i: self._toggle_dungeon_detail(x)).pack(side="left", padx=(2,2))
+
+            click_vars = []
+            click_btns = []
+            for j in range(DUNGEON_CLICKS):
+                cv = tk.StringVar()
+                click_vars.append(cv)
+                cell = tk.Frame(detail, bg="#ecf0f1")
+                cell.pack(side="left", padx=4, pady=3)
+                tk.Label(cell, text=LABELS_D[j], font=("맑은 고딕", 7),
+                         fg="#555", bg="#ecf0f1").pack()
+                btn = tk.Button(cell, textvariable=cv, font=("맑은 고딕", 7),
+                                width=4, pady=1,
+                                command=lambda x=i, c=j: self._reg_dungeon_click(x, c))
+                btn.pack()
+                click_btns.append(btn)
+            self._dungeon_click_vars.append(click_vars)
+            self._dungeon_click_btns.append(click_btns)
+
+            for w in row.winfo_children():
+                w.bind("<MouseWheel>", _on_dwheel)
+            row.bind("<MouseWheel>", _on_dwheel)
+            detail.bind("<MouseWheel>", _on_dwheel)
+
+            if i > 0:
+                tk.Button(row, text="↑그룹복사", font=("맑은 고딕", 7), width=6,
+                          command=lambda x=i: self._group_copy_dungeon_slot(x)).pack(side="right", padx=(0,3))
+            tk.Button(row, text="👁", font=("맑은 고딕", 8), width=2,
+                      command=lambda x=i: self._preview_dungeon(x)).pack(side="right", padx=(0,2))
+            tk.Button(row, text="▶", font=("맑은 고딕", 8), fg="white", bg="#e67e22", width=2,
+                      command=lambda x=i: self._test_dungeon(x)).pack(side="right", padx=(0,1))
+            tk.Button(row, text="×", font=("맑은 고딕", 8), fg="red", width=2,
+                      command=lambda x=i: self._del_dungeon(x)).pack(side="right", padx=2)
+
+    def _build_past(self, parent):
+        tk.Label(parent, text=f"과거의말하는섬  (3번 클릭 / {PAST_INTERVAL}초 간격)",
+                 font=("맑은 고딕", 9, "bold"), fg="#c0392b").pack(anchor="w", padx=4, pady=(4,2))
+
+        pr = tk.Frame(parent); pr.pack(pady=3)
+        self._past_stop = False
+        self.btn_past_run = tk.Button(pr, text="▶  실행",
+            font=("맑은 고딕", 9, "bold"), bg="#c0392b", fg="white",
+            activebackground="#922b21", width=13, height=2,
+            command=self._start_past)
+        self.btn_past_run.pack(side="left", padx=(0,3))
+        self.btn_past_stop = tk.Button(pr, text="■ 멈춤",
+            font=("맑은 고딕", 8, "bold"), bg="#7f8c8d", fg="white",
+            width=6, height=2,
+            command=lambda: setattr(self, "_past_stop", True) or
+                            self.status.set("멈추는 중..."),
+            state="disabled")
+        self.btn_past_stop.pack(side="left")
+        tk.Button(pr, text="🔀 그룹복사 (#01→전체)",
+            font=("맑은 고딕", 8), bg="#922b21", fg="white", width=18,
+            command=self._group_copy_past).pack(side="left", padx=(8,0))
+
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
+
+        p_outer = tk.Frame(parent); p_outer.pack(fill="both", expand=True, padx=2)
+        p_canvas = tk.Canvas(p_outer, highlightthickness=0)
+        self._past_canvas = p_canvas
+        p_sb_y = tk.Scrollbar(p_outer, orient="vertical", command=p_canvas.yview)
+        p_sb_x = tk.Scrollbar(parent, orient="horizontal", command=p_canvas.xview)
+        p_canvas.configure(yscrollcommand=p_sb_y.set, xscrollcommand=p_sb_x.set)
+        p_sb_x.pack(side="bottom", fill="x")
+        p_sb_y.pack(side="right", fill="y")
+        p_canvas.pack(side="left", fill="both", expand=True)
+        self._past_frame = tk.Frame(p_canvas)
+        p_fid = p_canvas.create_window((0,0), window=self._past_frame, anchor="nw")
+        self._past_frame.bind("<Configure>",
+            lambda e: p_canvas.configure(scrollregion=p_canvas.bbox("all")))
+
+        def _on_pwheel(e):
+            p_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+        p_canvas.bind("<MouseWheel>", _on_pwheel)
+        self._past_frame.bind("<MouseWheel>", _on_pwheel)
+
+        self._past_name_vars  = []
+        self._past_click_vars = []
+        self._past_click_btns = []
+        self._past_coord_sv   = []
+        self._past_detail_frames = []
+        self._past_row_frames = []
+
+        _past_lbl = ["클릭1", "이동2", "클릭3"]
+        for i in range(PAST_SLOTS):
+            row = tk.Frame(self._past_frame, bd=1, relief="groove")
+            row.pack(fill="x", padx=2, pady=4)
+            self._past_row_frames.append(row)
+            detail = tk.Frame(self._past_frame, bg="#ecf0f1", bd=1, relief="flat")
+            self._past_detail_frames.append(detail)
+
+            tk.Label(row, text=f"#{i+1:02d}", font=("맑은 고딕", 8, "bold"),
+                     width=4).pack(side="left", padx=(3,0))
+            nv = tk.StringVar()
+            self._past_name_vars.append(nv)
+            ent = tk.Entry(row, textvariable=nv, font=("맑은 고딕", 8), width=7)
+            ent.pack(side="left", padx=(2,2))
+            ent.bind("<FocusIn>",  lambda e: self.lift())
+            ent.bind("<FocusOut>", lambda e, x=i: self._save_past_name(x))
+            ent.bind("<Return>",   lambda e, x=i: self._save_past_name(x))
+
+            past_saved = self.cfg.get("past_slots", [{}]*PAST_SLOTS)[i].get("coords", []) if i < len(self.cfg.get("past_slots",[])) else []
+            past_reg = sum(1 for c in past_saved if c)
+            psv = tk.StringVar(value=f"좌표 {past_reg}/{PAST_CLICKS} ▾")
+            self._past_coord_sv.append(psv)
+            tk.Button(row, textvariable=psv, font=("맑은 고딕", 7),
+                      bg="#c0392b", fg="white", width=8, pady=0,
+                      command=lambda x=i: self._toggle_past_detail(x)).pack(side="left", padx=(2,2))
+
+            click_vars = []
+            click_btns = []
+            for j in range(PAST_CLICKS):
+                cv = tk.StringVar()
+                click_vars.append(cv)
+                cell = tk.Frame(detail, bg="#ecf0f1")
+                cell.pack(side="left", padx=4, pady=3)
+                tk.Label(cell, text=_past_lbl[j], font=("맑은 고딕", 7),
+                         fg="#c0392b", bg="#ecf0f1").pack()
+                btn = tk.Button(cell, textvariable=cv, font=("맑은 고딕", 7),
+                                width=4, pady=1,
+                                command=lambda x=i, c=j: self._reg_past_click(x, c))
+                btn.pack()
+                click_btns.append(btn)
+            self._past_click_vars.append(click_vars)
+            self._past_click_btns.append(click_btns)
+
+            for w in row.winfo_children():
+                w.bind("<MouseWheel>", _on_pwheel)
+            row.bind("<MouseWheel>", _on_pwheel)
+            detail.bind("<MouseWheel>", _on_pwheel)
+
+            if i > 0:
+                tk.Button(row, text="↑그룹복사", font=("맑은 고딕", 7), width=6,
+                          command=lambda x=i: self._group_copy_past_slot(x)).pack(side="right", padx=(0,3))
+            tk.Button(row, text="👁", font=("맑은 고딕", 8), width=2,
+                      command=lambda x=i: self._preview_past(x)).pack(side="right", padx=(0,2))
+            tk.Button(row, text="×", font=("맑은 고딕", 8), fg="red", width=2,
+                      command=lambda x=i: self._del_past(x)).pack(side="right", padx=(0,2))
+            tk.Button(row, text="▶", font=("맑은 고딕", 8), fg="white", bg="#c0392b", width=2,
+                      command=lambda x=i: self._test_past(x)).pack(side="right", padx=(0,2))
+
+        # 창 열릴 때 cfg 값으로 즉시 초기화
+        for i in range(PAST_SLOTS):
+            p = self.cfg["past_slots"][i]
+            self._past_name_vars[i].set(p.get("name", "미등록"))
+            coords = p.get("coords", [None]*PAST_CLICKS)
+            for j in range(PAST_CLICKS):
+                c = coords[j] if j < len(coords) else None
+                self._past_click_vars[i][j].set("✔" if c else "✗")
+                self._past_click_btns[i][j].config(
+                    fg="white" if c else "#aaa",
+                    bg="#27ae60" if c else "#7f8c8d")
+
+    def deiconify(self):
+        if getattr(self, "_running", False):
+            return  # 자동실행 중에는 복원 차단
+        super().deiconify()
+
+    def _on_main_map(self, e):
+        """패스권 창이 켜져 있으면 메인 런처 최소화 유지 (섬/던전은 사용자가 직접 복원 가능)"""
+        pass_open = self._pass_win and self._pass_win.winfo_exists()
+        if pass_open:
+            self.after(50, self.iconify)
+
+    def _open_pass_win(self):
+        if self._pass_win and self._pass_win.winfo_exists():
+            self._pass_win.lift(); return
+        self.iconify()
+        win = tk.Toplevel(self)
+        win.title("🎫 패스권 새로운 등록")
+        win.geometry("480x720")
+        win.resizable(True, True)
+        def _on_pass_close():
+            win.destroy()
+            if not (hasattr(self, "_island_proc") and self._island_proc and self._island_proc.poll() is None):
+                self.deiconify()
+        win.protocol("WM_DELETE_WINDOW", _on_pass_close)
+        self._pass_win = win
+        self._build_pass(win)
+        self._refresh_ui()
+
+    def _build_pass(self, parent):
+        tk.Label(parent, text=f"패스권 새로운 등록  ({PASS_CLICKS}번 클릭)",
+                 font=("맑은 고딕", 9, "bold"), fg="#6c3483").pack(anchor="w", padx=4, pady=(4,2))
+
+        pr = tk.Frame(parent); pr.pack(pady=3)
+        self._pass_stop = False
+        self.btn_pass_run = tk.Button(pr, text="▶  실행",
+            font=("맑은 고딕", 9, "bold"), bg="#6c3483", fg="white",
+            activebackground="#4a235a", width=13, height=2,
+            command=self._start_pass)
+        self.btn_pass_run.pack(side="left", padx=(0,3))
+        self.btn_pass_stop = tk.Button(pr, text="■ 멈춤",
+            font=("맑은 고딕", 8, "bold"), bg="#7f8c8d", fg="white",
+            width=6, height=2,
+            command=lambda: setattr(self, "_pass_stop", True) or
+                            self.status.set("멈추는 중..."),
+            state="disabled")
+        self.btn_pass_stop.pack(side="left")
+        tk.Button(pr, text="🔀 그룹복사 (#01→전체)",
+            font=("맑은 고딕", 8), bg="#4a235a", fg="white", width=18,
+            command=self._group_copy_pass).pack(side="left", padx=(8,0))
+
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
+
+        # 그룹 이동 버튼 (4개씩 4그룹)
+        PASS_GROUP = 4
+        grp_row = tk.Frame(parent); grp_row.pack(fill="x", padx=4, pady=(0,2))
+        self._pass_grp_btns = []
+        for g in range(PASS_SLOTS // PASS_GROUP):
+            s = g * PASS_GROUP + 1; e = (g+1) * PASS_GROUP
+            btn = tk.Button(grp_row, text=f"#{s:02d}~#{e:02d}",
+                font=("맑은 고딕", 7), width=6,
+                command=lambda g=g: self._pass_scroll_to_group(g))
+            btn.pack(side="left", padx=1)
+            self._pass_grp_btns.append(btn)
+
+        p_outer = tk.Frame(parent); p_outer.pack(fill="both", expand=True, padx=2)
+        p_canvas = tk.Canvas(p_outer, highlightthickness=0)
+        self._pass_canvas = p_canvas
+        p_sb = tk.Scrollbar(p_outer, orient="vertical", command=p_canvas.yview)
+        p_canvas.configure(yscrollcommand=p_sb.set)
+        p_sb.pack(side="right", fill="y")
+        p_canvas.pack(side="left", fill="both", expand=True)
+        self._pass_frame = tk.Frame(p_canvas)
+        p_fid = p_canvas.create_window((0,0), window=self._pass_frame, anchor="nw")
+        self._pass_frame.bind("<Configure>",
+            lambda e: p_canvas.configure(scrollregion=p_canvas.bbox("all")))
+        p_canvas.bind("<Configure>",
+            lambda e: p_canvas.itemconfig(p_fid, width=e.width))
+
+        def _on_pwheel(e):
+            p_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+        p_canvas.bind("<MouseWheel>", _on_pwheel)
+        self._pass_frame.bind("<MouseWheel>", _on_pwheel)
+
+        self._pass_name_vars  = []
+        self._pass_click_vars = []
+        self._pass_click_btns = []
+        self._pass_coord_sv   = []
+        self._pass_detail_frames = []
+        self._pass_row_frames = []
+
+        for i in range(PASS_SLOTS):
+            row = tk.Frame(self._pass_frame, bd=1, relief="groove")
+            row.pack(fill="x", padx=2, pady=4)
+            self._pass_row_frames.append(row)
+            detail = tk.Frame(self._pass_frame, bg="#f5eef8", bd=1, relief="flat")
+            self._pass_detail_frames.append(detail)
+
+            tk.Label(row, text=f"#{i+1:02d}", font=("맑은 고딕", 8, "bold"),
+                     width=4).pack(side="left", padx=(3,0))
+            nv = tk.StringVar()
+            self._pass_name_vars.append(nv)
+            ent = tk.Entry(row, textvariable=nv, font=("맑은 고딕", 8), width=7)
+            ent.pack(side="left", padx=(2,2))
+            ent.bind("<FocusIn>",  lambda e: self.lift())
+            ent.bind("<FocusOut>", lambda e, x=i: self._save_pass_name(x))
+            ent.bind("<Return>",   lambda e, x=i: self._save_pass_name(x))
+
+            pass_saved = self.cfg.get("pass_slots", [{}]*PASS_SLOTS)[i].get("coords", []) if i < len(self.cfg.get("pass_slots",[])) else []
+            pass_reg = sum(1 for c in pass_saved if c)
+            psv = tk.StringVar(value=f"좌표 {pass_reg}/{PASS_CLICKS} ▾")
+            self._pass_coord_sv.append(psv)
+            tk.Button(row, textvariable=psv, font=("맑은 고딕", 7),
+                      bg="#6c3483", fg="white", width=8, pady=0,
+                      command=lambda x=i: self._toggle_pass_detail(x)).pack(side="left", padx=(2,2))
+
+            click_vars = []
+            click_btns = []
+            row1 = tk.Frame(detail, bg="#f5eef8"); row1.pack(fill="x", pady=(3,0))
+            row2 = tk.Frame(detail, bg="#f5eef8"); row2.pack(fill="x", pady=(0,3))
+            for j in range(PASS_CLICKS):
+                cv = tk.StringVar()
+                click_vars.append(cv)
+                parent_row = row1 if j < 5 else row2
+                cell = tk.Frame(parent_row, bg="#f5eef8")
+                cell.pack(side="left", padx=2)
+                tk.Label(cell, text=f"클{j+1}", font=("맑은 고딕", 6),
+                         fg="#6c3483", bg="#f5eef8").pack()
+                btn = tk.Button(cell, textvariable=cv, font=("맑은 고딕", 6),
+                                width=3, pady=0,
+                                command=lambda x=i, c=j: self._reg_pass_click(x, c))
+                btn.pack()
+                click_btns.append(btn)
+            self._pass_click_vars.append(click_vars)
+            self._pass_click_btns.append(click_btns)
+
+            for w in row.winfo_children():
+                w.bind("<MouseWheel>", _on_pwheel)
+            row.bind("<MouseWheel>", _on_pwheel)
+            detail.bind("<MouseWheel>", _on_pwheel)
+
+            if i > 0:
+                tk.Button(row, text="↑그룹복사", font=("맑은 고딕", 7), width=6,
+                          command=lambda x=i: self._group_copy_pass_slot(x)).pack(side="right", padx=(0,3))
+            tk.Button(row, text="👁", font=("맑은 고딕", 7), width=2,
+                      command=lambda x=i: self._preview_pass(x)).pack(side="right", padx=(0,2))
+            tk.Button(row, text="▶", font=("맑은 고딕", 8), fg="white", bg="#6c3483", width=2,
+                      command=lambda x=i: self._test_pass(x)).pack(side="right", padx=(0,1))
+            tk.Button(row, text="×", font=("맑은 고딕", 8), fg="red", width=2,
+                      command=lambda x=i: self._del_pass(x)).pack(side="right", padx=2)
+
+    def _start_pass(self):
+        self._pass_stop = False
+        self.btn_pass_run.config(state="disabled", bg="#f39c12", text="⏳ 실행중...")
+        self.btn_pass_stop.config(state="normal")
+        self.iconify()
+        threading.Thread(target=self._run_pass, daemon=True).start()
+
+    def _run_pass(self, slot_idx=None):
+        try:
+            self.status.set("2초 후 패스권 실행...")
+            self.after(0, self.iconify)
+            time.sleep(2)
+            slots = self.cfg.get("pass_slots", [])
+            if slot_idx is not None:
+                targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
+            else:
+                targets = [(i, s) for i, s in enumerate(slots) if any(s.get("coords", []))]
+            for si, slot in targets:
+                if self._pass_stop: break
+                name   = slot.get("name", f"#{si+1}")
+                coords = slot.get("coords", [None]*PASS_CLICKS)
+                if not self._wait_mouse_idle("_pass_stop"): return
+                for ci, coord in enumerate(coords):
+                    if self._pass_stop: break
+                    if not coord: continue
+                    self.status.set(f"🎫 [{name}] {PASS_LABELS[ci]}...")
+                    pyautogui.click(*coord)
+                    if ci < len(coords) - 1:
+                        time.sleep(random.uniform(PASS_INNER_MIN, PASS_INNER_MAX))
+                if self._pass_stop: break
+                time.sleep(random.uniform(PASS_SLOT_MIN, PASS_SLOT_MAX))
+            self.status.set("✔ 패스권 등록 완료!")
+        except Exception as e:
+            self.status.set(f"오류: {e}")
+        finally:
+            self.after(0, self.deiconify)
+            self.btn_pass_run.config(state="normal", bg="#6c3483", text="▶  실행")
+            self.btn_pass_stop.config(state="disabled")
+
+    def _reg_pass_click(self, slot_idx, click_idx):
+        self._reg_pass_slot_idx  = slot_idx
+        self._reg_pass_click_idx = click_idx
+        btn = self._pass_click_btns[slot_idx][click_idx]
+        self._pass_canvas.update_idletasks()
+        total = self._pass_canvas.bbox("all")
+        if total:
+            row_y = btn.winfo_y() + btn.master.winfo_y()
+            frac = row_y / total[3]
+            self._pass_canvas.yview_moveto(frac)
+        self.status.set(f"3초 후 패스권 #{slot_idx+1} [{PASS_LABELS[click_idx]}] 위치 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="pass")])
+
+    def on_pass_coord(self, x, y):
+        si = self._reg_pass_slot_idx
+        ci = self._reg_pass_click_idx
+        self.cfg["pass_slots"][si]["coords"][ci] = [x, y]
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ 패스권 #{si+1} {PASS_LABELS[ci]} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _save_pass_name(self, idx):
+        name = self._pass_name_vars[idx].get().strip() or "미등록"
+        self.cfg["pass_slots"][idx]["name"] = name
+        save_cfg(self.cfg)
+
+    def _test_pass(self, idx):
+        threading.Thread(target=self._run_pass, args=(idx,), daemon=True).start()
+
+    def _del_pass(self, idx):
+        if not messagebox.askyesno("슬롯 삭제", f"패스권 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
+            return
+        self.cfg["pass_slots"][idx] = {"name": "미등록", "coords": [None]*PASS_CLICKS}
+        save_cfg(self.cfg); self._refresh_ui()
+
+    def _pass_scroll_to_group(self, g):
+        PASS_GROUP = 4
+        total = PASS_SLOTS
+        frac = (g * PASS_GROUP) / total
+        self._pass_canvas.yview_moveto(frac)
+
+    def _preview_pass(self, idx):
+        coords = self.cfg["pass_slots"][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
+        if not dots:
+            self.status.set(f"#{idx+1:02d} 등록된 좌표가 없습니다"); return
+        name = self.cfg["pass_slots"][idx].get("name", f"#{idx+1:02d}")
+        total = PASS_SLOTS
+
+        def rereg(dot_idx):
+            self._reg_pass_slot_idx  = idx
+            self._reg_pass_click_idx = dot_idx if dot_idx is not None else 0
+            self.deiconify()
+            self.after(200, lambda: CoordOverlay(self, mode="pass"))
+
+        def _save(dot_idx, nx, ny):
+            self.cfg["pass_slots"][idx]["coords"][dot_idx] = [nx, ny]
+            save_cfg(self.cfg); self._refresh_ui()
+            self.status.set(f"✔ 패스권 #{idx+1:02d} 클릭{dot_idx+1} 이동 저장: ({nx},{ny})")
+
+        def _prev():
+            prev_idx = (idx - 1) % total
+            self._open_dot_preview_pass(prev_idx)
+
+        def _next():
+            next_idx = (idx + 1) % total
+            self._open_dot_preview_pass(next_idx)
+
+        self._open_dot_preview_with_nav(
+            f"패스권 #{idx+1:02d} {name}  ({idx+1}/{total})",
+            dots, rereg_fn=rereg, save_fn=_save,
+            prev_fn=_prev, next_fn=_next)
+
+    def _open_dot_preview_pass(self, idx):
+        self.after(200, lambda: self._preview_pass(idx))
+
+    def _open_dot_preview_with_nav(self, title, dots, rereg_fn, save_fn, prev_fn, next_fn):
+        self.withdraw()
+        if self._pass_win and self._pass_win.winfo_exists():
+            self._pass_win.withdraw()
+        self.after(1000, lambda: _DotPreviewOverlayNav(
+            self, title, dots, rereg_fn, save_fn, prev_fn, next_fn))
+
+    def _group_copy_pass_slot(self, idx):
+        import copy
+        src = self.cfg["pass_slots"][0].get("coords", [])
+        dst = self.cfg["pass_slots"][idx]["coords"]
+        for j in range(PASS_CLICKS):
+            if j < len(src): dst[j] = copy.deepcopy(src[j])
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ #01 → #{idx+1:02d} 복사 완료")
+
+    def _group_copy_pass(self):
+        import copy
+        src = self.cfg["pass_slots"][0].get("coords", [])
+        if not any(src):
+            self.status.set("#01 슬롯에 복사할 좌표가 없습니다"); return
+        for i in range(1, PASS_SLOTS):
+            self.cfg["pass_slots"][i]["coords"] = copy.deepcopy(src)
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ #01 좌표 → #02~#{PASS_SLOTS:02d} 전체 복사 완료")
+
+    def _build_sched(self, parent):
+        tk.Label(parent, text=f"매일매일 스케줄  ({SCHED_INTERVAL}초 간격)",
+                 font=("맑은 고딕", 9, "bold"), fg="#16a085").pack(anchor="w", padx=4, pady=(4,2))
+
+        pr = tk.Frame(parent); pr.pack(pady=3)
+        self._sched_stop = False
+        self.btn_sched_run = tk.Button(pr, text="▶  실행",
+            font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
+            activebackground="#0e6655", width=13, height=2,
+            command=self._start_sched)
+        self.btn_sched_run.pack(side="left", padx=(0,3))
+        self.btn_sched_stop = tk.Button(pr, text="■ 멈춤",
+            font=("맑은 고딕", 8, "bold"), bg="#7f8c8d", fg="white",
+            width=6, height=2,
+            command=lambda: setattr(self, "_sched_stop", True) or
+                            self.status.set("멈추는 중..."),
+            state="disabled")
+        self.btn_sched_stop.pack(side="left")
+        tk.Button(pr, text="🔀 그룹복사 (#01→전체)",
+            font=("맑은 고딕", 8), bg="#0e6655", fg="white", width=18,
+            command=self._group_copy_sched).pack(side="left", padx=(8,0))
+        tk.Button(pr, text="📍 클릭1 전체적용",
+            font=("맑은 고딕", 8), bg="#8e44ad", fg="white", width=14,
+            command=self._reg_sched_click1_all).pack(side="left", padx=(4,0))
+
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
+
+        s_outer = tk.Frame(parent); s_outer.pack(fill="both", expand=True, padx=2)
+        s_canvas = tk.Canvas(s_outer, highlightthickness=0)
+        self._sched_canvas = s_canvas
+        s_sb = tk.Scrollbar(s_outer, orient="vertical", command=s_canvas.yview)
+        s_canvas.configure(yscrollcommand=s_sb.set)
+        s_sb.pack(side="right", fill="y")
+        s_canvas.pack(side="left", fill="both", expand=True)
+        self._sched_frame = tk.Frame(s_canvas)
+        s_fid = s_canvas.create_window((0,0), window=self._sched_frame, anchor="nw")
+        self._sched_frame.bind("<Configure>",
+            lambda e: s_canvas.configure(scrollregion=s_canvas.bbox("all")))
+        s_canvas.bind("<Configure>",
+            lambda e: s_canvas.itemconfig(s_fid, width=e.width))
+
+        def _on_swheel(e):
+            s_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+        s_canvas.bind("<MouseWheel>", _on_swheel)
+        self._sched_frame.bind("<MouseWheel>", _on_swheel)
+
+        self._sched_name_vars  = []
+        self._sched_click_vars = []
+        self._sched_click_btns = []
+
+        for i in range(SCHED_SLOTS):
+            row = tk.Frame(self._sched_frame, bd=1, relief="groove")
+            row.pack(fill="x", padx=2, pady=2)
+
+            tk.Label(row, text=f"#{i+1:02d}", font=("맑은 고딕", 8, "bold"),
+                     width=4).pack(side="left", padx=(3,0))
+            nv = tk.StringVar()
+            self._sched_name_vars.append(nv)
+            ent = tk.Entry(row, textvariable=nv, font=("맑은 고딕", 8), width=7)
+            ent.pack(side="left", padx=(2,6))
+            ent.bind("<FocusIn>",  lambda e: self.lift())
+            ent.bind("<FocusOut>", lambda e, x=i: self._save_sched_name(x))
+            ent.bind("<Return>",   lambda e, x=i: self._save_sched_name(x))
+
+            click_vars = []
+            click_btns = []
+            _sched_lbl = ["클릭1", "클릭2", "클릭3"]
+            for j in range(SCHED_CLICKS):
+                cv = tk.StringVar()
+                click_vars.append(cv)
+                cell = tk.Frame(row, bd=1, relief="flat")
+                cell.pack(side="left", padx=3)
+                tk.Label(cell, text=_sched_lbl[j],
+                         font=("맑은 고딕", 5), fg="#16a085").pack()
+                btn = tk.Button(cell, textvariable=cv, font=("맑은 고딕", 6),
+                                width=3, pady=0,
+                                command=lambda x=i, c=j: self._reg_sched_click(x, c))
+                btn.pack()
+                click_btns.append(btn)
+            self._sched_click_vars.append(click_vars)
+            self._sched_click_btns.append(click_btns)
+
+            for w in row.winfo_children():
+                w.bind("<MouseWheel>", _on_swheel)
+            row.bind("<MouseWheel>", _on_swheel)
+
+            if i > 0:
+                tk.Button(row, text="↑그룹복사", font=("맑은 고딕", 7), width=6,
+                          command=lambda x=i: self._group_copy_sched_slot(x)).pack(side="right", padx=(0,3))
+            tk.Button(row, text="👁", font=("맑은 고딕", 8), width=2,
+                      command=lambda x=i: self._preview_sched(x)).pack(side="right", padx=(0,2))
+            tk.Button(row, text="×", font=("맑은 고딕", 8), fg="red", width=2,
+                      command=lambda x=i: self._del_sched(x)).pack(side="right", padx=(0,2))
+            tk.Button(row, text="▶", font=("맑은 고딕", 8), fg="white", bg="#16a085", width=2,
+                      command=lambda x=i: self._test_sched(x)).pack(side="right", padx=(0,2))
+
+        # 창 열릴 때 cfg 값으로 즉시 초기화
+        for i in range(SCHED_SLOTS):
+            s = self.cfg["sched_slots"][i]
+            self._sched_name_vars[i].set(s.get("name", "미등록"))
+            coords = s.get("coords", [None]*SCHED_CLICKS)
+            for j in range(SCHED_CLICKS):
+                c = coords[j] if j < len(coords) else None
+                self._sched_click_vars[i][j].set("✔" if c else "✗")
+                self._sched_click_btns[i][j].config(
+                    fg="white" if c else "#aaa",
+                    bg="#27ae60" if c else "#7f8c8d")
+
+    # ── 공통 ──────────────────────────────────────────────────────────
+    def _popup_reg_label(self):
+        chk = "✔" if self.cfg.get("purple_popup_checkbox") else "✗"
+        cls = "✔" if self.cfg.get("purple_popup_close")    else "✗"
+        det = "✔" if self.cfg.get("purple_popup_detect")   else "✗"
+        return f"체크박스:{chk}  닫기:{cls}  감지:{det}"
+
+    def _reg_popup_checkbox(self):
+        self.status.set("3초 후 마우스를 [체크박스] 위에 올려두세요 — 자동 캡처")
+        self.after(3000, self._capture_popup_checkbox)
+
+    def _capture_popup_checkbox(self):
+        x, y = pyautogui.position()
+        self.cfg["purple_popup_checkbox"] = [x, y]
+        save_cfg(self.cfg)
+        self._popup_status_var.set(self._popup_reg_label())
+        self.status.set(f"✔ 팝업 체크박스 등록: ({x},{y})")
+
+    def _reg_popup_close(self):
+        self.status.set("3초 후 마우스를 [✕ 닫기버튼] 위에 올려두세요 — 자동 캡처")
+        self.after(3000, self._capture_popup_close)
+
+    def _capture_popup_close(self):
+        x, y = pyautogui.position()
+        self.cfg["purple_popup_close"] = [x, y]
+        save_cfg(self.cfg)
+        self._popup_status_var.set(self._popup_reg_label())
+        self.status.set(f"✔ 팝업 닫기버튼 등록: ({x},{y})")
+
+    def _reg_popup_detect(self):
+        self.status.set("3초 후 마우스를 [팝업 X버튼 주변 빈 배경] 위에 올려두세요 — 픽셀 색상 저장")
+        self.after(3000, self._capture_popup_detect)
+
+    def _capture_popup_detect(self):
+        from PIL import ImageGrab
+        x, y = pyautogui.position()
+        shot = ImageGrab.grab(all_screens=False)
+        px   = shot.getpixel((x, y))
+        self.cfg["purple_popup_detect"] = [x, y]
+        self.cfg["purple_popup_color"]  = [px[0], px[1], px[2]]
+        save_cfg(self.cfg)
+        self._popup_status_var.set(self._popup_reg_label())
+        self.status.set(f"✔ 감지 픽셀 등록: ({x},{y}) RGB=({px[0]},{px[1]},{px[2]})")
+
+    def _maximize_purple(self):
+        win = find_purple()
+        if win:
+            try: win.activate(); win.maximize()
+            except: pass
+
+    def _open_dot_preview(self, title, dots, rereg_fn, save_fn=None, dot_r=5):
+        self.withdraw()
+        self.after(1000, lambda: _DotPreviewOverlay(self, title, dots, rereg_fn, save_fn, dot_r))
+
+    def _preview_label_coord(self, key):
+        c = self.cfg.get(key)
+        dots = [(c[0], c[1], "1")] if c else []
+        self._open_dot_preview(LABELS[key], dots, lambda _: self._reg_coord(key))
+
+    def _preview_slot(self, idx):
+        pair = self.cfg["click_slots"][idx]
+        c1 = pair[0] if len(pair) > 0 else None
+        c2 = pair[1] if len(pair) > 1 else None
+        c3 = pair[2] if idx == 4 and len(pair) > 2 else None
+        dots = []
+        if c1: dots.append((c1[0], c1[1], "1"))
+        if c2: dots.append((c2[0], c2[1], "2"))
+        if c3: dots.append((c3[0], c3[1], "3"))
+
+        def _save(dot_idx, nx, ny):
+            self.cfg["click_slots"][idx][dot_idx] = [nx, ny]
+            save_cfg(self.cfg); self._refresh_ui()
+            self.status.set(f"✔ #{idx+1:02d} 클릭{dot_idx+1} 이동 저장: ({nx},{ny})")
+
+        def _rereg(dot_idx):
+            if dot_idx is None:
+                self._reg_slot(idx)
+            else:
+                self._reg_slot_step(idx, dot_idx)
+
+        self._open_dot_preview(f"#{idx+1:02d} 클릭슬롯", dots,
+                               rereg_fn=_rereg, save_fn=_save)
+
+    def _preview_char(self, idx):
+        btns = self.cfg.get("char_btns", [])
+        c = btns[idx] if idx < len(btns) else None
+        dots = [(c[0], c[1], str(idx+1))] if c else []
+        def _rereg():
+            self._char_rereg_idx = idx
+            self.status.set(f"3초 후 캐릭터 #{idx+1} 위치 클릭하세요!")
+            self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                      CoordOverlay(self, mode="char_rereg")])
+        self._open_dot_preview(f"캐릭터 #{idx+1:02d}", dots, _rereg)
+
+    def on_char_rereg_coord(self, x, y):
+        idx = self._char_rereg_idx
+        btns = self.cfg.get("char_btns", [])
+        if idx < len(btns):
+            btns[idx] = [x, y]
+            self.cfg["char_btns"] = btns
+            save_cfg(self.cfg)
+            self._refresh_ui()
+            self.status.set(f"✔ 캐릭터 #{idx+1} 재등록: ({x},{y})")
+        self.deiconify()
+
+    def _del_char_btn(self, idx):
+        btns = self.cfg.get("char_btns", [])
+        if idx < len(btns):
+            btns.pop(idx)
+            self.cfg["char_btns"] = btns
+            save_cfg(self.cfg)
+            self._refresh_ui()
+
+    def _sync_sched_click1(self):
+        """매일매일 스케줄 클릭1 = 과거의말하는섬 클릭1 (항상 동기화)"""
+        changed = False
+        for i in range(min(PAST_SLOTS, SCHED_SLOTS)):
+            src = self.cfg["past_slots"][i]["coords"][0]
+            if self.cfg["sched_slots"][i]["coords"][0] != src:
+                self.cfg["sched_slots"][i]["coords"][0] = src
+                changed = True
+        if changed:
+            save_cfg(self.cfg)
+
+    def _build_sec_row(self):
+        """섹션 버튼 행 전체 재빌드 (고정 섹션 + 과거섬/던전 슬롯)."""
+        for w in self._sec_row.winfo_children():
+            w.destroy()
+
+        fixed = [
+            ("⚙ 좌표 등록", "#2c3e50", self._open_settings_win,                         None,      None),
+            ("귀환주문서",   "#c0392b", lambda: self._open_past_slot(4),                 "#922b21", lambda: self._run_island_slot(4)),
+            ("카매사오기",   "#1a5276", lambda: self._open_past_slot(5),                 "#154360", lambda: self._run_island_slot(5)),
+            ("🏹 사냥",      "#8e44ad", self._open_hunt_win,                             "#6c3483", self._start_hunt),
+            ("📬 우편함",    "#2471a3", self._open_mail_win,     "#1a5276", self._start_mail),
+            ("🏝 과거섬",    "#c0392b", self._open_past_win,     "#922b21", self._start_past),
+            ("📅 스케줄",    "#16a085", self._open_sched_win,    "#0e6655", self._start_sched),
+            ("🏰 주말던전",  "#d35400", self._open_dungeon_win,  "#a04000", self._start_dungeon),
+            ("💰 다야OCR",   "#27ae60", self._open_ocr,          "#1e8449", self._open_ocr_scan),
+        ]
+        for text, color, cmd, run_color, run_cmd in fixed:
+            grp = tk.Frame(self._sec_row); grp.pack(side="left", padx=2)
+            tk.Button(grp, text=text, font=("맑은 고딕", 9, "bold"),
+                      bg=color, fg="white", width=9, height=2,
+                      command=cmd).pack(side="top")
+            if run_cmd:
+                tk.Button(grp, text="▶ 실행", font=("맑은 고딕", 7, "bold"),
+                          bg=run_color, fg="white", width=9, height=1,
+                          command=run_cmd).pack(side="top", pady=(1, 0))
+            else:
+                tk.Frame(grp, height=20).pack(side="top")
+
+        # 구분선
+        tk.Frame(self._sec_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=4)
+
+        # 과거섬 슬롯 4개 고정 (이름 하드코딩)
+        _ISLAND_NAMES  = ["오만의탑", "악몽의섬", "잊혀진섬", "에카"]
+        _ISLAND_COLORS = ["#8e44ad", "#2471a3", "#16a085", "#d35400"]
+        past_slots = self.cfg.get("past_slots", [])
+        for i, label in enumerate(_ISLAND_NAMES):
+            coords    = past_slots[i].get("coords", []) if i < len(past_slots) else []
+            has_coord = any(c for c in coords)
+            color     = _ISLAND_COLORS[i]
+            dark      = _ISLAND_COLORS[i]
+            grp = tk.Frame(self._sec_row); grp.pack(side="left", padx=2)
+            tk.Button(grp, text=label, font=("맑은 고딕", 9, "bold"),
+                      bg=color, fg="white", width=9, height=2,
+                      command=lambda x=i: self._open_past_slot(x)).pack(side="top")
+            tk.Button(grp, text="▶ 실행", font=("맑은 고딕", 7, "bold"),
+                      bg=dark, fg="white", width=9, height=1,
+                      command=lambda x=i: self._run_island_slot(x)
+                      ).pack(side="top", pady=(1, 0))
+
+        # 버튼 행 너비에 맞게 창 자동 조정
+        self.after(50, self._fit_width_to_sec_row)
+
+    def _fit_width_to_sec_row(self):
+        self.update_idletasks()
+        needed = self._sec_row.winfo_reqwidth() + 20
+        current_h = self.winfo_height()
+        self.geometry(f"{needed}x{current_h}")
+
+    def _build_slot_quick_btns(self):
+        """메인 런처 다야 옆 섬/던전 슬롯 빠른 실행 버튼 (재호출로 갱신)."""
+        for w in self._slot_inner.winfo_children():
+            w.destroy()
+        self._slot_quick_btns = []
+
+        past_slots    = self.cfg.get("past_slots",    [])
+        dungeon_slots = self.cfg.get("dungeon_slots", [])
+
+        # 과거섬 슬롯 — 행으로 배치
+        for i, slot in enumerate(past_slots):
+            name      = slot.get("name", "").strip() or f"섬#{i+1}"
+            coords    = slot.get("coords", [])
+            has_coord = any(c for c in coords)
+            btn = tk.Button(
+                self._slot_inner,
+                text=name,
+                font=("맑은 고딕", 8, "bold"),
+                bg="#c0392b" if has_coord else "#95a5a6",
+                fg="white", width=9, height=1,
+                state="normal" if has_coord else "disabled",
+                command=lambda x=i: threading.Thread(
+                    target=self._run_past, args=(x,), daemon=True).start()
+            )
+            btn.pack(fill="x", pady=1)
+            self._slot_quick_btns.append(btn)
+
+        # 던전 슬롯
+        for i, slot in enumerate(dungeon_slots):
+            name      = slot.get("name", "").strip() or f"던전#{i+1}"
+            coords    = slot.get("coords", [])
+            has_coord = any(c for c in coords)
+            btn = tk.Button(
+                self._slot_inner,
+                text=name,
+                font=("맑은 고딕", 8, "bold"),
+                bg="#e67e22" if has_coord else "#95a5a6",
+                fg="white", width=9, height=1,
+                state="normal" if has_coord else "disabled",
+                command=lambda x=i: threading.Thread(
+                    target=self._run_dungeon, args=(x,), daemon=True).start()
+            )
+            btn.pack(fill="x", pady=1)
+            self._slot_quick_btns.append(btn)
+
+    def _refresh_ui(self):
+        # debounce: 100ms 내 중복 호출 무시
+        now = time.time()
+        if hasattr(self, "_last_refresh") and now - self._last_refresh < 0.1:
+            return
+        self._last_refresh = now
+        if not hasattr(self, "_coord_vars"):
+            return
+        for key, var in self._coord_vars.items():
+            c = self.cfg.get(key)
+            var.set(f"({c[0]},{c[1]})" if c else "미등록")
+        # 캐릭터 버튼 동적 목록 갱신
+        for w in self._char_rows_frame.winfo_children():
+            w.destroy()
+        btns = self.cfg.get("char_btns", [])
+        for i, c in enumerate(btns):
+            r = tk.Frame(self._char_rows_frame); r.pack(fill="x", pady=0)
+            tk.Label(r, text=f"#{i+1:02d}", font=("맑은 고딕", 7), width=3).pack(side="left")
+            coord_txt = f"({c[0]},{c[1]})" if c else "미등록"
+            tk.Label(r, text=coord_txt, font=("맑은 고딕", 7), fg="gray", width=14).pack(side="left")
+            tk.Button(r, text="👁", font=("맑은 고딕", 6), width=2,
+                      command=lambda x=i: self._preview_char(x)).pack(side="right", padx=1)
+            tk.Button(r, text="×", font=("맑은 고딕", 6), fg="red", width=2,
+                      command=lambda x=i: self._del_char_btn(x)).pack(side="right", padx=1)
+        n = len(btns)
+        self._char_count_var.set(f"({n}개)" if n else "(미등록)")
+        for i, var in enumerate(self._slot_vars):
+            pair = self.cfg["click_slots"][i]
+            c1 = pair[0] if len(pair) > 0 else None
+            c2 = pair[1] if len(pair) > 1 else None
+            c3 = pair[2] if i == 4 and len(pair) > 2 else None
+            if i == 4:
+                if c1 and c2 and c3:
+                    var.set(f"✔ {c1} / {c2} / {c3}")
+                elif c1 and c2:
+                    var.set("클릭1✔ 클릭2✔ 클릭3 미등록")
+                elif c1:
+                    var.set("클릭1✔  클릭2 미등록")
+                else:
+                    var.set("미등록")
+            else:
+                if c1 and c2:
+                    var.set(f"✔ {c1} / {c2}")
+                elif c1:
+                    var.set("클릭1✔  클릭2 미등록")
+                else:
+                    var.set("미등록")
+        if hasattr(self, "_hunt_name_vars") and self._hunt_name_vars:
+            for i in range(HUNT_SLOTS):
+                h = self.cfg["hunt_slots"][i]
+                self._hunt_name_vars[i].set(h.get("name", "미등록"))
+                coords = h.get("coords", [None] * HUNT_CLICKS)
+                for j in range(HUNT_CLICKS):
+                    c = coords[j] if j < len(coords) else None
+                    self._hunt_click_vars[i][j].set("✔" if c else "✗")
+                    self._hunt_click_btns[i][j].config(
+                        fg="white" if c else "#aaa",
+                        bg="#27ae60" if c else "#7f8c8d"
+                    )
+                if i < len(self._hunt_assign_btns):
+                    aw = h.get("assigned_window")
+                    self._hunt_assign_btns[i].config(
+                        text="✔지정" if aw else "지정",
+                        bg="#27ae60" if aw else "#8e44ad"
+                    )
+                if i < len(self._hunt_coord_sv):
+                    reg = sum(1 for c in coords if c)
+                    arrow = "▴" if (i < len(self._hunt_detail_frames) and self._hunt_detail_frames[i].winfo_ismapped()) else "▾"
+                    self._hunt_coord_sv[i].set(f"좌표 {reg}/{HUNT_CLICKS} {arrow}")
+        # mail 슬롯
+        if hasattr(self, "_mail_name_vars") and self._mail_name_vars:
+            for i in range(MAIL_SLOTS):
+                m = self.cfg["mail_slots"][i]
+                self._mail_name_vars[i].set(m.get("name", "미등록"))
+                coords = m.get("coords", [None]*MAIL_CLICKS)
+                for j in range(MAIL_CLICKS):
+                    c = coords[j] if j < len(coords) else None
+                    self._mail_click_vars[i][j].set("✔" if c else "✗")
+                    self._mail_click_btns[i][j].config(
+                        fg="white" if c else "#aaa",
+                        bg="#27ae60" if c else "#7f8c8d"
+                    )
+                if i < len(self._mail_coord_sv):
+                    reg = sum(1 for c in coords if c)
+                    arrow = "▴" if (i < len(self._mail_detail_frames) and self._mail_detail_frames[i].winfo_ismapped()) else "▾"
+                    self._mail_coord_sv[i].set(f"좌표 {reg}/{MAIL_CLICKS} {arrow}")
+        # past 슬롯
+        if hasattr(self, "_past_name_vars") and self._past_name_vars:
+            for i in range(PAST_SLOTS):
+                p = self.cfg["past_slots"][i]
+                self._past_name_vars[i].set(p.get("name", "미등록"))
+                coords = p.get("coords", [None]*PAST_CLICKS)
+                for j in range(PAST_CLICKS):
+                    c = coords[j] if j < len(coords) else None
+                    self._past_click_vars[i][j].set("✔" if c else "✗")
+                    self._past_click_btns[i][j].config(
+                        fg="white" if c else "#aaa",
+                        bg="#27ae60" if c else "#7f8c8d"
+                    )
+                if i < len(self._past_coord_sv):
+                    reg = sum(1 for c in coords if c)
+                    arrow = "▴" if (i < len(self._past_detail_frames) and self._past_detail_frames[i].winfo_ismapped()) else "▾"
+                    self._past_coord_sv[i].set(f"좌표 {reg}/{PAST_CLICKS} {arrow}")
+        # pass 슬롯
+        if hasattr(self, "_pass_name_vars") and self._pass_name_vars:
+            for i in range(PASS_SLOTS):
+                p = self.cfg["pass_slots"][i]
+                self._pass_name_vars[i].set(p.get("name", "미등록"))
+                coords = p.get("coords", [None]*PASS_CLICKS)
+                for j in range(PASS_CLICKS):
+                    c = coords[j] if j < len(coords) else None
+                    self._pass_click_vars[i][j].set("✔" if c else "✗")
+                    self._pass_click_btns[i][j].config(
+                        fg="white" if c else "#aaa",
+                        bg="#27ae60" if c else "#7f8c8d"
+                    )
+                if i < len(self._pass_coord_sv):
+                    reg = sum(1 for c in coords if c)
+                    arrow = "▴" if (i < len(self._pass_detail_frames) and self._pass_detail_frames[i].winfo_ismapped()) else "▾"
+                    self._pass_coord_sv[i].set(f"좌표 {reg}/{PASS_CLICKS} {arrow}")
+        # 섹션 버튼 행 슬롯 갱신
+        if hasattr(self, "_sec_row") and self._sec_row.winfo_exists():
+            self._build_sec_row()
+        # sched 슬롯 (창이 열려있을 때만)
+        if hasattr(self, "_sched_name_vars") and self._sched_name_vars:
+            for i in range(SCHED_SLOTS):
+                s = self.cfg["sched_slots"][i]
+                self._sched_name_vars[i].set(s.get("name", "미등록"))
+                coords = s.get("coords", [None]*SCHED_CLICKS)
+                for j in range(SCHED_CLICKS):
+                    c = coords[j] if j < len(coords) else None
+                    self._sched_click_vars[i][j].set("✔" if c else "✗")
+                    self._sched_click_btns[i][j].config(
+                        fg="white" if c else "#aaa",
+                        bg="#27ae60" if c else "#7f8c8d"
+                    )
+
+    def _wait(self, sec):
+        for _ in range(int(sec * 10)):
+            if self._stop_flag: return False
+            time.sleep(0.1)
+        return True
+
+    def _wait_mouse_idle(self, stop_flag_name, idle_sec=5.0):
+        """마우스가 움직이는 중일 때만 대기. 안 움직이면 즉시 True 반환."""
+        CHECK = 0.1
+        prev = pyautogui.position()
+        # 움직임이 없으면 즉시 통과
+        time.sleep(CHECK)
+        cur = pyautogui.position()
+        if cur == prev:
+            return not getattr(self, stop_flag_name, False)
+        # 움직임 감지됨 → idle_sec초 동안 안 움직일 때까지 대기
+        self.after(0, lambda: self.status.set(f"⏸ 마우스 움직임 감지 — {int(idle_sec)}초 정지 후 재개..."))
+        last_move = time.time()
+        prev = cur
+        while True:
+            if getattr(self, stop_flag_name, False):
+                return False
+            time.sleep(CHECK)
+            cur = pyautogui.position()
+            if cur != prev:
+                last_move = time.time()
+                prev = cur
+            elif time.time() - last_move >= idle_sec:
+                return True
+
+    def _click_wait(self, sec):
+        for _ in range(int(sec * 10)):
+            if self._click_stop: return False
+            time.sleep(0.1)
+        return True
+
+    def _hunt_wait(self, sec):
+        for _ in range(int(sec * 10)):
+            if self._hunt_stop: return False
+            time.sleep(0.1)
+        return True
+
+    # ── 좌표 등록 ─────────────────────────────────────────────────────
+    def _preprocess_ocr_img(self, img):
+        """OCR용 이미지 전처리 — 단순 확대만"""
+        from PIL import Image, ImageOps
+        img = img.resize((img.width * 4, img.height * 4), Image.LANCZOS)
+        img = ImageOps.expand(img, border=20, fill=(0, 0, 0))
+        return img.convert("RGB")
+
+    def _save_ocr_as_target_id(self):
+        """테스트 OCR 결과를 사용할 아이디로 저장"""
+        area = self.cfg.get("profile_id_area")
+        if not area:
+            self.status.set("아이디 표시 영역을 먼저 등록하세요."); return
+        def _do():
+            try:
+                if self.cfg.get("profile_reveal_btn"):
+                    pyautogui.click(*self.cfg["profile_reveal_btn"])
+                    time.sleep(1)
+                from PIL import ImageGrab
+                ax, ay, aw, ah = area["x"], area["y"], area["w"], area["h"]
+                img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
+                img = self._preprocess_ocr_img(img)
+                img.save("os.path.join(LOGS_DIR, 'profile_ocr_debug.png')")
+                results = _get_ocr_reader().readtext("os.path.join(LOGS_DIR, 'profile_ocr_debug.png')",
+                    detail=0, paragraph=False)
+                ocr_id = "".join(results).strip()
+                if ocr_id:
+                    self.cfg["profile_target_id"] = ocr_id
+                    save_cfg(self.cfg)
+                    self.after(0, lambda: [self._profile_target_var.set(ocr_id),
+                                           self.status.set(f"✔ 아이디 저장 완료: '{ocr_id}'")])
+                else:
+                    self.after(0, lambda: self.status.set("OCR 결과가 없습니다. 영역을 다시 확인하세요."))
+            except Exception as e:
+                self.after(0, lambda: self.status.set(f"오류: {e}"))
+        self.status.set("OCR로 아이디 읽는 중...")
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _test_profile_ocr(self):
+        """profile_reveal_btn 클릭 후 영역 캡처해서 이미지 열기"""
+        area = self.cfg.get("profile_id_area")
+        if not area:
+            self.status.set("아이디 표시 영역을 먼저 등록하세요."); return
+        def _do():
+            try:
+                if self.cfg.get("profile_reveal_btn"):
+                    pyautogui.click(*self.cfg["profile_reveal_btn"])
+                    time.sleep(1)
+                from PIL import ImageGrab
+                ax, ay, aw, ah = area["x"], area["y"], area["w"], area["h"]
+                img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
+                img = self._preprocess_ocr_img(img)
+                img.save("os.path.join(LOGS_DIR, 'profile_ocr_debug.png')")
+                self.after(0, lambda: self.status.set("OCR 분석 중..."))
+                path = "os.path.join(LOGS_DIR, 'profile_ocr_debug.png')"
+                reader = _get_ocr_reader()
+                results = reader.readtext(path, detail=0, paragraph=False)
+                ocr_id = "".join(results).strip()
+                target = self.cfg.get("profile_target_id", "").strip()
+                if target and ocr_id:
+                    match = sum(1 for a, b in zip(ocr_id, target) if a == b)
+                    ratio = int(match / max(len(target), 1) * 100)
+                    self.after(0, lambda o=ocr_id, r=ratio: self.status.set(f"OCR: '{o}' / 목표: '{target}' → 일치율 {r}%"))
+                else:
+                    self.after(0, lambda o=ocr_id: self.status.set(f"OCR 결과: '{o}' (저장된 아이디 없음)"))
+            except Exception as e:
+                import traceback
+                with open(os.path.join(LOGS_DIR, "ocr_error.txt"), "w", encoding="utf-8") as f:
+                    f.write(traceback.format_exc())
+                self.after(0, lambda: self.status.set(f"오류: {e} (ocr_error.txt 확인)"))
+        self.status.set("캡처 중... (첫 실행 시 30초 소요)")
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _reg_profile_id_area(self):
+        self.status.set("3초 후 퍼플 아이디가 표시되는 영역을 드래그하세요!")
+        self.after(3000, lambda: [self.withdraw(), self.after(200, self._open_profile_area_overlay)])
+
+    def _open_profile_area_overlay(self):
+        _ProfileAreaOverlay(self)
+
+    def _save_profile_ref_pixel(self):
+        """스크롤 계정 화면에서 아이디 영역 픽셀 기준값 저장"""
+        area = self.cfg.get("profile_id_area")
+        if not area:
+            self.status.set("아이디 표시 영역을 먼저 등록하세요."); return
+        from PIL import ImageGrab
+        import numpy as np
+        ax, ay, aw, ah = area["x"], area["y"], area["w"], area["h"]
+        img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
+        arr = np.array(img).flatten().tolist()
+        self.cfg["profile_ref_pixel"] = arr
+        save_cfg(self.cfg)
+        self._profile_pix_var.set("저장됨")
+        self.status.set("✔ 스크롤 계정 기준 픽셀 저장 완료")
+
+    def _test_profile_pixel(self):
+        """현재 화면과 기준 픽셀 비교 테스트"""
+        ref = self.cfg.get("profile_ref_pixel")
+        area = self.cfg.get("profile_id_area")
+        if not ref or not area:
+            self.status.set("기준 픽셀 또는 영역이 미등록입니다."); return
+        from PIL import ImageGrab
+        import numpy as np
+        ax, ay, aw, ah = area["x"], area["y"], area["w"], area["h"]
+        img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
+        arr = np.array(img).flatten().tolist()
+        n = min(len(ref), len(arr))
+        diff = sum(abs(ref[i] - arr[i]) for i in range(n)) / n
+        matched = diff < 30
+        self.status.set(f"픽셀 차이: {diff:.1f} → {'✔ 스크롤 계정 일치' if matched else '✗ 다른 계정'}")
+
+    def _is_scroll_account_at(self, hwnd):
+        """hwnd 창 위치 기준으로 profile_id_area 좌표 보정 후 픽셀 비교"""
+        import win32gui
+        ref = self.cfg.get("profile_ref_pixel")
+        area = self.cfg.get("profile_id_area")
+        if not ref or not area:
+            return False
+        try:
+            from PIL import ImageGrab
+            import numpy as np
+            wx, wy, _, _ = win32gui.GetWindowRect(hwnd)
+            ax = area["x"] + wx
+            ay = area["y"] + wy
+            img = ImageGrab.grab(bbox=(ax, ay, ax+area["w"], ay+area["h"]), all_screens=True)
+            arr = np.array(img).flatten().tolist()
+            n = min(len(ref), len(arr))
+            diff = sum(abs(ref[i] - arr[i]) for i in range(n)) / n
+            return diff < 30
+        except:
+            return False
+
+    def _is_scroll_account(self):
+        """현재 화면이 스크롤 계정인지 픽셀 비교로 확인"""
+        ref = self.cfg.get("profile_ref_pixel")
+        area = self.cfg.get("profile_id_area")
+        if not ref or not area:
+            return False
+        try:
+            from PIL import ImageGrab
+            import numpy as np
+            ax, ay, aw, ah = area["x"], area["y"], area["w"], area["h"]
+            img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
+            arr = np.array(img).flatten().tolist()
+            n = min(len(ref), len(arr))
+            diff = sum(abs(ref[i] - arr[i]) for i in range(n)) / n
+            return diff < 30
+        except:
+            return False
+
+    def _check_profile_and_switch(self):
+        """아이디 영역 OCR → 50% 이상 일치하면 스크롤 계정으로 판단"""
+        area = self.cfg.get("profile_id_area")
+        target = self.cfg.get("profile_target_id", "스크롤").strip()
+        if not area or not target:
+            return True
+        try:
+            if self.cfg.get("profile_reveal_btn"):
+                pyautogui.click(*self.cfg["profile_reveal_btn"])
+                time.sleep(1)
+            from PIL import ImageGrab
+            ax, ay, aw, ah = area["x"], area["y"], area["w"], area["h"]
+            img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
+            img = self._preprocess_ocr_img(img)
+            img.save(os.path.join(LOGS_DIR, "profile_ocr_tmp.png"))
+            results = _get_ocr_reader().readtext(os.path.join(LOGS_DIR, "profile_ocr_tmp.png"),
+                detail=0, paragraph=False)
+            ocr_id = "".join(results).strip()
+            # 50% 이상 글자 일치 여부 확인
+            match = sum(1 for a, b in zip(ocr_id, target) if a == b)
+            ratio = match / max(len(target), 1)
+            self.status.set(f"아이디 인식: '{ocr_id}' ({int(ratio*100)}% 일치)")
+            return ratio >= 0.5
+        except Exception as e:
+            self.status.set(f"아이디 확인 오류: {e}")
+            return True
+
+    def _check_profile_and_switch_at(self, hwnd):
+        """hwnd 창 위치를 기준으로 profile_id_area 절대좌표를 계산해서 OCR"""
+        import win32gui
+        area = self.cfg.get("profile_id_area")
+        target = self.cfg.get("profile_target_id", "스크롤").strip()
+        if not area or not target:
+            return True
+        try:
+            # 창이 (0,0)에 있을 때 기준으로 등록된 좌표 → 현재 창 위치로 보정
+            wx, wy, _, _ = win32gui.GetWindowRect(hwnd)
+            ax = area["x"] + wx
+            ay = area["y"] + wy
+            aw, ah = area["w"], area["h"]
+            from PIL import ImageGrab
+            img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
+            img = self._preprocess_ocr_img(img)
+            img.save(os.path.join(LOGS_DIR, "profile_ocr_tmp.png"))
+            results = _get_ocr_reader().readtext(os.path.join(LOGS_DIR, "profile_ocr_tmp.png"),
+                detail=0, paragraph=False)
+            ocr_id = "".join(results).strip()
+            match = sum(1 for a, b in zip(ocr_id, target) if a == b)
+            ratio = match / max(len(target), 1)
+            self.status.set(f"아이디 인식: '{ocr_id}' ({int(ratio*100)}% 일치)")
+            return ratio >= 0.5
+        except Exception as e:
+            self.status.set(f"아이디 확인 오류: {e}")
+            return True
+
+    def _reg_coord(self, key):
+        self._reg_target = key
+        self.status.set(f"3초 후 [{LABELS[key]}] 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="single")])
+
+    def on_coord(self, x, y):
+        if isinstance(self._reg_target, str) and self._reg_target.startswith("__pass_"):
+            ci = int(self._reg_target.split("_")[3])
+            pc = self.cfg.setdefault("pass_coords", [None]*PASS_CLICKS)
+            while len(pc) < PASS_CLICKS: pc.append(None)
+            pc[ci] = [x, y]
+            if hasattr(self, "_pass_reg_sv") and self._pass_reg_sv:
+                self._pass_reg_sv.set(f"({x},{y})")
+        else:
+            self.cfg[self._reg_target] = [x, y]
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ 등록: ({x},{y})")
+        self.deiconify()
+
+    def _reg_char_btn(self):
+        n = len(self.cfg.get("char_btns", []))
+        self.status.set(f"3초 후 캐릭터 #{n+1} 접속 버튼 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="char")])
+
+    def on_char_coord(self, x, y):
+        self.cfg.setdefault("char_btns", []).append([x, y])
+        n = len(self.cfg["char_btns"])
+        # 대응하는 사냥 슬롯 이름이 미등록이면 자동 설정
+        hunt_slots = self.cfg.get("hunt_slots", [])
+        if n - 1 < len(hunt_slots):
+            if hunt_slots[n-1].get("name", "미등록") == "미등록":
+                hunt_slots[n-1]["name"] = f"캐릭터{n}"
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ 캐릭터 #{n} 등록: ({x},{y})  →  사냥 슬롯 #{n} 연동됨")
+        self.deiconify()
+
+    def _clear_char_btns(self):
+        self.cfg["char_btns"] = []
+        save_cfg(self.cfg); self._refresh_ui()
+
+    # ── 클릭 슬롯 ─────────────────────────────────────────────────────
+    def _reg_slot(self, idx):
+        self._slot_target = idx
+        self._slot_step   = 0
+        self.cfg["click_slots"][idx] = [None, None]
+        self._do_slot_step()
+
+    def _do_slot_step(self):
+        step = self._slot_step
+        self.status.set(f"3초 후 #{self._slot_target+1}번 클릭{step+1} 위치 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="slot")])
+
+    def on_slot_coord(self, x, y):
+        idx, step = self._slot_target, self._slot_step
+        slot = self.cfg["click_slots"][idx]
+        while len(slot) <= step:
+            slot.append(None)
+        slot[step] = [x, y]
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ #{idx+1}번 클릭{step+1} 등록: ({x},{y})")
+        self.deiconify()
+        self._slot_step += 1
+        max_steps = 3 if idx == 4 else 2
+        if self._slot_step < max_steps:
+            self.after(500, self._do_slot_step)
+        else:
+            self.status.set(f"✔ #{idx+1}번 슬롯 완료!")
+
+    def _reg_slot_step(self, idx, step):
+        """클릭1 또는 클릭2만 개별 등록"""
+        if self.cfg["click_slots"][idx] is None:
+            self.cfg["click_slots"][idx] = [None, None]
+        self._slot_target = idx
+        self._slot_step   = step
+        self.status.set(f"3초 후 #{idx+1}번 클릭{step+1} 위치 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="slot")])
+
+    def _group_copy_slot(self, idx):
+        import copy
+        src = self.cfg["click_slots"][idx-1]
+        if not src or not any(src):
+            self.status.set(f"#{idx:02d} 위에 복사할 좌표가 없습니다")
+            return
+        self.cfg["click_slots"][idx] = copy.deepcopy(src)
+        save_cfg(self.cfg); self._refresh_ui()
+        pair = self.cfg["click_slots"][idx]
+        dots = []
+        if pair[0]: dots.append((pair[0][0], pair[0][1], "1"))
+        if pair[1]: dots.append((pair[1][0], pair[1][1], "2"))
+        if dots:
+            self.withdraw()
+            self.after(300, lambda: _SlotGroupMoveOverlay(self, idx, dots))
+
+    def _del_slot(self, idx):
+        self.cfg["click_slots"][idx] = [None, None]
+        save_cfg(self.cfg); self._refresh_ui()
+
+    def _clear_click_slots(self):
+        self.cfg["click_slots"] = [[None, None]] * CLICK_SLOTS
+        save_cfg(self.cfg); self._refresh_ui()
+
+    # ── 사냥 슬롯 ─────────────────────────────────────────────────────
+    def _save_hunt_name(self, idx):
+        name = self._hunt_name_vars[idx].get().strip() or "미등록"
+        self._hunt_name_vars[idx].set(name)
+        self.cfg["hunt_slots"][idx]["name"] = name
+        save_cfg(self.cfg)
+
+    def _reg_hunt_click(self, slot_idx, click_idx):
+        self._save_hunt_name(slot_idx)
+        self._hunt_reg_idx  = slot_idx
+        self._hunt_reg_step = click_idx
+        name = self.cfg["hunt_slots"][slot_idx].get("name", f"#{slot_idx+1}")
+        self.status.set(f"3초 후 [{name}] 클릭{click_idx+1} 위치 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="hunt")])
+
+    def on_hunt_coord(self, x, y):
+        idx, step = self._hunt_reg_idx, self._hunt_reg_step
+        coords = self.cfg["hunt_slots"][idx].get("coords", [None] * HUNT_CLICKS)
+        while len(coords) < HUNT_CLICKS:
+            coords.append(None)
+        coords[step] = [x, y]
+        self.cfg["hunt_slots"][idx]["coords"] = coords
+        save_cfg(self.cfg); self._refresh_ui()
+        name = self.cfg["hunt_slots"][idx].get("name", f"#{idx+1}")
+        self.status.set(f"✔ [{name}] 클릭{step+1} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _del_hunt_click(self, slot_idx, click_idx):
+        if not messagebox.askyesno("좌표 삭제", f"사냥 #{slot_idx+1} 클릭{click_idx+1} 좌표를 삭제하시겠습니까?", default="no"):
+            return
+        coords = self.cfg["hunt_slots"][slot_idx].get("coords", [None] * HUNT_CLICKS)
+        while len(coords) < HUNT_CLICKS:
+            coords.append(None)
+        coords[click_idx] = None
+        self.cfg["hunt_slots"][slot_idx]["coords"] = coords
+        save_cfg(self.cfg); self._refresh_ui()
+
+    def _test_hunt(self, idx):
+        h = self.cfg["hunt_slots"][idx]
+        coords = [c for c in h.get("coords", []) if c]
+        if not coords:
+            messagebox.showwarning("등록 필요", f"#{idx+1} 슬롯에 등록된 좌표가 없습니다."); return
+        name = h.get("name", f"#{idx+1}")
+        self.status.set(f"[{name}] 테스트 실행 중...")
+        self.iconify()
+        def run():
+            try:
+                for j, coord in enumerate(h.get("coords", [])):
+                    if not coord: continue
+                    self.status.set(f"[{name}] 클릭{j+1} 테스트...")
+                    pyautogui.click(*coord)
+                    if j < len(h["coords"]) - 1:
+                        time.sleep(HUNT_INTERVAL)
+                self.status.set(f"✔ [{name}] 테스트 완료!")
+            except Exception as e:
+                self.status.set(f"오류: {e}")
+            finally:
+                self.deiconify()
+        threading.Thread(target=run, daemon=True).start()
+
+    def _del_hunt(self, idx):
+        if not messagebox.askyesno("슬롯 삭제", f"사냥 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
+            return
+        self.cfg["hunt_slots"][idx]["coords"] = [None] * HUNT_CLICKS
+        save_cfg(self.cfg); self._refresh_ui()
+
+    def _preview_hunt(self, idx):
+        coords = self.cfg["hunt_slots"][idx].get("coords", [])
+        dots = [(x, y, n+1) for n, c in enumerate(coords)
+                if c and len(c) >= 2 for x, y in [c[:2]]]
+        if not dots:
+            self.status.set(f"#{idx+1:02d} 등록된 좌표가 없습니다")
+            return
+        name = self.cfg["hunt_slots"][idx].get("name", f"#{idx+1:02d}")
+
+        def rereg(dot_idx):
+            self._hunt_reg_idx  = idx
+            self._hunt_reg_step = dot_idx
+            self.deiconify()
+            self.after(200, lambda: CoordOverlay(self, mode="hunt"))
+
+        def _save(dot_idx, nx, ny):
+            self.cfg["hunt_slots"][idx]["coords"][dot_idx] = [nx, ny]
+            save_cfg(self.cfg); self._refresh_ui()
+            self.status.set(f"✔ 사냥 #{idx+1:02d} 클릭{dot_idx+1} 이동 저장: ({nx},{ny})")
+
+        self._open_dot_preview(f"사냥 #{idx+1:02d} {name}", dots,
+                               rereg_fn=rereg, save_fn=_save, dot_r=8)
+
+    def _group_copy_hunt_slot(self, idx):
+        """위 슬롯 좌표 복사 후 그룹 드래그로 위치 조정"""
+        import copy
+        src = self.cfg["hunt_slots"][idx-1].get("coords", [])
+        if not any(src):
+            self.status.set(f"#{idx:02d} 위에 복사할 좌표가 없습니다")
+            return
+        self.cfg["hunt_slots"][idx]["coords"] = copy.deepcopy(src)
+        save_cfg(self.cfg); self._refresh_ui()
+
+        # 그룹 드래그 미리보기 열기
+        coords = self.cfg["hunt_slots"][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
+        if not dots:
+            return
+        name = self.cfg["hunt_slots"][idx].get("name", f"#{idx+1:02d}")
+
+        def _save_group(_, nx, ny):
+            pass  # 개별 저장은 아래 group_save에서 처리
+
+        self.withdraw()
+        self.after(300, lambda: _HuntGroupMoveOverlay(self, idx, dots))
+
+    def _group_copy_hunt(self):
+        import copy
+        src = self.cfg["hunt_slots"][0].get("coords", [])
+        if not any(src):
+            self.status.set("#01 슬롯에 복사할 좌표가 없습니다")
+            return
+        for i in range(1, HUNT_SLOTS):
+            self.cfg["hunt_slots"][i]["coords"] = copy.deepcopy(src)
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ #01 좌표 → #02~#{HUNT_SLOTS:02d} 전체 복사 완료")
+
+    # ── 멈춤 ──────────────────────────────────────────────────────────
+    # ── 9시 클릭 스케줄러 ─────────────────────────────────────────────
+    def _set_sleep_prevention(self, prevent: bool):
+        ES_CONTINUOUS       = 0x80000000
+        ES_SYSTEM_REQUIRED  = 0x00000001
+        ES_DISPLAY_REQUIRED = 0x00000002
+        if prevent:
+            ctypes.windll.kernel32.SetThreadExecutionState(
+                ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)
+        else:
+            ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+
+    def _toggle_mail(self):
+        has = any(any(s.get("coords", [])) for s in self.cfg.get("mail_slots", []))
+        if not has:
+            messagebox.showwarning("등록 필요", "먼저 우편함 좌표를 등록해주세요."); return
+        self._mail_on = not self._mail_on
+        if self._mail_on:
+            self._mail_triggered_date = None
+            self.btn_mail.config(text="🕘 9~10시 클릭  ON", bg="#27ae60")
+            self.status.set("9~10시 클릭 ON — 오후 9:00~10:00 랜덤 실행")
+        else:
+            self.btn_mail.config(text="🕘 9~10시 클릭  OFF", bg="#7f8c8d")
+            self.status.set("9시 클릭 OFF")
+
+    def _mail_scheduler_tick(self):
+        import datetime
+        if self._mail_on:
+            now = datetime.datetime.now()
+            today = now.date()
+            # 21:00~22:00 사이에 한 번만 트리거
+            if now.hour == 21 and self._mail_triggered_date != today:
+                self._mail_triggered_date = today
+                threading.Thread(target=self._run_mail_scheduled, daemon=True).start()
+            elif self._mail_triggered_date != today:
+                target = now.replace(hour=21, minute=0, second=0, microsecond=0)
+                if now >= target:
+                    target += datetime.timedelta(days=1)
+                diff = target - now
+                h, m = divmod(int(diff.total_seconds()) // 60, 60)
+                self.status.set(f"🕘 9시 클릭 대기 중... (약 {h}시간 {m}분 후)")
+        self.after(10000, self._mail_scheduler_tick)
+
+    def _past_scheduler_tick(self):
+        import datetime, random
+        now = datetime.datetime.now()
+        today = now.date()
+        if now.hour == 5 and 3 <= now.minute <= 15 and self._past_triggered_date != today:
+            self._past_triggered_date = today
+            end = now.replace(minute=15, second=0, microsecond=0)
+            remaining = max(0, (end - now).total_seconds())
+            delay = random.uniform(0, remaining)
+            threading.Thread(target=self._run_past_scheduled, args=(delay,), daemon=True).start()
+        elif self._past_triggered_date != today:
+            target = now.replace(hour=5, minute=3, second=0, microsecond=0)
+            if now >= target:
+                target += datetime.timedelta(days=1)
+            diff = target - now
+            h, m = divmod(int(diff.total_seconds()) // 60, 60)
+            self.status.set(f"🏝 과거섬 대기 중... (약 {h}시간 {m}분 후 5:03~5:15 실행)")
+        self.after(30000, self._past_scheduler_tick)
+
+    def _purple_check_tick(self):
+        """5시간마다 퍼플이 스홀 계정인지 확인 → 아니면 전환 후 최소화"""
+        import threading
+        threading.Thread(target=self._purple_check_worker, daemon=True).start()
+        self.after(5 * 60 * 60 * 1000, self._purple_check_tick)
+
+    def _purple_check_worker(self):
+        try:
+            win = find_purple()
+            if not win:
+                self.after(0, lambda: self.status.set("🔍 퍼플 확인: 퍼플 창 없음"))
+                return
+
+            # 퍼플 복원 → 원래 위치 유지 → 포그라운드 → 캡처
+            import win32gui, win32con, ctypes
+            hwnd = win32gui.FindWindow(None, win.title)
+            orig_placement = None
+            if hwnd:
+                orig_placement = win32gui.GetWindowPlacement(hwnd)
+            self.after(0, lambda: self.status.set("🔍 퍼플 확인 중..."))
+
+            # 1단계: 리니지M 좌측버튼(profile_reveal_btn) 클릭 → 계정 확인
+            if self.cfg.get("profile_reveal_btn"):
+                pyautogui.click(*self.cfg["profile_reveal_btn"])
+                time.sleep(1)
+
+            is_scroll = self._is_scroll_account()
+            if not is_scroll:
+                self.after(0, lambda: self.status.set("🔍 퍼플: 스홀 아님 → 전환 중..."))
+                # 2단계: Purple 포그라운드로 가져와서 프로필 전환
+                if hwnd:
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                    time.sleep(0.3)
+                    try:
+                        ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    except Exception:
+                        pass
+                    time.sleep(1.0)
+                if self.cfg.get("profile_btn"):
+                    pyautogui.click(*self.cfg["profile_btn"]); time.sleep(2)
+                if self.cfg.get("google_acc"):
+                    pyautogui.click(*self.cfg["google_acc"]); time.sleep(2)
+                if self.cfg.get("confirm_btn"):
+                    pyautogui.click(*self.cfg["confirm_btn"]); time.sleep(2)
+
+            # 원래 placement 복원 후 최소화
+            if hwnd:
+                if orig_placement:
+                    win32gui.SetWindowPlacement(hwnd, orig_placement)
+                win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+            else:
+                try: win.minimize()
+                except: pass
+            self.after(0, lambda: self.status.set("✔ 5시간 퍼플 확인 완료"))
+        except Exception as e:
+            self.after(0, lambda err=e: self.status.set(f"🔍 퍼플 확인 오류: {err}"))
+
+    def _purple_ensure_scroll(self):
+        """퍼플을 스홀 계정으로 전환하고 최소화."""
+        try:
+            import win32gui, win32con, ctypes
+            hwnd = win32gui.FindWindow(None, "PURPLE")
+            if not hwnd:
+                self.status.set("⚠ 퍼플 창 없음 — 스홀 확인 건너뜀")
+                return
+
+            orig_placement = win32gui.GetWindowPlacement(hwnd)
+
+            # 1단계: 리니지M 좌측버튼(profile_reveal_btn) 클릭 → 계정 확인
+            if self.cfg.get("profile_reveal_btn"):
+                pyautogui.click(*self.cfg["profile_reveal_btn"])
+                time.sleep(1)
+
+            is_scroll = self._is_scroll_account()
+            self.status.set(f"{'✔ 스홀 확인됨' if is_scroll else '🔄 스홀 아님 → 퍼플 전환 중...'}")
+
+            if not is_scroll:
+                # 2단계: Purple 포그라운드로 가져와서 프로필 전환
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                time.sleep(0.3)
+                try:
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                except Exception:
+                    pass
+                time.sleep(1.0)
+                if self.cfg.get("profile_btn"):
+                    pyautogui.click(*self.cfg["profile_btn"]); time.sleep(2)
+                if self.cfg.get("google_acc"):
+                    pyautogui.click(*self.cfg["google_acc"]); time.sleep(2)
+                if self.cfg.get("confirm_btn"):
+                    pyautogui.click(*self.cfg["confirm_btn"]); time.sleep(3)
+                self.status.set("✔ 퍼플 스홀 전환 완료")
+
+            # 원래 상태로 복원 후 최소화
+            win32gui.SetWindowPlacement(hwnd, orig_placement)
+            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+        except Exception as e:
+            self.status.set(f"⚠ 퍼플 전환 오류: {e}")
+
+    def _system_idle_seconds(self):
+        """Windows 마지막 입력(마우스+키보드) 이후 경과 초"""
+        import ctypes
+        class _LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+        lii = _LASTINPUTINFO()
+        lii.cbSize = ctypes.sizeof(lii)
+        ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii))
+        return (ctypes.windll.kernel32.GetTickCount() - lii.dwTime) / 1000.0
+
+    def _wait_system_idle(self, minutes=15):
+        """시스템이 minutes분 이상 유휴 상태가 될 때까지 대기. 멈춤 시 즉시 반환."""
+        required = minutes * 60
+        while True:
+            if getattr(self, "_sched_any_stop", False):
+                return
+            idle = self._system_idle_seconds()
+            if idle >= required:
+                return
+            remaining = int((required - idle) / 60)
+            self.after(0, lambda r=remaining: self.status.set(
+                f"⏸ 컴퓨터 사용 중 — {r}분 더 대기 후 스케줄 실행..."))
+            for _ in range(60):  # 30초를 0.5초씩 나눠 stop 즉시 감지
+                if getattr(self, "_sched_any_stop", False):
+                    return
+                time.sleep(0.5)
+
+    def _wait_mouse_idle_sched(self, idle_sec=5.0):
+        """스케줄 작업용 마우스 idle 대기 — stop flag 없이 단순 대기"""
+        import pyautogui as _pg
+        prev = _pg.position()
+        time.sleep(0.1)
+        cur = _pg.position()
+        if cur == prev:
+            return
+        self.after(0, lambda: self.status.set(f"⏸ 마우스 움직임 감지 — {idle_sec}초 정지 후 재개..."))
+        last_move = time.time()
+        prev = cur
+        while True:
+            time.sleep(0.1)
+            cur = _pg.position()
+            if cur != prev:
+                last_move = time.time()
+                prev = cur
+            elif time.time() - last_move >= idle_sec:
+                return
+
+    def _run_past_scheduled(self, delay):
+        self._sched_any_stop = False
+        self._past_stop = False
+        if delay > 0:
+            mins = int(delay // 60); secs = int(delay % 60)
+            self.status.set(f"🏝 과거섬 {mins}분 {secs}초 후 실행...")
+            elapsed = 0
+            while elapsed < delay:
+                if getattr(self, "_sched_any_stop", False): return
+                time.sleep(0.5); elapsed += 0.5
+        if getattr(self, "_sched_any_stop", False): return
+        threading.Thread(target=self._run_past, daemon=True).start()
+
+    def _run_mail_scheduled(self):
+        import random, datetime
+        slots = self.cfg.get("mail_slots", [])
+        active = [(i, s) for i, s in enumerate(slots)
+                  if any(c for c in s.get("coords", []))]
+        if not active:
+            return
+
+        # 각 클라이언트마다 21:00~22:00 사이 무작위 시각 배정
+        base = datetime.datetime.now().replace(hour=21, minute=0, second=0, microsecond=0)
+        window = 60 * 60  # 1시간(3600초)
+        schedule = sorted([(random.uniform(0, window), i, s) for i, s in active])
+
+        self.status.set(f"🕘 9~10시 우편함 {len(active)}개 랜덤 실행 대기...")
+        elapsed = (datetime.datetime.now() - base).total_seconds()
+
+        for delay, si, slot in schedule:
+            wait = delay - elapsed
+            if wait > 0:
+                mins = int(wait // 60); secs = int(wait % 60)
+                name = slot.get("name", f"#{si+1}")
+                self.status.set(f"🕘 [{name}] {mins}분 {secs}초 후 실행...")
+                waited = 0
+                while waited < wait:
+                    if getattr(self, "_sched_any_stop", False): return
+                    time.sleep(0.5); waited += 0.5
+            if getattr(self, "_sched_any_stop", False): return
+            elapsed = (datetime.datetime.now() - base).total_seconds()
+            name = slot.get("name", f"#{si+1}")
+            self._wait_system_idle(15)
+            if getattr(self, "_sched_any_stop", False): return
+            self.status.set(f"🕘 [{name}] 우편함 클릭 중...")
+            self._run_mail(slot_idx=si)
+
+        self.status.set("✔ 전체 우편함 클릭 완료!")
+
+    def _start_mail(self):
+        self._mail_stop = False
+        self._sched_any_stop = False
+        if hasattr(self, "btn_mail_run"): self.btn_mail_run.config(state="disabled")
+        if hasattr(self, "btn_mail_stop"): self.btn_mail_stop.config(state="normal")
+        self._minimize_all()
+        threading.Thread(target=self._run_mail_standalone, daemon=True).start()
+
+    def _stop_mail(self):
+        self._mail_stop = True
+        self.status.set("우편함 멈추는 중...")
+
+    def _run_mail_standalone(self):
+        self._run_mail()
+        if hasattr(self, "btn_mail_run"): self.after(0, lambda: self.btn_mail_run.config(state="normal"))
+        if hasattr(self, "btn_mail_stop"): self.after(0, lambda: self.btn_mail_stop.config(state="disabled"))
+        self._mail_stop = False
+        self.after(0, self._restore_all)
+
+    def _run_mail(self, slot_idx=None):
+        """slot_idx 지정 시 해당 슬롯만, None이면 전체 16개 랜덤 순서 실행"""
+        try:
+            slots = self.cfg.get("mail_slots", [])
+            if slot_idx is not None:
+                targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
+            else:
+                targets = [(i, s) for i, s in enumerate(slots)
+                           if any(c for c in s.get("coords", []) if c)]
+                random.shuffle(targets)
+            for si, slot in targets:
+                if self._mail_stop: break
+                name = slot.get("name", f"#{si+1}")
+                coords = slot.get("coords", [])
+                valid = [c for c in coords if c and len(c) >= 2]
+                if not valid: continue
+                for k, coord in enumerate(valid):
+                    if self._mail_stop: break
+                    if not self._wait_mouse_idle("_mail_stop"): break
+                    self.status.set(f"🕘 [{name}] 우편함 클릭 {k+1}/{len(valid)}...")
+                    pyautogui.click(*coord)
+                    if k < len(valid) - 1:
+                        time.sleep(MAIL_INTERVAL)
+                if not self._mail_stop:
+                    slot_wait = random.uniform(2.0, 4.0)
+                    self.status.set(f"🕘 다음 슬롯 대기 {slot_wait:.1f}초...")
+                    time.sleep(slot_wait)
+            self.status.set("✔ 우편함 클릭 완료!" if not self._mail_stop else "우편함 멈춤")
+        except Exception as e:
+            self.status.set(f"오류: {e}")
+
+    def _reg_mail_click(self, slot_idx, click_idx):
+        self._reg_mail_slot_idx  = slot_idx
+        self._reg_mail_click_idx = click_idx
+        self.status.set(f"3초 후 우편함 #{slot_idx+1} 클릭{click_idx+1} 위치 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="mail")])
+
+    def on_mail_coord(self, x, y):
+        si = self._reg_mail_slot_idx
+        ci = self._reg_mail_click_idx
+        self.cfg["mail_slots"][si]["coords"][ci] = [x, y]
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ 우편함 #{si+1} 클릭{ci+1} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _save_mail_name(self, idx):
+        name = self._mail_name_vars[idx].get().strip() or "미등록"
+        self.cfg["mail_slots"][idx]["name"] = name
+        save_cfg(self.cfg)
+
+    def _test_mail(self, idx):
+        threading.Thread(target=self._run_mail, args=(idx,), daemon=True).start()
+
+    def _del_mail(self, idx):
+        if not messagebox.askyesno("슬롯 삭제", f"우편함 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
+            return
+        self.cfg["mail_slots"][idx] = {"name": "미등록", "coords": [None]*MAIL_CLICKS}
+        save_cfg(self.cfg); self._refresh_ui()
+
+    def _preview_mail(self, idx):
+        coords = self.cfg["mail_slots"][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
+        if not dots:
+            self.status.set(f"#{idx+1:02d} 등록된 좌표가 없습니다")
+            return
+        name = self.cfg["mail_slots"][idx].get("name", f"#{idx+1:02d}")
+
+        def rereg(dot_idx):
+            self._reg_mail_slot_idx  = idx
+            self._reg_mail_click_idx = dot_idx
+            self.deiconify()
+            self.after(200, lambda: CoordOverlay(self, mode="mail"))
+
+        def _save(dot_idx, nx, ny):
+            self.cfg["mail_slots"][idx]["coords"][dot_idx] = [nx, ny]
+            save_cfg(self.cfg); self._refresh_ui()
+            self.status.set(f"✔ 우편함 #{idx+1:02d} 클릭{dot_idx+1} 이동 저장: ({nx},{ny})")
+
+        self._open_dot_preview(f"우편함 #{idx+1:02d} {name}", dots,
+                               rereg_fn=rereg, save_fn=_save, dot_r=8)
+
+    def _group_copy_mail_slot(self, idx):
+        import copy
+        src = self.cfg["mail_slots"][idx-1].get("coords", [])
+        if not any(src):
+            self.status.set(f"#{idx:02d} 위에 복사할 좌표가 없습니다")
+            return
+        self.cfg["mail_slots"][idx]["coords"] = copy.deepcopy(src)
+        save_cfg(self.cfg); self._refresh_ui()
+        coords = self.cfg["mail_slots"][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
+        if dots:
+            self.withdraw()
+            self.after(300, lambda: _MailGroupMoveOverlay(self, idx, dots))
+
+    def _group_copy_mail(self):
+        import copy
+        src = self.cfg["mail_slots"][0].get("coords", [])
+        if not any(src):
+            self.status.set("#01 슬롯에 복사할 좌표가 없습니다")
+            return
+        for i in range(1, MAIL_SLOTS):
+            self.cfg["mail_slots"][i]["coords"] = copy.deepcopy(src)
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ #01 좌표 → #02~#{MAIL_SLOTS:02d} 전체 복사 완료")
+
+    # ── 주말던전 ──────────────────────────────────────────────────────
+    def _start_dungeon(self):
+        self._dungeon_stop = False
+        if hasattr(self, "btn_dungeon_run"): self.btn_dungeon_run.config(state="disabled")
+        if hasattr(self, "btn_dungeon_stop"): self.btn_dungeon_stop.config(state="normal")
+        self.iconify()
+        threading.Thread(target=self._run_dungeon, daemon=True).start()
+
+    def _run_dungeon(self, slot_idx=None):
+        try:
+            slots = self.cfg.get("dungeon_slots", [])
+            if slot_idx is not None:
+                targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
+            else:
+                targets = [(i, s) for i, s in enumerate(slots)
+                           if any(s.get("coords", []))]
+            for si, slot in targets:
+                if self._dungeon_stop: break
+                name = slot.get("name", f"#{si+1}")
+                coords = slot.get("coords", [])
+                if not coords[0]: continue
+                if not self._wait_mouse_idle("_dungeon_stop"): return
+                # 메뉴 위로 마우스 이동 후 대기
+                self.status.set(f"🏰 [{name}] 메뉴 hover...")
+                pyautogui.moveTo(*coords[0])
+                time.sleep(DUNGEON_HOVER)
+                pyautogui.click(*coords[0])
+                time.sleep(DUNGEON_INTERVAL)
+                # 확장 후 클릭1, 클릭2
+                for j in range(1, DUNGEON_CLICKS):
+                    if self._dungeon_stop: break
+                    if coords[j]:
+                        self.status.set(f"🏰 [{name}] 클릭{j}...")
+                        pyautogui.click(*coords[j])
+                        if j < DUNGEON_CLICKS - 1:
+                            time.sleep(DUNGEON_INTERVAL)
+            self.status.set("✔ 던전 실행 완료!")
+        except Exception as e:
+            self.status.set(f"오류: {e}")
+        finally:
+            if hasattr(self, "btn_dungeon_run"): self.btn_dungeon_run.config(state="normal")
+            if hasattr(self, "btn_dungeon_stop"): self.btn_dungeon_stop.config(state="disabled")
+
+    def _reg_dungeon_click(self, slot_idx, click_idx):
+        self._reg_dungeon_slot_idx  = slot_idx
+        self._reg_dungeon_click_idx = click_idx
+        label = ["메뉴", "클릭1", "클릭2"][click_idx]
+        self.status.set(f"3초 후 던전 #{slot_idx+1} [{label}] 위치 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="dungeon")])
+
+    def on_dungeon_coord(self, x, y):
+        si = self._reg_dungeon_slot_idx
+        ci = self._reg_dungeon_click_idx
+        self.cfg["dungeon_slots"][si]["coords"][ci] = [x, y]
+        save_cfg(self.cfg); self._refresh_ui()
+        label = ["메뉴", "클릭1", "클릭2"][ci]
+        self.status.set(f"✔ 던전 #{si+1} [{label}] 등록: ({x},{y})")
+        self.deiconify()
+
+    def _save_dungeon_name(self, idx):
+        name = self._dungeon_name_vars[idx].get().strip() or "미등록"
+        self.cfg["dungeon_slots"][idx]["name"] = name
+        save_cfg(self.cfg)
+
+    def _test_dungeon(self, idx):
+        threading.Thread(target=self._run_dungeon, args=(idx,), daemon=True).start()
+
+    def _del_dungeon(self, idx):
+        if not messagebox.askyesno("슬롯 삭제", f"던전 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
+            return
+        self.cfg["dungeon_slots"][idx] = {"name": "미등록", "coords": [None]*DUNGEON_CLICKS}
+        save_cfg(self.cfg); self._refresh_ui()
+
+    def _preview_dungeon(self, idx):
+        coords = self.cfg["dungeon_slots"][idx].get("coords", [])
+        LABELS_D = ["메뉴", "클릭1", "클릭2"]
+        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
+        if not dots:
+            self.status.set(f"던전 #{idx+1:02d} 등록된 좌표가 없습니다")
+            return
+        name = self.cfg["dungeon_slots"][idx].get("name", f"#{idx+1:02d}")
+
+        def rereg(dot_idx):
+            self._reg_dungeon_slot_idx  = idx
+            self._reg_dungeon_click_idx = dot_idx
+            self.deiconify()
+            self.after(200, lambda: CoordOverlay(self, mode="dungeon"))
+
+        def _save(dot_idx, nx, ny):
+            self.cfg["dungeon_slots"][idx]["coords"][dot_idx] = [nx, ny]
+            save_cfg(self.cfg); self._refresh_ui()
+            self.status.set(f"✔ 던전 #{idx+1:02d} {LABELS_D[dot_idx]} 이동 저장: ({nx},{ny})")
+
+        self._open_dot_preview(f"던전 #{idx+1:02d} {name}", dots,
+                               rereg_fn=rereg, save_fn=_save, dot_r=8)
+
+    def _group_copy_dungeon_slot(self, idx):
+        import copy
+        src = self.cfg["dungeon_slots"][idx-1].get("coords", [])
+        if not any(src):
+            self.status.set(f"던전 #{idx:02d} 위에 복사할 좌표가 없습니다")
+            return
+        self.cfg["dungeon_slots"][idx]["coords"] = copy.deepcopy(src)
+        save_cfg(self.cfg); self._refresh_ui()
+        coords = self.cfg["dungeon_slots"][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
+        if not dots:
+            return
+        self.withdraw()
+        self.after(300, lambda: _DungeonGroupMoveOverlay(self, idx, dots))
+
+    # ── 과거의말하는섬 ────────────────────────────────────────────────
+    def _start_past(self):
+        self._past_stop = False
+        self._sched_any_stop = False
+        if hasattr(self, "btn_past_run"): self.btn_past_run.config(state="disabled", bg="#f39c12", text="⏳ 실행중...")
+        if hasattr(self, "btn_past_stop"): self.btn_past_stop.config(state="normal")
+        self._minimize_all()
+        threading.Thread(target=self._run_past, daemon=True).start()
+
+    def _run_past(self, slot_idx=None):
+        try:
+            self.status.set("2초 후 과거의말하는섬 실행...")
+            self.after(0, self.iconify)
+            time.sleep(2)
+            slots = self.cfg.get("past_slots", [])
+            if slot_idx is not None:
+                targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
+            else:
+                targets = [(i, s) for i, s in enumerate(slots)
+                           if any(s.get("coords", []))]
+            for si, slot in targets:
+                if self._past_stop: break
+                name   = slot.get("name", f"#{si+1}")
+                coords = slot.get("coords", [None]*PAST_CLICKS)
+                # 슬롯별 랜덤 딜레이
+                slot_delay = random.uniform(3.0, 15.0)
+                self.status.set(f"🏝 [{name}] {slot_delay:.0f}초 후 실행...")
+                elapsed = 0
+                while elapsed < slot_delay:
+                    if self._past_stop: break
+                    time.sleep(0.5); elapsed += 0.5
+                if self._past_stop: break
+                # 0: 클릭1(신규) → 1: 마우스이동(hover) → 2: 클릭
+                if coords[0]:
+                    self.status.set(f"🏝 [{name}] 클릭1...")
+                    pyautogui.click(*coords[0])
+                    time.sleep(random.uniform(3.0, 6.0))
+                if self._past_stop: break
+                if coords[1]:
+                    self.status.set(f"🏝 [{name}] 마우스 이동...")
+                    pyautogui.moveTo(*coords[1])
+                    time.sleep(random.uniform(3.0, 5.0))
+                if self._past_stop: break
+                if len(coords) > 2 and coords[2]:
+                    self.status.set(f"🏝 [{name}] 클릭2...")
+                    pyautogui.click(*coords[2])
+                if self._past_stop: break
+                # 슬롯 간 대기 (가끔 긴 휴식)
+                pause = random.uniform(4.0, 8.0)
+                if random.random() < 0.25:
+                    pause += random.uniform(3.0, 7.0)
+                time.sleep(pause)
+            self.status.set("✔ 과거의말하는섬 완료!")
+        except Exception as e:
+            self.status.set(f"오류: {e}")
+        finally:
+            self.after(0, self._restore_all)
+            if hasattr(self, "btn_past_run"): self.btn_past_run.config(state="normal", bg="#c0392b", text="▶  실행")
+            if hasattr(self, "btn_past_stop"): self.btn_past_stop.config(state="disabled")
+
+    def _reg_past_click(self, slot_idx, click_idx):
+        self._reg_past_slot_idx  = slot_idx
+        self._reg_past_click_idx = click_idx
+        # 클릭한 슬롯을 맨 위로 스크롤
+        btn = self._past_click_btns[slot_idx][click_idx]
+        self._past_canvas.update_idletasks()
+        total = self._past_canvas.bbox("all")
+        if total:
+            row_y = btn.winfo_y() + btn.master.winfo_y()
+            frac = row_y / total[3]
+            self._past_canvas.yview_moveto(frac)
+        if click_idx == 1:
+            # 이동 좌표는 카운트다운 후 현재 마우스 위치 자동 캡처
+            self._past_hover_countdown(slot_idx, 3)
+        else:
+            self.status.set(f"3초 후 과거의말하는섬 #{slot_idx+1} [클릭{click_idx+1}] 위치 클릭하세요!")
+            self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                       CoordOverlay(self, mode="past")])
+
+    def _past_hover_countdown(self, slot_idx, remaining):
+        if remaining > 0:
+            self.status.set(f"⏱ {remaining}초 안에 마우스를 이동해두세요 — 자동 저장됩니다")
+            self.after(1000, lambda: self._past_hover_countdown(slot_idx, remaining - 1))
+        else:
+            x, y = pyautogui.position()
+            self.on_past_coord(x, y)
+
+    def on_past_coord(self, x, y):
+        si = self._reg_past_slot_idx
+        ci = self._reg_past_click_idx
+        self.cfg["past_slots"][si]["coords"][ci] = [x, y]
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ 과거의말하는섬 #{si+1} 클릭{ci+1} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _save_past_name(self, idx):
+        name = self._past_name_vars[idx].get().strip() or "미등록"
+        self.cfg["past_slots"][idx]["name"] = name
+        save_cfg(self.cfg)
+
+    def _test_past(self, idx):
+        threading.Thread(target=self._run_past, args=(idx,), daemon=True).start()
+
+    def _del_past(self, idx):
+        if not messagebox.askyesno("슬롯 삭제", f"과거의섬 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
+            return
+        self.cfg["past_slots"][idx] = {"name": "미등록", "coords": [None]*PAST_CLICKS}
+        save_cfg(self.cfg); self._refresh_ui()
+
+    def _preview_past(self, idx):
+        coords = self.cfg["past_slots"][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
+        if not dots:
+            self.status.set(f"#{idx+1:02d} 등록된 좌표가 없습니다")
+            return
+        name = self.cfg["past_slots"][idx].get("name", f"#{idx+1:02d}")
+
+        def rereg(dot_idx):
+            self._reg_past_slot_idx  = idx
+            self._reg_past_click_idx = dot_idx
+            self.deiconify()
+            self.after(200, lambda: CoordOverlay(self, mode="past"))
+
+        def _save(dot_idx, nx, ny):
+            self.cfg["past_slots"][idx]["coords"][dot_idx] = [nx, ny]
+            save_cfg(self.cfg); self._refresh_ui()
+            self.status.set(f"✔ 과거섬 #{idx+1:02d} 클릭{dot_idx+1} 이동 저장: ({nx},{ny})")
+
+        self._open_dot_preview(f"과거섬 #{idx+1:02d} {name}", dots,
+                               rereg_fn=rereg, save_fn=_save)
+
+    def _group_copy_past_slot(self, idx):
+        import copy
+        src = self.cfg["past_slots"][idx-1].get("coords", [])
+        if not any(src[1:]):
+            self.status.set(f"#{idx:02d} 위에 복사할 좌표(2,3번)가 없습니다")
+            return
+        dst = self.cfg["past_slots"][idx]["coords"]
+        for j in (1, 2):
+            if j < len(src): dst[j] = copy.deepcopy(src[j])
+        save_cfg(self.cfg); self._refresh_ui()
+        coords = self.cfg["past_slots"][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1, n) for n, c in enumerate(coords)
+                if n > 0 and c and len(c) >= 2]
+        if dots:
+            self.withdraw()
+            def _open_past(i=idx, d=dots):
+                try:
+                    _PastGroupMoveOverlay(self, i, d)
+                except Exception as e:
+                    self.deiconify()
+                    self.status.set(f"오류: {e}")
+            self.after(300, _open_past)
+
+    def _group_copy_past_1to4(self):
+        import copy
+        src = self.cfg["past_slots"][0].get("coords", [])
+        if not any(src):
+            self.status.set("#01 슬롯에 복사할 좌표가 없습니다")
+            return
+        for i in range(1, 4):
+            self.cfg["past_slots"][i]["coords"] = copy.deepcopy(src)
+        save_cfg(self.cfg); self._refresh_ui()
+        # #02~#04 순서대로 그룹 이동 오버레이 열기
+        self._past_chain_move(1, end=4)
+
+    def _past_chain_move(self, idx, end):
+        coords = self.cfg["past_slots"][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
+        if not dots:
+            if idx + 1 < end:
+                self.after(300, lambda: self._past_chain_move(idx+1, end))
+            return
+        self.withdraw()
+        self.after(300, lambda: _PastChainMoveOverlay(self, idx, dots, idx+1, end))
+
+    def _group_copy_past(self):
+        import copy
+        src = self.cfg["past_slots"][0].get("coords", [])
+        if not any(src[1:]):
+            self.status.set("#01 슬롯에 복사할 좌표(2,3번)가 없습니다")
+            return
+        for i in range(1, PAST_SLOTS):
+            dst = self.cfg["past_slots"][i]["coords"]
+            for j in (1, 2):
+                if j < len(src): dst[j] = copy.deepcopy(src[j])
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ #01 좌표 → #02~#{PAST_SLOTS:02d} 전체 복사 완료")
+
+    def _start_sched(self):
+        self._sched_stop = False
+        self._sched_any_stop = False
+        if hasattr(self, "btn_sched_run"):
+            self.btn_sched_run.config(state="disabled", bg="#f39c12", text="⏳ 실행중...")
+        if hasattr(self, "btn_sched_stop"):
+            self.btn_sched_stop.config(state="normal")
+        self._minimize_all()
+        threading.Thread(target=self._run_sched, daemon=True).start()
+
+    def _run_sched(self, slot_idx=None):
+        try:
+            self.status.set("2초 후 매일매일 스케줄 실행...")
+            self.after(0, self.iconify)
+            time.sleep(2)
+            slots = self.cfg.get("sched_slots", [])
+            if slot_idx is not None:
+                targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
+            else:
+                targets = [(i, s) for i, s in enumerate(slots)
+                           if any(s.get("coords", []))]
+            for si, slot in targets:
+                if self._sched_stop: break
+                name   = slot.get("name", f"#{si+1}")
+                coords = slot.get("coords", [None]*SCHED_CLICKS)
+                if not self._wait_mouse_idle("_sched_stop"): return
+                if coords[0]:
+                    self.status.set(f"📅 [{name}] 클릭1...")
+                    pyautogui.click(*coords[0])
+                    time.sleep(SCHED_INTERVAL)
+                if self._sched_stop: break
+                if coords[1]:
+                    self.status.set(f"📅 [{name}] 마우스 이동...")
+                    pyautogui.moveTo(*coords[1])
+                    time.sleep(SCHED_INTERVAL)
+                if self._sched_stop: break
+                if len(coords) > 2 and coords[2]:
+                    self.status.set(f"📅 [{name}] 클릭2...")
+                    pyautogui.click(*coords[2])
+                if self._sched_stop: break
+                time.sleep(4)
+            self.status.set("✔ 매일매일 스케줄 완료!")
+        except Exception as e:
+            self.status.set(f"오류: {e}")
+        finally:
+            self.after(0, self.deiconify)
+            self.after(0, self._restore_all)
+            if hasattr(self, "btn_sched_run"): self.btn_sched_run.config(state="normal", bg="#16a085", text="▶  실행")
+            if hasattr(self, "btn_sched_stop"): self.btn_sched_stop.config(state="disabled")
+
+    def _reg_sched_click(self, slot_idx, click_idx):
+        self._reg_sched_slot_idx  = slot_idx
+        self._reg_sched_click_idx = click_idx
+        btn = self._sched_click_btns[slot_idx][click_idx]
+        self._sched_canvas.update_idletasks()
+        total = self._sched_canvas.bbox("all")
+        if total:
+            row_y = btn.winfo_y() + btn.master.winfo_y()
+            frac = row_y / total[3]
+            self._sched_canvas.yview_moveto(frac)
+        if click_idx == 1:
+            # 이동 좌표는 카운트다운 후 현재 마우스 위치 자동 캡처
+            self._sched_hover_countdown(slot_idx, 3)
+        else:
+            self.status.set(f"3초 후 스케줄 #{slot_idx+1} [클릭{click_idx+1}] 위치 클릭하세요!")
+            self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                       CoordOverlay(self, mode="sched")])
+
+    def _sched_hover_countdown(self, slot_idx, remaining):
+        if remaining > 0:
+            self.status.set(f"⏱ {remaining}초 안에 마우스를 이동해두세요 — 자동 저장됩니다")
+            self.after(1000, lambda: self._sched_hover_countdown(slot_idx, remaining - 1))
+        else:
+            x, y = pyautogui.position()
+            self.on_sched_coord(x, y)
+
+    def on_sched_coord(self, x, y):
+        si = self._reg_sched_slot_idx
+        ci = self._reg_sched_click_idx
+        self.cfg["sched_slots"][si]["coords"][ci] = [x, y]
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ 스케줄 #{si+1} 클릭{ci+1} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _save_sched_name(self, idx):
+        name = self._sched_name_vars[idx].get().strip() or "미등록"
+        self.cfg["sched_slots"][idx]["name"] = name
+        save_cfg(self.cfg)
+
+    def _test_sched(self, idx):
+        threading.Thread(target=self._run_sched, args=(idx,), daemon=True).start()
+
+    def _del_sched(self, idx):
+        if not messagebox.askyesno("슬롯 삭제", f"스케줄 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
+            return
+        self.cfg["sched_slots"][idx] = {"name": "미등록", "coords": [None]*SCHED_CLICKS}
+        save_cfg(self.cfg); self._refresh_ui()
+
+    def _preview_sched(self, idx):
+        coords = self.cfg["sched_slots"][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
+        if not dots:
+            self.status.set(f"#{idx+1:02d} 등록된 좌표가 없습니다")
+            return
+        name = self.cfg["sched_slots"][idx].get("name", f"#{idx+1:02d}")
+
+        def rereg(dot_idx):
+            self._reg_sched_slot_idx  = idx
+            self._reg_sched_click_idx = dot_idx
+            self.deiconify()
+            self.after(200, lambda: CoordOverlay(self, mode="sched"))
+
+        def _save(dot_idx, nx, ny):
+            self.cfg["sched_slots"][idx]["coords"][dot_idx] = [nx, ny]
+            save_cfg(self.cfg); self._refresh_ui()
+            self.status.set(f"✔ 스케줄 #{idx+1:02d} 클릭{dot_idx+1} 이동 저장: ({nx},{ny})")
+
+        self._open_dot_preview(f"스케줄 #{idx+1:02d} {name}", dots,
+                               rereg_fn=rereg, save_fn=_save)
+
+    def _group_copy_sched_slot(self, idx):
+        import copy
+        src = self.cfg["sched_slots"][idx-1].get("coords", [])
+        if not any(src[1:]):
+            self.status.set(f"#{idx:02d} 위에 복사할 좌표(2,3번)가 없습니다")
+            return
+        dst = self.cfg["sched_slots"][idx]["coords"]
+        for j in (1, 2):
+            if j < len(src): dst[j] = copy.deepcopy(src[j])
+        save_cfg(self.cfg); self._refresh_ui()
+        coords = self.cfg["sched_slots"][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1, n) for n, c in enumerate(coords)
+                if n > 0 and c and len(c) >= 2]
+        if dots:
+            self.withdraw()
+            def _open_sched(i=idx, d=dots):
+                try:
+                    _SchedGroupMoveOverlay(self, i, d)
+                except Exception as e:
+                    self.deiconify()
+                    self.status.set(f"오류: {e}")
+            self.after(300, _open_sched)
+
+    def _group_copy_sched(self):
+        import copy
+        src = self.cfg["sched_slots"][0].get("coords", [])
+        if not any(src[1:]):
+            self.status.set("#01 슬롯에 복사할 좌표(2,3번)가 없습니다")
+            return
+        for i in range(1, SCHED_SLOTS):
+            dst = self.cfg["sched_slots"][i]["coords"]
+            for j in (1, 2):
+                if j < len(src): dst[j] = copy.deepcopy(src[j])
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ #01 좌표 → #02~#{SCHED_SLOTS:02d} 전체 복사 완료")
+
+    def _reg_sched_click1_all(self):
+        ref = self.cfg["sched_slots"][0]["coords"][0]
+        if not ref:
+            self.status.set("슬롯#01 클릭1 좌표가 없습니다. 먼저 등록해주세요.")
+            return
+        self._sched_click1_ref = list(ref)
+        self.status.set(f"기준: 슬롯#01 클릭1 ({ref[0]},{ref[1]}) → 3초 후 새 위치에 마우스를 올려두세요")
+        self.after(3000, self._capture_sched_click1_all)
+
+    def _capture_sched_click1_all(self):
+        nx, ny = pyautogui.position()
+        ox, oy = self._sched_click1_ref
+        dx, dy = nx - ox, ny - oy
+        for i in range(SCHED_SLOTS):
+            c = self.cfg["sched_slots"][i]["coords"][0]
+            if c:
+                self.cfg["sched_slots"][i]["coords"][0] = [c[0] + dx, c[1] + dy]
+        save_cfg(self.cfg)
+        self._refresh_ui()
+        self.status.set(f"✔ 클릭1 전체 이동 완료 (dx={dx:+d}, dy={dy:+d})")
+
+    def _take_layout_screenshot(self, count):
+        import time
+        time.sleep(0.4)
+        try:
+            from PIL import ImageGrab, ImageDraw, ImageFont
+            shot = ImageGrab.grab(all_screens=True)
+            draw = ImageDraw.Draw(shot)
+            positions = self.cfg.get("window_positions", [])
+            for idx, p in enumerate(positions):
+                x, y, w, h = p["x"], p["y"], p["w"], p["h"]
+                # 창 테두리
+                draw.rectangle([x, y, x+w, y+h], outline=(255, 80, 80), width=3)
+                # 번호 배경 박스
+                pad = 6
+                num_text = f"#{idx+1:02d}"
+                box_w, box_h = 60, 36
+                draw.rectangle([x+4, y+4, x+4+box_w, y+4+box_h], fill=(255, 80, 80))
+                draw.text((x+8, y+8), num_text, fill=(255, 255, 255))
+            path = os.path.join(BASE, "lineagem_logs", "window_layout.png")
+            shot.save(path)
+        except Exception:
+            pass
+        self.deiconify()
+        self.lift()
+        self.status.set(f"✔ 창 배치 {count}개 저장 완료")
+        # 캡처 후 잠깐 보여주다 5초 후 자동 숨김
+        self._show_layout_preview()
+        self.after(5000, self._hide_layout_preview)
+
+    def _section_wins(self):
+        attrs = ["_settings_win","_hunt_win","_mail_win","_past_win2",
+                 "_sched_win","_dungeon_win","_daya_win","_pass_win"]
+        return [getattr(self, a) for a in attrs
+                if getattr(self, a, None) and getattr(self, a).winfo_exists()]
+
+    def _minimize_all(self):
+        for w in self._section_wins():
+            w.iconify()
+        self.iconify()
+        self._minimize_claude()
+
+    def _restore_all(self):
+        self.deiconify()
+        for w in self._section_wins():
+            w.deiconify()
+
+    def _show_layout_preview(self):
+        # 메인+서브창 전부 최소화
+        for w in self._section_wins():
+            w.iconify()
+        self._load_layout_preview()
+        self._layout_preview_visible = True
+        self.iconify()
+
+    def _hide_layout_preview(self):
+        self._layout_preview_frame.pack_forget()
+        self._layout_preview_visible = False
+        self._btn_layout_toggle.config(text="🖼 배치보기")
+        self.deiconify()
+        for w in self._section_wins():
+            w.deiconify()
+
+    def _toggle_layout_preview(self):
+        if self._layout_preview_visible:
+            self._hide_layout_preview()
+        else:
+            self._show_layout_preview()
+
+    def _load_layout_preview(self):
+        path = os.path.join(BASE, "lineagem_logs", "window_layout.png")
+        frame = self._layout_preview_frame
+        for w in frame.winfo_children():
+            w.destroy()
+        if not os.path.exists(path):
+            tk.Label(frame, text="(배치 캡처 없음)", font=("맑은 고딕", 7), fg="#aaa").pack(side="left")
+            return
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open(path)
+            # 가로 폭을 프레임에 맞게 축소
+            max_w = 900
+            ratio = max_w / img.width
+            img = img.resize((max_w, int(img.height * ratio)), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            lbl = tk.Label(frame, image=photo, cursor="hand2")
+            lbl.image = photo
+            lbl.pack(side="left")
+            lbl.bind("<Button-1>", lambda e: __import__("subprocess").Popen(["explorer", path]))
+        except Exception:
+            tk.Label(frame, text="(미리보기 오류)", font=("맑은 고딕", 7), fg="#aaa").pack(side="left")
+
+    # ── 창 배치 ───────────────────────────────────────────────────────
+    def _get_purple_hwnds(self):
+        """Purple/리니지 창의 (hwnd, left, top, width, height) 목록 반환"""
+        import ctypes
+        result = []
+        def cb(hwnd, _):
+            buf = ctypes.create_unicode_buffer(256)
+            ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)
+            title = buf.value
+            if ("Purple" in title or "리니지" in title) and ctypes.windll.user32.IsWindowVisible(hwnd):
+                r = ctypes.wintypes.RECT()
+                ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(r))
+                w = r.right - r.left
+                h = r.bottom - r.top
+                if w > 100 and h > 100:
+                    result.append((hwnd, r.left, r.top, w, h))
+            return True
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        ctypes.windll.user32.EnumWindows(WNDENUMPROC(cb), 0)
+        return result
+
+    def _capture_window_layout(self):
+        wins = self._get_purple_hwnds()
+        if not wins:
+            messagebox.showwarning("창 없음", "퍼플/리니지 창을 찾을 수 없습니다."); return
+        # 위치(위→아래, 왼→오른) 순으로 정렬해서 패턴만 저장
+        wins_sorted = sorted(wins, key=lambda e: (e[2], e[1]))  # y, x 순
+        positions = [{"x": x, "y": y, "w": w, "h": h}
+                     for _, x, y, w, h in wins_sorted]
+        self.cfg["window_positions"] = positions
+        save_cfg(self.cfg)
+        # 런처 최소화 후 스크린샷 → 복구
+        self.iconify()
+        self.after(600, lambda: self._take_layout_screenshot(len(positions)))
+
+    def _clear_window_layout(self):
+        self.cfg["window_positions"] = []
+        save_cfg(self.cfg)
+        self.status.set("창 배치 초기화 완료")
+
+    def _apply_window_layout(self):
+        positions = self.cfg.get("window_positions", [])
+        if not positions:
+            self.status.set("저장된 배치가 없습니다. 먼저 '현재 배치 캡처'를 눌러주세요."); return
+        wins = self._get_purple_hwnds()
+        if not wins:
+            self.status.set("퍼플/리니지 창을 찾을 수 없습니다."); return
+        # 현재 창도 같은 기준(y, x)으로 정렬
+        wins_sorted = sorted(wins, key=lambda e: (e[2], e[1]))
+        SWP_NOZORDER = 0x0004
+        applied = 0
+        for i, (hwnd, *_) in enumerate(wins_sorted):
+            if i >= len(positions): break
+            p = positions[i]
+            try:
+                ctypes.windll.user32.SetWindowPos(
+                    hwnd, 0, p["x"], p["y"], p["w"], p["h"], SWP_NOZORDER)
+                applied += 1
+            except Exception:
+                pass
+        self.status.set(f"✔ 창 배치 복구 완료 ({applied}개)")
+
+    def _toggle_detail(self, detail, sv, row_frame, padx=14):
+        if detail.winfo_ismapped():
+            detail.pack_forget()
+            sv.set(sv.get().replace("▴", "▾"))
+        else:
+            detail.pack(fill="x", padx=padx, pady=(0,4), after=row_frame)
+            sv.set(sv.get().replace("▾", "▴"))
+
+    def _toggle_hunt_detail(self, slot_idx):
+        self._toggle_detail(self._hunt_detail_frames[slot_idx],
+                            self._hunt_coord_sv[slot_idx],
+                            self._hunt_row_frames[slot_idx])
+
+    def _toggle_mail_detail(self, slot_idx):
+        self._toggle_detail(self._mail_detail_frames[slot_idx],
+                            self._mail_coord_sv[slot_idx],
+                            self._mail_row_frames[slot_idx])
+
+    def _toggle_dungeon_detail(self, slot_idx):
+        self._toggle_detail(self._dungeon_detail_frames[slot_idx],
+                            self._dungeon_coord_sv[slot_idx],
+                            self._dungeon_row_frames[slot_idx])
+
+    def _toggle_past_detail(self, slot_idx):
+        self._toggle_detail(self._past_detail_frames[slot_idx],
+                            self._past_coord_sv[slot_idx],
+                            self._past_row_frames[slot_idx])
+
+    def _toggle_pass_detail(self, slot_idx):
+        self._toggle_detail(self._pass_detail_frames[slot_idx],
+                            self._pass_coord_sv[slot_idx],
+                            self._pass_row_frames[slot_idx])
+
+    def _minimize_claude(self):
+        """Claude 창 최소화"""
+        def _cb(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd): return True
+            t = win32gui.GetWindowText(hwnd)
+            if "claude" in t.lower():
+                ctypes.windll.user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE
+        win32gui.EnumWindows(_cb, None)
+
+    def _assign_window(self, slot_idx):
+        """카운트다운 후 클릭한 창을 슬롯에 지정"""
+        def _countdown(n):
+            if n > 0:
+                self.status.set(f"#{slot_idx+1:02d} 창 지정 — {n}초 후 지정할 창을 클릭하세요!")
+                self.after(1000, lambda: _countdown(n - 1))
+            else:
+                self.status.set(f"#{slot_idx+1:02d} 창 지정 — 지금 지정할 창을 클릭하세요! (클릭 대기 중...)")
+                self._minimize_claude()
+                self.withdraw()
+                self.after(100, _wait_click)
+
+        def _wait_click():
+            _AssignWindowOverlay(self, slot_idx, self._on_assign_done)
+
+        _countdown(1)
+
+    def _on_assign_done(self, slot_idx, title):
+        """지정 완료 후 버튼 초록으로 변경"""
+        if slot_idx < len(self._hunt_assign_btns):
+            self._hunt_assign_btns[slot_idx].config(text="✔지정", bg="#27ae60")
+        self.status.set(f"✔ #{slot_idx+1:02d} 지정 완료 — [{title[:30]}]")
+
+    def _preview_assigned_window(self, slot_idx):
+        """지정된 창을 잠깐 맨 앞으로 띄워서 어떤 창인지 확인"""
+        slots = self.cfg.get("hunt_slots", [])
+        if slot_idx >= len(slots):
+            return
+        aw = slots[slot_idx].get("assigned_window")
+        if not aw:
+            self.status.set(f"#{slot_idx+1:02d} — 지정된 창이 없습니다."); return
+        wins = self._get_purple_hwnds()
+        if not wins: return
+        tx, ty = aw["cx"], aw["cy"]
+        best = min(wins, key=lambda e: ((e[1]+e[3]//2-tx)**2 + (e[2]+e[4]//2-ty)**2))
+        hwnd = best[0]
+        HWND_TOP = 0
+        SWP_NOSIZE = 0x0001; SWP_NOMOVE = 0x0002
+        def _flash():
+            for _ in range(3):
+                ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
+                                                   SWP_NOSIZE | SWP_NOMOVE)
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+                time.sleep(0.4)
+        threading.Thread(target=_flash, daemon=True).start()
+        title = aw.get("title", "")
+        self.status.set(f"#{slot_idx+1:02d} 지정 창: [{title[:30]}]  {aw['w']}x{aw['h']}  @{aw['x']},{aw['y']}")
+
+    _FIXED_W = 491
+    _FIXED_H = 276
+
+    def _find_hwnd_for_slot(self, aw, wins):
+        """1) HWND  2) 창 제목 번호  3) 가장 가까운 위치 순으로 찾기"""
+        # 1) HWND
+        saved_hwnd = aw.get("hwnd")
+        if saved_hwnd and win32gui.IsWindow(saved_hwnd):
+            for e in wins:
+                if e[0] == saved_hwnd:
+                    return saved_hwnd
+        # 2) 창 제목 (지정 시 번호 붙여놓은 경우)
+        title = aw.get("title", "")
+        if title:
+            for e in wins:
+                if win32gui.GetWindowText(e[0]) == title:
+                    return e[0]
+        # 3) 저장된 x,y 기준 가장 가까운 창
+        sx, sy = aw.get("x"), aw.get("y")
+        if sx is not None and sy is not None:
+            best = min(wins, key=lambda e: (e[1]-sx)**2+(e[2]-sy)**2)
+            return best[0]
+        return None
+
+    def _reg_name_area(self):
+        """창 최대화 후 이름 영역 두 점 드래그로 등록"""
+        self.status.set("3초 후 캐릭터 이름 영역의 좌상단을 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), self.after(200, self._open_name_area_overlay)])
+
+    def _open_name_area_overlay(self):
+        _NameAreaOverlay(self)
+
+    def _ocr_all_names(self):
+        area = self.cfg.get("name_ocr_area")
+        if not area:
+            self.status.set("먼저 📷 이름 영역등록 버튼으로 영역을 등록해주세요."); return
+        self.iconify()
+        threading.Thread(target=self._do_ocr_all_names, daemon=True).start()
+
+    def _do_ocr_all_names(self):
+        try:
+            import easyocr
+            reader = easyocr.Reader(['ko', 'en'], gpu=False, verbose=False)
+        except Exception as e:
+            self.after(0, lambda: self.status.set(f"easyocr 오류: {e}")); return
+
+        wins = self._get_purple_hwnds()
+        if not wins:
+            self.after(0, lambda: self.status.set("리니지M 창을 찾을 수 없습니다.")); return
+
+        area = self.cfg.get("name_ocr_area")
+        ox, oy, aw, ah = area["ox"], area["oy"], area["w"], area["h"]
+        slots = self.cfg.get("hunt_slots", [])
+        updated = 0
+
+        # 열린 창 각각을 OCR 스캔 후 가장 가까운 슬롯에 이름 업데이트
+        for hwnd, wx, wy in wins:
+            self.after(0, lambda h=hwnd: self.status.set(f"OCR 인식 중..."))
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+                time.sleep(0.6)
+                import ctypes
+                pt = ctypes.wintypes.POINT(0, 0)
+                ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
+                x, y = pt.x + ox, pt.y + oy
+                from PIL import ImageGrab
+                img = ImageGrab.grab(bbox=(x, y, x+aw, y+ah), all_screens=True)
+                results = reader.readtext(img, detail=0)
+                name = " ".join(results).strip()
+                self.after(0, lambda n=name: self.status.set(f"OCR 결과: '{n}'"))
+                time.sleep(1.0)
+                if not name: continue
+
+                # 가장 가까운 슬롯 찾기 (assigned_window 위치 기준, 없으면 순서대로)
+                best_si = None
+                best_dist = float('inf')
+                for si, slot in enumerate(slots):
+                    aw_data = slot.get("assigned_window")
+                    if aw_data:
+                        sx, sy = aw_data.get("x", 0), aw_data.get("y", 0)
+                        dist = (wx-sx)**2 + (wy-sy)**2
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_si = si
+                    elif best_si is None:
+                        best_si = si
+
+                if best_si is not None:
+                    self.cfg["hunt_slots"][best_si]["name"] = name
+                    if best_si < len(self._hunt_name_vars):
+                        self.after(0, lambda n=name, i=best_si: self._hunt_name_vars[i].set(n))
+                    updated += 1
+            except Exception as e:
+                self.after(0, lambda e=e: self.status.set(f"OCR 오류: {e}"))
+
+        save_cfg(self.cfg)
+        self.after(0, lambda: [self.deiconify(), self.status.set(f"✔ {updated}개 슬롯 이름 자동 업데이트 완료")])
+
+    def _renumber_windows(self):
+        """지정된 슬롯의 창 제목을 번호로 다시 붙이기"""
+        slots = self.cfg.get("hunt_slots", [])
+        wins = self._get_purple_hwnds()
+        if not wins:
+            self.status.set("리니지M 창을 찾을 수 없습니다."); return
+        count = 0
+        for i, slot in enumerate(slots):
+            aw = slot.get("assigned_window")
+            if not aw: continue
+            hwnd = self._find_hwnd_for_slot(aw, wins)
+            if not hwnd: continue
+            new_title = f"리니지M #{i+1:02d}"
+            try:
+                win32gui.SetWindowText(hwnd, new_title)
+                aw["title"] = new_title
+                aw["hwnd"] = hwnd
+                count += 1
+            except: pass
+        save_cfg(self.cfg)
+        self.status.set(f"✔ {count}개 창 번호 재지정 완료")
+
+    def _save_window_pos(self, slot_idx):
+        """현재 지정된 창의 위치를 저장 (크기는 491×276 고정)"""
+        slots = self.cfg.get("hunt_slots", [])
+        if slot_idx >= len(slots):
+            self.status.set(f"#{slot_idx+1} 슬롯 없음"); return
+        aw = slots[slot_idx].get("assigned_window")
+        if not aw:
+            self.status.set(f"#{slot_idx+1} — 먼저 '지정' 버튼으로 창을 지정해주세요."); return
+        wins = self._get_purple_hwnds()
+        if not wins:
+            self.status.set("리니지M 창을 찾을 수 없습니다."); return
+        hwnd = self._find_hwnd_for_slot(aw, wins)
+        if not hwnd:
+            self.status.set(f"#{slot_idx+1} — 창을 찾을 수 없습니다. '지정' 버튼을 다시 눌러주세요."); return
+        try:
+            rect = win32gui.GetWindowRect(hwnd)
+            x, y = rect[0], rect[1]
+            w, h = self._FIXED_W, self._FIXED_H
+            aw["x"], aw["y"], aw["w"], aw["h"] = x, y, w, h
+            aw["cx"], aw["cy"] = x + w // 2, y + h // 2
+            save_cfg(self.cfg)
+            self.status.set(f"✔ #{slot_idx+1:02d} 위치 저장: {w}×{h} @{x},{y}")
+        except Exception as e:
+            self.status.set(f"#{slot_idx+1} 저장 오류: {e}")
+
+    def _save_all_window_pos(self):
+        """지정된 모든 슬롯의 현재 창 위치를 저장 (크기 491×276 고정)"""
+        slots = self.cfg.get("hunt_slots", [])
+        wins = self._get_purple_hwnds()
+        if not wins:
+            self.status.set("리니지M 창을 찾을 수 없습니다."); return
+        count = 0
+        for i, slot in enumerate(slots):
+            aw = slot.get("assigned_window")
+            if not aw: continue
+            hwnd = self._find_hwnd_for_slot(aw, wins)
+            if not hwnd: continue
+            try:
+                rect = win32gui.GetWindowRect(hwnd)
+                x, y = rect[0], rect[1]
+                w, h = self._FIXED_W, self._FIXED_H
+                aw["x"], aw["y"], aw["w"], aw["h"] = x, y, w, h
+                aw["cx"], aw["cy"] = x + w // 2, y + h // 2
+                count += 1
+            except: pass
+        save_cfg(self.cfg)
+        self.status.set(f"✔ {count}개 창 위치 저장 완료 (491×276 고정)")
+
+    def _restore_all_windows(self):
+        self._restore_by_position()
+
+    def _restore_by_position(self):
+        slots = self.cfg.get("hunt_slots", [])
+        wins = self._get_purple_hwnds()
+        if not wins:
+            self.status.set("리니지M 창을 찾을 수 없습니다."); return
+        SWP_NOZORDER = 0x0004
+        count = 0
+        for i, slot in enumerate(slots):
+            aw = slot.get("assigned_window")
+            if not aw or not all(k in aw for k in ("x","y","w","h")): continue
+            hwnd = self._find_hwnd_for_slot(aw, wins)
+            if not hwnd: continue
+            try:
+                ctypes.windll.user32.SetWindowPos(hwnd, 0, aw["x"], aw["y"], aw["w"], aw["h"], SWP_NOZORDER)
+                count += 1
+            except: pass
+        self.status.set(f"✔ {count}개 창 위치 복원 완료")
+
+    def _restore_by_ocr(self):
+        """OCR로 각 창의 캐릭터명을 읽어 슬롯 이름과 매칭 후 복원"""
+        try:
+            import easyocr
+            reader = easyocr.Reader(['ko', 'en'], gpu=False, verbose=False)
+        except Exception as e:
+            self.after(0, lambda: [self.deiconify(), self.status.set(f"easyocr 오류: {e}")]); return
+
+        wins = self._get_purple_hwnds()
+        if not wins:
+            self.after(0, lambda: [self.deiconify(), self.status.set("리니지M 창을 찾을 수 없습니다.")]); return
+
+        area = self.cfg.get("name_ocr_area")
+        ox, oy, aw, ah = area["ox"], area["oy"], area["w"], area["h"]
+        slots = self.cfg.get("hunt_slots", [])
+        SWP_NOZORDER = 0x0004
+        count = 0
+
+        for hwnd, wx, wy in wins:
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+                time.sleep(0.6)
+                pt = ctypes.wintypes.POINT(0, 0)
+                ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
+                x, y = pt.x + ox, pt.y + oy
+                from PIL import ImageGrab
+                img = ImageGrab.grab(bbox=(x, y, x+aw, y+ah), all_screens=True)
+                results = reader.readtext(img, detail=0)
+                ocr_name = " ".join(results).strip()
+                self.after(0, lambda n=ocr_name: self.status.set(f"OCR: '{n}' 매칭 중..."))
+
+                # 슬롯 이름과 매칭
+                matched_si = None
+                for si, slot in enumerate(slots):
+                    slot_name = slot.get("name", "").strip()
+                    if slot_name and slot_name != "미등록" and slot_name in ocr_name:
+                        matched_si = si
+                        break
+
+                if matched_si is not None:
+                    aw_data = slots[matched_si].get("assigned_window")
+                    if aw_data and all(k in aw_data for k in ("x","y","w","h")):
+                        ctypes.windll.user32.SetWindowPos(hwnd, 0,
+                            aw_data["x"], aw_data["y"], aw_data["w"], aw_data["h"], SWP_NOZORDER)
+                        self.after(0, lambda n=ocr_name, s=matched_si: self.status.set(f"✔ '{n}' → #{s+1:02d} 복원"))
+                        count += 1
+                        time.sleep(0.3)
+            except Exception as e:
+                self.after(0, lambda e=e: self.status.set(f"오류: {e}"))
+
+        save_cfg(self.cfg)
+        self.after(0, lambda: [self.deiconify(), self.status.set(f"✔ {count}개 창 이름 매칭 복원 완료")])
+
+    def _restore_single_by_ocr(self, slot_idx):
+        """고정 영역 OCR → 현재 앞에 있는 창을 해당 슬롯 위치로 복원"""
+        area = self.cfg.get("name_ocr_area")
+        if not area:
+            self.status.set("먼저 📷 이름 영역등록을 해주세요."); return
+        slots = self.cfg.get("hunt_slots", [])
+        if slot_idx >= len(slots):
+            self.status.set(f"#{slot_idx+1:02d} 슬롯 없음"); return
+        aw_data = slots[slot_idx].get("assigned_window")
+        if not aw_data or not all(k in aw_data for k in ("x","y","w","h")):
+            self.status.set(f"#{slot_idx+1:02d} 저장된 위치가 없습니다. 📍 저장 먼저 해주세요."); return
+        # 버튼 클릭 전 포그라운드 창 미리 기억
+        prev_hwnd = win32gui.GetForegroundWindow()
+        threading.Thread(target=self._do_ocr_snap, args=(slot_idx, area, aw_data, prev_hwnd), daemon=True).start()
+
+    def _do_ocr_snap(self, slot_idx, area, aw_data, prev_hwnd):
+        try:
+            import easyocr
+            from PIL import ImageGrab
+            reader = easyocr.Reader(['ko', 'en'], gpu=False, verbose=False)
+        except Exception as e:
+            self.after(0, lambda: self.status.set(f"easyocr 오류: {e}")); return
+
+        slots = self.cfg.get("hunt_slots", [])
+        slot_name = slots[slot_idx].get("name", "").strip()
+        wins = self._get_purple_hwnds()
+        if not wins:
+            self.after(0, lambda: self.status.set("리니지M 창을 찾을 수 없습니다.")); return
+
+        ax, ay, aw, ah = area["x"], area["y"], area["w"], area["h"]
+        SWP_NOZORDER = 0x0004
+
+        for hwnd, wx, wy in wins:
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+                time.sleep(0.5)
+                img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
+                results = reader.readtext(img, detail=0)
+                ocr_name = " ".join(results).strip()
+                self.after(0, lambda n=ocr_name: self.status.set(f"OCR: '{n}' 확인 중..."))
+                if slot_name and (slot_name in ocr_name or ocr_name in slot_name):
+                    ctypes.windll.user32.SetWindowPos(hwnd, 0,
+                        aw_data["x"], aw_data["y"], aw_data["w"], aw_data["h"], SWP_NOZORDER)
+                    self.after(0, lambda: self.status.set(f"✔ '{slot_name}' → #{slot_idx+1:02d} 복원 완료"))
+                    return
+            except: pass
+
+        self.after(0, lambda: self.status.set(f"'{slot_name}' 이름의 창을 찾지 못했습니다."))
+
+    def _restore_single_window(self, slot_idx):
+        """지정된 창을 저장된 위치/크기로 복구"""
+        slots = self.cfg.get("hunt_slots", [])
+        if slot_idx >= len(slots):
+            self.status.set(f"#{slot_idx+1} 슬롯 없음"); return
+        aw = slots[slot_idx].get("assigned_window")
+        if not aw:
+            self.status.set(f"#{slot_idx+1} — 먼저 '지정' 버튼으로 창을 지정해주세요."); return
+        wins = self._get_purple_hwnds()
+        if not wins:
+            self.status.set("리니지M 창을 찾을 수 없습니다."); return
+        hwnd = self._find_hwnd_for_slot(aw, wins)
+        if not hwnd:
+            self.status.set(f"#{slot_idx+1} — 창을 찾을 수 없습니다. '지정' 버튼을 다시 눌러주세요."); return
+        SWP_NOZORDER = 0x0004
+        try:
+            ctypes.windll.user32.SetWindowPos(hwnd, 0, aw["x"], aw["y"], aw["w"], aw["h"], SWP_NOZORDER)
+            self.status.set(f"✔ #{slot_idx+1:02d} 창 복구 완료  ({aw['w']}x{aw['h']}  @{aw['x']},{aw['y']})")
+        except Exception as e:
+            self.status.set(f"#{slot_idx+1} 복구 오류: {e}")
+
+    def _stop(self):
+        self._stop_flag      = True
+        self._past_stop      = True
+        self._sched_stop     = True
+        self._hunt_stop      = True
+        self._click_stop     = True
+        self._mail_stop      = True
+        self._sched_any_stop = True
+        # 다야 OCR 프로세스 종료
+        proc = getattr(self, "_ocr_proc", None)
+        if proc and proc.poll() is None:
+            try: proc.terminate()
+            except: pass
+            self._ocr_proc = None
+        self.status.set("멈추는 중...")
+
+    # ── 클릭 실행 ─────────────────────────────────────────────────────
+    def _start_click(self):
+        slots = [s for s in self.cfg.get("click_slots", []) if s[0] and s[1]]
+        if not slots:
+            messagebox.showwarning("등록 필요", "클릭 좌표를 먼저 등록해주세요."); return
+        self._click_stop = False
+        self.btn_click_run.config(state="disabled")
+        self.btn_click_stop.config(state="normal")
+        self._minimize_claude()
+        self.iconify()
+        threading.Thread(target=self._run_click_standalone, daemon=True).start()
+
+    def _run_click_standalone(self):
+        self._run_click()
+        self.btn_click_run.config(state="normal")
+        self.btn_click_stop.config(state="disabled")
+        self._click_stop = False
+        self.deiconify()
+
+    def _run_click(self):
+        try:
+            active = [(i, s) for i, s in enumerate(self.cfg.get("click_slots", []))
+                      if s[0] and s[1]]
+            for done, (i, pair) in enumerate(active):
+                if self._click_stop: self.status.set("클릭 멈춤"); return
+                if not self._wait_mouse_idle("_click_stop"):
+                    self.status.set("클릭 멈춤"); return
+                grp = (i // GROUP_SIZE) + 1
+                self.status.set(f"그룹{grp} #{i+1}번 클릭1...")
+                pyautogui.click(*pair[0])
+                if not self._click_wait(CLICK_INNER_INTERVAL): self.status.set("클릭 멈춤"); return
+                if not self._wait_mouse_idle("_click_stop"):
+                    self.status.set("클릭 멈춤"); return
+                self.status.set(f"그룹{grp} #{i+1}번 클릭2...")
+                pyautogui.click(*pair[1])
+                if done < len(active) - 1:
+                    if not self._click_wait(CLICK_SLOT_INTERVAL): self.status.set("클릭 멈춤"); return
+            self.status.set(f"✔ 클릭 완료! (총 {len(active)*2}번)")
+        except Exception as e:
+            self.status.set(f"오류: {e}")
+
+    # ── 사냥 실행 ─────────────────────────────────────────────────────
+    def _start_hunt(self):
+        active = [h for h in self.cfg.get("hunt_slots", [])
+                  if any(c for c in h.get("coords", []))]
+        if not active:
+            messagebox.showwarning("등록 필요", "사냥 좌표를 먼저 등록해주세요."); return
+        self._hunt_stop = False
+        if hasattr(self, "btn_hunt_run"): self.btn_hunt_run.config(state="disabled")
+        if hasattr(self, "btn_hunt_stop"): self.btn_hunt_stop.config(state="normal")
+        self._minimize_claude()
+        self.iconify()
+        threading.Thread(target=self._run_hunt_standalone, daemon=True).start()
+
+    def _run_hunt_standalone(self):
+        self._run_hunt()
+        if hasattr(self, "btn_hunt_run"): self.btn_hunt_run.config(state="normal")
+        if hasattr(self, "btn_hunt_stop"): self.btn_hunt_stop.config(state="disabled")
+        self._hunt_stop = False
+        self.deiconify()
+
+    def _run_hunt(self, limit=None):
+        try:
+            all_slots = list(enumerate(self.cfg.get("hunt_slots", [])))
+            if limit is not None:
+                all_slots = all_slots[:limit]
+            active = [(i, h) for i, h in all_slots
+                      if any(c for c in h.get("coords", []))]
+            for slot_done, (i, h) in enumerate(active):
+                if self._hunt_stop: self.status.set("사냥 멈춤"); return
+                # 슬롯별 랜덤 딜레이
+                slot_delay = random.uniform(5.0, 30.0)
+                name = h.get("name", f"#{i+1}")
+                self.status.set(f"[{name}] {slot_delay:.0f}초 후 실행...")
+                if not self._hunt_wait(slot_delay): self.status.set("사냥 멈춤"); return
+                for j, coord in enumerate(h["coords"]):
+                    if not coord: continue
+                    if self._hunt_stop: self.status.set("사냥 멈춤"); return
+                    if not self._wait_mouse_idle("_hunt_stop"):
+                        self.status.set("사냥 멈춤"); return
+                    self.status.set(f"[{name}] 클릭 {j+1}/{HUNT_CLICKS}...")
+                    pyautogui.moveTo(*coord)
+                    time.sleep(random.uniform(0.1, 0.3))
+                    pyautogui.mouseDown(*coord)
+                    time.sleep(random.uniform(0.1, 0.25))
+                    pyautogui.mouseUp(*coord)
+                    time.sleep(random.uniform(0.05, 0.15))
+                    if j < HUNT_CLICKS - 1:
+                        interval = random.uniform(0.6, 1.8)
+                        if not self._hunt_wait(interval):
+                            self.status.set("사냥 멈춤"); return
+                # 다음 슬롯 대기 (가끔 긴 휴식 추가)
+                if slot_done < len(active) - 1:
+                    slot_interval = random.uniform(2.0, 6.0)
+                    if random.random() < 0.2:  # 20% 확률로 추가 휴식
+                        slot_interval += random.uniform(2.0, 5.0)
+                    if not self._hunt_wait(slot_interval):
+                        self.status.set("사냥 멈춤"); return
+            self.status.set(f"✔ 사냥 완료! ({len(active)}개)")
+        except Exception as e:
+            import traceback
+            self.status.set(f"사냥 오류: {type(e).__name__}: {e}")
+            print(traceback.format_exc())
+
+    # ── 전체 자동 실행 ────────────────────────────────────────────────
+    def _start(self):
+        optional = {"confirm_btn", "profile_reveal_btn"}
+        missing = [LABELS[k] for k in LABELS if k not in optional and not self.cfg.get(k)]
+        if not self.cfg.get("char_btns"):
+            missing.append("캐릭터 접속 버튼 (1개 이상)")
+        if missing:
+            messagebox.showwarning("등록 필요", "먼저 등록해주세요:\n" +
+                                   "\n".join(f"• {m}" for m in missing)); return
+        self._stop_flag = False
+        self._running   = True
+        self.btn_start.config(state="disabled")
+        self.btn_stop.config(state="normal")
+        self._minimize_claude()
+        self.iconify()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        total = self.acc_count.get()
+        self.after(0, self._minimize_all)
+        try:
+            import traceback as _tb
+            _dbg = open(os.path.join(LOGS_DIR, "run_debug.txt"), "w", encoding="utf-8")
+            _dbg.write("_run started\n"); _dbg.flush()
+            win = find_purple()
+            if win is None:
+                self.status.set("퍼플 실행 중...")
+                subprocess.Popen(PURPLE_EXE)
+                for _ in range(30):
+                    if self._stop_flag: self.status.set("멈춤"); return
+                    time.sleep(1)
+                    win = find_purple()
+                    if win: break
+            if win is None:
+                self.status.set("오류: 퍼플 창 없음"); return
+
+            try:
+                import win32gui, win32con, ctypes
+                hwnd = win32gui.FindWindow(None, win.title)
+                if hwnd:
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                    time.sleep(0.5)
+                    # 작업 표시줄 제외한 실제 작업 영역으로 크기 설정
+                    rc = ctypes.wintypes.RECT()
+                    ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rc), 0)
+                    win32gui.SetWindowPos(hwnd, win32con.HWND_TOP,
+                                         rc.left, rc.top,
+                                         rc.right - rc.left, rc.bottom - rc.top,
+                                         win32con.SWP_SHOWWINDOW)
+                    time.sleep(0.5)
+                win32gui.SetForegroundWindow(hwnd)
+            except: pass
+            if not self._wait(2): self.status.set("멈춤"); return
+
+            # 팝업 감지 및 자동 닫기 (3초 대기 후)
+            self.status.set("퍼플 팝업 확인 중...")
+            time.sleep(3)
+            close_purple_popup_if_visible(
+                self.cfg,
+                lambda msg: self.after(0, lambda m=msg: self.status.set(m)))
+            if not self._wait(1): self.status.set("멈춤"); return
+
+            # ── 현재 퍼플 아이디 그대로 접속 ────────────────────────────────
+            try: win.activate()
+            except: pass
+            if not self._wait(1): self.status.set("멈춤"); return
+
+            for acc_idx in range(total):
+                if self._stop_flag: self.status.set("멈춤"); return
+                try: win.activate()
+                except: pass
+                if not self._wait(1): self.status.set("멈춤"); return
+
+                self.status.set(f"[{acc_idx+1}/{total}] 리니지M 클릭...")
+                pyautogui.click(*self.cfg["lineagem"])
+                if not self._wait(3): self.status.set("멈춤"); return
+
+                try: win.activate()
+                except: pass
+                if not self._wait(1): self.status.set("멈춤"); return
+                self.status.set(f"[{acc_idx+1}/{total}] 게임 실행 클릭...")
+                pyautogui.click(*self.cfg["game_start"])
+                if not self._wait(5): self.status.set("멈춤"); return
+
+                self.status.set(f"[{acc_idx+1}/{total}] 멀티플레이 클릭...")
+                pyautogui.click(*self.cfg["multiplay"])
+                if not self._wait(6): self.status.set("멈춤"); return
+
+                # 캐릭터 버튼 클릭 전 퍼플을 항상 위로 고정
+                try:
+                    import win32gui, win32con
+                    _hwnd = win32gui.FindWindow(None, win.title)
+                    if _hwnd:
+                        win32gui.SetWindowPos(_hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                                              win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+                        win32gui.SetForegroundWindow(_hwnd)
+                except: pass
+
+                for i, (cx, cy) in enumerate(self.cfg.get("char_btns", [])):
+                    if self._stop_flag: self.status.set("멈춤"); return
+                    self.status.set(f"[{acc_idx+1}/{total}] 캐릭터 #{i+1} 클릭...")
+                    pyautogui.click(cx, cy)
+                    if not self._wait(3): self.status.set("멈춤"); return
+
+                # 캐릭터 버튼 완료 후 항상 위 해제
+                try:
+                    if _hwnd:
+                        win32gui.SetWindowPos(_hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
+                                              win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+                except: pass
+
+                if acc_idx == total - 1:
+                    # ── 마지막 캐릭터 클릭 후 3초 대기 → 스홀 확인/전환 → 퍼플 최소화 ──
+                    if not self._wait(3): self.status.set("멈춤"); return
+                    self.status.set("스홀 계정 확인 중...")
+
+                    # profile_reveal_btn(리니지M 좌측버튼) 클릭 후 픽셀 비교
+                    if self.cfg.get("profile_reveal_btn"):
+                        pyautogui.click(*self.cfg["profile_reveal_btn"])
+                        if not self._wait(1): self.status.set("멈춤"); return
+
+                    if not self._is_scroll_account():
+                        self.status.set("스홀 아님 → 퍼플 프로필 전환 중...")
+                        if self.cfg.get("profile_btn"):
+                            pyautogui.click(*self.cfg["profile_btn"])
+                            if not self._wait(2): self.status.set("멈춤"); return
+                        if self.cfg.get("google_acc"):
+                            pyautogui.click(*self.cfg["google_acc"])
+                            if not self._wait(2): self.status.set("멈춤"); return
+                        if self.cfg.get("confirm_btn"):
+                            pyautogui.click(*self.cfg["confirm_btn"])
+                            if not self._wait(2): self.status.set("멈춤"); return
+                        self.status.set("✔ 스홀 전환 완료 → 퍼플 최소화")
+                    else:
+                        self.status.set("✔ 스홀 확인 완료 → 퍼플 최소화")
+
+                    # 퍼플 최소화
+                    try:
+                        import win32gui, win32con
+                        _p_hwnd = win32gui.FindWindow(None, win.title)
+                        if _p_hwnd:
+                            win32gui.ShowWindow(_p_hwnd, win32con.SW_MINIMIZE)
+                        else:
+                            win.minimize()
+                    except Exception:
+                        try: win.minimize()
+                        except: pass
+                    break
+
+                self.status.set(f"[{acc_idx+1}/{total}] 로딩 대기... (15초)")
+                if not self._wait(15): self.status.set("멈춤"); return
+                try: win.activate()
+                except: pass
+                if not self._wait(1): self.status.set("멈춤"); return
+
+                self.status.set(f"[{acc_idx+1}/{total}] 프로필 클릭...")
+                pyautogui.click(*self.cfg["profile_btn"])
+                if not self._wait(2): self.status.set("멈춤"); return
+
+                self.status.set(f"[{acc_idx+1}/{total}] 구글 계정 클릭...")
+                pyautogui.click(*self.cfg["google_acc"])
+                if not self._wait(2): self.status.set("멈춤"); return
+
+                if self.cfg.get("confirm_btn"):
+                    self.status.set(f"[{acc_idx+1}/{total}] 확인 클릭...")
+                    pyautogui.click(*self.cfg["confirm_btn"])
+
+                self.status.set(f"[{acc_idx+1}/{total}] 새 계정 로딩... (15초)")
+                if not self._wait(15): self.status.set("멈춤"); return
+
+                for _ in range(10):
+                    win = find_purple();
+                    if win: break
+                    time.sleep(1)
+                if win is None:
+                    self.status.set("오류: 퍼플 창 없음"); return
+                try: win.activate()
+                except: pass
+                if not self._wait(2): self.status.set("멈춤"); return
+
+            if self._stop_flag: self.status.set("멈춤"); return
+
+            # 접속 완료 → 25초 대기 → 클릭 등록(그룹1,2) 실행
+            self.status.set("✔ 모든 계정 접속 완료! 25초 후 클릭 등록 실행...")
+            if not self._wait(25): self.status.set("멈춤"); return
+
+            active = [(i, s) for i, s in enumerate(self.cfg.get("click_slots", []))
+                      if s[0] and s[1]]
+            for done, (i, pair) in enumerate(active):
+                if self._stop_flag: self.status.set("멈춤"); return
+                grp = (i // GROUP_SIZE) + 1
+                self.status.set(f"그룹{grp} #{i+1}번 클릭1...")
+                pyautogui.click(*pair[0])
+                if not self._wait(CLICK_INNER_INTERVAL): self.status.set("멈춤"); return
+                self.status.set(f"그룹{grp} #{i+1}번 클릭2...")
+                pyautogui.click(*pair[1])
+                if i == 4 and len(pair) > 2 and pair[2]:
+                    if not self._wait(CLICK_INNER_INTERVAL): self.status.set("멈춤"); return
+                    self.status.set(f"그룹{grp} #{i+1}번 클릭3...")
+                    pyautogui.click(*pair[2])
+                if done < len(active) - 1:
+                    if not self._wait(CLICK_SLOT_INTERVAL): self.status.set("멈춤"); return
+            self.status.set(f"✔ 클릭 등록 완료! 5초 후 사냥 실행 시작...")
+            if not self._wait(5): self.status.set("멈춤"); return
+
+            if not self._stop_flag:
+                self._hunt_stop = False
+                self._run_hunt()
+            self.status.set("✔ 전체 실행 완료!")
+
+        except Exception as e:
+            import traceback as _tb2
+            _err = f"오류: {type(e).__name__}: {e}"
+            self.status.set(_err)
+            try:
+                with open(os.path.join(LOGS_DIR, "run_debug.txt"), "a", encoding="utf-8") as _f:
+                    _f.write(_err + "\n" + _tb2.format_exc())
+            except Exception:
+                pass
+        finally:
+            self._running = False
+            self.btn_start.config(state="normal")
+            self.btn_stop.config(state="disabled")
+            self._stop_flag = False
+            self.after(0, self._restore_all)
+
+
+# ── 좌표 오버레이 ─────────────────────────────────────────────────────────
+class _HuntGroupMoveOverlay(tk.Toplevel):
+    """사냥 슬롯 좌표 전체를 그룹으로 드래그해 이동 후 저장"""
+    R = 8
+
+    def __init__(self, app, slot_idx, dots):
+        super().__init__()
+        self.app      = app
+        self.slot_idx = slot_idx
+        self._dots    = [[x, y, num] for x, y, num in dots]
+        self._drag    = False
+        self._moved   = False
+        self._last    = (0, 0)
+
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        self._sw, self._sh = sw, sh
+        self.geometry(f"{sw}x{sh}+0+0")
+
+        from PIL import ImageGrab as _IG, ImageTk as _ITk
+        shot = _IG.grab(all_screens=False).resize((sw, sh))
+        self._bg_img = _ITk.PhotoImage(shot)
+
+        self._cv = tk.Canvas(self, highlightthickness=0, cursor="fleur")
+        self._cv.pack(fill="both", expand=True)
+        self._draw()
+
+        self._cv.bind("<ButtonPress-1>",   self._on_press)
+        self._cv.bind("<B1-Motion>",       self._on_drag)
+        self._cv.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", lambda e: self._close())
+        self.lift(); self.focus_force()
+
+    def _draw(self):
+        cv = self._cv
+        cv.delete("all")
+        cv.create_image(0, 0, anchor="nw", image=self._bg_img)
+        cv.create_rectangle(0, 0, self._sw, 36, fill="#1a252f", outline="")
+        cv.create_text(self._sw//2, 18,
+            text="드래그로 전체 이동  |  빈 곳 클릭: 저장 후 닫기  |  ESC: 취소",
+            fill="#aaa", font=("맑은 고딕", 10))
+        r = self.R
+        for x, y, num in self._dots:
+            cv.create_oval(x-r, y-r, x+r, y+r, fill="red", outline="white", width=2)
+            cv.create_text(x, y, text=str(num), fill="white",
+                           font=("맑은 고딕", 7, "bold"))
+
+    def _on_press(self, e):
+        if e.y < 36:
+            return
+        self._drag  = True
+        self._moved = False
+        self._last  = (e.x, e.y)
+
+    def _on_drag(self, e):
+        if not self._drag:
+            return
+        dx = e.x - self._last[0]
+        dy = e.y - self._last[1]
+        if abs(dx) > 1 or abs(dy) > 1:
+            self._moved = True
+        self._last = (e.x, e.y)
+        for d in self._dots:
+            d[0] += dx; d[1] += dy
+        self._draw()
+
+    def _on_release(self, e):
+        if self._moved:
+            self._drag  = False
+            self._moved = False
+        else:
+            # 빈 곳 클릭 → 저장 후 닫기
+            coords = self.app.cfg["hunt_slots"][self.slot_idx].get("coords", [])
+            for i, (x, y, _) in enumerate(self._dots):
+                if i < len(coords) and coords[i]:
+                    coords[i] = [x, y]
+            self.app.cfg["hunt_slots"][self.slot_idx]["coords"] = coords
+            save_cfg(self.app.cfg)
+            self.app._refresh_ui()
+            self.app.status.set(f"✔ 사냥 #{self.slot_idx+1:02d} 그룹 이동 저장 완료")
+            self._close()
+
+    def _close(self):
+        self.destroy()
+        self.app.deiconify()
+
+
+class _DungeonGroupMoveOverlay(tk.Toplevel):
+    """던전 슬롯 좌표 전체를 그룹으로 드래그해 이동 후 저장"""
+    R = 8
+
+    def __init__(self, app, slot_idx, dots):
+        super().__init__()
+        self.app      = app
+        self.slot_idx = slot_idx
+        self._dots    = [[x, y, num] for x, y, num in dots]
+        self._drag    = False
+        self._moved   = False
+        self._last    = (0, 0)
+
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        self._sw, self._sh = sw, sh
+        self.geometry(f"{sw}x{sh}+0+0")
+
+        from PIL import ImageGrab as _IG, ImageTk as _ITk
+        shot = _IG.grab(all_screens=False).resize((sw, sh))
+        self._bg_img = _ITk.PhotoImage(shot)
+
+        self._cv = tk.Canvas(self, highlightthickness=0, cursor="fleur")
+        self._cv.pack(fill="both", expand=True)
+        self._draw()
+
+        self._cv.bind("<ButtonPress-1>",   self._on_press)
+        self._cv.bind("<B1-Motion>",       self._on_drag)
+        self._cv.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", lambda e: self._close())
+        self.lift(); self.focus_force()
+
+    def _draw(self):
+        cv = self._cv
+        cv.delete("all")
+        cv.create_image(0, 0, anchor="nw", image=self._bg_img)
+        cv.create_rectangle(0, 0, self._sw, 36, fill="#1a252f", outline="")
+        cv.create_text(self._sw//2, 18,
+            text="드래그로 전체 이동  |  빈 곳 클릭: 저장 후 닫기  |  ESC: 취소",
+            fill="#aaa", font=("맑은 고딕", 10))
+        r = self.R
+        for x, y, num in self._dots:
+            cv.create_oval(x-r, y-r, x+r, y+r, fill="#e67e22", outline="white", width=2)
+            cv.create_text(x, y, text=str(num), fill="white",
+                           font=("맑은 고딕", 7, "bold"))
+
+    def _on_press(self, e):
+        if e.y < 36: return
+        self._drag = True; self._moved = False; self._last = (e.x, e.y)
+
+    def _on_drag(self, e):
+        if not self._drag: return
+        dx = e.x - self._last[0]; dy = e.y - self._last[1]
+        if abs(dx) > 1 or abs(dy) > 1: self._moved = True
+        self._last = (e.x, e.y)
+        for d in self._dots: d[0] += dx; d[1] += dy
+        self._draw()
+
+    def _on_release(self, e):
+        if self._moved:
+            self._drag = False; self._moved = False
+        else:
+            coords = self.app.cfg["dungeon_slots"][self.slot_idx].get("coords", [])
+            for i, (x, y, _) in enumerate(self._dots):
+                if i < len(coords) and coords[i]:
+                    coords[i] = [x, y]
+            self.app.cfg["dungeon_slots"][self.slot_idx]["coords"] = coords
+            save_cfg(self.app.cfg)
+            self.app._refresh_ui()
+            self.app.status.set(f"✔ 던전 #{self.slot_idx+1:02d} 그룹 이동 저장 완료")
+            self._close()
+
+    def _close(self):
+        self.destroy()
+        self.app.deiconify()
+
+
+class _PastChainMoveOverlay(tk.Toplevel):
+    """과거섬 #01→#04 순차 그룹 이동: 저장하면 자동으로 다음 슬롯으로 이어짐"""
+    R = 8
+
+    def __init__(self, app, slot_idx, dots, next_idx, end):
+        super().__init__()
+        self.app = app; self.slot_idx = slot_idx
+        self.next_idx = next_idx; self.end = end
+        self._dots = [[x, y, num] for x, y, num in dots]
+        self._drag = False; self._moved = False; self._last = (0, 0)
+        self.overrideredirect(True); self.attributes("-topmost", True)
+        sw = self.winfo_screenwidth(); sh = self.winfo_screenheight()
+        self._sw, self._sh = sw, sh
+        self.geometry(f"{sw}x{sh}+0+0")
+        from PIL import ImageGrab as _IG, ImageTk as _ITk
+        self._bg_img = _ITk.PhotoImage(_IG.grab(all_screens=False).resize((sw, sh)))
+        self._cv = tk.Canvas(self, highlightthickness=0, cursor="fleur")
+        self._cv.pack(fill="both", expand=True)
+        self._draw()
+        self._cv.bind("<ButtonPress-1>", self._on_press)
+        self._cv.bind("<B1-Motion>", self._on_drag)
+        self._cv.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", lambda e: self._close_all())
+        self.lift(); self.focus_force()
+
+    def _draw(self):
+        cv = self._cv; cv.delete("all")
+        cv.create_image(0, 0, anchor="nw", image=self._bg_img)
+        cv.create_rectangle(0, 0, self._sw, 36, fill="#1a252f", outline="")
+        remain = self.end - self.slot_idx
+        cv.create_text(self._sw//2, 18,
+            text=f"#{self.slot_idx+1:02d} 위치 조정 ({remain}개 남음)  |  드래그: 이동  |  빈 곳 클릭: 저장→다음  |  ESC: 전체취소",
+            fill="#aaa", font=("맑은 고딕", 10))
+        r = self.R
+        for x, y, num in self._dots:
+            cv.create_oval(x-r, y-r, x+r, y+r, fill="#c0392b", outline="white", width=2)
+            cv.create_text(x, y, text=str(num), fill="white", font=("맑은 고딕", 7, "bold"))
+
+    def _on_press(self, e):
+        if e.y < 36: return
+        self._drag = True; self._moved = False; self._last = (e.x, e.y)
+
+    def _on_drag(self, e):
+        if not self._drag: return
+        dx = e.x - self._last[0]; dy = e.y - self._last[1]
+        if abs(dx) > 1 or abs(dy) > 1: self._moved = True
+        self._last = (e.x, e.y)
+        for d in self._dots: d[0] += dx; d[1] += dy
+        self._draw()
+
+    def _on_release(self, e):
+        if self._moved:
+            self._drag = False; self._moved = False
+        else:
+            # 저장
+            coords = self.app.cfg["past_slots"][self.slot_idx].get("coords", [])
+            for i, (x, y, _) in enumerate(self._dots):
+                if i < len(coords) and coords[i]:
+                    coords[i] = [x, y]
+            self.app.cfg["past_slots"][self.slot_idx]["coords"] = coords
+            save_cfg(self.app.cfg); self.app._refresh_ui()
+            self.destroy()
+            # 다음 슬롯으로
+            if self.next_idx < self.end:
+                self.app._past_chain_move(self.next_idx, self.end)
+            else:
+                self.app.deiconify()
+                self.app.status.set("✔ #01~#04 그룹 이동 저장 완료")
+
+    def _close_all(self):
+        self.destroy(); self.app.deiconify()
+        self.app.status.set("취소됨")
+
+
+class _PastGroupMoveOverlay(tk.Toplevel):
+    """과거섬 슬롯 좌표 전체를 그룹으로 드래그해 이동 후 저장
+    dots: [(x, y, num, coord_idx), ...]  — coord_idx 가 실제 coords 배열 인덱스
+    """
+    R = 8
+
+    def __init__(self, app, slot_idx, dots):
+        super().__init__()
+        self.app = app; self.slot_idx = slot_idx
+        # dots 는 (x, y, num, coord_idx) 또는 (x, y, num) 둘 다 허용
+        self._dots = [[d[0], d[1], d[2], d[3] if len(d)>3 else i]
+                      for i, d in enumerate(dots)]
+        self._drag = False; self._moved = False; self._last = (0, 0)
+        self.overrideredirect(True); self.attributes("-topmost", True)
+        sw = self.winfo_screenwidth(); sh = self.winfo_screenheight()
+        self._sw, self._sh = sw, sh
+        self.geometry(f"{sw}x{sh}+0+0")
+        from PIL import ImageGrab as _IG, ImageTk as _ITk
+        self._bg_img = _ITk.PhotoImage(_IG.grab(all_screens=False).resize((sw, sh)))
+        self._cv = tk.Canvas(self, highlightthickness=0, cursor="fleur")
+        self._cv.pack(fill="both", expand=True)
+        self._draw()
+        self._cv.bind("<ButtonPress-1>", self._on_press)
+        self._cv.bind("<B1-Motion>", self._on_drag)
+        self._cv.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", lambda e: self._close())
+        self.lift(); self.focus_force()
+
+    def _draw(self):
+        cv = self._cv; cv.delete("all")
+        cv.create_image(0, 0, anchor="nw", image=self._bg_img)
+        cv.create_rectangle(0, 0, self._sw, 36, fill="#1a252f", outline="")
+        cv.create_text(self._sw//2, 18,
+            text="드래그로 전체 이동  |  빈 곳 클릭: 저장 후 닫기  |  ESC: 취소",
+            fill="#aaa", font=("맑은 고딕", 10))
+        r = self.R
+        for d in self._dots:
+            x, y, num = d[0], d[1], d[2]
+            cv.create_oval(x-r, y-r, x+r, y+r, fill="#c0392b", outline="white", width=2)
+            cv.create_text(x, y, text=str(num), fill="white", font=("맑은 고딕", 7, "bold"))
+
+    def _on_press(self, e):
+        if e.y < 36: return
+        self._drag = True; self._moved = False; self._last = (e.x, e.y)
+
+    def _on_drag(self, e):
+        if not self._drag: return
+        dx = e.x - self._last[0]; dy = e.y - self._last[1]
+        if abs(dx) > 1 or abs(dy) > 1: self._moved = True
+        self._last = (e.x, e.y)
+        for d in self._dots: d[0] += dx; d[1] += dy
+        self._draw()
+
+    def _on_release(self, e):
+        if self._moved:
+            self._drag = False; self._moved = False
+        else:
+            coords = self.app.cfg["past_slots"][self.slot_idx].get("coords", [])
+            for x, y, _, ci in self._dots:
+                if ci < len(coords):
+                    coords[ci] = [x, y]
+            self.app.cfg["past_slots"][self.slot_idx]["coords"] = coords
+            save_cfg(self.app.cfg); self.app._refresh_ui()
+            self.app.status.set(f"✔ 과거섬 #{self.slot_idx+1:02d} 그룹 이동 저장 완료")
+            self._close()
+
+    def _close(self):
+        self.destroy(); self.app.deiconify()
+
+
+class _SchedGroupMoveOverlay(tk.Toplevel):
+    """스케줄 슬롯 좌표 전체를 그룹으로 드래그해 이동 후 저장
+    dots: [(x, y, num, coord_idx), ...]
+    """
+    R = 8
+
+    def __init__(self, app, slot_idx, dots):
+        super().__init__()
+        self.app = app; self.slot_idx = slot_idx
+        self._dots = [[d[0], d[1], d[2], d[3] if len(d)>3 else i]
+                      for i, d in enumerate(dots)]
+        self._drag = False; self._moved = False; self._last = (0, 0)
+        self.overrideredirect(True); self.attributes("-topmost", True)
+        sw = self.winfo_screenwidth(); sh = self.winfo_screenheight()
+        self._sw, self._sh = sw, sh
+        self.geometry(f"{sw}x{sh}+0+0")
+        from PIL import ImageGrab as _IG, ImageTk as _ITk
+        self._bg_img = _ITk.PhotoImage(_IG.grab(all_screens=False).resize((sw, sh)))
+        self._cv = tk.Canvas(self, highlightthickness=0, cursor="fleur")
+        self._cv.pack(fill="both", expand=True)
+        self._draw()
+        self._cv.bind("<ButtonPress-1>", self._on_press)
+        self._cv.bind("<B1-Motion>", self._on_drag)
+        self._cv.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", lambda e: self._close())
+        self.lift(); self.focus_force()
+
+    def _draw(self):
+        cv = self._cv; cv.delete("all")
+        cv.create_image(0, 0, anchor="nw", image=self._bg_img)
+        cv.create_rectangle(0, 0, self._sw, 36, fill="#1a252f", outline="")
+        cv.create_text(self._sw//2, 18,
+            text="드래그로 전체 이동  |  빈 곳 클릭: 저장 후 닫기  |  ESC: 취소",
+            fill="#aaa", font=("맑은 고딕", 10))
+        r = self.R
+        for d in self._dots:
+            x, y, num = d[0], d[1], d[2]
+            cv.create_oval(x-r, y-r, x+r, y+r, fill="#16a085", outline="white", width=2)
+            cv.create_text(x, y, text=str(num), fill="white", font=("맑은 고딕", 7, "bold"))
+
+    def _on_press(self, e):
+        if e.y < 36: return
+        self._drag = True; self._moved = False; self._last = (e.x, e.y)
+
+    def _on_drag(self, e):
+        if not self._drag: return
+        dx = e.x - self._last[0]; dy = e.y - self._last[1]
+        if abs(dx) > 1 or abs(dy) > 1: self._moved = True
+        self._last = (e.x, e.y)
+        for d in self._dots: d[0] += dx; d[1] += dy
+        self._draw()
+
+    def _on_release(self, e):
+        if self._moved:
+            self._drag = False; self._moved = False
+        else:
+            coords = self.app.cfg["sched_slots"][self.slot_idx].get("coords", [])
+            for x, y, _, ci in self._dots:
+                if ci < len(coords):
+                    coords[ci] = [x, y]
+            self.app.cfg["sched_slots"][self.slot_idx]["coords"] = coords
+            save_cfg(self.app.cfg); self.app._refresh_ui()
+            self.app.status.set(f"✔ 스케줄 #{self.slot_idx+1:02d} 그룹 이동 저장 완료")
+            self._close()
+
+    def _close(self):
+        self.destroy(); self.app.deiconify()
+
+
+class _SlotGroupMoveOverlay(tk.Toplevel):
+    """클릭 슬롯 좌표 전체를 그룹으로 드래그해 이동 후 저장"""
+    R = 16
+
+    def __init__(self, app, slot_idx, dots):
+        super().__init__()
+        self.app = app; self.slot_idx = slot_idx
+        self._dots = [[x, y, num] for x, y, num in dots]
+        self._drag = False; self._moved = False; self._last = (0, 0)
+        self.overrideredirect(True); self.attributes("-topmost", True)
+        sw = self.winfo_screenwidth(); sh = self.winfo_screenheight()
+        self._sw, self._sh = sw, sh
+        self.geometry(f"{sw}x{sh}+0+0")
+        from PIL import ImageGrab as _IG, ImageTk as _ITk
+        self._bg_img = _ITk.PhotoImage(_IG.grab(all_screens=False).resize((sw, sh)))
+        self._cv = tk.Canvas(self, highlightthickness=0, cursor="fleur")
+        self._cv.pack(fill="both", expand=True)
+        self._draw()
+        self._cv.bind("<ButtonPress-1>", self._on_press)
+        self._cv.bind("<B1-Motion>", self._on_drag)
+        self._cv.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", lambda e: self._close())
+        self.lift(); self.focus_force()
+
+    def _draw(self):
+        cv = self._cv; cv.delete("all")
+        cv.create_image(0, 0, anchor="nw", image=self._bg_img)
+        cv.create_rectangle(0, 0, self._sw, 36, fill="#1a252f", outline="")
+        cv.create_text(self._sw//2, 18,
+            text="드래그로 전체 이동  |  빈 곳 클릭: 저장 후 닫기  |  ESC: 취소",
+            fill="#aaa", font=("맑은 고딕", 10))
+        r = self.R
+        for x, y, num in self._dots:
+            cv.create_oval(x-r, y-r, x+r, y+r, fill="#2980b9", outline="white", width=2)
+            cv.create_text(x, y, text=str(num), fill="white", font=("맑은 고딕", 11, "bold"))
+
+    def _on_press(self, e):
+        if e.y < 36: return
+        self._drag = True; self._moved = False; self._last = (e.x, e.y)
+
+    def _on_drag(self, e):
+        if not self._drag: return
+        dx = e.x - self._last[0]; dy = e.y - self._last[1]
+        if abs(dx) > 1 or abs(dy) > 1: self._moved = True
+        self._last = (e.x, e.y)
+        for d in self._dots: d[0] += dx; d[1] += dy
+        self._draw()
+
+    def _on_release(self, e):
+        if self._moved:
+            self._drag = False; self._moved = False
+        else:
+            pair = [None, None]
+            for x, y, num in self._dots:
+                step = 0 if str(num) == "1" else 1
+                pair[step] = [x, y]
+            self.app.cfg["click_slots"][self.slot_idx] = pair
+            save_cfg(self.app.cfg); self.app._refresh_ui()
+            self.app.status.set(f"✔ #{self.slot_idx+1:02d} 그룹 이동 저장 완료")
+            self._close()
+
+    def _close(self):
+        self.destroy(); self.app.deiconify()
+
+
+class _MailGroupMoveOverlay(tk.Toplevel):
+    """우편함 슬롯 좌표 전체를 그룹으로 드래그해 이동 후 저장"""
+    R = 8
+
+    def __init__(self, app, slot_idx, dots):
+        super().__init__()
+        self.app      = app
+        self.slot_idx = slot_idx
+        self._dots    = [[x, y, num] for x, y, num in dots]
+        self._drag    = False
+        self._moved   = False
+        self._last    = (0, 0)
+
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        self._sw, self._sh = sw, sh
+        self.geometry(f"{sw}x{sh}+0+0")
+
+        from PIL import ImageGrab as _IG, ImageTk as _ITk
+        shot = _IG.grab(all_screens=False).resize((sw, sh))
+        self._bg_img = _ITk.PhotoImage(shot)
+
+        self._cv = tk.Canvas(self, highlightthickness=0, cursor="fleur")
+        self._cv.pack(fill="both", expand=True)
+        self._draw()
+
+        self._cv.bind("<ButtonPress-1>",   self._on_press)
+        self._cv.bind("<B1-Motion>",       self._on_drag)
+        self._cv.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", lambda e: self._close())
+        self.lift(); self.focus_force()
+
+    def _draw(self):
+        cv = self._cv
+        cv.delete("all")
+        cv.create_image(0, 0, anchor="nw", image=self._bg_img)
+        cv.create_rectangle(0, 0, self._sw, 36, fill="#1a252f", outline="")
+        cv.create_text(self._sw//2, 18,
+            text="드래그로 전체 이동  |  빈 곳 클릭: 저장 후 닫기  |  ESC: 취소",
+            fill="#aaa", font=("맑은 고딕", 10))
+        r = self.R
+        for x, y, num in self._dots:
+            cv.create_oval(x-r, y-r, x+r, y+r, fill="#8e44ad", outline="white", width=2)
+            cv.create_text(x, y, text=str(num), fill="white",
+                           font=("맑은 고딕", 7, "bold"))
+
+    def _on_press(self, e):
+        if e.y < 36: return
+        self._drag = True; self._moved = False; self._last = (e.x, e.y)
+
+    def _on_drag(self, e):
+        if not self._drag: return
+        dx = e.x - self._last[0]; dy = e.y - self._last[1]
+        if abs(dx) > 1 or abs(dy) > 1: self._moved = True
+        self._last = (e.x, e.y)
+        for d in self._dots: d[0] += dx; d[1] += dy
+        self._draw()
+
+    def _on_release(self, e):
+        if self._moved:
+            self._drag = False; self._moved = False
+        else:
+            coords = self.app.cfg["mail_slots"][self.slot_idx].get("coords", [])
+            for i, (x, y, _) in enumerate(self._dots):
+                if i < len(coords) and coords[i]:
+                    coords[i] = [x, y]
+            self.app.cfg["mail_slots"][self.slot_idx]["coords"] = coords
+            save_cfg(self.app.cfg); self.app._refresh_ui()
+            self.app.status.set(f"✔ 우편함 #{self.slot_idx+1:02d} 그룹 이동 저장 완료")
+            self._close()
+
+    def _close(self):
+        self.destroy(); self.app.deiconify()
+
+
+class _DotPreviewOverlay(tk.Toplevel):
+    """스크린샷 배경 + 드래그 가능한 빨간 점 미리보기.
+    dots: [(x, y, num), ...]
+    save_fn(dot_idx, new_x, new_y): 점 이동 시 호출
+    rereg_fn: ✏ 재등록 버튼 콜백
+    """
+    R = 5
+
+    def __init__(self, app, title, dots, rereg_fn, save_fn=None, dot_r=5):
+        super().__init__()
+        self.R        = dot_r
+        self.app      = app
+        self.rereg_fn = rereg_fn
+        self.save_fn  = save_fn
+        self._dots    = [[x, y, num] for x, y, num in dots]  # mutable
+        self._drag      = None   # dragging dot index
+        self._grp_drag  = False  # dragging empty space (group move)
+        self._moved     = False
+        self._last      = (0, 0)
+
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        self._sw, self._sh = sw, sh
+        self.geometry(f"{sw}x{sh}+0+0")
+
+        from PIL import ImageGrab as _IG, ImageTk as _ITk
+        shot = _IG.grab(all_screens=False).resize((sw, sh))
+        self._bg_img = _ITk.PhotoImage(shot)
+
+        self._cv = tk.Canvas(self, highlightthickness=0, cursor="hand2")
+        self._cv.pack(fill="both", expand=True)
+        self._bx = sw - 100
+
+        self._draw()
+
+        self._cv.bind("<ButtonPress-1>",   self._on_press)
+        self._cv.bind("<B1-Motion>",       self._on_drag)
+        self._cv.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", lambda e: self._close())
+        self.lift(); self.focus_force()
+
+    def _draw(self):
+        cv = self._cv
+        cv.delete("all")
+        cv.create_image(0, 0, anchor="nw", image=self._bg_img)
+        # 상단 안내바
+        cv.create_rectangle(0, 0, self._sw, 36, fill="#1a252f", outline="")
+        cv.create_text(self._sw//2, 18,
+            text="점 드래그: 개별 이동  |  빈 곳 드래그: 전체 이동  |  빈 곳 클릭: 닫기  |  ESC: 닫기",
+            fill="#aaa", font=("맑은 고딕", 10))
+        bx = self._bx
+        cv.create_rectangle(bx, 6, bx+90, 30, fill="#e67e22", outline="")
+        cv.create_text(bx+45, 18, text="✏ 재등록", fill="white",
+                       font=("맑은 고딕", 9, "bold"))
+        # 점들
+        r = self.R
+        for x, y, num in self._dots:
+            cv.create_oval(x-r, y-r, x+r, y+r, fill="red", outline="white", width=2)
+            cv.create_text(x, y, text=str(num), fill="white",
+                           font=("맑은 고딕", 7, "bold"))
+
+    def _hit(self, ex, ey):
+        r = self.R + 6
+        for i, (x, y, _) in enumerate(self._dots):
+            if abs(ex - x) < r and abs(ey - y) < r:
+                return i
+        return None
+
+    def _on_press(self, e):
+        if e.y < 36: return
+        hit = self._hit(e.x, e.y)
+        if hit is not None:
+            self._drag      = hit     # 개별 점 드래그
+            self._grp_drag  = False
+        else:
+            self._drag      = None
+            self._grp_drag  = True   # 빈 공간 → 그룹 드래그
+        self._moved = False
+        self._last  = (e.x, e.y)
+
+    def _on_drag(self, e):
+        dx = e.x - self._last[0]
+        dy = e.y - self._last[1]
+        if abs(dx) > 1 or abs(dy) > 1:
+            self._moved = True
+        self._last = (e.x, e.y)
+        if self._drag is not None:
+            self._dots[self._drag][0] += dx
+            self._dots[self._drag][1] += dy
+        elif self._grp_drag:
+            for d in self._dots:
+                d[0] += dx; d[1] += dy
+        self._draw()
+
+    def _on_release(self, e):
+        # 재등록 버튼 클릭
+        if self._bx <= e.x <= self._bx + 90 and 6 <= e.y <= 30:
+            self._close(); self.rereg_fn(None); return
+        if self._moved:
+            # 드래그 후 저장
+            if self._drag is not None:
+                x, y, num = self._dots[self._drag]
+                if self.save_fn: self.save_fn(self._drag, x, y)
+            elif self._grp_drag:
+                if self.save_fn:
+                    for i, (x, y, _) in enumerate(self._dots):
+                        self.save_fn(i, x, y)
+            self._drag = None; self._grp_drag = False; self._moved = False
+        elif self._drag is not None and not self._moved:
+            # 점 클릭 → 개별 재등록
+            dot_idx = self._drag
+            self._drag = None
+            self._close(); self.rereg_fn(dot_idx)
+        else:
+            # 빈 곳 단순 클릭 → 닫기
+            self._close()
+
+    def _close(self):
+        self.destroy()
+        self.app.deiconify()
+
+
+class _DotPreviewOverlayNav(_DotPreviewOverlay):
+    """그룹 이동(이전/다음) 버튼이 추가된 미리보기 오버레이."""
+    def __init__(self, app, title, dots, rereg_fn, save_fn, prev_fn, next_fn, dot_r=5):
+        self._prev_fn = prev_fn
+        self._next_fn = next_fn
+        super().__init__(app, title, dots, rereg_fn, save_fn, dot_r)
+
+    def _close(self):
+        self.destroy()
+        self.app.deiconify()
+        if self.app._pass_win and self.app._pass_win.winfo_exists():
+            self.app._pass_win.deiconify()
+
+    PW = 42; PH = 18; PY = 9
+
+    def _draw(self):
+        super()._draw()
+        cv = self._cv
+        pw, ph, py = self.PW, self.PH, self.PY
+        px = 10
+        cv.create_rectangle(px, py, px+pw, py+ph, fill="#2c3e50", outline="")
+        cv.create_text(px+pw//2, py+ph//2, text="◀ 이전", fill="white", font=("맑은 고딕", 7, "bold"))
+        nx = px + pw + 4
+        cv.create_rectangle(nx, py, nx+pw, py+ph, fill="#2c3e50", outline="")
+        cv.create_text(nx+pw//2, py+ph//2, text="다음 ▶", fill="white", font=("맑은 고딕", 7, "bold"))
+
+    def _on_release(self, e):
+        pw, ph, py = self.PW, self.PH, self.PY
+        px = 10; nx = px + pw + 4
+        if py <= e.y <= py+ph:
+            if px <= e.x <= px+pw:
+                self._close(); self.app.after(300, self._prev_fn); return
+            if nx <= e.x <= nx+pw:
+                self._close(); self.app.after(300, self._next_fn); return
+        super()._on_release(e)
+
+
+class _ProfileAreaOverlay(tk.Toplevel):
+    """퍼플 아이디 표시 영역 드래그 등록"""
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.attributes("-alpha", 0.35)
+        sw = self.winfo_screenwidth(); sh = self.winfo_screenheight()
+        self.geometry(f"{sw}x{sh}+0+0")
+        self.configure(bg="black")
+        self._start = None; self._rect = None
+        tk.Label(self, text="퍼플 아이디가 표시되는 영역을 드래그하세요\nESC = 취소",
+                 font=("맑은 고딕", 16, "bold"), fg="white", bg="black",
+                 justify="center").place(relx=0.5, rely=0.5, anchor="center")
+        self._canvas = tk.Canvas(self, bg="black", highlightthickness=0)
+        self._canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        self._canvas.bind("<ButtonPress-1>", self._on_press)
+        self._canvas.bind("<B1-Motion>", self._on_drag)
+        self._canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", self._cancel)
+        self.focus_force()
+
+    def _on_press(self, e):
+        self._start = (e.x_root, e.y_root)
+        if self._rect: self._canvas.delete(self._rect)
+
+    def _on_drag(self, e):
+        if not self._start: return
+        if self._rect: self._canvas.delete(self._rect)
+        x0, y0 = self._start
+        self._rect = self._canvas.create_rectangle(x0, y0, e.x_root, e.y_root, outline="cyan", width=2)
+
+    def _on_release(self, e):
+        if not self._start: return
+        x0, y0 = self._start
+        x1, y1 = e.x_root, e.y_root
+        self.destroy()
+        self.app.cfg["profile_id_area"] = {
+            "x": min(x0,x1), "y": min(y0,y1),
+            "w": abs(x1-x0), "h": abs(y1-y0)
+        }
+        save_cfg(self.app.cfg)
+        self.app.deiconify()
+        self.app._profile_area_var.set("등록됨")
+        self.app.status.set(f"✔ 아이디 영역 등록 완료")
+
+    def _cancel(self, e=None):
+        self.destroy()
+        self.app.deiconify()
+
+
+class _NameAreaOverlay(tk.Toplevel):
+    """캐릭터 이름 OCR 영역을 드래그로 등록하는 오버레이"""
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.attributes("-alpha", 0.35)
+        sw = self.winfo_screenwidth(); sh = self.winfo_screenheight()
+        self.geometry(f"{sw}x{sh}+0+0")
+        self.configure(bg="black")
+        self._start = None
+        self._rect = None
+        tk.Label(self, text="캐릭터 이름 영역을 드래그하세요\nESC = 취소",
+                 font=("맑은 고딕", 18, "bold"), fg="white", bg="black",
+                 justify="center").place(relx=0.5, rely=0.5, anchor="center")
+        self._canvas = tk.Canvas(self, bg="black", highlightthickness=0)
+        self._canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        self._canvas.bind("<ButtonPress-1>", self._on_press)
+        self._canvas.bind("<B1-Motion>", self._on_drag)
+        self._canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", self._cancel)
+        self.focus_force()
+
+    def _on_press(self, e):
+        self._start = (e.x_root, e.y_root)
+        if self._rect: self._canvas.delete(self._rect)
+
+    def _on_drag(self, e):
+        if not self._start: return
+        if self._rect: self._canvas.delete(self._rect)
+        x0, y0 = self._start
+        self._rect = self._canvas.create_rectangle(x0, y0, e.x_root, e.y_root,
+                                                    outline="yellow", width=2)
+
+    def _on_release(self, e):
+        if not self._start: return
+        x0, y0 = self._start
+        x1, y1 = e.x_root, e.y_root
+        self.destroy()
+        ax, ay = min(x0,x1), min(y0,y1)
+        self.app.cfg["name_ocr_area"] = {
+            "x": ax, "y": ay,
+            "w": abs(x1-x0), "h": abs(y1-y0)
+        }
+        save_cfg(self.app.cfg)
+        self.app.deiconify()
+        self.app.status.set(f"✔ 이름 영역 등록 완료 ({ax},{ay} / {abs(x1-x0)}×{abs(y1-y0)})")
+
+    def _cancel(self, e=None):
+        self.destroy()
+        self.app.deiconify()
+        self.app.status.set("이름 영역 등록 취소")
+
+
+class _AssignWindowOverlay(tk.Toplevel):
+    """클릭한 창을 사냥 슬롯에 지정하는 전체화면 오버레이"""
+    def __init__(self, app, slot_idx, on_done=None):
+        super().__init__()
+        self.app = app
+        self.slot_idx = slot_idx
+        self.on_done = on_done
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.attributes("-alpha", 0.35)
+        sw = self.winfo_screenwidth(); sh = self.winfo_screenheight()
+        self.geometry(f"{sw}x{sh}+0+0")
+        self.configure(bg="black")
+        tk.Label(self, text=f"#{slot_idx+1:02d} 창 지정\n지정할 리니지M 창을 클릭하세요\nESC = 취소",
+                 font=("맑은 고딕", 22, "bold"), fg="white", bg="black",
+                 justify="center").place(relx=0.5, rely=0.5, anchor="center")
+        self.bind("<Button-1>", self._on_click)
+        self.bind("<Escape>", self._cancel)
+        self.focus_force()
+
+    def _on_click(self, e):
+        x, y = e.x_root, e.y_root
+        self.destroy()
+        try:
+            self.app.update()
+            time.sleep(0.1)
+            # win32gui로 안정적으로 창 감지
+            hwnd = win32gui.WindowFromPoint((x, y))
+            root = win32gui.GetAncestor(hwnd, win32con.GA_ROOT) if hwnd else hwnd
+            if not root: root = hwnd
+            r = win32gui.GetWindowRect(root)
+            title = win32gui.GetWindowText(root) or f"hwnd:{root}"
+            cx, cy = (r[0]+r[2])//2, (r[1]+r[3])//2
+            slot_num = f"#{self.slot_idx+1:02d}"
+            new_title = f"리니지M {slot_num}"
+            try:
+                win32gui.SetWindowText(root, new_title)
+            except: pass
+            aw = {"hwnd": root, "cx": cx, "cy": cy,
+                  "x": r[0], "y": r[1],
+                  "w": r[2]-r[0], "h": r[3]-r[1],
+                  "title": new_title,
+                  "slot_num": slot_num}
+            self.app.cfg["hunt_slots"][self.slot_idx]["assigned_window"] = aw
+            save_cfg(self.app.cfg)
+            if self.on_done:
+                self.app.after(0, lambda t=title: self.on_done(self.slot_idx, t))
+        except Exception as ex:
+            self.app.after(0, lambda: self.app.status.set(f"지정 오류: {type(ex).__name__}: {ex}"))
+        finally:
+            self.app.deiconify()
+
+    def _cancel(self, e=None):
+        self.destroy()
+        self.app.deiconify()
+        self.app.status.set(f"#{self.slot_idx+1:02d} 창 지정 취소")
+
+
+class CoordOverlay(tk.Toplevel):
+    def __init__(self, app, mode="single"):
+        super().__init__()
+        self.app  = app
+        self.mode = mode
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.geometry(f"{sw}x{sh}+0+0")
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+
+        from PIL import Image as _Img, ImageTk as _ITk, ImageGrab as _IG
+        shot = _IG.grab(all_screens=True).resize((sw, sh))
+        self._bg = _ITk.PhotoImage(shot)
+
+        c = tk.Canvas(self, cursor="crosshair", highlightthickness=0)
+        c.pack(fill="both", expand=True)
+        c.create_image(0, 0, anchor="nw", image=self._bg)
+        c.create_rectangle(0, 0, sw, 54, fill="#1a252f", outline="")
+
+        if mode == "char":
+            n = len(app.cfg.get("char_btns", [])) + 1
+            label = f"캐릭터 접속 버튼 #{n}"
+        elif mode == "char_rereg":
+            idx = app._char_rereg_idx
+            label = f"캐릭터 #{idx+1} 새 위치"
+        elif mode == "slot":
+            label = f"#{app._slot_target+1}번 슬롯 클릭{app._slot_step+1}"
+        elif mode == "hunt":
+            idx  = app._hunt_reg_idx
+            step = app._hunt_reg_step
+            name = app.cfg["hunt_slots"][idx].get("name", f"#{idx+1}")
+            label = f"[{name}] 클릭{step+1} 위치"
+        elif mode == "mail":
+            label = f"우편함 #{app._reg_mail_slot_idx+1} 클릭{app._reg_mail_click_idx+1} 위치"
+        elif mode == "dungeon":
+            lbl = ["메뉴", "클릭1", "클릭2"][app._reg_dungeon_click_idx]
+            label = f"던전 #{app._reg_dungeon_slot_idx+1} [{lbl}] 위치"
+        elif mode == "past":
+            label = f"과거의말하는섬 #{app._reg_past_slot_idx+1} [클릭] 위치"
+        elif mode == "pass":
+            label = f"패스권 #{app._reg_pass_slot_idx+1} [{PASS_LABELS[app._reg_pass_click_idx]}] 위치"
+        elif mode == "sched":
+            label = f"매일매일 스케줄 #{app._reg_sched_slot_idx+1} [클릭] 위치"
+        else:
+            label = LABELS.get(app._reg_target, "버튼")
+
+        c.create_text(sw//2, 27, text=f"{label}  —  클릭하세요  (ESC: 취소)",
+                      fill="white", font=("맑은 고딕", 14))
+        c.bind("<ButtonPress-1>", self._click)
+        self.bind("<Escape>", lambda e: [self.destroy(), app.deiconify()])
+
+    def _click(self, e):
+        x, y = e.x, e.y
+        self.destroy(); self.update_idletasks()
+        if   self.mode == "char":      self.app.on_char_coord(x, y)
+        elif self.mode == "char_rereg":self.app.on_char_rereg_coord(x, y)
+        elif self.mode == "slot":      self.app.on_slot_coord(x, y)
+        elif self.mode == "hunt":      self.app.on_hunt_coord(x, y)
+        elif self.mode == "mail":      self.app.on_mail_coord(x, y)
+        elif self.mode == "dungeon":   self.app.on_dungeon_coord(x, y)
+        elif self.mode == "past":      self.app.on_past_coord(x, y)
+        elif self.mode == "pass":      self.app.on_pass_coord(x, y)
+        elif self.mode == "sched":     self.app.on_sched_coord(x, y)
+        else:                          self.app.on_coord(x, y)
+
+
+
+def _watch_and_restart():
+    """파일 변경 감지 시 자동 재시작"""
+    watch = [
+        os.path.join(BASE, "lineagem_launcher.py"),
+        os.path.join(BASE, "lineagem_island.py"),
+    ]
+    mtimes = {f: os.path.getmtime(f) for f in watch if os.path.exists(f)}
+    while True:
+        time.sleep(1.5)
+        for f in watch:
+            if not os.path.exists(f): continue
+            try:
+                mt = os.path.getmtime(f)
+            except OSError:
+                continue
+            if mt != mtimes.get(f):
+                time.sleep(0.5)  # 저장 완료 대기
+                subprocess.Popen(
+                    [r"C:\Users\user\AppData\Local\Python\bin\pythonw.exe",
+                     os.path.join(BASE, "lineagem_launcher.py")]
+                )
+                os._exit(0)
+
+if __name__ == "__main__":
+    threading.Thread(target=_watch_and_restart, daemon=True).start()
+    App().mainloop()
