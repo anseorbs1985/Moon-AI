@@ -320,7 +320,7 @@ class App(tk.Tk):
         super().__init__()
         self.title("리니지M 자동 실행")
         sh = self.winfo_screenheight()
-        self.geometry(f"1341x504+76+75")
+        self.geometry(f"1475x943+76+75")
         self.resizable(True, True)
         self.bind("<Map>", self._on_main_map)
 
@@ -485,12 +485,18 @@ class App(tk.Tk):
         self._sec_row = tk.Frame(self); self._sec_row.pack(pady=4)
         self._build_sec_row()
 
-        # ── 다야 카운트 패널 (메인창 inline) ──
+        # ── 사냥 + 다야 카운트 패널 (메인창 inline) ──
         tk.Frame(self, height=1, bg="#ccc").pack(fill="x", padx=10, pady=(4,2))
-        daya_row = tk.Frame(self); daya_row.pack(pady=2)
+        daya_row = tk.Frame(self); daya_row.pack(pady=2, anchor="n")
+
+        # 사냥 런처 인라인
+        hunt_inline = tk.Frame(daya_row); hunt_inline.pack(side="left", padx=(4,4))
+        self._build_right(hunt_inline)
+
+        tk.Frame(daya_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(2,6))
 
         # 왼쪽: 버튼
-        ctrl = tk.Frame(daya_row); ctrl.pack(side="left", padx=(4,8))
+        ctrl = tk.Frame(daya_row); ctrl.pack(side="left", padx=(4,8), pady=(75,0), anchor="n")
         tk.Label(ctrl, text="💰 다야 수량", font=("맑은 고딕", 9, "bold"), fg="#2c3e50").pack(anchor="w")
         tk.Button(ctrl, text="📊 OCR 실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", width=10,
@@ -502,7 +508,7 @@ class App(tk.Tk):
                  font=("맑은 고딕", 10, "bold"), fg="#c0392b").pack(anchor="w", pady=(4,0))
 
         # 가운데: 4×4 그리드
-        grid = tk.Frame(daya_row); grid.pack(side="left")
+        grid = tk.Frame(daya_row); grid.pack(side="left", anchor="n", pady=(75,0))
         for r in range(4):
             for c in range(4):
                 idx = r * 4 + c
@@ -855,7 +861,7 @@ class App(tk.Tk):
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
 
         outer = tk.Frame(parent); outer.pack(fill="both", expand=True, padx=2)
-        canvas = tk.Canvas(outer, highlightthickness=0)
+        canvas = tk.Canvas(outer, highlightthickness=0, width=484, height=1190)
         sb = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
@@ -1925,7 +1931,6 @@ class App(tk.Tk):
             ("⚙ 좌표 등록", "#2c3e50", self._open_settings_win,                         None,      None),
             ("귀환주문서",   "#c0392b", lambda: self._open_past_slot(4),                 "#922b21", lambda: self._run_island_slot(4)),
             ("카매사오기",   "#1a5276", lambda: self._open_past_slot(5),                 "#154360", lambda: self._run_island_slot(5)),
-            ("🏹 사냥",      "#8e44ad", self._open_hunt_win,                             "#6c3483", self._start_hunt),
             ("📬 우편함",    "#2471a3", self._open_mail_win,     "#1a5276", self._start_mail),
             ("🏝 과거섬",    "#c0392b", self._open_past_win,     "#922b21", self._start_past),
             ("📅 스케줄",    "#16a085", self._open_sched_win,    "#0e6655", self._start_sched),
