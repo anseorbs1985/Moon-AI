@@ -123,7 +123,7 @@ def load_accounts():
         with open(ACCOUNTS_FILE, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        return [{"type": "구글", "f1": "", "f2": "", "f3": "", "f4": ""} for _ in range(16)]
+        return [{"type": "구글", "f1": "", "f2": "", "f3": "", "f4": "", "f5": ""} for _ in range(20)]
 
 def save_accounts(data):
     with open(ACCOUNTS_FILE, "w", encoding="utf-8") as f:
@@ -332,7 +332,7 @@ class App(tk.Tk):
         super().__init__()
         self.title("리니지M 자동 실행")
         sh = self.winfo_screenheight()
-        self.geometry(f"1475x1300+76+75")
+        self.geometry(f"2117x1300+76+75")
         self.resizable(True, True)
         self.attributes("-topmost", True)
         self.bind("<Map>", self._on_main_map)
@@ -341,11 +341,11 @@ class App(tk.Tk):
 
         self.cfg = load_cfg()
         self._accounts = load_accounts()
-        while len(self._accounts) < 16:
-            self._accounts.append({"type": "구글", "f1": "", "f2": "", "f3": "", "f4": ""})
+        while len(self._accounts) < 20:
+            self._accounts.append({"type": "구글", "f1": "", "f2": "", "f3": "", "f4": "", "f5": ""})
         self._acc_type_vars = [tk.StringVar(value=a.get("type", "구글")) for a in self._accounts]
         self._acc_vars = [
-            [tk.StringVar(value=a.get(f"f{j+1}", "")) for j in range(4)]
+            [tk.StringVar(value=a.get(f"f{j+1}", "")) for j in range(5)]
             for a in self._accounts
         ]
         self._reg_target   = None
@@ -543,6 +543,8 @@ class App(tk.Tk):
         tk.Frame(right_col, height=1, bg="#ccc").pack(fill="x", pady=(6,2))
         acc_title = tk.Frame(right_col); acc_title.pack(fill="x")
         tk.Label(acc_title, text="🔑 계정 관리", font=("맑은 고딕", 9, "bold"), fg="#2c3e50").pack(side="left")
+        tk.Button(acc_title, text="초기화", font=("맑은 고딕", 7), bg="#c0392b", fg="white",
+                  command=self._clear_accounts).pack(side="right", padx=(2,0))
         tk.Button(acc_title, text="전체저장", font=("맑은 고딕", 7), bg="#27ae60", fg="white",
                   command=self._save_accounts).pack(side="right")
 
@@ -553,30 +555,28 @@ class App(tk.Tk):
         for r in range(4):
             for c in range(4):
                 idx = r * 4 + c
-                cell = tk.Frame(acc_grid, bd=1, relief="groove", padx=3, pady=2)
-                cell.grid(row=r, column=c, padx=2, pady=2, sticky="nsew")
+                cell = tk.Frame(acc_grid, bd=1, relief="groove", padx=2, pady=1)
+                cell.grid(row=r, column=c, padx=1, pady=1, sticky="nsew")
                 top = tk.Frame(cell); top.pack(anchor="w")
                 tk.Label(top, text=f"{idx+1:02d}", font=("맑은 고딕", 7, "bold"), fg="#888").pack(side="left")
                 t = self._acc_type_vars[idx].get()
                 om = tk.OptionMenu(top, self._acc_type_vars[idx], *TYPES)
                 om.config(font=("맑은 고딕", 7, "bold"), fg="white", width=6,
                           bg=TYPE_COLORS[TYPES.index(t) if t in TYPES else 0],
-                          activebackground="#555", pady=1, relief="raised",
+                          activebackground="#555", pady=0, relief="raised",
                           highlightthickness=0)
                 for ti, (tn, tc) in enumerate(zip(TYPES, TYPE_COLORS)):
                     om["menu"].entryconfig(ti, background=tc, foreground="white",
                                           activebackground=tc, activeforeground="white",
                                           font=("맑은 고딕", 9, "bold"))
-                def _on_select(val, o=om):
-                    o.config(bg=TYPE_COLORS[TYPES.index(val)])
                 self._acc_type_vars[idx].trace_add("write", lambda *a, i=idx, o=om:
                     o.config(bg=TYPE_COLORS[TYPES.index(self._acc_type_vars[i].get())
                                            if self._acc_type_vars[i].get() in TYPES else 0]))
                 om.pack(side="left", padx=(2,0))
                 self._acc_type_btns.append(om)
-                for j in range(4):
+                for j in range(5):
                     tk.Entry(cell, textvariable=self._acc_vars[idx][j],
-                             font=("맑은 고딕", 8), width=12).pack(pady=(1,0))
+                             font=("맑은 고딕", 8), width=12).pack(fill="x", pady=(0,0))
 
         # 서브창 핸들 초기화
         self._settings_win = None
@@ -1476,10 +1476,21 @@ class App(tk.Tk):
             return True
         win32gui.EnumWindows(_cb, None)
 
-    def _save_accounts(self):
+    def _clear_accounts(self):
+        from tkinter import messagebox
+        if not messagebox.askyesno("초기화", "계정 정보를 전체 초기화하시겠습니까?", default="no"):
+            return
         for i in range(16):
+            self._acc_type_vars[i].set("구글")
+            for j in range(5):
+                self._acc_vars[i][j].set("")
+        save_accounts([{"type": "구글", "f1": "", "f2": "", "f3": "", "f4": "", "f5": ""} for _ in range(20)])
+        self.status.set("✔ 계정 정보 초기화 완료")
+
+    def _save_accounts(self):
+        for i in range(20):
             self._accounts[i]["type"] = self._acc_type_vars[i].get()
-            for j in range(4):
+            for j in range(5):
                 self._accounts[i][f"f{j+1}"] = self._acc_vars[i][j].get()
         save_accounts(self._accounts)
         self.status.set("✔ 계정 정보 저장 완료")
