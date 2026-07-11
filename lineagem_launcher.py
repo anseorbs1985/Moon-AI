@@ -334,7 +334,6 @@ class App(tk.Tk):
         sh = self.winfo_screenheight()
         self.geometry(f"2117x1300+76+75")
         self.resizable(True, True)
-        self.attributes("-topmost", True)
         self.bind("<Map>", self._on_main_map)
         self.bind("<FocusIn>", self._bring_to_front)
         self.after(150, self._fit_main_height)
@@ -1505,7 +1504,7 @@ class App(tk.Tk):
         self.geometry(f"{w}x{needed}+{x}+{y}")
 
     def _bring_to_front(self, e=None):
-        self.attributes("-topmost", True)
+        self.lift()
 
     def _on_main_map(self, e):
         """패스권 창이 켜져 있으면 메인 런처 최소화 유지 (섬/던전은 사용자가 직접 복원 가능)"""
