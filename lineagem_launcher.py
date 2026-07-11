@@ -357,12 +357,13 @@ class App(tk.Tk):
         self._mail_on      = True
         self._mail_triggered_date = None
         self._past_triggered_date = None
+        self._purple_triggered_date = None
         self._win_lock     = WindowSizeLock()
         self._hp_stop      = False
         self._build_ui()
         self.after(1000, self._mail_scheduler_tick)
         self.after(1000, self._past_scheduler_tick)
-        self.after(5 * 60 * 60 * 1000, self._purple_check_tick)
+        self.after(1000, self._purple_check_tick)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _on_close(self):
@@ -435,7 +436,7 @@ class App(tk.Tk):
 
         # 9시 클릭 스케줄러
         tk.Frame(btn_row, width=10).pack(side="left")
-        self.btn_mail = tk.Button(btn_row, text="🕘 9~10시 클릭  ON",
+        self.btn_mail = tk.Button(btn_row, text="🕘 22:30~23:30 클릭  ON",
             font=("맑은 고딕", 9, "bold"), bg="#27ae60", fg="white",
             activebackground="#5d6d7e", width=13, height=2,
             command=self._toggle_mail)
@@ -2758,54 +2759,57 @@ class App(tk.Tk):
         self._mail_on = not self._mail_on
         if self._mail_on:
             self._mail_triggered_date = None
-            self.btn_mail.config(text="🕘 9~10시 클릭  ON", bg="#27ae60")
-            self.status.set("9~10시 클릭 ON — 오후 9:00~10:00 랜덤 실행")
+            self.btn_mail.config(text="🕘 22:30~23:30 클릭  ON", bg="#27ae60")
+            self.status.set("우편 클릭 ON — 밤 10:30~11:30 랜덤 실행")
         else:
-            self.btn_mail.config(text="🕘 9~10시 클릭  OFF", bg="#7f8c8d")
-            self.status.set("9시 클릭 OFF")
+            self.btn_mail.config(text="🕘 22:30~23:30 클릭  OFF", bg="#7f8c8d")
+            self.status.set("우편 클릭 OFF")
 
     def _mail_scheduler_tick(self):
         import datetime
         if self._mail_on:
             now = datetime.datetime.now()
             today = now.date()
-            # 21:00~22:00 사이에 한 번만 트리거
-            if now.hour == 21 and self._mail_triggered_date != today:
+            # 22:30~23:30 사이에 한 번만 트리거
+            in_window = ((now.hour == 22 and now.minute >= 30) or
+                         (now.hour == 23 and now.minute < 30))
+            if in_window and self._mail_triggered_date != today:
                 self._mail_triggered_date = today
                 threading.Thread(target=self._run_mail_scheduled, daemon=True).start()
             elif self._mail_triggered_date != today:
-                target = now.replace(hour=21, minute=0, second=0, microsecond=0)
+                target = now.replace(hour=22, minute=30, second=0, microsecond=0)
                 if now >= target:
                     target += datetime.timedelta(days=1)
                 diff = target - now
                 h, m = divmod(int(diff.total_seconds()) // 60, 60)
-                self.status.set(f"🕘 9시 클릭 대기 중... (약 {h}시간 {m}분 후)")
+                self.status.set(f"🕘 우편 클릭 대기 중... (약 {h}시간 {m}분 후 22:30~23:30 실행)")
         self.after(10000, self._mail_scheduler_tick)
 
     def _past_scheduler_tick(self):
-        import datetime, random
+        import datetime
         now = datetime.datetime.now()
         today = now.date()
-        if now.hour == 5 and 3 <= now.minute <= 15 and self._past_triggered_date != today:
+        if now.hour == 5 and 3 <= now.minute <= 25 and self._past_triggered_date != today:
             self._past_triggered_date = today
-            end = now.replace(minute=15, second=0, microsecond=0)
-            remaining = max(0, (end - now).total_seconds())
-            delay = random.uniform(0, remaining)
-            threading.Thread(target=self._run_past_scheduled, args=(delay,), daemon=True).start()
+            threading.Thread(target=self._run_past_scheduled, daemon=True).start()
         elif self._past_triggered_date != today:
             target = now.replace(hour=5, minute=3, second=0, microsecond=0)
             if now >= target:
                 target += datetime.timedelta(days=1)
             diff = target - now
             h, m = divmod(int(diff.total_seconds()) // 60, 60)
-            self.status.set(f"🏝 과거섬 대기 중... (약 {h}시간 {m}분 후 5:03~5:15 실행)")
+            self.status.set(f"🏝 과거섬 대기 중... (약 {h}시간 {m}분 후 5:03~5:25 실행)")
         self.after(30000, self._past_scheduler_tick)
 
     def _purple_check_tick(self):
-        """5시간마다 퍼플이 스홀 계정인지 확인 → 아니면 전환 후 최소화"""
-        import threading
-        threading.Thread(target=self._purple_check_worker, daemon=True).start()
-        self.after(5 * 60 * 60 * 1000, self._purple_check_tick)
+        """매일 새벽 4시에 한 번 퍼플이 스홀 계정인지 확인 → 아니면 전환 후 최소화"""
+        import threading, datetime
+        now = datetime.datetime.now()
+        today = now.date()
+        if now.hour == 4 and self._purple_triggered_date != today:
+            self._purple_triggered_date = today
+            threading.Thread(target=self._purple_check_worker, daemon=True).start()
+        self.after(60000, self._purple_check_tick)
 
     def _purple_check_worker(self):
         try:
@@ -2947,18 +2951,39 @@ class App(tk.Tk):
             elif time.time() - last_move >= idle_sec:
                 return
 
-    def _run_past_scheduled(self, delay):
+    def _run_past_scheduled(self):
+        import random, datetime
         self._sched_any_stop = False
         self._past_stop = False
-        if delay > 0:
-            mins = int(delay // 60); secs = int(delay % 60)
-            self.status.set(f"🏝 과거섬 {mins}분 {secs}초 후 실행...")
-            elapsed = 0
-            while elapsed < delay:
-                if getattr(self, "_sched_any_stop", False): return
-                time.sleep(0.5); elapsed += 0.5
-        if getattr(self, "_sched_any_stop", False): return
-        threading.Thread(target=self._run_past, daemon=True).start()
+        slots = self.cfg.get("past_slots", [])
+        active = [(i, s) for i, s in enumerate(slots)
+                  if any(s.get("coords", []))]
+        if not active:
+            return
+
+        # 각 슬롯마다 5:03~5:25 사이 무작위 시각 배정
+        base = datetime.datetime.now().replace(hour=5, minute=3, second=0, microsecond=0)
+        window = 22 * 60  # 22분
+        schedule = sorted([(random.uniform(0, window), i, s) for i, s in active])
+
+        self.status.set(f"🏝 과거섬 {len(active)}개 슬롯 랜덤 실행 대기...")
+        elapsed = (datetime.datetime.now() - base).total_seconds()
+
+        for delay, si, slot in schedule:
+            wait = delay - elapsed
+            if wait > 0:
+                mins = int(wait // 60); secs = int(wait % 60)
+                name = slot.get("name", f"#{si+1}")
+                self.status.set(f"🏝 [{name}] {mins}분 {secs}초 후 실행...")
+                waited = 0
+                while waited < wait:
+                    if getattr(self, "_sched_any_stop", False): return
+                    time.sleep(0.5); waited += 0.5
+            if getattr(self, "_sched_any_stop", False): return
+            elapsed = (datetime.datetime.now() - base).total_seconds()
+            self._run_past(slot_idx=si)
+
+        self.status.set("✔ 과거섬 전체 슬롯 완료!")
 
     def _run_mail_scheduled(self):
         import random, datetime
@@ -2968,12 +2993,12 @@ class App(tk.Tk):
         if not active:
             return
 
-        # 각 클라이언트마다 21:00~22:00 사이 무작위 시각 배정
-        base = datetime.datetime.now().replace(hour=21, minute=0, second=0, microsecond=0)
+        # 각 클라이언트마다 22:30~23:30 사이 무작위 시각 배정
+        base = datetime.datetime.now().replace(hour=22, minute=30, second=0, microsecond=0)
         window = 60 * 60  # 1시간(3600초)
         schedule = sorted([(random.uniform(0, window), i, s) for i, s in active])
 
-        self.status.set(f"🕘 9~10시 우편함 {len(active)}개 랜덤 실행 대기...")
+        self.status.set(f"🕘 22:30~23:30 우편함 {len(active)}개 랜덤 실행 대기...")
         elapsed = (datetime.datetime.now() - base).total_seconds()
 
         for delay, si, slot in schedule:
