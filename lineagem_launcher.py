@@ -47,6 +47,7 @@ BASE          = os.path.dirname(os.path.abspath(__file__))
 LOGS_DIR      = os.path.join(BASE, "lineagem_logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
 CONFIG_FILE   = os.path.join(BASE, "coords.json")
+ACCOUNTS_FILE = os.path.join(BASE, "accounts.json")
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE    = 0.05
 
@@ -116,6 +117,17 @@ LABELS = {
     "profile_reveal_btn": "아이디 표시 클릭 (확인 전)",
 }
 
+
+def load_accounts():
+    try:
+        with open(ACCOUNTS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return [{"type": "구글", "f1": "", "f2": "", "f3": "", "f4": ""} for _ in range(16)]
+
+def save_accounts(data):
+    with open(ACCOUNTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 def load_cfg():
     if os.path.exists(CONFIG_FILE):
@@ -320,11 +332,22 @@ class App(tk.Tk):
         super().__init__()
         self.title("리니지M 자동 실행")
         sh = self.winfo_screenheight()
-        self.geometry(f"1475x943+76+75")
+        self.geometry(f"1475x1300+76+75")
         self.resizable(True, True)
+        self.attributes("-topmost", True)
         self.bind("<Map>", self._on_main_map)
+        self.bind("<FocusIn>", self._bring_to_front)
+        self.after(150, self._fit_main_height)
 
         self.cfg = load_cfg()
+        self._accounts = load_accounts()
+        while len(self._accounts) < 16:
+            self._accounts.append({"type": "구글", "f1": "", "f2": "", "f3": "", "f4": ""})
+        self._acc_type_vars = [tk.StringVar(value=a.get("type", "구글")) for a in self._accounts]
+        self._acc_vars = [
+            [tk.StringVar(value=a.get(f"f{j+1}", "")) for j in range(4)]
+            for a in self._accounts
+        ]
         self._reg_target   = None
         self._stop_flag      = False
         self._running        = False  # 전체 자동실행 중 여부
@@ -418,21 +441,10 @@ class App(tk.Tk):
             command=self._toggle_mail)
         self.btn_mail.pack(side="left")
 
-        tk.Frame(btn_row, width=10).pack(side="left")
-        tk.Button(btn_row, text="📐 현재 배치 캡처",
-            font=("맑은 고딕", 9, "bold"), bg="#2c3e50", fg="white",
-            activebackground="#1a252f", width=13, height=2,
-            command=self._capture_window_layout).pack(side="left", padx=(0,3))
-        tk.Button(btn_row, text="🔄 배치\n복구",
-            font=("맑은 고딕", 7), width=5, height=2,
-            command=self._apply_window_layout).pack(side="left", padx=(0,2))
-        tk.Button(btn_row, text="🗂 배치\n초기화",
-            font=("맑은 고딕", 7), width=5, height=2,
-            command=self._clear_window_layout).pack(side="left", padx=(0,2))
         self._btn_layout_toggle = tk.Button(btn_row, text="🖼 배치보기",
             font=("맑은 고딕", 7), width=6, height=2,
             command=self._toggle_layout_preview)
-        self._btn_layout_toggle.pack(side="left")
+        # layout toggle 참조 유지 (내부 사용)
 
         tk.Frame(btn_row, width=20).pack(side="left")
         tk.Button(btn_row, text="🏝 섬/던전 실행기",
@@ -443,6 +455,10 @@ class App(tk.Tk):
             font=("맑은 고딕", 10, "bold"), bg="#6c3483", fg="white",
             width=10, height=2,
             command=self._open_pass_win).pack(side="left", padx=(4,0))
+        tk.Button(btn_row, text="💬 클로드\n앞으로",
+            font=("맑은 고딕", 9, "bold"), bg="#c0392b", fg="white",
+            width=8, height=2,
+            command=self._raise_claude).pack(side="left", padx=(4,0))
 
         tk.Frame(btn_row, width=10).pack(side="left")
         popup_box = tk.Frame(btn_row, bd=1, relief="groove", padx=4, pady=2)
@@ -496,7 +512,12 @@ class App(tk.Tk):
         tk.Frame(daya_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(2,6))
 
         # 왼쪽: 버튼
-        ctrl = tk.Frame(daya_row); ctrl.pack(side="left", padx=(4,8), pady=(75,0), anchor="n")
+        # 오른쪽: 다야수량 + 계정관리 묶음
+        right_col = tk.Frame(daya_row); right_col.pack(side="left", anchor="n", pady=(30,0))
+
+        # 다야 수량 컨트롤 + 그리드
+        daya_inner = tk.Frame(right_col); daya_inner.pack(anchor="w")
+        ctrl = tk.Frame(daya_inner); ctrl.pack(side="left", padx=(4,8), anchor="n")
         tk.Label(ctrl, text="💰 다야 수량", font=("맑은 고딕", 9, "bold"), fg="#2c3e50").pack(anchor="w")
         tk.Button(ctrl, text="📊 OCR 실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", width=10,
@@ -507,8 +528,7 @@ class App(tk.Tk):
         tk.Label(ctrl, textvariable=self._cnt_total_var,
                  font=("맑은 고딕", 10, "bold"), fg="#c0392b").pack(anchor="w", pady=(4,0))
 
-        # 가운데: 4×4 그리드
-        grid = tk.Frame(daya_row); grid.pack(side="left", anchor="n", pady=(75,0))
+        grid = tk.Frame(daya_inner); grid.pack(side="left", anchor="n")
         for r in range(4):
             for c in range(4):
                 idx = r * 4 + c
@@ -518,6 +538,45 @@ class App(tk.Tk):
                 tk.Label(cell, text=f"{idx+1:02d}", font=("맑은 고딕", 7), fg="#aaa").pack()
                 tk.Label(cell, textvariable=self._cnt_cell_vars[idx],
                          font=("맑은 고딕", 11, "bold"), fg="#2980b9").pack()
+
+        # 계정 관리 (다야 그리드 바로 아래)
+        tk.Frame(right_col, height=1, bg="#ccc").pack(fill="x", pady=(6,2))
+        acc_title = tk.Frame(right_col); acc_title.pack(fill="x")
+        tk.Label(acc_title, text="🔑 계정 관리", font=("맑은 고딕", 9, "bold"), fg="#2c3e50").pack(side="left")
+        tk.Button(acc_title, text="전체저장", font=("맑은 고딕", 7), bg="#27ae60", fg="white",
+                  command=self._save_accounts).pack(side="right")
+
+        TYPES       = ["구글",    "NC",      "전번",    "페이스북"]
+        TYPE_COLORS = ["#DB4437", "#e67e22", "#27ae60", "#6c3483"]
+        acc_grid = tk.Frame(right_col); acc_grid.pack(pady=(2,4))
+        self._acc_type_btns = []
+        for r in range(4):
+            for c in range(4):
+                idx = r * 4 + c
+                cell = tk.Frame(acc_grid, bd=1, relief="groove", padx=3, pady=2)
+                cell.grid(row=r, column=c, padx=2, pady=2, sticky="nsew")
+                top = tk.Frame(cell); top.pack(anchor="w")
+                tk.Label(top, text=f"{idx+1:02d}", font=("맑은 고딕", 7, "bold"), fg="#888").pack(side="left")
+                t = self._acc_type_vars[idx].get()
+                om = tk.OptionMenu(top, self._acc_type_vars[idx], *TYPES)
+                om.config(font=("맑은 고딕", 7, "bold"), fg="white", width=6,
+                          bg=TYPE_COLORS[TYPES.index(t) if t in TYPES else 0],
+                          activebackground="#555", pady=1, relief="raised",
+                          highlightthickness=0)
+                for ti, (tn, tc) in enumerate(zip(TYPES, TYPE_COLORS)):
+                    om["menu"].entryconfig(ti, background=tc, foreground="white",
+                                          activebackground=tc, activeforeground="white",
+                                          font=("맑은 고딕", 9, "bold"))
+                def _on_select(val, o=om):
+                    o.config(bg=TYPE_COLORS[TYPES.index(val)])
+                self._acc_type_vars[idx].trace_add("write", lambda *a, i=idx, o=om:
+                    o.config(bg=TYPE_COLORS[TYPES.index(self._acc_type_vars[i].get())
+                                           if self._acc_type_vars[i].get() in TYPES else 0]))
+                om.pack(side="left", padx=(2,0))
+                self._acc_type_btns.append(om)
+                for j in range(4):
+                    tk.Entry(cell, textvariable=self._acc_vars[idx][j],
+                             font=("맑은 고딕", 8), width=12).pack(pady=(1,0))
 
         # 서브창 핸들 초기화
         self._settings_win = None
@@ -555,6 +614,7 @@ class App(tk.Tk):
             win.lift(); return
         win = tk.Toplevel(self)
         win.title(title)
+        win.attributes("-topmost", True)
         # 저장된 위치가 있으면 복원, 없으면 기본 크기
         pos_key = f"_win_pos_{attr}"
         saved = self.cfg.get(pos_key)
@@ -860,8 +920,8 @@ class App(tk.Tk):
 
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
 
-        outer = tk.Frame(parent); outer.pack(fill="both", expand=True, padx=2)
-        canvas = tk.Canvas(outer, highlightthickness=0, width=484, height=1190)
+        outer = tk.Frame(parent); outer.pack(fill="x", padx=2)
+        canvas = tk.Canvas(outer, highlightthickness=0, width=484, height=500)
         sb = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
@@ -1403,11 +1463,45 @@ class App(tk.Tk):
             return  # 자동실행 중에는 복원 차단
         super().deiconify()
 
+    def _raise_claude(self):
+        import win32gui, win32con
+        def _cb(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd): return True
+            title = win32gui.GetWindowText(hwnd)
+            if "claude" in title.lower():
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+                win32gui.SetForegroundWindow(hwnd)
+            return True
+        win32gui.EnumWindows(_cb, None)
+
+    def _save_accounts(self):
+        for i in range(16):
+            self._accounts[i]["type"] = self._acc_type_vars[i].get()
+            for j in range(4):
+                self._accounts[i][f"f{j+1}"] = self._acc_vars[i][j].get()
+        save_accounts(self._accounts)
+        self.status.set("✔ 계정 정보 저장 완료")
+
+    def _fit_main_height(self):
+        self.update_idletasks()
+        needed = self.winfo_reqheight() + 38  # 1cm 여유
+        w = self.winfo_width()
+        x = self.winfo_x()
+        y = self.winfo_y()
+        self.geometry(f"{w}x{needed}+{x}+{y}")
+
+    def _bring_to_front(self, e=None):
+        self.attributes("-topmost", True)
+
     def _on_main_map(self, e):
         """패스권 창이 켜져 있으면 메인 런처 최소화 유지 (섬/던전은 사용자가 직접 복원 가능)"""
         pass_open = self._pass_win and self._pass_win.winfo_exists()
         if pass_open:
             self.after(50, self.iconify)
+            return
+        self._bring_to_front()
 
     def _open_pass_win(self):
         if self._pass_win and self._pass_win.winfo_exists():
@@ -2167,7 +2261,7 @@ class App(tk.Tk):
             time.sleep(0.1)
         return True
 
-    def _wait_mouse_idle(self, stop_flag_name, idle_sec=5.0):
+    def _wait_mouse_idle(self, stop_flag_name, idle_sec=1.5):
         """마우스가 움직이는 중일 때만 대기. 안 움직이면 즉시 True 반환."""
         CHECK = 0.1
         prev = pyautogui.position()
@@ -2248,18 +2342,15 @@ class App(tk.Tk):
             self.status.set("아이디 표시 영역을 먼저 등록하세요."); return
         def _do():
             try:
-                if self.cfg.get("profile_reveal_btn"):
-                    pyautogui.click(*self.cfg["profile_reveal_btn"])
-                    time.sleep(1)
                 from PIL import ImageGrab
                 ax, ay, aw, ah = area["x"], area["y"], area["w"], area["h"]
                 img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
                 img = self._preprocess_ocr_img(img)
-                img.save("os.path.join(LOGS_DIR, 'profile_ocr_debug.png')")
+                debug_path = os.path.join(LOGS_DIR, "profile_ocr_debug.png")
+                img.save(debug_path)
                 self.after(0, lambda: self.status.set("OCR 분석 중..."))
-                path = "os.path.join(LOGS_DIR, 'profile_ocr_debug.png')"
                 reader = _get_ocr_reader()
-                results = reader.readtext(path, detail=0, paragraph=False)
+                results = reader.readtext(debug_path, detail=0, paragraph=False)
                 ocr_id = "".join(results).strip()
                 target = self.cfg.get("profile_target_id", "").strip()
                 if target and ocr_id:
@@ -2900,7 +2991,7 @@ class App(tk.Tk):
         if hasattr(self, "btn_mail_run"): self.btn_mail_run.config(state="disabled")
         if hasattr(self, "btn_mail_stop"): self.btn_mail_stop.config(state="normal")
         self._minimize_all()
-        threading.Thread(target=self._run_mail_standalone, daemon=True).start()
+        self.after(300, lambda: threading.Thread(target=self._run_mail_standalone, daemon=True).start())
 
     def _stop_mail(self):
         self._mail_stop = True
@@ -3026,7 +3117,7 @@ class App(tk.Tk):
         if hasattr(self, "btn_dungeon_run"): self.btn_dungeon_run.config(state="disabled")
         if hasattr(self, "btn_dungeon_stop"): self.btn_dungeon_stop.config(state="normal")
         self.iconify()
-        threading.Thread(target=self._run_dungeon, daemon=True).start()
+        self.after(300, lambda: threading.Thread(target=self._run_dungeon, daemon=True).start())
 
     def _run_dungeon(self, slot_idx=None):
         try:
@@ -3139,7 +3230,7 @@ class App(tk.Tk):
         if hasattr(self, "btn_past_run"): self.btn_past_run.config(state="disabled", bg="#f39c12", text="⏳ 실행중...")
         if hasattr(self, "btn_past_stop"): self.btn_past_stop.config(state="normal")
         self._minimize_all()
-        threading.Thread(target=self._run_past, daemon=True).start()
+        self.after(300, lambda: threading.Thread(target=self._run_past, daemon=True).start())
 
     def _run_past(self, slot_idx=None):
         try:
@@ -3329,7 +3420,7 @@ class App(tk.Tk):
         if hasattr(self, "btn_sched_stop"):
             self.btn_sched_stop.config(state="normal")
         self._minimize_all()
-        threading.Thread(target=self._run_sched, daemon=True).start()
+        self.after(300, lambda: threading.Thread(target=self._run_sched, daemon=True).start())
 
     def _run_sched(self, slot_idx=None):
         try:

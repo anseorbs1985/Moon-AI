@@ -691,19 +691,28 @@ class OCRApp(tk.Tk):
 
         # 이미지 전처리
         import numpy as np
-        img = img.resize((img.width*2, img.height*2), Image.LANCZOS)
-        img = img.convert("RGB")
+        import cv2
+        from PIL import ImageFilter, ImageEnhance
+        img = img.resize((img.width*3, img.height*3), Image.LANCZOS)
+        img = img.convert("L")  # 그레이스케일
+        img = ImageEnhance.Contrast(img).enhance(2.5)
+        img = ImageEnhance.Sharpness(img).enhance(2.0)
+        img_np = np.array(img)
+        # 이진화 (숫자 배경 분리)
+        _, img_np = cv2.threshold(img_np, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        img = Image.fromarray(img_np).convert("RGB")
 
         if save_debug:
             img.save(os.path.join(BASE, "ocr_debug.png"))
 
         img_np = np.array(img)
         reader = get_reader()
-        results = reader.readtext(img_np, detail=1, paragraph=False)
+        results = reader.readtext(img_np, detail=1, paragraph=False,
+                                  allowlist="0123456789.,")
 
-        # 신뢰도 0.3 이상, 왼쪽→오른쪽 순서로 이어붙이기
+        # 신뢰도 0.2 이상, 왼쪽→오른쪽 순서로 이어붙이기
         valid = [(bbox, txt, conf) for bbox, txt, conf in results
-                 if conf >= 0.3 and any(c.isdigit() for c in txt)]
+                 if conf >= 0.2 and any(c.isdigit() for c in txt)]
         valid.sort(key=lambda r: r[0][0][0])  # bbox 좌측 x 기준 정렬
         nums = "".join(c for r in valid for c in r[1] if c.isdigit())
         return int(nums) if nums else 0
