@@ -1506,6 +1506,16 @@ class App(tk.Tk):
     def _bring_to_front(self, e=None):
         self.lift()
 
+    def _raise_main(self):
+        """최소화된 메인런처를 복원하고 앞으로 올림 (항상 위 고정은 안 함)"""
+        try:
+            self.deiconify()
+            self.lift()
+            self.attributes("-topmost", True)
+            self.after(300, lambda: self.attributes("-topmost", False))
+        except Exception:
+            pass
+
     def _on_main_map(self, e):
         """패스권 창이 켜져 있으면 메인 런처 최소화 유지 (섬/던전은 사용자가 직접 복원 가능)"""
         pass_open = self._pass_win and self._pass_win.winfo_exists()
@@ -2326,14 +2336,7 @@ class App(tk.Tk):
                 if self.cfg.get("profile_reveal_btn"):
                     pyautogui.click(*self.cfg["profile_reveal_btn"])
                     time.sleep(1)
-                from PIL import ImageGrab
-                ax, ay, aw, ah = area["x"], area["y"], area["w"], area["h"]
-                img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
-                img = self._preprocess_ocr_img(img)
-                img.save("os.path.join(LOGS_DIR, 'profile_ocr_debug.png')")
-                results = _get_ocr_reader().readtext("os.path.join(LOGS_DIR, 'profile_ocr_debug.png')",
-                    detail=0, paragraph=False)
-                ocr_id = "".join(results).strip()
+                ocr_id = self._ocr_profile_id()
                 if ocr_id:
                     self.cfg["profile_target_id"] = ocr_id
                     save_cfg(self.cfg)
@@ -2342,7 +2345,7 @@ class App(tk.Tk):
                 else:
                     self.after(0, lambda: self.status.set("OCR 결과가 없습니다. 영역을 다시 확인하세요."))
             except Exception as e:
-                self.after(0, lambda: self.status.set(f"오류: {e}"))
+                self.after(0, lambda err=e: self.status.set(f"오류: {err}"))
         self.status.set("OCR로 아이디 읽는 중...")
         threading.Thread(target=_do, daemon=True).start()
 
@@ -2353,28 +2356,29 @@ class App(tk.Tk):
             self.status.set("아이디 표시 영역을 먼저 등록하세요."); return
         def _do():
             try:
-                from PIL import ImageGrab
-                ax, ay, aw, ah = area["x"], area["y"], area["w"], area["h"]
-                img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
-                img = self._preprocess_ocr_img(img)
-                debug_path = os.path.join(LOGS_DIR, "profile_ocr_debug.png")
-                img.save(debug_path)
+                # 캡처는 런처가 최소화된 상태에서 먼저 (런처 창이 영역을 가리지 않도록)
+                # 실제 4시 판별과 동일한 창 위치 보정 경로 사용
+                img = self._grab_profile_img()
+                # 캡처 후 메인런처를 복원·앞으로 올려 상태바 결과를 볼 수 있게 함
+                self.after(0, self._raise_main)
                 self.after(0, lambda: self.status.set("OCR 분석 중..."))
-                reader = _get_ocr_reader()
-                results = reader.readtext(debug_path, detail=0, paragraph=False)
-                ocr_id = "".join(results).strip()
-                target = self.cfg.get("profile_target_id", "").strip()
+                ocr_id = self._ocr_img_text(img)
+                target = (self.cfg.get("profile_target_id") or "").strip()
                 if target and ocr_id:
-                    match = sum(1 for a, b in zip(ocr_id, target) if a == b)
-                    ratio = int(match / max(len(target), 1) * 100)
-                    self.after(0, lambda o=ocr_id, r=ratio: self.status.set(f"OCR: '{o}' / 목표: '{target}' → 일치율 {r}%"))
+                    ratio = int(self._profile_match_ratio(ocr_id) * 100)
+                    self.after(0, lambda o=ocr_id, r=ratio: self.status.set(
+                        f"OCR: '{o}' / 목표: '{target}' → 일치율 {r}%"))
                 else:
-                    self.after(0, lambda o=ocr_id: self.status.set(f"OCR 결과: '{o}' (저장된 아이디 없음)"))
+                    self.after(0, lambda o=ocr_id: self.status.set(
+                        f"OCR 결과: '{o}' (저장된 아이디 없음)"))
             except Exception as e:
                 import traceback
-                with open(os.path.join(LOGS_DIR, "ocr_error.txt"), "w", encoding="utf-8") as f:
-                    f.write(traceback.format_exc())
-                self.after(0, lambda: self.status.set(f"오류: {e} (ocr_error.txt 확인)"))
+                try:
+                    with open(os.path.join(LOGS_DIR, "ocr_error.txt"), "w", encoding="utf-8") as f:
+                        f.write(traceback.format_exc())
+                except Exception:
+                    pass
+                self.after(0, lambda err=e: self.status.set(f"오류: {err} (ocr_error.txt 확인)"))
         self.status.set("캡처 중... (첫 실행 시 30초 소요)")
         threading.Thread(target=_do, daemon=True).start()
 
@@ -2454,6 +2458,87 @@ class App(tk.Tk):
             return diff < 30
         except:
             return False
+
+    # ── 아이디 OCR 기반 계정 판별 (창 위치 보정 → 다른 컴퓨터에서도 동작) ──
+    def _profile_area_bbox(self, hwnd=None):
+        """아이디 영역의 실제 캡처 bbox 계산.
+        등록 시 퍼플 창 위치(profile_id_area_win)가 저장돼 있으면 현재 퍼플 창
+        위치와의 차이만큼 보정한다 → 창이 어디 떠 있든/다른 컴퓨터에서도 정확.
+        저장된 창위치가 없으면 기존 절대좌표를 그대로 사용(하위호환)."""
+        area = self.cfg.get("profile_id_area")
+        if not area:
+            return None
+        ax, ay = area["x"], area["y"]
+        reg_win = self.cfg.get("profile_id_area_win")
+        if reg_win:
+            cur = None
+            if hwnd:
+                try:
+                    import win32gui
+                    wx, wy, _, _ = win32gui.GetWindowRect(hwnd)
+                    cur = (wx, wy)
+                except Exception:
+                    cur = None
+            if cur is None:
+                try:
+                    w = find_purple()
+                    if w:
+                        cur = (w.left, w.top)
+                except Exception:
+                    cur = None
+            if cur:
+                ax += cur[0] - reg_win[0]
+                ay += cur[1] - reg_win[1]
+        return (ax, ay, area["w"], area["h"])
+
+    def _grab_profile_img(self, hwnd=None):
+        """아이디 영역 캡처 + 전처리 후 이미지 반환(실패 시 None). 디버그 이미지 저장."""
+        bbox = self._profile_area_bbox(hwnd)
+        if not bbox:
+            return None
+        try:
+            from PIL import ImageGrab
+            ax, ay, aw, ah = bbox
+            img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
+            img = self._preprocess_ocr_img(img)
+            try:
+                img.save(os.path.join(LOGS_DIR, "profile_ocr_debug.png"))
+            except Exception:
+                pass
+            return img
+        except Exception:
+            return None
+
+    def _ocr_img_text(self, img):
+        if img is None:
+            return ""
+        try:
+            import numpy as np
+            results = _get_ocr_reader().readtext(np.array(img), detail=0, paragraph=False)
+            return "".join(results).strip()
+        except Exception:
+            return ""
+
+    def _ocr_profile_id(self, hwnd=None):
+        """아이디 영역을 OCR로 읽어 문자열 반환."""
+        return self._ocr_img_text(self._grab_profile_img(hwnd))
+
+    def _profile_match_ratio(self, ocr_id):
+        target = (self.cfg.get("profile_target_id") or "").strip()
+        if not target or not ocr_id:
+            return 0.0
+        match = sum(1 for a, b in zip(ocr_id, target) if a == b)
+        return match / max(len(target), 1)
+
+    def _is_target_account(self, hwnd=None):
+        """현재 퍼플 계정이 지정 아이디인지 OCR로 판별 → (matched, ocr_id, ratio).
+        지정 아이디가 비어 있으면 (True, '', 0)로 전환하지 않음."""
+        target = (self.cfg.get("profile_target_id") or "").strip()
+        if not target:
+            return (True, "", 0.0)
+        ocr_id = self._ocr_profile_id(hwnd)
+        ratio = self._profile_match_ratio(ocr_id)
+        return (ratio >= 0.5, ocr_id, ratio)
 
     def _check_profile_and_switch(self):
         """아이디 영역 OCR → 50% 이상 일치하면 스크롤 계정으로 판단"""
@@ -2830,9 +2915,12 @@ class App(tk.Tk):
                 pyautogui.click(*self.cfg["profile_reveal_btn"])
                 time.sleep(1)
 
-            is_scroll = self._is_scroll_account()
+            matched, ocr_id, ratio = self._is_target_account(hwnd)
+            self.after(0, lambda o=ocr_id, r=ratio: self.status.set(
+                f"🔍 퍼플 아이디 '{o}' (일치율 {int(r*100)}%)"))
+            is_scroll = matched
             if not is_scroll:
-                self.after(0, lambda: self.status.set("🔍 퍼플: 스홀 아님 → 전환 중..."))
+                self.after(0, lambda: self.status.set("🔍 퍼플: 지정 아이디 아님 → 전환 중..."))
                 # 2단계: Purple 포그라운드로 가져와서 프로필 전환
                 if hwnd:
                     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
@@ -2877,10 +2965,10 @@ class App(tk.Tk):
                 pyautogui.click(*self.cfg["profile_reveal_btn"])
                 time.sleep(1)
 
-            is_scroll = self._is_scroll_account()
-            self.status.set(f"{'✔ 스홀 확인됨' if is_scroll else '🔄 스홀 아님 → 퍼플 전환 중...'}")
+            matched, ocr_id, ratio = self._is_target_account(hwnd)
+            self.status.set(f"{'✔ 아이디 확인됨' if matched else '🔄 아이디 다름 → 퍼플 전환 중...'} ('{ocr_id}' {int(ratio*100)}%)")
 
-            if not is_scroll:
+            if not matched:
                 # 2단계: Purple 포그라운드로 가져와서 프로필 전환
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
                 time.sleep(0.3)
@@ -4420,8 +4508,10 @@ class App(tk.Tk):
                         pyautogui.click(*self.cfg["profile_reveal_btn"])
                         if not self._wait(1): self.status.set("멈춤"); return
 
-                    if not self._is_scroll_account():
-                        self.status.set("스홀 아님 → 퍼플 프로필 전환 중...")
+                    _matched3, _oid3, _r3 = self._is_target_account()
+                    self.status.set(f"아이디 '{_oid3}' (일치율 {int(_r3*100)}%)")
+                    if not _matched3:
+                        self.status.set("지정 아이디 아님 → 퍼플 프로필 전환 중...")
                         if self.cfg.get("profile_btn"):
                             pyautogui.click(*self.cfg["profile_btn"])
                             if not self._wait(2): self.status.set("멈춤"); return
@@ -5252,10 +5342,17 @@ class _ProfileAreaOverlay(tk.Toplevel):
             "x": min(x0,x1), "y": min(y0,y1),
             "w": abs(x1-x0), "h": abs(y1-y0)
         }
+        # 등록 당시 퍼플 창 위치도 저장 → 다른 컴퓨터/다른 창위치에서 자동 보정
+        try:
+            w = find_purple()
+            if w:
+                self.app.cfg["profile_id_area_win"] = [w.left, w.top]
+        except Exception:
+            pass
         save_cfg(self.app.cfg)
         self.app.deiconify()
         self.app._profile_area_var.set("등록됨")
-        self.app.status.set(f"✔ 아이디 영역 등록 완료")
+        self.app.status.set("✔ 아이디 영역 등록 완료 (창 위치 보정 지원)")
 
     def _cancel(self, e=None):
         self.destroy()
