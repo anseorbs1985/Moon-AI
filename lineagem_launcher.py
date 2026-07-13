@@ -80,6 +80,9 @@ PASS_SLOT_MIN      = 2.0
 PASS_SLOT_MAX      = 8.0
 PASS_LABELS        = [f"클릭{j+1}" for j in range(PASS_CLICKS)]
 DUNGEON_INTERVAL = 2.0 # 클릭 사이 간격(초)
+SEQ_SLOTS      = 16    # 연속 클릭 슬롯 수 (고정)
+SEQ_MIN        = 1.5   # 연속 클릭 최소 간격(초)
+SEQ_MAX        = 3.5   # 연속 클릭 최대 간격(초)
 
 DEFAULT_CFG = {
     "lineagem":    None,
@@ -105,6 +108,11 @@ DEFAULT_CFG = {
     "sched_slots":  [{"name": "미등록", "coords": [None] * SCHED_CLICKS}
                      for _ in range(SCHED_SLOTS)],
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
+    "seq_slots":    [None]*SEQ_SLOTS,   # 연속 클릭 좌표 (각 [x,y] 또는 None)
+    "seq_hotkey":   None,               # 연속 클릭 실행 단축키 (가상키 코드)
+    "seq_on":       False,              # 연속 클릭 단축키 활성화 상태 (재시작 유지)
+    "seq_min":      SEQ_MIN,
+    "seq_max":      SEQ_MAX,
 }
 
 LABELS = {
@@ -219,6 +227,13 @@ def load_cfg():
             while len(c) < PASS_CLICKS: c.append(None)
             s["coords"] = c[:PASS_CLICKS]
         cfg["pass_slots"] = ps[:PASS_SLOTS]
+        # seq_slots (연속 클릭 좌표 16개 고정)
+        sq = cfg.get("seq_slots", [])
+        if not isinstance(sq, list):
+            sq = []
+        while len(sq) < SEQ_SLOTS:
+            sq.append(None)
+        cfg["seq_slots"] = sq[:SEQ_SLOTS]
         return cfg
     return dict(DEFAULT_CFG)
 
@@ -332,7 +347,7 @@ class App(tk.Tk):
         super().__init__()
         self.title("리니지M 자동 실행")
         sh = self.winfo_screenheight()
-        self.geometry(f"2117x1300+76+75")
+        self.geometry(f"2117x1010+76+75")   # 콘텐츠에 맞춘 높이 (작업표시줄 위로)
         self.resizable(True, True)
         self.bind("<Map>", self._on_main_map)
         self.bind("<FocusIn>", self._bring_to_front)
@@ -359,10 +374,16 @@ class App(tk.Tk):
         self._purple_triggered_date = None
         self._win_lock     = WindowSizeLock()
         self._hp_stop      = False
+        self._seq_on       = bool(self.cfg.get("seq_on", False))
+        self._seq_running  = False
         self._build_ui()
         self.after(1000, self._mail_scheduler_tick)
         self.after(1000, self._past_scheduler_tick)
         self.after(1000, self._purple_check_tick)
+        threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
+        # 런처 시작 시 클로드 앱 최소화(좌표 겹침 방지) + 야간 자동 최소화 시작
+        self.after(1500, lambda: self._minimize_claude_windows(only_background=False))
+        self.after(3000, self._claude_minimize_tick)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _on_close(self):
@@ -1495,13 +1516,40 @@ class App(tk.Tk):
         save_accounts(self._accounts)
         self.status.set("✔ 계정 정보 저장 완료")
 
-    def _fit_main_height(self):
+    def _target_geometry(self):
+        """콘텐츠에 맞는 목표 창 크기/위치 (폭=섹션행, 높이=콘텐츠+1cm, 작업표시줄 위로)."""
         self.update_idletasks()
-        needed = self.winfo_reqheight() + 38  # 1cm 여유
-        w = self.winfo_width()
-        x = self.winfo_x()
-        y = self.winfo_y()
-        self.geometry(f"{w}x{needed}+{x}+{y}")
+        needed = self.winfo_reqheight() + 38   # 슬롯 끝에서 약 1cm 여유
+        x, y = 76, 75                           # 초기 위치와 동일
+        work_bottom = self.winfo_screenheight() - 48   # fallback
+        try:
+            import ctypes
+            from ctypes import wintypes
+            rect = wintypes.RECT()
+            ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0)  # SPI_GETWORKAREA
+            work_bottom = rect.bottom
+        except Exception:
+            pass
+        # 창 하단이 작업표시줄 아래로 잘리지 않도록 위로 올리고, 그래도 넘치면 높이 축소
+        if y + needed > work_bottom:
+            y = max(0, work_bottom - needed)
+            if y + needed > work_bottom:
+                needed = work_bottom - y
+        try:
+            w = self._sec_row.winfo_reqwidth() + 20
+        except Exception:
+            w = self.winfo_width() or 1047
+        return w, needed, x, y
+
+    def _fit_main_height(self):
+        # 최소화(iconic) 상태에선 geometry 변경이 복원 크기에 안 먹으므로 normal일 때만 조정
+        try:
+            if self.state() != "normal":
+                return
+        except Exception:
+            pass
+        w, h, x, y = self._target_geometry()
+        self.geometry(f"{w}x{h}+{x}+{y}")
 
     def _bring_to_front(self, e=None):
         self.lift()
@@ -2051,6 +2099,7 @@ class App(tk.Tk):
             ("📅 스케줄",    "#16a085", self._open_sched_win,    "#0e6655", self._start_sched),
             ("🏰 주말던전",  "#d35400", self._open_dungeon_win,  "#a04000", self._start_dungeon),
             ("💰 다야OCR",   "#27ae60", self._open_ocr,          "#1e8449", self._open_ocr_scan),
+            ("🔗 연속클릭",  "#7d3c98", self._open_seq_win,      "#5b2c6f", self._start_seq),
         ]
         for text, color, cmd, run_color, run_cmd in fixed:
             grp = tk.Frame(self._sec_row); grp.pack(side="left", padx=2)
@@ -2594,6 +2643,288 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"아이디 확인 오류: {e}")
             return True
+
+    # ── 연속 클릭 (별도 기능): 단축키/버튼으로 16개 좌표를 순서대로 1회씩 클릭 ──
+    def _open_seq_win(self):
+        self._open_section_win("_seq_win", "🔗 연속 클릭", self._build_seq, w=300, h=680)
+
+    def _vk_name(self, vk):
+        if not vk:
+            return "미지정"
+        names = {0x1B: "ESC", 0x20: "Space", 0x0D: "Enter", 0x09: "Tab",
+                 0x25: "←", 0x26: "↑", 0x27: "→", 0x28: "↓",
+                 0x2D: "Insert", 0x2E: "Delete", 0x24: "Home", 0x23: "End",
+                 0x21: "PageUp", 0x22: "PageDown"}
+        if vk in names:
+            return names[vk]
+        if 0x70 <= vk <= 0x87:
+            return f"F{vk - 0x6F}"      # F1~F24
+        if 0x30 <= vk <= 0x39 or 0x41 <= vk <= 0x5A:
+            return chr(vk)              # 0-9, A-Z
+        if 0x60 <= vk <= 0x69:
+            return f"Num{vk - 0x60}"    # 넘패드 0-9
+        return f"VK 0x{vk:02X}"
+
+    def _seq_hotkey_label(self):
+        return f"단축키: {self._vk_name(self.cfg.get('seq_hotkey'))}"
+
+    def _build_seq(self, parent):
+        seq = self.cfg.get("seq_slots") or [None] * SEQ_SLOTS
+
+        tk.Label(parent, text="연속 클릭 — 단축키를 누르면 순서대로 1회씩",
+                 font=("맑은 고딕", 9, "bold"), fg="#5b2c6f").pack(pady=(6, 2))
+
+        top = tk.Frame(parent); top.pack(pady=2)
+        self._seq_toggle_btn = tk.Button(top, text="OFF", font=("맑은 고딕", 9, "bold"),
+                                         bg="#7f8c8d", fg="white", width=6,
+                                         command=self._toggle_seq)
+        self._seq_toggle_btn.pack(side="left", padx=(0, 3))
+        tk.Button(top, text="▶ 실행", font=("맑은 고딕", 9, "bold"),
+                  bg="#27ae60", fg="white", width=6,
+                  command=self._start_seq).pack(side="left", padx=3)
+        tk.Button(top, text="⌨ 단축키", font=("맑은 고딕", 8),
+                  bg="#2c3e50", fg="white",
+                  command=self._assign_seq_hotkey).pack(side="left", padx=3)
+
+        self._seq_hotkey_var = tk.StringVar(value=self._seq_hotkey_label())
+        tk.Label(parent, textvariable=self._seq_hotkey_var,
+                 font=("맑은 고딕", 8), fg="#5b2c6f").pack()
+
+        int_row = tk.Frame(parent); int_row.pack(pady=2)
+        tk.Label(int_row, text="간격(초)", font=("맑은 고딕", 8)).pack(side="left")
+        self._seq_min_var = tk.StringVar(value=str(self.cfg.get("seq_min", SEQ_MIN)))
+        self._seq_max_var = tk.StringVar(value=str(self.cfg.get("seq_max", SEQ_MAX)))
+        tk.Entry(int_row, textvariable=self._seq_min_var, width=4).pack(side="left", padx=2)
+        tk.Label(int_row, text="~").pack(side="left")
+        tk.Entry(int_row, textvariable=self._seq_max_var, width=4).pack(side="left", padx=2)
+        tk.Button(int_row, text="저장", font=("맑은 고딕", 7),
+                  command=self._save_seq_interval).pack(side="left", padx=3)
+
+        tk.Frame(parent, height=1, bg="#ccc").pack(fill="x", padx=8, pady=3)
+
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        sb = tk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        inner = tk.Frame(canvas)
+        fid = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(fid, width=e.width))
+        def _wheel(e): canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        canvas.bind("<MouseWheel>", _wheel)
+        inner.bind("<MouseWheel>", _wheel)
+
+        self._seq_slot_vars = []
+        for i in range(SEQ_SLOTS):
+            row = tk.Frame(inner, bd=1, relief="groove"); row.pack(fill="x", padx=3, pady=1)
+            tk.Label(row, text=f"#{i+1:02d}", font=("맑은 고딕", 8, "bold"),
+                     width=3, fg="#5b2c6f").pack(side="left", padx=2)
+            sv = tk.StringVar()
+            c = seq[i] if i < len(seq) else None
+            sv.set(f"({c[0]},{c[1]})" if c else "미등록")
+            self._seq_slot_vars.append(sv)
+            tk.Label(row, textvariable=sv, font=("맑은 고딕", 8),
+                     width=12, anchor="w").pack(side="left")
+            tk.Button(row, text="등록", font=("맑은 고딕", 7), bg="#7d3c98", fg="white",
+                      command=lambda x=i: self._reg_seq_coord(x)).pack(side="right", padx=2)
+            tk.Button(row, text="×", font=("맑은 고딕", 7), fg="red", width=2,
+                      command=lambda x=i: self._del_seq_coord(x)).pack(side="right")
+            row.bind("<MouseWheel>", _wheel)
+
+        self._refresh_seq_toggle()
+
+    def _refresh_seq_toggle(self):
+        if hasattr(self, "_seq_toggle_btn") and self._seq_toggle_btn.winfo_exists():
+            on = getattr(self, "_seq_on", False)
+            self._seq_toggle_btn.config(text="ON" if on else "OFF",
+                                        bg="#27ae60" if on else "#7f8c8d")
+
+    def _toggle_seq(self):
+        self._seq_on = not getattr(self, "_seq_on", False)
+        self.cfg["seq_on"] = self._seq_on   # 재시작해도 유지되게 저장
+        save_cfg(self.cfg)
+        self._refresh_seq_toggle()
+        if self._seq_on:
+            self.status.set(f"연속클릭 ON — {self._vk_name(self.cfg.get('seq_hotkey'))} 누르면 실행")
+        else:
+            self.status.set("연속클릭 OFF")
+
+    def _save_seq_interval(self):
+        try:
+            mn = float(self._seq_min_var.get())
+            mx = float(self._seq_max_var.get())
+            if mx < mn:
+                mn, mx = mx, mn
+            self.cfg["seq_min"] = mn
+            self.cfg["seq_max"] = mx
+            save_cfg(self.cfg)
+            self.status.set(f"✔ 간격 저장: {mn}~{mx}초")
+        except ValueError:
+            self.status.set("간격은 숫자로 입력하세요")
+
+    def _reg_seq_coord(self, idx):
+        self._seq_reg_idx = idx
+        self.status.set(f"3초 후 연속클릭 #{idx+1} 위치를 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="seq")])
+
+    def on_seq_coord(self, x, y):
+        seq = self.cfg.get("seq_slots") or [None] * SEQ_SLOTS
+        while len(seq) < SEQ_SLOTS:
+            seq.append(None)
+        seq[self._seq_reg_idx] = [x, y]
+        self.cfg["seq_slots"] = seq
+        save_cfg(self.cfg)
+        if hasattr(self, "_seq_slot_vars") and self._seq_reg_idx < len(self._seq_slot_vars):
+            self._seq_slot_vars[self._seq_reg_idx].set(f"({x},{y})")
+        self.status.set(f"✔ 연속클릭 #{self._seq_reg_idx+1} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _del_seq_coord(self, idx):
+        seq = self.cfg.get("seq_slots") or [None] * SEQ_SLOTS
+        if idx < len(seq):
+            seq[idx] = None
+            self.cfg["seq_slots"] = seq
+            save_cfg(self.cfg)
+        if hasattr(self, "_seq_slot_vars") and idx < len(self._seq_slot_vars):
+            self._seq_slot_vars[idx].set("미등록")
+        self.status.set(f"연속클릭 #{idx+1} 삭제")
+
+    def _seq_hide(self):
+        """연속클릭 실행 전, 리니지M 외 창(서브창/메인런처/클로드)을 최소화. 메인스레드에서 호출."""
+        try:
+            self._minimize_all()   # 서브창 + 메인 + 클로드 (다른 실행과 동일)
+        except Exception:
+            pass
+        # iconify가 안 먹는 경우 대비 — 메인런처를 win32로도 확실히 최소화
+        try:
+            import win32gui, win32con
+            hwnd = win32gui.FindWindow(None, "리니지M 자동 실행")
+            if hwnd:
+                win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+        except Exception:
+            pass
+
+    def _start_seq(self):
+        threading.Thread(target=self._run_seq, daemon=True).start()
+
+    def _run_seq(self):
+        if getattr(self, "_seq_running", False):
+            return
+        seq = self.cfg.get("seq_slots") or []
+        coords = [c for c in seq if c]
+        if not coords:
+            self.after(0, lambda: self.status.set("연속클릭: 등록된 좌표가 없습니다"))
+            return
+        self._seq_running = True
+        try:
+            # 클릭 좌표를 런처/연속클릭 창이 가리지 않도록 확실히 최소화 후 실행
+            self.after(0, self._seq_hide)
+            time.sleep(0.5)
+            mn = float(self.cfg.get("seq_min", SEQ_MIN))
+            mx = float(self.cfg.get("seq_max", SEQ_MAX))
+            if mx < mn:
+                mn, mx = mx, mn
+            n = len(coords)
+            for i, (x, y) in enumerate(coords):
+                self.after(0, lambda a=i: self.status.set(f"🔗 연속클릭 {a+1}/{n}..."))
+                pyautogui.click(x, y)
+                if i < n - 1:
+                    time.sleep(random.uniform(mn, mx))
+            self.after(0, lambda: self.status.set(f"✔ 연속클릭 완료 ({n}개)"))
+        except Exception as e:
+            self.after(0, lambda err=e: self.status.set(f"연속클릭 오류: {err}"))
+        finally:
+            self._seq_running = False
+
+    def _assign_seq_hotkey(self):
+        self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
+        def _cap():
+            import ctypes
+            time.sleep(0.3)  # 이전 클릭이 떼질 시간
+            end = time.time() + 5
+            captured = None
+            while time.time() < end:
+                for vk in range(0x08, 0xFF):
+                    if vk in (0x01, 0x02, 0x04):  # 마우스 버튼 제외
+                        continue
+                    if ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000:
+                        captured = vk
+                        break
+                if captured is not None:
+                    break
+                time.sleep(0.02)
+            if captured is None:
+                self.after(0, lambda: self.status.set("단축키 지정 취소 (시간초과)"))
+                return
+            if captured == 0x1B:  # ESC
+                self.after(0, lambda: self.status.set("단축키 지정 취소"))
+                return
+            self.cfg["seq_hotkey"] = captured
+            save_cfg(self.cfg)
+            name = self._vk_name(captured)
+            def _upd():
+                if hasattr(self, "_seq_hotkey_var"):
+                    self._seq_hotkey_var.set(f"단축키: {name}")
+                self.status.set(f"✔ 단축키 지정: {name}")
+            self.after(0, _upd)
+        threading.Thread(target=_cap, daemon=True).start()
+
+    def _seq_hotkey_loop(self):
+        """전역 단축키 감시 — ON 상태에서 지정키가 눌리면 연속 클릭 실행."""
+        import ctypes
+        prev = False
+        while True:
+            time.sleep(0.03)
+            vk = self.cfg.get("seq_hotkey")
+            if not getattr(self, "_seq_on", False) or not vk:
+                prev = False
+                continue
+            try:
+                down = bool(ctypes.windll.user32.GetAsyncKeyState(int(vk)) & 0x8000)
+            except Exception:
+                prev = False
+                continue
+            if down and not prev and not getattr(self, "_seq_running", False):
+                threading.Thread(target=self._run_seq, daemon=True).start()
+            prev = down
+
+    # ── 클로드 앱 최소화 (좌표 겹침 방지 + 야간 자동 최소화) ──
+    def _minimize_claude_windows(self, only_background=False):
+        """제목에 'claude'가 들어간 창을 최소화한다.
+        only_background=True면 사용자가 보고 있는(포그라운드) 창은 건드리지 않는다."""
+        import ctypes
+        SW_MINIMIZE = 6
+        user32 = ctypes.windll.user32
+        fg = user32.GetForegroundWindow() if only_background else None
+        def _cb(hwnd, _):
+            try:
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                buf = ctypes.create_unicode_buffer(256)
+                user32.GetWindowTextW(hwnd, buf, 256)
+                if "claude" in buf.value.lower():
+                    if only_background and hwnd == fg:
+                        return True  # 사용자가 열어둔 창은 그대로 둠
+                    if not user32.IsIconic(hwnd):
+                        user32.ShowWindow(hwnd, SW_MINIMIZE)
+            except Exception:
+                pass
+            return True
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        try:
+            user32.EnumWindows(WNDENUMPROC(_cb), 0)
+        except Exception:
+            pass
+
+    def _claude_minimize_tick(self):
+        """밤 11시~새벽 6시엔 클로드 앱을 계속 최소화(포그라운드 제외)."""
+        import datetime
+        h = datetime.datetime.now().hour
+        if h >= 23 or h < 6:
+            self._minimize_claude_windows(only_background=True)
+        self.after(30000, self._claude_minimize_tick)
 
     def _reg_coord(self, key):
         self._reg_target = key
@@ -3743,7 +4074,7 @@ class App(tk.Tk):
 
     def _section_wins(self):
         attrs = ["_settings_win","_hunt_win","_mail_win","_past_win2",
-                 "_sched_win","_dungeon_win","_daya_win","_pass_win"]
+                 "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win"]
         return [getattr(self, a) for a in attrs
                 if getattr(self, a, None) and getattr(self, a).winfo_exists()]
 
@@ -4503,7 +4834,7 @@ class App(tk.Tk):
                     if not self._wait(3): self.status.set("멈춤"); return
                     self.status.set("스홀 계정 확인 중...")
 
-                    # profile_reveal_btn(리니지M 좌측버튼) 클릭 후 픽셀 비교
+                    # profile_reveal_btn(리니지M 좌측버튼) 클릭 후 아이디 OCR 비교
                     if self.cfg.get("profile_reveal_btn"):
                         pyautogui.click(*self.cfg["profile_reveal_btn"])
                         if not self._wait(1): self.status.set("멈춤"); return
@@ -5515,6 +5846,8 @@ class CoordOverlay(tk.Toplevel):
             label = f"패스권 #{app._reg_pass_slot_idx+1} [{PASS_LABELS[app._reg_pass_click_idx]}] 위치"
         elif mode == "sched":
             label = f"매일매일 스케줄 #{app._reg_sched_slot_idx+1} [클릭] 위치"
+        elif mode == "seq":
+            label = f"연속클릭 #{app._seq_reg_idx+1} 위치"
         else:
             label = LABELS.get(app._reg_target, "버튼")
 
@@ -5535,6 +5868,7 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "past":      self.app.on_past_coord(x, y)
         elif self.mode == "pass":      self.app.on_pass_coord(x, y)
         elif self.mode == "sched":     self.app.on_sched_coord(x, y)
+        elif self.mode == "seq":       self.app.on_seq_coord(x, y)
         else:                          self.app.on_coord(x, y)
 
 
