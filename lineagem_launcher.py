@@ -48,6 +48,7 @@ LOGS_DIR      = os.path.join(BASE, "lineagem_logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
 CONFIG_FILE   = os.path.join(BASE, "coords.json")
 ACCOUNTS_FILE = os.path.join(BASE, "accounts.json")
+REROLL_DIR    = os.path.join(BASE, "reroll_templates")   # 아이템 리롤 타깃 이미지 저장
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE    = 0.05
 
@@ -113,6 +114,13 @@ DEFAULT_CFG = {
     "seq_on":       False,              # 연속 클릭 단축키 활성화 상태 (재시작 유지)
     "seq_min":      SEQ_MIN,
     "seq_max":      SEQ_MAX,
+    # 아이템 리롤(새로고침 매크로)
+    "reroll_refresh_btn": None,   # 새로고침 버튼 좌표 [x,y]
+    "reroll_confirm_btn": None,   # 발견 시 자동으로 누를 확인 버튼 좌표 [x,y]
+    "reroll_item_area":   None,   # 아이템 이미지 캡처 영역 {x,y,w,h}
+    "reroll_threshold":   0.90,   # 일치 판정 유사도(0~1)
+    "reroll_wait":        1.0,    # 새로고침 후 대기(초)
+    "reroll_targets":     [],     # [{enabled: bool} × 4], 이미지는 reroll_templates/target_N.png
 }
 
 LABELS = {
@@ -362,6 +370,7 @@ class App(tk.Tk):
             [tk.StringVar(value=a.get(f"f{j+1}", "")) for j in range(5)]
             for a in self._accounts
         ]
+        self._acc_type_btns = [None] * 16   # 계정 관리 창 OptionMenu 참조 (창 재오픈 대비)
         self._reg_target   = None
         self._stop_flag      = False
         self._running        = False  # 전체 자동실행 중 여부
@@ -381,8 +390,10 @@ class App(tk.Tk):
         self.after(1000, self._past_scheduler_tick)
         self.after(1000, self._purple_check_tick)
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
-        # 런처 시작 시 클로드 앱 최소화(좌표 겹침 방지) + 야간 자동 최소화 시작
-        self.after(1500, lambda: self._minimize_claude_windows(only_background=False))
+        # 런처 시작 시 클로드 앱 최소화 유지 — 런처가 최소화될 때 포커스가 클로드로
+        # 넘어가 클로드가 앞으로 올라오므로, 시작 직후 여러 번 반복해서 확실히 내림
+        for _delay in (1000, 2500, 4000, 6000, 8000, 11000):
+            self.after(_delay, lambda: self._minimize_claude_windows(only_background=False))
         self.after(3000, self._claude_minimize_tick)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -444,6 +455,10 @@ class App(tk.Tk):
 
         # 실행 / 멈춤
         btn_row = tk.Frame(self); btn_row.pack(pady=6)
+        tk.Button(btn_row, text="🔑 계정\n관리",
+            font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
+            activebackground="#0e6655", width=7, height=2,
+            command=self._open_accounts_win).pack(side="left", padx=(0, 6))
         self.btn_start = tk.Button(btn_row, text="▶  전체 자동 실행",
             font=("맑은 고딕", 12, "bold"), bg="#c8a951", fg="white",
             activebackground="#a88930", width=15, height=2, command=self._start)
@@ -497,6 +512,12 @@ class App(tk.Tk):
         tk.Label(popup_box, textvariable=self._popup_status_var,
                  font=("맑은 고딕", 6), fg="#7f8c8d").pack()
 
+        # 퍼플 팝업 자동닫기 우측: 오림의 일기장(아이템 리롤) — 크게
+        tk.Frame(btn_row, width=10).pack(side="left")
+        tk.Button(btn_row, text="📖 오림의\n일기장", font=("맑은 고딕", 13, "bold"),
+                  bg="#a04000", fg="white", activebackground="#7a3000",
+                  width=11, height=3, command=self._open_reroll_win).pack(side="left")
+
         # 다야 카운트 데이터 변수 (UI는 별도 창)
         self._cnt_total_var = tk.StringVar(value="합계: 0")
         self._cnt_cell_vars = [tk.StringVar(value="-") for _ in range(16)]
@@ -518,26 +539,21 @@ class App(tk.Tk):
 
         tk.Frame(self, height=1, bg="#ccc").pack(fill="x", padx=10, pady=3)
 
-        # ── 섹션 버튼 행 ──
+        # ── 섹션 버튼 행 (좌표등록·과거섬·스케줄·사냥 등 직접 표시) ──
         self._sec_row = tk.Frame(self); self._sec_row.pack(pady=4)
         self._build_sec_row()
 
-        # ── 사냥 + 다야 카운트 패널 (메인창 inline) ──
+        # ── 배열창 재배치(슬롯별 그리드) + 다야 수량 ──
         tk.Frame(self, height=1, bg="#ccc").pack(fill="x", padx=10, pady=(4,2))
-        daya_row = tk.Frame(self); daya_row.pack(pady=2, anchor="n")
+        front_row = tk.Frame(self); front_row.pack(pady=4, anchor="n")
 
-        # 사냥 런처 인라인
-        hunt_inline = tk.Frame(daya_row); hunt_inline.pack(side="left", padx=(4,4))
-        self._build_right(hunt_inline)
+        winmgmt = tk.Frame(front_row); winmgmt.pack(side="left", padx=(4,10), anchor="n")
+        self._build_winmgmt(winmgmt)
 
-        tk.Frame(daya_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(2,6))
-
-        # 왼쪽: 버튼
-        # 오른쪽: 다야수량 + 계정관리 묶음
-        right_col = tk.Frame(daya_row); right_col.pack(side="left", anchor="n", pady=(30,0))
+        tk.Frame(front_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(4,8))
 
         # 다야 수량 컨트롤 + 그리드
-        daya_inner = tk.Frame(right_col); daya_inner.pack(anchor="w")
+        daya_inner = tk.Frame(front_row); daya_inner.pack(side="left", anchor="n")
         ctrl = tk.Frame(daya_inner); ctrl.pack(side="left", padx=(4,8), anchor="n")
         tk.Label(ctrl, text="💰 다야 수량", font=("맑은 고딕", 9, "bold"), fg="#2c3e50").pack(anchor="w")
         tk.Button(ctrl, text="📊 OCR 실행", font=("맑은 고딕", 8, "bold"),
@@ -560,44 +576,10 @@ class App(tk.Tk):
                 tk.Label(cell, textvariable=self._cnt_cell_vars[idx],
                          font=("맑은 고딕", 11, "bold"), fg="#2980b9").pack()
 
-        # 계정 관리 (다야 그리드 바로 아래)
-        tk.Frame(right_col, height=1, bg="#ccc").pack(fill="x", pady=(6,2))
-        acc_title = tk.Frame(right_col); acc_title.pack(fill="x")
-        tk.Label(acc_title, text="🔑 계정 관리", font=("맑은 고딕", 9, "bold"), fg="#2c3e50").pack(side="left")
-        tk.Button(acc_title, text="초기화", font=("맑은 고딕", 7), bg="#c0392b", fg="white",
-                  command=self._clear_accounts).pack(side="right", padx=(2,0))
-        tk.Button(acc_title, text="전체저장", font=("맑은 고딕", 7), bg="#27ae60", fg="white",
-                  command=self._save_accounts).pack(side="right")
-
-        TYPES       = ["구글",    "NC",      "전번",    "페이스북"]
-        TYPE_COLORS = ["#DB4437", "#e67e22", "#27ae60", "#6c3483"]
-        acc_grid = tk.Frame(right_col); acc_grid.pack(pady=(2,4))
-        self._acc_type_btns = []
-        for r in range(4):
-            for c in range(4):
-                idx = r * 4 + c
-                cell = tk.Frame(acc_grid, bd=1, relief="groove", padx=2, pady=1)
-                cell.grid(row=r, column=c, padx=1, pady=1, sticky="nsew")
-                top = tk.Frame(cell); top.pack(anchor="w")
-                tk.Label(top, text=f"{idx+1:02d}", font=("맑은 고딕", 7, "bold"), fg="#888").pack(side="left")
-                t = self._acc_type_vars[idx].get()
-                om = tk.OptionMenu(top, self._acc_type_vars[idx], *TYPES)
-                om.config(font=("맑은 고딕", 7, "bold"), fg="white", width=6,
-                          bg=TYPE_COLORS[TYPES.index(t) if t in TYPES else 0],
-                          activebackground="#555", pady=0, relief="raised",
-                          highlightthickness=0)
-                for ti, (tn, tc) in enumerate(zip(TYPES, TYPE_COLORS)):
-                    om["menu"].entryconfig(ti, background=tc, foreground="white",
-                                          activebackground=tc, activeforeground="white",
-                                          font=("맑은 고딕", 9, "bold"))
-                self._acc_type_vars[idx].trace_add("write", lambda *a, i=idx, o=om:
-                    o.config(bg=TYPE_COLORS[TYPES.index(self._acc_type_vars[i].get())
-                                           if self._acc_type_vars[i].get() in TYPES else 0]))
-                om.pack(side="left", padx=(2,0))
-                self._acc_type_btns.append(om)
-                for j in range(5):
-                    tk.Entry(cell, textvariable=self._acc_vars[idx][j],
-                             font=("맑은 고딕", 8), width=12).pack(fill="x", pady=(0,0))
+        # 다야 수량 우측: 귀환주문서 슬롯별 실행 그리드 (좌표는 섬/던전 실행기에서 관리)
+        tk.Frame(front_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(8,8))
+        return_col = tk.Frame(front_row); return_col.pack(side="left", anchor="n")
+        self._build_return_grid(return_col)
 
         # 서브창 핸들 초기화
         self._settings_win = None
@@ -608,6 +590,10 @@ class App(tk.Tk):
         self._dungeon_win  = None
         self._daya_win     = None
         self._pass_win     = None
+        self._accounts_win = None
+        self._reroll_win   = None
+        self._reroll_running = False
+        self._reroll_thumbs  = [None] * 4   # 타깃 미리보기 PhotoImage 참조 유지
         self._island_proc  = None
         self._pass_name_vars    = []
         self._pass_click_vars   = []
@@ -691,6 +677,12 @@ class App(tk.Tk):
 
     def _open_hunt_win(self):
         self._open_section_win("_hunt_win", "🏹 사냥", self._build_right, w=440, h=700)
+
+    def _open_accounts_win(self):
+        self._open_section_win("_accounts_win", "🔑 계정 관리", self._build_accounts, w=560, h=560)
+
+    def _open_reroll_win(self):
+        self._open_section_win("_reroll_win", "📖 오림의 일기장", self._build_reroll, w=440, h=800)
 
     def _open_mail_win(self):
         self._open_section_win("_mail_win", "📬 우편함", self._build_mail, w=300, h=700)
@@ -904,6 +896,446 @@ class App(tk.Tk):
             state="disabled")
         self.btn_click_stop.pack(side="left")
 
+    def _build_winmgmt(self, parent):
+        """배열창 재배치 — 좌측 전체 관리 버튼 열 + 슬롯별(01~16) 개별 재배치 그리드.
+        그리드는 세로(열 우선) 번호: 01~04가 첫 열, 05~08이 둘째 열…"""
+        # 좌측: 전체 창 관리 버튼 열 (다야 수량 컨트롤 열과 동일 형식)
+        ctrl = tk.Frame(parent); ctrl.pack(side="left", padx=(4,8), anchor="n")
+        tk.Label(ctrl, text="🪟 배열창 재배치", font=("맑은 고딕", 9, "bold"),
+                 fg="#2c3e50").pack(anchor="w")
+        for text, color, cmd in [
+            ("📍 위치 전체저장", "#5d6d7e", self._save_all_window_pos),
+            ("📐 창 전체복원",   "#1a5276", self._restore_all_windows),
+            ("🔢 번호 재지정",   "#7d3c98", self._renumber_windows),
+            ("📷 이름 영역등록", "#b7770d", self._reg_name_area),
+            ("🔍 이름 자동인식", "#1e8449", self._ocr_all_names),
+        ]:
+            tk.Button(ctrl, text=text, font=("맑은 고딕", 7, "bold"),
+                      bg=color, fg="white", width=12,
+                      command=cmd).pack(fill="x", pady=1)
+
+        # 우측: 슬롯별 재배치 그리드 (세로 번호 배치)
+        wg = tk.Frame(parent); wg.pack(side="left", anchor="n")
+        for idx in range(16):
+            r, c = idx % 4, idx // 4
+            cell = tk.Frame(wg); cell.grid(row=r, column=c, padx=6, pady=5)
+            tk.Label(cell, text=f"{idx+1:02d}", font=("맑은 고딕", 7), fg="#888").pack()
+            tk.Button(cell, text="재배치", font=("맑은 고딕", 7, "bold"),
+                      bg="#1a5276", fg="white", width=6,
+                      command=lambda x=idx: self._restore_single_window(x)).pack()
+
+    def _build_return_grid(self, parent):
+        """귀환주문서 슬롯별 실행 그리드 (좌표는 섬/던전 실행기에서 관리, 여기선 실행만).
+        배열창 재배치와 동일한 세로(열 우선) 번호 배치."""
+        tk.Label(parent, text="📜 귀환주문서", font=("맑은 고딕", 9, "bold"),
+                 fg="#2c3e50").pack(anchor="w", pady=(0, 2))
+        wg = tk.Frame(parent); wg.pack(anchor="w")
+        for idx in range(16):
+            r, c = idx % 4, idx // 4
+            cell = tk.Frame(wg); cell.grid(row=r, column=c, padx=6, pady=5)
+            tk.Label(cell, text=f"{idx+1:02d}", font=("맑은 고딕", 7), fg="#888").pack()
+            tk.Button(cell, text="실행", font=("맑은 고딕", 7, "bold"),
+                      bg="#c0392b", fg="white", width=6,
+                      command=lambda x=idx: self._run_return_slot(x)).pack()
+
+    def _run_return_slot(self, slot_idx):
+        """귀환주문서(섬/던전 실행기의 컬럼) 슬롯 하나만 메인 런처에서 단독 실행."""
+        if getattr(self, "_return_running", False):
+            self.status.set("귀환주문서 실행 중입니다"); return
+        ipath = os.path.join(BASE, "island_coords.json")
+        try:
+            with open(ipath, encoding="utf-8") as f:
+                icfg = json.load(f)
+        except Exception:
+            self.status.set("island_coords.json 을 찾을 수 없습니다"); return
+        slots = icfg.get("귀환주문서", [])
+        if slot_idx >= len(slots) or not any(c for c in slots[slot_idx].get("coords", [])):
+            self.status.set(f"귀환주문서 #{slot_idx+1:02d} — 등록된 좌표 없음 (섬/던전 실행기에서 등록)")
+            return
+        name   = slots[slot_idx].get("name", f"#{slot_idx+1}")
+        coords = slots[slot_idx].get("coords", [])
+        self._return_running = True
+        self._return_stop    = False
+        self.status.set(f"2초 후 귀환주문서 [{name}] 실행...")
+        self._minimize_claude()
+        self.iconify()
+        threading.Thread(target=self._run_return_worker,
+                         args=(name, coords), daemon=True).start()
+
+    def _run_return_worker(self, name, coords):
+        CLICK_INTERVAL = 2.0   # island 실행 간격과 동일 (클릭 사이 대기)
+        SETTLE_DELAY   = 0.7   # 좌표 이동 후 클릭 전 대기 (씹힘 방지)
+        try:
+            time.sleep(2)
+            for j, c in enumerate(coords):
+                if getattr(self, "_return_stop", False):
+                    break
+                if not c:
+                    continue
+                self.after(0, lambda n=name, j=j: self.status.set(f"🌀 귀환주문서 [{n}] 클릭{j+1}..."))
+                pyautogui.moveTo(*c)
+                time.sleep(SETTLE_DELAY)     # 커서 안착 후 클릭 → 씹힘 방지
+                pyautogui.click()
+                time.sleep(CLICK_INTERVAL)
+            self.after(0, lambda n=name: self.status.set(f"✔ 귀환주문서 [{n}] 완료"))
+        except Exception as e:
+            self.after(0, lambda e=e: self.status.set(f"귀환주문서 오류: {e}"))
+        finally:
+            self._return_running = False
+            self.after(0, self._raise_main)
+
+    ACC_TYPES  = ["구글",    "NC",      "전번",    "페이스북"]
+    ACC_COLORS = ["#DB4437", "#e67e22", "#27ae60", "#6c3483"]
+
+    def _acc_color_for(self, idx, val):
+        """계정 유형 OptionMenu 배경색 갱신 (창이 열려 있을 때만)."""
+        if idx >= len(self._acc_type_btns):
+            return
+        om = self._acc_type_btns[idx]
+        if om is None:
+            return
+        try:
+            om.config(bg=self.ACC_COLORS[self.ACC_TYPES.index(val)
+                                         if val in self.ACC_TYPES else 0])
+        except Exception:
+            pass
+
+    def _build_accounts(self, parent):
+        """🔑 계정 관리 — 16칸 그리드 (별도 창). 유형 색상은 생성자 command로 갱신(누적 없음)."""
+        acc_title = tk.Frame(parent); acc_title.pack(fill="x", padx=4, pady=(4,0))
+        tk.Label(acc_title, text="🔑 계정 관리", font=("맑은 고딕", 9, "bold"), fg="#2c3e50").pack(side="left")
+        tk.Button(acc_title, text="초기화", font=("맑은 고딕", 7), bg="#c0392b", fg="white",
+                  command=self._clear_accounts).pack(side="right", padx=(2,0))
+        tk.Button(acc_title, text="전체저장", font=("맑은 고딕", 7), bg="#27ae60", fg="white",
+                  command=self._save_accounts).pack(side="right")
+
+        TYPES, TYPE_COLORS = self.ACC_TYPES, self.ACC_COLORS
+        acc_grid = tk.Frame(parent); acc_grid.pack(pady=(2,4), padx=4)
+        for r in range(4):
+            for c in range(4):
+                idx = r * 4 + c
+                cell = tk.Frame(acc_grid, bd=1, relief="groove", padx=2, pady=1)
+                cell.grid(row=r, column=c, padx=1, pady=1, sticky="nsew")
+                top = tk.Frame(cell); top.pack(anchor="w")
+                tk.Label(top, text=f"{idx+1:02d}", font=("맑은 고딕", 7, "bold"), fg="#888").pack(side="left")
+                t = self._acc_type_vars[idx].get()
+                om = tk.OptionMenu(top, self._acc_type_vars[idx], *TYPES,
+                                   command=lambda val, i=idx: self._acc_color_for(i, val))
+                om.config(font=("맑은 고딕", 7, "bold"), fg="white", width=6,
+                          bg=TYPE_COLORS[TYPES.index(t) if t in TYPES else 0],
+                          activebackground="#555", pady=0, relief="raised",
+                          highlightthickness=0)
+                for ti, (tn, tc) in enumerate(zip(TYPES, TYPE_COLORS)):
+                    om["menu"].entryconfig(ti, background=tc, foreground="white",
+                                          activebackground=tc, activeforeground="white",
+                                          font=("맑은 고딕", 9, "bold"))
+                om.pack(side="left", padx=(2,0))
+                self._acc_type_btns[idx] = om
+                for j in range(5):
+                    tk.Entry(cell, textvariable=self._acc_vars[idx][j],
+                             font=("맑은 고딕", 8), width=12).pack(fill="x", pady=(0,0))
+
+    # ── 아이템 리롤(새로고침 매크로) ─────────────────────────────────
+    def _reroll_targets_cfg(self):
+        """reroll_targets 를 4칸으로 보정해 반환 (없으면 생성)."""
+        t = list(self.cfg.get("reroll_targets") or [])
+        while len(t) < 4:
+            t.append({"enabled": False})
+        self.cfg["reroll_targets"] = t
+        return t
+
+    def _reroll_reg_label(self):
+        def mk(k): return "✔" if self.cfg.get(k) else "✕"
+        return (f"새로고침 {mk('reroll_refresh_btn')}   확인 {mk('reroll_confirm_btn')}   "
+                f"영역 {mk('reroll_item_area')}")
+
+    def _build_reroll(self, parent):
+        """🔨 아이템 리롤 — 새로고침 반복 → 타깃 아이템 발견 시 정지 + 확인 자동클릭."""
+        targets = self._reroll_targets_cfg()
+
+        self._reroll_status_var = tk.StringVar(value="상태: 대기 중")
+        self._reroll_status_lbl = tk.Label(parent, textvariable=self._reroll_status_var,
+            font=("맑은 고딕", 12, "bold"), fg="#c0392b", wraplength=400, justify="center")
+        self._reroll_status_lbl.pack(pady=(8, 4))
+
+        reg = tk.LabelFrame(parent, text="등록", font=("맑은 고딕", 8, "bold"))
+        reg.pack(fill="x", padx=8, pady=4)
+        r1 = tk.Frame(reg); r1.pack(fill="x", pady=2)
+        tk.Button(r1, text="🖱 새로고침 버튼", font=("맑은 고딕", 8), width=13,
+                  command=lambda: self._reg_reroll_point("reroll_refresh_btn", "새로고침 버튼")).pack(side="left", padx=2)
+        tk.Button(r1, text="🖱 확인 버튼", font=("맑은 고딕", 8), width=11,
+                  command=lambda: self._reg_reroll_point("reroll_confirm_btn", "확인(획득) 버튼")).pack(side="left", padx=2)
+        tk.Button(r1, text="📷 아이템 영역", font=("맑은 고딕", 8), width=11,
+                  command=self._reg_reroll_area).pack(side="left", padx=2)
+        self._reroll_reg_var = tk.StringVar(value=self._reroll_reg_label())
+        tk.Label(reg, textvariable=self._reroll_reg_var, font=("맑은 고딕", 8), fg="#555").pack(anchor="w", padx=4, pady=(2,2))
+
+        tgt = tk.LabelFrame(parent, text="노릴 아이템 (체크=감시 / 📷=드래그로 아이콘 지정해 저장)",
+                            font=("맑은 고딕", 8, "bold"))
+        tgt.pack(fill="x", padx=8, pady=4)
+        self._reroll_enable_vars = []
+        self._reroll_thumb_lbls  = [None] * 4
+        _changed = False
+        for i in range(4):
+            row = tk.Frame(tgt); row.pack(fill="x", pady=2)
+            img_exists = os.path.exists(os.path.join(REROLL_DIR, f"target_{i+1}.png"))
+            ev = tk.BooleanVar(value=img_exists)   # 이미지가 있으면 기본 감시 ON
+            if targets[i].get("enabled") != img_exists:
+                targets[i]["enabled"] = img_exists; _changed = True
+            self._reroll_enable_vars.append(ev)
+            tk.Checkbutton(row, text=f"{i+1}번", variable=ev, font=("맑은 고딕", 9, "bold"),
+                           command=lambda x=i: self._toggle_reroll_target(x)).pack(side="left")
+            tk.Button(row, text="📷 캡처", font=("맑은 고딕", 8), width=6,
+                      command=lambda x=i: self._capture_reroll_target(x)).pack(side="left", padx=4)
+            thumb = tk.Label(row, bd=1, relief="groove", width=9, height=2, text="없음",
+                             font=("맑은 고딕", 7), fg="#aaa")
+            thumb.pack(side="left", padx=4)
+            self._reroll_thumb_lbls[i] = thumb
+        self._reroll_load_thumbs()
+        if _changed:
+            save_cfg(self.cfg)
+
+        cf = tk.Frame(parent); cf.pack(fill="x", padx=8, pady=4)
+        tk.Label(cf, text="유사도(0~1):", font=("맑은 고딕", 8)).pack(side="left")
+        self._reroll_thr_var = tk.StringVar(value=str(self.cfg.get("reroll_threshold", 0.90)))
+        tk.Entry(cf, textvariable=self._reroll_thr_var, width=5, font=("맑은 고딕", 8)).pack(side="left", padx=(2,10))
+        tk.Label(cf, text="새로고침 후 대기(초):", font=("맑은 고딕", 8)).pack(side="left")
+        self._reroll_wait_var = tk.StringVar(value=str(self.cfg.get("reroll_wait", 1.0)))
+        tk.Entry(cf, textvariable=self._reroll_wait_var, width=5, font=("맑은 고딕", 8)).pack(side="left", padx=2)
+        tk.Button(cf, text="설정 저장", font=("맑은 고딕", 8), command=self._save_reroll_cfg).pack(side="left", padx=6)
+
+        run = tk.Frame(parent); run.pack(pady=10)
+        tk.Button(run, text="▶ 매크로 시작", font=("맑은 고딕", 11, "bold"),
+                  bg="#27ae60", fg="white", width=12, height=2,
+                  command=self._start_reroll).pack(side="left", padx=4)
+        tk.Button(run, text="■ 매크로 종료", font=("맑은 고딕", 11, "bold"),
+                  bg="#c0392b", fg="white", width=12, height=2,
+                  command=self._stop_reroll).pack(side="left", padx=4)
+
+    def _reroll_load_thumbs(self):
+        from PIL import Image as _Img, ImageTk as _ITk
+        for i in range(4):
+            lbl = self._reroll_thumb_lbls[i] if hasattr(self, "_reroll_thumb_lbls") else None
+            if lbl is None or not lbl.winfo_exists():
+                continue
+            p = os.path.join(REROLL_DIR, f"target_{i+1}.png")
+            if os.path.exists(p):
+                try:
+                    im = _Img.open(p)
+                    w0, h0 = im.size
+                    # 작은 캡처는 2배 확대해 잘 보이게, 큰 건 상한(150×110)으로 축소
+                    if max(w0, h0) < 90:
+                        im = im.resize((w0 * 2, h0 * 2))
+                    im.thumbnail((150, 110))
+                    ph = _ITk.PhotoImage(im)
+                    self._reroll_thumbs[i] = ph
+                    # 이미지가 있으면 width/height 는 '픽셀'로 해석되므로 이미지 크기로 지정
+                    lbl.config(image=ph, text="", width=im.width, height=im.height)
+                except Exception:
+                    lbl.config(image="", text="?", width=9, height=2)
+            else:
+                lbl.config(image="", text="없음", width=9, height=2)
+
+    def _toggle_reroll_target(self, idx):
+        t = self._reroll_targets_cfg()
+        t[idx]["enabled"] = bool(self._reroll_enable_vars[idx].get())
+        save_cfg(self.cfg)
+
+    def _save_reroll_cfg(self):
+        if not hasattr(self, "_reroll_thr_var"):
+            return
+        try:
+            self.cfg["reroll_threshold"] = max(0.1, min(1.0, float(self._reroll_thr_var.get())))
+        except Exception:
+            self.cfg["reroll_threshold"] = 0.90
+        try:
+            self.cfg["reroll_wait"] = max(0.1, float(self._reroll_wait_var.get()))
+        except Exception:
+            self.cfg["reroll_wait"] = 1.0
+        save_cfg(self.cfg)
+        self.status.set(f"✔ 리롤 설정 저장 (유사도 {self.cfg['reroll_threshold']}, 대기 {self.cfg['reroll_wait']}초)")
+
+    def _reg_reroll_point(self, key, label):
+        self._reroll_reg_key = key
+        self.status.set(f"3초 후 [{label}] 위치를 클릭하세요")
+        if self._reroll_win and self._reroll_win.winfo_exists():
+            self._reroll_win.withdraw()
+        self.after(3000, lambda: [self.withdraw(), self.after(200,
+            lambda: _RerollPointOverlay(self, label, self._on_reroll_point))])
+
+    def _on_reroll_point(self, x, y):
+        self.cfg[self._reroll_reg_key] = [x, y]
+        save_cfg(self.cfg)
+        self.deiconify()
+        if self._reroll_win and self._reroll_win.winfo_exists():
+            self._reroll_win.deiconify()
+            if hasattr(self, "_reroll_reg_var"):
+                self._reroll_reg_var.set(self._reroll_reg_label())
+        self.status.set(f"✔ 좌표 등록 완료 ({x},{y})")
+
+    def _reg_reroll_area(self):
+        self.status.set("3초 후 아이템 이미지 영역을 드래그하세요")
+        if self._reroll_win and self._reroll_win.winfo_exists():
+            self._reroll_win.withdraw()
+        self.after(3000, lambda: [self.withdraw(), self.after(200,
+            lambda: _RerollAreaOverlay(self, self._on_reroll_area))])
+
+    def _on_reroll_area(self, x, y, w, h):
+        self.cfg["reroll_item_area"] = {"x": x, "y": y, "w": w, "h": h}
+        save_cfg(self.cfg)
+        self.deiconify()
+        if self._reroll_win and self._reroll_win.winfo_exists():
+            self._reroll_win.deiconify()
+            if hasattr(self, "_reroll_reg_var"):
+                self._reroll_reg_var.set(self._reroll_reg_label())
+        self.status.set(f"✔ 아이템 영역 등록 ({x},{y} / {w}×{h})")
+
+    def _capture_reroll_target(self, idx):
+        """노릴 아이템 캡처 — 화면에서 직접 드래그로 아이콘 영역을 지정해 저장."""
+        self.status.set(f"3초 후 {idx+1}번 타깃: 원하는 아이템 아이콘을 드래그하세요")
+        if self._reroll_win and self._reroll_win.winfo_exists():
+            self._reroll_win.withdraw()
+        self.after(3000, lambda: [self.withdraw(), self.after(200,
+            lambda: _RerollAreaOverlay(
+                self,
+                lambda x, y, w, h: self._on_reroll_target_area(idx, x, y, w, h),
+                label=f"{idx+1}번 타깃 — 원하는 아이템 아이콘을 드래그하세요"))])
+
+    def _on_reroll_target_area(self, idx, x, y, w, h):
+        if w < 3 or h < 3:
+            self.deiconify()
+            if self._reroll_win and self._reroll_win.winfo_exists():
+                self._reroll_win.deiconify()
+            self.status.set("영역이 너무 작습니다. 다시 시도하세요"); return
+        time.sleep(0.2)   # 오버레이가 완전히 사라진 뒤 캡처
+        try:
+            from PIL import ImageGrab
+            img = ImageGrab.grab(bbox=(x, y, x+w, y+h), all_screens=True)
+            os.makedirs(REROLL_DIR, exist_ok=True)
+            img.save(os.path.join(REROLL_DIR, f"target_{idx+1}.png"))
+            t = self._reroll_targets_cfg(); t[idx]["enabled"] = True
+            save_cfg(self.cfg)
+            msg = f"✔ {idx+1}번 타깃 캡처 완료 ({w}×{h})"
+        except Exception as e:
+            msg = f"{idx+1}번 캡처 오류: {e}"
+        self.deiconify()
+        if self._reroll_win and self._reroll_win.winfo_exists():
+            self._reroll_win.deiconify()
+            if idx < len(getattr(self, "_reroll_enable_vars", [])):
+                self._reroll_enable_vars[idx].set(True)
+            self._reroll_load_thumbs()
+        self.status.set(msg)
+
+    def _reroll_status(self, text, color="#c0392b"):
+        if hasattr(self, "_reroll_status_var"):
+            self._reroll_status_var.set(text)
+        if hasattr(self, "_reroll_status_lbl") and self._reroll_status_lbl.winfo_exists():
+            self._reroll_status_lbl.config(fg=color)
+        self.status.set(text)
+
+    def _start_reroll(self):
+        if self._reroll_running:
+            self.status.set("이미 리롤 실행 중입니다"); return
+        self._save_reroll_cfg()
+        if not self.cfg.get("reroll_refresh_btn"):
+            self._reroll_status("새로고침 버튼을 먼저 등록하세요", "#c0392b"); return
+        if not self.cfg.get("reroll_item_area"):
+            self._reroll_status("아이템 영역을 먼저 등록하세요", "#c0392b"); return
+        enabled = [i for i in range(4)
+                   if self._reroll_targets_cfg()[i].get("enabled")
+                   and os.path.exists(os.path.join(REROLL_DIR, f"target_{i+1}.png"))]
+        if not enabled:
+            self._reroll_status("노릴 아이템(타깃 이미지)을 1개 이상 캡처/체크하세요", "#c0392b"); return
+        self._reroll_running = True
+        self._reroll_status("리롤 시작...", "#2c3e50")
+        threading.Thread(target=self._reroll_loop, daemon=True).start()
+
+    def _stop_reroll(self):
+        self._reroll_running = False
+        self._reroll_status("리롤 정지", "#555")
+
+    def _reroll_loop(self):
+        try:
+            import cv2, numpy as np
+            from PIL import ImageGrab
+        except Exception as e:
+            self.after(0, lambda: self._reroll_status(f"라이브러리 오류: {e}", "#c0392b"))
+            self._reroll_running = False; return
+        area    = self.cfg.get("reroll_item_area")
+        refresh = self.cfg.get("reroll_refresh_btn")
+        confirm = self.cfg.get("reroll_confirm_btn")
+        thr     = float(self.cfg.get("reroll_threshold", 0.90))
+        wait    = float(self.cfg.get("reroll_wait", 1.0))
+        templates = []
+        for i in range(4):
+            if not self._reroll_targets_cfg()[i].get("enabled"):
+                continue
+            p = os.path.join(REROLL_DIR, f"target_{i+1}.png")
+            if os.path.exists(p):
+                im = cv2.imread(p)
+                if im is not None:
+                    templates.append((i, im))
+        if not templates:
+            self.after(0, lambda: self._reroll_status("타깃 이미지 없음", "#c0392b"))
+            self._reroll_running = False; return
+        x, y, w, h = area["x"], area["y"], area["w"], area["h"]
+        count = 0
+        while self._reroll_running:
+            try:
+                pil = ImageGrab.grab(bbox=(x, y, x+w, y+h), all_screens=True).convert("RGB")
+                cur = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+            except Exception as e:
+                self.after(0, lambda e=e: self._reroll_status(f"캡처 오류: {e}", "#c0392b"))
+                break
+            best_i, best_s = -1, -1.0
+            ch, cw = cur.shape[:2]
+            for i, tmpl in templates:
+                th, tw = tmpl.shape[:2]
+                t = tmpl
+                if th > ch or tw > cw:
+                    # 템플릿이 검색영역보다 크면 맞게 축소 (matchTemplate 요구조건)
+                    sc = min(ch / th, cw / tw)
+                    t = cv2.resize(tmpl, (max(1, int(tw*sc)), max(1, int(th*sc))))
+                try:
+                    score = float(cv2.matchTemplate(cur, t, cv2.TM_CCOEFF_NORMED).max())
+                except Exception:
+                    score = -1.0
+                if score > best_s:
+                    best_s, best_i = score, i
+            self.after(0, lambda c=count, s=best_s: self._reroll_status(
+                f"검색 중…  {c}회  (최고 유사도 {s:.3f})", "#2c3e50"))
+            if best_s >= thr:
+                self.after(0, lambda i=best_i, s=best_s: self._reroll_status(
+                    f"상태: {i+1}번 아이템 발견!!!  (유사도 {s:.3f})", "#c0392b"))
+                self._reroll_found(confirm)
+                self._reroll_running = False
+                break
+            if refresh:
+                try: pyautogui.click(refresh[0], refresh[1])
+                except Exception: pass
+            count += 1
+            t0 = time.time()
+            while self._reroll_running and time.time() - t0 < wait:
+                time.sleep(0.05)
+        if not self._reroll_running:
+            self.after(0, lambda: self._reroll_status("리롤 종료", "#555"))
+
+    def _reroll_found(self, confirm):
+        # 발견 시: 확인(획득) 버튼 자동 클릭 → 소리 알림 → 런처 앞으로
+        if confirm:
+            time.sleep(0.3)
+            try: pyautogui.click(confirm[0], confirm[1])
+            except Exception: pass
+        try:
+            import winsound
+            for _ in range(3):
+                winsound.Beep(1000, 180); time.sleep(0.06)
+        except Exception:
+            pass
+        self.after(0, self._keep_launcher_front)
+        if self._reroll_win and self._reroll_win.winfo_exists():
+            self.after(0, lambda: (self._reroll_win.deiconify(), self._reroll_win.lift()))
+
     def _build_right(self, parent):
         tk.Label(parent, text=f"사냥  (슬롯당 {HUNT_CLICKS}번 클릭 / {HUNT_INTERVAL}초 간격)",
                  font=("맑은 고딕", 9, "bold"), fg="#27ae60").pack(anchor="w", padx=4, pady=(4,2))
@@ -923,21 +1355,8 @@ class App(tk.Tk):
         tk.Button(hr, text="🔀 그룹복사 (#01→전체)",
             font=("맑은 고딕", 8), bg="#8e44ad", fg="white", width=18,
             command=self._group_copy_hunt).pack(side="left", padx=(8,0))
-        tk.Button(hr, text="📍 위치\n전체저장",
-            font=("맑은 고딕", 7, "bold"), bg="#5d6d7e", fg="white", width=6, height=2,
-            command=self._save_all_window_pos).pack(side="left", padx=(6,2))
-        tk.Button(hr, text="📐 창\n전체복원",
-            font=("맑은 고딕", 7, "bold"), bg="#1a5276", fg="white", width=6, height=2,
-            command=self._restore_all_windows).pack(side="left", padx=(2,2))
-        tk.Button(hr, text="🔢 번호\n재지정",
-            font=("맑은 고딕", 7, "bold"), bg="#7d3c98", fg="white", width=6, height=2,
-            command=self._renumber_windows).pack(side="left", padx=(2,2))
-        tk.Button(hr, text="📷 이름\n영역등록",
-            font=("맑은 고딕", 7, "bold"), bg="#b7770d", fg="white", width=6, height=2,
-            command=self._reg_name_area).pack(side="left", padx=(2,2))
-        tk.Button(hr, text="🔍 이름\n자동인식",
-            font=("맑은 고딕", 7, "bold"), bg="#1e8449", fg="white", width=6, height=2,
-            command=self._ocr_all_names).pack(side="left", padx=(2,0))
+        # 전체 창 관리 버튼(위치저장/창복원/번호재지정/이름영역/이름인식)은
+        # 메인 앞쪽 "🪟 배열창 재배치" 좌측 열(_build_winmgmt)로 이동됨
 
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
 
@@ -1536,7 +1955,7 @@ class App(tk.Tk):
             if y + needed > work_bottom:
                 needed = work_bottom - y
         try:
-            w = self._sec_row.winfo_reqwidth() + 20
+            w = max(self._sec_row.winfo_reqwidth() + 20, self.winfo_reqwidth())
         except Exception:
             w = self.winfo_width() or 1047
         return w, needed, x, y
@@ -1571,6 +1990,11 @@ class App(tk.Tk):
             self.after(50, self.iconify)
             return
         self._bring_to_front()
+        # 워치독이 최소화 상태로 띄우면 시작 시 크기맞춤이 걸리지 않으므로,
+        # 최초로 창이 보여질 때 딱 한 번만 콘텐츠 크기에 맞춘다(맵 이벤트 폭주 방지: 1회성).
+        if not getattr(self, "_did_initial_fit", False):
+            self._did_initial_fit = True
+            self.after(60, self._fit_main_height)
 
     def _open_pass_win(self):
         if self._pass_win and self._pass_win.winfo_exists():
@@ -2098,6 +2522,7 @@ class App(tk.Tk):
             ("🏝 과거섬",    "#c0392b", self._open_past_win,     "#922b21", self._start_past),
             ("📅 스케줄",    "#16a085", self._open_sched_win,    "#0e6655", self._start_sched),
             ("🏰 주말던전",  "#d35400", self._open_dungeon_win,  "#a04000", self._start_dungeon),
+            ("🏹 사냥",      "#27ae60", self._open_hunt_win,     "#1e8449", self._start_hunt),
             ("💰 다야OCR",   "#27ae60", self._open_ocr,          "#1e8449", self._open_ocr_scan),
             ("🔗 연속클릭",  "#7d3c98", self._open_seq_win,      "#5b2c6f", self._start_seq),
         ]
@@ -2138,10 +2563,7 @@ class App(tk.Tk):
         self.after(50, self._fit_width_to_sec_row)
 
     def _fit_width_to_sec_row(self):
-        self.update_idletasks()
-        needed = self._sec_row.winfo_reqwidth() + 20
-        current_h = self.winfo_height()
-        self.geometry(f"{needed}x{current_h}")
+        self._fit_main_height()
 
     def _build_slot_quick_btns(self):
         """메인 런처 다야 옆 섬/던전 슬롯 빠른 실행 버튼 (재호출로 갱신)."""
@@ -3227,58 +3649,67 @@ class App(tk.Tk):
         self.after(60000, self._purple_check_tick)
 
     def _purple_check_worker(self):
+        import win32gui, win32con, ctypes
+        win = find_purple()
+        if not win:
+            self.after(0, lambda: self.status.set("🔍 퍼플 확인: 퍼플 창 없음"))
+            return
+        hwnd = win32gui.FindWindow(None, win.title)
+        orig_placement = None
         try:
-            win = find_purple()
-            if not win:
-                self.after(0, lambda: self.status.set("🔍 퍼플 확인: 퍼플 창 없음"))
-                return
-
-            # 퍼플 복원 → 원래 위치 유지 → 포그라운드 → 캡처
-            import win32gui, win32con, ctypes
-            hwnd = win32gui.FindWindow(None, win.title)
-            orig_placement = None
             if hwnd:
                 orig_placement = win32gui.GetWindowPlacement(hwnd)
+                # 퍼플을 맨 앞으로 — 아이디 확인/캡처가 되려면 퍼플이 최상단이어야 함
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                time.sleep(0.5)
+                try:
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                except Exception:
+                    pass
+                try:
+                    win32gui.BringWindowToTop(hwnd)
+                except Exception:
+                    pass
+                time.sleep(1.2)
             self.after(0, lambda: self.status.set("🔍 퍼플 확인 중..."))
 
-            # 1단계: 리니지M 좌측버튼(profile_reveal_btn) 클릭 → 계정 확인
+            # 1단계: 리니지M 좌측버튼(profile_reveal_btn) 클릭 → 아이디 표시 → 확인
             if self.cfg.get("profile_reveal_btn"):
                 pyautogui.click(*self.cfg["profile_reveal_btn"])
-                time.sleep(1)
+                time.sleep(2)
 
             matched, ocr_id, ratio = self._is_target_account(hwnd)
             self.after(0, lambda o=ocr_id, r=ratio: self.status.set(
                 f"🔍 퍼플 아이디 '{o}' (일치율 {int(r*100)}%)"))
-            is_scroll = matched
-            if not is_scroll:
-                self.after(0, lambda: self.status.set("🔍 퍼플: 지정 아이디 아님 → 전환 중..."))
-                # 2단계: Purple 포그라운드로 가져와서 프로필 전환
-                if hwnd:
-                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                    time.sleep(0.3)
-                    try:
-                        ctypes.windll.user32.SetForegroundWindow(hwnd)
-                    except Exception:
-                        pass
-                    time.sleep(1.0)
+
+            # 2단계: 지정 아이디(스홀) 아니면 전환
+            if not matched:
+                self.after(0, lambda: self.status.set("🔍 지정 아이디 아님 → 전환 중..."))
                 if self.cfg.get("profile_btn"):
                     pyautogui.click(*self.cfg["profile_btn"]); time.sleep(2)
                 if self.cfg.get("google_acc"):
                     pyautogui.click(*self.cfg["google_acc"]); time.sleep(2)
                 if self.cfg.get("confirm_btn"):
-                    pyautogui.click(*self.cfg["confirm_btn"]); time.sleep(2)
-
-            # 원래 placement 복원 후 최소화
-            if hwnd:
-                if orig_placement:
-                    win32gui.SetWindowPlacement(hwnd, orig_placement)
-                win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
-            else:
-                try: win.minimize()
-                except: pass
-            self.after(0, lambda: self.status.set("✔ 5시간 퍼플 확인 완료"))
+                    pyautogui.click(*self.cfg["confirm_btn"])
+                    time.sleep(10)  # 계정 전환 후 로딩(약 8~10초) 대기
+            self.after(0, lambda: self.status.set("✔ 퍼플 확인 완료"))
         except Exception as e:
             self.after(0, lambda err=e: self.status.set(f"🔍 퍼플 확인 오류: {err}"))
+        finally:
+            # 계정 전환하면 퍼플 창이 새로 생겨 hwnd가 바뀌므로, 여기서 다시 찾아 최소화.
+            # (확인/전환 중 오류가 나도 반드시 최소화 — 안 되면 다음 작업이 퍼플 위에서 막힘)
+            try:
+                _ph = win32gui.FindWindow(None, "PURPLE")
+                if not _ph:
+                    _w2 = find_purple()
+                    _ph = win32gui.FindWindow(None, _w2.title) if _w2 else None
+                if _ph:
+                    win32gui.ShowWindow(_ph, win32con.SW_MINIMIZE)
+                elif win:
+                    win.minimize()
+            except Exception:
+                try: win.minimize()
+                except Exception: pass
 
     def _purple_ensure_scroll(self):
         """퍼플을 스홀 계정으로 전환하고 최소화."""
@@ -4597,6 +5028,18 @@ class App(tk.Tk):
             self.status.set(f"✔ #{slot_idx+1:02d} 창 복구 완료  ({aw['w']}x{aw['h']}  @{aw['x']},{aw['y']})")
         except Exception as e:
             self.status.set(f"#{slot_idx+1} 복구 오류: {e}")
+        # 개별 재배치 후 메인런처가 뒤로 밀리지 않도록 항상 앞으로 유지
+        self._keep_launcher_front()
+
+    def _keep_launcher_front(self):
+        """메인런처를 잠깐 topmost로 올려 앞으로 유지 (고정은 하지 않음)."""
+        try:
+            self.deiconify()
+            self.lift()
+            self.attributes("-topmost", True)
+            self.after(400, lambda: self.attributes("-topmost", False))
+        except Exception:
+            pass
 
     def _stop(self):
         self._stop_flag      = True
@@ -4606,6 +5049,7 @@ class App(tk.Tk):
         self._click_stop     = True
         self._mail_stop      = True
         self._sched_any_stop = True
+        self._return_stop    = True
         # 다야 OCR 프로세스 종료
         proc = getattr(self, "_ocr_proc", None)
         if proc and proc.poll() is None:
@@ -4830,43 +5274,57 @@ class App(tk.Tk):
                 except: pass
 
                 if acc_idx == total - 1:
-                    # ── 마지막 캐릭터 클릭 후 3초 대기 → 스홀 확인/전환 → 퍼플 최소화 ──
+                    # ── 마지막 캐릭터 접속 후 순서 ──
+                    # ① 스홀로 전환(프로필→구글계정→확인) ② 리니지M 좌측버튼으로 스홀 확인
+                    # ③ 스홀이면 퍼플 최소화
                     if not self._wait(3): self.status.set("멈춤"); return
-                    self.status.set("스홀 계정 확인 중...")
 
-                    # profile_reveal_btn(리니지M 좌측버튼) 클릭 후 아이디 OCR 비교
+                    # ① 스홀 계정으로 전환
+                    self.status.set("스홀 계정으로 전환 중...")
+                    if self.cfg.get("profile_btn"):
+                        pyautogui.click(*self.cfg["profile_btn"])
+                        if not self._wait(2): self.status.set("멈춤"); return
+                    if self.cfg.get("google_acc"):
+                        pyautogui.click(*self.cfg["google_acc"])
+                        if not self._wait(2): self.status.set("멈춤"); return
+                    if self.cfg.get("confirm_btn"):
+                        pyautogui.click(*self.cfg["confirm_btn"])
+                        # 계정 전환 후 로딩(약 8초)이 끝나야 리니지M 좌측버튼이 생성됨
+                        self.status.set("계정 전환 로딩 대기 중... (약 10초)")
+                        if not self._wait(10): self.status.set("멈춤"); return
+
+                    # ② 게임 창 활성화 → 리니지M 좌측버튼으로 아이디 표시 → 스홀 확인
+                    self.status.set("스홀 확인 중...")
+                    try: win.activate()
+                    except Exception: pass
+                    if not self._wait(1): self.status.set("멈춤"); return
                     if self.cfg.get("profile_reveal_btn"):
                         pyautogui.click(*self.cfg["profile_reveal_btn"])
-                        if not self._wait(1): self.status.set("멈춤"); return
-
+                        if not self._wait(3): self.status.set("멈춤"); return
                     _matched3, _oid3, _r3 = self._is_target_account()
                     self.status.set(f"아이디 '{_oid3}' (일치율 {int(_r3*100)}%)")
-                    if not _matched3:
-                        self.status.set("지정 아이디 아님 → 퍼플 프로필 전환 중...")
-                        if self.cfg.get("profile_btn"):
-                            pyautogui.click(*self.cfg["profile_btn"])
-                            if not self._wait(2): self.status.set("멈춤"); return
-                        if self.cfg.get("google_acc"):
-                            pyautogui.click(*self.cfg["google_acc"])
-                            if not self._wait(2): self.status.set("멈춤"); return
-                        if self.cfg.get("confirm_btn"):
-                            pyautogui.click(*self.cfg["confirm_btn"])
-                            if not self._wait(2): self.status.set("멈춤"); return
-                        self.status.set("✔ 스홀 전환 완료 → 퍼플 최소화")
-                    else:
-                        self.status.set("✔ 스홀 확인 완료 → 퍼플 최소화")
 
-                    # 퍼플 최소화
+                    # ③ 퍼플 최소화 — 확인 성공/실패와 무관하게 항상 최소화
+                    #    (다음 좌표 클릭이 퍼플 위에서 눌리지 않도록 반드시 최소화)
+                    if _matched3:
+                        self.status.set("✔ 스홀 확인 → 퍼플 최소화")
+                    else:
+                        self.status.set(f"⚠ 스홀 확인 실패('{_oid3}') — 그래도 최소화 진행")
                     try:
                         import win32gui, win32con
-                        _p_hwnd = win32gui.FindWindow(None, win.title)
+                        # 계정 전환하면 퍼플 창이 새로 생겨 win 객체가 오래됨(죽은 창) →
+                        # "PURPLE" 제목으로 현재 창을 다시 찾아서 최소화
+                        _p_hwnd = win32gui.FindWindow(None, "PURPLE")
+                        if not _p_hwnd:
+                            try: _p_hwnd = win32gui.FindWindow(None, win.title)
+                            except Exception: _p_hwnd = 0
                         if _p_hwnd:
                             win32gui.ShowWindow(_p_hwnd, win32con.SW_MINIMIZE)
                         else:
                             win.minimize()
                     except Exception:
                         try: win.minimize()
-                        except: pass
+                        except Exception: pass
                     break
 
                 self.status.set(f"[{acc_idx+1}/{total}] 로딩 대기... (15초)")
@@ -5871,6 +6329,83 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "seq":       self.app.on_seq_coord(x, y)
         else:                          self.app.on_coord(x, y)
 
+
+class _RerollPointOverlay(tk.Toplevel):
+    """아이템 리롤용 단일 좌표 클릭 등록 (스크린샷 배경)."""
+    def __init__(self, app, label, on_pick):
+        super().__init__()
+        self.app = app; self.on_pick = on_pick
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.geometry(f"{sw}x{sh}+0+0")
+        self.overrideredirect(True); self.attributes("-topmost", True)
+        from PIL import ImageTk as _ITk, ImageGrab as _IG
+        self._bg = _ITk.PhotoImage(_IG.grab(all_screens=True).resize((sw, sh)))
+        c = tk.Canvas(self, cursor="crosshair", highlightthickness=0)
+        c.pack(fill="both", expand=True)
+        c.create_image(0, 0, anchor="nw", image=self._bg)
+        c.create_rectangle(0, 0, sw, 54, fill="#1a252f", outline="")
+        c.create_text(sw//2, 27, text=f"{label}  —  클릭하세요  (ESC: 취소)",
+                      fill="white", font=("맑은 고딕", 14))
+        c.bind("<ButtonPress-1>", self._click)
+        self.bind("<Escape>", self._cancel)
+        self.focus_force()
+
+    def _click(self, e):
+        x, y = e.x, e.y
+        self.destroy(); self.update_idletasks()
+        self.on_pick(x, y)
+
+    def _cancel(self, e=None):
+        self.destroy(); self.app.deiconify()
+        if self.app._reroll_win and self.app._reroll_win.winfo_exists():
+            self.app._reroll_win.deiconify()
+        self.app.status.set("좌표 등록 취소")
+
+
+class _RerollAreaOverlay(tk.Toplevel):
+    """아이템 리롤용 캡처 영역 드래그 등록."""
+    def __init__(self, app, on_pick, label="아이템 이미지 영역을 드래그하세요"):
+        super().__init__()
+        self.app = app; self.on_pick = on_pick
+        self.overrideredirect(True); self.attributes("-topmost", True)
+        self.attributes("-alpha", 0.35)
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.geometry(f"{sw}x{sh}+0+0"); self.configure(bg="black")
+        self._start = None; self._rect = None
+        tk.Label(self, text=f"{label}\nESC = 취소",
+                 font=("맑은 고딕", 18, "bold"), fg="white", bg="black",
+                 justify="center").place(relx=0.5, rely=0.5, anchor="center")
+        self._canvas = tk.Canvas(self, bg="black", highlightthickness=0)
+        self._canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        self._canvas.bind("<ButtonPress-1>", self._on_press)
+        self._canvas.bind("<B1-Motion>", self._on_drag)
+        self._canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", self._cancel)
+        self.focus_force()
+
+    def _on_press(self, e):
+        self._start = (e.x_root, e.y_root)
+        if self._rect: self._canvas.delete(self._rect)
+
+    def _on_drag(self, e):
+        if not self._start: return
+        if self._rect: self._canvas.delete(self._rect)
+        x0, y0 = self._start
+        self._rect = self._canvas.create_rectangle(x0, y0, e.x_root, e.y_root,
+                                                    outline="yellow", width=2)
+
+    def _on_release(self, e):
+        if not self._start: return
+        x0, y0 = self._start; x1, y1 = e.x_root, e.y_root
+        self.destroy()
+        ax, ay = min(x0, x1), min(y0, y1)
+        self.on_pick(ax, ay, abs(x1 - x0), abs(y1 - y0))
+
+    def _cancel(self, e=None):
+        self.destroy(); self.app.deiconify()
+        if self.app._reroll_win and self.app._reroll_win.winfo_exists():
+            self.app._reroll_win.deiconify()
+        self.app.status.set("영역 등록 취소")
 
 
 def _watch_and_restart():

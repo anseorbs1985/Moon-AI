@@ -363,6 +363,13 @@ class GroupMoveOverlay(tk.Toplevel):
 class OCRApp(tk.Tk):
     def __init__(self):
         super().__init__()
+        # 게임 클라이언트들이 CPU를 100% 잡고 있어도 OCR이 CPU를 우선 받도록
+        # 이 프로세스를 높은 우선순위로 설정 (게임보다 먼저 스케줄됨)
+        try:
+            _k = ctypes.windll.kernel32
+            _k.SetPriorityClass(_k.GetCurrentProcess(), 0x00000080)  # HIGH_PRIORITY_CLASS
+        except Exception:
+            pass
         self.title("다야 수량 OCR")
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
@@ -689,47 +696,35 @@ class OCRApp(tk.Tk):
             pyautogui.click(*zo)
             time.sleep(zoomout_wait)
 
-        # 이미지 전처리 + OCR
-        # variant 0(기존 방식)을 먼저 시도 → 되던 슬롯은 그대로.
-        # 0이 실패할 때만 반전/비이진화 전처리를 추가 시도(안 되던 슬롯 구제).
+        # 이미지 전처리
         import numpy as np
         import cv2
-        from PIL import ImageEnhance
+        from PIL import ImageFilter, ImageEnhance
+        img = img.resize((img.width*2, img.height*2), Image.LANCZOS)
+        img = img.convert("L")  # 그레이스케일
+        img = ImageEnhance.Contrast(img).enhance(2.5)
+        img = ImageEnhance.Sharpness(img).enhance(2.0)
+        img_np = np.array(img)
+        # 이진화 (숫자 배경 분리)
+        _, img_np = cv2.threshold(img_np, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        img = Image.fromarray(img_np).convert("RGB")
+
+        if save_debug:
+            img.save(os.path.join(BASE, "ocr_debug.png"))
+
+        img_np = np.array(img)
         reader = get_reader()
+        results = reader.readtext(img_np, detail=1, paragraph=False,
+                                  allowlist="0123456789.,")
 
-        base = img.resize((img.width*3, img.height*3), Image.LANCZOS).convert("L")
-        base = ImageEnhance.Contrast(base).enhance(2.5)
-        base = ImageEnhance.Sharpness(base).enhance(2.0)
-        base_np = np.array(base)
+        # 신뢰도 0.2 이상, 왼쪽→오른쪽 순서로 이어붙이기
+        valid = [(bbox, txt, conf) for bbox, txt, conf in results
+                 if conf >= 0.2 and any(c.isdigit() for c in txt)]
+        valid.sort(key=lambda r: r[0][0][0])  # bbox 좌측 x 기준 정렬
+        nums = "".join(c for r in valid for c in r[1] if c.isdigit())
+        return int(nums) if nums else 0
 
-        def _variant(v):
-            if v == 0:
-                # 기존 방식: Otsu 이진화
-                _, b = cv2.threshold(base_np, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            elif v == 1:
-                # Otsu 반전 (밝은 글자 / 어두운 배경 대응)
-                _, b = cv2.threshold(base_np, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-            else:
-                # 이진화 없이 (복잡한 배경에서 Otsu가 숫자를 뭉갤 때)
-                b = base_np
-            return Image.fromarray(b).convert("RGB")
-
-        for v in (0, 1, 2):
-            proc = _variant(v)
-            if save_debug and v == 0:
-                proc.save(os.path.join(BASE, "ocr_debug.png"))
-            results = reader.readtext(np.array(proc), detail=1, paragraph=False,
-                                      allowlist="0123456789.,")
-            # 신뢰도 0.2 이상, 왼쪽→오른쪽 순서로 이어붙이기
-            valid = [(bbox, txt, conf) for bbox, txt, conf in results
-                     if conf >= 0.2 and any(c.isdigit() for c in txt)]
-            valid.sort(key=lambda r: r[0][0][0])  # bbox 좌측 x 기준 정렬
-            nums = "".join(c for r in valid for c in r[1] if c.isdigit())
-            if nums:
-                return int(nums)
-        return 0
-
-    def _ocr_with_retry(self, r, idx, retries=3, interval=1.5, save_debug=False):
+    def _ocr_with_retry(self, r, idx, retries=1, interval=1.5, save_debug=False):
         import time
         for attempt in range(1, retries+1):
             self.after(0, lambda a=attempt: self._status.set(
