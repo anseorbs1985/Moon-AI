@@ -47,6 +47,8 @@ BASE          = os.path.dirname(os.path.abspath(__file__))
 LOGS_DIR      = os.path.join(BASE, "lineagem_logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
 CONFIG_FILE   = os.path.join(BASE, "coords.json")
+LOCAL_FILE    = os.path.join(BASE, "local_config.json")   # 머신별 설정(깃 공유 안 함, *.json 자동 제외)
+LOCAL_KEYS    = ("profile_target_id",)                    # coords.json이 아닌 이 컴퓨터에만 저장할 키
 ACCOUNTS_FILE = os.path.join(BASE, "accounts.json")
 REROLL_DIR    = os.path.join(BASE, "reroll_templates")   # 아이템 리롤 타깃 이미지 저장
 pyautogui.FAILSAFE = False
@@ -187,6 +189,37 @@ def load_accounts():
     except Exception:
         return [{"type": "구글", "f1": "", "f2": "", "f3": "", "f4": "", "f5": ""} for _ in range(20)]
 
+
+def load_local():
+    """머신별 설정(local_config.json) 읽기 — 없으면 빈 dict."""
+    try:
+        with open(LOCAL_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_local(data):
+    try:
+        with open(LOCAL_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _apply_local(cfg):
+    """머신별 키를 로컬 파일 값으로 덮어씀. 로컬에 없고 coords.json에 값이 있으면 로컬로 1회 이관."""
+    local = load_local()
+    changed = False
+    for k in LOCAL_KEYS:
+        if k in local:
+            cfg[k] = local[k]                 # 이 컴퓨터 값 우선
+        elif cfg.get(k):
+            local[k] = cfg[k]; changed = True  # 기존 coords.json 값 → 로컬로 이관(최초 1회)
+    if changed:
+        save_local(local)
+    return cfg
+
 def save_accounts(data):
     with open(ACCOUNTS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -295,12 +328,19 @@ def load_cfg():
         while len(dq) < DC_SLOTS:
             dq.append(None)
         cfg["dc_slots"] = dq[:DC_SLOTS]
-        return cfg
-    return dict(DEFAULT_CFG)
+        return _apply_local(cfg)
+    return _apply_local(dict(DEFAULT_CFG))
 
 def save_cfg(cfg):
+    # 머신별 키는 로컬 파일에만 저장하고, 공유되는 coords.json에서는 제외
+    local = load_local()
+    for k in LOCAL_KEYS:
+        if k in cfg:
+            local[k] = cfg[k]
+    save_local(local)
+    shared = {k: v for k, v in cfg.items() if k not in LOCAL_KEYS}
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+        json.dump(shared, f, ensure_ascii=False, indent=2)
 
 def find_purple():
     for w in gw.getAllWindows():
