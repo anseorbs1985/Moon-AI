@@ -47,6 +47,9 @@ BASE          = os.path.dirname(os.path.abspath(__file__))
 LOGS_DIR      = os.path.join(BASE, "lineagem_logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
 CONFIG_FILE   = os.path.join(BASE, "coords.json")
+# 타겟 아이디는 이 컴퓨터 전용 — coords.json 이 아니라 여기에만 저장한다.
+# (git 미추적: .gitignore 등록. pull 해도 유지되고, 이 컴퓨터에서 바꾸기 전엔 안 바뀜)
+LOCAL_ID_FILE = os.path.join(BASE, "local_profile.json")
 ACCOUNTS_FILE = os.path.join(BASE, "accounts.json")
 REROLL_DIR    = os.path.join(BASE, "reroll_templates")   # 아이템 리롤 타깃 이미지 저장
 pyautogui.FAILSAFE = False
@@ -179,6 +182,22 @@ def save_accounts(data):
     with open(ACCOUNTS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+def load_local_id():
+    """이 컴퓨터 전용 타겟 아이디를 읽는다(없으면 빈 문자열)."""
+    try:
+        with open(LOCAL_ID_FILE, encoding="utf-8") as f:
+            return (json.load(f).get("profile_target_id") or "").strip()
+    except Exception:
+        return ""
+
+def save_local_id(value):
+    """이 컴퓨터 전용 타겟 아이디를 저장한다(coords.json 에는 절대 저장하지 않음)."""
+    try:
+        with open(LOCAL_ID_FILE, "w", encoding="utf-8") as f:
+            json.dump({"profile_target_id": (value or "").strip()}, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
 def load_cfg():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, encoding="utf-8") as f:
@@ -276,12 +295,21 @@ def load_cfg():
         while len(sq) < SEQ_SLOTS:
             sq.append(None)
         cfg["seq_slots"] = sq[:SEQ_SLOTS]
+        # 타겟 아이디는 로컬 전용 파일 값으로 덮어쓴다(coords.json 값 무시)
+        cfg["profile_target_id"] = load_local_id()
         return cfg
-    return dict(DEFAULT_CFG)
+    _c = dict(DEFAULT_CFG)
+    _c["profile_target_id"] = load_local_id()
+    return _c
 
 def save_cfg(cfg):
+    # 타겟 아이디는 로컬 전용 파일에만 저장하고, coords.json 에는 항상 빈 값으로 기록한다.
+    # (coords.json 이 로컬 아이디로 더럽혀지지 않아 git pull 이 깨끗하게 유지됨)
+    save_local_id(cfg.get("profile_target_id", ""))
+    out = dict(cfg)
+    out["profile_target_id"] = ""
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+        json.dump(out, f, ensure_ascii=False, indent=2)
 
 def find_purple():
     for w in gw.getAllWindows():
@@ -2927,7 +2955,7 @@ class App(tk.Tk):
         _ProfileAreaOverlay(self)
 
     def _save_profile_ref_pixel(self):
-        """스크롤 계정 화면에서 아이디 영역 픽셀 기준값 저장"""
+        """난봉꾼 계정 화면에서 아이디 영역 픽셀 기준값 저장"""
         area = self.cfg.get("profile_id_area")
         if not area:
             self.status.set("아이디 표시 영역을 먼저 등록하세요."); return
@@ -2939,7 +2967,7 @@ class App(tk.Tk):
         self.cfg["profile_ref_pixel"] = arr
         save_cfg(self.cfg)
         self._profile_pix_var.set("저장됨")
-        self.status.set("✔ 스크롤 계정 기준 픽셀 저장 완료")
+        self.status.set("✔ 난봉꾼 계정 기준 픽셀 저장 완료")
 
     def _test_profile_pixel(self):
         """현재 화면과 기준 픽셀 비교 테스트"""
@@ -2955,7 +2983,7 @@ class App(tk.Tk):
         n = min(len(ref), len(arr))
         diff = sum(abs(ref[i] - arr[i]) for i in range(n)) / n
         matched = diff < 30
-        self.status.set(f"픽셀 차이: {diff:.1f} → {'✔ 스크롤 계정 일치' if matched else '✗ 다른 계정'}")
+        self.status.set(f"픽셀 차이: {diff:.1f} → {'✔ 난봉꾼 계정 일치' if matched else '✗ 다른 계정'}")
 
     def _is_scroll_account_at(self, hwnd):
         """hwnd 창 위치 기준으로 profile_id_area 좌표 보정 후 픽셀 비교"""
@@ -2979,7 +3007,7 @@ class App(tk.Tk):
             return False
 
     def _is_scroll_account(self):
-        """현재 화면이 스크롤 계정인지 픽셀 비교로 확인"""
+        """현재 화면이 난봉꾼 계정인지 픽셀 비교로 확인"""
         ref = self.cfg.get("profile_ref_pixel")
         area = self.cfg.get("profile_id_area")
         if not ref or not area:
@@ -3078,9 +3106,9 @@ class App(tk.Tk):
         return (ratio >= 0.5, ocr_id, ratio)
 
     def _check_profile_and_switch(self):
-        """아이디 영역 OCR → 50% 이상 일치하면 스크롤 계정으로 판단"""
+        """아이디 영역 OCR → 50% 이상 일치하면 난봉꾼 계정으로 판단"""
         area = self.cfg.get("profile_id_area")
-        target = self.cfg.get("profile_target_id", "스크롤").strip()
+        target = self.cfg.get("profile_target_id", "난봉꾼").strip()
         if not area or not target:
             return True
         try:
@@ -3108,7 +3136,7 @@ class App(tk.Tk):
         """hwnd 창 위치를 기준으로 profile_id_area 절대좌표를 계산해서 OCR"""
         import win32gui
         area = self.cfg.get("profile_id_area")
-        target = self.cfg.get("profile_target_id", "스크롤").strip()
+        target = self.cfg.get("profile_target_id", "난봉꾼").strip()
         if not area or not target:
             return True
         try:
@@ -3856,7 +3884,7 @@ class App(tk.Tk):
         self.after(30000, self._past_scheduler_tick)
 
     def _purple_check_tick(self):
-        """매일 새벽 4시에 한 번 퍼플이 스홀 계정인지 확인 → 아니면 전환 후 최소화"""
+        """매일 새벽 4시에 한 번 퍼플이 난봉꾼 계정인지 확인 → 아니면 전환 후 최소화"""
         import threading, datetime
         now = datetime.datetime.now()
         today = now.date()
@@ -3899,7 +3927,7 @@ class App(tk.Tk):
             self.after(0, lambda o=ocr_id, r=ratio: self.status.set(
                 f"🔍 퍼플 아이디 '{o}' (일치율 {int(r*100)}%)"))
 
-            # 2단계: 지정 아이디(스홀) 아니면 전환
+            # 2단계: 지정 아이디(난봉꾼) 아니면 전환
             if not matched:
                 self.after(0, lambda: self.status.set("🔍 지정 아이디 아님 → 전환 중..."))
                 if self.cfg.get("profile_btn"):
@@ -3929,12 +3957,12 @@ class App(tk.Tk):
                 except Exception: pass
 
     def _purple_ensure_scroll(self):
-        """퍼플을 스홀 계정으로 전환하고 최소화."""
+        """퍼플을 난봉꾼 계정으로 전환하고 최소화."""
         try:
             import win32gui, win32con, ctypes
             hwnd = win32gui.FindWindow(None, "PURPLE")
             if not hwnd:
-                self.status.set("⚠ 퍼플 창 없음 — 스홀 확인 건너뜀")
+                self.status.set("⚠ 퍼플 창 없음 — 난봉꾼 확인 건너뜀")
                 return
 
             orig_placement = win32gui.GetWindowPlacement(hwnd)
@@ -3962,7 +3990,7 @@ class App(tk.Tk):
                     pyautogui.click(*self.cfg["google_acc"]); time.sleep(2)
                 if self.cfg.get("confirm_btn"):
                     pyautogui.click(*self.cfg["confirm_btn"]); time.sleep(3)
-                self.status.set("✔ 퍼플 스홀 전환 완료")
+                self.status.set("✔ 퍼플 난봉꾼 전환 완료")
 
             # 원래 상태로 복원 후 최소화
             win32gui.SetWindowPlacement(hwnd, orig_placement)
@@ -5508,12 +5536,12 @@ class App(tk.Tk):
                 except Exception: pass
                 if acc_idx == total - 1:
                     # ── 마지막 캐릭터 접속 후 순서 ──
-                    # ① 스홀로 전환(프로필→구글계정→확인) ② 리니지M 좌측버튼으로 스홀 확인
-                    # ③ 스홀이면 퍼플 최소화
+                    # ① 난봉꾼로 전환(프로필→구글계정→확인) ② 리니지M 좌측버튼으로 난봉꾼 확인
+                    # ③ 난봉꾼이면 퍼플 최소화
                     if not self._wait(3): self.status.set("멈춤"); return
 
-                    # ① 스홀 계정으로 전환
-                    self.status.set("스홀 계정으로 전환 중...")
+                    # ① 난봉꾼 계정으로 전환
+                    self.status.set("난봉꾼 계정으로 전환 중...")
                     try: _dbg.write(f"[SWITCH] 전환 시작 profile={self.cfg.get('profile_btn')} google={self.cfg.get('google_acc')} confirm={self.cfg.get('confirm_btn')}\n"); _dbg.flush()
                     except Exception: pass
                     if self.cfg.get("profile_btn"):
@@ -5534,8 +5562,8 @@ class App(tk.Tk):
                         self.status.set("계정 전환 로딩 대기 중... (약 10초)")
                         if not self._wait(10): self.status.set("멈춤"); return
 
-                    # ② 게임 창 활성화 → 리니지M 좌측버튼으로 아이디 표시 → 스홀 확인
-                    self.status.set("스홀 확인 중...")
+                    # ② 게임 창 활성화 → 리니지M 좌측버튼으로 아이디 표시 → 난봉꾼 확인
+                    self.status.set("난봉꾼 확인 중...")
                     try: win.activate()
                     except Exception: pass
                     if not self._wait(1): self.status.set("멈춤"); return
@@ -5550,9 +5578,9 @@ class App(tk.Tk):
                     # ③ 퍼플 최소화 — 확인 성공/실패와 무관하게 항상 최소화
                     #    (다음 좌표 클릭이 퍼플 위에서 눌리지 않도록 반드시 최소화)
                     if _matched3:
-                        self.status.set("✔ 스홀 확인 → 퍼플 최소화")
+                        self.status.set("✔ 난봉꾼 확인 → 퍼플 최소화")
                     else:
-                        self.status.set(f"⚠ 스홀 확인 실패('{_oid3}') — 그래도 최소화 진행")
+                        self.status.set(f"⚠ 난봉꾼 확인 실패('{_oid3}') — 그래도 최소화 진행")
                     try:
                         import win32gui, win32con
                         # 계정 전환하면 퍼플 창이 새로 생겨 win 객체가 오래됨(죽은 창) →

@@ -23,12 +23,12 @@
     1369,
     757
   ],
-  "profile_target_id": "스홀",
+  "profile_target_id": "",
   "profile_id_area": {
-    "x": 2290,
+    "x": 2289,
     "y": 988,
-    "w": 99,
-    "h": 38
+    "w": 98,
+    "h": 37
   },
   "profile_reveal_btn": [
     95,
@@ -16193,5 +16193,9 @@
     20,
     19,
     17
+  ],
+  "profile_id_area_win": [
+    0,
+    0
   ]
 }
