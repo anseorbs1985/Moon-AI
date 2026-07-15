@@ -118,6 +118,13 @@ DUNGEON_INTERVAL = 2.0 # 클릭 사이 간격(초)
 SEQ_SLOTS      = 16    # 연속 클릭 슬롯 수 (고정)
 SEQ_MIN        = 1.5   # 연속 클릭 최소 간격(초)
 SEQ_MAX        = 3.5   # 연속 클릭 최대 간격(초)
+DC_SLOTS       = 16    # 일반던전충전 슬롯 수 (고정)
+DC_MIN         = 1.0   # 좌표(슬롯) 간 간격(초) — 1~16 슬롯 사이 랜덤
+DC_MAX         = 2.5
+DC_TAPS_MIN    = 7     # 한 좌표당 연속 클릭 횟수(최소)
+DC_TAPS_MAX    = 9     # 한 좌표당 연속 클릭 횟수(최대)
+DC_BURST_MIN   = 1.0   # 한 좌표의 7~9회 클릭을 이 시간(초) 안에 모두 실행
+DC_BURST_MAX   = 2.0
 
 DEFAULT_CFG = {
     "lineagem":    None,
@@ -148,6 +155,11 @@ DEFAULT_CFG = {
     "seq_on":       False,              # 연속 클릭 단축키 활성화 상태 (재시작 유지)
     "seq_min":      SEQ_MIN,
     "seq_max":      SEQ_MAX,
+    "dc_slots":     [None]*DC_SLOTS,    # 일반던전충전 좌표 (각 [x,y] 또는 None)
+    "dc_hotkey":    None,               # 일반던전충전 실행 단축키 (가상키 코드)
+    "dc_on":        False,              # 일반던전충전 단축키 활성화 상태 (재시작 유지)
+    "dc_min":       DC_MIN,
+    "dc_max":       DC_MAX,
     # 아이템 리롤(새로고침 매크로)
     "reroll_refresh_btn": None,   # 새로고침 버튼 좌표 [x,y]
     "reroll_confirm_btn": None,   # 발견 시 자동으로 누를 확인 버튼 좌표 [x,y]
@@ -276,6 +288,13 @@ def load_cfg():
         while len(sq) < SEQ_SLOTS:
             sq.append(None)
         cfg["seq_slots"] = sq[:SEQ_SLOTS]
+        # dc_slots (일반던전충전 좌표 16개 고정)
+        dq = cfg.get("dc_slots", [])
+        if not isinstance(dq, list):
+            dq = []
+        while len(dq) < DC_SLOTS:
+            dq.append(None)
+        cfg["dc_slots"] = dq[:DC_SLOTS]
         return cfg
     return dict(DEFAULT_CFG)
 
@@ -428,11 +447,15 @@ class App(tk.Tk):
         self._hp_stop      = False
         self._seq_on       = bool(self.cfg.get("seq_on", False))
         self._seq_running  = False
+        self._dc_on        = bool(self.cfg.get("dc_on", False))
+        self._dc_running   = False
         self._build_ui()
+        self._sync_sched_click1()   # 스케줄 클릭1 = 과거섬 클릭1 (시작 시 1회 동기화)
         self.after(1000, self._mail_scheduler_tick)
         self.after(1000, self._past_scheduler_tick)
         self.after(1000, self._purple_check_tick)
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
+        threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._popup_guard_loop, daemon=True).start()
         threading.Thread(target=self._claude_attention_loop, daemon=True).start()
         # 작업 중에는 클로드를 강제로 내리지 않는다(예전 시작 버스트 제거).
@@ -596,6 +619,17 @@ class App(tk.Tk):
         # ── 배열창 재배치(슬롯별 그리드) + 다야 수량 ──
         tk.Frame(self, height=1, bg="#ccc").pack(fill="x", padx=10, pady=(4,2))
         front_row = tk.Frame(self); front_row.pack(pady=4, anchor="n")
+
+        # 배열창 재배치 왼쪽: 일반던전충전 (계정관리 버튼 크기와 동일) + 실행 버튼
+        dc_col = tk.Frame(front_row); dc_col.pack(side="left", padx=(4,8), anchor="n")
+        tk.Button(dc_col, text="🎯 일반\n던전충전",
+            font=("맑은 고딕", 9, "bold"), bg="#6c3483", fg="white",
+            activebackground="#512e6f", width=7, height=2,
+            command=self._open_dc_win).pack(anchor="n")
+        tk.Button(dc_col, text="▶ 실행",
+            font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
+            activebackground="#1e8449", width=7,
+            command=self._start_dc).pack(anchor="n", pady=(2,0))
 
         winmgmt = tk.Frame(front_row); winmgmt.pack(side="left", padx=(4,10), anchor="n")
         self._build_winmgmt(winmgmt)
@@ -2373,6 +2407,7 @@ class App(tk.Tk):
         self.status.set(f"✔ #01 좌표 → #02~#{PASS_SLOTS:02d} 전체 복사 완료")
 
     def _build_sched(self, parent):
+        self._sync_sched_click1()   # 창 열 때 과거섬 클릭1을 그대로 반영
         tk.Label(parent, text=f"매일매일 스케줄  ({SCHED_INTERVAL}초 간격)",
                  font=("맑은 고딕", 9, "bold"), fg="#16a085").pack(anchor="w", padx=4, pady=(4,2))
 
@@ -2393,9 +2428,9 @@ class App(tk.Tk):
         tk.Button(pr, text="🔀 그룹복사 (#01→전체)",
             font=("맑은 고딕", 8), bg="#0e6655", fg="white", width=18,
             command=self._group_copy_sched).pack(side="left", padx=(8,0))
-        tk.Button(pr, text="📍 클릭1 전체적용",
-            font=("맑은 고딕", 8), bg="#8e44ad", fg="white", width=14,
-            command=self._reg_sched_click1_all).pack(side="left", padx=(4,0))
+        tk.Button(pr, text="🔒 클릭1=과거섬",
+            font=("맑은 고딕", 8), bg="#95a5a6", fg="white", width=14,
+            state="disabled").pack(side="left", padx=(4,0))
 
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
 
@@ -2444,11 +2479,17 @@ class App(tk.Tk):
                 click_vars.append(cv)
                 cell = tk.Frame(row, bd=1, relief="flat")
                 cell.pack(side="left", padx=3)
-                tk.Label(cell, text=_sched_lbl[j],
-                         font=("맑은 고딕", 5), fg="#16a085").pack()
+                locked = (j == 0)   # 클릭1은 과거섬과 동기화 → 잠금(표시만)
+                tk.Label(cell, text=("클릭1🔒" if locked else _sched_lbl[j]),
+                         font=("맑은 고딕", 5),
+                         fg="#c0392b" if locked else "#16a085").pack()
+                if locked:
+                    _cmd = lambda: self.status.set(
+                        "🔒 스케줄 클릭1은 과거섬 클릭1과 동기화됩니다 — 과거섬에서 수정하세요")
+                else:
+                    _cmd = lambda x=i, c=j: self._reg_sched_click(x, c)
                 btn = tk.Button(cell, textvariable=cv, font=("맑은 고딕", 6),
-                                width=3, pady=0,
-                                command=lambda x=i, c=j: self._reg_sched_click(x, c))
+                                width=3, pady=0, command=_cmd)
                 btn.pack()
                 click_btns.append(btn)
             self._sched_click_vars.append(click_vars)
@@ -2488,6 +2529,7 @@ class App(tk.Tk):
         return f"체크박스:{chk}  닫기:{cls}  감지:{det}"
 
     def _reg_popup_checkbox(self):
+        self._minimize_claude()   # 클로드가 타깃을 가리지 않게 (런처는 안내 위해 유지)
         self.status.set("3초 후 마우스를 [체크박스] 위에 올려두세요 — 자동 캡처")
         self.after(3000, self._capture_popup_checkbox)
 
@@ -2499,6 +2541,7 @@ class App(tk.Tk):
         self.status.set(f"✔ 팝업 체크박스 등록: ({x},{y})")
 
     def _reg_popup_close(self):
+        self._minimize_claude()   # 클로드가 타깃을 가리지 않게 (런처는 안내 위해 유지)
         self.status.set("3초 후 마우스를 [✕ 닫기버튼] 위에 올려두세요 — 자동 캡처")
         self.after(3000, self._capture_popup_close)
 
@@ -2510,6 +2553,7 @@ class App(tk.Tk):
         self.status.set(f"✔ 팝업 닫기버튼 등록: ({x},{y})")
 
     def _reg_popup_detect(self):
+        self._minimize_claude()   # 클로드가 타깃을 가리지 않게 (런처는 안내 위해 유지)
         self.status.set("3초 후 마우스를 [팝업 X버튼 주변 빈 배경] 위에 올려두세요 — 픽셀 색상 저장")
         self.after(3000, self._capture_popup_detect)
 
@@ -2706,6 +2750,8 @@ class App(tk.Tk):
             self._slot_quick_btns.append(btn)
 
     def _refresh_ui(self):
+        # 스케줄 클릭1 = 과거섬 클릭1 : 표시 갱신 전에 항상 미러링(과거섬 편집이 그대로 반영됨)
+        self._sync_sched_click1()
         # debounce: 100ms 내 중복 호출 무시
         now = time.time()
         if hasattr(self, "_last_refresh") and now - self._last_refresh < 0.1:
@@ -3357,6 +3403,7 @@ class App(tk.Tk):
         finally:
             self._seq_running = False
             self._clear_busy("연속클릭")
+            self.after(0, self._restore_all)   # 완료 후 런처/서브창 복원
 
     def _assign_seq_hotkey(self):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
@@ -3408,6 +3455,239 @@ class App(tk.Tk):
                 continue
             if down and not prev and not getattr(self, "_seq_running", False):
                 threading.Thread(target=self._run_seq, daemon=True).start()
+            prev = down
+
+    # ── 일반던전충전 (연속클릭 복제 — 각 좌표를 7~9회 랜덤 연속 클릭) ──
+    def _open_dc_win(self):
+        self._open_section_win("_dc_win", "🎯 일반던전충전", self._build_dc, w=300, h=680)
+
+    def _dc_hotkey_label(self):
+        return f"단축키: {self._vk_name(self.cfg.get('dc_hotkey'))}"
+
+    def _build_dc(self, parent):
+        dc = self.cfg.get("dc_slots") or [None] * DC_SLOTS
+
+        tk.Label(parent,
+                 text=f"일반던전충전 — 각 좌표 {DC_BURST_MIN:.0f}~{DC_BURST_MAX:.0f}초 내 {DC_TAPS_MIN}~{DC_TAPS_MAX}회 연속 클릭",
+                 font=("맑은 고딕", 9, "bold"), fg="#6c3483").pack(pady=(6, 2))
+
+        top = tk.Frame(parent); top.pack(pady=2)
+        self._dc_toggle_btn = tk.Button(top, text="OFF", font=("맑은 고딕", 9, "bold"),
+                                        bg="#7f8c8d", fg="white", width=6,
+                                        command=self._toggle_dc)
+        self._dc_toggle_btn.pack(side="left", padx=(0, 3))
+        tk.Button(top, text="▶ 실행", font=("맑은 고딕", 9, "bold"),
+                  bg="#27ae60", fg="white", width=6,
+                  command=self._start_dc).pack(side="left", padx=3)
+        tk.Button(top, text="⌨ 단축키", font=("맑은 고딕", 8),
+                  bg="#2c3e50", fg="white",
+                  command=self._assign_dc_hotkey).pack(side="left", padx=3)
+
+        self._dc_hotkey_var = tk.StringVar(value=self._dc_hotkey_label())
+        tk.Label(parent, textvariable=self._dc_hotkey_var,
+                 font=("맑은 고딕", 8), fg="#6c3483").pack()
+
+        int_row = tk.Frame(parent); int_row.pack(pady=2)
+        tk.Label(int_row, text="좌표간 간격(초)", font=("맑은 고딕", 8)).pack(side="left")
+        self._dc_min_var = tk.StringVar(value=str(self.cfg.get("dc_min", DC_MIN)))
+        self._dc_max_var = tk.StringVar(value=str(self.cfg.get("dc_max", DC_MAX)))
+        tk.Entry(int_row, textvariable=self._dc_min_var, width=4).pack(side="left", padx=2)
+        tk.Label(int_row, text="~").pack(side="left")
+        tk.Entry(int_row, textvariable=self._dc_max_var, width=4).pack(side="left", padx=2)
+        tk.Button(int_row, text="저장", font=("맑은 고딕", 7),
+                  command=self._save_dc_interval).pack(side="left", padx=3)
+
+        tk.Frame(parent, height=1, bg="#ccc").pack(fill="x", padx=8, pady=3)
+
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        sb = tk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        inner = tk.Frame(canvas)
+        fid = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(fid, width=e.width))
+        def _wheel(e): canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        canvas.bind("<MouseWheel>", _wheel)
+        inner.bind("<MouseWheel>", _wheel)
+
+        self._dc_slot_vars = []
+        for i in range(DC_SLOTS):
+            row = tk.Frame(inner, bd=1, relief="groove"); row.pack(fill="x", padx=3, pady=1)
+            tk.Label(row, text=f"#{i+1:02d}", font=("맑은 고딕", 8, "bold"),
+                     width=3, fg="#6c3483").pack(side="left", padx=2)
+            sv = tk.StringVar()
+            c = dc[i] if i < len(dc) else None
+            sv.set(f"({c[0]},{c[1]})" if c else "미등록")
+            self._dc_slot_vars.append(sv)
+            tk.Label(row, textvariable=sv, font=("맑은 고딕", 8),
+                     width=12, anchor="w").pack(side="left")
+            tk.Button(row, text="등록", font=("맑은 고딕", 7), bg="#6c3483", fg="white",
+                      command=lambda x=i: self._reg_dc_coord(x)).pack(side="right", padx=2)
+            tk.Button(row, text="×", font=("맑은 고딕", 7), fg="red", width=2,
+                      command=lambda x=i: self._del_dc_coord(x)).pack(side="right")
+            row.bind("<MouseWheel>", _wheel)
+
+        self._refresh_dc_toggle()
+
+    def _refresh_dc_toggle(self):
+        if hasattr(self, "_dc_toggle_btn") and self._dc_toggle_btn.winfo_exists():
+            on = getattr(self, "_dc_on", False)
+            self._dc_toggle_btn.config(text="ON" if on else "OFF",
+                                       bg="#27ae60" if on else "#7f8c8d")
+
+    def _toggle_dc(self):
+        self._dc_on = not getattr(self, "_dc_on", False)
+        self.cfg["dc_on"] = self._dc_on   # 재시작해도 유지되게 저장
+        save_cfg(self.cfg)
+        self._refresh_dc_toggle()
+        if self._dc_on:
+            self.status.set(f"일반던전충전 ON — {self._vk_name(self.cfg.get('dc_hotkey'))} 누르면 실행")
+        else:
+            self.status.set("일반던전충전 OFF")
+
+    def _save_dc_interval(self):
+        try:
+            mn = float(self._dc_min_var.get())
+            mx = float(self._dc_max_var.get())
+            if mx < mn:
+                mn, mx = mx, mn
+            self.cfg["dc_min"] = mn
+            self.cfg["dc_max"] = mx
+            save_cfg(self.cfg)
+            self.status.set(f"✔ 좌표간 간격 저장: {mn}~{mx}초")
+        except ValueError:
+            self.status.set("간격은 숫자로 입력하세요")
+
+    def _reg_dc_coord(self, idx):
+        self._dc_reg_idx = idx
+        self.status.set(f"3초 후 일반던전충전 #{idx+1} 위치를 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="dc")])
+
+    def on_dc_coord(self, x, y):
+        dc = self.cfg.get("dc_slots") or [None] * DC_SLOTS
+        while len(dc) < DC_SLOTS:
+            dc.append(None)
+        dc[self._dc_reg_idx] = [x, y]
+        self.cfg["dc_slots"] = dc
+        save_cfg(self.cfg)
+        if hasattr(self, "_dc_slot_vars") and self._dc_reg_idx < len(self._dc_slot_vars):
+            self._dc_slot_vars[self._dc_reg_idx].set(f"({x},{y})")
+        self.status.set(f"✔ 일반던전충전 #{self._dc_reg_idx+1} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _del_dc_coord(self, idx):
+        dc = self.cfg.get("dc_slots") or [None] * DC_SLOTS
+        if idx < len(dc):
+            dc[idx] = None
+            self.cfg["dc_slots"] = dc
+            save_cfg(self.cfg)
+        if hasattr(self, "_dc_slot_vars") and idx < len(self._dc_slot_vars):
+            self._dc_slot_vars[idx].set("미등록")
+        self.status.set(f"일반던전충전 #{idx+1} 삭제")
+
+    def _start_dc(self):
+        threading.Thread(target=self._run_dc, daemon=True).start()
+
+    def _run_dc(self):
+        if getattr(self, "_dc_running", False):
+            return
+        dc = self.cfg.get("dc_slots") or []
+        coords = [c for c in dc if c]
+        if not coords:
+            self.after(0, lambda: self.status.set("일반던전충전: 등록된 좌표가 없습니다"))
+            return
+        if not self._try_busy("일반던전충전"):
+            return
+        self._dc_running = True
+        try:
+            # 클릭 좌표를 런처/창이 가리지 않도록 최소화 후 실행(연속클릭과 동일)
+            self.after(0, self._seq_hide)
+            time.sleep(0.5)
+            mn = float(self.cfg.get("dc_min", DC_MIN))
+            mx = float(self.cfg.get("dc_max", DC_MAX))
+            if mx < mn:
+                mn, mx = mx, mn
+            n = len(coords)
+            for i, (x, y) in enumerate(coords):
+                taps = random.randint(DC_TAPS_MIN, DC_TAPS_MAX)   # 좌표마다 7~9회 랜덤
+                window = random.uniform(DC_BURST_MIN, DC_BURST_MAX)  # 1~2초 랜덤 구간
+                # 7~9회 클릭을 window(초) 안에 랜덤 간격으로 모두 실행
+                gaps = taps - 1
+                if gaps > 0:
+                    ws = [random.random() for _ in range(gaps)]
+                    s = sum(ws) or 1.0
+                    intervals = [window * w / s for w in ws]
+                else:
+                    intervals = []
+                self.after(0, lambda a=i, t=taps, w=window: self.status.set(
+                    f"🎯 일반던전충전 {a+1}/{n} — {t}회 연속({w:.1f}초 내)..."))
+                for k in range(taps):
+                    pyautogui.click(x, y)
+                    if k < taps - 1:
+                        time.sleep(intervals[k])
+                if i < n - 1:
+                    time.sleep(random.uniform(mn, mx))
+            self.after(0, lambda: self.status.set(f"✔ 일반던전충전 완료 ({n}개 좌표)"))
+        except Exception as e:
+            self.after(0, lambda err=e: self.status.set(f"일반던전충전 오류: {err}"))
+        finally:
+            self._dc_running = False
+            self._clear_busy("일반던전충전")
+            self.after(0, self._restore_all)   # 완료 후 런처/서브창 복원
+
+    def _assign_dc_hotkey(self):
+        self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
+        def _cap():
+            import ctypes
+            time.sleep(0.3)  # 이전 클릭이 떼질 시간
+            end = time.time() + 5
+            captured = None
+            while time.time() < end:
+                for vk in range(0x08, 0xFF):
+                    if vk in (0x01, 0x02, 0x04):  # 마우스 버튼 제외
+                        continue
+                    if ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000:
+                        captured = vk
+                        break
+                if captured is not None:
+                    break
+                time.sleep(0.02)
+            if captured is None:
+                self.after(0, lambda: self.status.set("단축키 지정 취소 (시간초과)"))
+                return
+            if captured == 0x1B:  # ESC
+                self.after(0, lambda: self.status.set("단축키 지정 취소"))
+                return
+            self.cfg["dc_hotkey"] = captured
+            save_cfg(self.cfg)
+            name = self._vk_name(captured)
+            def _upd():
+                if hasattr(self, "_dc_hotkey_var"):
+                    self._dc_hotkey_var.set(f"단축키: {name}")
+                self.status.set(f"✔ 단축키 지정: {name}")
+            self.after(0, _upd)
+        threading.Thread(target=_cap, daemon=True).start()
+
+    def _dc_hotkey_loop(self):
+        """전역 단축키 감시 — ON 상태에서 지정키가 눌리면 일반던전충전 실행."""
+        import ctypes
+        prev = False
+        while True:
+            time.sleep(0.03)
+            vk = self.cfg.get("dc_hotkey")
+            if not getattr(self, "_dc_on", False) or not vk:
+                prev = False
+                continue
+            try:
+                down = bool(ctypes.windll.user32.GetAsyncKeyState(int(vk)) & 0x8000)
+            except Exception:
+                prev = False
+                continue
+            if down and not prev and not getattr(self, "_dc_running", False):
+                threading.Thread(target=self._run_dc, daemon=True).start()
             prev = down
 
     # ── 클로드 앱 최소화 (좌표 겹침 방지 + 야간 자동 최소화) ──
@@ -4097,9 +4377,13 @@ class App(tk.Tk):
             self.after(0, lambda o=ocr_id, r=ratio: self.status.set(
                 f"🔍 퍼플 아이디 '{o}' (일치율 {int(r*100)}%)"))
 
-            # 2단계: 지정 아이디(스홀) 아니면 전환
-            if not matched:
-                self.after(0, lambda: self.status.set("🔍 지정 아이디 아님 → 전환 중..."))
+            # 2단계: 지정 아이디(스홀) 아니면 전환 → 전환 후 재검증, 아직 다르면 최대 2회 재전환
+            MAX_SWITCH_TRIES = 2
+            attempt = 0
+            while not matched and attempt < MAX_SWITCH_TRIES:
+                attempt += 1
+                self.after(0, lambda a=attempt: self.status.set(
+                    f"🔍 지정 아이디 아님 → 전환 시도 {a}/{MAX_SWITCH_TRIES}..."))
                 if self.cfg.get("profile_btn"):
                     pyautogui.click(*self.cfg["profile_btn"]); time.sleep(2)
                 if self.cfg.get("google_acc"):
@@ -4107,7 +4391,28 @@ class App(tk.Tk):
                 if self.cfg.get("confirm_btn"):
                     pyautogui.click(*self.cfg["confirm_btn"])
                     time.sleep(10)  # 계정 전환 후 로딩(약 8~10초) 대기
-            self.after(0, lambda: self.status.set("✔ 퍼플 확인 완료"))
+                # 전환 후 재검증 — 퍼플 hwnd가 새로 생기므로 다시 찾아 앞으로 + 아이디 재표시
+                _re = win32gui.FindWindow(None, "PURPLE")
+                if _re:
+                    hwnd = _re
+                    try:
+                        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE); time.sleep(0.5)
+                        ctypes.windll.user32.SetForegroundWindow(hwnd)
+                        win32gui.BringWindowToTop(hwnd)
+                    except Exception:
+                        pass
+                    time.sleep(1.0)
+                if self.cfg.get("profile_reveal_btn"):
+                    pyautogui.click(*self.cfg["profile_reveal_btn"]); time.sleep(2)
+                matched, ocr_id, ratio = self._is_target_account(hwnd)
+                self.after(0, lambda o=ocr_id, r=ratio, a=attempt: self.status.set(
+                    f"🔍 전환 {a}회 후 아이디 '{o}' (일치율 {int(r*100)}%)"))
+
+            if matched:
+                self.after(0, lambda: self.status.set("✔ 퍼플 스홀 확인/전환 완료"))
+            else:
+                self.after(0, lambda: self.status.set(
+                    f"⚠ 퍼플 전환 실패 — {MAX_SWITCH_TRIES}회 재시도했으나 지정 아이디로 못 바꿈"))
         except Exception as e:
             self.after(0, lambda err=e: self.status.set(f"🔍 퍼플 확인 오류: {err}"))
         finally:
@@ -4422,6 +4727,7 @@ class App(tk.Tk):
         self._dungeon_stop = False
         if hasattr(self, "btn_dungeon_run"): self.btn_dungeon_run.config(state="disabled")
         if hasattr(self, "btn_dungeon_stop"): self.btn_dungeon_stop.config(state="normal")
+        self._minimize_claude()
         self.iconify()
         self.after(300, lambda: threading.Thread(target=self._run_task, args=("주말던전", self._run_dungeon), daemon=True).start())
 
@@ -4732,6 +5038,7 @@ class App(tk.Tk):
 
     def _run_sched(self, slot_idx=None):
         try:
+            self._sync_sched_click1()   # 실행 직전 과거섬 클릭1 반영(항상 최신값으로 실행)
             self.status.set("2초 후 매일매일 스케줄 실행...")
             self.after(0, self.iconify)
             time.sleep(2)
@@ -4782,6 +5089,7 @@ class App(tk.Tk):
             self._sched_canvas.yview_moveto(frac)
         if click_idx == 1:
             # 이동 좌표는 카운트다운 후 현재 마우스 위치 자동 캡처
+            self._minimize_claude()   # 클로드가 타깃을 가리지 않게 (런처는 안내 위해 유지)
             self._sched_hover_countdown(slot_idx, 3)
         else:
             self.status.set(f"3초 후 스케줄 #{slot_idx+1} [클릭{click_idx+1}] 위치 클릭하세요!")
@@ -6789,6 +7097,13 @@ class CoordOverlay(tk.Toplevel):
         self.overrideredirect(True)
         self.attributes("-topmost", True)
 
+        # 좌표 등록 시 클로드(항상 위) 창이 타깃을 가리지 않도록 캡처 전에 최소화
+        try:
+            app._minimize_claude()
+        except Exception:
+            pass
+        time.sleep(0.15)   # 최소화가 화면에 반영될 시간
+
         from PIL import Image as _Img, ImageTk as _ITk, ImageGrab as _IG
         shot = _IG.grab(all_screens=True).resize((sw, sh))
         self._bg = _ITk.PhotoImage(shot)
@@ -6824,6 +7139,8 @@ class CoordOverlay(tk.Toplevel):
             label = f"매일매일 스케줄 #{app._reg_sched_slot_idx+1} [클릭] 위치"
         elif mode == "seq":
             label = f"연속클릭 #{app._seq_reg_idx+1} 위치"
+        elif mode == "dc":
+            label = f"일반던전충전 #{app._dc_reg_idx+1} 위치"
         else:
             label = LABELS.get(app._reg_target, "버튼")
 
@@ -6845,6 +7162,7 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "pass":      self.app.on_pass_coord(x, y)
         elif self.mode == "sched":     self.app.on_sched_coord(x, y)
         elif self.mode == "seq":       self.app.on_seq_coord(x, y)
+        elif self.mode == "dc":        self.app.on_dc_coord(x, y)
         else:                          self.app.on_coord(x, y)
 
 
