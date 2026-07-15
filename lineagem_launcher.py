@@ -908,6 +908,14 @@ class App(tk.Tk):
         tk.Button(pid_row, text="저장", font=("맑은 고딕", 7), bg="#2471a3", fg="white",
                   command=_save_pid).pack(side="left", padx=2)
 
+        # 🔍 퍼플 확인 테스트 — 새벽 4시 자동 전환+최소화 로직을 지금 수동으로 1회 실행
+        test_row = tk.Frame(parent); test_row.pack(fill="x", padx=4, pady=(0, 2))
+        tk.Button(test_row, text="🔍 퍼플 확인 테스트 (4시 로직 지금 실행)",
+                  font=("맑은 고딕", 8), bg="#7d3c98", fg="white",
+                  command=lambda: threading.Thread(
+                      target=self._purple_check_worker, daemon=True).start()
+                  ).pack(fill="x")
+
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=3)
 
         # 캐릭터 접속 버튼
@@ -4102,9 +4110,10 @@ class App(tk.Tk):
         try:
             if hwnd:
                 orig_placement = win32gui.GetWindowPlacement(hwnd)
-                # 퍼플을 맨 앞으로 — 아이디 확인/캡처가 되려면 퍼플이 최상단이어야 함
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                time.sleep(0.5)
+                # 퍼플을 맨 앞 + '최대화' — 아이디 표시 영역/버튼 좌표가 최대화 상태 기준이라
+                # 반드시 최대화해야 OCR 캡처가 올바른 위치에서 찍힌다. (축소/복원 상태면 오인식)
+                win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+                time.sleep(0.6)
                 try:
                     ctypes.windll.user32.SetForegroundWindow(hwnd)
                 except Exception:
@@ -4165,6 +4174,20 @@ class App(tk.Tk):
 
             orig_placement = win32gui.GetWindowPlacement(hwnd)
 
+            # 캡처 전에 퍼플을 '최대화 + 앞으로' — 아이디 표시 영역 좌표가 최대화 기준이라
+            # 최대화 상태에서 찍어야 OCR 인식이 맞다.
+            win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+            time.sleep(0.6)
+            try:
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+            try:
+                win32gui.BringWindowToTop(hwnd)
+            except Exception:
+                pass
+            time.sleep(0.6)
+
             # 1단계: 리니지M 좌측버튼(profile_reveal_btn) 클릭 → 계정 확인
             if self.cfg.get("profile_reveal_btn"):
                 pyautogui.click(*self.cfg["profile_reveal_btn"])
@@ -4174,8 +4197,8 @@ class App(tk.Tk):
             self.status.set(f"{'✔ 아이디 확인됨' if matched else '🔄 아이디 다름 → 퍼플 전환 중...'} ('{ocr_id}' {int(ratio*100)}%)")
 
             if not matched:
-                # 2단계: Purple 포그라운드로 가져와서 프로필 전환
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                # 2단계: Purple 포그라운드로 가져와서 프로필 전환 (이미 최대화 상태)
+                win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
                 time.sleep(0.3)
                 try:
                     ctypes.windll.user32.SetForegroundWindow(hwnd)
