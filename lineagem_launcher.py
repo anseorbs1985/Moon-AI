@@ -410,6 +410,7 @@ class App(tk.Tk):
         ]
         self._acc_type_btns = [None] * 16   # 계정 관리 창 OptionMenu 참조 (창 재오픈 대비)
         self._reg_target   = None
+        self._busy_task      = None   # 현재 실행 중인 개별 작업 이름 (동시 실행 방지)
         self._stop_flag      = False
         self._running        = False  # 전체 자동실행 중 여부
         self._click_stop     = False
@@ -429,12 +430,13 @@ class App(tk.Tk):
         self.after(1000, self._purple_check_tick)
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._popup_guard_loop, daemon=True).start()
-        # 런처 시작 시 클로드 앱 최소화 유지 — 런처가 최소화될 때 포커스가 클로드로
-        # 넘어가 클로드가 앞으로 올라오므로, 시작 직후 여러 번 반복해서 확실히 내림
-        for _delay in (1000, 2500, 4000, 6000, 8000, 11000):
-            self.after(_delay, lambda: self._minimize_claude_windows(only_background=False))
+        threading.Thread(target=self._claude_attention_loop, daemon=True).start()
+        # 작업 중에는 클로드를 강제로 내리지 않는다(예전 시작 버스트 제거).
+        # 대신 클로드 앱을 화면 가운데로 유지 (아이디 영역 등 안 가리게, 사용자가 옮기면 중단)
+        self.after(2000, self._center_claude_tick)
         self.after(3000, self._claude_minimize_tick)
-        self.after(20000, self._idle_minimize_tick)   # 2분 무조작 시 메인런처 자동 최소화
+        self.after(20000, self._idle_minimize_tick)         # 2분 무조작 시 메인런처 자동 최소화
+        self.after(30000, self._claude_idle_minimize_tick)  # 3분 무입력 시 클로드 앱 최소화
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _on_close(self):
@@ -442,12 +444,16 @@ class App(tk.Tk):
         self.destroy()
 
     def _open_ocr(self):
+        if self._is_busy(exclude="다야OCR"):
+            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 다야OCR 실행 안 함 (동시 실행 방지)"); return
         import subprocess, sys
         exe = sys.executable.replace("python.exe", "pythonw.exe")
         self._ocr_proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py")])
         self.iconify()
 
     def _open_ocr_scan(self):
+        if self._is_busy(exclude="다야OCR"):
+            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 다야OCR 실행 안 함 (동시 실행 방지)"); return
         import subprocess, sys
         exe = sys.executable.replace("python.exe", "pythonw.exe")
         self._ocr_proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py"), "--scan"])
@@ -739,9 +745,12 @@ class App(tk.Tk):
 
     def _run_island_slot(self, idx):
         """해당 던전 단독창 열고 자동 실행."""
+        if self._is_busy():
+            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 섬/던전 실행 안 함 (동시 실행 방지)"); return
         self.iconify()
         self._minimize_claude()
         proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(idx), "--run"])
+        self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
 
     def _open_sched_win(self):
@@ -994,13 +1003,14 @@ class App(tk.Tk):
             return
         name   = slots[slot_idx].get("name", f"#{slot_idx+1}")
         coords = slots[slot_idx].get("coords", [])
+        if not self._try_busy("귀환주문서"): return
         self._return_running = True
         self._return_stop    = False
         self.status.set(f"2초 후 귀환주문서 [{name}] 실행...")
         self._minimize_claude()
         self.iconify()
-        threading.Thread(target=self._run_return_worker,
-                         args=(name, coords), daemon=True).start()
+        threading.Thread(target=self._run_task,
+                         args=("귀환주문서", self._run_return_worker, name, coords), daemon=True).start()
 
     def _run_return_worker(self, name, coords):
         CLICK_INTERVAL = 2.0   # island 실행 간격과 동일 (클릭 사이 대기)
@@ -2177,11 +2187,12 @@ class App(tk.Tk):
                       command=lambda x=i: self._del_pass(x)).pack(side="right", padx=2)
 
     def _start_pass(self):
+        if not self._try_busy("패스권"): return
         self._pass_stop = False
         self.btn_pass_run.config(state="disabled", bg="#f39c12", text="⏳ 실행중...")
         self.btn_pass_stop.config(state="normal")
         self._minimize_pass_ui()
-        threading.Thread(target=self._run_pass, daemon=True).start()
+        threading.Thread(target=self._run_task, args=("패스권", self._run_pass), daemon=True).start()
 
     def _minimize_pass_ui(self):
         """패스권 실행 시 메인 런처 + 패스권 창 + 클로드 모두 최소화 (클릭이 게임에 닿도록)."""
@@ -3305,6 +3316,8 @@ class App(tk.Tk):
         if not coords:
             self.after(0, lambda: self.status.set("연속클릭: 등록된 좌표가 없습니다"))
             return
+        if not self._try_busy("연속클릭"):
+            return
         self._seq_running = True
         try:
             # 클릭 좌표를 런처/연속클릭 창이 가리지 않도록 확실히 최소화 후 실행
@@ -3325,6 +3338,7 @@ class App(tk.Tk):
             self.after(0, lambda err=e: self.status.set(f"연속클릭 오류: {err}"))
         finally:
             self._seq_running = False
+            self._clear_busy("연속클릭")
 
     def _assign_seq_hotkey(self):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
@@ -3429,6 +3443,76 @@ class App(tk.Tk):
         except Exception: pass
         return st["vis"], st["fg"]
 
+    def _center_claude(self):
+        """클로드 앱 창을 화면 가운데로 이동 (아이디 영역 등 우측을 가리지 않게).
+        크기는 그대로, 위치만 중앙으로. 최소화 상태면 건드리지 않음.
+        사용자가 직접 옮겼으면(중앙 근처가 아닌 곳에 두면) 더는 강제로 안 옮김."""
+        if getattr(self, "_claude_user_moved", False):
+            return
+        from ctypes import wintypes
+        u = ctypes.windll.user32
+        sw = u.GetSystemMetrics(0); sh = u.GetSystemMetrics(1)
+        SWP_NOSIZE = 0x0001; SWP_NOZORDER = 0x0004; SWP_NOACTIVATE = 0x0010
+        def cb(hwnd, _):
+            try:
+                if not u.IsWindowVisible(hwnd) or u.IsIconic(hwnd):
+                    return True
+                b = ctypes.create_unicode_buffer(256); u.GetWindowTextW(hwnd, b, 256)
+                if "claude" not in b.value.lower():
+                    return True
+                r = wintypes.RECT(); u.GetWindowRect(hwnd, ctypes.byref(r))
+                w = r.right - r.left; h = r.bottom - r.top
+                if w > 200 and h > 200:   # 실제 앱 창만 (작은 부속 창 제외)
+                    x = max(0, (sw - w) // 2)
+                    y = max(0, (sh - h) // 2)
+                    self._claude_center_pos = (x, y)
+                    if abs(r.left - x) > 3 or abs(r.top - y) > 3:   # 이미 중앙이면 안 건드림
+                        u.SetWindowPos(hwnd, 0, x, y, 0, 0,
+                                       SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+            except Exception:
+                pass
+            return True
+        WN = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        try: u.EnumWindows(WN(cb), 0)
+        except Exception: pass
+
+    def _claude_pos(self):
+        """현재 클로드 앱 창의 (x, y) 반환. 없으면 None."""
+        from ctypes import wintypes
+        u = ctypes.windll.user32
+        res = {"p": None}
+        def cb(hwnd, _):
+            try:
+                if not u.IsWindowVisible(hwnd) or u.IsIconic(hwnd):
+                    return True
+                b = ctypes.create_unicode_buffer(256); u.GetWindowTextW(hwnd, b, 256)
+                if "claude" not in b.value.lower():
+                    return True
+                r = wintypes.RECT(); u.GetWindowRect(hwnd, ctypes.byref(r))
+                if (r.right - r.left) > 200 and (r.bottom - r.top) > 200:
+                    res["p"] = (r.left, r.top)
+            except Exception:
+                pass
+            return True
+        WN = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        try: u.EnumWindows(WN(cb), 0)
+        except Exception: pass
+        return res["p"]
+
+    def _center_claude_tick(self):
+        """클로드를 화면 가운데로 유지. 단, 사용자가 직접 옮기면(우리가 둔 위치에서 벗어나면) 중단."""
+        try:
+            if not getattr(self, "_claude_user_moved", False):
+                cur = self._claude_pos()
+                cp = getattr(self, "_claude_center_pos", None)
+                if cur and cp and (abs(cur[0] - cp[0]) > 20 or abs(cur[1] - cp[1]) > 20):
+                    self._claude_user_moved = True   # 사용자가 옮김 → 더는 강제 중앙 배치 안 함
+                else:
+                    self._center_claude()
+        except Exception:
+            pass
+        self.after(8000, self._center_claude_tick)
+
     def _claude_minimize_tick(self):
         """밤 11시~새벽 6시엔 클로드 앱을 최소화 유지.
         단, 사용자가 직접 클로드를 열면(포그라운드로) 자동 최소화를 멈추고,
@@ -3443,6 +3527,85 @@ class App(tk.Tk):
         if (h >= 23 or h < 6) and not getattr(self, "_claude_user_open", False):
             self._minimize_claude_windows(only_background=True)
         self.after(30000, self._claude_minimize_tick)
+
+    def _system_idle_ms(self):
+        """시스템 전체 마지막 입력(마우스·키보드) 이후 경과 시간(ms)."""
+        class LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+        lii = LASTINPUTINFO(); lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
+        ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii))
+        return ctypes.windll.kernel32.GetTickCount() - lii.dwTime
+
+    def _claude_idle_minimize_tick(self):
+        """사용자가 3분간 아무 작업(입력)도 안 하면 클로드 앱도 최소화.
+        (매크로 실행 중엔 pyautogui가 입력을 내서 유휴가 아니므로 발동 안 함)"""
+        try:
+            if self._system_idle_ms() >= 180000:   # 3분
+                self._minimize_claude_windows(only_background=False)
+        except Exception:
+            pass
+        self.after(20000, self._claude_idle_minimize_tick)
+
+    def _claude_attention_loop(self):
+        """클로드 앱이 주의를 요청(작업표시줄 플래시)하면 자동으로 복원해서 앞으로.
+        승인(항상 허용/한번 허용) 등 클릭이 필요할 때, 최소화돼 있어도 스스로 올라오게 한다.
+        사용자가 그냥 최소화한 경우와 구분하려고, 짧은 시간에 '반복되는' 상태변화(=플래시)만 복원한다."""
+        from ctypes import wintypes
+        u = ctypes.windll.user32
+        EVENT_OBJECT_STATECHANGE = 0x800A
+        WINEVENT_OUTOFCONTEXT = 0x0000
+        OBJID_WINDOW = 0
+        hits = {}   # hwnd -> [최근 상태변화 시각들]
+
+        def _is_claude(hwnd):
+            try:
+                b = ctypes.create_unicode_buffer(256); u.GetWindowTextW(hwnd, b, 256)
+                return "claude" in b.value.lower()
+            except Exception:
+                return False
+
+        WEP = ctypes.WINFUNCTYPE(None, wintypes.HANDLE, wintypes.DWORD, wintypes.HWND,
+                                 wintypes.LONG, wintypes.LONG, wintypes.DWORD, wintypes.DWORD)
+
+        def _cb(hHook, event, hwnd, idObject, idChild, dwThread, dwMs):
+            try:
+                if not hwnd or idObject != OBJID_WINDOW:
+                    return
+                if not u.IsIconic(hwnd):     # 이미 보이면 무시
+                    return
+                if not _is_claude(hwnd):
+                    return
+                now = time.time()
+                ts = [t for t in hits.get(hwnd, []) if now - t < 2.0] + [now]
+                hits[hwnd] = ts
+                # 2초 안에 상태변화 3번 이상 = 플래시(주의 요청) → 복원
+                if len(ts) >= 3:
+                    hits[hwnd] = []
+                    u.ShowWindow(hwnd, 9)    # SW_RESTORE
+                    try: u.SetForegroundWindow(hwnd)
+                    except Exception: pass
+                    try: self._center_claude()   # 복원 시 가운데로
+                    except Exception: pass
+            except Exception:
+                pass
+
+        cb = WEP(_cb)
+        self._claude_wineventproc = cb   # 콜백 GC 방지 (참조 유지)
+        try:
+            u.SetWinEventHook(EVENT_OBJECT_STATECHANGE, EVENT_OBJECT_STATECHANGE,
+                              0, cb, 0, 0, WINEVENT_OUTOFCONTEXT)
+        except Exception:
+            return
+        msg = wintypes.MSG()
+        while True:
+            try:
+                r = u.GetMessageW(ctypes.byref(msg), 0, 0, 0)
+                if r == 0 or r == -1:
+                    break
+                u.TranslateMessage(ctypes.byref(msg))
+                u.DispatchMessageW(ctypes.byref(msg))
+            except Exception:
+                time.sleep(0.5)
 
     def _mark_activity(self, e=None):
         """메인런처(및 서브창) 조작 감지 — 유휴 최소화 타이머 리셋."""
@@ -3526,7 +3689,7 @@ class App(tk.Tk):
                 if cls in SKIP_CLASSES:
                     return True
                 tl = title.lower()
-                if "purple" in tl or "리니지m" in tl:  # 게임/런처
+                if "purple" in tl or "리니지m" in tl or "claude" in tl:  # 게임/런처/클로드(항상위라 오인 방지)
                     return True
                 r = wintypes.RECT(); u.GetWindowRect(hwnd, ctypes.byref(r))
                 w = r.right - r.left; h = r.bottom - r.top
@@ -3825,8 +3988,13 @@ class App(tk.Tk):
             in_window = ((now.hour == 22 and now.minute >= 30) or
                          (now.hour == 23 and now.minute < 30))
             if in_window and self._mail_triggered_date != today:
-                self._mail_triggered_date = today
-                threading.Thread(target=self._run_mail_scheduled, daemon=True).start()
+                if self._is_busy():
+                    self.status.set("🕘 우편 스케줄 대기 — 다른 작업 실행 중")
+                else:
+                    self._mail_triggered_date = today
+                    self._busy_task = "우편함(스케줄)"
+                    threading.Thread(target=self._run_task,
+                        args=("우편함(스케줄)", self._run_mail_scheduled), daemon=True).start()
             elif self._mail_triggered_date != today:
                 target = now.replace(hour=22, minute=30, second=0, microsecond=0)
                 if now >= target:
@@ -3844,8 +4012,13 @@ class App(tk.Tk):
         if is_wed:
             self.status.set("🏝 과거섬: 수요일은 스케줄 실행 안 함 (건너뜀)")
         elif now.hour == 5 and 3 <= now.minute <= 25 and self._past_triggered_date != today:
-            self._past_triggered_date = today
-            threading.Thread(target=self._run_past_scheduled, daemon=True).start()
+            if self._is_busy():
+                self.status.set("🏝 과거섬 스케줄 대기 — 다른 작업 실행 중")
+            else:
+                self._past_triggered_date = today
+                self._busy_task = "과거섬(스케줄)"
+                threading.Thread(target=self._run_task,
+                    args=("과거섬(스케줄)", self._run_past_scheduled), daemon=True).start()
         elif self._past_triggered_date != today:
             target = now.replace(hour=5, minute=3, second=0, microsecond=0)
             if now >= target:
@@ -3861,12 +4034,19 @@ class App(tk.Tk):
         now = datetime.datetime.now()
         today = now.date()
         if now.hour == 4 and self._purple_triggered_date != today:
-            self._purple_triggered_date = today
-            threading.Thread(target=self._purple_check_worker, daemon=True).start()
+            if self._is_busy():
+                self.status.set("🔍 4시 퍼플 확인 대기 — 다른 작업 실행 중")
+            else:
+                self._purple_triggered_date = today
+                self._busy_task = "퍼플확인(4시)"
+                threading.Thread(target=self._run_task,
+                    args=("퍼플확인(4시)", self._purple_check_worker), daemon=True).start()
         self.after(60000, self._purple_check_tick)
 
     def _purple_check_worker(self):
         import win32gui, win32con, ctypes
+        self._minimize_claude()          # 클로드(항상위)가 클릭을 가리지 않게 먼저 내림
+        self.after(0, self.iconify)      # 메인런처도 내림
         win = find_purple()
         if not win:
             self.after(0, lambda: self.status.set("🔍 퍼플 확인: 퍼플 창 없음"))
@@ -4021,6 +4201,8 @@ class App(tk.Tk):
         import random, datetime
         self._sched_any_stop = False
         self._past_stop = False
+        self._minimize_claude()          # 클로드(항상위)가 클릭 가리지 않게 먼저 내림
+        self.after(0, self.iconify)
         slots = self.cfg.get("past_slots", [])
         active = [(i, s) for i, s in enumerate(slots)
                   if any(s.get("coords", []))]
@@ -4053,6 +4235,8 @@ class App(tk.Tk):
 
     def _run_mail_scheduled(self):
         import random, datetime
+        self._minimize_claude()          # 클로드(항상위)가 클릭 가리지 않게 먼저 내림
+        self.after(0, self.iconify)
         slots = self.cfg.get("mail_slots", [])
         active = [(i, s) for i, s in enumerate(slots)
                   if any(c for c in s.get("coords", []))]
@@ -4088,12 +4272,13 @@ class App(tk.Tk):
         self.status.set("✔ 전체 우편함 클릭 완료!")
 
     def _start_mail(self):
+        if not self._try_busy("우편함"): return
         self._mail_stop = False
         self._sched_any_stop = False
         if hasattr(self, "btn_mail_run"): self.btn_mail_run.config(state="disabled")
         if hasattr(self, "btn_mail_stop"): self.btn_mail_stop.config(state="normal")
         self._minimize_all()
-        self.after(300, lambda: threading.Thread(target=self._run_mail_standalone, daemon=True).start())
+        self.after(300, lambda: threading.Thread(target=self._run_task, args=("우편함", self._run_mail_standalone), daemon=True).start())
 
     def _stop_mail(self):
         self._mail_stop = True
@@ -4215,11 +4400,12 @@ class App(tk.Tk):
 
     # ── 주말던전 ──────────────────────────────────────────────────────
     def _start_dungeon(self):
+        if not self._try_busy("주말던전"): return
         self._dungeon_stop = False
         if hasattr(self, "btn_dungeon_run"): self.btn_dungeon_run.config(state="disabled")
         if hasattr(self, "btn_dungeon_stop"): self.btn_dungeon_stop.config(state="normal")
         self.iconify()
-        self.after(300, lambda: threading.Thread(target=self._run_dungeon, daemon=True).start())
+        self.after(300, lambda: threading.Thread(target=self._run_task, args=("주말던전", self._run_dungeon), daemon=True).start())
 
     def _run_dungeon(self, slot_idx=None):
         try:
@@ -4327,12 +4513,13 @@ class App(tk.Tk):
 
     # ── 과거의말하는섬 ────────────────────────────────────────────────
     def _start_past(self):
+        if not self._try_busy("과거섬"): return
         self._past_stop = False
         self._sched_any_stop = False
         if hasattr(self, "btn_past_run"): self.btn_past_run.config(state="disabled", bg="#f39c12", text="⏳ 실행중...")
         if hasattr(self, "btn_past_stop"): self.btn_past_stop.config(state="normal")
         self._minimize_all()
-        self.after(300, lambda: threading.Thread(target=self._run_past, daemon=True).start())
+        self.after(300, lambda: threading.Thread(target=self._run_task, args=("과거섬", self._run_past), daemon=True).start())
 
     def _run_past(self, slot_idx=None):
         try:
@@ -4515,6 +4702,7 @@ class App(tk.Tk):
         self.status.set(f"✔ #01 좌표 → #02~#{PAST_SLOTS:02d} 전체 복사 완료")
 
     def _start_sched(self):
+        if not self._try_busy("스케줄"): return
         self._sched_stop = False
         self._sched_any_stop = False
         if hasattr(self, "btn_sched_run"):
@@ -4522,7 +4710,7 @@ class App(tk.Tk):
         if hasattr(self, "btn_sched_stop"):
             self.btn_sched_stop.config(state="normal")
         self._minimize_all()
-        self.after(300, lambda: threading.Thread(target=self._run_sched, daemon=True).start())
+        self.after(300, lambda: threading.Thread(target=self._run_task, args=("스케줄", self._run_sched), daemon=True).start())
 
     def _run_sched(self, slot_idx=None):
         try:
@@ -5258,6 +5446,49 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    # ── 동시 실행 방지 (전역 잠금) ──────────────────────────────────
+    def _is_busy(self, exclude=None):
+        """개별 작업 / 다야 OCR / 섬·던전 실행기가 돌고 있으면 True. exclude 이름은 무시."""
+        bt = getattr(self, "_busy_task", None)
+        if bt and bt != exclude:
+            return True
+        if exclude != "다야OCR":
+            proc = getattr(self, "_ocr_proc", None)
+            if proc is not None and proc.poll() is None:
+                return True
+        ip = getattr(self, "_island_proc", None)
+        if ip is not None and ip.poll() is None:
+            return True
+        return False
+
+    def _busy_label(self):
+        bt = getattr(self, "_busy_task", None)
+        if bt:
+            return bt
+        proc = getattr(self, "_ocr_proc", None)
+        if proc is not None and proc.poll() is None:
+            return "다야OCR"
+        return "다른 작업"
+
+    def _try_busy(self, name):
+        """작업 시작 시도 — 다른 작업이 실행 중이면 안내 후 False."""
+        if self._is_busy(exclude=name):
+            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — '{name}'은(는) 실행 안 함 (동시 실행 방지)")
+            return False
+        self._busy_task = name
+        return True
+
+    def _clear_busy(self, name):
+        if getattr(self, "_busy_task", None) == name:
+            self._busy_task = None
+
+    def _run_task(self, name, fn, *args):
+        """작업 스레드 래퍼 — 끝나면 잠금 해제."""
+        try:
+            fn(*args)
+        finally:
+            self._clear_busy(name)
+
     def _stop(self):
         self._stop_flag      = True
         self._past_stop      = True
@@ -5267,6 +5498,7 @@ class App(tk.Tk):
         self._mail_stop      = True
         self._sched_any_stop = True
         self._return_stop    = True
+        self._busy_task      = None   # 잠금 해제
         # 다야 OCR 프로세스 종료
         proc = getattr(self, "_ocr_proc", None)
         if proc and proc.poll() is None:
@@ -5280,12 +5512,13 @@ class App(tk.Tk):
         slots = [s for s in self.cfg.get("click_slots", []) if s[0] and s[1]]
         if not slots:
             messagebox.showwarning("등록 필요", "클릭 좌표를 먼저 등록해주세요."); return
+        if not self._try_busy("클릭실행"): return
         self._click_stop = False
         self.btn_click_run.config(state="disabled")
         self.btn_click_stop.config(state="normal")
         self._minimize_claude()
         self.iconify()
-        threading.Thread(target=self._run_click_standalone, daemon=True).start()
+        threading.Thread(target=self._run_task, args=("클릭실행", self._run_click_standalone), daemon=True).start()
 
     def _run_click_standalone(self):
         self._run_click()
@@ -5323,12 +5556,13 @@ class App(tk.Tk):
                   if any(c for c in h.get("coords", []))]
         if not active:
             messagebox.showwarning("등록 필요", "사냥 좌표를 먼저 등록해주세요."); return
+        if not self._try_busy("사냥"): return
         self._hunt_stop = False
         if hasattr(self, "btn_hunt_run"): self.btn_hunt_run.config(state="disabled")
         if hasattr(self, "btn_hunt_stop"): self.btn_hunt_stop.config(state="normal")
         self._minimize_claude()
         self.iconify()
-        threading.Thread(target=self._run_hunt_standalone, daemon=True).start()
+        threading.Thread(target=self._run_task, args=("사냥", self._run_hunt_standalone), daemon=True).start()
 
     def _run_hunt_standalone(self):
         self._run_hunt()
@@ -5401,6 +5635,8 @@ class App(tk.Tk):
         if missing:
             messagebox.showwarning("등록 필요", "먼저 등록해주세요:\n" +
                                    "\n".join(f"• {m}" for m in missing)); return
+        if not self._try_busy("전체자동실행"):   # 다른 작업 실행 중이면 시작 안 함
+            return
         self._stop_flag = False
         self._running   = True
         self.btn_start.config(state="disabled")
@@ -5662,6 +5898,7 @@ class App(tk.Tk):
                 pass
         finally:
             self._running = False
+            self._clear_busy("전체자동실행")
             self.btn_start.config(state="normal")
             self.btn_stop.config(state="disabled")
             self._stop_flag = False
