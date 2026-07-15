@@ -52,6 +52,40 @@ REROLL_DIR    = os.path.join(BASE, "reroll_templates")   # 아이템 리롤 타�
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE    = 0.05
 
+# ── 정밀 클릭 (전역) ───────────────────────────────────────────────
+# 기본 pyautogui.click 은 좌표로 "이동하며" 클릭해서, 실행 중 마우스가 움직이거나
+# 이동 경로 위에 클릭이 찍히는 오클릭이 생긴다. SetCursorPos 로 지정 좌표에
+# 커서를 딱 고정한 뒤 그 자리에서 눌러, 방해 없이 정확히 그 지점만 찍는다.
+_MOUSEEVENTF_LEFTDOWN = 0x0002
+_MOUSEEVENTF_LEFTUP   = 0x0004
+_orig_pyautogui_click = pyautogui.click
+def _precise_click(x=None, y=None, *args, **kwargs):
+    """지정 좌표에 커서를 고정하고, 클릭하는 ~60ms 동안만 물리 입력을 차단해
+    사용자가 마우스를 움직여도 방해 없이 그 지점만 정확히 찍는다.
+    클릭 사이(대기 중)에는 차단이 풀려 마우스를 자유롭게 쓸 수 있다."""
+    try:
+        u = ctypes.windll.user32
+        blocked = False
+        try:
+            blocked = bool(u.BlockInput(True))   # 물리 마우스/키보드 잠깐 차단
+            if x is not None and y is not None:
+                ix, iy = int(x), int(y)
+                u.SetCursorPos(ix, iy)
+                time.sleep(0.015)
+                u.SetCursorPos(ix, iy)           # 클릭 직전 한 번 더 고정
+            u.mouse_event(_MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            time.sleep(0.03)
+            u.mouse_event(_MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        finally:
+            if blocked:
+                u.BlockInput(False)              # 반드시 차단 해제 (락 방지)
+        time.sleep(0.02)
+    except Exception:
+        try: u.BlockInput(False)
+        except Exception: pass
+        return _orig_pyautogui_click(x, y, *args, **kwargs)
+pyautogui.click = _precise_click
+
 CLICK_SLOTS    = 16
 GROUP_SIZE     = 8
 HUNT_SLOTS     = 16
@@ -360,6 +394,10 @@ class App(tk.Tk):
         self.bind("<Map>", self._on_main_map)
         self.bind("<FocusIn>", self._bring_to_front)
         self.after(150, self._fit_main_height)
+        # 유휴(2분 무조작) 시 메인런처 자동 최소화 — 조작 감지용
+        self._last_activity = time.time()
+        self.bind_all("<Button>", self._mark_activity, add="+")
+        self.bind_all("<Key>",    self._mark_activity, add="+")
 
         self.cfg = load_cfg()
         self._accounts = load_accounts()
@@ -390,11 +428,13 @@ class App(tk.Tk):
         self.after(1000, self._past_scheduler_tick)
         self.after(1000, self._purple_check_tick)
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
+        threading.Thread(target=self._popup_guard_loop, daemon=True).start()
         # 런처 시작 시 클로드 앱 최소화 유지 — 런처가 최소화될 때 포커스가 클로드로
         # 넘어가 클로드가 앞으로 올라오므로, 시작 직후 여러 번 반복해서 확실히 내림
         for _delay in (1000, 2500, 4000, 6000, 8000, 11000):
             self.after(_delay, lambda: self._minimize_claude_windows(only_background=False))
         self.after(3000, self._claude_minimize_tick)
+        self.after(20000, self._idle_minimize_tick)   # 2분 무조작 시 메인런처 자동 최소화
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _on_close(self):
@@ -1989,6 +2029,7 @@ class App(tk.Tk):
         if pass_open:
             self.after(50, self.iconify)
             return
+        self._last_activity = time.time()   # 다시 올라오면 유휴 타이머 리셋
         self._bring_to_front()
         # 워치독이 최소화 상태로 띄우면 시작 시 크기맞춤이 걸리지 않으므로,
         # 최초로 창이 보여질 때 딱 한 번만 콘텐츠 크기에 맞춘다(맵 이벤트 폭주 방지: 1회성).
@@ -2139,13 +2180,33 @@ class App(tk.Tk):
         self._pass_stop = False
         self.btn_pass_run.config(state="disabled", bg="#f39c12", text="⏳ 실행중...")
         self.btn_pass_stop.config(state="normal")
-        self.iconify()
+        self._minimize_pass_ui()
         threading.Thread(target=self._run_pass, daemon=True).start()
+
+    def _minimize_pass_ui(self):
+        """패스권 실행 시 메인 런처 + 패스권 창 + 클로드 모두 최소화 (클릭이 게임에 닿도록)."""
+        self.iconify()
+        try:
+            if self._pass_win and self._pass_win.winfo_exists():
+                self._pass_win.iconify()
+        except Exception:
+            pass
+        self._minimize_claude()
+
+    def _restore_pass_ui(self):
+        """패스권 실행 종료 후 창 복원 — 패스권 창이 있으면 그걸, 없으면 메인을 올림."""
+        try:
+            if self._pass_win and self._pass_win.winfo_exists():
+                self._pass_win.deiconify(); self._pass_win.lift()
+                return
+        except Exception:
+            pass
+        self.deiconify()
 
     def _run_pass(self, slot_idx=None):
         try:
             self.status.set("2초 후 패스권 실행...")
-            self.after(0, self.iconify)
+            self.after(0, self._minimize_pass_ui)
             time.sleep(2)
             slots = self.cfg.get("pass_slots", [])
             if slot_idx is not None:
@@ -2170,9 +2231,14 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"오류: {e}")
         finally:
-            self.after(0, self.deiconify)
-            self.btn_pass_run.config(state="normal", bg="#6c3483", text="▶  실행")
-            self.btn_pass_stop.config(state="disabled")
+            self.after(0, self._restore_pass_ui)
+            try:
+                if self.btn_pass_run.winfo_exists():
+                    self.btn_pass_run.config(state="normal", bg="#6c3483", text="▶  실행")
+                if self.btn_pass_stop.winfo_exists():
+                    self.btn_pass_stop.config(state="disabled")
+            except Exception:
+                pass
 
     def _reg_pass_click(self, slot_idx, click_idx):
         self._reg_pass_slot_idx  = slot_idx
@@ -3340,13 +3406,161 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _claude_ui_state(self):
+        """(보임여부, 포그라운드여부) — 클로드 창이 화면에 떠 있나 / 사용자가 앞에 두고 있나."""
+        import ctypes
+        u = ctypes.windll.user32
+        fg = u.GetForegroundWindow()
+        st = {"vis": False, "fg": False}
+        def cb(hwnd, _):
+            try:
+                if not u.IsWindowVisible(hwnd):
+                    return True
+                b = ctypes.create_unicode_buffer(256); u.GetWindowTextW(hwnd, b, 256)
+                if "claude" in b.value.lower() and not u.IsIconic(hwnd):
+                    st["vis"] = True
+                    if hwnd == fg:
+                        st["fg"] = True
+            except Exception:
+                pass
+            return True
+        WN = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        try: u.EnumWindows(WN(cb), 0)
+        except Exception: pass
+        return st["vis"], st["fg"]
+
     def _claude_minimize_tick(self):
-        """밤 11시~새벽 6시엔 클로드 앱을 계속 최소화(포그라운드 제외)."""
+        """밤 11시~새벽 6시엔 클로드 앱을 최소화 유지.
+        단, 사용자가 직접 클로드를 열면(포그라운드로) 자동 최소화를 멈추고,
+        사용자가 다시 최소화하면 재개한다 — 사용자가 클릭해서 연 걸 계속 내리지 않도록."""
         import datetime
+        vis, fg = self._claude_ui_state()
+        if fg:
+            self._claude_user_open = True    # 사용자가 열어둠 → 자동 최소화 중지
+        elif not vis:
+            self._claude_user_open = False   # 클로드가 안 보임(최소화됨) → 재개
         h = datetime.datetime.now().hour
-        if h >= 23 or h < 6:
+        if (h >= 23 or h < 6) and not getattr(self, "_claude_user_open", False):
             self._minimize_claude_windows(only_background=True)
         self.after(30000, self._claude_minimize_tick)
+
+    def _mark_activity(self, e=None):
+        """메인런처(및 서브창) 조작 감지 — 유휴 최소화 타이머 리셋."""
+        self._last_activity = time.time()
+
+    def _idle_minimize_tick(self):
+        """2분간 아무 조작이 없으면 메인런처를 최소화(뒤 화면 가리지 않게).
+        사용자가 클릭해서 다시 올리면(맵 이벤트) 타이머가 리셋된다."""
+        try:
+            idle = time.time() - getattr(self, "_last_activity", time.time())
+            running = getattr(self, "_running", False)  # 전체 자동실행 중이면 관여 안 함
+            if not running and idle >= 120:
+                try: normal = (self.state() == "normal")
+                except Exception: normal = False
+                if normal:
+                    self.iconify()
+        except Exception:
+            pass
+        self.after(15000, self._idle_minimize_tick)
+
+    def _popup_guard_loop(self):
+        """실행 방해 팝업 감시·정리.
+        - 우하단 윈도우 알림 토스트: 항상 숨김(안전).
+        - 항상 위(topmost) 낯선 팝업(업데이트 나그 등): 실행 중(런처 최소화 상태)일 때만 최소화.
+        우리 런처/서브창(같은 PID)·게임(Purple/리니지M)·바탕화면/작업표시줄은 건드리지 않음."""
+        from ctypes import wintypes
+        u = ctypes.windll.user32
+        GWL_EXSTYLE = -20
+        WS_EX_TOPMOST = 0x00000008
+        SW_HIDE = 0
+        SW_MINIMIZE = 6
+        my_pid = os.getpid()
+        SKIP_CLASSES = {
+            "progman", "workerw", "shell_traywnd", "shell_secondarytraywnd",
+            "button", "trayclockwclass", "notifyiconoverflowwindow",
+            "tooltips_class32", "windows.ui.input.inputsite.windowclass",
+        }
+        sw = u.GetSystemMetrics(0)
+        sh = u.GetSystemMetrics(1)
+        k = ctypes.windll.kernel32
+        # 게임/퍼플/NCSoft 계열 프로세스 — 이 창들은 절대 건드리지 않음
+        # (계정 전환·구글 계정 선택 팝업이 이 CEF/웹뷰 창으로 뜸)
+        SKIP_PROCS = {
+            "purple.exe", "purplebox.exe", "purpleon.exe", "purpleonp.exe",
+            "purple-agent.exe", "ncoverlaycefweb32.exe", "lineagem.exe",
+            "msedgewebview2.exe",
+        }
+
+        def _pid_of(hwnd):
+            p = wintypes.DWORD()
+            u.GetWindowThreadProcessId(hwnd, ctypes.byref(p))
+            return p.value
+
+        def _pname_of(pid):
+            try:
+                h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+                if not h:
+                    return ""
+                buf = ctypes.create_unicode_buffer(260)
+                size = wintypes.DWORD(260)
+                ok = k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size))
+                k.CloseHandle(h)
+                return os.path.basename(buf.value).lower() if ok else ""
+            except Exception:
+                return ""
+
+        def _is_game_proc(pid):
+            return _pname_of(pid) in SKIP_PROCS
+
+        def _cb(hwnd, running):
+            try:
+                if not u.IsWindowVisible(hwnd):
+                    return True
+                pid = _pid_of(hwnd)
+                if pid == my_pid:                    # 우리 런처/서브창
+                    return True
+                tb = ctypes.create_unicode_buffer(256); u.GetWindowTextW(hwnd, tb, 256)
+                title = tb.value
+                cbn = ctypes.create_unicode_buffer(256); u.GetClassNameW(hwnd, cbn, 256)
+                cls = cbn.value.lower()
+                if cls in SKIP_CLASSES:
+                    return True
+                tl = title.lower()
+                if "purple" in tl or "리니지m" in tl:  # 게임/런처
+                    return True
+                r = wintypes.RECT(); u.GetWindowRect(hwnd, ctypes.byref(r))
+                w = r.right - r.left; h = r.bottom - r.top
+                if w <= 0 or h <= 0:
+                    return True
+                # 1) 알림 토스트: 우하단 코너의 작은 CoreWindow → 숨김
+                if (cls == "windows.ui.core.corewindow"
+                        and r.right >= sw - 60 and r.bottom >= sh - 160
+                        and w < 640 and h < 520):
+                    if _is_game_proc(pid):           # 게임/퍼플/NCSoft 창 보호
+                        return True
+                    u.ShowWindow(hwnd, SW_HIDE)
+                    return True
+                # 2) 실행 중일 때만: 항상 위(topmost) 낯선 창 → 최소화
+                if running and title:
+                    ex = u.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                    if ex & WS_EX_TOPMOST:
+                        if _is_game_proc(pid):       # 게임/퍼플/NCSoft 창 보호 (전환 팝업 등)
+                            return True
+                        u.ShowWindow(hwnd, SW_MINIMIZE)
+            except Exception:
+                pass
+            return True
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        while True:
+            try:
+                lh = u.FindWindowW(None, "리니지M 자동 실행")
+                running = bool(lh and u.IsIconic(lh))   # 런처 최소화 = 실행 중으로 간주
+                cb_ptr = WNDENUMPROC(lambda h, l, rn=running: _cb(h, rn))
+                u.EnumWindows(cb_ptr, 0)
+            except Exception:
+                pass
+            time.sleep(0.5)
 
     def _reg_coord(self, key):
         self._reg_target = key
@@ -3506,7 +3720,7 @@ class App(tk.Tk):
                     self.status.set(f"[{name}] 클릭{j+1} 테스트...")
                     pyautogui.click(*coord)
                     if j < len(h["coords"]) - 1:
-                        time.sleep(HUNT_INTERVAL)
+                        time.sleep(random.uniform(0.1, 0.6))
                 self.status.set(f"✔ [{name}] 테스트 완료!")
             except Exception as e:
                 self.status.set(f"오류: {e}")
@@ -3626,7 +3840,10 @@ class App(tk.Tk):
         import datetime
         now = datetime.datetime.now()
         today = now.date()
-        if now.hour == 5 and 3 <= now.minute <= 25 and self._past_triggered_date != today:
+        is_wed = now.weekday() == 2   # 월=0 … 수=2 : 수요일엔 과거섬 스케줄 건너뜀
+        if is_wed:
+            self.status.set("🏝 과거섬: 수요일은 스케줄 실행 안 함 (건너뜀)")
+        elif now.hour == 5 and 3 <= now.minute <= 25 and self._past_triggered_date != today:
             self._past_triggered_date = today
             threading.Thread(target=self._run_past_scheduled, daemon=True).start()
         elif self._past_triggered_date != today:
@@ -3911,7 +4128,7 @@ class App(tk.Tk):
                     self.status.set(f"🕘 [{name}] 우편함 클릭 {k+1}/{len(valid)}...")
                     pyautogui.click(*coord)
                     if k < len(valid) - 1:
-                        time.sleep(MAIL_INTERVAL)
+                        time.sleep(random.uniform(0.1, 0.6))
                 if not self._mail_stop:
                     slot_wait = random.uniform(2.0, 4.0)
                     self.status.set(f"🕘 다음 슬롯 대기 {slot_wait:.1f}초...")
@@ -4023,7 +4240,7 @@ class App(tk.Tk):
                 pyautogui.moveTo(*coords[0])
                 time.sleep(DUNGEON_HOVER)
                 pyautogui.click(*coords[0])
-                time.sleep(DUNGEON_INTERVAL)
+                time.sleep(random.uniform(0.1, 0.6))
                 # 확장 후 클릭1, 클릭2
                 for j in range(1, DUNGEON_CLICKS):
                     if self._dungeon_stop: break
@@ -4031,7 +4248,7 @@ class App(tk.Tk):
                         self.status.set(f"🏰 [{name}] 클릭{j}...")
                         pyautogui.click(*coords[j])
                         if j < DUNGEON_CLICKS - 1:
-                            time.sleep(DUNGEON_INTERVAL)
+                            time.sleep(random.uniform(0.1, 0.6))
             self.status.set("✔ 던전 실행 완료!")
         except Exception as e:
             self.status.set(f"오류: {e}")
@@ -4326,12 +4543,12 @@ class App(tk.Tk):
                 if coords[0]:
                     self.status.set(f"📅 [{name}] 클릭1...")
                     pyautogui.click(*coords[0])
-                    time.sleep(SCHED_INTERVAL)
+                    time.sleep(random.uniform(0.1, 0.6))
                 if self._sched_stop: break
                 if coords[1]:
                     self.status.set(f"📅 [{name}] 마우스 이동...")
                     pyautogui.moveTo(*coords[1])
-                    time.sleep(SCHED_INTERVAL)
+                    time.sleep(random.uniform(0.1, 0.6))
                 if self._sched_stop: break
                 if len(coords) > 2 and coords[2]:
                     self.status.set(f"📅 [{name}] 클릭2...")
@@ -5088,13 +5305,13 @@ class App(tk.Tk):
                 grp = (i // GROUP_SIZE) + 1
                 self.status.set(f"그룹{grp} #{i+1}번 클릭1...")
                 pyautogui.click(*pair[0])
-                if not self._click_wait(CLICK_INNER_INTERVAL): self.status.set("클릭 멈춤"); return
+                if not self._click_wait(random.uniform(0.1, 0.5)): self.status.set("클릭 멈춤"); return
                 if not self._wait_mouse_idle("_click_stop"):
                     self.status.set("클릭 멈춤"); return
                 self.status.set(f"그룹{grp} #{i+1}번 클릭2...")
                 pyautogui.click(*pair[1])
                 if done < len(active) - 1:
-                    if not self._click_wait(CLICK_SLOT_INTERVAL): self.status.set("클릭 멈춤"); return
+                    if not self._click_wait(random.uniform(0.1, 0.5)): self.status.set("클릭 멈춤"); return
             self.status.set(f"✔ 클릭 완료! (총 {len(active)*2}번)")
         except Exception as e:
             self.status.set(f"오류: {e}")
@@ -5126,10 +5343,11 @@ class App(tk.Tk):
                 all_slots = all_slots[:limit]
             active = [(i, h) for i, h in all_slots
                       if any(c for c in h.get("coords", []))]
+            _hunt_t0 = time.time()   # 사냥 전체 소요시간 측정 (3분=180초 목표)
             for slot_done, (i, h) in enumerate(active):
                 if self._hunt_stop: self.status.set("사냥 멈춤"); return
-                # 슬롯별 랜덤 딜레이
-                slot_delay = random.uniform(5.0, 30.0)
+                # 슬롯 전 대기 — 전체 3분(180초) 안에 들도록 축소: 2~12 → 1~4
+                slot_delay = random.uniform(1.0, 4.0)
                 name = h.get("name", f"#{i+1}")
                 self.status.set(f"[{name}] {slot_delay:.0f}초 후 실행...")
                 if not self._hunt_wait(slot_delay): self.status.set("사냥 멈춤"); return
@@ -5146,17 +5364,28 @@ class App(tk.Tk):
                     pyautogui.mouseUp(*coord)
                     time.sleep(random.uniform(0.05, 0.15))
                     if j < HUNT_CLICKS - 1:
-                        interval = random.uniform(0.6, 1.8)
+                        # 슬롯 안 좌표간 클릭 간격 (랜덤)
+                        interval = random.uniform(0.15, 0.5)
                         if not self._hunt_wait(interval):
                             self.status.set("사냥 멈춤"); return
-                # 다음 슬롯 대기 (가끔 긴 휴식 추가)
+                # 다음 슬롯 대기
                 if slot_done < len(active) - 1:
-                    slot_interval = random.uniform(2.0, 6.0)
-                    if random.random() < 0.2:  # 20% 확률로 추가 휴식
-                        slot_interval += random.uniform(2.0, 5.0)
+                    slot_interval = random.uniform(0.6, 1.6)
+                    if random.random() < 0.2:  # 20% 확률로 짧은 추가 휴식
+                        slot_interval += random.uniform(0.5, 1.2)
                     if not self._hunt_wait(slot_interval):
                         self.status.set("사냥 멈춤"); return
-            self.status.set(f"✔ 사냥 완료! ({len(active)}개)")
+            # 사냥 전체 소요시간 기록 (180초 목표 확인)
+            _he = time.time() - _hunt_t0
+            _hmark = "✔180초이내" if _he <= 180 else "⚠180초초과!"
+            _hmsg = f"✔ 사냥 완료! ({len(active)}개)  [소요 {_he:.1f}초 {_hmark}]"
+            try:
+                with open(os.path.join(LOGS_DIR, "run_timing.txt"), "a", encoding="utf-8") as _f:
+                    import datetime as _dt
+                    _f.write(f"{_dt.datetime.now():%Y-%m-%d %H:%M:%S}  [사냥] {_he:.1f}초 ({_hmark})\n")
+            except Exception:
+                pass
+            self.status.set(_hmsg)
         except Exception as e:
             import traceback
             self.status.set(f"사냥 오류: {type(e).__name__}: {e}")
@@ -5262,6 +5491,8 @@ class App(tk.Tk):
 
                 for i, (cx, cy) in enumerate(self.cfg.get("char_btns", [])):
                     if self._stop_flag: self.status.set("멈춤"); return
+                    if acc_idx == 0 and i == 0:
+                        self._run_char01_t = time.time()   # 캐릭터01 접속 시각 (4분30초 제한 측정)
                     self.status.set(f"[{acc_idx+1}/{total}] 캐릭터 #{i+1} 클릭...")
                     pyautogui.click(cx, cy)
                     if not self._wait(3): self.status.set("멈춤"); return
@@ -5273,6 +5504,8 @@ class App(tk.Tk):
                                               win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
                 except: pass
 
+                try: _dbg.write(f"[LOOP] acc_idx={acc_idx} total={total} 마지막여부={acc_idx == total - 1}\n"); _dbg.flush()
+                except Exception: pass
                 if acc_idx == total - 1:
                     # ── 마지막 캐릭터 접속 후 순서 ──
                     # ① 스홀로 전환(프로필→구글계정→확인) ② 리니지M 좌측버튼으로 스홀 확인
@@ -5281,14 +5514,22 @@ class App(tk.Tk):
 
                     # ① 스홀 계정으로 전환
                     self.status.set("스홀 계정으로 전환 중...")
+                    try: _dbg.write(f"[SWITCH] 전환 시작 profile={self.cfg.get('profile_btn')} google={self.cfg.get('google_acc')} confirm={self.cfg.get('confirm_btn')}\n"); _dbg.flush()
+                    except Exception: pass
                     if self.cfg.get("profile_btn"):
                         pyautogui.click(*self.cfg["profile_btn"])
+                        try: _dbg.write("[SWITCH] profile_btn 클릭\n"); _dbg.flush()
+                        except Exception: pass
                         if not self._wait(2): self.status.set("멈춤"); return
                     if self.cfg.get("google_acc"):
                         pyautogui.click(*self.cfg["google_acc"])
+                        try: _dbg.write("[SWITCH] google_acc 클릭\n"); _dbg.flush()
+                        except Exception: pass
                         if not self._wait(2): self.status.set("멈춤"); return
                     if self.cfg.get("confirm_btn"):
                         pyautogui.click(*self.cfg["confirm_btn"])
+                        try: _dbg.write("[SWITCH] confirm_btn 클릭 → 로딩 10초\n"); _dbg.flush()
+                        except Exception: pass
                         # 계정 전환 후 로딩(약 8초)이 끝나야 리니지M 좌측버튼이 생성됨
                         self.status.set("계정 전환 로딩 대기 중... (약 10초)")
                         if not self._wait(10): self.status.set("멈춤"); return
@@ -5303,6 +5544,8 @@ class App(tk.Tk):
                         if not self._wait(3): self.status.set("멈춤"); return
                     _matched3, _oid3, _r3 = self._is_target_account()
                     self.status.set(f"아이디 '{_oid3}' (일치율 {int(_r3*100)}%)")
+                    try: _dbg.write(f"[SWITCH] 아이디 확인: '{_oid3}' 일치율 {int(_r3*100)}% matched={_matched3}\n"); _dbg.flush()
+                    except Exception: pass
 
                     # ③ 퍼플 최소화 — 확인 성공/실패와 무관하게 항상 최소화
                     #    (다음 좌표 클릭이 퍼플 위에서 눌리지 않도록 반드시 최소화)
@@ -5325,6 +5568,8 @@ class App(tk.Tk):
                     except Exception:
                         try: win.minimize()
                         except Exception: pass
+                    try: _dbg.write("[SWITCH] 퍼플 최소화 완료 → 그룹 클릭으로\n"); _dbg.flush()
+                    except Exception: pass
                     break
 
                 self.status.set(f"[{acc_idx+1}/{total}] 로딩 대기... (15초)")
@@ -5360,9 +5605,9 @@ class App(tk.Tk):
 
             if self._stop_flag: self.status.set("멈춤"); return
 
-            # 접속 완료 → 25초 대기 → 클릭 등록(그룹1,2) 실행
-            self.status.set("✔ 모든 계정 접속 완료! 25초 후 클릭 등록 실행...")
-            if not self._wait(25): self.status.set("멈춤"); return
+            # 접속 완료 → 20초 대기 → 클릭 등록(그룹1,2) 실행
+            self.status.set("✔ 모든 계정 접속 완료! 20초 후 클릭 등록 실행...")
+            if not self._wait(20): self.status.set("멈춤"); return
 
             active = [(i, s) for i, s in enumerate(self.cfg.get("click_slots", []))
                       if s[0] and s[1]]
@@ -5371,17 +5616,34 @@ class App(tk.Tk):
                 grp = (i // GROUP_SIZE) + 1
                 self.status.set(f"그룹{grp} #{i+1}번 클릭1...")
                 pyautogui.click(*pair[0])
-                if not self._wait(CLICK_INNER_INTERVAL): self.status.set("멈춤"); return
+                # 두번째 클릭이 좀 빨라서 0.5~0.7초 랜덤 추가로 늦춤
+                if not self._wait(random.uniform(0.6, 1.2) + random.uniform(0.5, 0.7)):
+                    self.status.set("멈춤"); return
                 self.status.set(f"그룹{grp} #{i+1}번 클릭2...")
                 pyautogui.click(*pair[1])
                 if i == 4 and len(pair) > 2 and pair[2]:
-                    if not self._wait(CLICK_INNER_INTERVAL): self.status.set("멈춤"); return
+                    if not self._wait(random.uniform(0.6, 1.2)): self.status.set("멈춤"); return
                     self.status.set(f"그룹{grp} #{i+1}번 클릭3...")
                     pyautogui.click(*pair[2])
                 if done < len(active) - 1:
-                    if not self._wait(CLICK_SLOT_INTERVAL): self.status.set("멈춤"); return
-            self.status.set(f"✔ 클릭 등록 완료! 5초 후 사냥 실행 시작...")
-            if not self._wait(5): self.status.set("멈춤"); return
+                    if not self._wait(2.5): self.status.set("멈춤"); return
+            # 캐릭터01 접속 → 그룹2 완료까지 실제 소요시간 측정 (4분30초=270초 제한 확인)
+            _t0 = getattr(self, "_run_char01_t", None)
+            if _t0:
+                _elapsed = time.time() - _t0
+                _mark = "✔270초이내" if _elapsed <= 270 else "⚠270초초과!"
+                _msg = f"[타이밍] 캐릭터01→그룹2 완료: {_elapsed:.1f}초 ({_mark})"
+                try:
+                    with open(os.path.join(LOGS_DIR, "run_timing.txt"), "a", encoding="utf-8") as _f:
+                        import datetime as _dt
+                        _f.write(f"{_dt.datetime.now():%Y-%m-%d %H:%M:%S}  {_msg}\n")
+                except Exception:
+                    pass
+                self.status.set(_msg)
+                time.sleep(1)
+            # 그룹→사냥 전환 시간 35%로 축소 (5초 → 1.75초)
+            self.status.set(f"✔ 클릭 등록 완료! 1.75초 후 사냥 실행 시작...")
+            if not self._wait(1.75): self.status.set("멈춤"); return
 
             if not self._stop_flag:
                 self._hunt_stop = False
