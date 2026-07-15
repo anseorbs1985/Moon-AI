@@ -5305,7 +5305,8 @@ class App(tk.Tk):
                 grp = (i // GROUP_SIZE) + 1
                 self.status.set(f"그룹{grp} #{i+1}번 클릭1...")
                 pyautogui.click(*pair[0])
-                if not self._click_wait(random.uniform(0.1, 0.5)): self.status.set("클릭 멈춤"); return
+                # 좌표1 → 좌표2 사이 0.8~1.1초 (너무 빠르면 클릭 씹힘) — 16슬롯 모두
+                if not self._click_wait(random.uniform(0.8, 1.1)): self.status.set("클릭 멈춤"); return
                 if not self._wait_mouse_idle("_click_stop"):
                     self.status.set("클릭 멈춤"); return
                 self.status.set(f"그룹{grp} #{i+1}번 클릭2...")
