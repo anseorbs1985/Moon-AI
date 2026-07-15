@@ -392,12 +392,16 @@ class App(tk.Tk):
         self.geometry(f"2117x1010+76+75")   # 콘텐츠에 맞춘 높이 (작업표시줄 위로)
         self.resizable(True, True)
         self.bind("<Map>", self._on_main_map)
+        self.bind("<Unmap>", self._on_main_unmap)   # 런처 최소화 시 클로드도 같이 내림
         self.bind("<FocusIn>", self._bring_to_front)
         self.after(150, self._fit_main_height)
         # 유휴(2분 무조작) 시 메인런처 자동 최소화 — 조작 감지용
         self._last_activity = time.time()
         self.bind_all("<Button>", self._mark_activity, add="+")
         self.bind_all("<Key>",    self._mark_activity, add="+")
+        # 런처↔클로드 최소화 커플링은 시작 20초 후부터 (워치독 시작 최소화 제외)
+        self._unmap_couple_ok = False
+        self.after(20000, lambda: setattr(self, "_unmap_couple_ok", True))
 
         self.cfg = load_cfg()
         self._accounts = load_accounts()
@@ -2032,6 +2036,20 @@ class App(tk.Tk):
             self.after(300, lambda: self.attributes("-topmost", False))
         except Exception:
             pass
+
+    def _on_main_unmap(self, e=None):
+        """메인런처가 최소화되면 클로드 앱도 같이 최소화.
+        (복원은 클로드를 직접 클릭해서 따로 열 수 있음 — 자동 복원 안 함)
+        단, 시작 직후 워치독이 런처를 최소화하는 건 제외(배포/시작 시 클로드 안 내리게)."""
+        if not getattr(self, "_unmap_couple_ok", False):
+            return
+        def _chk():
+            try:
+                if self.state() == "iconic":   # 실제 최소화일 때만 (withdraw/등록오버레이 제외)
+                    self._minimize_claude()
+            except Exception:
+                pass
+        self.after(120, _chk)
 
     def _on_main_map(self, e):
         """패스권 창이 켜져 있으면 메인 런처 최소화 유지 (섬/던전은 사용자가 직접 복원 가능)"""
