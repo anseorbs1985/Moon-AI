@@ -3190,10 +3190,10 @@ class App(tk.Tk):
             return (True, "", 0.0)
         ocr_id = self._ocr_profile_id(hwnd)
         ratio = self._profile_match_ratio(ocr_id)
-        return (ratio >= 0.5, ocr_id, ratio)
+        return (ratio >= 1.0, ocr_id, ratio)
 
     def _check_profile_and_switch(self):
-        """아이디 영역 OCR → 50% 이상 일치하면 스크롤 계정으로 판단"""
+        """아이디 영역 OCR → 100% 일치하면 지정 계정으로 판단"""
         area = self.cfg.get("profile_id_area")
         target = self.cfg.get("profile_target_id", "스크롤").strip()
         if not area or not target:
@@ -3210,11 +3210,11 @@ class App(tk.Tk):
             results = _get_ocr_reader().readtext(os.path.join(LOGS_DIR, "profile_ocr_tmp.png"),
                 detail=0, paragraph=False)
             ocr_id = "".join(results).strip()
-            # 50% 이상 글자 일치 여부 확인
+            # 100% 글자 일치 여부 확인
             match = sum(1 for a, b in zip(ocr_id, target) if a == b)
             ratio = match / max(len(target), 1)
             self.status.set(f"아이디 인식: '{ocr_id}' ({int(ratio*100)}% 일치)")
-            return ratio >= 0.5
+            return ratio >= 1.0
         except Exception as e:
             self.status.set(f"아이디 확인 오류: {e}")
             return True
@@ -3242,7 +3242,7 @@ class App(tk.Tk):
             match = sum(1 for a, b in zip(ocr_id, target) if a == b)
             ratio = match / max(len(target), 1)
             self.status.set(f"아이디 인식: '{ocr_id}' ({int(ratio*100)}% 일치)")
-            return ratio >= 0.5
+            return ratio >= 1.0
         except Exception as e:
             self.status.set(f"아이디 확인 오류: {e}")
             return True
@@ -4367,7 +4367,7 @@ class App(tk.Tk):
         self.after(30000, self._past_scheduler_tick)
 
     def _purple_check_tick(self):
-        """매일 새벽 4시에 한 번 퍼플이 스홀 계정인지 확인 → 아니면 전환 후 최소화"""
+        """매일 새벽 4시에 한 번 퍼플이 지정 계정인지 확인 → 아니면 전환 후 최소화"""
         import threading, datetime
         now = datetime.datetime.now()
         today = now.date()
@@ -4417,7 +4417,7 @@ class App(tk.Tk):
             self.after(0, lambda o=ocr_id, r=ratio: self.status.set(
                 f"🔍 퍼플 아이디 '{o}' (일치율 {int(r*100)}%)"))
 
-            # 2단계: 지정 아이디(스홀) 아니면 전환 → 전환 후 재검증, 아직 다르면 최대 2회 재전환
+            # 2단계: 지정 아이디 아니면 전환 → 전환 후 재검증, 아직 다르면 최대 2회 재전환
             MAX_SWITCH_TRIES = 2
             attempt = 0
             while not matched and attempt < MAX_SWITCH_TRIES:
@@ -4449,7 +4449,7 @@ class App(tk.Tk):
                     f"🔍 전환 {a}회 후 아이디 '{o}' (일치율 {int(r*100)}%)"))
 
             if matched:
-                self.after(0, lambda: self.status.set("✔ 퍼플 스홀 확인/전환 완료"))
+                self.after(0, lambda: self.status.set("✔ 퍼플 지정계정 확인/전환 완료"))
             else:
                 self.after(0, lambda: self.status.set(
                     f"⚠ 퍼플 전환 실패 — {MAX_SWITCH_TRIES}회 재시도했으나 지정 아이디로 못 바꿈"))
@@ -4472,12 +4472,12 @@ class App(tk.Tk):
                 except Exception: pass
 
     def _purple_ensure_scroll(self):
-        """퍼플을 스홀 계정으로 전환하고 최소화."""
+        """퍼플을 지정 계정으로 전환하고 최소화."""
         try:
             import win32gui, win32con, ctypes
             hwnd = win32gui.FindWindow(None, "PURPLE")
             if not hwnd:
-                self.status.set("⚠ 퍼플 창 없음 — 스홀 확인 건너뜀")
+                self.status.set("⚠ 퍼플 창 없음 — 지정계정 확인 건너뜀")
                 return
 
             orig_placement = win32gui.GetWindowPlacement(hwnd)
@@ -4505,7 +4505,7 @@ class App(tk.Tk):
                     pyautogui.click(*self.cfg["google_acc"]); time.sleep(2)
                 if self.cfg.get("confirm_btn"):
                     pyautogui.click(*self.cfg["confirm_btn"]); time.sleep(3)
-                self.status.set("✔ 퍼플 스홀 전환 완료")
+                self.status.set("✔ 퍼플 지정계정 전환 완료")
 
             # 원래 상태로 복원 후 최소화
             win32gui.SetWindowPlacement(hwnd, orig_placement)
@@ -6111,12 +6111,12 @@ class App(tk.Tk):
                 except Exception: pass
                 if acc_idx == total - 1:
                     # ── 마지막 캐릭터 접속 후 순서 ──
-                    # ① 스홀로 전환(프로필→구글계정→확인) ② 리니지M 좌측버튼으로 스홀 확인
-                    # ③ 스홀이면 퍼플 최소화
+                    # ① 지정계정로 전환(프로필→구글계정→확인) ② 리니지M 좌측버튼으로 지정계정 확인
+                    # ③ 지정계정이면 퍼플 최소화
                     if not self._wait(3): self.status.set("멈춤"); return
 
-                    # ① 스홀 계정으로 전환
-                    self.status.set("스홀 계정으로 전환 중...")
+                    # ① 지정 계정으로 전환
+                    self.status.set("지정 계정으로 전환 중...")
                     try: _dbg.write(f"[SWITCH] 전환 시작 profile={self.cfg.get('profile_btn')} google={self.cfg.get('google_acc')} confirm={self.cfg.get('confirm_btn')}\n"); _dbg.flush()
                     except Exception: pass
                     if self.cfg.get("profile_btn"):
@@ -6137,8 +6137,8 @@ class App(tk.Tk):
                         self.status.set("계정 전환 로딩 대기 중... (약 10초)")
                         if not self._wait(10): self.status.set("멈춤"); return
 
-                    # ② 게임 창 활성화 → 리니지M 좌측버튼으로 아이디 표시 → 스홀 확인
-                    self.status.set("스홀 확인 중...")
+                    # ② 게임 창 활성화 → 리니지M 좌측버튼으로 아이디 표시 → 지정계정 확인
+                    self.status.set("지정계정 확인 중...")
                     try: win.activate()
                     except Exception: pass
                     if not self._wait(1): self.status.set("멈춤"); return
@@ -6153,9 +6153,9 @@ class App(tk.Tk):
                     # ③ 퍼플 최소화 — 확인 성공/실패와 무관하게 항상 최소화
                     #    (다음 좌표 클릭이 퍼플 위에서 눌리지 않도록 반드시 최소화)
                     if _matched3:
-                        self.status.set("✔ 스홀 확인 → 퍼플 최소화")
+                        self.status.set("✔ 지정계정 확인 → 퍼플 최소화")
                     else:
-                        self.status.set(f"⚠ 스홀 확인 실패('{_oid3}') — 그래도 최소화 진행")
+                        self.status.set(f"⚠ 지정계정 확인 실패('{_oid3}') — 그래도 최소화 진행")
                     try:
                         import win32gui, win32con
                         # 계정 전환하면 퍼플 창이 새로 생겨 win 객체가 오래됨(죽은 창) →
