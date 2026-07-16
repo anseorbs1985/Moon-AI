@@ -7628,6 +7628,10 @@ class CoordOverlay(tk.Toplevel):
         self.app  = app
         self.mode = mode
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        # ⚠ 캡처가 끝날 때까지 이 창을 절대 보이면 안 된다.
+        #    전체화면 창이 먼저 뜬 상태로 ImageGrab 하면 '아직 안 그려진 자기 자신(검은 화면)'이
+        #    배경으로 찍혀서 화면 전체가 새까맣게 되고, 그대로 갇힌다.
+        self.withdraw()
         self.geometry(f"{sw}x{sh}+0+0")
         self.overrideredirect(True)
         self.attributes("-topmost", True)
@@ -7685,6 +7689,12 @@ class CoordOverlay(tk.Toplevel):
                       fill="white", font=("맑은 고딕", 14))
         c.bind("<ButtonPress-1>", self._click)
         self.bind("<Escape>", lambda e: [self.destroy(), app.deiconify()])
+
+        # 배경(스크린샷)이 준비된 뒤에야 보여준다 → 검은 화면이 찍히는 일이 없다.
+        self.deiconify()
+        self.lift()
+        # 포커스를 강제로 가져와야 ESC 취소가 먹는다. (없으면 전체화면에 갇힘)
+        self.focus_force()
 
     def _click(self, e):
         x, y = e.x, e.y
