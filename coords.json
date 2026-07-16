@@ -2910,7 +2910,8 @@
           305
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -2984,7 +2985,8 @@
           619
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -3058,7 +3060,8 @@
           936
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -3132,7 +3135,8 @@
           1249
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -3206,7 +3210,8 @@
           301
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -3280,7 +3285,8 @@
           618
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -3354,7 +3360,8 @@
           934
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -3428,7 +3435,8 @@
           1250
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -3502,7 +3510,8 @@
           309
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -3576,7 +3585,8 @@
           625
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -3650,7 +3660,8 @@
           942
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -3724,7 +3735,8 @@
           1257
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -3798,7 +3810,8 @@
           300
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -3872,7 +3885,8 @@
           618
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -3946,7 +3960,8 @@
           935
         ],
         null
-      ]
+      ],
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -4020,7 +4035,8 @@
           1252
         ],
         null
-      ]
+      ],
+      "enabled": true
     }
   ],
   "reroll_refresh_btn": [
@@ -4041,16 +4057,16 @@
   "reroll_wait": 1.0,
   "reroll_targets": [
     {
+      "enabled": false
+    },
+    {
+      "enabled": false
+    },
+    {
+      "enabled": false
+    },
+    {
       "enabled": true
-    },
-    {
-      "enabled": false
-    },
-    {
-      "enabled": false
-    },
-    {
-      "enabled": false
     }
   ],
   "pass_coords": [
