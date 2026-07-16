@@ -373,7 +373,17 @@ class OCRApp(tk.Tk):
         self.title("다야 수량 OCR")
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        self.geometry(f"700x{sh*2//3}+{sw//2-350}+{sh//6}")
+        # 작업표시줄을 제외한 작업영역 하단까지 세로로 확장 (상단 위치는 유지)
+        try:
+            import ctypes.wintypes as _wt
+            _rc = _wt.RECT()
+            ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(_rc), 0)  # SPI_GETWORKAREA
+            _work_bottom = _rc.bottom
+        except Exception:
+            _work_bottom = sh
+        _top = sh // 6
+        _h = _work_bottom - _top - 40   # 창 프레임(≈39px) 감안 → 하단이 작업표시줄 바로 위에 안착
+        self.geometry(f"700x{_h}+{sw//2-350}+{_top}")
         self.resizable(True, True)
 
         self.regions = load_regions()
@@ -385,6 +395,45 @@ class OCRApp(tk.Tk):
         self._build_ui()
         self._refresh_ui()
         self._refresh_zoom_ui()
+
+        # 3분간 조작이 없으면 자동으로 닫고 메인런처를 앞으로 띄운다
+        import time as _t
+        self._last_active = _t.time()
+        def _bump(e=None): self._last_active = _t.time()
+        for _seq in ("<Button>", "<Key>", "<Motion>"):
+            self.bind_all(_seq, _bump, add="+")
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.after(20000, self._idle_close_tick)
+
+    def _on_close(self):
+        self._raise_main_launcher()
+        self.destroy()
+
+    def _idle_close_tick(self):
+        import time as _t
+        try:
+            if not getattr(self, "_scanning", False) \
+               and _t.time() - getattr(self, "_last_active", _t.time()) >= 180:
+                self._raise_main_launcher()
+                self.destroy()
+                return
+        except Exception:
+            pass
+        self.after(20000, self._idle_close_tick)
+
+    def _raise_main_launcher(self):
+        """다야 OCR 창이 닫힐 때 메인런처를 앞으로 띄운다."""
+        try:
+            import win32gui, win32con
+            h = win32gui.FindWindow(None, "리니지M 자동 실행")
+            if h:
+                win32gui.ShowWindow(h, win32con.SW_RESTORE)
+                try:
+                    win32gui.SetForegroundWindow(h)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _build_ui(self):
         hdr = tk.Frame(self, bg="#2c3e50"); hdr.pack(fill="x")
@@ -704,6 +753,14 @@ class OCRApp(tk.Tk):
         img = img.convert("L")  # 그레이스케일
         img = ImageEnhance.Contrast(img).enhance(2.5)
         img = ImageEnhance.Sharpness(img).enhance(2.0)
+        # 슬롯별 캡처(전처리) 이미지 저장 — 메인런처에서 눈으로 숫자 확인용
+        if slot_idx is not None:
+            try:
+                _cd = os.path.join(BASE, "daya_crops")
+                os.makedirs(_cd, exist_ok=True)
+                img.convert("RGB").save(os.path.join(_cd, f"slot_{slot_idx}.png"))
+            except Exception:
+                pass
         img_np = np.array(img)
         # 이진화 (숫자 배경 분리)
         _, img_np = cv2.threshold(img_np, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -833,10 +890,36 @@ class OCRApp(tk.Tk):
         counts[day][str(idx)] = val
         save_counts(counts)
 
+    def _rescan_and_close(self, idx):
+        """단일 슬롯만 OCR 재측정 → 저장 → 메인런처 띄우고 종료 (--slot 모드)."""
+        r = self._get_common_region()
+        if not r:
+            self._raise_main_launcher(); self.destroy(); return
+        self._scanning = True
+        self.withdraw()
+        _minimize_claude()
+        def _run():
+            try:
+                val = self._ocr_with_retry(r, idx)
+                self._save_count(idx, val)
+            except Exception:
+                pass
+            finally:
+                self._scanning = False
+                self.after(0, lambda: (self._raise_main_launcher(), self.destroy()))
+        threading.Thread(target=_run, daemon=True).start()
+
 
 if __name__ == "__main__":
     import sys as _sys
     app = OCRApp()
     if "--scan" in _sys.argv:
         app.after(500, app._scan_all)
+    elif "--slot" in _sys.argv:
+        try:
+            _i = int(_sys.argv[_sys.argv.index("--slot") + 1])
+        except Exception:
+            _i = None
+        if _i is not None:
+            app.after(400, lambda: app._rescan_and_close(_i))
     app.mainloop()

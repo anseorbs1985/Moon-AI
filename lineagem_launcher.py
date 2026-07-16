@@ -127,6 +127,12 @@ DC_TAPS_MIN    = 7     # 한 좌표당 연속 클릭 횟수(최소)
 DC_TAPS_MAX    = 9     # 한 좌표당 연속 클릭 횟수(최대)
 DC_BURST_MIN   = 1.0   # 한 좌표의 7~9회 클릭을 이 시간(초) 안에 모두 실행
 DC_BURST_MAX   = 2.0
+DOLL_SLOTS     = 16    # 인형 탐험 슬롯 수
+DOLL_CLICKS    = 18    # 각 슬롯 좌표(클릭) 수
+DOLL_MIN       = 0.3   # 슬롯 안 좌표 간 클릭 간격(초)
+DOLL_MAX       = 0.7
+DOLL_SLOT_MIN  = 1.0   # 슬롯 간 간격(초)
+DOLL_SLOT_MAX  = 2.0
 
 DEFAULT_CFG = {
     "lineagem":    None,
@@ -162,6 +168,8 @@ DEFAULT_CFG = {
     "dc_on":        False,              # 일반던전충전 단축키 활성화 상태 (재시작 유지)
     "dc_min":       DC_MIN,
     "dc_max":       DC_MAX,
+    "doll_slots":   [{"name": "미등록", "coords": [None]*DOLL_CLICKS}
+                     for _ in range(DOLL_SLOTS)],   # 인형 탐험 (16슬롯 × 18좌표)
     # 아이템 리롤(새로고침 매크로)
     "reroll_refresh_btn": None,   # 새로고침 버튼 좌표 [x,y]
     "reroll_confirm_btn": None,   # 발견 시 자동으로 누를 확인 버튼 좌표 [x,y]
@@ -328,6 +336,16 @@ def load_cfg():
         while len(dq) < DC_SLOTS:
             dq.append(None)
         cfg["dc_slots"] = dq[:DC_SLOTS]
+        # doll_slots (인형 탐험 16슬롯 × 18좌표)
+        dl, ndl = cfg.get("doll_slots", []), []
+        for s in dl:
+            c = s.get("coords", [None]*DOLL_CLICKS) if isinstance(s, dict) else [None]*DOLL_CLICKS
+            while len(c) < DOLL_CLICKS: c.append(None)
+            ndl.append({"name": s.get("name", "미등록") if isinstance(s, dict) else "미등록",
+                        "coords": c[:DOLL_CLICKS]})
+        while len(ndl) < DOLL_SLOTS:
+            ndl.append({"name": "미등록", "coords": [None]*DOLL_CLICKS})
+        cfg["doll_slots"] = ndl[:DOLL_SLOTS]
         return _apply_local(cfg)
     return _apply_local(dict(DEFAULT_CFG))
 
@@ -489,10 +507,12 @@ class App(tk.Tk):
         self._seq_running  = False
         self._dc_on        = bool(self.cfg.get("dc_on", False))
         self._dc_running   = False
+        self._doll_stop    = False
         self._build_ui()
         self._sync_sched_click1()   # 스케줄 클릭1 = 과거섬 클릭1 (시작 시 1회 동기화)
         self.after(1000, self._mail_scheduler_tick)
         self.after(1000, self._past_scheduler_tick)
+        self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
         self.after(1000, self._purple_check_tick)
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
@@ -660,16 +680,26 @@ class App(tk.Tk):
         tk.Frame(self, height=1, bg="#ccc").pack(fill="x", padx=10, pady=(4,2))
         front_row = tk.Frame(self); front_row.pack(pady=4, anchor="n")
 
-        # 배열창 재배치 왼쪽: 일반던전충전 (계정관리 버튼 크기와 동일) + 실행 버튼
+        # 배열창 재배치 왼쪽: (1행) 일반던전충전+실행  (2행) 인형탐험+실행 — 각 버튼 옆에 실행
         dc_col = tk.Frame(front_row); dc_col.pack(side="left", padx=(4,8), anchor="n")
-        tk.Button(dc_col, text="🎯 일반\n던전충전",
+        r1 = tk.Frame(dc_col); r1.pack(anchor="n")
+        tk.Button(r1, text="🎯 일반\n던전충전",
             font=("맑은 고딕", 9, "bold"), bg="#6c3483", fg="white",
             activebackground="#512e6f", width=7, height=2,
-            command=self._open_dc_win).pack(anchor="n")
-        tk.Button(dc_col, text="▶ 실행",
+            command=self._open_dc_win).pack(side="left")
+        tk.Button(r1, text="▶\n실행",
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
-            activebackground="#1e8449", width=7,
-            command=self._start_dc).pack(anchor="n", pady=(2,0))
+            activebackground="#1e8449", width=4, height=2,
+            command=self._start_dc).pack(side="left", padx=(2,0))
+        r2 = tk.Frame(dc_col); r2.pack(anchor="n", pady=(4,0))
+        tk.Button(r2, text="🧸 인형\n탐험",
+            font=("맑은 고딕", 9, "bold"), bg="#b9770e", fg="white",
+            activebackground="#8a5809", width=7, height=2,
+            command=self._open_doll_win).pack(side="left")
+        tk.Button(r2, text="▶\n실행",
+            font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
+            activebackground="#1e8449", width=4, height=2,
+            command=self._start_doll).pack(side="left", padx=(2,0))
 
         winmgmt = tk.Frame(front_row); winmgmt.pack(side="left", padx=(4,10), anchor="n")
         self._build_winmgmt(winmgmt)
@@ -689,16 +719,30 @@ class App(tk.Tk):
         tk.Label(ctrl, textvariable=self._cnt_total_var,
                  font=("맑은 고딕", 10, "bold"), fg="#c0392b").pack(anchor="w", pady=(4,0))
 
+        self._cnt_img_labels = []
+        self._cnt_thumbs = [None] * 16
         grid = tk.Frame(daya_inner); grid.pack(side="left", anchor="n")
         for r in range(4):
             for c in range(4):
                 idx = r * 4 + c
-                cell = tk.Frame(grid, bd=1, relief="flat", width=60, height=38)
-                cell.grid(row=r, column=c, padx=1, pady=1)
-                cell.pack_propagate(False)
-                tk.Label(cell, text=f"{idx+1:02d}", font=("맑은 고딕", 7), fg="#aaa").pack()
-                tk.Label(cell, textvariable=self._cnt_cell_vars[idx],
-                         font=("맑은 고딕", 11, "bold"), fg="#2980b9").pack()
+                cell = tk.Frame(grid, bd=1, relief="groove")
+                cell.grid(row=r, column=c, padx=1, pady=1, sticky="n")
+                head = tk.Frame(cell); head.pack()
+                tk.Label(head, text=f"{idx+1:02d}", font=("맑은 고딕", 7), fg="#aaa").pack(side="left")
+                cntlbl = tk.Label(head, textvariable=self._cnt_cell_vars[idx],
+                         font=("맑은 고딕", 11, "bold"), fg="#2980b9", cursor="hand2")
+                cntlbl.pack(side="left", padx=(2,0))
+                cntlbl.bind("<Button-1>", lambda e, x=idx: self._edit_daya_count(x))
+                imbox = tk.Frame(cell, width=93, height=33, bg="#f4f4f4")
+                imbox.pack()
+                imbox.pack_propagate(False)
+                imlbl = tk.Label(imbox, bg="#f4f4f4", fg="#ccc", font=("맑은 고딕", 7))
+                imlbl.pack(fill="both", expand=True)
+                self._cnt_img_labels.append(imlbl)
+                tk.Button(cell, text="재측정", font=("맑은 고딕", 6, "bold"),
+                          bg="#27ae60", fg="white", pady=0,
+                          command=lambda x=idx: self._rescan_daya_slot(x)).pack(fill="x")
+        self._load_daya_thumbs()
 
         # 다야 수량 우측: 귀환주문서 슬롯별 실행 그리드 (좌표는 섬/던전 실행기에서 관리)
         tk.Frame(front_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(8,8))
@@ -755,6 +799,12 @@ class App(tk.Tk):
             win.geometry(f"{w}x{h}")
         win.resizable(True, True)
         setattr(self, attr, win)
+        # 서브창: 3분간 조작 없으면 자동으로 닫고 메인런처 복원
+        win._last_active = time.time()
+        def _bump(e=None, w=win): w._last_active = time.time()
+        for _seq in ("<Button>", "<Key>", "<Motion>"):
+            win.bind(_seq, _bump, add="+")
+        win.protocol("WM_DELETE_WINDOW", lambda w=win: self._close_subwin(w))
         build_fn(win)
         if pinnable:
             self._add_drag_bar(win, attr, pos_key)
@@ -765,6 +815,33 @@ class App(tk.Tk):
             needed = win.winfo_reqwidth() + 10
             win.geometry(f"{needed}x{h}")
         win.after(80, _fit)
+
+    def _close_subwin(self, win):
+        """서브창을 닫고 메인런처를 앞으로 띄운다."""
+        try:
+            if win and win.winfo_exists():
+                win.destroy()
+        except Exception:
+            pass
+        def _raise():
+            try:
+                self.deiconify(); self.lift(); self.focus_force()
+            except Exception:
+                pass
+        self.after(60, _raise)
+
+    def _subwin_autoclose_tick(self):
+        """열려있는 서브창이 3분간 조작이 없으면 자동으로 닫는다(실행 중엔 유지)."""
+        try:
+            if not self._is_busy():   # 실행 중이면 창을 건드리지 않음
+                now = time.time()
+                for w in self._section_wins():
+                    if now - getattr(w, "_last_active", now) >= 180:
+                        self._close_subwin(w)
+                        break   # 한 번에 하나씩(복원 충돌 방지)
+        except Exception:
+            pass
+        self.after(20000, self._subwin_autoclose_tick)
 
     def _add_drag_bar(self, win, attr, pos_key):
         """창 하단에 드래그 이동바 추가. 이동 후 위치를 cfg에 저장."""
@@ -897,6 +974,97 @@ class App(tk.Tk):
             self._cnt_cell_vars[i].set(f"{v:,}" if v else "-")
             total += v
         self._cnt_total_var.set(f"합계: {total:,}")
+        self._load_daya_thumbs()
+
+    def _load_daya_thumbs(self):
+        """daya_crops/slot_i.png (OCR가 캡처한 숫자 이미지)을 각 셀에 표시."""
+        labels = getattr(self, "_cnt_img_labels", None)
+        if not labels:
+            return
+        try:
+            from PIL import Image, ImageTk
+        except Exception:
+            return
+        crop_dir = os.path.join(BASE, "daya_crops")
+        for i, lbl in enumerate(labels):
+            p = os.path.join(crop_dir, f"slot_{i}.png")
+            try:
+                if os.path.exists(p):
+                    with Image.open(p) as _im0:
+                        im = _im0.copy()
+                    scale = 30.0 / max(im.height, 1)          # 기존 20px → 1.5배(30px)
+                    w = max(1, min(180, int(im.width * scale)))
+                    im = im.resize((w, 30), Image.LANCZOS)
+                    ph = ImageTk.PhotoImage(im)
+                    self._cnt_thumbs[i] = ph            # 참조 유지
+                    lbl.config(image=ph, text="")
+                else:
+                    lbl.config(image="", text="-")
+            except Exception:
+                pass
+
+    def _rescan_daya_slot(self, idx):
+        """해당 슬롯 하나만 다야 OCR 재측정 (별도 프로세스 --slot)."""
+        if self._is_busy():
+            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 재측정 안 함 (동시 실행 방지)"); return
+        import subprocess, sys
+        exe = sys.executable.replace("python.exe", "pythonw.exe")
+        self.status.set(f"🔎 #{idx+1:02d} 다야 재측정 중... (OCR 로딩 포함 잠시)")
+        # 런처/클로드가 게임(숫자 영역)을 가리지 않게 최소화하고 실행
+        self._minimize_claude()
+        self.iconify()
+        try:
+            proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py"), "--slot", str(idx)])
+        except Exception as e:
+            self.deiconify()
+            self.status.set(f"재측정 실행 오류: {e}"); return
+        self._ocr_proc = proc   # busy 락이 인식 → 다른 작업과 겹침 방지
+        threading.Thread(target=self._watch_rescan, args=(proc, idx), daemon=True).start()
+
+    def _watch_rescan(self, proc, idx):
+        try:
+            proc.wait()
+        except Exception:
+            pass
+        def _done():
+            self.deiconify(); self.lift()   # 끝나면 런처 다시 보여주기
+            self._refresh_count()           # 숫자 + 캡처 사진(썸네일) 갱신
+            self.status.set(f"✔ #{idx+1:02d} 다야 재측정 완료")
+        self.after(0, _done)
+
+    def _edit_daya_count(self, idx):
+        """다야 수량 숫자를 클릭 → 손으로 수정 (OCR 오표기 보정)."""
+        from tkinter import simpledialog
+        cur_txt = self._cnt_cell_vars[idx].get().replace(",", "")
+        try:
+            cur = int(cur_txt) if cur_txt not in ("", "-", "?") else 0
+        except Exception:
+            cur = 0
+        val = simpledialog.askinteger(
+            "다야 수량 수정", f"#{idx+1:02d} 다야 수량을 입력하세요\n(캡처 이미지를 보고 맞는 숫자로)",
+            initialvalue=cur, minvalue=0, parent=self)
+        if val is None:
+            return   # 취소
+        self._save_daya_count_manual(idx, val)
+        self._refresh_count()
+        self.status.set(f"✔ #{idx+1:02d} 다야 수량 수동 수정: {val:,}")
+
+    def _save_daya_count_manual(self, idx, val):
+        """daya_counts.json의 최신 날짜 데이터에 수정값을 기록(표시와 동일한 날짜)."""
+        p = os.path.join(BASE, "daya_counts.json")
+        try:
+            with open(p, encoding="utf-8") as f:
+                counts = json.load(f)
+        except Exception:
+            counts = {}
+        import datetime as _dt
+        day = max(counts.keys()) if counts else _dt.date.today().isoformat()
+        counts.setdefault(day, {})[str(idx)] = val
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(counts, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.status.set(f"저장 오류: {e}")
 
     def _schedule_count_refresh(self):
         self._refresh_count()
@@ -2086,6 +2254,7 @@ class App(tk.Tk):
             w = max(self._sec_row.winfo_reqwidth() + 20, self.winfo_reqwidth())
         except Exception:
             w = self.winfo_width() or 1047
+        w += 76   # 좌우 약 1cm씩(≈38px) 여유 — 내용이 가운데 정렬이라 양옆에 균등 여백
         return w, needed, x, y
 
     def _fit_main_height(self):
@@ -2097,6 +2266,7 @@ class App(tk.Tk):
             pass
         w, h, x, y = self._target_geometry()
         self.geometry(f"{w}x{h}+{x}+{y}")
+        self._did_initial_fit = True   # normal 상태에서 실제로 맞췄을 때만 완료 표시
 
     def _bring_to_front(self, e=None):
         self.lift()
@@ -2136,7 +2306,6 @@ class App(tk.Tk):
         # 워치독이 최소화 상태로 띄우면 시작 시 크기맞춤이 걸리지 않으므로,
         # 최초로 창이 보여질 때 딱 한 번만 콘텐츠 크기에 맞춘다(맵 이벤트 폭주 방지: 1회성).
         if not getattr(self, "_did_initial_fit", False):
-            self._did_initial_fit = True
             self.after(60, self._fit_main_height)
 
     def _open_pass_win(self):
@@ -3730,6 +3899,264 @@ class App(tk.Tk):
                 threading.Thread(target=self._run_dc, daemon=True).start()
             prev = down
 
+    # ── 인형 탐험 (16슬롯 × 18좌표, 슬롯별 순차 클릭) ──
+    def _open_doll_win(self):
+        self._open_section_win("_doll_win", "🧸 인형 탐험", self._build_doll, w=560, h=680)
+
+    def _build_doll(self, parent):
+        tk.Label(parent, text=f"인형 탐험  (슬롯당 {DOLL_CLICKS}좌표 순차 클릭)",
+                 font=("맑은 고딕", 9, "bold"), fg="#b9770e").pack(anchor="w", padx=4, pady=(4,2))
+
+        hr = tk.Frame(parent); hr.pack(pady=3)
+        self.btn_doll_run = tk.Button(hr, text="▶  인형탐험 실행",
+            font=("맑은 고딕", 9, "bold"), bg="#b9770e", fg="white",
+            activebackground="#8a5809", width=15, height=2, command=self._start_doll)
+        self.btn_doll_run.pack(side="left", padx=(0, 3))
+        self.btn_doll_stop = tk.Button(hr, text="■ 멈춤",
+            font=("맑은 고딕", 8, "bold"), bg="#c0392b", fg="white",
+            activebackground="#922b21", width=6, height=2,
+            command=lambda: setattr(self, "_doll_stop", True) or self.status.set("인형탐험 멈추는 중..."),
+            state="disabled")
+        self.btn_doll_stop.pack(side="left")
+        tk.Button(hr, text="🔀 그룹복사 (#01→전체)",
+            font=("맑은 고딕", 8), bg="#8e44ad", fg="white", width=18,
+            command=self._group_copy_doll).pack(side="left", padx=(8,0))
+
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
+
+        outer = tk.Frame(parent); outer.pack(fill="both", expand=True, padx=2)
+        canvas = tk.Canvas(outer, highlightthickness=0)
+        sb = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        self._doll_frame = tk.Frame(canvas)
+        fid = canvas.create_window((0, 0), window=self._doll_frame, anchor="nw")
+        self._doll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(fid, width=e.width))
+        def _wheel(e): canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+        canvas.bind("<MouseWheel>", _wheel)
+        self._doll_frame.bind("<MouseWheel>", _wheel)
+
+        self._doll_name_vars   = []
+        self._doll_click_vars  = []
+        self._doll_click_btns  = []
+        self._doll_coord_sv    = []
+        self._doll_detail_frames = []
+        self._doll_row_frames  = []
+
+        for i in range(DOLL_SLOTS):
+            row = tk.Frame(self._doll_frame, bd=1, relief="groove")
+            row.pack(fill="x", padx=2, pady=3)
+            self._doll_row_frames.append(row)
+            detail = tk.Frame(self._doll_frame, bg="#fdf3e3", bd=1, relief="flat")
+            self._doll_detail_frames.append(detail)
+
+            tk.Label(row, text=f"#{i+1:02d}", font=("맑은 고딕", 8, "bold"), width=4).pack(side="left", padx=(2,0))
+            nv = tk.StringVar()
+            self._doll_name_vars.append(nv)
+            ent = tk.Entry(row, textvariable=nv, font=("맑은 고딕", 8), width=8)
+            ent.pack(side="left", padx=(2,4))
+            ent.bind("<FocusOut>", lambda e, x=i: self._save_doll_name(x))
+            ent.bind("<Return>",   lambda e, x=i: self._save_doll_name(x))
+
+            csv = tk.StringVar(value=f"좌표 0/{DOLL_CLICKS} ▾")
+            self._doll_coord_sv.append(csv)
+            tk.Button(row, textvariable=csv, font=("맑은 고딕", 7),
+                      bg="#2980b9", fg="white", width=10, pady=0,
+                      command=lambda x=i: self._toggle_doll_detail(x)).pack(side="left", padx=(2,2))
+
+            # 접이식 내부: 18좌표 버튼 (6열 x 3행)
+            click_vars, click_btns = [], []
+            for j in range(DOLL_CLICKS):
+                cv = tk.StringVar()
+                click_vars.append(cv)
+                cell = tk.Frame(detail, bg="#fdf3e3")
+                cell.grid(row=j//6, column=j%6, padx=3, pady=2)
+                tk.Label(cell, text=f"{j+1}", font=("맑은 고딕", 6), fg="#555", bg="#fdf3e3").pack()
+                btn = tk.Button(cell, textvariable=cv, font=("맑은 고딕", 7), width=4, pady=1,
+                                command=lambda x=i, c=j: self._reg_doll_click(x, c))
+                btn.pack()
+                click_btns.append(btn)
+            self._doll_click_vars.append(click_vars)
+            self._doll_click_btns.append(click_btns)
+
+            for w in row.winfo_children():
+                w.bind("<MouseWheel>", _wheel)
+            row.bind("<MouseWheel>", _wheel)
+
+            if i > 0:
+                tk.Button(row, text="↑그룹복사", font=("맑은 고딕", 7), width=6,
+                          command=lambda x=i: self._group_copy_doll_slot(x)).pack(side="right", padx=(0,3))
+            tk.Button(row, text="👁", font=("맑은 고딕", 8), width=2,
+                      command=lambda x=i: self._preview_doll(x)).pack(side="right", padx=(0,2))
+            tk.Button(row, text="×", font=("맑은 고딕", 8), fg="red", width=2,
+                      command=lambda x=i: self._del_doll(x)).pack(side="right", padx=(0,2))
+            tk.Button(row, text="▶", font=("맑은 고딕", 8), fg="white", bg="#b9770e", width=2,
+                      command=lambda x=i: self._test_doll(x)).pack(side="right", padx=(0,2))
+
+        self._refresh_doll_display()
+
+    def _refresh_doll_display(self):
+        if not getattr(self, "_doll_name_vars", None):
+            return
+        for i in range(DOLL_SLOTS):
+            s = self.cfg["doll_slots"][i]
+            self._doll_name_vars[i].set(s.get("name", "미등록"))
+            coords = s.get("coords", [None]*DOLL_CLICKS)
+            reg = sum(1 for c in coords if c)
+            mapped = i < len(self._doll_detail_frames) and self._doll_detail_frames[i].winfo_ismapped()
+            self._doll_coord_sv[i].set(f"좌표 {reg}/{DOLL_CLICKS} {'▴' if mapped else '▾'}")
+            for j in range(DOLL_CLICKS):
+                c = coords[j] if j < len(coords) else None
+                self._doll_click_vars[i][j].set("✔" if c else "✗")
+                self._doll_click_btns[i][j].config(fg="white" if c else "#aaa",
+                                                    bg="#27ae60" if c else "#7f8c8d")
+
+    def _toggle_doll_detail(self, idx):
+        detail = self._doll_detail_frames[idx]
+        if detail.winfo_ismapped():
+            detail.pack_forget()
+        else:
+            detail.pack(after=self._doll_row_frames[idx], fill="x", padx=6, pady=(0,4))
+        self._refresh_doll_display()
+
+    def _save_doll_name(self, idx):
+        if getattr(self, "_doll_name_vars", None) and idx < len(self._doll_name_vars):
+            name = self._doll_name_vars[idx].get().strip() or "미등록"
+            self.cfg["doll_slots"][idx]["name"] = name
+            save_cfg(self.cfg)
+
+    def _reg_doll_click(self, slot_idx, click_idx):
+        self._save_doll_name(slot_idx)
+        self._doll_reg_idx  = slot_idx
+        self._doll_reg_step = click_idx
+        name = self.cfg["doll_slots"][slot_idx].get("name", f"#{slot_idx+1}")
+        self.status.set(f"3초 후 [{name}] 좌표{click_idx+1} 위치 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2), CoordOverlay(self, mode="doll")])
+
+    def on_doll_coord(self, x, y):
+        idx, step = self._doll_reg_idx, self._doll_reg_step
+        coords = self.cfg["doll_slots"][idx].get("coords", [None]*DOLL_CLICKS)
+        while len(coords) < DOLL_CLICKS: coords.append(None)
+        coords[step] = [x, y]
+        self.cfg["doll_slots"][idx]["coords"] = coords
+        save_cfg(self.cfg); self._refresh_doll_display()
+        self.status.set(f"✔ 인형탐험 #{idx+1} 좌표{step+1} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _del_doll(self, idx):
+        if not messagebox.askyesno("슬롯 삭제", f"인형탐험 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
+            return
+        self.cfg["doll_slots"][idx]["coords"] = [None]*DOLL_CLICKS
+        save_cfg(self.cfg); self._refresh_doll_display()
+
+    def _test_doll(self, idx):
+        h = self.cfg["doll_slots"][idx]
+        coords = [c for c in h.get("coords", []) if c]
+        if not coords:
+            messagebox.showwarning("등록 필요", f"#{idx+1} 슬롯에 등록된 좌표가 없습니다."); return
+        name = h.get("name", f"#{idx+1}")
+        self.iconify()
+        def run():
+            try:
+                for j, c in enumerate(h.get("coords", [])):
+                    if not c: continue
+                    self.status.set(f"[{name}] 좌표{j+1} 테스트...")
+                    pyautogui.click(*c)
+                    time.sleep(random.uniform(DOLL_MIN, DOLL_MAX))
+                self.status.set(f"✔ [{name}] 테스트 완료!")
+            except Exception as e:
+                self.status.set(f"오류: {e}")
+            finally:
+                self.deiconify()
+        threading.Thread(target=run, daemon=True).start()
+
+    def _preview_doll(self, idx):
+        coords = self.cfg["doll_slots"][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
+        if not dots:
+            self.status.set(f"#{idx+1:02d} 등록된 좌표가 없습니다"); return
+        name = self.cfg["doll_slots"][idx].get("name", f"#{idx+1:02d}")
+        def rereg(dot_idx):
+            self._doll_reg_idx  = idx
+            self._doll_reg_step = dot_idx
+            self.deiconify()
+            self.after(200, lambda: CoordOverlay(self, mode="doll"))
+        def _save(dot_idx, nx, ny):
+            self.cfg["doll_slots"][idx]["coords"][dot_idx] = [nx, ny]
+            save_cfg(self.cfg); self._refresh_doll_display()
+            self.status.set(f"✔ 인형탐험 #{idx+1:02d} 좌표{dot_idx+1} 이동 저장: ({nx},{ny})")
+        self._open_dot_preview(f"인형탐험 #{idx+1:02d} {name}", dots, rereg_fn=rereg, save_fn=_save, dot_r=8)
+
+    def _group_copy_doll_slot(self, idx):
+        import copy
+        src = self.cfg["doll_slots"][idx-1].get("coords", [])
+        if not any(src):
+            self.status.set(f"#{idx:02d} 위에 복사할 좌표가 없습니다"); return
+        self.cfg["doll_slots"][idx]["coords"] = copy.deepcopy(src)
+        save_cfg(self.cfg); self._refresh_doll_display()
+        self.status.set(f"✔ #{idx:02d} → #{idx+1:02d} 좌표 복사 완료")
+
+    def _group_copy_doll(self):
+        import copy
+        src = self.cfg["doll_slots"][0].get("coords", [])
+        if not any(src):
+            self.status.set("#01 슬롯에 복사할 좌표가 없습니다"); return
+        for i in range(1, DOLL_SLOTS):
+            self.cfg["doll_slots"][i]["coords"] = copy.deepcopy(src)
+        save_cfg(self.cfg); self._refresh_doll_display()
+        self.status.set(f"✔ #01 좌표 → #02~#{DOLL_SLOTS:02d} 전체 복사 완료")
+
+    def _doll_wait(self, sec):
+        end = time.time() + sec
+        while time.time() < end:
+            if getattr(self, "_doll_stop", False): return False
+            time.sleep(0.05)
+        return True
+
+    def _start_doll(self):
+        active = [h for h in self.cfg.get("doll_slots", []) if any(c for c in h.get("coords", []))]
+        if not active:
+            messagebox.showwarning("등록 필요", "인형 탐험 좌표를 먼저 등록해주세요."); return
+        if not self._try_busy("인형탐험"): return
+        self._doll_stop = False
+        if hasattr(self, "btn_doll_run"):  self.btn_doll_run.config(state="disabled")
+        if hasattr(self, "btn_doll_stop"): self.btn_doll_stop.config(state="normal")
+        self._minimize_claude()
+        self.iconify()
+        threading.Thread(target=self._run_task, args=("인형탐험", self._run_doll_standalone), daemon=True).start()
+
+    def _run_doll_standalone(self):
+        self._run_doll()
+        if hasattr(self, "btn_doll_run"):  self.btn_doll_run.config(state="normal", bg="#b9770e", text="▶  인형탐험 실행")
+        if hasattr(self, "btn_doll_stop"): self.btn_doll_stop.config(state="disabled")
+        self._doll_stop = False
+        self.after(0, self._restore_all)
+
+    def _run_doll(self):
+        try:
+            slots = list(enumerate(self.cfg.get("doll_slots", [])))
+            active = [(i, h) for i, h in slots if any(c for c in h.get("coords", []))]
+            for si, (i, h) in enumerate(active):
+                if getattr(self, "_doll_stop", False): self.status.set("인형탐험 멈춤"); return
+                name = h.get("name", f"#{i+1}")
+                coords = h.get("coords", [])
+                for j, coord in enumerate(coords):
+                    if not coord: continue
+                    if getattr(self, "_doll_stop", False): self.status.set("인형탐험 멈춤"); return
+                    self.status.set(f"🧸 [{name}] 좌표 {j+1}/{DOLL_CLICKS}...")
+                    pyautogui.click(*coord)
+                    if j < len(coords) - 1:
+                        if not self._doll_wait(random.uniform(DOLL_MIN, DOLL_MAX)):
+                            self.status.set("인형탐험 멈춤"); return
+                if si < len(active) - 1:
+                    if not self._doll_wait(random.uniform(DOLL_SLOT_MIN, DOLL_SLOT_MAX)):
+                        self.status.set("인형탐험 멈춤"); return
+            self.status.set(f"✔ 인형 탐험 완료! ({len(active)}개 슬롯)")
+        except Exception as e:
+            self.status.set(f"인형탐험 오류: {e}")
+
     # ── 클로드 앱 최소화 (좌표 겹침 방지 + 야간 자동 최소화) ──
     def _minimize_claude_windows(self, only_background=False):
         """제목에 'claude'가 들어간 창을 최소화한다.
@@ -5276,7 +5703,8 @@ class App(tk.Tk):
 
     def _section_wins(self):
         attrs = ["_settings_win","_hunt_win","_mail_win","_past_win2",
-                 "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win"]
+                 "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
+                 "_dc_win","_accounts_win","_doll_win"]
         return [getattr(self, a) for a in attrs
                 if getattr(self, a, None) and getattr(self, a).winfo_exists()]
 
@@ -7181,6 +7609,8 @@ class CoordOverlay(tk.Toplevel):
             label = f"연속클릭 #{app._seq_reg_idx+1} 위치"
         elif mode == "dc":
             label = f"일반던전충전 #{app._dc_reg_idx+1} 위치"
+        elif mode == "doll":
+            label = f"인형탐험 #{app._doll_reg_idx+1} 좌표{app._doll_reg_step+1} 위치"
         else:
             label = LABELS.get(app._reg_target, "버튼")
 
@@ -7203,6 +7633,7 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "sched":     self.app.on_sched_coord(x, y)
         elif self.mode == "seq":       self.app.on_seq_coord(x, y)
         elif self.mode == "dc":        self.app.on_dc_coord(x, y)
+        elif self.mode == "doll":      self.app.on_doll_coord(x, y)
         else:                          self.app.on_coord(x, y)
 
 
