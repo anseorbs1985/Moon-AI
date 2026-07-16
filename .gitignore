@@ -1,4 +1,6 @@
 *.json
 lineagem_logs/
+daya_crops/
 __pycache__/
 *.pyc
+ocr_debug.png
