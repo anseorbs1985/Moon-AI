@@ -129,10 +129,10 @@ DC_BURST_MIN   = 1.0   # 한 좌표의 7~9회 클릭을 이 시간(초) 안에 �
 DC_BURST_MAX   = 2.0
 DOLL_SLOTS     = 16    # 인형 탐험 슬롯 수
 DOLL_CLICKS    = 18    # 각 슬롯 좌표(클릭) 수
-DOLL_MIN       = 1.0   # 슬롯 안 좌표 간 클릭 간격(초) — 전부 1~1.5초 랜덤
-DOLL_MAX       = 1.5
-DOLL_FIRST_MIN = 1.0   # 첫 클릭 뒤 간격도 동일하게 1~1.5초
-DOLL_FIRST_MAX = 1.5
+DOLL_MIN       = 2.0   # 슬롯 안 좌표 간 클릭 간격(초) — 2~3초 (1·2·3번 모두)
+DOLL_MAX       = 3.0
+DOLL_LEAD_MIN  = 0.5   # 슬롯의 '첫 클릭 전' 여유(바로 클릭하지 않음) — 0.5~1초
+DOLL_LEAD_MAX  = 1.0
 DOLL_SLOT_MIN  = 2.0   # 슬롯 간 간격(초) — 2~4초 랜덤
 DOLL_SLOT_MAX  = 4.0
 EXTRA_GAP_MIN  = 0.9   # 씹힘 방지용 추가 좌표간 간격 (사냥·전체실행·인형탐험 제외 전 기능)
@@ -4098,13 +4098,12 @@ class App(tk.Tk):
                 _clicked = 0
                 for j, c in enumerate(h.get("coords", [])):
                     if not c: continue
+                    if _clicked == 0:
+                        time.sleep(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))  # 첫 클릭 전 여유
                     self.status.set(f"[{name}] 좌표{j+1} 테스트...")
                     pyautogui.click(*c)
                     _clicked += 1
-                    if _clicked == 1:
-                        time.sleep(random.uniform(DOLL_FIRST_MIN, DOLL_FIRST_MAX))
-                    else:
-                        time.sleep(random.uniform(DOLL_MIN, DOLL_MAX))
+                    time.sleep(random.uniform(DOLL_MIN, DOLL_MAX))  # 좌표 간 2~3초
                 self.status.set(f"✔ [{name}] 테스트 완료!")
             except Exception as e:
                 self.status.set(f"오류: {e}")
@@ -4184,20 +4183,19 @@ class App(tk.Tk):
                 if getattr(self, "_doll_stop", False): self.status.set("인형탐험 멈춤"); return
                 name = h.get("name", f"#{i+1}")
                 coords = h.get("coords", [])
-                _clicked = 0   # 이 슬롯에서 실제로 클릭한 횟수 (첫 클릭 뒤 여유용)
+                _clicked = 0   # 이 슬롯에서 실제로 클릭한 횟수
                 for j, coord in enumerate(coords):
                     if not coord: continue
                     if getattr(self, "_doll_stop", False): self.status.set("인형탐험 멈춤"); return
+                    if _clicked == 0:
+                        # 첫 클릭 '전' 여유 — 바로 클릭하지 않음 (0.5~1초)
+                        if not self._doll_wait(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX)):
+                            self.status.set("인형탐험 멈춤"); return
                     self.status.set(f"🧸 [{name}] 좌표 {j+1}/{DOLL_CLICKS}...")
                     pyautogui.click(*coord)
                     _clicked += 1
                     if j < len(coords) - 1:
-                        # 첫 클릭 뒤(둘째 클릭 전)는 전용 여유 간격, 이후는 일반 간격
-                        if _clicked == 1:
-                            gap = random.uniform(DOLL_FIRST_MIN, DOLL_FIRST_MAX)
-                        else:
-                            gap = random.uniform(DOLL_MIN, DOLL_MAX)
-                        if not self._doll_wait(gap):
+                        if not self._doll_wait(random.uniform(DOLL_MIN, DOLL_MAX)):
                             self.status.set("인형탐험 멈춤"); return
                 if si < len(active) - 1:
                     if not self._doll_wait(random.uniform(DOLL_SLOT_MIN, DOLL_SLOT_MAX)):

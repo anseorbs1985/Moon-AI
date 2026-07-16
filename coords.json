@@ -4057,13 +4057,13 @@
   "reroll_wait": 1.0,
   "reroll_targets": [
     {
-      "enabled": false
+      "enabled": true
     },
     {
-      "enabled": false
+      "enabled": true
     },
     {
-      "enabled": false
+      "enabled": true
     },
     {
       "enabled": true
