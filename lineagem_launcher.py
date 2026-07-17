@@ -4094,6 +4094,10 @@ class App(tk.Tk):
         coords = [c for c in h.get("coords", []) if c]
         if not coords:
             messagebox.showwarning("등록 필요", f"#{idx+1} 슬롯에 등록된 좌표가 없습니다."); return
+        # 슬롯별 실행도 잠금+대기열 — 연속으로 눌러두면 한 슬롯 완료 후 다음 슬롯 실행
+        busy_name = f"인형탐험 #{idx+1:02d}"
+        if not self._try_busy_or_queue(busy_name, lambda: self._test_doll(idx)): return
+        self._doll_stop = False
         name = h.get("name", f"#{idx+1}")
         self.iconify()
         def run():
@@ -4101,16 +4105,18 @@ class App(tk.Tk):
                 _clicked = 0
                 for j, c in enumerate(h.get("coords", [])):
                     if not c: continue
+                    if getattr(self, "_doll_stop", False): break
                     if _clicked == 0:
                         time.sleep(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))  # 첫 클릭 전 여유
-                    self.status.set(f"[{name}] 좌표{j+1} 테스트...")
+                    self.status.set(f"[{name}] 좌표{j+1} 실행...")
                     pyautogui.click(*c)
                     _clicked += 1
-                    time.sleep(random.uniform(DOLL_MIN, DOLL_MAX))  # 좌표 간 2~3초
-                self.status.set(f"✔ [{name}] 테스트 완료!")
+                    time.sleep(random.uniform(DOLL_MIN, DOLL_MAX))  # 좌표 간 간격
+                self.status.set(f"✔ [{name}] 슬롯 완료!")
             except Exception as e:
                 self.status.set(f"오류: {e}")
             finally:
+                self._clear_busy(busy_name)   # 잠금 해제 → 대기열의 다음 슬롯이 이어서 실행
                 self.deiconify()
         threading.Thread(target=run, daemon=True).start()
 
