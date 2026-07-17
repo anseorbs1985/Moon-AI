@@ -493,6 +493,7 @@ class App(tk.Tk):
         self._doll_stop    = False
         self._task_queue   = []   # 연속으로 누른 실행/재측정 순차 실행 대기열
         self._build_ui()
+        self._build_update_circle()   # 바탕화면 빨간 동그라미 업데이트 위젯
         self._sync_sched_click1()   # 스케줄 클릭1 = 과거섬 클릭1 (시작 시 1회 동기화)
         self.after(1000, self._mail_scheduler_tick)
         self.after(1000, self._past_scheduler_tick)
@@ -515,8 +516,59 @@ class App(tk.Tk):
         self._set_sleep_prevention(False)
         self.destroy()
 
+    def _build_update_circle(self):
+        """바탕화면 빨간 동그라미 업데이트 위젯 — 클릭=업데이트 실행, 드래그=위치 이동."""
+        win = tk.Toplevel(self)
+        win.title("업데이트위젯")                 # 런처와 제목 분리(시작 최소화에 안 딸려가게)
+        win.overrideredirect(True)               # 테두리 없는 위젯
+        win.attributes("-topmost", True)
+        try:
+            win.attributes("-transparentcolor", "magenta")   # 원 밖은 투명
+        except Exception:
+            pass
+        size = 74
+        pos = self.cfg.get("update_circle_pos") or \
+              [self.winfo_screenwidth() - 120, self.winfo_screenheight() - 190]
+        win.geometry(f"{size}x{size}+{int(pos[0])}+{int(pos[1])}")
+        cv = tk.Canvas(win, width=size, height=size, bg="magenta", highlightthickness=0)
+        cv.pack()
+        cv.create_oval(2, 2, size-2, size-2, fill="#c0392b", outline="#7b241c", width=3)
+        cv.create_text(size//2, size//2 - 10, text="🔄", font=("맑은 고딕", 13))
+        cv.create_text(size//2, size//2 + 14, text="업데이트", fill="white",
+                       font=("맑은 고딕", 9, "bold"))
+        drag = {"x": 0, "y": 0, "moved": False}
+        def _press(e):
+            drag["x"], drag["y"], drag["moved"] = e.x, e.y, False
+        def _motion(e):
+            nx = win.winfo_x() + (e.x - drag["x"])
+            ny = win.winfo_y() + (e.y - drag["y"])
+            win.geometry(f"+{nx}+{ny}")
+            drag["moved"] = True
+        def _release(e):
+            if drag["moved"]:
+                self.cfg["update_circle_pos"] = [win.winfo_x(), win.winfo_y()]
+                save_cfg(self.cfg)
+            else:
+                self._run_updater()
+        cv.bind("<ButtonPress-1>", _press)
+        cv.bind("<B1-Motion>", _motion)
+        cv.bind("<ButtonRelease-1>", _release)
+        self._update_circle = win
+        def _keep_visible():
+            """뭔가에 의해 최소화/숨김되면 자동 복원 — 위젯은 항상 바탕화면에 떠 있음."""
+            try:
+                if win.winfo_exists():
+                    if win.state() != "normal":
+                        win.deiconify()
+                        win.overrideredirect(True)
+                        win.attributes("-topmost", True)
+                    win.after(5000, _keep_visible)
+            except Exception:
+                pass
+        win.after(3000, _keep_visible)
+
     def _run_updater(self):
-        """[🔄 업데이트] — git pull + 파일 복사 + 런처 재시작을 별도 프로그램으로 실행."""
+        """🔄 업데이트 동그라미 — git pull + 파일 복사 + 런처 재시작을 별도 프로그램으로 실행."""
         if self._is_busy():
             self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 끝난 뒤 업데이트하세요"); return
         import subprocess, sys
@@ -649,9 +701,6 @@ class App(tk.Tk):
         tk.Button(btn_row, text="📖 오림의\n일기장", font=("맑은 고딕", 13, "bold"),
                   bg="#a04000", fg="white", activebackground="#7a3000",
                   width=11, height=3, command=self._open_reroll_win).pack(side="left")
-        tk.Button(btn_row, text="🔄 업데\n이트", font=("맑은 고딕", 10, "bold"),
-                  bg="#16a085", fg="white", activebackground="#0e6655",
-                  width=6, height=3, command=self._run_updater).pack(side="left", padx=(4,0))
 
         # 다야 카운트 데이터 변수 (UI는 별도 창)
         self._cnt_total_var = tk.StringVar(value="합계: 0")
