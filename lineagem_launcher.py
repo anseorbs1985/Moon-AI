@@ -515,6 +515,20 @@ class App(tk.Tk):
         self._set_sleep_prevention(False)
         self.destroy()
 
+    def _run_updater(self):
+        """[🔄 업데이트] — git pull + 파일 복사 + 런처 재시작을 별도 프로그램으로 실행."""
+        if self._is_busy():
+            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 끝난 뒤 업데이트하세요"); return
+        import subprocess, sys
+        exe = sys.executable.replace("python.exe", "pythonw.exe")
+        for cand in (os.path.join(BASE, "lineagem_update.py"),
+                     os.path.join(BASE, "Moon-AI", "lineagem_update.py")):
+            if os.path.exists(cand):
+                subprocess.Popen([exe, cand])
+                self.status.set("🔄 업데이트 실행 — 잠시 후 런처가 자동 재시작됩니다")
+                return
+        self.status.set("⚠ lineagem_update.py 를 찾을 수 없습니다 (git pull 한 번 필요)")
+
     def _open_ocr(self):
         if self._is_busy(exclude="다야OCR"):
             self._enqueue("다야OCR 창", self._open_ocr); return
@@ -635,6 +649,9 @@ class App(tk.Tk):
         tk.Button(btn_row, text="📖 오림의\n일기장", font=("맑은 고딕", 13, "bold"),
                   bg="#a04000", fg="white", activebackground="#7a3000",
                   width=11, height=3, command=self._open_reroll_win).pack(side="left")
+        tk.Button(btn_row, text="🔄 업데\n이트", font=("맑은 고딕", 10, "bold"),
+                  bg="#16a085", fg="white", activebackground="#0e6655",
+                  width=6, height=3, command=self._run_updater).pack(side="left", padx=(4,0))
 
         # 다야 카운트 데이터 변수 (UI는 별도 창)
         self._cnt_total_var = tk.StringVar(value="합계: 0")
