@@ -29,6 +29,12 @@ import tkinter as tk
 import time, threading, json, os
 import pyautogui
 
+try:
+    from precise_click import install as _install_precise_click
+    _install_precise_click(pyautogui)   # 마우스가 움직여도 지정 좌표에 정확히 클릭
+except Exception:
+    pass
+
 MOUSE_IDLE_SEC = 5.0  # 마우스 정지 후 재개까지 대기 시간
 
 def wait_mouse_idle(stop_fn, status_fn, idle_sec=MOUSE_IDLE_SEC):

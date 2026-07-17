@@ -2765,8 +2765,8 @@
   ],
   "seq_hotkey": 122,
   "seq_on": true,
-  "seq_min": 0.55,
-  "seq_max": 1.09,
+  "seq_min": 0.48,
+  "seq_max": 0.96,
   "dc_slots": [
     [
       196,
