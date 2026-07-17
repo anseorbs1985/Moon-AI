@@ -118,8 +118,8 @@ PASS_SLOT_MAX      = 8.0
 PASS_LABELS        = [f"클릭{j+1}" for j in range(PASS_CLICKS)]
 DUNGEON_INTERVAL = 2.0 # 클릭 사이 간격(초)
 SEQ_SLOTS      = 16    # 연속 클릭 슬롯 수 (고정)
-SEQ_MIN        = 1.5   # 연속 클릭 최소 간격(초)
-SEQ_MAX        = 3.5   # 연속 클릭 최대 간격(초)
+SEQ_MIN        = 0.7   # 연속 클릭 슬롯간 최소 간격(초)
+SEQ_MAX        = 1.4   # 연속 클릭 슬롯간 최대 간격(초)
 DC_SLOTS       = 16    # 일반던전충전 슬롯 수 (고정)
 DC_MIN         = 1.0   # 좌표(슬롯) 간 간격(초) — 1~16 슬롯 사이 랜덤
 DC_MAX         = 2.5
@@ -513,11 +513,13 @@ class App(tk.Tk):
         self._dc_on        = bool(self.cfg.get("dc_on", False))
         self._dc_running   = False
         self._doll_stop    = False
+        self._task_queue   = []   # 연속으로 누른 실행/재측정 순차 실행 대기열
         self._build_ui()
         self._sync_sched_click1()   # 스케줄 클릭1 = 과거섬 클릭1 (시작 시 1회 동기화)
         self.after(1000, self._mail_scheduler_tick)
         self.after(1000, self._past_scheduler_tick)
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
+        self.after(2000, self._queue_tick)               # 실행 대기열 순차 처리
         self.after(1000, self._purple_check_tick)
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
@@ -537,7 +539,7 @@ class App(tk.Tk):
 
     def _open_ocr(self):
         if self._is_busy(exclude="다야OCR"):
-            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 다야OCR 실행 안 함 (동시 실행 방지)"); return
+            self._enqueue("다야OCR 창", self._open_ocr); return
         import subprocess, sys
         exe = sys.executable.replace("python.exe", "pythonw.exe")
         self._ocr_proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py")])
@@ -545,7 +547,7 @@ class App(tk.Tk):
 
     def _open_ocr_scan(self):
         if self._is_busy(exclude="다야OCR"):
-            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 다야OCR 실행 안 함 (동시 실행 방지)"); return
+            self._enqueue("다야OCR 스캔", self._open_ocr_scan); return
         import subprocess, sys
         exe = sys.executable.replace("python.exe", "pythonw.exe")
         self._ocr_proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py"), "--scan"])
@@ -906,7 +908,7 @@ class App(tk.Tk):
     def _run_island_slot(self, idx):
         """해당 던전 단독창 열고 자동 실행."""
         if self._is_busy():
-            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 섬/던전 실행 안 함 (동시 실행 방지)"); return
+            self._enqueue(f"섬/던전 #{idx+1:02d}", lambda: self._run_island_slot(idx)); return
         self.iconify()
         self._minimize_claude()
         proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(idx), "--run"])
@@ -1011,7 +1013,7 @@ class App(tk.Tk):
     def _rescan_daya_slot(self, idx):
         """해당 슬롯 하나만 다야 OCR 재측정 (별도 프로세스 --slot)."""
         if self._is_busy():
-            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 재측정 안 함 (동시 실행 방지)"); return
+            self._enqueue(f"다야 재측정 #{idx+1:02d}", lambda: self._rescan_daya_slot(idx)); return
         import subprocess, sys
         exe = sys.executable.replace("python.exe", "pythonw.exe")
         self.status.set(f"🔎 #{idx+1:02d} 다야 재측정 중... (OCR 로딩 포함 잠시)")
@@ -1254,7 +1256,8 @@ class App(tk.Tk):
             return
         name   = slots[slot_idx].get("name", f"#{slot_idx+1}")
         coords = slots[slot_idx].get("coords", [])
-        if not self._try_busy("귀환주문서"): return
+        if not self._try_busy_or_queue("귀환주문서", lambda: self._run_return_slot(slot_idx),
+                                       label=f"귀환주문서 #{slot_idx+1:02d}"): return
         self._return_running = True
         self._return_stop    = False
         self.status.set(f"2초 후 귀환주문서 [{name}] 실행...")
@@ -2461,7 +2464,7 @@ class App(tk.Tk):
                       command=lambda x=i: self._del_pass(x)).pack(side="right", padx=2)
 
     def _start_pass(self):
-        if not self._try_busy("패스권"): return
+        if not self._try_busy_or_queue("패스권", self._start_pass): return
         self._pass_stop = False
         self.btn_pass_run.config(state="disabled", bg="#f39c12", text="⏳ 실행중...")
         self.btn_pass_stop.config(state="normal")
@@ -3606,7 +3609,7 @@ class App(tk.Tk):
         if not coords:
             self.after(0, lambda: self.status.set("연속클릭: 등록된 좌표가 없습니다"))
             return
-        if not self._try_busy("연속클릭"):
+        if not self._try_busy_or_queue("연속클릭", self._start_seq):
             return
         self._seq_running = True
         try:
@@ -3622,7 +3625,7 @@ class App(tk.Tk):
                 self.after(0, lambda a=i: self.status.set(f"🔗 연속클릭 {a+1}/{n}..."))
                 pyautogui.click(x, y)
                 if i < n - 1:
-                    time.sleep(random.uniform(mn, mx) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                    time.sleep(random.uniform(mn, mx))   # 슬롯간 간격 (설정값 그대로, 추가 간격 없음)
             self.after(0, lambda: self.status.set(f"✔ 연속클릭 완료 ({n}개)"))
         except Exception as e:
             self.after(0, lambda err=e: self.status.set(f"연속클릭 오류: {err}"))
@@ -3825,7 +3828,7 @@ class App(tk.Tk):
         if not coords:
             self.after(0, lambda: self.status.set("일반던전충전: 등록된 좌표가 없습니다"))
             return
-        if not self._try_busy("일반던전충전"):
+        if not self._try_busy_or_queue("일반던전충전", self._start_dc):
             return
         self._dc_running = True
         try:
@@ -4151,7 +4154,7 @@ class App(tk.Tk):
                   if h.get("enabled", True) and any(c for c in h.get("coords", []))]
         if not active:
             messagebox.showwarning("등록 필요", "실행할(ON) 인형 탐험 좌표가 없습니다."); return
-        if not self._try_busy("인형탐험"): return
+        if not self._try_busy_or_queue("인형탐험", self._start_doll): return
         self._doll_stop = False
         if hasattr(self, "btn_doll_run"):  self.btn_doll_run.config(state="disabled")
         if hasattr(self, "btn_doll_stop"): self.btn_doll_stop.config(state="normal")
@@ -5106,7 +5109,7 @@ class App(tk.Tk):
         self.status.set("✔ 전체 우편함 클릭 완료!")
 
     def _start_mail(self):
-        if not self._try_busy("우편함"): return
+        if not self._try_busy_or_queue("우편함", self._start_mail): return
         self._mail_stop = False
         self._sched_any_stop = False
         if hasattr(self, "btn_mail_run"): self.btn_mail_run.config(state="disabled")
@@ -5234,7 +5237,7 @@ class App(tk.Tk):
 
     # ── 주말던전 ──────────────────────────────────────────────────────
     def _start_dungeon(self):
-        if not self._try_busy("주말던전"): return
+        if not self._try_busy_or_queue("주말던전", self._start_dungeon): return
         self._dungeon_stop = False
         if hasattr(self, "btn_dungeon_run"): self.btn_dungeon_run.config(state="disabled")
         if hasattr(self, "btn_dungeon_stop"): self.btn_dungeon_stop.config(state="normal")
@@ -5348,7 +5351,7 @@ class App(tk.Tk):
 
     # ── 과거의말하는섬 ────────────────────────────────────────────────
     def _start_past(self):
-        if not self._try_busy("과거섬"): return
+        if not self._try_busy_or_queue("과거섬", self._start_past): return
         self._past_stop = False
         self._sched_any_stop = False
         if hasattr(self, "btn_past_run"): self.btn_past_run.config(state="disabled", bg="#f39c12", text="⏳ 실행중...")
@@ -5537,7 +5540,7 @@ class App(tk.Tk):
         self.status.set(f"✔ #01 좌표 → #02~#{PAST_SLOTS:02d} 전체 복사 완료")
 
     def _start_sched(self):
-        if not self._try_busy("스케줄"): return
+        if not self._try_busy_or_queue("스케줄", self._start_sched): return
         self._sched_stop = False
         self._sched_any_stop = False
         if hasattr(self, "btn_sched_run"):
@@ -6316,6 +6319,36 @@ class App(tk.Tk):
         self._busy_task = name
         return True
 
+    # ── 작업 대기열: 실행 중에 누른 실행/재측정은 쌓아뒀다가 순차 실행 ──
+    def _enqueue(self, label, fn):
+        """다른 작업 실행 중 → 대기열에 추가 (같은 라벨 중복 방지). 어느 스레드에서든 호출 가능."""
+        if any(l == label for l, _ in self._task_queue):
+            self.after(0, lambda: self.status.set(f"⏳ '{label}' 이미 대기열에 있음 (대기 {len(self._task_queue)}개)"))
+            return
+        self._task_queue.append((label, fn))
+        n = len(self._task_queue)
+        self.after(0, lambda: self.status.set(
+            f"⏳ '{self._busy_label()}' 실행 중 — '{label}' 대기열 추가 (대기 {n}개)"))
+
+    def _queue_tick(self):
+        """1.5초마다 대기열 확인 — 한가해지면 다음 작업을 순서대로 실행."""
+        try:
+            if self._task_queue and not self._is_busy():
+                label, fn = self._task_queue.pop(0)
+                self.status.set(f"▶ 대기열 실행: {label} (남은 {len(self._task_queue)}개)")
+                fn()
+        except Exception:
+            pass
+        self.after(1500, self._queue_tick)
+
+    def _try_busy_or_queue(self, name, retry_fn, label=None):
+        """busy면 대기열에 넣고 False, 아니면 잠금 획득."""
+        if self._is_busy(exclude=name):
+            self._enqueue(label or name, retry_fn)
+            return False
+        self._busy_task = name
+        return True
+
     def _clear_busy(self, name):
         if getattr(self, "_busy_task", None) == name:
             self._busy_task = None
@@ -6337,6 +6370,7 @@ class App(tk.Tk):
         self._sched_any_stop = True
         self._return_stop    = True
         self._busy_task      = None   # 잠금 해제
+        self._task_queue.clear()      # 멈춤 시 대기열도 비움
         # 다야 OCR 프로세스 종료
         proc = getattr(self, "_ocr_proc", None)
         if proc and proc.poll() is None:
@@ -6350,7 +6384,7 @@ class App(tk.Tk):
         slots = [s for s in self.cfg.get("click_slots", []) if s[0] and s[1]]
         if not slots:
             messagebox.showwarning("등록 필요", "클릭 좌표를 먼저 등록해주세요."); return
-        if not self._try_busy("클릭실행"): return
+        if not self._try_busy_or_queue("클릭실행", self._start_click): return
         self._click_stop = False
         self.btn_click_run.config(state="disabled")
         self.btn_click_stop.config(state="normal")
@@ -6394,7 +6428,7 @@ class App(tk.Tk):
                   if h.get("enabled", True) and any(c for c in h.get("coords", []))]
         if not active:
             messagebox.showwarning("등록 필요", "실행할(ON) 사냥 좌표가 없습니다."); return
-        if not self._try_busy("사냥"): return
+        if not self._try_busy_or_queue("사냥", self._start_hunt): return
         self._hunt_stop = False
         if hasattr(self, "btn_hunt_run"): self.btn_hunt_run.config(state="disabled")
         if hasattr(self, "btn_hunt_stop"): self.btn_hunt_stop.config(state="normal")
@@ -6473,7 +6507,7 @@ class App(tk.Tk):
         if missing:
             messagebox.showwarning("등록 필요", "먼저 등록해주세요:\n" +
                                    "\n".join(f"• {m}" for m in missing)); return
-        if not self._try_busy("전체자동실행"):   # 다른 작업 실행 중이면 시작 안 함
+        if not self._try_busy_or_queue("전체자동실행", self._start):   # 실행 중이면 대기열로
             return
         self._stop_flag = False
         self._running   = True
