@@ -4854,9 +4854,10 @@ class App(tk.Tk):
         import datetime
         now = datetime.datetime.now()
         today = now.date()
-        is_wed = now.weekday() == 2   # 월=0 … 수=2 : 수요일엔 과거섬 스케줄 건너뜀
-        if is_wed:
-            self.status.set("🏝 과거섬: 수요일은 스케줄 실행 안 함 (건너뜀)")
+        is_skip_day = now.weekday() in (2, 5)   # 월=0 … 수=2, 토=5 : 수·토요일엔 과거섬 스케줄 건너뜀
+        if is_skip_day:
+            _dname = "수요일" if now.weekday() == 2 else "토요일"
+            self.status.set(f"🏝 과거섬: {_dname}은 스케줄 실행 안 함 (건너뜀)")
         elif now.hour == 5 and 3 <= now.minute <= 25 and self._past_triggered_date != today:
             if self._is_busy():
                 self.status.set("🏝 과거섬 스케줄 대기 — 다른 작업 실행 중")
