@@ -24,10 +24,10 @@
     757
   ],
   "profile_id_area": {
-    "x": 2289,
+    "x": 2290,
     "y": 988,
-    "w": 98,
-    "h": 37
+    "w": 99,
+    "h": 38
   },
   "profile_reveal_btn": [
     95,
@@ -2765,8 +2765,8 @@
   ],
   "seq_hotkey": 122,
   "seq_on": true,
-  "seq_min": 1.5,
-  "seq_max": 3.5,
+  "seq_min": 0.7,
+  "seq_max": 1.4,
   "dc_slots": [
     [
       196,
@@ -17374,9 +17374,5 @@
     20,
     19,
     17
-  ],
-  "profile_id_area_win": [
-    0,
-    0
   ]
 }
