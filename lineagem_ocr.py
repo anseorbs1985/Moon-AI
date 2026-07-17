@@ -17,6 +17,12 @@ import json, os, threading, datetime
 import pyautogui
 from PIL import ImageGrab
 
+try:
+    from precise_click import install as _install_precise_click
+    _install_precise_click(pyautogui)   # 마우스가 움직여도 지정 좌표에 정확히 클릭
+except Exception:
+    pass
+
 BASE       = os.path.dirname(os.path.abspath(__file__))
 OCR_FILE   = os.path.join(BASE, "daya_regions.json")
 COUNT_FILE = os.path.join(BASE, "daya_counts.json")

@@ -55,38 +55,16 @@ pyautogui.FAILSAFE = False
 pyautogui.PAUSE    = 0.05
 
 # ── 정밀 클릭 (전역) ───────────────────────────────────────────────
-# 기본 pyautogui.click 은 좌표로 "이동하며" 클릭해서, 실행 중 마우스가 움직이거나
-# 이동 경로 위에 클릭이 찍히는 오클릭이 생긴다. SetCursorPos 로 지정 좌표에
-# 커서를 딱 고정한 뒤 그 자리에서 눌러, 방해 없이 정확히 그 지점만 찍는다.
-_MOUSEEVENTF_LEFTDOWN = 0x0002
-_MOUSEEVENTF_LEFTUP   = 0x0004
-_orig_pyautogui_click = pyautogui.click
-def _precise_click(x=None, y=None, *args, **kwargs):
-    """지정 좌표에 커서를 고정하고, 클릭하는 ~60ms 동안만 물리 입력을 차단해
-    사용자가 마우스를 움직여도 방해 없이 그 지점만 정확히 찍는다.
-    클릭 사이(대기 중)에는 차단이 풀려 마우스를 자유롭게 쓸 수 있다."""
-    try:
-        u = ctypes.windll.user32
-        blocked = False
-        try:
-            blocked = bool(u.BlockInput(True))   # 물리 마우스/키보드 잠깐 차단
-            if x is not None and y is not None:
-                ix, iy = int(x), int(y)
-                u.SetCursorPos(ix, iy)
-                time.sleep(0.015)
-                u.SetCursorPos(ix, iy)           # 클릭 직전 한 번 더 고정
-            u.mouse_event(_MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            time.sleep(0.03)
-            u.mouse_event(_MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-        finally:
-            if blocked:
-                u.BlockInput(False)              # 반드시 차단 해제 (락 방지)
-        time.sleep(0.02)
-    except Exception:
-        try: u.BlockInput(False)
-        except Exception: pass
-        return _orig_pyautogui_click(x, y, *args, **kwargs)
-pyautogui.click = _precise_click
+# 사용자가 마우스를 움직여도 클릭이 항상 지정 좌표에 찍히도록 SendInput 기반으로
+# pyautogui.click/moveTo/mouseDown/mouseUp 을 교체 (precise_click.py 공용 패치).
+# SendInput 한 호출에 [이동+누름+뗌]을 묶으면 그 사이에 물리 마우스 입력이
+# 끼어들지 않음을 OS가 보장한다. (기존 BlockInput 방식은 관리자 권한이 없으면
+# 조용히 실패해서 마우스 이동과 클릭이 경합하는 문제가 남아 있었음)
+try:
+    from precise_click import install as _install_precise_click
+    _install_precise_click(pyautogui)
+except Exception:
+    pass
 
 CLICK_SLOTS    = 16
 GROUP_SIZE     = 8
@@ -118,8 +96,8 @@ PASS_SLOT_MAX      = 8.0
 PASS_LABELS        = [f"클릭{j+1}" for j in range(PASS_CLICKS)]
 DUNGEON_INTERVAL = 2.0 # 클릭 사이 간격(초)
 SEQ_SLOTS      = 16    # 연속 클릭 슬롯 수 (고정)
-SEQ_MIN        = 0.55  # 연속 클릭 슬롯간 최소 간격(초)
-SEQ_MAX        = 1.09  # 연속 클릭 슬롯간 최대 간격(초)
+SEQ_MIN        = 0.48  # 연속 클릭 슬롯간 최소 간격(초)
+SEQ_MAX        = 0.96  # 연속 클릭 슬롯간 최대 간격(초)
 DC_SLOTS       = 16    # 일반던전충전 슬롯 수 (고정)
 DC_MIN         = 1.0   # 좌표(슬롯) 간 간격(초) — 1~16 슬롯 사이 랜덤
 DC_MAX         = 2.5
@@ -3969,6 +3947,11 @@ class App(tk.Tk):
                       command=lambda x=idx: self._open_doll_slot(x)).pack(pady=(3,0))
             tk.Button(cell, text="▶ 테스트", font=("맑은 고딕", 7), bg="#27ae60", fg="white", width=10,
                       command=lambda x=idx: self._test_doll(x)).pack(pady=(2,1))
+            cprow = tk.Frame(cell); cprow.pack(pady=(0,1))
+            tk.Button(cprow, text="복사", font=("맑은 고딕", 6), bg="#2980b9", fg="white", width=4,
+                      command=lambda x=idx: self._copy_doll_slot(x)).pack(side="left", padx=(0,2))
+            tk.Button(cprow, text="붙임", font=("맑은 고딕", 6), bg="#8e44ad", fg="white", width=4,
+                      command=lambda x=idx: self._paste_doll_slot(x)).pack(side="left")
 
         self._doll_pop_win = None
         self._refresh_doll_display()
@@ -4148,6 +4131,27 @@ class App(tk.Tk):
             self.cfg["doll_slots"][i]["coords"] = copy.deepcopy(src)
         save_cfg(self.cfg); self._refresh_doll_display()
         self.status.set(f"✔ #01 좌표 → #02~#{DOLL_SLOTS:02d} 전체 복사 완료")
+
+    def _copy_doll_slot(self, idx):
+        """슬롯 좌표를 클립보드에 복사 — 원하는 슬롯에서 [붙임]으로 붙여넣기."""
+        import copy
+        coords = self.cfg["doll_slots"][idx].get("coords", [])
+        if not any(coords):
+            self.status.set(f"#{idx+1:02d} 복사할 좌표가 없습니다"); return
+        self._doll_clipboard = copy.deepcopy(coords)
+        reg = sum(1 for c in coords if c)
+        self.status.set(f"📋 #{idx+1:02d} 좌표 {reg}개 복사됨 — 원하는 슬롯의 [붙임]을 누르세요")
+
+    def _paste_doll_slot(self, idx):
+        """클립보드의 좌표를 이 슬롯에 붙여넣기(기존 좌표 덮어씀)."""
+        import copy
+        clip = getattr(self, "_doll_clipboard", None)
+        if not clip:
+            self.status.set("먼저 [복사]로 슬롯 좌표를 복사하세요"); return
+        self.cfg["doll_slots"][idx]["coords"] = copy.deepcopy(clip)
+        save_cfg(self.cfg); self._refresh_doll_display()
+        reg = sum(1 for c in clip if c)
+        self.status.set(f"✔ #{idx+1:02d}에 붙여넣기 완료 ({reg}/{DOLL_CLICKS})")
 
     def _doll_wait(self, sec):
         end = time.time() + sec
