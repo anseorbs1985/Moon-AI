@@ -48,8 +48,7 @@ LOGS_DIR      = os.path.join(BASE, "lineagem_logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
 CONFIG_FILE   = os.path.join(BASE, "coords.json")
 LOCAL_FILE    = os.path.join(BASE, "local_config.json")   # 머신별 설정(깃 공유 안 함, *.json 자동 제외)
-LOCAL_KEYS    = ("profile_target_id", "doll_slots")       # coords.json이 아닌 이 컴퓨터에만 저장할 키
-#               └ 인형탐험 좌표는 머신별로 다르게 유지 — 깃에 올리지 않음 (2026-07-17 사용자 요청)
+LOCAL_KEYS    = ("profile_target_id",)                    # coords.json이 아닌 이 컴퓨터에만 저장할 키
 ACCOUNTS_FILE = os.path.join(BASE, "accounts.json")
 REROLL_DIR    = os.path.join(BASE, "reroll_templates")   # 아이템 리롤 타깃 이미지 저장
 pyautogui.FAILSAFE = False
