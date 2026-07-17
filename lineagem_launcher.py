@@ -118,8 +118,8 @@ PASS_SLOT_MAX      = 8.0
 PASS_LABELS        = [f"클릭{j+1}" for j in range(PASS_CLICKS)]
 DUNGEON_INTERVAL = 2.0 # 클릭 사이 간격(초)
 SEQ_SLOTS      = 16    # 연속 클릭 슬롯 수 (고정)
-SEQ_MIN        = 0.7   # 연속 클릭 슬롯간 최소 간격(초)
-SEQ_MAX        = 1.4   # 연속 클릭 슬롯간 최대 간격(초)
+SEQ_MIN        = 0.55  # 연속 클릭 슬롯간 최소 간격(초)
+SEQ_MAX        = 1.09  # 연속 클릭 슬롯간 최대 간격(초)
 DC_SLOTS       = 16    # 일반던전충전 슬롯 수 (고정)
 DC_MIN         = 1.0   # 좌표(슬롯) 간 간격(초) — 1~16 슬롯 사이 랜덤
 DC_MAX         = 2.5
@@ -3620,9 +3620,10 @@ class App(tk.Tk):
             mx = float(self.cfg.get("seq_max", SEQ_MAX))
             if mx < mn:
                 mn, mx = mx, mn
+            random.shuffle(coords)   # 매 실행마다 클릭 순서 무작위
             n = len(coords)
             for i, (x, y) in enumerate(coords):
-                self.after(0, lambda a=i: self.status.set(f"🔗 연속클릭 {a+1}/{n}..."))
+                self.after(0, lambda a=i: self.status.set(f"🔗 연속클릭 {a+1}/{n} (랜덤 순서)..."))
                 pyautogui.click(x, y)
                 if i < n - 1:
                     time.sleep(random.uniform(mn, mx))   # 슬롯간 간격 (설정값 그대로, 추가 간격 없음)
