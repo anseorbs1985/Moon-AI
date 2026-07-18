@@ -748,7 +748,7 @@ class App(tk.Tk):
         tk.Label(ctrl, text="💰 다야 수량", font=("맑은 고딕", 9, "bold"), fg="#2c3e50").pack(anchor="w")
         tk.Button(ctrl, text="📊 OCR 실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", width=10,
-                  command=self._open_ocr).pack(fill="x", pady=1)
+                  command=self._open_ocr_scan).pack(fill="x", pady=1)
         tk.Button(ctrl, text="📋 복사", font=("맑은 고딕", 8, "bold"),
                   bg="#2471a3", fg="white", width=10,
                   command=self._copy_daya_counts).pack(fill="x", pady=1)
