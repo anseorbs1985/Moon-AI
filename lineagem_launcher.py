@@ -515,6 +515,20 @@ class App(tk.Tk):
         self._set_sleep_prevention(False)
         self.destroy()
 
+    def _run_updater(self):
+        """🔄 업데이트 동그라미 — git pull + 파일 복사 + 런처 재시작을 별도 프로그램으로 실행."""
+        if self._is_busy():
+            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 끝난 뒤 업데이트하세요"); return
+        import subprocess, sys
+        exe = sys.executable.replace("python.exe", "pythonw.exe")
+        for cand in (os.path.join(BASE, "lineagem_update.py"),
+                     os.path.join(BASE, "Moon-AI", "lineagem_update.py")):
+            if os.path.exists(cand):
+                subprocess.Popen([exe, cand])
+                self.status.set("🔄 업데이트 실행 — 잠시 후 런처가 자동 재시작됩니다")
+                return
+        self.status.set("⚠ lineagem_update.py 를 찾을 수 없습니다 (git pull 한 번 필요)")
+
     def _open_ocr(self):
         if self._is_busy(exclude="다야OCR"):
             self._enqueue("다야OCR 창", self._open_ocr); return
@@ -635,6 +649,15 @@ class App(tk.Tk):
         tk.Button(btn_row, text="📖 오림의\n일기장", font=("맑은 고딕", 13, "bold"),
                   bg="#a04000", fg="white", activebackground="#7a3000",
                   width=11, height=3, command=self._open_reroll_win).pack(side="left")
+
+        # 오림의 일기장 오른쪽: 빨간 동그라미 업데이트 버튼 (git pull + 재시작)
+        upd = tk.Canvas(btn_row, width=78, height=78, highlightthickness=0,
+                        bg=self.cget("bg"), cursor="hand2")
+        upd.pack(side="left", padx=(6, 0))
+        upd.create_oval(3, 3, 75, 75, fill="#c0392b", outline="#7b241c", width=3)
+        upd.create_text(39, 29, text="🔄", font=("맑은 고딕", 13))
+        upd.create_text(39, 52, text="업데이트", fill="white", font=("맑은 고딕", 9, "bold"))
+        upd.bind("<Button-1>", lambda e: self._run_updater())
 
         # 다야 카운트 데이터 변수 (UI는 별도 창)
         self._cnt_total_var = tk.StringVar(value="합계: 0")
@@ -4839,9 +4862,10 @@ class App(tk.Tk):
         import datetime
         now = datetime.datetime.now()
         today = now.date()
-        is_wed = now.weekday() == 2   # 월=0 … 수=2 : 수요일엔 과거섬 스케줄 건너뜀
-        if is_wed:
-            self.status.set("🏝 과거섬: 수요일은 스케줄 실행 안 함 (건너뜀)")
+        is_skip_day = now.weekday() in (2, 5)   # 월=0 … 수=2, 토=5 : 수·토요일엔 과거섬 스케줄 건너뜀
+        if is_skip_day:
+            _dname = "수요일" if now.weekday() == 2 else "토요일"
+            self.status.set(f"🏝 과거섬: {_dname}은 스케줄 실행 안 함 (건너뜀)")
         elif now.hour == 5 and 3 <= now.minute <= 25 and self._past_triggered_date != today:
             if self._is_busy():
                 self.status.set("🏝 과거섬 스케줄 대기 — 다른 작업 실행 중")
