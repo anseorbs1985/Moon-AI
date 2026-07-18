@@ -98,6 +98,9 @@ DUNGEON_INTERVAL = 2.0 # 클릭 사이 간격(초)
 SEQ_SLOTS      = 16    # 연속 클릭 슬롯 수 (고정)
 SEQ_MIN        = 0.48  # 연속 클릭 슬롯간 최소 간격(초)
 SEQ_MAX        = 0.96  # 연속 클릭 슬롯간 최대 간격(초)
+WDOFF_SLOTS    = 16    # 주말던전 끄기 슬롯 수 (연속클릭과 동일 구조)
+WDOFF_MIN      = 0.48  # 주말던전 끄기 슬롯간 최소 간격(초)
+WDOFF_MAX      = 0.96
 DC_SLOTS       = 16    # 일반던전충전 슬롯 수 (고정)
 DC_MIN         = 1.0   # 좌표(슬롯) 간 간격(초) — 1~16 슬롯 사이 랜덤
 DC_MAX         = 2.5
@@ -145,6 +148,11 @@ DEFAULT_CFG = {
     "seq_on":       False,              # 연속 클릭 단축키 활성화 상태 (재시작 유지)
     "seq_min":      SEQ_MIN,
     "seq_max":      SEQ_MAX,
+    "wdoff_slots":  [None]*WDOFF_SLOTS, # 주말던전 끄기 좌표 (각 [x,y] 또는 None)
+    "wdoff_hotkey": None,
+    "wdoff_on":     False,
+    "wdoff_min":    WDOFF_MIN,
+    "wdoff_max":    WDOFF_MAX,
     "dc_slots":     [None]*DC_SLOTS,    # 일반던전충전 좌표 (각 [x,y] 또는 None)
     "dc_hotkey":    None,               # 일반던전충전 실행 단축키 (가상키 코드)
     "dc_on":        False,              # 일반던전충전 단축키 활성화 상태 (재시작 유지)
@@ -311,6 +319,13 @@ def load_cfg():
         while len(sq) < SEQ_SLOTS:
             sq.append(None)
         cfg["seq_slots"] = sq[:SEQ_SLOTS]
+        # wdoff_slots (주말던전 끄기 좌표 16개 고정)
+        wq = cfg.get("wdoff_slots", [])
+        if not isinstance(wq, list):
+            wq = []
+        while len(wq) < WDOFF_SLOTS:
+            wq.append(None)
+        cfg["wdoff_slots"] = wq[:WDOFF_SLOTS]
         # dc_slots (일반던전충전 좌표 16개 고정)
         dq = cfg.get("dc_slots", [])
         if not isinstance(dq, list):
@@ -488,6 +503,8 @@ class App(tk.Tk):
         self._hp_stop      = False
         self._seq_on       = bool(self.cfg.get("seq_on", False))
         self._seq_running  = False
+        self._wdoff_on     = bool(self.cfg.get("wdoff_on", False))
+        self._wdoff_running = False
         self._dc_on        = bool(self.cfg.get("dc_on", False))
         self._dc_running   = False
         self._doll_stop    = False
@@ -501,6 +518,7 @@ class App(tk.Tk):
         self.after(1000, self._purple_check_tick)
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
+        threading.Thread(target=self._wdoff_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._popup_guard_loop, daemon=True).start()
         threading.Thread(target=self._claude_attention_loop, daemon=True).start()
         # 작업 중에는 클로드를 강제로 내리지 않는다(예전 시작 버스트 제거).
@@ -708,6 +726,16 @@ class App(tk.Tk):
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
             command=self._start_doll).pack(side="left", padx=(2,0))
+        # 인형탐험 아래: 매일매일 스케줄 (자주 쓰는 기능이라 앞으로 이동)
+        r3 = tk.Frame(dc_col); r3.pack(anchor="n", pady=(4,0))
+        tk.Button(r3, text="📅 스케줄",
+            font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
+            activebackground="#0e6655", width=7, height=2,
+            command=self._open_sched_win).pack(side="left")
+        tk.Button(r3, text="▶\n실행",
+            font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
+            activebackground="#1e8449", width=4, height=2,
+            command=self._start_sched).pack(side="left", padx=(2,0))
 
         winmgmt = tk.Frame(front_row); winmgmt.pack(side="left", padx=(4,10), anchor="n")
         self._build_winmgmt(winmgmt)
@@ -2885,8 +2913,8 @@ class App(tk.Tk):
             ("카매사오기",   "#1a5276", lambda: self._open_past_slot(5),                 "#154360", lambda: self._run_island_slot(5)),
             ("📬 우편함",    "#2471a3", self._open_mail_win,     "#1a5276", self._start_mail),
             ("🏝 과거섬",    "#c0392b", self._open_past_win,     "#922b21", self._start_past),
-            ("📅 스케줄",    "#16a085", self._open_sched_win,    "#0e6655", self._start_sched),
             ("🏰 주말던전",  "#d35400", self._open_dungeon_win,  "#a04000", self._start_dungeon),
+            ("주말던전끄기", "#5d6d7e", self._open_wdoff_win,    "#34495e", self._start_wdoff),
             ("🏹 사냥",      "#27ae60", self._open_hunt_win,     "#1e8449", self._start_hunt),
             ("💰 다야OCR",   "#27ae60", self._open_ocr,          "#1e8449", self._open_ocr_scan),
             ("🔗 연속클릭",  "#7d3c98", self._open_seq_win,      "#5b2c6f", self._start_seq),
@@ -2897,11 +2925,11 @@ class App(tk.Tk):
                       bg=color, fg="white", width=9, height=2,
                       command=cmd).pack(side="top")
             if run_cmd:
-                tk.Button(grp, text="▶ 실행", font=("맑은 고딕", 7, "bold"),
-                          bg=run_color, fg="white", width=9, height=1,
+                tk.Button(grp, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
+                          bg=run_color, fg="white", width=9, height=1, pady=5,
                           command=run_cmd).pack(side="top", pady=(1, 0))
             else:
-                tk.Frame(grp, height=20).pack(side="top")
+                tk.Frame(grp, height=30).pack(side="top")
 
         # 구분선
         tk.Frame(self._sec_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=4)
@@ -2919,8 +2947,8 @@ class App(tk.Tk):
             tk.Button(grp, text=label, font=("맑은 고딕", 9, "bold"),
                       bg=color, fg="white", width=9, height=2,
                       command=lambda x=i: self._open_past_slot(x)).pack(side="top")
-            tk.Button(grp, text="▶ 실행", font=("맑은 고딕", 7, "bold"),
-                      bg=dark, fg="white", width=9, height=1,
+            tk.Button(grp, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
+                      bg=dark, fg="white", width=9, height=1, pady=5,
                       command=lambda x=i: self._run_island_slot(x)
                       ).pack(side="top", pady=(1, 0))
 
@@ -3688,6 +3716,248 @@ class App(tk.Tk):
                 threading.Thread(target=self._run_seq, daemon=True).start()
             prev = down
 
+    # ── 주말던전 끄기 (연속클릭과 동일 — 별도 좌표/단축키/ON·OFF) ──
+    def _open_wdoff_win(self):
+        self._open_section_win("_wdoff_win", "🚪 주말던전 끄기", self._build_wdoff, w=300, h=680)
+
+    def _wdoff_hotkey_label(self):
+        return f"단축키: {self._vk_name(self.cfg.get('wdoff_hotkey'))}"
+
+    def _build_wdoff(self, parent):
+        wd = self.cfg.get("wdoff_slots") or [None] * WDOFF_SLOTS
+
+        tk.Label(parent, text="주말던전 끄기 — 등록 좌표를 순서 랜덤으로 1회씩",
+                 font=("맑은 고딕", 9, "bold"), fg="#34495e").pack(pady=(6, 2))
+
+        top = tk.Frame(parent); top.pack(pady=2)
+        self._wdoff_toggle_btn = tk.Button(top, text="OFF", font=("맑은 고딕", 9, "bold"),
+                                           bg="#7f8c8d", fg="white", width=6,
+                                           command=self._toggle_wdoff)
+        self._wdoff_toggle_btn.pack(side="left", padx=(0, 3))
+        tk.Button(top, text="▶ 실행", font=("맑은 고딕", 9, "bold"),
+                  bg="#27ae60", fg="white", width=6,
+                  command=self._start_wdoff).pack(side="left", padx=3)
+        tk.Button(top, text="⌨ 단축키", font=("맑은 고딕", 8),
+                  bg="#2c3e50", fg="white",
+                  command=self._assign_wdoff_hotkey).pack(side="left", padx=3)
+        tk.Button(top, text="👁 전체보기", font=("맑은 고딕", 8),
+                  bg="#566573", fg="white",
+                  command=self._preview_wdoff_all).pack(side="left", padx=3)
+
+        self._wdoff_hotkey_var = tk.StringVar(value=self._wdoff_hotkey_label())
+        tk.Label(parent, textvariable=self._wdoff_hotkey_var,
+                 font=("맑은 고딕", 8), fg="#34495e").pack()
+
+        int_row = tk.Frame(parent); int_row.pack(pady=2)
+        tk.Label(int_row, text="간격(초)", font=("맑은 고딕", 8)).pack(side="left")
+        self._wdoff_min_var = tk.StringVar(value=str(self.cfg.get("wdoff_min", WDOFF_MIN)))
+        self._wdoff_max_var = tk.StringVar(value=str(self.cfg.get("wdoff_max", WDOFF_MAX)))
+        tk.Entry(int_row, textvariable=self._wdoff_min_var, width=4).pack(side="left", padx=2)
+        tk.Label(int_row, text="~").pack(side="left")
+        tk.Entry(int_row, textvariable=self._wdoff_max_var, width=4).pack(side="left", padx=2)
+        tk.Button(int_row, text="저장", font=("맑은 고딕", 7),
+                  command=self._save_wdoff_interval).pack(side="left", padx=3)
+
+        tk.Frame(parent, height=1, bg="#ccc").pack(fill="x", padx=8, pady=3)
+
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        sb = tk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        inner = tk.Frame(canvas)
+        fid = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(fid, width=e.width))
+        def _wheel(e): canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        canvas.bind("<MouseWheel>", _wheel)
+        inner.bind("<MouseWheel>", _wheel)
+
+        self._wdoff_slot_vars = []
+        for i in range(WDOFF_SLOTS):
+            row = tk.Frame(inner, bd=1, relief="groove"); row.pack(fill="x", padx=3, pady=1)
+            tk.Label(row, text=f"#{i+1:02d}", font=("맑은 고딕", 8, "bold"),
+                     width=3, fg="#34495e").pack(side="left", padx=2)
+            sv = tk.StringVar()
+            c = wd[i] if i < len(wd) else None
+            sv.set(f"({c[0]},{c[1]})" if c else "미등록")
+            self._wdoff_slot_vars.append(sv)
+            tk.Label(row, textvariable=sv, font=("맑은 고딕", 8),
+                     width=12, anchor="w").pack(side="left")
+            tk.Button(row, text="등록", font=("맑은 고딕", 7), bg="#5d6d7e", fg="white",
+                      command=lambda x=i: self._reg_wdoff_coord(x)).pack(side="right", padx=2)
+            tk.Button(row, text="×", font=("맑은 고딕", 7), fg="red", width=2,
+                      command=lambda x=i: self._del_wdoff_coord(x)).pack(side="right")
+            row.bind("<MouseWheel>", _wheel)
+
+        self._refresh_wdoff_toggle()
+
+    def _refresh_wdoff_toggle(self):
+        if hasattr(self, "_wdoff_toggle_btn") and self._wdoff_toggle_btn.winfo_exists():
+            on = getattr(self, "_wdoff_on", False)
+            self._wdoff_toggle_btn.config(text="ON" if on else "OFF",
+                                          bg="#27ae60" if on else "#7f8c8d")
+
+    def _toggle_wdoff(self):
+        self._wdoff_on = not getattr(self, "_wdoff_on", False)
+        self.cfg["wdoff_on"] = self._wdoff_on   # 재시작해도 유지
+        save_cfg(self.cfg)
+        self._refresh_wdoff_toggle()
+        if self._wdoff_on:
+            self.status.set(f"주말던전끄기 ON — {self._vk_name(self.cfg.get('wdoff_hotkey'))} 누르면 실행")
+        else:
+            self.status.set("주말던전끄기 OFF")
+
+    def _save_wdoff_interval(self):
+        try:
+            mn = float(self._wdoff_min_var.get())
+            mx = float(self._wdoff_max_var.get())
+            if mx < mn:
+                mn, mx = mx, mn
+            self.cfg["wdoff_min"] = mn
+            self.cfg["wdoff_max"] = mx
+            save_cfg(self.cfg)
+            self.status.set(f"✔ 간격 저장: {mn}~{mx}초")
+        except ValueError:
+            self.status.set("간격은 숫자로 입력하세요")
+
+    def _reg_wdoff_coord(self, idx):
+        self._wdoff_reg_idx = idx
+        self.status.set(f"3초 후 주말던전끄기 #{idx+1} 위치를 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="wdoff")])
+
+    def on_wdoff_coord(self, x, y):
+        wd = self.cfg.get("wdoff_slots") or [None] * WDOFF_SLOTS
+        while len(wd) < WDOFF_SLOTS:
+            wd.append(None)
+        wd[self._wdoff_reg_idx] = [x, y]
+        self.cfg["wdoff_slots"] = wd
+        save_cfg(self.cfg)
+        if hasattr(self, "_wdoff_slot_vars") and self._wdoff_reg_idx < len(self._wdoff_slot_vars):
+            self._wdoff_slot_vars[self._wdoff_reg_idx].set(f"({x},{y})")
+        self.status.set(f"✔ 주말던전끄기 #{self._wdoff_reg_idx+1} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _del_wdoff_coord(self, idx):
+        wd = self.cfg.get("wdoff_slots") or [None] * WDOFF_SLOTS
+        if idx < len(wd):
+            wd[idx] = None
+            self.cfg["wdoff_slots"] = wd
+            save_cfg(self.cfg)
+        if hasattr(self, "_wdoff_slot_vars") and idx < len(self._wdoff_slot_vars):
+            self._wdoff_slot_vars[idx].set("미등록")
+        self.status.set(f"주말던전끄기 #{idx+1} 삭제")
+
+    def _preview_wdoff_all(self):
+        """전체 좌표 미리보기 — 점 드래그=개별 이동, 빈 곳 드래그=전체 이동, 점 클릭=재등록."""
+        wd = self.cfg.get("wdoff_slots") or []
+        reg = [(i, c) for i, c in enumerate(wd) if c]
+        if not reg:
+            self.status.set("주말던전끄기: 등록된 좌표가 없습니다"); return
+        dots = [(c[0], c[1], si + 1) for si, c in reg]
+
+        def rereg(dot_idx):
+            self._reg_wdoff_coord(reg[dot_idx][0])
+
+        def _save(dot_idx, nx, ny):
+            si = reg[dot_idx][0]
+            self.cfg["wdoff_slots"][si] = [nx, ny]
+            save_cfg(self.cfg)
+            if hasattr(self, "_wdoff_slot_vars") and si < len(self._wdoff_slot_vars):
+                self._wdoff_slot_vars[si].set(f"({nx},{ny})")
+
+        self._open_dot_preview("주말던전 끄기 — 전체 좌표", dots,
+                               rereg_fn=rereg, save_fn=_save, dot_r=8)
+
+    def _start_wdoff(self):
+        threading.Thread(target=self._run_wdoff, daemon=True).start()
+
+    def _run_wdoff(self):
+        if getattr(self, "_wdoff_running", False):
+            return
+        wd = self.cfg.get("wdoff_slots") or []
+        coords = [c for c in wd if c]
+        if not coords:
+            self.after(0, lambda: self.status.set("주말던전끄기: 등록된 좌표가 없습니다"))
+            return
+        if not self._try_busy_or_queue("주말던전끄기", self._start_wdoff):
+            return
+        self._wdoff_running = True
+        try:
+            self.after(0, self._seq_hide)   # 런처/창 최소화 (연속클릭과 동일)
+            time.sleep(0.5)
+            mn = float(self.cfg.get("wdoff_min", WDOFF_MIN))
+            mx = float(self.cfg.get("wdoff_max", WDOFF_MAX))
+            if mx < mn:
+                mn, mx = mx, mn
+            random.shuffle(coords)   # 매 실행마다 클릭 순서 무작위 (연속클릭과 동일)
+            n = len(coords)
+            for i, (x, y) in enumerate(coords):
+                self.after(0, lambda a=i: self.status.set(f"🚪 주말던전끄기 {a+1}/{n} (랜덤 순서)..."))
+                pyautogui.click(x, y)
+                if i < n - 1:
+                    time.sleep(random.uniform(mn, mx))
+            self.after(0, lambda: self.status.set(f"✔ 주말던전끄기 완료 ({n}개)"))
+        except Exception as e:
+            self.after(0, lambda err=e: self.status.set(f"주말던전끄기 오류: {err}"))
+        finally:
+            self._wdoff_running = False
+            self._clear_busy("주말던전끄기")
+            self.after(0, self._restore_all)
+
+    def _assign_wdoff_hotkey(self):
+        self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
+        def _cap():
+            import ctypes
+            time.sleep(0.3)
+            end = time.time() + 5
+            captured = None
+            while time.time() < end:
+                for vk in range(0x08, 0xFF):
+                    if vk in (0x01, 0x02, 0x04):
+                        continue
+                    if ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000:
+                        captured = vk
+                        break
+                if captured is not None:
+                    break
+                time.sleep(0.02)
+            if captured is None:
+                self.after(0, lambda: self.status.set("단축키 지정 취소 (시간초과)"))
+                return
+            if captured == 0x1B:
+                self.after(0, lambda: self.status.set("단축키 지정 취소"))
+                return
+            self.cfg["wdoff_hotkey"] = captured
+            save_cfg(self.cfg)
+            name = self._vk_name(captured)
+            def _upd():
+                if hasattr(self, "_wdoff_hotkey_var"):
+                    self._wdoff_hotkey_var.set(f"단축키: {name}")
+                self.status.set(f"✔ 단축키 지정: {name}")
+            self.after(0, _upd)
+        threading.Thread(target=_cap, daemon=True).start()
+
+    def _wdoff_hotkey_loop(self):
+        """전역 단축키 감시 — ON 상태에서 지정키가 눌리면 주말던전 끄기 실행."""
+        import ctypes
+        prev = False
+        while True:
+            time.sleep(0.03)
+            vk = self.cfg.get("wdoff_hotkey")
+            if not getattr(self, "_wdoff_on", False) or not vk:
+                prev = False
+                continue
+            try:
+                down = bool(ctypes.windll.user32.GetAsyncKeyState(int(vk)) & 0x8000)
+            except Exception:
+                prev = False
+                continue
+            if down and not prev and not getattr(self, "_wdoff_running", False):
+                threading.Thread(target=self._run_wdoff, daemon=True).start()
+            prev = down
+
     # ── 일반던전충전 (연속클릭 복제 — 각 좌표를 7~9회 랜덤 연속 클릭) ──
     def _open_dc_win(self):
         self._open_section_win("_dc_win", "🎯 일반던전충전", self._build_dc, w=300, h=680)
@@ -4378,10 +4648,10 @@ class App(tk.Tk):
         return ctypes.windll.kernel32.GetTickCount() - lii.dwTime
 
     def _claude_idle_minimize_tick(self):
-        """사용자가 3분간 아무 작업(입력)도 안 하면 클로드 앱도 최소화.
+        """사용자가 10분간 아무 작업(입력)도 안 하면 클로드 앱도 최소화.
         (매크로 실행 중엔 pyautogui가 입력을 내서 유휴가 아니므로 발동 안 함)"""
         try:
-            if self._system_idle_ms() >= 180000:   # 3분
+            if self._system_idle_ms() >= 600000:   # 10분
                 self._minimize_claude_windows(only_background=False)
         except Exception:
             pass
@@ -4453,12 +4723,12 @@ class App(tk.Tk):
         self._last_activity = time.time()
 
     def _idle_minimize_tick(self):
-        """2분간 아무 조작이 없으면 메인런처를 최소화(뒤 화면 가리지 않게).
+        """10분간 아무 조작이 없으면 메인런처를 최소화(뒤 화면 가리지 않게).
         사용자가 클릭해서 다시 올리면(맵 이벤트) 타이머가 리셋된다."""
         try:
             idle = time.time() - getattr(self, "_last_activity", time.time())
             running = getattr(self, "_running", False)  # 전체 자동실행 중이면 관여 안 함
-            if not running and idle >= 120:
+            if not running and idle >= 600:
                 try: normal = (self.state() == "normal")
                 except Exception: normal = False
                 if normal:
@@ -5786,7 +6056,7 @@ class App(tk.Tk):
     def _section_wins(self):
         attrs = ["_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
-                 "_dc_win","_accounts_win","_doll_win"]
+                 "_dc_win","_accounts_win","_doll_win","_wdoff_win"]
         return [getattr(self, a) for a in attrs
                 if getattr(self, a, None) and getattr(self, a).winfo_exists()]
 
@@ -7724,6 +7994,8 @@ class CoordOverlay(tk.Toplevel):
             label = f"일반던전충전 #{app._dc_reg_idx+1} 위치"
         elif mode == "doll":
             label = f"인형탐험 #{app._doll_reg_idx+1} 좌표{app._doll_reg_step+1} 위치"
+        elif mode == "wdoff":
+            label = f"주말던전끄기 #{app._wdoff_reg_idx+1} 위치"
         else:
             label = LABELS.get(app._reg_target, "버튼")
 
@@ -7747,6 +8019,7 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "seq":       self.app.on_seq_coord(x, y)
         elif self.mode == "dc":        self.app.on_dc_coord(x, y)
         elif self.mode == "doll":      self.app.on_doll_coord(x, y)
+        elif self.mode == "wdoff":     self.app.on_wdoff_coord(x, y)
         else:                          self.app.on_coord(x, y)
 
 
