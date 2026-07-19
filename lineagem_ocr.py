@@ -862,13 +862,18 @@ class OCRApp(tk.Tk):
                         counts[day][str(i)] = val
                     except Exception as e:
                         self.after(0, lambda m=f"#{i+1:02d} 오류: {e}": self._status.set(m))
-                    import time; time.sleep(2)
+                    import time; time.sleep(1.4)   # 슬롯간 간격 (2.0 → 30% 단축)
                 save_counts(counts)
                 self.after(0, lambda: self._status.set("✔ 스캔 완료!"))
             finally:
                 self._scanning = False
-                self.after(0, self.deiconify)
-                _restore_claude()
+                if getattr(self, "_close_after_scan", False):
+                    # 창 없는 즉시실행 모드(--close): 끝나면 메인런처 띄우고 종료
+                    _restore_claude()
+                    self.after(0, lambda: (self._raise_main_launcher(), self.destroy()))
+                else:
+                    self.after(0, self.deiconify)
+                    _restore_claude()
         threading.Thread(target=_run, daemon=True).start()
 
     def _toggle_auto(self):
@@ -920,6 +925,9 @@ if __name__ == "__main__":
     import sys as _sys
     app = OCRApp()
     if "--scan" in _sys.argv:
+        if "--close" in _sys.argv:
+            app._close_after_scan = True
+            app.withdraw()          # 창 없이 바로 스캔
         app.after(500, app._scan_all)
     elif "--slot" in _sys.argv:
         try:

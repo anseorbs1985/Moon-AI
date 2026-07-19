@@ -556,12 +556,25 @@ class App(tk.Tk):
         self.iconify()
 
     def _open_ocr_scan(self):
+        """다야 전체 스캔 — OCR 창 없이 바로 실행, 끝나면 메인런처 복귀+숫자 갱신."""
         if self._is_busy(exclude="다야OCR"):
             self._enqueue("다야OCR 스캔", self._open_ocr_scan); return
         import subprocess, sys
         exe = sys.executable.replace("python.exe", "pythonw.exe")
-        self._ocr_proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py"), "--scan"])
+        self.status.set("📊 다야 전체 스캔 시작... (OCR 로딩 포함 잠시)")
+        self._minimize_claude()
         self.iconify()
+        proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py"), "--scan", "--close"])
+        self._ocr_proc = proc
+        def _watch():
+            try: proc.wait()
+            except Exception: pass
+            def _done():
+                self.deiconify(); self.lift()
+                self._refresh_count()
+                self.status.set("✔ 다야 전체 스캔 완료")
+            self.after(0, _done)
+        threading.Thread(target=_watch, daemon=True).start()
 
     def _open_island(self):
         import subprocess
@@ -679,6 +692,8 @@ class App(tk.Tk):
 
         # 다야 카운트 데이터 변수 (UI는 별도 창)
         self._cnt_total_var = tk.StringVar(value="합계: 0")
+        self._cnt_date_var  = tk.StringVar(value="")   # 마지막 확정 측정 일시
+        self._cnt_diff_var  = tk.StringVar(value="")   # 직전 확정 대비 수량 차이
         self._cnt_cell_vars = [tk.StringVar(value="-") for _ in range(16)]
         self._cnt_load  = self._make_cnt_loader()
         self._cnt_today = self._make_today_fn()
@@ -752,8 +767,12 @@ class App(tk.Tk):
         tk.Button(ctrl, text="📋 복사", font=("맑은 고딕", 8, "bold"),
                   bg="#2471a3", fg="white", width=10,
                   command=self._copy_daya_counts).pack(fill="x", pady=1)
+        tk.Label(ctrl, textvariable=self._cnt_date_var,
+                 font=("맑은 고딕", 7), fg="#555").pack(anchor="w", pady=(4,0))
         tk.Label(ctrl, textvariable=self._cnt_total_var,
-                 font=("맑은 고딕", 10, "bold"), fg="#c0392b").pack(anchor="w", pady=(4,0))
+                 font=("맑은 고딕", 10, "bold"), fg="#c0392b").pack(anchor="w")
+        tk.Label(ctrl, textvariable=self._cnt_diff_var,
+                 font=("맑은 고딕", 9, "bold"), fg="#8e44ad").pack(anchor="w")
 
         self._cnt_img_labels = []
         self._cnt_thumbs = [None] * 16
@@ -1010,7 +1029,67 @@ class App(tk.Tk):
             self._cnt_cell_vars[i].set(f"{v:,}" if v else "-")
             total += v
         self._cnt_total_var.set(f"합계: {total:,}")
+        self._daya_track_total(total)
         self._load_daya_thumbs()
+
+    def _daya_track_total(self, total):
+        """합계 변경 감지 → 30분 뒤 시점의 합계를 '확정' 기록 (그 사이 수동 수정 반영).
+        확정 기록으로 [측정일시 / 합계 / 직전 대비 차이]를 표시한다."""
+        import datetime as _dt
+        hp = os.path.join(BASE, "daya_history.json")
+        if not hasattr(self, "_daya_hist"):
+            try:
+                with open(hp, encoding="utf-8") as f:
+                    self._daya_hist = json.load(f)
+            except Exception:
+                self._daya_hist = {"entries": []}
+            self._daya_pending = None
+            self._daya_seen_total = total   # 시작 시점 합계 (변경 감지 기준)
+        # 합계 변경 감지 → 확정 대기 시작 (이미 대기 중이면 시작시각 유지)
+        if total != self._daya_seen_total:
+            self._daya_seen_total = total
+            if self._daya_pending is None:
+                self._daya_pending = {"start": time.time()}
+        # 10분 경과 → 현재 합계로 확정 (그 사이 수동 수정 반영)
+        if self._daya_pending and time.time() - self._daya_pending["start"] >= 600:
+            ents = self._daya_hist["entries"]
+            start_ts = self._daya_pending["start"]
+            if ents and start_ts - ents[-1]["ts"] < 3600:
+                ents[-1]["total"] = total          # 1시간 내 재변경은 같은 측정의 수정으로 봄
+            else:
+                ents.append({"ts": start_ts, "total": total})
+            self._daya_hist["entries"] = ents[-30:]   # 최근 30개만 보관
+            try:
+                with open(hp, "w", encoding="utf-8") as f:
+                    json.dump(self._daya_hist, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+            self._daya_pending = None
+        # 표시 갱신: 📅 측정일시(즉시 표기) / 차이(직전 확정 대비 — 새 측정 시 바로 잠정 표기)
+        ents = self._daya_hist["entries"]
+        pend = self._daya_pending
+        if pend:
+            when = _dt.datetime.fromtimestamp(pend["start"]).strftime("%m/%d %H:%M")
+            self._cnt_date_var.set(f"📅 {when} 측정 ⏳")
+            base = None
+            if ents:
+                merging = pend["start"] - ents[-1]["ts"] < 3600   # 직전 측정의 수정으로 병합될 건
+                if merging:
+                    base = ents[-2] if len(ents) >= 2 else None
+                else:
+                    base = ents[-1]
+            self._cnt_diff_var.set(f"차이: {total - base['total']:+,}" if base else "")
+        elif ents:
+            when = _dt.datetime.fromtimestamp(ents[-1]["ts"]).strftime("%m/%d %H:%M")
+            self._cnt_date_var.set(f"📅 {when} 측정")
+            if len(ents) >= 2:
+                diff = ents[-1]["total"] - ents[-2]["total"]
+                self._cnt_diff_var.set(f"차이: {diff:+,}")
+            else:
+                self._cnt_diff_var.set("")
+        else:
+            self._cnt_date_var.set("📅 측정 기록 없음")
+            self._cnt_diff_var.set("")
 
     def _load_daya_thumbs(self):
         """daya_crops/slot_i.png (OCR가 캡처한 숫자 이미지)을 각 셀에 표시."""
