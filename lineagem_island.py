@@ -377,96 +377,98 @@ class IslandApp(tk.Tk):
 
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
 
-        # 슬롯 스크롤
-        outer = tk.Frame(parent); outer.pack(fill="both", expand=True, padx=2)
-        canvas = tk.Canvas(outer, highlightthickness=0)
-        sb = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        canvas.pack(side="left", fill="both", expand=True)
-        inner = tk.Frame(canvas)
-        fid = canvas.create_window((0,0), window=inner, anchor="nw")
-        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        self._slot_canvases.append(canvas)
-        canvas.bind("<Configure>",
-            lambda e: canvas.itemconfig(fid, width=e.width))
-
-        def _wheel(e):
-            canvas.yview_scroll(int(-1*(e.delta/120)), "units")
-        canvas.bind("<MouseWheel>", _wheel)
-        inner.bind("<MouseWheel>", _wheel)
-
-        slots = self.cfg[key]
+        # 슬롯 4×4 그리드 (세로 열우선 — 화면 배치와 동일)
+        if not hasattr(self, "_cnt_vars"):
+            self._cnt_vars = {}
+            self._pop = {}
+        self._cnt_vars[key] = []
+        wg = tk.Frame(parent); wg.pack(padx=2, pady=2)
         for i in range(SLOTS):
-            row = tk.Frame(inner, bd=1, relief="groove")
-            row.pack(fill="x", padx=2, pady=1)
-
-            tk.Label(row, text=f"#{i+1:02d}", font=("맑은 고딕", 7, "bold"),
-                     width=3).pack(side="left", padx=(2,0))
-
-            nv = tk.StringVar(value=slots[i].get("name", "미등록"))
-            self._name_vars[key].append(nv)
-            ent = tk.Entry(row, textvariable=nv, font=("맑은 고딕", 8), width=7)
-            ent.pack(side="left", padx=2)
-            ent.bind("<FocusOut>", lambda e, k=key, x=i: self._save_name(k, x))
-            ent.bind("<Return>",   lambda e, k=key, x=i: self._save_name(k, x))
-
-            cvars = []; cbtns = []
-            for j in range(CLICKS):
-                cv = tk.StringVar()
-                cvars.append(cv)
-                cell = tk.Frame(row); cell.pack(side="left", padx=1)
-                tk.Label(cell, text=CLICK_LABELS[j],
-                         font=("맑은 고딕", 5), fg="#888").pack()
-                btn = tk.Button(cell, textvariable=cv, font=("맑은 고딕", 6),
-                                width=3, pady=0,
-                                command=lambda k=key, x=i, c=j: self._reg(k, x, c))
-                btn.pack()
-                cbtns.append(btn)
-            self._click_vars[key].append(cvars)
-            self._click_btns[key].append(cbtns)
-
-            for w in row.winfo_children():
-                w.bind("<MouseWheel>", _wheel)
-            row.bind("<MouseWheel>", _wheel)
-
-            tk.Button(row, text="▶", font=("맑은 고딕", 7), fg="white",
-                      bg=color, width=1,
-                      command=lambda k=key, x=i: self._test(k, x)
-                      ).pack(side="right", padx=(0,1))
-            tk.Button(row, text="×", font=("맑은 고딕", 7), fg="red",
-                      width=1, command=lambda k=key, x=i: self._del(k, x)
-                      ).pack(side="right", padx=1)
-            tk.Button(row, text="👁", font=("맑은 고딕", 7),
-                      width=1, command=lambda k=key, x=i: self._preview(k, x)
-                      ).pack(side="right", padx=1)
-            if i > 0:
-                tk.Button(row, text="↑그룹복사", font=("맑은 고딕", 6), fg="white",
-                          bg="#7d6608", width=5,
-                          command=lambda k=key, x=i: self._copy_from_above(k, x)
-                          ).pack(side="right", padx=1)
+            r, c = i % 4, i // 4
+            cell = tk.Frame(wg, bd=1, relief="groove", padx=2, pady=1)
+            cell.grid(row=r, column=c, padx=2, pady=2, sticky="n")
+            tk.Label(cell, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"),
+                     fg="#555").pack()
+            sv = tk.StringVar(value=f"0/{CLICKS}")
+            self._cnt_vars[key].append(sv)
+            tk.Button(cell, textvariable=sv, font=("맑은 고딕", 7, "bold"),
+                      bg=color, fg="white", width=7,
+                      command=lambda k=key, x=i: self._open_slot_pop(k, x)).pack(pady=(1, 0))
+            r3 = tk.Frame(cell); r3.pack(pady=(1, 0))
+            tk.Button(r3, text="▶", font=("맑은 고딕", 6), fg="white", bg=color, width=2,
+                      command=lambda k=key, x=i: self._test(k, x)).pack(side="left", padx=(0, 1))
+            tk.Button(r3, text="👁", font=("맑은 고딕", 6), width=2,
+                      command=lambda k=key, x=i: self._preview(k, x)).pack(side="left", padx=(0, 1))
+            tk.Button(r3, text="×", font=("맑은 고딕", 6), fg="red", width=2,
+                      command=lambda k=key, x=i: self._del(k, x)).pack(side="left")
 
         self._refresh(key)
 
+    def _open_slot_pop(self, key, idx):
+        """슬롯 좌표 등록 팝업 — 이름 + 클릭1~6 버튼 + 그룹복사."""
+        d = next(x for x in DUNGEONS if x["key"] == key)
+        old = self._pop.get("win")
+        if old and old.winfo_exists():
+            try: old.destroy()
+            except Exception: pass
+        win = tk.Toplevel(self)
+        self._pop = {"win": win, "key": key, "slot": idx, "vars": [], "btns": []}
+        win.title(f"{d['label'].replace(chr(10), ' ')} #{idx+1:02d} 좌표 등록")
+        win.attributes("-topmost", True)
+        slot = self.cfg[key][idx]
+        top = tk.Frame(win); top.pack(fill="x", padx=10, pady=(10, 4))
+        tk.Label(top, text=f"#{idx+1:02d}  이름", font=("맑은 고딕", 9, "bold")).pack(side="left")
+        nv = tk.StringVar(value=slot.get("name", "미등록"))
+        ent = tk.Entry(top, textvariable=nv, font=("맑은 고딕", 9), width=14)
+        ent.pack(side="left", padx=6)
+        def _sv(e=None):
+            self.cfg[key][idx]["name"] = nv.get().strip() or "미등록"
+            save_cfg(self.cfg)
+        ent.bind("<FocusOut>", _sv); ent.bind("<Return>", _sv)
+        grid = tk.Frame(win); grid.pack(padx=10, pady=6)
+        coords = slot.get("coords", [None] * CLICKS)
+        for j in range(CLICKS):
+            cc = tk.Frame(grid); cc.grid(row=j // 6, column=j % 6, padx=4, pady=4)
+            tk.Label(cc, text=CLICK_LABELS[j], font=("맑은 고딕", 7), fg="#555").pack()
+            on = j < len(coords) and coords[j]
+            cv = tk.StringVar(value="✔" if on else "✗")
+            self._pop["vars"].append(cv)
+            b = tk.Button(cc, textvariable=cv, font=("맑은 고딕", 8), width=4, pady=2,
+                          bg=d["color"] if on else "#7f8c8d", fg="white",
+                          command=lambda k=key, x=idx, c=j: self._reg(k, x, c))
+            b.pack(); self._pop["btns"].append(b)
+        bot = tk.Frame(win); bot.pack(pady=(4, 10))
+        if idx > 0:
+            tk.Button(bot, text="↑ 윗슬롯 복사", font=("맑은 고딕", 8), bg="#7d6608", fg="white",
+                      command=lambda: self._copy_from_above(key, idx)).pack(side="left", padx=3)
+        tk.Button(bot, text="👁 미리보기", font=("맑은 고딕", 8), bg="#566573", fg="white",
+                  command=lambda: self._preview(key, idx)).pack(side="left", padx=3)
+        tk.Button(bot, text="× 전체삭제", font=("맑은 고딕", 8), fg="white", bg="#c0392b",
+                  command=lambda: self._del(key, idx)).pack(side="left", padx=3)
+        tk.Button(bot, text="닫기", font=("맑은 고딕", 8), command=win.destroy).pack(side="left", padx=3)
+
     def _refresh(self, key):
         slots = self.cfg.get(key, [])
-        for i in range(SLOTS):
+        # 그리드 셀 (좌표 개수)
+        for i, sv in enumerate(self._cnt_vars.get(key, [])):
             if i >= len(slots): break
-            self._name_vars[key][i].set(slots[i].get("name", "미등록"))
-            coords = slots[i].get("coords", [None]*CLICKS)
-            d = next(x for x in DUNGEONS if x["key"] == key)
-            for j in range(CLICKS):
-                c = coords[j] if j < len(coords) else None
-                self._click_vars[key][i][j].set("✔" if c else "등록")
-                self._click_btns[key][i][j].config(
-                    fg="white" if c else "black",
-                    bg=d["color"] if c else "SystemButtonFace"
-                )
-
-    def _save_name(self, key, idx):
-        name = self._name_vars[key][idx].get().strip() or "미등록"
-        self.cfg[key][idx]["name"] = name
-        save_cfg(self.cfg)
+            coords = slots[i].get("coords", [])
+            sv.set(f"{sum(1 for c in coords if c)}/{CLICKS}")
+        # 열린 등록 팝업 갱신
+        pop = getattr(self, "_pop", {})
+        win = pop.get("win")
+        if win and win.winfo_exists() and pop.get("key") == key:
+            i = pop["slot"]
+            if i < len(slots):
+                d = next(x for x in DUNGEONS if x["key"] == key)
+                coords = slots[i].get("coords", [])
+                for j, cv in enumerate(pop.get("vars", [])):
+                    on = j < len(coords) and coords[j]
+                    cv.set("✔" if on else "✗")
+                    try:
+                        pop["btns"][j].config(bg=d["color"] if on else "#7f8c8d")
+                    except Exception:
+                        pass
 
     def _reg_scroll(self, key, slot_idx, sc_var):
         self._status.set(f"3초 후 슬롯#{slot_idx+1} 스크롤 위치에 마우스를 올려두세요!")
