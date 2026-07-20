@@ -52,7 +52,7 @@ LOCAL_DATA    = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
 try:
     import shutil as _sh
     os.makedirs(os.path.join(LOCAL_DATA, "daya_crops"), exist_ok=True)
-    for _f in ("daya_counts.json", "daya_history.json"):    # 예전 위치에서 1회 이관
+    for _f in ("daya_counts.json", "daya_history.json", "daya_regions.json"):  # 예전 위치에서 1회 이관
         _s, _d = os.path.join(BASE, _f), os.path.join(LOCAL_DATA, _f)
         if os.path.exists(_s) and not os.path.exists(_d):
             _sh.copy2(_s, _d)
