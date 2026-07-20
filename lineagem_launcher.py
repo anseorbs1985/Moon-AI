@@ -4539,16 +4539,16 @@ class App(tk.Tk):
             messagebox.showwarning("등록 필요", "실행할(ON) 인형 탐험 좌표가 없습니다."); return
         if not self._try_busy_or_queue("인형탐험", self._start_doll): return
         self._doll_stop = False
-        if hasattr(self, "btn_doll_run"):  self.btn_doll_run.config(state="disabled")
-        if hasattr(self, "btn_doll_stop"): self.btn_doll_stop.config(state="normal")
+        if hasattr(self, "btn_doll_run") and self.btn_doll_run.winfo_exists():  self.btn_doll_run.config(state="disabled")
+        if hasattr(self, "btn_doll_stop") and self.btn_doll_stop.winfo_exists(): self.btn_doll_stop.config(state="normal")
         self._minimize_claude()
         self.iconify()
         threading.Thread(target=self._run_task, args=("인형탐험", self._run_doll_standalone), daemon=True).start()
 
     def _run_doll_standalone(self):
         self._run_doll()
-        if hasattr(self, "btn_doll_run"):  self.btn_doll_run.config(state="normal", bg="#b9770e", text="▶  인형탐험 실행")
-        if hasattr(self, "btn_doll_stop"): self.btn_doll_stop.config(state="disabled")
+        if hasattr(self, "btn_doll_run") and self.btn_doll_run.winfo_exists():  self.btn_doll_run.config(state="normal", bg="#b9770e", text="▶  인형탐험 실행")
+        if hasattr(self, "btn_doll_stop") and self.btn_doll_stop.winfo_exists(): self.btn_doll_stop.config(state="disabled")
         self._doll_stop = False
         self.after(0, self._restore_all)
 
