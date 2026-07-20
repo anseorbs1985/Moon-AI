@@ -4619,16 +4619,16 @@ class App(tk.Tk):
             messagebox.showwarning("등록 필요", "실행할(ON) 인형 탐험 좌표가 없습니다."); return
         if not self._try_busy_or_queue("인형탐험", self._start_doll): return
         self._doll_stop = False
-        if hasattr(self, "btn_doll_run") and self.btn_doll_run.winfo_exists():  self.btn_doll_run.config(state="disabled")
-        if hasattr(self, "btn_doll_stop") and self.btn_doll_stop.winfo_exists(): self.btn_doll_stop.config(state="normal")
+        self._set_btn("btn_doll_run", state="disabled")
+        self._set_btn("btn_doll_stop", state="normal")
         self._minimize_claude()
         self.iconify()
         threading.Thread(target=self._run_task, args=("인형탐험", self._run_doll_standalone), daemon=True).start()
 
     def _run_doll_standalone(self):
         self._run_doll()
-        if hasattr(self, "btn_doll_run") and self.btn_doll_run.winfo_exists():  self.btn_doll_run.config(state="normal", bg="#b9770e", text="▶  인형탐험 실행")
-        if hasattr(self, "btn_doll_stop") and self.btn_doll_stop.winfo_exists(): self.btn_doll_stop.config(state="disabled")
+        self._set_btn("btn_doll_run", state="normal", bg="#b9770e", text="▶  인형탐험 실행")
+        self._set_btn("btn_doll_stop", state="disabled")
         self._doll_stop = False
         self.after(0, self._restore_all)
 
@@ -5576,8 +5576,8 @@ class App(tk.Tk):
         if not self._try_busy_or_queue("우편함", self._start_mail): return
         self._mail_stop = False
         self._sched_any_stop = False
-        if hasattr(self, "btn_mail_run"): self.btn_mail_run.config(state="disabled")
-        if hasattr(self, "btn_mail_stop"): self.btn_mail_stop.config(state="normal")
+        self._set_btn("btn_mail_run", state="disabled")
+        self._set_btn("btn_mail_stop", state="normal")
         self._minimize_all()
         self.after(300, lambda: threading.Thread(target=self._run_task, args=("우편함", self._run_mail_standalone), daemon=True).start())
 
@@ -5587,8 +5587,8 @@ class App(tk.Tk):
 
     def _run_mail_standalone(self):
         self._run_mail()
-        if hasattr(self, "btn_mail_run"): self.after(0, lambda: self.btn_mail_run.config(state="normal"))
-        if hasattr(self, "btn_mail_stop"): self.after(0, lambda: self.btn_mail_stop.config(state="disabled"))
+        self.after(0, lambda: self._set_btn("btn_mail_run", state="normal"))
+        self.after(0, lambda: self._set_btn("btn_mail_stop", state="disabled"))
         self._mail_stop = False
         self.after(0, self._restore_all)
 
@@ -5703,8 +5703,8 @@ class App(tk.Tk):
     def _start_dungeon(self):
         if not self._try_busy_or_queue("주말던전", self._start_dungeon): return
         self._dungeon_stop = False
-        if hasattr(self, "btn_dungeon_run"): self.btn_dungeon_run.config(state="disabled")
-        if hasattr(self, "btn_dungeon_stop"): self.btn_dungeon_stop.config(state="normal")
+        self._set_btn("btn_dungeon_run", state="disabled")
+        self._set_btn("btn_dungeon_stop", state="normal")
         self._minimize_claude()
         self.iconify()
         self.after(300, lambda: threading.Thread(target=self._run_task, args=("주말던전", self._run_dungeon), daemon=True).start())
@@ -5741,8 +5741,8 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"오류: {e}")
         finally:
-            if hasattr(self, "btn_dungeon_run"): self.btn_dungeon_run.config(state="normal")
-            if hasattr(self, "btn_dungeon_stop"): self.btn_dungeon_stop.config(state="disabled")
+            self._set_btn("btn_dungeon_run", state="normal")
+            self._set_btn("btn_dungeon_stop", state="disabled")
 
     def _reg_dungeon_click(self, slot_idx, click_idx):
         self._reg_dungeon_slot_idx  = slot_idx
@@ -5818,8 +5818,8 @@ class App(tk.Tk):
         if not self._try_busy_or_queue("과거섬", self._start_past): return
         self._past_stop = False
         self._sched_any_stop = False
-        if hasattr(self, "btn_past_run"): self.btn_past_run.config(state="disabled", bg="#f39c12", text="⏳ 실행중...")
-        if hasattr(self, "btn_past_stop"): self.btn_past_stop.config(state="normal")
+        self._set_btn("btn_past_run", state="disabled", bg="#f39c12", text="⏳ 실행중...")
+        self._set_btn("btn_past_stop", state="normal")
         self._minimize_all()
         self.after(300, lambda: threading.Thread(target=self._run_task, args=("과거섬", self._run_past), daemon=True).start())
 
@@ -5871,8 +5871,8 @@ class App(tk.Tk):
             self.status.set(f"오류: {e}")
         finally:
             self.after(0, self._restore_all)
-            if hasattr(self, "btn_past_run"): self.btn_past_run.config(state="normal", bg="#c0392b", text="▶  실행")
-            if hasattr(self, "btn_past_stop"): self.btn_past_stop.config(state="disabled")
+            self._set_btn("btn_past_run", state="normal", bg="#c0392b", text="▶  실행")
+            self._set_btn("btn_past_stop", state="disabled")
 
     def _reg_past_click(self, slot_idx, click_idx):
         self._reg_past_slot_idx  = slot_idx
@@ -6007,10 +6007,8 @@ class App(tk.Tk):
         if not self._try_busy_or_queue("스케줄", self._start_sched): return
         self._sched_stop = False
         self._sched_any_stop = False
-        if hasattr(self, "btn_sched_run"):
-            self.btn_sched_run.config(state="disabled", bg="#f39c12", text="⏳ 실행중...")
-        if hasattr(self, "btn_sched_stop"):
-            self.btn_sched_stop.config(state="normal")
+        self._set_btn("btn_sched_run", state="disabled", bg="#f39c12", text="⏳ 실행중...")
+        self._set_btn("btn_sched_stop", state="normal")
         self._minimize_all()
         self.after(300, lambda: threading.Thread(target=self._run_task, args=("스케줄", self._run_sched), daemon=True).start())
 
@@ -6052,8 +6050,8 @@ class App(tk.Tk):
         finally:
             self.after(0, self.deiconify)
             self.after(0, self._restore_all)
-            if hasattr(self, "btn_sched_run"): self.btn_sched_run.config(state="normal", bg="#16a085", text="▶  실행")
-            if hasattr(self, "btn_sched_stop"): self.btn_sched_stop.config(state="disabled")
+            self._set_btn("btn_sched_run", state="normal", bg="#16a085", text="▶  실행")
+            self._set_btn("btn_sched_stop", state="disabled")
 
     def _reg_sched_click(self, slot_idx, click_idx):
         self._reg_sched_slot_idx  = slot_idx
@@ -6778,6 +6776,17 @@ class App(tk.Tk):
             pass
 
     # ── 동시 실행 방지 (전역 잠금) ──────────────────────────────────
+    def _set_btn(self, name, **kw):
+        """서브창이 닫히면(3분 자동닫힘 포함) 버튼 위젯이 파괴된다.
+        파괴된 위젯에 config()하면 TclError가 나서 작업 시작이 통째로 취소되고,
+        직전에 잡은 _busy_task 잠금도 안 풀리므로 반드시 생존 확인 후 설정한다."""
+        b = getattr(self, name, None)
+        try:
+            if b is not None and b.winfo_exists():
+                b.config(**kw)
+        except Exception:
+            pass
+
     def _is_busy(self, exclude=None):
         """개별 작업 / 다야 OCR / 섬·던전 실행기가 돌고 있으면 True. exclude 이름은 무시."""
         bt = getattr(self, "_busy_task", None)
@@ -6920,16 +6929,16 @@ class App(tk.Tk):
             messagebox.showwarning("등록 필요", "실행할(ON) 사냥 좌표가 없습니다."); return
         if not self._try_busy_or_queue("사냥", self._start_hunt): return
         self._hunt_stop = False
-        if hasattr(self, "btn_hunt_run"): self.btn_hunt_run.config(state="disabled")
-        if hasattr(self, "btn_hunt_stop"): self.btn_hunt_stop.config(state="normal")
+        self._set_btn("btn_hunt_run", state="disabled")
+        self._set_btn("btn_hunt_stop", state="normal")
         self._minimize_claude()
         self.iconify()
         threading.Thread(target=self._run_task, args=("사냥", self._run_hunt_standalone), daemon=True).start()
 
     def _run_hunt_standalone(self):
         self._run_hunt()
-        if hasattr(self, "btn_hunt_run"): self.btn_hunt_run.config(state="normal")
-        if hasattr(self, "btn_hunt_stop"): self.btn_hunt_stop.config(state="disabled")
+        self._set_btn("btn_hunt_run", state="normal")
+        self._set_btn("btn_hunt_stop", state="disabled")
         self._hunt_stop = False
         self.deiconify()
 
