@@ -10,10 +10,41 @@ import os, sys, subprocess, shutil, time
 import tkinter as tk
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-if os.path.basename(HERE).lower() == "moon-ai":
-    DESK, REPO = os.path.dirname(HERE), HERE
-else:
-    DESK, REPO = HERE, os.path.join(HERE, "Moon-AI")
+
+
+def _is_repo(p):
+    return bool(p) and os.path.isdir(os.path.join(p, ".git"))
+
+
+def find_repo(here):
+    """저장소 위치를 자동으로 찾는다 — 컴퓨터마다 폴더 구조가 달라도 되도록.
+    (실행 폴더 아래 / 실행 폴더 자체 / 상위 폴더 / 사용자 폴더·바탕화면 순으로 탐색)"""
+    home = os.path.expanduser("~")
+    cands = [
+        os.path.join(here, "Moon-AI"),          # 실행 폴더\Moon-AI (기본 배치)
+        here,                                    # 실행 폴더가 곧 저장소
+        os.path.join(home, "Moon-AI"),           # C:\Users\<이름>\Moon-AI
+        os.path.join(home, "Desktop", "Moon-AI"),
+        os.path.join(home, "OneDrive", "Desktop", "Moon-AI"),
+    ]
+    # 상위 폴더로 거슬러 올라가며 탐색 (…\Moon-AI\ 안에서 실행된 경우 포함)
+    p = here
+    for _ in range(4):
+        cands.append(p)
+        cands.append(os.path.join(p, "Moon-AI"))
+        parent = os.path.dirname(p)
+        if parent == p:
+            break
+        p = parent
+    for c in cands:
+        if _is_repo(c):
+            return c
+    return None
+
+
+REPO = find_repo(HERE)
+# 배포 대상(DESK)은 런처가 실제로 실행되는 폴더. 저장소 안에서 실행됐다면 그 상위.
+DESK = os.path.dirname(HERE) if os.path.basename(HERE).lower() == "moon-ai" else HERE
 
 CODE_FILES = ["lineagem_launcher.py", "lineagem_ocr.py", "lineagem_island.py",
               "lineagem_dungeon.py", "lineagem_watchdog.py", "precise_click.py",
@@ -105,9 +136,15 @@ def ask_claude(reason):
 
 def main():
     try:
-        if not os.path.isdir(os.path.join(REPO, ".git")):
-            log(f"⚠ 저장소를 찾을 수 없습니다: {REPO}")
+        if not REPO:
+            log("⚠ Moon-AI 저장소를 찾을 수 없습니다. 아래 위치 중 한 곳에 있어야 합니다:")
+            log(f"   · {os.path.join(HERE, 'Moon-AI')}")
+            log(f"   · {os.path.join(os.path.expanduser('~'), 'Moon-AI')}")
+            log("")
+            log("해결: 저장소 폴더(Moon-AI)를 런처 폴더 안으로 옮기거나, 아래 명령으로 새로 받으세요.")
+            log(f'   git clone https://github.com/anseorbs1985/Moon-AI.git "{os.path.join(HERE, "Moon-AI")}"')
             return
+        log(f"저장소: {REPO}")
         log("1) GitHub에서 최신 버전 받는 중...")
         old = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
         r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
