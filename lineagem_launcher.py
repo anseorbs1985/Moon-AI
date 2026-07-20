@@ -7727,6 +7727,7 @@ class _DotPreviewOverlay(tk.Toplevel):
         self._grp_drag  = False  # dragging empty space (group move)
         self._moved     = False
         self._last      = (0, 0)
+        self._sel       = None   # 키보드(WASD/방향키) 미세이동 대상 — 드래그한 점 유지, None=전체
 
         self.overrideredirect(True)
         self.attributes("-topmost", True)
@@ -7749,7 +7750,28 @@ class _DotPreviewOverlay(tk.Toplevel):
         self._cv.bind("<B1-Motion>",       self._on_drag)
         self._cv.bind("<ButtonRelease-1>", self._on_release)
         self.bind("<Escape>", lambda e: self._close())
+        self.bind("<Key>", self._on_key)   # WASD/방향키 1px 미세이동
         self.lift(); self.focus_force()
+
+    def _on_key(self, e):
+        """WASD·방향키 미세이동 — 드래그했던 점이 있으면 그 점만, 없으면 전체 1px 이동."""
+        ks = (e.keysym or "").lower()
+        ch = e.char or ""
+        if   ks in ("w", "up")    or ch == "ㅈ": dx, dy = 0, -1
+        elif ks in ("s", "down")  or ch == "ㄴ": dx, dy = 0, 1
+        elif ks in ("a", "left")  or ch == "ㅁ": dx, dy = -1, 0
+        elif ks in ("d", "right") or ch == "ㅇ": dx, dy = 1, 0
+        else:
+            return
+        if self._sel is not None and self._sel < len(self._dots):
+            d = self._dots[self._sel]
+            d[0] += dx; d[1] += dy
+            if self.save_fn: self.save_fn(self._sel, d[0], d[1])
+        else:
+            for i, d in enumerate(self._dots):
+                d[0] += dx; d[1] += dy
+                if self.save_fn: self.save_fn(i, d[0], d[1])
+        self._draw()
 
     def _draw(self):
         cv = self._cv
@@ -7758,16 +7780,17 @@ class _DotPreviewOverlay(tk.Toplevel):
         # 상단 안내바
         cv.create_rectangle(0, 0, self._sw, 36, fill="#1a252f", outline="")
         cv.create_text(self._sw//2, 18,
-            text="점 드래그: 개별 이동  |  빈 곳 드래그: 전체 이동  |  빈 곳 클릭: 닫기  |  ESC: 닫기",
+            text="점 드래그: 개별 이동  |  빈 곳 드래그: 전체 이동  |  WASD·방향키: 1px 미세이동(드래그한 점, 없으면 전체)  |  빈 곳 클릭: 닫기",
             fill="#aaa", font=("맑은 고딕", 10))
         bx = self._bx
         cv.create_rectangle(bx, 6, bx+90, 30, fill="#e67e22", outline="")
         cv.create_text(bx+45, 18, text="✏ 재등록", fill="white",
                        font=("맑은 고딕", 9, "bold"))
-        # 점들
+        # 점들 (키보드 이동 대상으로 선택된 점은 노란 테두리)
         r = self.R
-        for x, y, num in self._dots:
-            cv.create_oval(x-r, y-r, x+r, y+r, fill="red", outline="white", width=2)
+        for i, (x, y, num) in enumerate(self._dots):
+            outline = "yellow" if i == self._sel else "white"
+            cv.create_oval(x-r, y-r, x+r, y+r, fill="red", outline=outline, width=2)
             cv.create_text(x, y, text=str(num), fill="white",
                            font=("맑은 고딕", 7, "bold"))
 
@@ -7784,11 +7807,14 @@ class _DotPreviewOverlay(tk.Toplevel):
         if hit is not None:
             self._drag      = hit     # 개별 점 드래그
             self._grp_drag  = False
+            self._sel       = hit     # 누르는 순간 선택 → 잡고 있는 중에도 WASD 미세조정 가능
         else:
             self._drag      = None
             self._grp_drag  = True   # 빈 공간 → 그룹 드래그
+            self._sel       = None   # 전체 모드 → WASD도 전체 이동
         self._moved = False
         self._last  = (e.x, e.y)
+        self._draw()
 
     def _on_drag(self, e):
         dx = e.x - self._last[0]
@@ -7813,11 +7839,14 @@ class _DotPreviewOverlay(tk.Toplevel):
             if self._drag is not None:
                 x, y, num = self._dots[self._drag]
                 if self.save_fn: self.save_fn(self._drag, x, y)
+                self._sel = self._drag   # 드래그한 점을 키보드 미세이동 대상으로 유지
             elif self._grp_drag:
                 if self.save_fn:
                     for i, (x, y, _) in enumerate(self._dots):
                         self.save_fn(i, x, y)
+                self._sel = None         # 그룹 이동 후엔 키보드도 전체 이동
             self._drag = None; self._grp_drag = False; self._moved = False
+            self._draw()
         elif self._drag is not None and not self._moved:
             # 점 클릭 → 개별 재등록
             dot_idx = self._drag
