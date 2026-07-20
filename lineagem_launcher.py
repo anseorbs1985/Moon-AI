@@ -6324,18 +6324,20 @@ class App(tk.Tk):
             self.status.set("퍼플/리니지 창을 찾을 수 없습니다."); return
         # 현재 창도 같은 기준(y, x)으로 정렬
         wins_sorted = sorted(wins, key=lambda e: (e[2], e[1]))
-        SWP_NOZORDER = 0x0004
-        applied = 0
+        applied, failed = 0, 0
         for i, (hwnd, *_) in enumerate(wins_sorted):
             if i >= len(positions): break
             p = positions[i]
             try:
-                ctypes.windll.user32.SetWindowPos(
-                    hwnd, 0, p["x"], p["y"], p["w"], p["h"], SWP_NOZORDER)
-                applied += 1
+                ok, _reason = self._apply_window_pos(hwnd, p)
             except Exception:
-                pass
-        self.status.set(f"✔ 창 배치 복구 완료 ({applied}개)")
+                ok = False
+            applied += 1 if ok else 0
+            failed  += 0 if ok else 1
+        if failed:
+            self.status.set(f"창 배치 복구: 성공 {applied}개 / 실패 {failed}개")
+        else:
+            self.status.set(f"✔ 창 배치 복구 완료 ({applied}개)")
 
     def _toggle_detail(self, detail, sv, row_frame, padx=14):
         if detail.winfo_ismapped():
@@ -6598,23 +6600,45 @@ class App(tk.Tk):
     def _restore_all_windows(self):
         self._restore_by_position()
 
+    def _apply_window_pos(self, hwnd, aw):
+        """창을 지정 위치/크기로 이동. (성공여부, 실패사유) 반환.
+        SetWindowPos는 예외가 아니라 0(실패)을 돌려주고, 최대화/최소화된 창은
+        위치가 바뀌지 않으므로 먼저 일반 상태로 되돌린 뒤 적용하고 결과를 검증한다."""
+        from ctypes import wintypes
+        u = ctypes.windll.user32
+        SWP_NOZORDER, SW_RESTORE = 0x0004, 9
+        if u.IsIconic(hwnd) or u.IsZoomed(hwnd):
+            u.ShowWindow(hwnd, SW_RESTORE)
+            time.sleep(0.25)
+        if not u.SetWindowPos(hwnd, 0, aw["x"], aw["y"], aw["w"], aw["h"], SWP_NOZORDER):
+            return False, f"SetWindowPos 실패(오류 {ctypes.windll.kernel32.GetLastError()})"
+        r = wintypes.RECT()
+        u.GetWindowRect(hwnd, ctypes.byref(r))
+        if abs(r.left - aw["x"]) > 4 or abs(r.top - aw["y"]) > 4:
+            return False, f"이동 안 됨(현재 @{r.left},{r.top})"
+        return True, ""
+
     def _restore_by_position(self):
         slots = self.cfg.get("hunt_slots", [])
         wins = self._get_purple_hwnds()
         if not wins:
             self.status.set("리니지M 창을 찾을 수 없습니다."); return
-        SWP_NOZORDER = 0x0004
-        count = 0
+        count, failed = 0, 0
         for i, slot in enumerate(slots):
             aw = slot.get("assigned_window")
             if not aw or not all(k in aw for k in ("x","y","w","h")): continue
             hwnd = self._find_hwnd_for_slot(aw, wins)
             if not hwnd: continue
             try:
-                ctypes.windll.user32.SetWindowPos(hwnd, 0, aw["x"], aw["y"], aw["w"], aw["h"], SWP_NOZORDER)
-                count += 1
-            except: pass
-        self.status.set(f"✔ {count}개 창 위치 복원 완료")
+                ok, _reason = self._apply_window_pos(hwnd, aw)
+            except Exception:
+                ok = False
+            count  += 1 if ok else 0
+            failed += 0 if ok else 1
+        if failed:
+            self.status.set(f"창 위치 복원: 성공 {count}개 / 실패 {failed}개")
+        else:
+            self.status.set(f"✔ {count}개 창 위치 복원 완료")
 
     def _restore_by_ocr(self):
         """OCR로 각 창의 캐릭터명을 읽어 슬롯 이름과 매칭 후 복원"""
@@ -6732,10 +6756,12 @@ class App(tk.Tk):
         hwnd = self._find_hwnd_for_slot(aw, wins)
         if not hwnd:
             self.status.set(f"#{slot_idx+1} — 창을 찾을 수 없습니다. '지정' 버튼을 다시 눌러주세요."); return
-        SWP_NOZORDER = 0x0004
         try:
-            ctypes.windll.user32.SetWindowPos(hwnd, 0, aw["x"], aw["y"], aw["w"], aw["h"], SWP_NOZORDER)
-            self.status.set(f"✔ #{slot_idx+1:02d} 창 복구 완료  ({aw['w']}x{aw['h']}  @{aw['x']},{aw['y']})")
+            ok, reason = self._apply_window_pos(hwnd, aw)
+            if ok:
+                self.status.set(f"✔ #{slot_idx+1:02d} 창 복구 완료  ({aw['w']}x{aw['h']}  @{aw['x']},{aw['y']})")
+            else:
+                self.status.set(f"⚠ #{slot_idx+1:02d} 창 복구 실패 — {reason}")
         except Exception as e:
             self.status.set(f"#{slot_idx+1} 복구 오류: {e}")
         # 개별 재배치 후 메인런처가 뒤로 밀리지 않도록 항상 앞으로 유지
