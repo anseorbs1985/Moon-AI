@@ -253,10 +253,11 @@ class IslandApp(tk.Tk):
             self.after(500, lambda: self._start(key))
 
     def _fit_width(self):
+        # 내용 크기에 맞게 가로+세로 모두 조정 (셀에 딱 맞춤 — 길쭉한 빈 공간 제거)
         self.update_idletasks()
-        needed = self.winfo_reqwidth() + 10
-        h = self.winfo_height()
-        self.geometry(f"{needed}x{h}")
+        nw = self.winfo_reqwidth() + 10
+        nh = self.winfo_reqheight() + 8
+        self.geometry(f"{nw}x{nh}")
 
     def _build_ui(self):
         # 상단 타이틀
@@ -275,9 +276,8 @@ class IslandApp(tk.Tk):
         body = tk.Frame(self); body.pack(fill="both", expand=True, padx=6, pady=4)
 
         for d in self._dungeons_to_show:
-            col = tk.Frame(body, bd=2, relief="groove", width=330)
-            col.pack(side="left", fill="both", expand=True, padx=4, pady=2)
-            col.pack_propagate(False)
+            col = tk.Frame(body, bd=2, relief="groove")
+            col.pack(side="left", padx=4, pady=2, anchor="n")
             self._build_col(col, d)
 
         # 오른쪽 카운트 패널 (전체 모드에서만)
