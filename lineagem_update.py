@@ -176,6 +176,36 @@ def ask_claude(reason):
     return True
 
 
+def ensure_launcher():
+    """메인런처가 꺼져 있으면 반드시 다시 띄운다 (워치독 → 직접 실행 순). 떠 있으면 그대로."""
+    if _launcher_running():
+        return True
+    sh(["schtasks", "/Run", "/TN", "LineageM_Watchdog"])
+    for _ in range(15):
+        time.sleep(1)
+        if _launcher_running():
+            return True
+    log("   워치독 재시작 실패 → 런처 직접 실행")
+    exe = sys.executable.replace("python.exe", "pythonw.exe")
+    subprocess.Popen([exe, os.path.join(DESK, "lineagem_launcher.py")],
+                     creationflags=0x00000008 | 0x00000200)  # DETACHED
+    for _ in range(15):
+        time.sleep(1)
+        if _launcher_running():
+            return True
+    return False
+
+
+def finish(msg=""):
+    """모든 종료 경로 공통: 메인런처 반드시 재시작 확인 → '5초 후 꺼짐' 알림 → 자동 종료."""
+    ok = ensure_launcher()
+    if msg:
+        log(""); log(msg)
+    log("✔ 메인런처 실행 확인" if ok else "⚠ 메인런처 재시작 실패 — 클로드 확인 필요")
+    log("이 창은 5초 후에 꺼집니다")
+    root.after(5000, root.destroy)
+
+
 def main():
     try:
         if not REPO:
@@ -185,6 +215,8 @@ def main():
             log("")
             log("해결: 저장소 폴더(Moon-AI)를 런처 폴더 안으로 옮기거나, 아래 명령으로 새로 받으세요.")
             log(f'   git clone https://github.com/anseorbs1985/Moon-AI.git "{os.path.join(HERE, "Moon-AI")}"')
+            ask_claude("Moon-AI 저장소 폴더를 찾을 수 없음 — 저장소를 찾거나 clone해서 업데이트를 마무리해줘")
+            finish()
             return
         log(f"저장소: {REPO}")
         _bn = backup_coords()
@@ -202,9 +234,8 @@ def main():
                 # 2차: 클로드를 열어 해결 지시문 자동 입력
                 err = (r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "git pull 충돌")
                 log("⚠ 자동복구도 실패 — 클로드에게 해결을 맡깁니다")
-                if ask_claude(err):
-                    log("이 창은 5초 후 자동으로 닫힙니다")
-                    root.after(5000, root.destroy)   # 클로드에 넘겼으면 창도 자동 종료
+                ask_claude(err)
+                finish()
                 return
             log("   ✔ 로컬 변경은 stash로 백업했고 최신 버전을 받았습니다")
         new = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
@@ -249,39 +280,21 @@ def main():
             log("   → 메인런처부터 다시 띄운 뒤 보고합니다")
 
         log("5) 런처 재시작...")
-        sh(["schtasks", "/Run", "/TN", "LineageM_Watchdog"])
-        started = False
-        for _ in range(15):                       # 워치독으로 떴는지 최대 15초 확인
-            time.sleep(1)
-            if _launcher_running():
-                started = True; break
-        if not started:                           # 안 떴으면 직접 실행 (독립 프로세스)
-            log("   워치독 재시작 실패 → 런처 직접 실행")
-            exe = sys.executable.replace("python.exe", "pythonw.exe")
-            subprocess.Popen([exe, os.path.join(DESK, "lineagem_launcher.py")],
-                             creationflags=0x00000008 | 0x00000200)  # DETACHED
-            for _ in range(15):
-                time.sleep(1)
-                if _launcher_running():
-                    started = True; break
-        if started and copy_err is None:
-            log("")
-            log("✔ 업데이트 완료! 런처 재시작 확인 — 이 창은 5초 후 자동으로 닫힙니다")
-            root.after(5000, root.destroy)
-        elif started:                             # 런처는 살렸지만 복사가 실패 → 클로드에 마무리 요청
-            log("")
-            log("⚠ 런처는 다시 띄웠지만 파일 복사가 실패했습니다 — 클로드에게 마무리를 요청합니다")
-            if ask_claude(f"업데이트 중 파일 복사 실패: {copy_err}"):
-                log("이 창은 5초 후 자동으로 닫힙니다")
-                root.after(5000, root.destroy)
+        ok = ensure_launcher()
+        if ok and copy_err is None:
+            finish("✔ 업데이트 완료!")
+        elif ok:                                  # 런처는 살렸지만 복사 실패 → 클로드에 마무리 요청
+            log("⚠ 파일 복사가 실패했습니다 — 클로드에게 마무리를 요청합니다")
+            ask_claude(f"업데이트 중 파일 복사 실패: {copy_err}")
+            finish()
         else:
             log("⚠ 런처가 재시작되지 않았습니다 — 클로드에게 확인을 요청합니다")
-            if ask_claude("업데이트 후 메인런처가 재시작되지 않음 (워치독 실행과 직접 실행 모두 창이 안 뜸 — "
-                          "런처가 시작 직후 죽는 오류일 수 있으니 python으로 직접 실행해 에러를 확인해줘)"):
-                log("이 창은 5초 후 자동으로 닫힙니다")
-                root.after(5000, root.destroy)
+            ask_claude("업데이트 후 메인런처가 재시작되지 않음 (워치독 실행과 직접 실행 모두 창이 안 뜸 — "
+                       "런처가 시작 직후 죽는 오류일 수 있으니 python으로 직접 실행해 에러를 확인해줘)")
+            finish()
     except Exception as e:
         log(f"오류: {e}")
+        finish("⚠ 오류가 있었지만 메인런처는 다시 띄웁니다")
 
 
 root.after(200, main)
