@@ -72,6 +72,23 @@ def sh(args, cwd=None):
 CLAUDE_AUMID = "Claude_pzs8sxrjxfjjc!Claude"   # 클로드 데스크톱 앱 실행 ID
 
 
+def _launcher_running():
+    """메인런처 창이 떠 있는지 확인 (최소화 상태도 True)."""
+    import ctypes
+    u = ctypes.windll.user32
+    found = []
+    def cb(h, _):
+        if u.IsWindowVisible(h):
+            b = ctypes.create_unicode_buffer(256)
+            u.GetWindowTextW(h, b, 256)
+            if "리니지M 자동 실행" in b.value:
+                found.append(h)
+        return True
+    WN = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    u.EnumWindows(WN(cb), 0)
+    return bool(found)
+
+
 def _find_claude_hwnd():
     import ctypes
     u = ctypes.windll.user32
@@ -198,14 +215,31 @@ def main():
         log(f"   복사 {n}개 완료")
 
         log("5) 런처 재시작...")
-        r = sh(["schtasks", "/Run", "/TN", "LineageM_Watchdog"])
-        if r.returncode != 0:                     # 워치독 작업이 없으면 직접 실행
+        sh(["schtasks", "/Run", "/TN", "LineageM_Watchdog"])
+        started = False
+        for _ in range(15):                       # 워치독으로 떴는지 최대 15초 확인
+            time.sleep(1)
+            if _launcher_running():
+                started = True; break
+        if not started:                           # 안 떴으면 직접 실행 (독립 프로세스)
+            log("   워치독 재시작 실패 → 런처 직접 실행")
             exe = sys.executable.replace("python.exe", "pythonw.exe")
-            subprocess.Popen([exe, os.path.join(DESK, "lineagem_launcher.py")])
-            log("   (워치독 작업이 없어 런처를 직접 실행)")
-        log("")
-        log("✔ 업데이트 완료! 이 창은 5초 후 자동으로 닫힙니다")
-        root.after(5000, root.destroy)
+            subprocess.Popen([exe, os.path.join(DESK, "lineagem_launcher.py")],
+                             creationflags=0x00000008 | 0x00000200)  # DETACHED
+            for _ in range(15):
+                time.sleep(1)
+                if _launcher_running():
+                    started = True; break
+        if started:
+            log("")
+            log("✔ 업데이트 완료! 런처 재시작 확인 — 이 창은 5초 후 자동으로 닫힙니다")
+            root.after(5000, root.destroy)
+        else:
+            log("⚠ 런처가 재시작되지 않았습니다 — 클로드에게 확인을 요청합니다")
+            if ask_claude("업데이트 후 메인런처가 재시작되지 않음 (워치독 실행과 직접 실행 모두 창이 안 뜸 — "
+                          "런처가 시작 직후 죽는 오류일 수 있으니 python으로 직접 실행해 에러를 확인해줘)"):
+                log("이 창은 5초 후 자동으로 닫힙니다")
+                root.after(5000, root.destroy)
     except Exception as e:
         log(f"오류: {e}")
 
