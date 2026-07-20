@@ -18,9 +18,8 @@ else:
 CODE_FILES = ["lineagem_launcher.py", "lineagem_ocr.py", "lineagem_island.py",
               "lineagem_dungeon.py", "lineagem_watchdog.py", "precise_click.py",
               "open_launcher.pyw", "lineagem_update.py"]
-# 다야 측정값(daya_counts/history)은 머신별 데이터 — 업데이트로 절대 덮어쓰지 않음
-DATA_FILES = ["coords.json", "island_coords.json", "daya_regions.json",
-              "island_counts.json"]
+# 다야 측정값/좌표(daya_counts·history·regions)는 머신별 데이터 — 업데이트로 절대 덮어쓰지 않음
+DATA_FILES = ["coords.json", "island_coords.json", "island_counts.json"]
 DATA_DIRS  = ["reroll_templates"]
 
 root = tk.Tk(); root.title("🔄 리니지M 업데이트")

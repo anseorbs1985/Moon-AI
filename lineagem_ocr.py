@@ -24,8 +24,20 @@ except Exception:
     pass
 
 BASE       = os.path.dirname(os.path.abspath(__file__))
-OCR_FILE   = os.path.join(BASE, "daya_regions.json")
-COUNT_FILE = os.path.join(BASE, "daya_counts.json")
+# 다야 측정 데이터·좌표(캡처영역/확대/절전)는 git/업데이트가 못 건드리는 로컬 앱데이터 폴더에 저장
+LOCAL_DATA = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+try:
+    os.makedirs(os.path.join(LOCAL_DATA, "daya_crops"), exist_ok=True)
+    import shutil as _sh
+    for _f in ("daya_counts.json", "daya_regions.json"):   # 예전 위치에서 1회 이관
+        _old = os.path.join(BASE, _f)
+        _new = os.path.join(LOCAL_DATA, _f)
+        if os.path.exists(_old) and not os.path.exists(_new):
+            _sh.copy2(_old, _new)
+except Exception:
+    pass
+COUNT_FILE = os.path.join(LOCAL_DATA, "daya_counts.json")
+OCR_FILE   = os.path.join(LOCAL_DATA, "daya_regions.json")   # 좌표/영역 — git pull 무관 고정
 SLOTS      = 16
 
 _reader = None
@@ -762,7 +774,7 @@ class OCRApp(tk.Tk):
         # 슬롯별 캡처(전처리) 이미지 저장 — 메인런처에서 눈으로 숫자 확인용
         if slot_idx is not None:
             try:
-                _cd = os.path.join(BASE, "daya_crops")
+                _cd = os.path.join(LOCAL_DATA, "daya_crops")
                 os.makedirs(_cd, exist_ok=True)
                 img.convert("RGB").save(os.path.join(_cd, f"slot_{slot_idx}.png"))
             except Exception:

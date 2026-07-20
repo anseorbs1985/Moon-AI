@@ -17,6 +17,6 @@
 ## 저장소 규칙
 
 - `accounts.json`(게임 계정 정보)과 `local_config.json`(머신별 설정)은 **절대 GitHub에 올리지 않는다** (gitignore 됨).
-- `daya_counts.json`·`daya_history.json`(다야 측정값)은 **머신별 데이터** — GitHub에 올리지 않고, 업데이트가 덮어쓰지도 않는다. 사용자가 마지막에 측정한 값은 다음 측정 전까지 그대로 유지한다.
+- `daya_counts.json`·`daya_history.json`·`daya_regions.json`(다야 측정값과 OCR 좌표/캡처영역)은 **머신별 데이터** — 실제 저장 위치는 `%LOCALAPPDATA%\MoonAI` 이며 GitHub에 올리지 않고, 업데이트/git pull이 절대 덮어쓰지 않는다. 마지막 측정값과 등록 좌표는 사용자가 직접 바꾸기 전까지 그대로 유지한다.
 - 좌표(coords.json, island_coords.json)와 오림의일기장 이미지(reroll_templates/)는 공유 대상.
 - 코드 수정 후에는 항상 바탕화면으로 복사(배포)하고 워치독(`LineageM_Watchdog` 예약 작업)으로 메인런처를 재시작한다.
