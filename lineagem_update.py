@@ -59,11 +59,15 @@ def _find_claude_hwnd():
 
 
 def ask_claude(reason):
-    """업데이트 실패 시 클로드 앱을 열고 해결 지시문을 자동 입력해 실행시킨다."""
+    """업데이트 실패 시 클로드 앱을 열고 해결 지시문(실패 상세 포함)을 자동 입력해 실행시킨다.
+    성공적으로 넘겼으면 True."""
     import ctypes
     u = ctypes.windll.user32
-    prompt = (f"메인런처 [업데이트] 버튼이 실패했어. 원인: {reason}\n"
-              f"{REPO} 저장소의 git 상태(로컬 변경/충돌)를 확인해서 해결하고, "
+    # 실패 상세(git 상태) 수집 — 클로드가 바로 분석할 수 있게 지시문에 포함
+    st = sh(["git", "status", "--short"], REPO).stdout.strip().splitlines()[:10]
+    detail = ("\n[git status]\n" + "\n".join(st)) if st else ""
+    prompt = (f"메인런처 [업데이트] 버튼이 실패했어. 원인: {reason}{detail}\n"
+              f"{REPO} 저장소의 git 상태(로컬 변경/충돌)를 분석해서 해결하고, "
               "git pull 후 코드 파일들을 바탕화면으로 복사하고 워치독으로 메인런처를 재시작해서 "
               "업데이트를 끝까지 마무리해줘.")
     # 1) 지시문을 클립보드에
@@ -80,7 +84,7 @@ def ask_claude(reason):
                 break
     if not h:
         log("⚠ 클로드 앱을 열지 못했습니다 — 직접 클로드에 '업데이트 실패 해결해줘'라고 말해주세요")
-        return
+        return False
     # 3) 앞으로 올리고 지시문 붙여넣기 + 전송
     u.ShowWindow(h, 9)   # SW_RESTORE
     try:
@@ -97,6 +101,7 @@ def ask_claude(reason):
     u.keybd_event(0x0D, 0, 0, 0)        # Enter
     u.keybd_event(0x0D, 0, KEYUP, 0)
     log("✔ 클로드에게 해결을 요청했습니다 — 클로드 창에서 진행 상황을 확인하세요")
+    return True
 
 
 def main():
@@ -117,7 +122,9 @@ def main():
                 # 2차: 클로드를 열어 해결 지시문 자동 입력
                 err = (r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "git pull 충돌")
                 log("⚠ 자동복구도 실패 — 클로드에게 해결을 맡깁니다")
-                ask_claude(err)
+                if ask_claude(err):
+                    log("이 창은 5초 후 자동으로 닫힙니다")
+                    root.after(5000, root.destroy)   # 클로드에 넘겼으면 창도 자동 종료
                 return
             log("   ✔ 로컬 변경은 stash로 백업했고 최신 버전을 받았습니다")
         new = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()

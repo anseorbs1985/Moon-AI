@@ -49,6 +49,7 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 CONFIG_FILE   = os.path.join(BASE, "coords.json")
 LOCAL_FILE    = os.path.join(BASE, "local_config.json")   # 머신별 설정(깃 공유 안 함, *.json 자동 제외)
 LOCAL_KEYS    = ("profile_target_id",)                    # coords.json이 아닌 이 컴퓨터에만 저장할 키
+DOLL_ENABLED_KEY = "doll_enabled"   # 인형탐험 슬롯 ON/OFF — 좌표는 공유하되 켜짐 여부만 머신별
 ACCOUNTS_FILE = os.path.join(BASE, "accounts.json")
 REROLL_DIR    = os.path.join(BASE, "reroll_templates")   # 아이템 리롤 타깃 이미지 저장
 pyautogui.FAILSAFE = False
@@ -214,6 +215,15 @@ def _apply_local(cfg):
             cfg[k] = local[k]                 # 이 컴퓨터 값 우선
         elif cfg.get(k):
             local[k] = cfg[k]; changed = True  # 기존 coords.json 값 → 로컬로 이관(최초 1회)
+    # 인형탐험 슬롯 ON/OFF는 머신별 — 로컬 값이 있으면 덮어쓰고, 없으면 현재 값을 로컬로 이관(최초 1회)
+    slots = cfg.get("doll_slots", [])
+    de = local.get(DOLL_ENABLED_KEY)
+    if isinstance(de, list):
+        for i, h in enumerate(slots):
+            if i < len(de):
+                h["enabled"] = bool(de[i])
+    elif slots:
+        local[DOLL_ENABLED_KEY] = [bool(h.get("enabled", True)) for h in slots]; changed = True
     if changed:
         save_local(local)
     return cfg
@@ -353,8 +363,22 @@ def save_cfg(cfg):
     for k in LOCAL_KEYS:
         if k in cfg:
             local[k] = cfg[k]
+    slots = cfg.get("doll_slots", [])
+    if slots:
+        local[DOLL_ENABLED_KEY] = [bool(h.get("enabled", True)) for h in slots]
     save_local(local)
     shared = {k: v for k, v in cfg.items() if k not in LOCAL_KEYS}
+    # 인형탐험 ON/OFF는 머신별 — 공유 파일에는 기존 값을 그대로 두어 이 PC 상태가 깃에 새지 않게 한다
+    if slots:
+        try:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
+                prev = json.load(f).get("doll_slots", [])
+        except Exception:
+            prev = []
+        shared["doll_slots"] = [
+            {**h, "enabled": prev[i].get("enabled", True)
+                   if i < len(prev) and isinstance(prev[i], dict) else True}
+            for i, h in enumerate(slots)]
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(shared, f, ensure_ascii=False, indent=2)
 
@@ -4512,6 +4536,29 @@ class App(tk.Tk):
         save_cfg(self.cfg); self._refresh_doll_display()
         self.status.set(f"✔ #01 좌표 → #02~#{DOLL_SLOTS:02d} 전체 복사 완료")
 
+    def _client_rects_by_slot(self):
+        """리니지M 클라이언트 창 16개를 화면 배치(세로 열우선 01~16) 순서로 반환.
+        16개가 정확히 안 보이면 None (보정 불가)."""
+        try:
+            import win32gui
+            wins = []
+            def cb(h, _):
+                if win32gui.IsWindowVisible(h) and not win32gui.IsIconic(h):
+                    t = win32gui.GetWindowText(h)
+                    if t.startswith("리니지M l"):
+                        l, tp, r, b = win32gui.GetWindowRect(h)
+                        if r - l > 100 and b - tp > 100:
+                            wins.append((l, tp, r, b))
+                return True
+            win32gui.EnumWindows(cb, None)
+            if len(wins) != 16:
+                return None
+            wins.sort(key=lambda w: w[0])                     # x(열) 정렬
+            cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
+            return [w for col in cols for w in col]           # 01~16 (열 우선)
+        except Exception:
+            return None
+
     def _copy_doll_slot(self, idx):
         """슬롯 좌표를 클립보드에 복사 — 원하는 슬롯에서 [붙임]으로 붙여넣기."""
         import copy
@@ -4519,19 +4566,35 @@ class App(tk.Tk):
         if not any(coords):
             self.status.set(f"#{idx+1:02d} 복사할 좌표가 없습니다"); return
         self._doll_clipboard = copy.deepcopy(coords)
+        self._doll_clip_src  = idx   # 붙여넣기 때 클라이언트 위치 자동보정 기준
         reg = sum(1 for c in coords if c)
         self.status.set(f"📋 #{idx+1:02d} 좌표 {reg}개 복사됨 — 원하는 슬롯의 [붙임]을 누르세요")
 
     def _paste_doll_slot(self, idx):
-        """클립보드의 좌표를 이 슬롯에 붙여넣기(기존 좌표 덮어씀)."""
+        """클립보드 좌표를 이 슬롯에 붙여넣기 — 클라이언트 창 위치를 감지해
+        원본 슬롯→대상 슬롯 위치 차이만큼 좌표를 자동 이동시킨다."""
         import copy
         clip = getattr(self, "_doll_clipboard", None)
         if not clip:
             self.status.set("먼저 [복사]로 슬롯 좌표를 복사하세요"); return
-        self.cfg["doll_slots"][idx]["coords"] = copy.deepcopy(clip)
+        shifted = copy.deepcopy(clip)
+        src = getattr(self, "_doll_clip_src", None)
+        note = ""
+        if src is not None and src != idx:
+            rects = self._client_rects_by_slot()
+            if rects:
+                dx = rects[idx][0] - rects[src][0]
+                dy = rects[idx][1] - rects[src][1]
+                for c in shifted:
+                    if c:
+                        c[0] += dx; c[1] += dy
+                note = f" — 클라이언트 위치 자동보정 ({dx:+},{dy:+})"
+            else:
+                note = " — ⚠ 클라이언트 16개 감지 실패, 원본 위치 그대로"
+        self.cfg["doll_slots"][idx]["coords"] = shifted
         save_cfg(self.cfg); self._refresh_doll_display()
-        reg = sum(1 for c in clip if c)
-        self.status.set(f"✔ #{idx+1:02d}에 붙여넣기 완료 ({reg}/{DOLL_CLICKS})")
+        reg = sum(1 for c in shifted if c)
+        self.status.set(f"✔ #{idx+1:02d}에 붙여넣기 완료 ({reg}/{DOLL_CLICKS}){note}")
 
     def _doll_wait(self, sec):
         end = time.time() + sec
@@ -4547,16 +4610,16 @@ class App(tk.Tk):
             messagebox.showwarning("등록 필요", "실행할(ON) 인형 탐험 좌표가 없습니다."); return
         if not self._try_busy_or_queue("인형탐험", self._start_doll): return
         self._doll_stop = False
-        if hasattr(self, "btn_doll_run"):  self.btn_doll_run.config(state="disabled")
-        if hasattr(self, "btn_doll_stop"): self.btn_doll_stop.config(state="normal")
+        if hasattr(self, "btn_doll_run") and self.btn_doll_run.winfo_exists():  self.btn_doll_run.config(state="disabled")
+        if hasattr(self, "btn_doll_stop") and self.btn_doll_stop.winfo_exists(): self.btn_doll_stop.config(state="normal")
         self._minimize_claude()
         self.iconify()
         threading.Thread(target=self._run_task, args=("인형탐험", self._run_doll_standalone), daemon=True).start()
 
     def _run_doll_standalone(self):
         self._run_doll()
-        if hasattr(self, "btn_doll_run"):  self.btn_doll_run.config(state="normal", bg="#b9770e", text="▶  인형탐험 실행")
-        if hasattr(self, "btn_doll_stop"): self.btn_doll_stop.config(state="disabled")
+        if hasattr(self, "btn_doll_run") and self.btn_doll_run.winfo_exists():  self.btn_doll_run.config(state="normal", bg="#b9770e", text="▶  인형탐험 실행")
+        if hasattr(self, "btn_doll_stop") and self.btn_doll_stop.winfo_exists(): self.btn_doll_stop.config(state="disabled")
         self._doll_stop = False
         self.after(0, self._restore_all)
 
@@ -7726,6 +7789,7 @@ class _DotPreviewOverlay(tk.Toplevel):
         self._grp_drag  = False  # dragging empty space (group move)
         self._moved     = False
         self._last      = (0, 0)
+        self._sel       = None   # 키보드(WASD/방향키) 미세이동 대상 — 드래그한 점 유지, None=전체
 
         self.overrideredirect(True)
         self.attributes("-topmost", True)
@@ -7748,7 +7812,28 @@ class _DotPreviewOverlay(tk.Toplevel):
         self._cv.bind("<B1-Motion>",       self._on_drag)
         self._cv.bind("<ButtonRelease-1>", self._on_release)
         self.bind("<Escape>", lambda e: self._close())
+        self.bind("<Key>", self._on_key)   # WASD/방향키 1px 미세이동
         self.lift(); self.focus_force()
+
+    def _on_key(self, e):
+        """WASD·방향키 미세이동 — 드래그했던 점이 있으면 그 점만, 없으면 전체 1px 이동."""
+        ks = (e.keysym or "").lower()
+        ch = e.char or ""
+        if   ks in ("w", "up")    or ch == "ㅈ": dx, dy = 0, -1
+        elif ks in ("s", "down")  or ch == "ㄴ": dx, dy = 0, 1
+        elif ks in ("a", "left")  or ch == "ㅁ": dx, dy = -1, 0
+        elif ks in ("d", "right") or ch == "ㅇ": dx, dy = 1, 0
+        else:
+            return
+        if self._sel is not None and self._sel < len(self._dots):
+            d = self._dots[self._sel]
+            d[0] += dx; d[1] += dy
+            if self.save_fn: self.save_fn(self._sel, d[0], d[1])
+        else:
+            for i, d in enumerate(self._dots):
+                d[0] += dx; d[1] += dy
+                if self.save_fn: self.save_fn(i, d[0], d[1])
+        self._draw()
 
     def _draw(self):
         cv = self._cv
@@ -7757,16 +7842,17 @@ class _DotPreviewOverlay(tk.Toplevel):
         # 상단 안내바
         cv.create_rectangle(0, 0, self._sw, 36, fill="#1a252f", outline="")
         cv.create_text(self._sw//2, 18,
-            text="점 드래그: 개별 이동  |  빈 곳 드래그: 전체 이동  |  빈 곳 클릭: 닫기  |  ESC: 닫기",
+            text="점 드래그: 개별 이동  |  빈 곳 드래그: 전체 이동  |  WASD·방향키: 1px 미세이동(드래그한 점, 없으면 전체)  |  빈 곳 클릭: 닫기",
             fill="#aaa", font=("맑은 고딕", 10))
         bx = self._bx
         cv.create_rectangle(bx, 6, bx+90, 30, fill="#e67e22", outline="")
         cv.create_text(bx+45, 18, text="✏ 재등록", fill="white",
                        font=("맑은 고딕", 9, "bold"))
-        # 점들
+        # 점들 (키보드 이동 대상으로 선택된 점은 노란 테두리)
         r = self.R
-        for x, y, num in self._dots:
-            cv.create_oval(x-r, y-r, x+r, y+r, fill="red", outline="white", width=2)
+        for i, (x, y, num) in enumerate(self._dots):
+            outline = "yellow" if i == self._sel else "white"
+            cv.create_oval(x-r, y-r, x+r, y+r, fill="red", outline=outline, width=2)
             cv.create_text(x, y, text=str(num), fill="white",
                            font=("맑은 고딕", 7, "bold"))
 
@@ -7783,11 +7869,14 @@ class _DotPreviewOverlay(tk.Toplevel):
         if hit is not None:
             self._drag      = hit     # 개별 점 드래그
             self._grp_drag  = False
+            self._sel       = hit     # 누르는 순간 선택 → 잡고 있는 중에도 WASD 미세조정 가능
         else:
             self._drag      = None
             self._grp_drag  = True   # 빈 공간 → 그룹 드래그
+            self._sel       = None   # 전체 모드 → WASD도 전체 이동
         self._moved = False
         self._last  = (e.x, e.y)
+        self._draw()
 
     def _on_drag(self, e):
         dx = e.x - self._last[0]
@@ -7812,11 +7901,14 @@ class _DotPreviewOverlay(tk.Toplevel):
             if self._drag is not None:
                 x, y, num = self._dots[self._drag]
                 if self.save_fn: self.save_fn(self._drag, x, y)
+                self._sel = self._drag   # 드래그한 점을 키보드 미세이동 대상으로 유지
             elif self._grp_drag:
                 if self.save_fn:
                     for i, (x, y, _) in enumerate(self._dots):
                         self.save_fn(i, x, y)
+                self._sel = None         # 그룹 이동 후엔 키보드도 전체 이동
             self._drag = None; self._grp_drag = False; self._moved = False
+            self._draw()
         elif self._drag is not None and not self._moved:
             # 점 클릭 → 개별 재등록
             dot_idx = self._drag
