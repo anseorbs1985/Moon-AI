@@ -4528,6 +4528,29 @@ class App(tk.Tk):
         save_cfg(self.cfg); self._refresh_doll_display()
         self.status.set(f"✔ #01 좌표 → #02~#{DOLL_SLOTS:02d} 전체 복사 완료")
 
+    def _client_rects_by_slot(self):
+        """리니지M 클라이언트 창 16개를 화면 배치(세로 열우선 01~16) 순서로 반환.
+        16개가 정확히 안 보이면 None (보정 불가)."""
+        try:
+            import win32gui
+            wins = []
+            def cb(h, _):
+                if win32gui.IsWindowVisible(h) and not win32gui.IsIconic(h):
+                    t = win32gui.GetWindowText(h)
+                    if t.startswith("리니지M l"):
+                        l, tp, r, b = win32gui.GetWindowRect(h)
+                        if r - l > 100 and b - tp > 100:
+                            wins.append((l, tp, r, b))
+                return True
+            win32gui.EnumWindows(cb, None)
+            if len(wins) != 16:
+                return None
+            wins.sort(key=lambda w: w[0])                     # x(열) 정렬
+            cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
+            return [w for col in cols for w in col]           # 01~16 (열 우선)
+        except Exception:
+            return None
+
     def _copy_doll_slot(self, idx):
         """슬롯 좌표를 클립보드에 복사 — 원하는 슬롯에서 [붙임]으로 붙여넣기."""
         import copy
@@ -4535,19 +4558,35 @@ class App(tk.Tk):
         if not any(coords):
             self.status.set(f"#{idx+1:02d} 복사할 좌표가 없습니다"); return
         self._doll_clipboard = copy.deepcopy(coords)
+        self._doll_clip_src  = idx   # 붙여넣기 때 클라이언트 위치 자동보정 기준
         reg = sum(1 for c in coords if c)
         self.status.set(f"📋 #{idx+1:02d} 좌표 {reg}개 복사됨 — 원하는 슬롯의 [붙임]을 누르세요")
 
     def _paste_doll_slot(self, idx):
-        """클립보드의 좌표를 이 슬롯에 붙여넣기(기존 좌표 덮어씀)."""
+        """클립보드 좌표를 이 슬롯에 붙여넣기 — 클라이언트 창 위치를 감지해
+        원본 슬롯→대상 슬롯 위치 차이만큼 좌표를 자동 이동시킨다."""
         import copy
         clip = getattr(self, "_doll_clipboard", None)
         if not clip:
             self.status.set("먼저 [복사]로 슬롯 좌표를 복사하세요"); return
-        self.cfg["doll_slots"][idx]["coords"] = copy.deepcopy(clip)
+        shifted = copy.deepcopy(clip)
+        src = getattr(self, "_doll_clip_src", None)
+        note = ""
+        if src is not None and src != idx:
+            rects = self._client_rects_by_slot()
+            if rects:
+                dx = rects[idx][0] - rects[src][0]
+                dy = rects[idx][1] - rects[src][1]
+                for c in shifted:
+                    if c:
+                        c[0] += dx; c[1] += dy
+                note = f" — 클라이언트 위치 자동보정 ({dx:+},{dy:+})"
+            else:
+                note = " — ⚠ 클라이언트 16개 감지 실패, 원본 위치 그대로"
+        self.cfg["doll_slots"][idx]["coords"] = shifted
         save_cfg(self.cfg); self._refresh_doll_display()
-        reg = sum(1 for c in clip if c)
-        self.status.set(f"✔ #{idx+1:02d}에 붙여넣기 완료 ({reg}/{DOLL_CLICKS})")
+        reg = sum(1 for c in shifted if c)
+        self.status.set(f"✔ #{idx+1:02d}에 붙여넣기 완료 ({reg}/{DOLL_CLICKS}){note}")
 
     def _doll_wait(self, sec):
         end = time.time() + sec
