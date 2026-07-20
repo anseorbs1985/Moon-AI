@@ -195,24 +195,31 @@ def main():
             "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"])
         time.sleep(1.2)
 
-        log("4) 파일 복사...")
-        n = 0
-        for f in CODE_FILES:                      # 코드는 항상 동기화
-            s = os.path.join(REPO, f)
-            if os.path.exists(s):
-                shutil.copy2(s, os.path.join(DESK, f)); n += 1
-        for f in DATA_FILES:                      # 데이터는 이번 pull에서 바뀐 것만
-            if f in changed and os.path.exists(os.path.join(REPO, f)):
-                shutil.copy2(os.path.join(REPO, f), os.path.join(DESK, f)); n += 1
-                log(f"   데이터 갱신: {f}")
-        for d in DATA_DIRS:
-            if any(c.startswith(d + "/") for c in changed):
-                sdir, ddir = os.path.join(REPO, d), os.path.join(DESK, d)
-                os.makedirs(ddir, exist_ok=True)
-                for fn in os.listdir(sdir):
-                    shutil.copy2(os.path.join(sdir, fn), os.path.join(ddir, fn))
-                log(f"   데이터 갱신: {d}/")
-        log(f"   복사 {n}개 완료")
+        # 복사가 실패해도 런처는 반드시 다시 띄운다(꺼진 채로 방치 금지) → 오류는 잡아두고 뒤에서 보고
+        copy_err = None
+        try:
+            log("4) 파일 복사...")
+            n = 0
+            for f in CODE_FILES:                      # 코드는 항상 동기화
+                s = os.path.join(REPO, f)
+                if os.path.exists(s):
+                    shutil.copy2(s, os.path.join(DESK, f)); n += 1
+            for f in DATA_FILES:                      # 데이터는 이번 pull에서 바뀐 것만
+                if f in changed and os.path.exists(os.path.join(REPO, f)):
+                    shutil.copy2(os.path.join(REPO, f), os.path.join(DESK, f)); n += 1
+                    log(f"   데이터 갱신: {f}")
+            for d in DATA_DIRS:
+                if any(c.startswith(d + "/") for c in changed):
+                    sdir, ddir = os.path.join(REPO, d), os.path.join(DESK, d)
+                    os.makedirs(ddir, exist_ok=True)
+                    for fn in os.listdir(sdir):
+                        shutil.copy2(os.path.join(sdir, fn), os.path.join(ddir, fn))
+                    log(f"   데이터 갱신: {d}/")
+            log(f"   복사 {n}개 완료")
+        except Exception as e:
+            copy_err = e
+            log(f"⚠ 파일 복사 중 오류: {e}")
+            log("   → 메인런처부터 다시 띄운 뒤 보고합니다")
 
         log("5) 런처 재시작...")
         sh(["schtasks", "/Run", "/TN", "LineageM_Watchdog"])
@@ -230,10 +237,16 @@ def main():
                 time.sleep(1)
                 if _launcher_running():
                     started = True; break
-        if started:
+        if started and copy_err is None:
             log("")
             log("✔ 업데이트 완료! 런처 재시작 확인 — 이 창은 5초 후 자동으로 닫힙니다")
             root.after(5000, root.destroy)
+        elif started:                             # 런처는 살렸지만 복사가 실패 → 클로드에 마무리 요청
+            log("")
+            log("⚠ 런처는 다시 띄웠지만 파일 복사가 실패했습니다 — 클로드에게 마무리를 요청합니다")
+            if ask_claude(f"업데이트 중 파일 복사 실패: {copy_err}"):
+                log("이 창은 5초 후 자동으로 닫힙니다")
+                root.after(5000, root.destroy)
         else:
             log("⚠ 런처가 재시작되지 않았습니다 — 클로드에게 확인을 요청합니다")
             if ask_claude("업데이트 후 메인런처가 재시작되지 않음 (워치독 실행과 직접 실행 모두 창이 안 뜸 — "
