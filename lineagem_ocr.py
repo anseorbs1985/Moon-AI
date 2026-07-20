@@ -779,6 +779,7 @@ class OCRApp(tk.Tk):
                 img.convert("RGB").save(os.path.join(_cd, f"slot_{slot_idx}.png"))
             except Exception:
                 pass
+        gray_keep = img.copy()                 # 2차 판독용 (이진화 전 회색조)
         img_np = np.array(img)
         # 이진화 (숫자 배경 분리)
         _, img_np = cv2.threshold(img_np, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -789,15 +790,38 @@ class OCRApp(tk.Tk):
 
         img_np = np.array(img)
         reader = get_reader()
-        results = reader.readtext(img_np, detail=1, paragraph=False,
-                                  allowlist="0123456789.,")
 
-        # 신뢰도 0.2 이상, 왼쪽→오른쪽 순서로 이어붙이기
-        valid = [(bbox, txt, conf) for bbox, txt, conf in results
-                 if conf >= 0.2 and any(c.isdigit() for c in txt)]
-        valid.sort(key=lambda r: r[0][0][0])  # bbox 좌측 x 기준 정렬
-        nums = "".join(c for r in valid for c in r[1] if c.isdigit())
-        return int(nums) if nums else 0
+        def _read(np_img):
+            """OCR → (콤마 포함 원문, 숫자만)."""
+            res = reader.readtext(np_img, detail=1, paragraph=False,
+                                  allowlist="0123456789.,")
+            ok = [(bb, t, cf) for bb, t, cf in res
+                  if cf >= 0.2 and any(ch.isdigit() for ch in t)]
+            ok.sort(key=lambda r: r[0][0][0])          # 왼쪽→오른쪽
+            raw = "".join(t for _, t, _ in ok).replace(" ", "").replace(".", ",")
+            return raw, "".join(ch for ch in raw if ch.isdigit())
+
+        import re
+        def _plausible(raw, digits):
+            """게임 표기 형식 검증 — 1,000 이상은 '1,234' 콤마 형식.
+            형식이 어긋나면(예: 12345, 1,2345) 의심으로 처리."""
+            if not digits or len(digits) > 9:
+                return False
+            if "," in raw:
+                return re.fullmatch(r"\d{1,3}(,\d{3})+", raw) is not None
+            return len(digits) <= 3
+
+        # 교차검증: A=이진화 판독, B=회색조 판독 — 완전 일치가 최우선,
+        # 불일치 시 게임 표기 형식(콤마 그룹)을 통과하는 쪽만 채택, 그래도 없으면 미인식.
+        rawA, digA = _read(img_np)
+        rawB, digB = _read(np.array(gray_keep))
+        if digA and digA == digB:
+            return int(digA)               # 서로 다른 전처리가 같은 숫자 → 신뢰
+        if _plausible(rawA, digA):
+            return int(digA)
+        if _plausible(rawB, digB):
+            return int(digB)
+        return 0                            # 확신 없음 → 미인식 (런처에 '-' 표시, 사용자가 확인)
 
     def _ocr_with_retry(self, r, idx, retries=1, interval=1.5, save_debug=False):
         import time
