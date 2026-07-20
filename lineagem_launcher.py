@@ -49,6 +49,7 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 CONFIG_FILE   = os.path.join(BASE, "coords.json")
 LOCAL_FILE    = os.path.join(BASE, "local_config.json")   # 머신별 설정(깃 공유 안 함, *.json 자동 제외)
 LOCAL_KEYS    = ("profile_target_id",)                    # coords.json이 아닌 이 컴퓨터에만 저장할 키
+DOLL_ENABLED_KEY = "doll_enabled"   # 인형탐험 슬롯 ON/OFF — 좌표는 공유하되 켜짐 여부만 머신별
 ACCOUNTS_FILE = os.path.join(BASE, "accounts.json")
 REROLL_DIR    = os.path.join(BASE, "reroll_templates")   # 아이템 리롤 타깃 이미지 저장
 pyautogui.FAILSAFE = False
@@ -214,6 +215,15 @@ def _apply_local(cfg):
             cfg[k] = local[k]                 # 이 컴퓨터 값 우선
         elif cfg.get(k):
             local[k] = cfg[k]; changed = True  # 기존 coords.json 값 → 로컬로 이관(최초 1회)
+    # 인형탐험 슬롯 ON/OFF는 머신별 — 로컬 값이 있으면 덮어쓰고, 없으면 현재 값을 로컬로 이관(최초 1회)
+    slots = cfg.get("doll_slots", [])
+    de = local.get(DOLL_ENABLED_KEY)
+    if isinstance(de, list):
+        for i, h in enumerate(slots):
+            if i < len(de):
+                h["enabled"] = bool(de[i])
+    elif slots:
+        local[DOLL_ENABLED_KEY] = [bool(h.get("enabled", True)) for h in slots]; changed = True
     if changed:
         save_local(local)
     return cfg
@@ -353,8 +363,22 @@ def save_cfg(cfg):
     for k in LOCAL_KEYS:
         if k in cfg:
             local[k] = cfg[k]
+    slots = cfg.get("doll_slots", [])
+    if slots:
+        local[DOLL_ENABLED_KEY] = [bool(h.get("enabled", True)) for h in slots]
     save_local(local)
     shared = {k: v for k, v in cfg.items() if k not in LOCAL_KEYS}
+    # 인형탐험 ON/OFF는 머신별 — 공유 파일에는 기존 값을 그대로 두어 이 PC 상태가 깃에 새지 않게 한다
+    if slots:
+        try:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
+                prev = json.load(f).get("doll_slots", [])
+        except Exception:
+            prev = []
+        shared["doll_slots"] = [
+            {**h, "enabled": prev[i].get("enabled", True)
+                   if i < len(prev) and isinstance(prev[i], dict) else True}
+            for i, h in enumerate(slots)]
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(shared, f, ensure_ascii=False, indent=2)
 
