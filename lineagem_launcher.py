@@ -64,6 +64,23 @@ try:
                 _sh.copy2(os.path.join(_cs, _fn), _dd)
 except Exception:
     pass
+# 좌표 자동 백업: 하루 1회 — git pull/실수로 좌표가 날아가도 여기서 복구
+try:
+    import shutil as _sh2, datetime as _dt2
+    _bdir = os.path.join(LOCAL_DATA, "backups")
+    os.makedirs(_bdir, exist_ok=True)
+    _stamp = _dt2.date.today().strftime("%Y%m%d")
+    for _f in ("coords.json", "island_coords.json", "local_config.json"):
+        _s = os.path.join(BASE, _f)
+        _d = os.path.join(_bdir, f"{_stamp}_{_f}")
+        if os.path.exists(_s) and not os.path.exists(_d):
+            _sh2.copy2(_s, _d)
+    _fns = sorted(os.listdir(_bdir))
+    for _fn in _fns[:-90]:                     # 최근 90개(약 한 달치)만 보관
+        try: os.remove(os.path.join(_bdir, _fn))
+        except Exception: pass
+except Exception:
+    pass
 LOCAL_FILE    = os.path.join(BASE, "local_config.json")   # 머신별 설정(깃 공유 안 함, *.json 자동 제외)
 LOCAL_KEYS    = ("profile_target_id",)                    # coords.json이 아닌 이 컴퓨터에만 저장할 키
 DOLL_ENABLED_KEY = "doll_enabled"   # 인형탐험 슬롯 ON/OFF — 좌표는 공유하되 켜짐 여부만 머신별

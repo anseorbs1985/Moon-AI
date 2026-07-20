@@ -72,6 +72,31 @@ def sh(args, cwd=None):
 CLAUDE_AUMID = "Claude_pzs8sxrjxfjjc!Claude"   # 클로드 데스크톱 앱 실행 ID
 
 
+def backup_coords():
+    """pull 전에 좌표 파일을 LOCALAPPDATA\\MoonAI\\backups 에 백업 — 날아가도 복구 가능."""
+    try:
+        import datetime as dt
+        bdir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI", "backups")
+        os.makedirs(bdir, exist_ok=True)
+        stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        n = 0
+        for src_dir, tag in ((DESK, "desk"), (REPO, "repo")):
+            if not src_dir:
+                continue
+            for f in ("coords.json", "island_coords.json", "local_config.json"):
+                s = os.path.join(src_dir, f)
+                if os.path.exists(s):
+                    shutil.copy2(s, os.path.join(bdir, f"{stamp}_{tag}_{f}"))
+                    n += 1
+        fns = sorted(os.listdir(bdir))
+        for fn in fns[:-120]:                  # 오래된 백업 정리
+            try: os.remove(os.path.join(bdir, fn))
+            except Exception: pass
+        return n
+    except Exception:
+        return 0
+
+
 def _launcher_running():
     """메인런처 창이 떠 있는지 확인 (최소화 상태도 True)."""
     import ctypes
@@ -162,6 +187,8 @@ def main():
             log(f'   git clone https://github.com/anseorbs1985/Moon-AI.git "{os.path.join(HERE, "Moon-AI")}"')
             return
         log(f"저장소: {REPO}")
+        _bn = backup_coords()
+        log(f"0) 좌표 자동 백업 {_bn}개 (LOCALAPPDATA\\MoonAI\\backups)")
         log("1) GitHub에서 최신 버전 받는 중...")
         old = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
         r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
