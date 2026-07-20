@@ -47,6 +47,23 @@ BASE          = os.path.dirname(os.path.abspath(__file__))
 LOGS_DIR      = os.path.join(BASE, "lineagem_logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
 CONFIG_FILE   = os.path.join(BASE, "coords.json")
+# 다야 측정 데이터는 git/업데이트/파일복사가 절대 못 건드리는 로컬 앱데이터 폴더에 저장
+LOCAL_DATA    = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+try:
+    import shutil as _sh
+    os.makedirs(os.path.join(LOCAL_DATA, "daya_crops"), exist_ok=True)
+    for _f in ("daya_counts.json", "daya_history.json"):    # 예전 위치에서 1회 이관
+        _s, _d = os.path.join(BASE, _f), os.path.join(LOCAL_DATA, _f)
+        if os.path.exists(_s) and not os.path.exists(_d):
+            _sh.copy2(_s, _d)
+    _cs = os.path.join(BASE, "daya_crops")
+    if os.path.isdir(_cs):
+        for _fn in os.listdir(_cs):
+            _dd = os.path.join(LOCAL_DATA, "daya_crops", _fn)
+            if not os.path.exists(_dd):
+                _sh.copy2(os.path.join(_cs, _fn), _dd)
+except Exception:
+    pass
 LOCAL_FILE    = os.path.join(BASE, "local_config.json")   # 머신별 설정(깃 공유 안 함, *.json 자동 제외)
 LOCAL_KEYS    = ("profile_target_id",)                    # coords.json이 아닌 이 컴퓨터에만 저장할 키
 DOLL_ENABLED_KEY = "doll_enabled"   # 인형탐험 슬롯 ON/OFF — 좌표는 공유하되 켜짐 여부만 머신별
@@ -1018,7 +1035,7 @@ class App(tk.Tk):
 
     def _make_cnt_loader(self):
         import datetime as _dt
-        count_file = os.path.join(BASE, "daya_counts.json")
+        count_file = os.path.join(LOCAL_DATA, "daya_counts.json")
         def load():
             try:
                 with open(count_file, encoding="utf-8") as f:
@@ -1060,7 +1077,7 @@ class App(tk.Tk):
         """합계 변경 감지 → 30분 뒤 시점의 합계를 '확정' 기록 (그 사이 수동 수정 반영).
         확정 기록으로 [측정일시 / 합계 / 직전 대비 차이]를 표시한다."""
         import datetime as _dt
-        hp = os.path.join(BASE, "daya_history.json")
+        hp = os.path.join(LOCAL_DATA, "daya_history.json")
         if not hasattr(self, "_daya_hist"):
             try:
                 with open(hp, encoding="utf-8") as f:
@@ -1124,7 +1141,7 @@ class App(tk.Tk):
             from PIL import Image, ImageTk
         except Exception:
             return
-        crop_dir = os.path.join(BASE, "daya_crops")
+        crop_dir = os.path.join(LOCAL_DATA, "daya_crops")
         for i, lbl in enumerate(labels):
             p = os.path.join(crop_dir, f"slot_{i}.png")
             try:
@@ -1190,7 +1207,7 @@ class App(tk.Tk):
 
     def _save_daya_count_manual(self, idx, val):
         """daya_counts.json의 최신 날짜 데이터에 수정값을 기록(표시와 동일한 날짜)."""
-        p = os.path.join(BASE, "daya_counts.json")
+        p = os.path.join(LOCAL_DATA, "daya_counts.json")
         try:
             with open(p, encoding="utf-8") as f:
                 counts = json.load(f)
