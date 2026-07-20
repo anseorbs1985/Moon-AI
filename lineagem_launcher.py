@@ -922,11 +922,12 @@ class App(tk.Tk):
         if pinnable:
             self._add_drag_bar(win, attr, pos_key)
         self._refresh_ui()
-        # 내용 너비에 맞게 창 너비 자동 조정
+        # 내용 크기에 맞게 창 가로+세로 자동 조정 (셀에 딱 맞춤)
         def _fit():
             win.update_idletasks()
-            needed = win.winfo_reqwidth() + 10
-            win.geometry(f"{needed}x{h}")
+            nw = win.winfo_reqwidth() + 10
+            nh = win.winfo_reqheight() + 6
+            win.geometry(f"{nw}x{nh}")
         win.after(80, _fit)
 
     def _close_subwin(self, win):
