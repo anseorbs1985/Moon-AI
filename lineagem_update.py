@@ -196,12 +196,37 @@ def ensure_launcher():
     return False
 
 
+def _show_launcher():
+    """메인런처 창을 복원해서 화면에 보여준다 (워치독의 시작 최소화 이후에 실행)."""
+    import ctypes
+    u = ctypes.windll.user32
+    found = []
+    def cb(h, _):
+        if u.IsWindowVisible(h):
+            b = ctypes.create_unicode_buffer(256)
+            u.GetWindowTextW(h, b, 256)
+            if "리니지M 자동 실행" in b.value:
+                found.append(h)
+        return True
+    WN = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    u.EnumWindows(WN(cb), 0)
+    for h in found:
+        u.ShowWindow(h, 9)          # SW_RESTORE
+        try:
+            u.SetForegroundWindow(h)
+        except Exception:
+            pass
+
+
 def finish(msg=""):
-    """모든 종료 경로 공통: 메인런처 반드시 재시작 확인 → '5초 후 꺼짐' 알림 → 자동 종료."""
+    """모든 종료 경로 공통: 런처 재시작 확인 → 창 띄워서 보여줌 → '5초 후 꺼짐' 알림 → 종료."""
     ok = ensure_launcher()
+    if ok:
+        time.sleep(2)               # 워치독의 시작 최소화가 지나간 뒤
+        _show_launcher()            # 런처 창을 화면에 띄워서 보여줌 (이후엔 10분 유휴 최소화가 처리)
     if msg:
         log(""); log(msg)
-    log("✔ 메인런처 실행 확인" if ok else "⚠ 메인런처 재시작 실패 — 클로드 확인 필요")
+    log("✔ 메인런처 실행 확인 (창 표시)" if ok else "⚠ 메인런처 재시작 실패 — 클로드 확인 필요")
     log("이 창은 5초 후에 꺼집니다")
     root.after(5000, root.destroy)
 
