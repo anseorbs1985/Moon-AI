@@ -6,8 +6,44 @@ git pull(Moon-AI) → 런처 종료 → 파일을 실행 폴더(바탕화면)로
 - 데이터 파일(coords.json 등)은 '이번 pull에서 실제로 바뀐 것만' 복사
   → 이 컴퓨터에서 아직 push 안 한 좌표를 실수로 덮어쓰지 않음.
 """
-import os, sys, subprocess, shutil, time
+import os, sys, subprocess, shutil, time, json
 import tkinter as tk
+
+_MISS = object()
+
+
+def _merge3(base, remote, local, stats):
+    """3-way 병합: 로컬에서 (base 대비) 수정한 값은 유지, 수정 안 한 값은 원격 채택.
+    리스트는 요소(슬롯) 단위, 딕셔너리는 키 단위로 재귀 비교."""
+    if isinstance(remote, list) or isinstance(local, list):
+        b = base if isinstance(base, list) else []
+        r = remote if isinstance(remote, list) else []
+        l = local if isinstance(local, list) else []
+        out = []
+        for i in range(max(len(r), len(l))):
+            bi = b[i] if i < len(b) else _MISS
+            ri = r[i] if i < len(r) else _MISS
+            li = l[i] if i < len(l) else _MISS
+            if li is not _MISS and li != (bi if bi is not _MISS else None):
+                out.append(li)                     # 로컬 수정 → 유지
+                if ri is not _MISS and li != ri:
+                    stats[0] += 1
+            else:
+                out.append(ri if ri is not _MISS else (li if li is not _MISS else None))
+        return out
+    if isinstance(remote, dict) or isinstance(local, dict):
+        b = base if isinstance(base, dict) else {}
+        r = remote if isinstance(remote, dict) else {}
+        l = local if isinstance(local, dict) else {}
+        out = {}
+        for k in set(r) | set(l):
+            out[k] = _merge3(b.get(k), r.get(k, l.get(k)), l.get(k, r.get(k)), stats)
+        return out
+    if local != base:
+        if local != remote:
+            stats[0] += 1
+        return local                               # 로컬 수정 → 유지
+    return remote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -246,6 +282,20 @@ def main():
         log(f"저장소: {REPO}")
         _bn = backup_coords()
         log(f"0) 좌표 자동 백업 {_bn}개 (LOCALAPPDATA\\MoonAI\\backups)")
+        # 병합용 스냅샷: 로컬(현재 사용 중) + base(풀 전 저장소 버전)
+        MERGE_FILES = ("coords.json", "island_coords.json")
+        local_snap, base_snap = {}, {}
+        for f in MERGE_FILES:
+            try:
+                with open(os.path.join(DESK, f), encoding="utf-8") as fp:
+                    local_snap[f] = json.load(fp)
+            except Exception:
+                local_snap[f] = None
+            rr = sh(["git", "show", f"HEAD:{f}"], REPO)
+            try:
+                base_snap[f] = json.loads(rr.stdout) if rr.returncode == 0 else None
+            except Exception:
+                base_snap[f] = None
         log("1) GitHub에서 최신 버전 받는 중...")
         old = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
         r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
@@ -289,7 +339,22 @@ def main():
                     shutil.copy2(s, os.path.join(DESK, f)); n += 1
             for f in DATA_FILES:                      # 데이터는 이번 pull에서 바뀐 것만
                 if f in changed and os.path.exists(os.path.join(REPO, f)):
-                    shutil.copy2(os.path.join(REPO, f), os.path.join(DESK, f)); n += 1
+                    dst = os.path.join(DESK, f)
+                    if f in MERGE_FILES and local_snap.get(f) is not None:
+                        # 3-way 병합: 로컬에서 수정한 슬롯/값 유지 + 나머지는 원격 반영
+                        try:
+                            with open(os.path.join(REPO, f), encoding="utf-8") as fp:
+                                remote = json.load(fp)
+                            stats = [0]
+                            merged = _merge3(base_snap.get(f), remote, local_snap[f], stats)
+                            with open(dst, "w", encoding="utf-8") as fp:
+                                json.dump(merged, fp, ensure_ascii=False, indent=2)
+                            n += 1
+                            log(f"   데이터 병합: {f} (로컬 수정 {stats[0]}곳 유지 + 나머지 원격)")
+                            continue
+                        except Exception as e:
+                            log(f"   병합 실패({e}) → 원격 버전으로 대체")
+                    shutil.copy2(os.path.join(REPO, f), dst); n += 1
                     log(f"   데이터 갱신: {f}")
             for d in DATA_DIRS:
                 if any(c.startswith(d + "/") for c in changed):
