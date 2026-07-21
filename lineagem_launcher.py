@@ -1927,7 +1927,7 @@ class App(tk.Tk):
         self._build_slot_grid(parent, "mail")   # 4×4 그리드 (화면 배치와 동일)
 
     def _build_dungeon(self, parent):
-        tk.Label(parent, text="변신확인용  (클릭1~5 / 슬롯·클릭 순서 모두 랜덤)",
+        tk.Label(parent, text="변신확인용  (슬롯 순서 랜덤 / 클릭1~5 순서대로, 간격 랜덤)",
                  font=("맑은 고딕", 9, "bold"), fg="#e67e22").pack(anchor="w", padx=4, pady=(4,2))
 
         dr = tk.Frame(parent); dr.pack(pady=3)
@@ -5375,12 +5375,11 @@ class App(tk.Tk):
                 while len(coords) < DUNGEON_CLICKS:   # 예전 3개짜리 데이터 호환
                     coords.append(None)
                 if not self._wait_mouse_idle("_dungeon_stop"): return
-                # 등록된 클릭1~5 전부를 매번 무작위 순서로 클릭
+                # 클릭1~5를 순서대로, 클릭 사이 간격만 랜덤
                 order = [j for j in range(DUNGEON_CLICKS) if coords[j]]
-                random.shuffle(order)
                 for n, j in enumerate(order):
                     if self._dungeon_stop: break
-                    self.status.set(f"🏰 [{name}] 클릭{j+1} (랜덤 순서)...")
+                    self.status.set(f"🏰 [{name}] 클릭{j+1}...")
                     pyautogui.click(*coords[j])
                     if n < len(order) - 1:
                         time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
