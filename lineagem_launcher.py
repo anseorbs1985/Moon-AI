@@ -5382,14 +5382,15 @@ class App(tk.Tk):
                 time.sleep(DUNGEON_HOVER)
                 pyautogui.click(*coords[0])
                 time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
-                # 확장 후 클릭1, 클릭2
-                for j in range(1, DUNGEON_CLICKS):
+                # 메뉴 이후 클릭1~4는 매번 무작위 순서로
+                order = [j for j in range(1, DUNGEON_CLICKS) if coords[j]]
+                random.shuffle(order)
+                for n, j in enumerate(order):
                     if self._dungeon_stop: break
-                    if coords[j]:
-                        self.status.set(f"🏰 [{name}] 클릭{j}...")
-                        pyautogui.click(*coords[j])
-                        if j < DUNGEON_CLICKS - 1:
-                            time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                    self.status.set(f"🏰 [{name}] 클릭{j} (랜덤 순서)...")
+                    pyautogui.click(*coords[j])
+                    if n < len(order) - 1:
+                        time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
             self.status.set("✔ 던전 실행 완료!")
         except Exception as e:
             self.status.set(f"오류: {e}")
