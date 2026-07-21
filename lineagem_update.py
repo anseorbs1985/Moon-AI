@@ -254,8 +254,26 @@ def _show_launcher():
             pass
 
 
+def ensure_keepalive():
+    """런처 상시 유지용 예약 작업(10분마다 워치독)이 없으면 자동 등록 — 모든 컴퓨터 공통."""
+    try:
+        q = sh(["schtasks", "/Query", "/TN", "LineageM_KeepAlive"])
+        if q.returncode == 0:
+            return
+        exe = sys.executable.replace("python.exe", "pythonw.exe")
+        wd = os.path.join(DESK, "lineagem_watchdog.py")
+        r = sh(["schtasks", "/Create", "/F", "/TN", "LineageM_KeepAlive",
+                "/SC", "MINUTE", "/MO", "10",
+                "/TR", f'"{exe}" "{wd}"'])
+        if r.returncode == 0:
+            log("   ✔ 런처 상시감시(KeepAlive, 10분마다) 예약 작업 등록")
+    except Exception:
+        pass
+
+
 def finish(msg=""):
     """모든 종료 경로 공통: 런처 재시작 확인 → 창 띄워서 보여줌 → '5초 후 꺼짐' 알림 → 종료."""
+    ensure_keepalive()               # 상시감시 예약 작업 보장 (없으면 등록)
     ok = ensure_launcher()
     if ok:
         time.sleep(2)               # 워치독의 시작 최소화가 지나간 뒤
