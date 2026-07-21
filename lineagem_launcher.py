@@ -2554,6 +2554,15 @@ class App(tk.Tk):
         if hasattr(self, "_last_refresh") and now - self._last_refresh < 0.1:
             return
         self._last_refresh = now
+        # 4×4 그리드·인형탐험은 항상 즉시 갱신 (좌표등록 창이 안 열려 있어도!)
+        try:
+            self._refresh_slot_grids()
+        except Exception:
+            pass
+        try:
+            self._refresh_doll_display()
+        except Exception:
+            pass
         if not hasattr(self, "_coord_vars"):
             return
         for key, var in self._coord_vars.items():
