@@ -6,8 +6,44 @@ git pull(Moon-AI) → 런처 종료 → 파일을 실행 폴더(바탕화면)로
 - 데이터 파일(coords.json 등)은 '이번 pull에서 실제로 바뀐 것만' 복사
   → 이 컴퓨터에서 아직 push 안 한 좌표를 실수로 덮어쓰지 않음.
 """
-import os, sys, subprocess, shutil, time
+import os, sys, subprocess, shutil, time, json
 import tkinter as tk
+
+_MISS = object()
+
+
+def _merge3(base, remote, local, stats):
+    """3-way 병합: 로컬에서 (base 대비) 수정한 값은 유지, 수정 안 한 값은 원격 채택.
+    리스트는 요소(슬롯) 단위, 딕셔너리는 키 단위로 재귀 비교."""
+    if isinstance(remote, list) or isinstance(local, list):
+        b = base if isinstance(base, list) else []
+        r = remote if isinstance(remote, list) else []
+        l = local if isinstance(local, list) else []
+        out = []
+        for i in range(max(len(r), len(l))):
+            bi = b[i] if i < len(b) else _MISS
+            ri = r[i] if i < len(r) else _MISS
+            li = l[i] if i < len(l) else _MISS
+            if li is not _MISS and li != (bi if bi is not _MISS else None):
+                out.append(li)                     # 로컬 수정 → 유지
+                if ri is not _MISS and li != ri:
+                    stats[0] += 1
+            else:
+                out.append(ri if ri is not _MISS else (li if li is not _MISS else None))
+        return out
+    if isinstance(remote, dict) or isinstance(local, dict):
+        b = base if isinstance(base, dict) else {}
+        r = remote if isinstance(remote, dict) else {}
+        l = local if isinstance(local, dict) else {}
+        out = {}
+        for k in set(r) | set(l):
+            out[k] = _merge3(b.get(k), r.get(k, l.get(k)), l.get(k, r.get(k)), stats)
+        return out
+    if local != base:
+        if local != remote:
+            stats[0] += 1
+        return local                               # 로컬 수정 → 유지
+    return remote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -72,6 +108,48 @@ def sh(args, cwd=None):
 CLAUDE_AUMID = "Claude_pzs8sxrjxfjjc!Claude"   # 클로드 데스크톱 앱 실행 ID
 
 
+def backup_coords():
+    """pull 전에 좌표 파일을 LOCALAPPDATA\\MoonAI\\backups 에 백업 — 날아가도 복구 가능."""
+    try:
+        import datetime as dt
+        bdir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI", "backups")
+        os.makedirs(bdir, exist_ok=True)
+        stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        n = 0
+        for src_dir, tag in ((DESK, "desk"), (REPO, "repo")):
+            if not src_dir:
+                continue
+            for f in ("coords.json", "island_coords.json", "local_config.json"):
+                s = os.path.join(src_dir, f)
+                if os.path.exists(s):
+                    shutil.copy2(s, os.path.join(bdir, f"{stamp}_{tag}_{f}"))
+                    n += 1
+        fns = sorted(os.listdir(bdir))
+        for fn in fns[:-120]:                  # 오래된 백업 정리
+            try: os.remove(os.path.join(bdir, fn))
+            except Exception: pass
+        return n
+    except Exception:
+        return 0
+
+
+def _launcher_running():
+    """메인런처 창이 떠 있는지 확인 (최소화 상태도 True)."""
+    import ctypes
+    u = ctypes.windll.user32
+    found = []
+    def cb(h, _):
+        if u.IsWindowVisible(h):
+            b = ctypes.create_unicode_buffer(256)
+            u.GetWindowTextW(h, b, 256)
+            if "리니지M 자동 실행" in b.value:
+                found.append(h)
+        return True
+    WN = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    u.EnumWindows(WN(cb), 0)
+    return bool(found)
+
+
 def _find_claude_hwnd():
     import ctypes
     u = ctypes.windll.user32
@@ -134,6 +212,79 @@ def ask_claude(reason):
     return True
 
 
+def ensure_launcher():
+    """메인런처가 꺼져 있으면 반드시 다시 띄운다 (워치독 → 직접 실행 순). 떠 있으면 그대로."""
+    if _launcher_running():
+        return True
+    sh(["schtasks", "/Run", "/TN", "LineageM_Watchdog"])
+    for _ in range(15):
+        time.sleep(1)
+        if _launcher_running():
+            return True
+    log("   워치독 재시작 실패 → 런처 직접 실행")
+    exe = sys.executable.replace("python.exe", "pythonw.exe")
+    subprocess.Popen([exe, os.path.join(DESK, "lineagem_launcher.py")],
+                     creationflags=0x00000008 | 0x00000200)  # DETACHED
+    for _ in range(15):
+        time.sleep(1)
+        if _launcher_running():
+            return True
+    return False
+
+
+def _show_launcher():
+    """메인런처 창을 복원해서 화면에 보여준다 (워치독의 시작 최소화 이후에 실행)."""
+    import ctypes
+    u = ctypes.windll.user32
+    found = []
+    def cb(h, _):
+        if u.IsWindowVisible(h):
+            b = ctypes.create_unicode_buffer(256)
+            u.GetWindowTextW(h, b, 256)
+            if "리니지M 자동 실행" in b.value:
+                found.append(h)
+        return True
+    WN = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    u.EnumWindows(WN(cb), 0)
+    for h in found:
+        u.ShowWindow(h, 9)          # SW_RESTORE
+        try:
+            u.SetForegroundWindow(h)
+        except Exception:
+            pass
+
+
+def ensure_keepalive():
+    """런처 상시 유지용 예약 작업(10분마다 워치독)이 없으면 자동 등록 — 모든 컴퓨터 공통."""
+    try:
+        q = sh(["schtasks", "/Query", "/TN", "LineageM_KeepAlive"])
+        if q.returncode == 0:
+            return
+        exe = sys.executable.replace("python.exe", "pythonw.exe")
+        wd = os.path.join(DESK, "lineagem_watchdog.py")
+        r = sh(["schtasks", "/Create", "/F", "/TN", "LineageM_KeepAlive",
+                "/SC", "MINUTE", "/MO", "10",
+                "/TR", f'"{exe}" "{wd}"'])
+        if r.returncode == 0:
+            log("   ✔ 런처 상시감시(KeepAlive, 10분마다) 예약 작업 등록")
+    except Exception:
+        pass
+
+
+def finish(msg=""):
+    """모든 종료 경로 공통: 런처 재시작 확인 → 창 띄워서 보여줌 → '5초 후 꺼짐' 알림 → 종료."""
+    ensure_keepalive()               # 상시감시 예약 작업 보장 (없으면 등록)
+    ok = ensure_launcher()
+    if ok:
+        time.sleep(2)               # 워치독의 시작 최소화가 지나간 뒤
+        _show_launcher()            # 런처 창을 화면에 띄워서 보여줌 (이후엔 10분 유휴 최소화가 처리)
+    if msg:
+        log(""); log(msg)
+    log("✔ 메인런처 실행 확인 (창 표시)" if ok else "⚠ 메인런처 재시작 실패 — 클로드 확인 필요")
+    log("이 창은 5초 후에 꺼집니다")
+    root.after(5000, root.destroy)
+
+
 def main():
     try:
         if not REPO:
@@ -143,8 +294,26 @@ def main():
             log("")
             log("해결: 저장소 폴더(Moon-AI)를 런처 폴더 안으로 옮기거나, 아래 명령으로 새로 받으세요.")
             log(f'   git clone https://github.com/anseorbs1985/Moon-AI.git "{os.path.join(HERE, "Moon-AI")}"')
+            ask_claude("Moon-AI 저장소 폴더를 찾을 수 없음 — 저장소를 찾거나 clone해서 업데이트를 마무리해줘")
+            finish()
             return
         log(f"저장소: {REPO}")
+        _bn = backup_coords()
+        log(f"0) 좌표 자동 백업 {_bn}개 (LOCALAPPDATA\\MoonAI\\backups)")
+        # 병합용 스냅샷: 로컬(현재 사용 중) + base(풀 전 저장소 버전)
+        MERGE_FILES = ("coords.json", "island_coords.json")
+        local_snap, base_snap = {}, {}
+        for f in MERGE_FILES:
+            try:
+                with open(os.path.join(DESK, f), encoding="utf-8") as fp:
+                    local_snap[f] = json.load(fp)
+            except Exception:
+                local_snap[f] = None
+            rr = sh(["git", "show", f"HEAD:{f}"], REPO)
+            try:
+                base_snap[f] = json.loads(rr.stdout) if rr.returncode == 0 else None
+            except Exception:
+                base_snap[f] = None
         log("1) GitHub에서 최신 버전 받는 중...")
         old = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
         r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
@@ -158,9 +327,8 @@ def main():
                 # 2차: 클로드를 열어 해결 지시문 자동 입력
                 err = (r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "git pull 충돌")
                 log("⚠ 자동복구도 실패 — 클로드에게 해결을 맡깁니다")
-                if ask_claude(err):
-                    log("이 창은 5초 후 자동으로 닫힙니다")
-                    root.after(5000, root.destroy)   # 클로드에 넘겼으면 창도 자동 종료
+                ask_claude(err)
+                finish()
                 return
             log("   ✔ 로컬 변경은 stash로 백업했고 최신 버전을 받았습니다")
         new = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
@@ -178,36 +346,63 @@ def main():
             "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"])
         time.sleep(1.2)
 
-        log("4) 파일 복사...")
-        n = 0
-        for f in CODE_FILES:                      # 코드는 항상 동기화
-            s = os.path.join(REPO, f)
-            if os.path.exists(s):
-                shutil.copy2(s, os.path.join(DESK, f)); n += 1
-        for f in DATA_FILES:                      # 데이터는 이번 pull에서 바뀐 것만
-            if f in changed and os.path.exists(os.path.join(REPO, f)):
-                shutil.copy2(os.path.join(REPO, f), os.path.join(DESK, f)); n += 1
-                log(f"   데이터 갱신: {f}")
-        for d in DATA_DIRS:
-            if any(c.startswith(d + "/") for c in changed):
-                sdir, ddir = os.path.join(REPO, d), os.path.join(DESK, d)
-                os.makedirs(ddir, exist_ok=True)
-                for fn in os.listdir(sdir):
-                    shutil.copy2(os.path.join(sdir, fn), os.path.join(ddir, fn))
-                log(f"   데이터 갱신: {d}/")
-        log(f"   복사 {n}개 완료")
+        # 복사가 실패해도 런처는 반드시 다시 띄운다(꺼진 채로 방치 금지) → 오류는 잡아두고 뒤에서 보고
+        copy_err = None
+        try:
+            log("4) 파일 복사...")
+            n = 0
+            for f in CODE_FILES:                      # 코드는 항상 동기화
+                s = os.path.join(REPO, f)
+                if os.path.exists(s):
+                    shutil.copy2(s, os.path.join(DESK, f)); n += 1
+            for f in DATA_FILES:                      # 데이터는 이번 pull에서 바뀐 것만
+                if f in changed and os.path.exists(os.path.join(REPO, f)):
+                    dst = os.path.join(DESK, f)
+                    if f in MERGE_FILES and local_snap.get(f) is not None:
+                        # 3-way 병합: 로컬에서 수정한 슬롯/값 유지 + 나머지는 원격 반영
+                        try:
+                            with open(os.path.join(REPO, f), encoding="utf-8") as fp:
+                                remote = json.load(fp)
+                            stats = [0]
+                            merged = _merge3(base_snap.get(f), remote, local_snap[f], stats)
+                            with open(dst, "w", encoding="utf-8") as fp:
+                                json.dump(merged, fp, ensure_ascii=False, indent=2)
+                            n += 1
+                            log(f"   데이터 병합: {f} (로컬 수정 {stats[0]}곳 유지 + 나머지 원격)")
+                            continue
+                        except Exception as e:
+                            log(f"   병합 실패({e}) → 원격 버전으로 대체")
+                    shutil.copy2(os.path.join(REPO, f), dst); n += 1
+                    log(f"   데이터 갱신: {f}")
+            for d in DATA_DIRS:
+                if any(c.startswith(d + "/") for c in changed):
+                    sdir, ddir = os.path.join(REPO, d), os.path.join(DESK, d)
+                    os.makedirs(ddir, exist_ok=True)
+                    for fn in os.listdir(sdir):
+                        shutil.copy2(os.path.join(sdir, fn), os.path.join(ddir, fn))
+                    log(f"   데이터 갱신: {d}/")
+            log(f"   복사 {n}개 완료")
+        except Exception as e:
+            copy_err = e
+            log(f"⚠ 파일 복사 중 오류: {e}")
+            log("   → 메인런처부터 다시 띄운 뒤 보고합니다")
 
         log("5) 런처 재시작...")
-        r = sh(["schtasks", "/Run", "/TN", "LineageM_Watchdog"])
-        if r.returncode != 0:                     # 워치독 작업이 없으면 직접 실행
-            exe = sys.executable.replace("python.exe", "pythonw.exe")
-            subprocess.Popen([exe, os.path.join(DESK, "lineagem_launcher.py")])
-            log("   (워치독 작업이 없어 런처를 직접 실행)")
-        log("")
-        log("✔ 업데이트 완료! 이 창은 5초 후 자동으로 닫힙니다")
-        root.after(5000, root.destroy)
+        ok = ensure_launcher()
+        if ok and copy_err is None:
+            finish("✔ 업데이트 완료!")
+        elif ok:                                  # 런처는 살렸지만 복사 실패 → 클로드에 마무리 요청
+            log("⚠ 파일 복사가 실패했습니다 — 클로드에게 마무리를 요청합니다")
+            ask_claude(f"업데이트 중 파일 복사 실패: {copy_err}")
+            finish()
+        else:
+            log("⚠ 런처가 재시작되지 않았습니다 — 클로드에게 확인을 요청합니다")
+            ask_claude("업데이트 후 메인런처가 재시작되지 않음 (워치독 실행과 직접 실행 모두 창이 안 뜸 — "
+                       "런처가 시작 직후 죽는 오류일 수 있으니 python으로 직접 실행해 에러를 확인해줘)")
+            finish()
     except Exception as e:
         log(f"오류: {e}")
+        finish("⚠ 오류가 있었지만 메인런처는 다시 띄웁니다")
 
 
 root.after(200, main)
