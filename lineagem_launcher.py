@@ -581,6 +581,7 @@ class App(tk.Tk):
         self.after(1000, self._past_scheduler_tick)
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
         self.after(2000, self._queue_tick)               # 실행 대기열 순차 처리
+        self.after(120000, self._auto_update_tick)       # GitHub 새 버전 자동 감지·업데이트 (5분 간격)
         self.after(1000, self._purple_check_tick)
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
@@ -598,6 +599,37 @@ class App(tk.Tk):
     def _on_close(self):
         self._set_sleep_prevention(False)
         self.destroy()
+
+    def _auto_update_tick(self):
+        """5분마다 GitHub 확인 — 새 커밋이 있으면 한가할 때 자동으로 업데이트 실행."""
+        def _check():
+            try:
+                repo = None
+                for c in (os.path.join(BASE, "Moon-AI"), BASE):
+                    if os.path.isdir(os.path.join(c, ".git")):
+                        repo = c; break
+                if not repo:
+                    return
+                import subprocess
+                NOW = 0x08000000  # CREATE_NO_WINDOW
+                subprocess.run(["git", "fetch", "origin"], cwd=repo, capture_output=True,
+                               text=True, creationflags=NOW, timeout=60)
+                a = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True,
+                                   text=True, creationflags=NOW).stdout.strip()
+                b = subprocess.run(["git", "rev-parse", "origin/main"], cwd=repo, capture_output=True,
+                                   text=True, creationflags=NOW).stdout.strip()
+                if a and b and a != b:
+                    if self._is_busy() or self._system_idle_ms() < 120000:
+                        # 작업 중이거나 사용자가 쓰는 중 → 다음 체크 때 재시도
+                        self.after(0, lambda: self.status.set(
+                            "⬇ GitHub 새 버전 감지 — 한가해지면 자동 업데이트합니다"))
+                    else:
+                        self.after(0, lambda: self.status.set("⬇ GitHub 새 버전 감지 — 자동 업데이트 시작"))
+                        self.after(0, self._run_updater)
+            except Exception:
+                pass
+        threading.Thread(target=_check, daemon=True).start()
+        self.after(300000, self._auto_update_tick)   # 5분 간격
 
     def _run_updater(self):
         """🔄 업데이트 동그라미 — git pull + 파일 복사 + 런처 재시작을 별도 프로그램으로 실행."""
