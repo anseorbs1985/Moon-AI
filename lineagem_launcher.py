@@ -2456,7 +2456,7 @@ class App(tk.Tk):
             ("카매사오기",   "#1a5276", lambda: self._open_past_slot(5),                 "#154360", lambda: self._run_island_slot(5)),
             ("📬 우편함",    "#2471a3", self._open_mail_win,     "#1a5276", self._start_mail),
             ("🏝 과거섬",    "#c0392b", self._open_past_win,     "#922b21", self._start_past),
-            ("🏰 주말던전",  "#d35400", self._open_dungeon_win,  "#a04000", self._start_dungeon),
+            ("🏰변신확인용", "#d35400", self._open_dungeon_win,  "#a04000", self._start_dungeon),
             ("주말던전끄기", "#5d6d7e", self._open_wdoff_win,    "#34495e", self._start_wdoff),
             ("🏹 사냥",      "#27ae60", self._open_hunt_win,     "#1e8449", self._start_hunt),
             ("💰 다야OCR",   "#27ae60", self._open_ocr,          "#1e8449", self._open_ocr_scan),
