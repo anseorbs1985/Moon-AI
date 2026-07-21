@@ -1927,7 +1927,7 @@ class App(tk.Tk):
         self._build_slot_grid(parent, "mail")   # 4×4 그리드 (화면 배치와 동일)
 
     def _build_dungeon(self, parent):
-        tk.Label(parent, text=f"변신확인용  (메뉴→{DUNGEON_HOVER}초→클릭×4 / 슬롯 순서 랜덤)",
+        tk.Label(parent, text="변신확인용  (클릭1~5 / 슬롯·클릭 순서 모두 랜덤)",
                  font=("맑은 고딕", 9, "bold"), fg="#e67e22").pack(anchor="w", padx=4, pady=(4,2))
 
         dr = tk.Frame(parent); dr.pack(pady=3)
@@ -5374,20 +5374,13 @@ class App(tk.Tk):
                 coords = slot.get("coords", [])
                 while len(coords) < DUNGEON_CLICKS:   # 예전 3개짜리 데이터 호환
                     coords.append(None)
-                if not coords[0]: continue
                 if not self._wait_mouse_idle("_dungeon_stop"): return
-                # 메뉴 위로 마우스 이동 후 대기
-                self.status.set(f"🏰 [{name}] 메뉴 hover...")
-                pyautogui.moveTo(*coords[0])
-                time.sleep(DUNGEON_HOVER)
-                pyautogui.click(*coords[0])
-                time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
-                # 메뉴 이후 클릭1~4는 매번 무작위 순서로
-                order = [j for j in range(1, DUNGEON_CLICKS) if coords[j]]
+                # 등록된 클릭1~5 전부를 매번 무작위 순서로 클릭
+                order = [j for j in range(DUNGEON_CLICKS) if coords[j]]
                 random.shuffle(order)
                 for n, j in enumerate(order):
                     if self._dungeon_stop: break
-                    self.status.set(f"🏰 [{name}] 클릭{j} (랜덤 순서)...")
+                    self.status.set(f"🏰 [{name}] 클릭{j+1} (랜덤 순서)...")
                     pyautogui.click(*coords[j])
                     if n < len(order) - 1:
                         time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
@@ -5401,7 +5394,7 @@ class App(tk.Tk):
     def _reg_dungeon_click(self, slot_idx, click_idx):
         self._reg_dungeon_slot_idx  = slot_idx
         self._reg_dungeon_click_idx = click_idx
-        label = ["메뉴", "클릭1", "클릭2", "클릭3", "클릭4"][click_idx]
+        label = ["클릭1", "클릭2", "클릭3", "클릭4", "클릭5"][click_idx]
         self.status.set(f"3초 후 던전 #{slot_idx+1} [{label}] 위치 클릭하세요!")
         self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
                                    CoordOverlay(self, mode="dungeon")])
@@ -5411,7 +5404,7 @@ class App(tk.Tk):
         ci = self._reg_dungeon_click_idx
         self.cfg["dungeon_slots"][si]["coords"][ci] = [x, y]
         save_cfg(self.cfg); self._refresh_ui()
-        label = ["메뉴", "클릭1", "클릭2", "클릭3", "클릭4"][ci]
+        label = ["클릭1", "클릭2", "클릭3", "클릭4", "클릭5"][ci]
         self.status.set(f"✔ 던전 #{si+1} [{label}] 등록: ({x},{y})")
         self.deiconify()
 
@@ -5431,7 +5424,7 @@ class App(tk.Tk):
 
     def _preview_dungeon(self, idx):
         coords = self.cfg["dungeon_slots"][idx].get("coords", [])
-        LABELS_D = ["메뉴", "클릭1", "클릭2", "클릭3", "클릭4"]
+        LABELS_D = ["클릭1", "클릭2", "클릭3", "클릭4", "클릭5"]
         dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
         if not dots:
             self.status.set(f"던전 #{idx+1:02d} 등록된 좌표가 없습니다")
@@ -7842,7 +7835,7 @@ class CoordOverlay(tk.Toplevel):
         elif mode == "mail":
             label = f"우편함 #{app._reg_mail_slot_idx+1} 클릭{app._reg_mail_click_idx+1} 위치"
         elif mode == "dungeon":
-            lbl = ["메뉴", "클릭1", "클릭2", "클릭3", "클릭4"][app._reg_dungeon_click_idx]
+            lbl = ["클릭1", "클릭2", "클릭3", "클릭4", "클릭5"][app._reg_dungeon_click_idx]
             label = f"던전 #{app._reg_dungeon_slot_idx+1} [{lbl}] 위치"
         elif mode == "past":
             label = f"과거의말하는섬 #{app._reg_past_slot_idx+1} [클릭] 위치"
