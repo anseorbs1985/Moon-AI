@@ -4943,12 +4943,23 @@ class App(tk.Tk):
                     args=("퍼플확인(4시)", self._purple_check_worker), daemon=True).start()
         self.after(60000, self._purple_check_tick)
 
+    def _plog(self, msg):
+        """4시 퍼플 체크 파일 로그 — 다음날 무슨 일이 있었는지 추적용."""
+        try:
+            import datetime as _dt
+            with open(os.path.join(LOGS_DIR, "purple_check.txt"), "a", encoding="utf-8") as f:
+                f.write(f"{_dt.datetime.now():%Y-%m-%d %H:%M:%S}  {msg}\n")
+        except Exception:
+            pass
+
     def _purple_check_worker(self):
         import win32gui, win32con, ctypes
+        self._plog(f"=== 시작 (타깃='{(self.cfg.get('profile_target_id') or '').strip()}') ===")
         self._minimize_claude()          # 클로드(항상위)가 클릭을 가리지 않게 먼저 내림
         self.after(0, self.iconify)      # 메인런처도 내림
         win = find_purple()
         if not win:
+            self._plog("퍼플 창 없음 — 종료")
             self.after(0, lambda: self.status.set("🔍 퍼플 확인: 퍼플 창 없음"))
             return
         hwnd = win32gui.FindWindow(None, win.title)
@@ -4976,6 +4987,7 @@ class App(tk.Tk):
                 time.sleep(2)
 
             matched, ocr_id, ratio = self._is_target_account(hwnd)
+            self._plog(f"1차 확인: OCR='{ocr_id}' 일치율 {int(ratio*100)}% → matched={matched}")
             self.after(0, lambda o=ocr_id, r=ratio: self.status.set(
                 f"🔍 퍼플 아이디 '{o}' (일치율 {int(r*100)}%)"))
 
@@ -4984,6 +4996,7 @@ class App(tk.Tk):
             attempt = 0
             while not matched and attempt < MAX_SWITCH_TRIES:
                 attempt += 1
+                self._plog(f"전환 시도 {attempt}/{MAX_SWITCH_TRIES} (profile→google→confirm)")
                 self.after(0, lambda a=attempt: self.status.set(
                     f"🔍 지정 아이디 아님 → 전환 시도 {a}/{MAX_SWITCH_TRIES}..."))
                 if self.cfg.get("profile_btn"):
@@ -5007,15 +5020,20 @@ class App(tk.Tk):
                 if self.cfg.get("profile_reveal_btn"):
                     pyautogui.click(*self.cfg["profile_reveal_btn"]); time.sleep(2)
                 matched, ocr_id, ratio = self._is_target_account(hwnd)
+                self._plog(f"전환 {attempt}회 후 확인: OCR='{ocr_id}' 일치율 {int(ratio*100)}% → matched={matched}")
                 self.after(0, lambda o=ocr_id, r=ratio, a=attempt: self.status.set(
                     f"🔍 전환 {a}회 후 아이디 '{o}' (일치율 {int(r*100)}%)"))
 
             if matched:
+                self._plog("✔ 완료 — 지정계정 확인됨")
                 self.after(0, lambda: self.status.set("✔ 퍼플 지정계정 확인/전환 완료"))
             else:
+                self._plog(f"⚠ 실패 — {MAX_SWITCH_TRIES}회 재시도에도 미일치 (마지막 OCR='{ocr_id}')")
                 self.after(0, lambda: self.status.set(
                     f"⚠ 퍼플 전환 실패 — {MAX_SWITCH_TRIES}회 재시도했으나 지정 아이디로 못 바꿈"))
         except Exception as e:
+            import traceback as _tb
+            self._plog(f"오류: {e}\n{_tb.format_exc()}")
             self.after(0, lambda err=e: self.status.set(f"🔍 퍼플 확인 오류: {err}"))
         finally:
             # 계정 전환하면 퍼플 창이 새로 생겨 hwnd가 바뀌므로, 여기서 다시 찾아 최소화.
