@@ -114,7 +114,7 @@ MAIL_SLOTS     = 16
 MAIL_CLICKS    = 6
 MAIL_INTERVAL  = 1.6   # 우편함 클릭 간격(초)
 DUNGEON_SLOTS  = 16
-DUNGEON_CLICKS = 3
+DUNGEON_CLICKS = 5
 DUNGEON_HOVER  = 1.5
 PAST_SLOTS     = 16
 PAST_CLICKS    = 3
@@ -363,6 +363,14 @@ def load_cfg():
         while len(sq) < SEQ_SLOTS:
             sq.append(None)
         cfg["seq_slots"] = sq[:SEQ_SLOTS]
+        # dungeon_slots (변신확인용 — 좌표 5개로 패딩, 예전 3개짜리 호환)
+        dgs = cfg.get("dungeon_slots", [])
+        for s in dgs:
+            if isinstance(s, dict):
+                c = s.get("coords", [])
+                while len(c) < DUNGEON_CLICKS:
+                    c.append(None)
+                s["coords"] = c[:DUNGEON_CLICKS]
         # wdoff_slots (주말던전 끄기 좌표 16개 고정)
         wq = cfg.get("wdoff_slots", [])
         if not isinstance(wq, list):
@@ -1026,7 +1034,7 @@ class App(tk.Tk):
         self._open_section_win("_sched_win", "📅 매일매일 스케줄", self._build_sched, w=470, h=620)
 
     def _open_dungeon_win(self):
-        self._open_section_win("_dungeon_win", "🏰 주말던전", self._build_dungeon, w=470, h=600, pinnable=True)
+        self._open_section_win("_dungeon_win", "🏰 변신확인용", self._build_dungeon, w=470, h=600, pinnable=True)
 
     def _open_daya_win(self):
         self._open_section_win("_daya_win", "💰 다야 카운트", self._build_daya_panel, w=500, h=260)
@@ -1919,7 +1927,7 @@ class App(tk.Tk):
         self._build_slot_grid(parent, "mail")   # 4×4 그리드 (화면 배치와 동일)
 
     def _build_dungeon(self, parent):
-        tk.Label(parent, text=f"주말던전  (메뉴→{DUNGEON_HOVER}초→클릭×2)",
+        tk.Label(parent, text=f"변신확인용  (메뉴→{DUNGEON_HOVER}초→클릭×4 / 슬롯 순서 랜덤)",
                  font=("맑은 고딕", 9, "bold"), fg="#e67e22").pack(anchor="w", padx=4, pady=(4,2))
 
         dr = tk.Frame(parent); dr.pack(pady=3)
@@ -3912,7 +3920,7 @@ class App(tk.Tk):
                             reg=self._reg_past_click,    test=self._test_past,    prev=self._preview_past,    delete=self._del_past),
             "mail":    dict(title="우편함",   key="mail_slots",    clicks=MAIL_CLICKS,    color="#2471a3",
                             reg=self._reg_mail_click,    test=self._test_mail,    prev=self._preview_mail,    delete=self._del_mail),
-            "dungeon": dict(title="주말던전", key="dungeon_slots", clicks=DUNGEON_CLICKS, color="#d35400",
+            "dungeon": dict(title="변신확인용", key="dungeon_slots", clicks=DUNGEON_CLICKS, color="#d35400",
                             reg=self._reg_dungeon_click, test=self._test_dungeon, prev=self._preview_dungeon, delete=self._del_dungeon),
             "sched":   dict(title="스케줄",   key="sched_slots",   clicks=SCHED_CLICKS,   color="#16a085",
                             reg=self._reg_sched_click,   test=self._test_sched,   prev=self._preview_sched,   delete=self._del_sched,
@@ -5359,10 +5367,13 @@ class App(tk.Tk):
             else:
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
+                random.shuffle(targets)   # 슬롯 클릭 순서 매번 랜덤
             for si, slot in targets:
                 if self._dungeon_stop: break
                 name = slot.get("name", f"#{si+1}")
                 coords = slot.get("coords", [])
+                while len(coords) < DUNGEON_CLICKS:   # 예전 3개짜리 데이터 호환
+                    coords.append(None)
                 if not coords[0]: continue
                 if not self._wait_mouse_idle("_dungeon_stop"): return
                 # 메뉴 위로 마우스 이동 후 대기
@@ -5389,7 +5400,7 @@ class App(tk.Tk):
     def _reg_dungeon_click(self, slot_idx, click_idx):
         self._reg_dungeon_slot_idx  = slot_idx
         self._reg_dungeon_click_idx = click_idx
-        label = ["메뉴", "클릭1", "클릭2"][click_idx]
+        label = ["메뉴", "클릭1", "클릭2", "클릭3", "클릭4"][click_idx]
         self.status.set(f"3초 후 던전 #{slot_idx+1} [{label}] 위치 클릭하세요!")
         self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
                                    CoordOverlay(self, mode="dungeon")])
@@ -5399,7 +5410,7 @@ class App(tk.Tk):
         ci = self._reg_dungeon_click_idx
         self.cfg["dungeon_slots"][si]["coords"][ci] = [x, y]
         save_cfg(self.cfg); self._refresh_ui()
-        label = ["메뉴", "클릭1", "클릭2"][ci]
+        label = ["메뉴", "클릭1", "클릭2", "클릭3", "클릭4"][ci]
         self.status.set(f"✔ 던전 #{si+1} [{label}] 등록: ({x},{y})")
         self.deiconify()
 
@@ -5419,7 +5430,7 @@ class App(tk.Tk):
 
     def _preview_dungeon(self, idx):
         coords = self.cfg["dungeon_slots"][idx].get("coords", [])
-        LABELS_D = ["메뉴", "클릭1", "클릭2"]
+        LABELS_D = ["메뉴", "클릭1", "클릭2", "클릭3", "클릭4"]
         dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
         if not dots:
             self.status.set(f"던전 #{idx+1:02d} 등록된 좌표가 없습니다")
@@ -7830,7 +7841,7 @@ class CoordOverlay(tk.Toplevel):
         elif mode == "mail":
             label = f"우편함 #{app._reg_mail_slot_idx+1} 클릭{app._reg_mail_click_idx+1} 위치"
         elif mode == "dungeon":
-            lbl = ["메뉴", "클릭1", "클릭2"][app._reg_dungeon_click_idx]
+            lbl = ["메뉴", "클릭1", "클릭2", "클릭3", "클릭4"][app._reg_dungeon_click_idx]
             label = f"던전 #{app._reg_dungeon_slot_idx+1} [{lbl}] 위치"
         elif mode == "past":
             label = f"과거의말하는섬 #{app._reg_past_slot_idx+1} [클릭] 위치"
