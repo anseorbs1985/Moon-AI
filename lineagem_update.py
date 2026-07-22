@@ -9,40 +9,34 @@ git pull(Moon-AI) → 런처 종료 → 파일을 실행 폴더(바탕화면)로
 import os, sys, subprocess, shutil, time, json
 import tkinter as tk
 
-_MISS = object()
-
-
-def _merge3(base, remote, local, stats):
-    """3-way 병합: 로컬에서 (base 대비) 수정한 값은 유지, 수정 안 한 값은 원격 채택.
-    리스트는 요소(슬롯) 단위, 딕셔너리는 키 단위로 재귀 비교."""
-    if isinstance(remote, list) or isinstance(local, list):
-        b = base if isinstance(base, list) else []
-        r = remote if isinstance(remote, list) else []
-        l = local if isinstance(local, list) else []
-        out = []
-        for i in range(max(len(r), len(l))):
-            bi = b[i] if i < len(b) else _MISS
-            ri = r[i] if i < len(r) else _MISS
-            li = l[i] if i < len(l) else _MISS
-            if li is not _MISS and li != (bi if bi is not _MISS else None):
-                out.append(li)                     # 로컬 수정 → 유지
-                if ri is not _MISS and li != ri:
-                    stats[0] += 1
-            else:
-                out.append(ri if ri is not _MISS else (li if li is not _MISS else None))
-        return out
-    if isinstance(remote, dict) or isinstance(local, dict):
-        b = base if isinstance(base, dict) else {}
-        r = remote if isinstance(remote, dict) else {}
-        l = local if isinstance(local, dict) else {}
+def _merge_local_first(remote, local, stats):
+    """로컬 우선 병합: 이 컴퓨터에 이미 등록된 좌표/값은 절대 건드리지 않고,
+    로컬이 비어 있는 슬롯·새로 생긴 키만 원격(GitHub)에서 채운다."""
+    if local is None:
+        return remote
+    if remote is None:
+        return local
+    if isinstance(local, dict) and isinstance(remote, dict):
+        lc = local.get("coords")
+        if isinstance(lc, list):                   # 슬롯 dict
+            if any(c for c in lc):
+                if local != remote:
+                    stats[0] += 1                  # 로컬 등록 슬롯 → 통째로 유지
+                return local
+            return remote                          # 로컬 미등록 슬롯 → 원격으로 채움
         out = {}
-        for k in set(r) | set(l):
-            out[k] = _merge3(b.get(k), r.get(k, l.get(k)), l.get(k, r.get(k)), stats)
+        for k in set(remote) | set(local):
+            out[k] = _merge_local_first(remote.get(k), local.get(k), stats)
         return out
-    if local != base:
-        if local != remote:
-            stats[0] += 1
-        return local                               # 로컬 수정 → 유지
+    if isinstance(local, list) and isinstance(remote, list):
+        out = []
+        for i in range(max(len(remote), len(local))):
+            li = local[i] if i < len(local) else None
+            ri = remote[i] if i < len(remote) else None
+            out.append(_merge_local_first(ri, li, stats))
+        return out
+    if local != "" and local is not None:          # 스칼라: 로컬 값 있으면 유지
+        return local
     return remote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -300,20 +294,15 @@ def main():
         log(f"저장소: {REPO}")
         _bn = backup_coords()
         log(f"0) 좌표 자동 백업 {_bn}개 (LOCALAPPDATA\\MoonAI\\backups)")
-        # 병합용 스냅샷: 로컬(현재 사용 중) + base(풀 전 저장소 버전)
+        # 병합용 스냅샷: 로컬(현재 사용 중) 좌표 — pull 전에 확보
         MERGE_FILES = ("coords.json", "island_coords.json")
-        local_snap, base_snap = {}, {}
+        local_snap = {}
         for f in MERGE_FILES:
             try:
                 with open(os.path.join(DESK, f), encoding="utf-8") as fp:
                     local_snap[f] = json.load(fp)
             except Exception:
                 local_snap[f] = None
-            rr = sh(["git", "show", f"HEAD:{f}"], REPO)
-            try:
-                base_snap[f] = json.loads(rr.stdout) if rr.returncode == 0 else None
-            except Exception:
-                base_snap[f] = None
         log("1) GitHub에서 최신 버전 받는 중...")
         old = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
         r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
@@ -359,16 +348,16 @@ def main():
                 if f in changed and os.path.exists(os.path.join(REPO, f)):
                     dst = os.path.join(DESK, f)
                     if f in MERGE_FILES and local_snap.get(f) is not None:
-                        # 3-way 병합: 로컬에서 수정한 슬롯/값 유지 + 나머지는 원격 반영
+                        # 로컬 우선 병합: 이 컴퓨터에 등록된 좌표는 그대로, 빈 곳만 원격에서 채움
                         try:
                             with open(os.path.join(REPO, f), encoding="utf-8") as fp:
                                 remote = json.load(fp)
                             stats = [0]
-                            merged = _merge3(base_snap.get(f), remote, local_snap[f], stats)
+                            merged = _merge_local_first(remote, local_snap[f], stats)
                             with open(dst, "w", encoding="utf-8") as fp:
                                 json.dump(merged, fp, ensure_ascii=False, indent=2)
                             n += 1
-                            log(f"   데이터 병합: {f} (로컬 수정 {stats[0]}곳 유지 + 나머지 원격)")
+                            log(f"   데이터 병합: {f} (로컬 등록 {stats[0]}곳 유지, 빈 곳만 원격 반영)")
                             continue
                         except Exception as e:
                             log(f"   병합 실패({e}) → 원격 버전으로 대체")
