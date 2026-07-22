@@ -4481,10 +4481,10 @@ class App(tk.Tk):
         return ctypes.windll.kernel32.GetTickCount() - lii.dwTime
 
     def _claude_idle_minimize_tick(self):
-        """사용자가 10분간 아무 작업(입력)도 안 하면 클로드 앱도 최소화.
+        """사용자가 5분간 아무 작업(입력)도 안 하면 클로드 앱도 최소화.
         (매크로 실행 중엔 pyautogui가 입력을 내서 유휴가 아니므로 발동 안 함)"""
         try:
-            if self._system_idle_ms() >= 600000:   # 10분
+            if self._system_idle_ms() >= 300000:   # 5분
                 self._minimize_claude_windows(only_background=False)
         except Exception:
             pass
@@ -4556,12 +4556,12 @@ class App(tk.Tk):
         self._last_activity = time.time()
 
     def _idle_minimize_tick(self):
-        """10분간 아무 조작이 없으면 메인런처를 최소화(뒤 화면 가리지 않게).
+        """5분간 아무 조작이 없으면 메인런처를 최소화(뒤 화면 가리지 않게).
         사용자가 클릭해서 다시 올리면(맵 이벤트) 타이머가 리셋된다."""
         try:
             idle = time.time() - getattr(self, "_last_activity", time.time())
             running = getattr(self, "_running", False)  # 전체 자동실행 중이면 관여 안 함
-            if not running and idle >= 600:
+            if not running and idle >= 300:
                 try: normal = (self.state() == "normal")
                 except Exception: normal = False
                 if normal:
@@ -5072,6 +5072,11 @@ class App(tk.Tk):
                 self._plog(f"전환 {attempt}회 후 확인: OCR='{ocr_id}' 일치율 {int(ratio*100)}% → matched={matched}")
                 self.after(0, lambda o=ocr_id, r=ratio, a=attempt: self.status.set(
                     f"🔍 전환 {a}회 후 아이디 '{o}' (일치율 {int(r*100)}%)"))
+                if not matched and ratio >= 0.5:
+                    # OCR이 흔들려 100% 미달이지만 사실상 지정계정일 가능성 —
+                    # 재전환하면 (목록에 현재계정이 없어서) 다른 계정으로 이탈하므로 중단
+                    self._plog("느슨일치(≥50%) — 재전환 시 이탈 위험 → 여기서 중단")
+                    break
 
             if matched:
                 self._plog("✔ 완료 — 지정계정 확인됨")
@@ -6792,6 +6797,38 @@ class App(tk.Tk):
                     # ① 지정계정로 전환(프로필→구글계정→확인) ② 리니지M 좌측버튼으로 지정계정 확인
                     # ③ 지정계정이면 퍼플 최소화
                     if not self._wait(3): self.status.set("멈춤"); return
+
+                    # ⓪ 먼저 현재 아이디 확인 — 이미 지정계정이면 전환 생략!
+                    #    (계정 목록엔 '현재 계정 제외 나머지'만 떠서, 이미 지정계정일 때
+                    #     고정 좌표를 클릭하면 다른 계정으로 이탈해버리는 사고 방지)
+                    _pre_matched = False
+                    try:
+                        try: win.activate()
+                        except Exception: pass
+                        if not self._wait(1): self.status.set("멈춤"); return
+                        if self.cfg.get("profile_reveal_btn"):
+                            pyautogui.click(*self.cfg["profile_reveal_btn"])
+                            if not self._wait(3): self.status.set("멈춤"); return
+                        _pre_matched, _pre_id, _pre_r = self._is_target_account()
+                        try: _dbg.write(f"[SWITCH] 사전확인: '{_pre_id}' 일치율 {int(_pre_r*100)}% matched={_pre_matched}\n"); _dbg.flush()
+                        except Exception: pass
+                    except Exception:
+                        pass
+                    if _pre_matched:
+                        self.status.set("✔ 이미 지정계정 — 전환 생략, 퍼플 최소화")
+                        try: _dbg.write("[SWITCH] 이미 지정계정 → 전환 생략\n"); _dbg.flush()
+                        except Exception: pass
+                        try:
+                            import win32gui, win32con
+                            _p_hwnd = win32gui.FindWindow(None, "PURPLE")
+                            if _p_hwnd:
+                                win32gui.ShowWindow(_p_hwnd, win32con.SW_MINIMIZE)
+                            else:
+                                win.minimize()
+                        except Exception:
+                            try: win.minimize()
+                            except Exception: pass
+                        break
 
                     # ① 지정 계정으로 전환
                     self.status.set("지정 계정으로 전환 중...")
