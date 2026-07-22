@@ -581,7 +581,7 @@ class App(tk.Tk):
         self.after(1000, self._past_scheduler_tick)
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
         self.after(2000, self._queue_tick)               # 실행 대기열 순차 처리
-        self.after(120000, self._auto_update_tick)       # GitHub 새 버전 자동 감지·업데이트 (5분 간격)
+        # (자동 업데이트는 사용자 요청으로 비활성 — 업데이트는 🔄 버튼으로 수동 실행)
         self.after(1000, self._purple_check_tick)
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
@@ -5521,6 +5521,7 @@ class App(tk.Tk):
             else:
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
+                random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
             for si, slot in targets:
                 if self._past_stop: break
                 name   = slot.get("name", f"#{si+1}")
