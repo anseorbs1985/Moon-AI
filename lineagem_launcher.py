@@ -2810,7 +2810,8 @@ class App(tk.Tk):
     def _test_profile_ocr(self):
         """profile_reveal_btn 클릭 후 영역 캡처해서 이미지 열기"""
         area = self.cfg.get("profile_id_area")
-        if not area:
+        # 기준이미지(드래그 영역) 모드는 아이디 표시영역이 없어도 동작
+        if not area and not os.path.exists(self._profile_ref_path()):
             self.status.set("아이디 표시 영역을 먼저 등록하세요."); return
         def _do():
             try:
@@ -2819,7 +2820,7 @@ class App(tk.Tk):
                     matched, label, sim = self._is_target_account()
                     self.after(0, self._raise_main)
                     self.after(0, lambda m=matched, l=label: self.status.set(
-                        f"{l} → {'✔ 지정계정 일치' if m else '✘ 불일치'} (기준: 85% 이상)"))
+                        f"{l} → {'✔ 지정계정 일치' if m else '✘ 불일치'} (기준: 90% 이상)"))
                     return
                 # 캡처는 런처가 최소화된 상태에서 먼저 (런처 창이 영역을 가리지 않도록)
                 # 실제 4시 판별과 동일한 창 위치 보정 경로 사용
@@ -2998,26 +2999,81 @@ class App(tk.Tk):
     def _profile_ref_path(self):
         return os.path.join(LOCAL_DATA, "profile_ref.png")
 
+    def _profile_ref_region_path(self):
+        return os.path.join(LOCAL_DATA, "profile_ref_region.json")
+
+    def _grab_ref_img(self, hwnd=None):
+        """기준 대조용 캡처 — 드래그로 등록한 전용 영역이 있으면 그 영역을,
+        없으면 기존 아이디 영역(_grab_profile_img)을 사용."""
+        p = self._profile_ref_region_path()
+        if not os.path.exists(p):
+            return self._grab_profile_img(hwnd)
+        try:
+            with open(p, encoding="utf-8") as f:
+                reg = json.load(f)
+            ax, ay = reg["x"], reg["y"]
+            # 등록 당시 퍼플 창 위치 대비 현재 위치 차이만큼 보정
+            if reg.get("win"):
+                cur = None
+                if hwnd:
+                    try:
+                        import win32gui
+                        wx, wy, _, _ = win32gui.GetWindowRect(hwnd)
+                        cur = (wx, wy)
+                    except Exception:
+                        cur = None
+                if cur is None:
+                    try:
+                        w = find_purple()
+                        if w:
+                            cur = (w.left, w.top)
+                    except Exception:
+                        cur = None
+                if cur:
+                    ax += cur[0] - reg["win"][0]
+                    ay += cur[1] - reg["win"][1]
+            from PIL import ImageGrab
+            img = ImageGrab.grab(bbox=(ax, ay, ax+reg["w"], ay+reg["h"]), all_screens=True)
+            try:
+                img.save(os.path.join(LOGS_DIR, "profile_ref_debug.png"))
+            except Exception:
+                pass
+            return img
+        except Exception:
+            return None
+
+    def _finish_ref_capture(self, region):
+        """드래그 영역 확정 후 — 오버레이가 사라진 다음 그 영역을 캡처해 기준으로 저장."""
+        def _do():
+            try:
+                time.sleep(0.4)   # 오버레이(반투명) 잔상이 사라진 뒤 캡처
+                from PIL import ImageGrab
+                x, y, w, h = region["x"], region["y"], region["w"], region["h"]
+                img = ImageGrab.grab(bbox=(x, y, x+w, y+h), all_screens=True)
+                with open(self._profile_ref_region_path(), "w", encoding="utf-8") as f:
+                    json.dump(region, f)
+                img.save(self._profile_ref_path())
+                self.after(0, self._raise_main)
+                self.after(0, lambda: self.status.set(
+                    "✔ 기준 영역·이미지 등록 완료 — 이 영역으로 이미지 대조합니다 (지정계정 상태에서 등록했는지 확인!)"))
+            except Exception as e:
+                self.after(0, lambda err=e: self.status.set(f"기준이미지 등록 오류: {err}"))
+        threading.Thread(target=_do, daemon=True).start()
+
     def _reg_profile_ref(self):
-        """지정계정 상태의 아이디 영역을 기준이미지로 저장 — 이후 OCR 대신 이미지 대조로 판별.
-        (OCR이 글자를 잘 못 읽는 컴퓨터용 — 지정계정으로 로그인된 상태에서 누를 것)"""
-        area = self.cfg.get("profile_id_area")
-        if not area:
-            self.status.set("아이디 표시 영역을 먼저 등록하세요."); return
+        """기준이미지 등록 — 캡처 영역을 직접 드래그로 지정하고, 그 영역을 기준으로 저장.
+        계정마다 확실히 다르게 보이는 부분(아이디 글자·프로필 사진 등)을 지정할수록 정확.
+        (지정계정으로 로그인된 상태에서 누를 것)"""
         def _do():
             try:
                 if self.cfg.get("profile_reveal_btn"):
                     pyautogui.click(*self.cfg["profile_reveal_btn"])
                     time.sleep(2)
-                img = self._grab_profile_img()
-                if img is None:
-                    self.after(0, lambda: self.status.set("캡처 실패 — 퍼플/게임 창 상태를 확인하세요")); return
-                img.save(self._profile_ref_path())
-                self.after(0, lambda: self.status.set(
-                    "✔ 기준이미지 등록 완료 — 이제 OCR 대신 이미지 대조로 판별합니다 (지정계정 상태에서 등록했는지 확인!)"))
-            except Exception as e:
-                self.after(0, lambda err=e: self.status.set(f"기준이미지 등록 오류: {err}"))
-        self.status.set("기준이미지 캡처 중...")
+            except Exception:
+                pass
+            self.after(0, lambda: _ProfileRefOverlay(self))
+        self.iconify()   # 게임 화면이 보이게 런처 최소화
+        self.status.set("기준으로 쓸 영역을 드래그하세요...")
         threading.Thread(target=_do, daemon=True).start()
 
     def _img_similarity(self, cur_img):
@@ -3056,7 +3112,7 @@ class App(tk.Tk):
         기준이미지가 등록돼 있으면 이미지 대조(권장), 없으면 기존 OCR 문자 비교."""
         # 이미지 대조 모드 (기준이미지 등록 시)
         if os.path.exists(self._profile_ref_path()):
-            cur = self._grab_profile_img(hwnd)
+            cur = self._grab_ref_img(hwnd)
             if cur is None:
                 return (False, "[이미지] 캡처실패", 0.0)
             sim = self._img_similarity(cur)
@@ -7834,6 +7890,65 @@ class _ProfileAreaOverlay(tk.Toplevel):
         self.app.deiconify()
         self.app._profile_area_var.set("등록됨")
         self.app.status.set("✔ 아이디 영역 등록 완료 (창 위치 보정 지원)")
+
+    def _cancel(self, e=None):
+        self.destroy()
+        self.app.deiconify()
+
+
+class _ProfileRefOverlay(tk.Toplevel):
+    """계정 대조 기준이미지 캡처 영역 드래그 등록 — 놓는 즉시 캡처해 기준으로 저장"""
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.attributes("-alpha", 0.35)
+        sw = self.winfo_screenwidth(); sh = self.winfo_screenheight()
+        self.geometry(f"{sw}x{sh}+0+0")
+        self.configure(bg="black")
+        self._start = None; self._rect = None
+        tk.Label(self, text="계정 대조 기준으로 쓸 영역을 드래그하세요\n"
+                            "(계정마다 확실히 다른 부분 — 아이디 글자·프로필 사진 등)\nESC = 취소",
+                 font=("맑은 고딕", 16, "bold"), fg="white", bg="black",
+                 justify="center").place(relx=0.5, rely=0.5, anchor="center")
+        self._canvas = tk.Canvas(self, bg="black", highlightthickness=0)
+        self._canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        self._canvas.bind("<ButtonPress-1>", self._on_press)
+        self._canvas.bind("<B1-Motion>", self._on_drag)
+        self._canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", self._cancel)
+        self.focus_force()
+
+    def _on_press(self, e):
+        self._start = (e.x_root, e.y_root)
+        if self._rect: self._canvas.delete(self._rect)
+
+    def _on_drag(self, e):
+        if not self._start: return
+        if self._rect: self._canvas.delete(self._rect)
+        x0, y0 = self._start
+        self._rect = self._canvas.create_rectangle(x0, y0, e.x_root, e.y_root, outline="lime", width=2)
+
+    def _on_release(self, e):
+        if not self._start: return
+        x0, y0 = self._start
+        x1, y1 = e.x_root, e.y_root
+        self.destroy()
+        if abs(x1-x0) < 8 or abs(y1-y0) < 8:
+            self.app.deiconify()
+            self.app.status.set("영역이 너무 작습니다 — 다시 드래그해주세요")
+            return
+        region = {"x": min(x0,x1), "y": min(y0,y1),
+                  "w": abs(x1-x0), "h": abs(y1-y0)}
+        # 등록 당시 퍼플 창 위치 저장 → 창이 옮겨져도 자동 보정
+        try:
+            w = find_purple()
+            if w:
+                region["win"] = [w.left, w.top]
+        except Exception:
+            pass
+        self.app._finish_ref_capture(region)
 
     def _cancel(self, e=None):
         self.destroy()
