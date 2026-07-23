@@ -3034,8 +3034,20 @@ class App(tk.Tk):
                 r = r[m:-m, m:-m]
             if c.shape[0] < r.shape[0] or c.shape[1] < r.shape[1]:
                 return 0.0
-            res = cv2.matchTemplate(c, r, cv2.TM_CCOEFF_NORMED)
-            return float(res.max())
+            # 공통 배경(UI)이 유사도를 부풀리므로 이진화 후, 템플릿매칭으로 위치만 맞추고
+            # '글자 픽셀'의 실제 일치율을 점수로 사용 — 다른 계정이면 크게 떨어진다
+            # (같은계정 0.99+, 3글자만 달라도 ~0.56, 전부 다르면 ~0.28 검증됨)
+            _, rb = cv2.threshold(r, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            _, cb = cv2.threshold(c, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            res = cv2.matchTemplate(cb, rb, cv2.TM_CCOEFF_NORMED)
+            _, _, _, loc = cv2.minMaxLoc(res)
+            x, y = loc
+            crop = cb[y:y+rb.shape[0], x:x+rb.shape[1]]
+            fg = 0 if (rb == 0).mean() < 0.5 else 255      # 글자(소수) 픽셀 값
+            mask = (rb == fg) | (crop == fg)               # 글자 픽셀 합집합
+            if not mask.any():
+                return float(res.max())
+            return float(1.0 - (crop != rb)[mask].mean())  # 글자 픽셀 일치율
         except Exception:
             return 0.0
 
@@ -3048,7 +3060,7 @@ class App(tk.Tk):
             if cur is None:
                 return (False, "[이미지] 캡처실패", 0.0)
             sim = self._img_similarity(cur)
-            return (sim >= 0.85, f"[이미지대조] 유사도 {int(sim*100)}%", sim)
+            return (sim >= 0.90, f"[이미지대조] 유사도 {int(sim*100)}%", sim)
         # OCR 문자 비교 모드 (기존)
         target = (self.cfg.get("profile_target_id") or "").strip()
         if not target:
@@ -5129,10 +5141,12 @@ class App(tk.Tk):
                 self._plog(f"전환 {attempt}회 후 확인: OCR='{ocr_id}' 일치율 {int(ratio*100)}% → matched={matched}")
                 self.after(0, lambda o=ocr_id, r=ratio, a=attempt: self.status.set(
                     f"🔍 전환 {a}회 후 아이디 '{o}' (일치율 {int(r*100)}%)"))
-                if not matched and ratio >= 0.5:
-                    # OCR이 흔들려 100% 미달이지만 사실상 지정계정일 가능성 —
+                # 느슨일치 기준 — 이미지 대조는 다른 계정도 어느 정도 점수가 나오므로 더 높게
+                loose = 0.75 if os.path.exists(self._profile_ref_path()) else 0.5
+                if not matched and ratio >= loose:
+                    # 판독이 흔들려 기준 미달이지만 사실상 지정계정일 가능성 —
                     # 재전환하면 (목록에 현재계정이 없어서) 다른 계정으로 이탈하므로 중단
-                    self._plog("느슨일치(≥50%) — 재전환 시 이탈 위험 → 여기서 중단")
+                    self._plog(f"느슨일치(≥{int(loose*100)}%) — 재전환 시 이탈 위험 → 여기서 중단")
                     break
 
             if matched:
