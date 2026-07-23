@@ -6605,6 +6605,10 @@ class App(tk.Tk):
         self._mail_stop      = True
         self._sched_any_stop = True
         self._return_stop    = True
+        self._doll_stop      = True
+        self._dungeon_stop   = True
+        self._pass_stop      = True
+        self._reroll_running = False  # 오림의일기장도 정지
         self._busy_task      = None   # 잠금 해제
         self._task_queue.clear()      # 멈춤 시 대기열도 비움
         # 다야 OCR 프로세스 종료
@@ -6613,6 +6617,12 @@ class App(tk.Tk):
             try: proc.terminate()
             except: pass
             self._ocr_proc = None
+        # 섬·던전 실행기(별도 프로세스)도 종료
+        ip = getattr(self, "_island_proc", None)
+        if ip and ip.poll() is None:
+            try: ip.terminate()
+            except: pass
+            self._island_proc = None
         self.status.set("멈추는 중...")
 
     # ── 클릭 실행 ─────────────────────────────────────────────────────
