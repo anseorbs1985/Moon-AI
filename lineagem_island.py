@@ -645,8 +645,21 @@ class IslandApp(tk.Tk):
         self.cfg[key][idx] = {"name": "미등록", "coords": [None]*CLICKS}
         save_cfg(self.cfg); self._refresh(key)
 
+    def _minimize_claude(self):
+        # 클로드 창(항상 위)이 클릭을 가리지 않게 최소화
+        try:
+            import win32gui, win32con
+            def _do(hwnd, _):
+                title = win32gui.GetWindowText(hwnd)
+                if "Claude" in title and win32gui.IsWindowVisible(hwnd):
+                    win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+            win32gui.EnumWindows(_do, None)
+        except Exception:
+            pass
+
     def _test(self, key, idx):
         self.iconify()
+        self._minimize_claude()
         threading.Thread(target=self._run, args=(key, idx), daemon=True).start()
 
     def _start(self, key):
@@ -655,6 +668,7 @@ class IslandApp(tk.Tk):
         for k, btn in self._stop_btns.items():
             btn.config(state="normal" if k == key else "disabled")
         self.iconify()
+        self._minimize_claude()
         threading.Thread(target=self._run, args=(key,), daemon=True).start()
 
     def _stop(self):

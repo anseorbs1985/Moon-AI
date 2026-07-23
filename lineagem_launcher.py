@@ -660,8 +660,7 @@ class App(tk.Tk):
         import subprocess, sys
         exe = sys.executable.replace("python.exe", "pythonw.exe")
         self.status.set("📊 다야 전체 스캔 시작... (OCR 로딩 포함 잠시)")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py"), "--scan", "--close"])
         self._ocr_proc = proc
         def _watch():
@@ -732,7 +731,7 @@ class App(tk.Tk):
 
         # 9시 클릭 스케줄러
         tk.Frame(btn_row, width=10).pack(side="left")
-        self.btn_mail = tk.Button(btn_row, text="🕘 22:30~23:30 클릭  ON",
+        self.btn_mail = tk.Button(btn_row, text="🕘 23:30~23:50 클릭  ON",
             font=("맑은 고딕", 9, "bold"), bg="#27ae60", fg="white",
             activebackground="#5d6d7e", width=13, height=2,
             command=self._toggle_mail)
@@ -1056,8 +1055,7 @@ class App(tk.Tk):
         """해당 던전 단독창 열고 자동 실행."""
         if self._is_busy():
             self._enqueue(f"섬/던전 #{idx+1:02d}", lambda: self._run_island_slot(idx)); return
-        self.iconify()
-        self._minimize_claude()
+        self._minimize_all()
         proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(idx), "--run"])
         self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
@@ -1225,8 +1223,7 @@ class App(tk.Tk):
         exe = sys.executable.replace("python.exe", "pythonw.exe")
         self.status.set(f"🔎 #{idx+1:02d} 다야 재측정 중... (OCR 로딩 포함 잠시)")
         # 런처/클로드가 게임(숫자 영역)을 가리지 않게 최소화하고 실행
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         try:
             proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py"), "--slot", str(idx)])
         except Exception as e:
@@ -1323,6 +1320,8 @@ class App(tk.Tk):
                   command=self._reg_profile_id_area).pack(side="right")
         tk.Button(area_row, text="테스트", font=("맑은 고딕", 7), bg="#7d3c98", fg="white",
                   command=self._test_profile_ocr).pack(side="right", padx=2)
+        tk.Button(area_row, text="🖼기준등록", font=("맑은 고딕", 7), bg="#1e8449", fg="white",
+                  command=self._reg_profile_ref).pack(side="right", padx=2)
 
         pid_row = tk.Frame(parent); pid_row.pack(fill="x", padx=4, pady=2)
         tk.Label(pid_row, text="사용할 아이디", font=("맑은 고딕", 8), width=18, anchor="w").pack(side="left")
@@ -1476,8 +1475,7 @@ class App(tk.Tk):
         self._return_running = True
         self._return_stop    = False
         self.status.set(f"2초 후 귀환주문서 [{name}] 실행...")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         threading.Thread(target=self._run_task,
                          args=("귀환주문서", self._run_return_worker, name, coords), daemon=True).start()
 
@@ -2255,6 +2253,7 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_pass(self, idx):
+        self._minimize_all()
         threading.Thread(target=self._run_pass, args=(idx,), daemon=True).start()
 
     def _del_pass(self, idx):
@@ -2823,6 +2822,13 @@ class App(tk.Tk):
             self.status.set("아이디 표시 영역을 먼저 등록하세요."); return
         def _do():
             try:
+                # 기준이미지 모드면 이미지 대조 결과를 표시 (실제 판별과 동일 경로)
+                if os.path.exists(self._profile_ref_path()):
+                    matched, label, sim = self._is_target_account()
+                    self.after(0, self._raise_main)
+                    self.after(0, lambda m=matched, l=label: self.status.set(
+                        f"{l} → {'✔ 지정계정 일치' if m else '✘ 불일치'} (기준: 85% 이상)"))
+                    return
                 # 캡처는 런처가 최소화된 상태에서 먼저 (런처 창이 영역을 가리지 않도록)
                 # 실제 4시 판별과 동일한 창 위치 보정 경로 사용
                 img = self._grab_profile_img()
@@ -2997,9 +3003,61 @@ class App(tk.Tk):
         match = sum(1 for a, b in zip(ocr_id, target) if a == b)
         return match / max(len(target), 1)
 
+    def _profile_ref_path(self):
+        return os.path.join(LOCAL_DATA, "profile_ref.png")
+
+    def _reg_profile_ref(self):
+        """지정계정 상태의 아이디 영역을 기준이미지로 저장 — 이후 OCR 대신 이미지 대조로 판별.
+        (OCR이 글자를 잘 못 읽는 컴퓨터용 — 지정계정으로 로그인된 상태에서 누를 것)"""
+        area = self.cfg.get("profile_id_area")
+        if not area:
+            self.status.set("아이디 표시 영역을 먼저 등록하세요."); return
+        def _do():
+            try:
+                if self.cfg.get("profile_reveal_btn"):
+                    pyautogui.click(*self.cfg["profile_reveal_btn"])
+                    time.sleep(2)
+                img = self._grab_profile_img()
+                if img is None:
+                    self.after(0, lambda: self.status.set("캡처 실패 — 퍼플/게임 창 상태를 확인하세요")); return
+                img.save(self._profile_ref_path())
+                self.after(0, lambda: self.status.set(
+                    "✔ 기준이미지 등록 완료 — 이제 OCR 대신 이미지 대조로 판별합니다 (지정계정 상태에서 등록했는지 확인!)"))
+            except Exception as e:
+                self.after(0, lambda err=e: self.status.set(f"기준이미지 등록 오류: {err}"))
+        self.status.set("기준이미지 캡처 중...")
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _img_similarity(self, cur_img):
+        """현재 캡처와 기준이미지의 유사도(0~1). 몇 픽셀 어긋나도 견디게 템플릿 매칭."""
+        try:
+            import numpy as np, cv2
+            from PIL import Image
+            ref = Image.open(self._profile_ref_path()).convert("L")
+            cur = cur_img.convert("L")
+            r = np.array(ref); c = np.array(cur)
+            # 기준을 안쪽으로 잘라 템플릿으로 사용 → 창 위치 미세 오차 흡수
+            m = 12
+            if r.shape[0] > m*2+8 and r.shape[1] > m*2+8:
+                r = r[m:-m, m:-m]
+            if c.shape[0] < r.shape[0] or c.shape[1] < r.shape[1]:
+                return 0.0
+            res = cv2.matchTemplate(c, r, cv2.TM_CCOEFF_NORMED)
+            return float(res.max())
+        except Exception:
+            return 0.0
+
     def _is_target_account(self, hwnd=None):
-        """현재 퍼플 계정이 지정 아이디인지 OCR로 판별 → (matched, ocr_id, ratio).
-        지정 아이디가 비어 있으면 (True, '', 0)로 전환하지 않음."""
+        """현재 퍼플 계정이 지정 계정인지 판별 → (matched, 표시문자열, 점수).
+        기준이미지가 등록돼 있으면 이미지 대조(권장), 없으면 기존 OCR 문자 비교."""
+        # 이미지 대조 모드 (기준이미지 등록 시)
+        if os.path.exists(self._profile_ref_path()):
+            cur = self._grab_profile_img(hwnd)
+            if cur is None:
+                return (False, "[이미지] 캡처실패", 0.0)
+            sim = self._img_similarity(cur)
+            return (sim >= 0.85, f"[이미지대조] 유사도 {int(sim*100)}%", sim)
+        # OCR 문자 비교 모드 (기존)
         target = (self.cfg.get("profile_target_id") or "").strip()
         if not target:
             return (True, "", 0.0)
@@ -3905,7 +3963,7 @@ class App(tk.Tk):
         if not self._try_busy_or_queue(busy_name, lambda: self._test_doll(idx)): return
         self._doll_stop = False
         name = h.get("name", f"#{idx+1}")
-        self.iconify()
+        self._minimize_all()
         def run():
             try:
                 _clicked = 0
@@ -4303,8 +4361,7 @@ class App(tk.Tk):
         self._doll_stop = False
         self._set_btn("btn_doll_run", state="disabled")
         self._set_btn("btn_doll_stop", state="normal")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         threading.Thread(target=self._run_task, args=("인형탐험", self._run_doll_standalone), daemon=True).start()
 
     def _run_doll_standalone(self):
@@ -4319,6 +4376,7 @@ class App(tk.Tk):
             slots = list(enumerate(self.cfg.get("doll_slots", [])))
             active = [(i, h) for i, h in slots
                       if h.get("enabled", True) and any(c for c in h.get("coords", []))]
+            random.shuffle(active)   # 슬롯 실행 순서 매번 랜덤
             for si, (i, h) in enumerate(active):
                 if getattr(self, "_doll_stop", False): self.status.set("인형탐험 멈춤"); return
                 name = h.get("name", f"#{i+1}")
@@ -4489,10 +4547,10 @@ class App(tk.Tk):
         return ctypes.windll.kernel32.GetTickCount() - lii.dwTime
 
     def _claude_idle_minimize_tick(self):
-        """사용자가 10분간 아무 작업(입력)도 안 하면 클로드 앱도 최소화.
+        """사용자가 5분간 아무 작업(입력)도 안 하면 클로드 앱도 최소화.
         (매크로 실행 중엔 pyautogui가 입력을 내서 유휴가 아니므로 발동 안 함)"""
         try:
-            if self._system_idle_ms() >= 600000:   # 10분
+            if self._system_idle_ms() >= 300000:   # 5분
                 self._minimize_claude_windows(only_background=False)
         except Exception:
             pass
@@ -4564,12 +4622,12 @@ class App(tk.Tk):
         self._last_activity = time.time()
 
     def _idle_minimize_tick(self):
-        """10분간 아무 조작이 없으면 메인런처를 최소화(뒤 화면 가리지 않게).
+        """5분간 아무 조작이 없으면 메인런처를 최소화(뒤 화면 가리지 않게).
         사용자가 클릭해서 다시 올리면(맵 이벤트) 타이머가 리셋된다."""
         try:
             idle = time.time() - getattr(self, "_last_activity", time.time())
             running = getattr(self, "_running", False)  # 전체 자동실행 중이면 관여 안 함
-            if not running and idle >= 600:
+            if not running and idle >= 300:
                 try: normal = (self.state() == "normal")
                 except Exception: normal = False
                 if normal:
@@ -4826,7 +4884,7 @@ class App(tk.Tk):
             messagebox.showwarning("등록 필요", f"#{idx+1} 슬롯에 등록된 좌표가 없습니다."); return
         name = h.get("name", f"#{idx+1}")
         self.status.set(f"[{name}] 테스트 실행 중...")
-        self.iconify()
+        self._minimize_all()
         def run():
             try:
                 for j, coord in enumerate(h.get("coords", [])):
@@ -4929,10 +4987,10 @@ class App(tk.Tk):
         self._mail_on = not self._mail_on
         if self._mail_on:
             self._mail_triggered_date = None
-            self.btn_mail.config(text="🕘 22:30~23:30 클릭  ON", bg="#27ae60")
+            self.btn_mail.config(text="🕘 23:30~23:50 클릭  ON", bg="#27ae60")
             self.status.set("우편 클릭 ON — 밤 10:30~11:30 랜덤 실행")
         else:
-            self.btn_mail.config(text="🕘 22:30~23:30 클릭  OFF", bg="#7f8c8d")
+            self.btn_mail.config(text="🕘 23:30~23:50 클릭  OFF", bg="#7f8c8d")
             self.status.set("우편 클릭 OFF")
 
     def _mail_scheduler_tick(self):
@@ -4940,9 +4998,8 @@ class App(tk.Tk):
         if self._mail_on:
             now = datetime.datetime.now()
             today = now.date()
-            # 22:30~23:30 사이에 한 번만 트리거
-            in_window = ((now.hour == 22 and now.minute >= 30) or
-                         (now.hour == 23 and now.minute < 30))
+            # 23:30~23:50 사이에 한 번만 트리거
+            in_window = (now.hour == 23 and 30 <= now.minute < 50)
             if in_window and self._mail_triggered_date != today:
                 if self._is_busy():
                     self.status.set("🕘 우편 스케줄 대기 — 다른 작업 실행 중")
@@ -4952,12 +5009,12 @@ class App(tk.Tk):
                     threading.Thread(target=self._run_task,
                         args=("우편함(스케줄)", self._run_mail_scheduled), daemon=True).start()
             elif self._mail_triggered_date != today:
-                target = now.replace(hour=22, minute=30, second=0, microsecond=0)
+                target = now.replace(hour=23, minute=30, second=0, microsecond=0)
                 if now >= target:
                     target += datetime.timedelta(days=1)
                 diff = target - now
                 h, m = divmod(int(diff.total_seconds()) // 60, 60)
-                self.status.set(f"🕘 우편 클릭 대기 중... (약 {h}시간 {m}분 후 22:30~23:30 실행)")
+                self.status.set(f"🕘 우편 클릭 대기 중... (약 {h}시간 {m}분 후 23:30~23:50 실행)")
         self.after(10000, self._mail_scheduler_tick)
 
     def _past_scheduler_tick(self):
@@ -5081,6 +5138,11 @@ class App(tk.Tk):
                 self._plog(f"전환 {attempt}회 후 확인: OCR='{ocr_id}' 일치율 {int(ratio*100)}% → matched={matched}")
                 self.after(0, lambda o=ocr_id, r=ratio, a=attempt: self.status.set(
                     f"🔍 전환 {a}회 후 아이디 '{o}' (일치율 {int(r*100)}%)"))
+                if not matched and ratio >= 0.5:
+                    # OCR이 흔들려 100% 미달이지만 사실상 지정계정일 가능성 —
+                    # 재전환하면 (목록에 현재계정이 없어서) 다른 계정으로 이탈하므로 중단
+                    self._plog("느슨일치(≥50%) — 재전환 시 이탈 위험 → 여기서 중단")
+                    break
 
             if matched:
                 self._plog("✔ 완료 — 지정계정 확인됨")
@@ -5258,12 +5320,12 @@ class App(tk.Tk):
         if not active:
             return
 
-        # 각 클라이언트마다 22:30~23:30 사이 무작위 시각 배정
-        base = datetime.datetime.now().replace(hour=22, minute=30, second=0, microsecond=0)
-        window = 60 * 60  # 1시간(3600초)
+        # 각 클라이언트마다 23:30~23:50 사이 무작위 시각 배정
+        base = datetime.datetime.now().replace(hour=23, minute=30, second=0, microsecond=0)
+        window = 20 * 60  # 20분(1200초)
         schedule = sorted([(random.uniform(0, window), i, s) for i, s in active])
 
-        self.status.set(f"🕘 22:30~23:30 우편함 {len(active)}개 랜덤 실행 대기...")
+        self.status.set(f"🕘 23:30~23:50 우편함 {len(active)}개 랜덤 실행 대기...")
         elapsed = (datetime.datetime.now() - base).total_seconds()
 
         for delay, si, slot in schedule:
@@ -5358,6 +5420,7 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_mail(self, idx):
+        self._minimize_all()
         threading.Thread(target=self._run_mail, args=(idx,), daemon=True).start()
 
     def _del_mail(self, idx):
@@ -5419,8 +5482,7 @@ class App(tk.Tk):
         self._dungeon_stop = False
         self._set_btn("btn_dungeon_run", state="disabled")
         self._set_btn("btn_dungeon_stop", state="normal")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         self.after(300, lambda: threading.Thread(target=self._run_task, args=("주말던전", self._run_dungeon), daemon=True).start())
 
     def _run_dungeon(self, slot_idx=None):
@@ -5477,6 +5539,7 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_dungeon(self, idx):
+        self._minimize_all()
         threading.Thread(target=self._run_dungeon, args=(idx,), daemon=True).start()
 
     def _del_dungeon(self, idx):
@@ -5618,6 +5681,7 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_past(self, idx):
+        self._minimize_all()
         threading.Thread(target=self._run_past, args=(idx,), daemon=True).start()
 
     def _del_past(self, idx):
@@ -5727,6 +5791,7 @@ class App(tk.Tk):
             else:
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
+                random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
             for si, slot in targets:
                 if self._sched_stop: break
                 name   = slot.get("name", f"#{si+1}")
@@ -5790,6 +5855,7 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_sched(self, idx):
+        self._minimize_all()
         threading.Thread(target=self._run_sched, args=(idx,), daemon=True).start()
 
     def _del_sched(self, idx):
@@ -6564,6 +6630,10 @@ class App(tk.Tk):
         self._mail_stop      = True
         self._sched_any_stop = True
         self._return_stop    = True
+        self._doll_stop      = True
+        self._dungeon_stop   = True
+        self._pass_stop      = True
+        self._reroll_running = False  # 오림의일기장도 정지
         self._busy_task      = None   # 잠금 해제
         self._task_queue.clear()      # 멈춤 시 대기열도 비움
         # 다야 OCR 프로세스 종료
@@ -6572,6 +6642,12 @@ class App(tk.Tk):
             try: proc.terminate()
             except: pass
             self._ocr_proc = None
+        # 섬·던전 실행기(별도 프로세스)도 종료
+        ip = getattr(self, "_island_proc", None)
+        if ip and ip.poll() is None:
+            try: ip.terminate()
+            except: pass
+            self._island_proc = None
         self.status.set("멈추는 중...")
 
     # ── 클릭 실행 ─────────────────────────────────────────────────────
@@ -6583,8 +6659,7 @@ class App(tk.Tk):
         self._click_stop = False
         self.btn_click_run.config(state="disabled")
         self.btn_click_stop.config(state="normal")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         threading.Thread(target=self._run_task, args=("클릭실행", self._run_click_standalone), daemon=True).start()
 
     def _run_click_standalone(self):
@@ -6627,8 +6702,7 @@ class App(tk.Tk):
         self._hunt_stop = False
         self._set_btn("btn_hunt_run", state="disabled")
         self._set_btn("btn_hunt_stop", state="normal")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         threading.Thread(target=self._run_task, args=("사냥", self._run_hunt_standalone), daemon=True).start()
 
     def _run_hunt_standalone(self):
@@ -6708,8 +6782,7 @@ class App(tk.Tk):
         self._running   = True
         self.btn_start.config(state="disabled")
         self.btn_stop.config(state="normal")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
@@ -6815,6 +6888,38 @@ class App(tk.Tk):
                     # ① 지정계정로 전환(프로필→구글계정→확인) ② 리니지M 좌측버튼으로 지정계정 확인
                     # ③ 지정계정이면 퍼플 최소화
                     if not self._wait(3): self.status.set("멈춤"); return
+
+                    # ⓪ 먼저 현재 아이디 확인 — 이미 지정계정이면 전환 생략!
+                    #    (계정 목록엔 '현재 계정 제외 나머지'만 떠서, 이미 지정계정일 때
+                    #     고정 좌표를 클릭하면 다른 계정으로 이탈해버리는 사고 방지)
+                    _pre_matched = False
+                    try:
+                        try: win.activate()
+                        except Exception: pass
+                        if not self._wait(1): self.status.set("멈춤"); return
+                        if self.cfg.get("profile_reveal_btn"):
+                            pyautogui.click(*self.cfg["profile_reveal_btn"])
+                            if not self._wait(3): self.status.set("멈춤"); return
+                        _pre_matched, _pre_id, _pre_r = self._is_target_account()
+                        try: _dbg.write(f"[SWITCH] 사전확인: '{_pre_id}' 일치율 {int(_pre_r*100)}% matched={_pre_matched}\n"); _dbg.flush()
+                        except Exception: pass
+                    except Exception:
+                        pass
+                    if _pre_matched:
+                        self.status.set("✔ 이미 지정계정 — 전환 생략, 퍼플 최소화")
+                        try: _dbg.write("[SWITCH] 이미 지정계정 → 전환 생략\n"); _dbg.flush()
+                        except Exception: pass
+                        try:
+                            import win32gui, win32con
+                            _p_hwnd = win32gui.FindWindow(None, "PURPLE")
+                            if _p_hwnd:
+                                win32gui.ShowWindow(_p_hwnd, win32con.SW_MINIMIZE)
+                            else:
+                                win.minimize()
+                        except Exception:
+                            try: win.minimize()
+                            except Exception: pass
+                        break
 
                     # ① 지정 계정으로 전환
                     self.status.set("지정 계정으로 전환 중...")
