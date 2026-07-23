@@ -1323,6 +1323,8 @@ class App(tk.Tk):
                   command=self._reg_profile_id_area).pack(side="right")
         tk.Button(area_row, text="테스트", font=("맑은 고딕", 7), bg="#7d3c98", fg="white",
                   command=self._test_profile_ocr).pack(side="right", padx=2)
+        tk.Button(area_row, text="🖼기준등록", font=("맑은 고딕", 7), bg="#1e8449", fg="white",
+                  command=self._reg_profile_ref).pack(side="right", padx=2)
 
         pid_row = tk.Frame(parent); pid_row.pack(fill="x", padx=4, pady=2)
         tk.Label(pid_row, text="사용할 아이디", font=("맑은 고딕", 8), width=18, anchor="w").pack(side="left")
@@ -2815,6 +2817,13 @@ class App(tk.Tk):
             self.status.set("아이디 표시 영역을 먼저 등록하세요."); return
         def _do():
             try:
+                # 기준이미지 모드면 이미지 대조 결과를 표시 (실제 판별과 동일 경로)
+                if os.path.exists(self._profile_ref_path()):
+                    matched, label, sim = self._is_target_account()
+                    self.after(0, self._raise_main)
+                    self.after(0, lambda m=matched, l=label: self.status.set(
+                        f"{l} → {'✔ 지정계정 일치' if m else '✘ 불일치'} (기준: 85% 이상)"))
+                    return
                 # 캡처는 런처가 최소화된 상태에서 먼저 (런처 창이 영역을 가리지 않도록)
                 # 실제 4시 판별과 동일한 창 위치 보정 경로 사용
                 img = self._grab_profile_img()
@@ -2989,9 +2998,61 @@ class App(tk.Tk):
         match = sum(1 for a, b in zip(ocr_id, target) if a == b)
         return match / max(len(target), 1)
 
+    def _profile_ref_path(self):
+        return os.path.join(LOCAL_DATA, "profile_ref.png")
+
+    def _reg_profile_ref(self):
+        """지정계정 상태의 아이디 영역을 기준이미지로 저장 — 이후 OCR 대신 이미지 대조로 판별.
+        (OCR이 글자를 잘 못 읽는 컴퓨터용 — 지정계정으로 로그인된 상태에서 누를 것)"""
+        area = self.cfg.get("profile_id_area")
+        if not area:
+            self.status.set("아이디 표시 영역을 먼저 등록하세요."); return
+        def _do():
+            try:
+                if self.cfg.get("profile_reveal_btn"):
+                    pyautogui.click(*self.cfg["profile_reveal_btn"])
+                    time.sleep(2)
+                img = self._grab_profile_img()
+                if img is None:
+                    self.after(0, lambda: self.status.set("캡처 실패 — 퍼플/게임 창 상태를 확인하세요")); return
+                img.save(self._profile_ref_path())
+                self.after(0, lambda: self.status.set(
+                    "✔ 기준이미지 등록 완료 — 이제 OCR 대신 이미지 대조로 판별합니다 (지정계정 상태에서 등록했는지 확인!)"))
+            except Exception as e:
+                self.after(0, lambda err=e: self.status.set(f"기준이미지 등록 오류: {err}"))
+        self.status.set("기준이미지 캡처 중...")
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _img_similarity(self, cur_img):
+        """현재 캡처와 기준이미지의 유사도(0~1). 몇 픽셀 어긋나도 견디게 템플릿 매칭."""
+        try:
+            import numpy as np, cv2
+            from PIL import Image
+            ref = Image.open(self._profile_ref_path()).convert("L")
+            cur = cur_img.convert("L")
+            r = np.array(ref); c = np.array(cur)
+            # 기준을 안쪽으로 잘라 템플릿으로 사용 → 창 위치 미세 오차 흡수
+            m = 12
+            if r.shape[0] > m*2+8 and r.shape[1] > m*2+8:
+                r = r[m:-m, m:-m]
+            if c.shape[0] < r.shape[0] or c.shape[1] < r.shape[1]:
+                return 0.0
+            res = cv2.matchTemplate(c, r, cv2.TM_CCOEFF_NORMED)
+            return float(res.max())
+        except Exception:
+            return 0.0
+
     def _is_target_account(self, hwnd=None):
-        """현재 퍼플 계정이 지정 아이디인지 OCR로 판별 → (matched, ocr_id, ratio).
-        지정 아이디가 비어 있으면 (True, '', 0)로 전환하지 않음."""
+        """현재 퍼플 계정이 지정 계정인지 판별 → (matched, 표시문자열, 점수).
+        기준이미지가 등록돼 있으면 이미지 대조(권장), 없으면 기존 OCR 문자 비교."""
+        # 이미지 대조 모드 (기준이미지 등록 시)
+        if os.path.exists(self._profile_ref_path()):
+            cur = self._grab_profile_img(hwnd)
+            if cur is None:
+                return (False, "[이미지] 캡처실패", 0.0)
+            sim = self._img_similarity(cur)
+            return (sim >= 0.85, f"[이미지대조] 유사도 {int(sim*100)}%", sim)
+        # OCR 문자 비교 모드 (기존)
         target = (self.cfg.get("profile_target_id") or "").strip()
         if not target:
             return (True, "", 0.0)
