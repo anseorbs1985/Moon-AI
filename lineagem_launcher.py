@@ -4368,6 +4368,7 @@ class App(tk.Tk):
             slots = list(enumerate(self.cfg.get("doll_slots", [])))
             active = [(i, h) for i, h in slots
                       if h.get("enabled", True) and any(c for c in h.get("coords", []))]
+            random.shuffle(active)   # 슬롯 실행 순서 매번 랜덤
             for si, (i, h) in enumerate(active):
                 if getattr(self, "_doll_stop", False): self.status.set("인형탐험 멈춤"); return
                 name = h.get("name", f"#{i+1}")
@@ -5767,6 +5768,7 @@ class App(tk.Tk):
             else:
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
+                random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
             for si, slot in targets:
                 if self._sched_stop: break
                 name   = slot.get("name", f"#{si+1}")
