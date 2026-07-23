@@ -660,8 +660,7 @@ class App(tk.Tk):
         import subprocess, sys
         exe = sys.executable.replace("python.exe", "pythonw.exe")
         self.status.set("📊 다야 전체 스캔 시작... (OCR 로딩 포함 잠시)")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py"), "--scan", "--close"])
         self._ocr_proc = proc
         def _watch():
@@ -732,7 +731,7 @@ class App(tk.Tk):
 
         # 9시 클릭 스케줄러
         tk.Frame(btn_row, width=10).pack(side="left")
-        self.btn_mail = tk.Button(btn_row, text="🕘 22:30~23:30 클릭  ON",
+        self.btn_mail = tk.Button(btn_row, text="🕘 23:30~23:50 클릭  ON",
             font=("맑은 고딕", 9, "bold"), bg="#27ae60", fg="white",
             activebackground="#5d6d7e", width=13, height=2,
             command=self._toggle_mail)
@@ -1056,8 +1055,7 @@ class App(tk.Tk):
         """해당 던전 단독창 열고 자동 실행."""
         if self._is_busy():
             self._enqueue(f"섬/던전 #{idx+1:02d}", lambda: self._run_island_slot(idx)); return
-        self.iconify()
-        self._minimize_claude()
+        self._minimize_all()
         proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(idx), "--run"])
         self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
@@ -1225,8 +1223,7 @@ class App(tk.Tk):
         exe = sys.executable.replace("python.exe", "pythonw.exe")
         self.status.set(f"🔎 #{idx+1:02d} 다야 재측정 중... (OCR 로딩 포함 잠시)")
         # 런처/클로드가 게임(숫자 영역)을 가리지 않게 최소화하고 실행
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         try:
             proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py"), "--slot", str(idx)])
         except Exception as e:
@@ -1470,8 +1467,7 @@ class App(tk.Tk):
         self._return_running = True
         self._return_stop    = False
         self.status.set(f"2초 후 귀환주문서 [{name}] 실행...")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         threading.Thread(target=self._run_task,
                          args=("귀환주문서", self._run_return_worker, name, coords), daemon=True).start()
 
@@ -2249,6 +2245,7 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_pass(self, idx):
+        self._minimize_all()
         threading.Thread(target=self._run_pass, args=(idx,), daemon=True).start()
 
     def _del_pass(self, idx):
@@ -3958,7 +3955,7 @@ class App(tk.Tk):
         if not self._try_busy_or_queue(busy_name, lambda: self._test_doll(idx)): return
         self._doll_stop = False
         name = h.get("name", f"#{idx+1}")
-        self.iconify()
+        self._minimize_all()
         def run():
             try:
                 _clicked = 0
@@ -4356,8 +4353,7 @@ class App(tk.Tk):
         self._doll_stop = False
         self._set_btn("btn_doll_run", state="disabled")
         self._set_btn("btn_doll_stop", state="normal")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         threading.Thread(target=self._run_task, args=("인형탐험", self._run_doll_standalone), daemon=True).start()
 
     def _run_doll_standalone(self):
@@ -4879,7 +4875,7 @@ class App(tk.Tk):
             messagebox.showwarning("등록 필요", f"#{idx+1} 슬롯에 등록된 좌표가 없습니다."); return
         name = h.get("name", f"#{idx+1}")
         self.status.set(f"[{name}] 테스트 실행 중...")
-        self.iconify()
+        self._minimize_all()
         def run():
             try:
                 for j, coord in enumerate(h.get("coords", [])):
@@ -4982,10 +4978,10 @@ class App(tk.Tk):
         self._mail_on = not self._mail_on
         if self._mail_on:
             self._mail_triggered_date = None
-            self.btn_mail.config(text="🕘 22:30~23:30 클릭  ON", bg="#27ae60")
+            self.btn_mail.config(text="🕘 23:30~23:50 클릭  ON", bg="#27ae60")
             self.status.set("우편 클릭 ON — 밤 10:30~11:30 랜덤 실행")
         else:
-            self.btn_mail.config(text="🕘 22:30~23:30 클릭  OFF", bg="#7f8c8d")
+            self.btn_mail.config(text="🕘 23:30~23:50 클릭  OFF", bg="#7f8c8d")
             self.status.set("우편 클릭 OFF")
 
     def _mail_scheduler_tick(self):
@@ -4993,9 +4989,8 @@ class App(tk.Tk):
         if self._mail_on:
             now = datetime.datetime.now()
             today = now.date()
-            # 22:30~23:30 사이에 한 번만 트리거
-            in_window = ((now.hour == 22 and now.minute >= 30) or
-                         (now.hour == 23 and now.minute < 30))
+            # 23:30~23:50 사이에 한 번만 트리거
+            in_window = (now.hour == 23 and 30 <= now.minute < 50)
             if in_window and self._mail_triggered_date != today:
                 if self._is_busy():
                     self.status.set("🕘 우편 스케줄 대기 — 다른 작업 실행 중")
@@ -5005,12 +5000,12 @@ class App(tk.Tk):
                     threading.Thread(target=self._run_task,
                         args=("우편함(스케줄)", self._run_mail_scheduled), daemon=True).start()
             elif self._mail_triggered_date != today:
-                target = now.replace(hour=22, minute=30, second=0, microsecond=0)
+                target = now.replace(hour=23, minute=30, second=0, microsecond=0)
                 if now >= target:
                     target += datetime.timedelta(days=1)
                 diff = target - now
                 h, m = divmod(int(diff.total_seconds()) // 60, 60)
-                self.status.set(f"🕘 우편 클릭 대기 중... (약 {h}시간 {m}분 후 22:30~23:30 실행)")
+                self.status.set(f"🕘 우편 클릭 대기 중... (약 {h}시간 {m}분 후 23:30~23:50 실행)")
         self.after(10000, self._mail_scheduler_tick)
 
     def _past_scheduler_tick(self):
@@ -5301,12 +5296,12 @@ class App(tk.Tk):
         if not active:
             return
 
-        # 각 클라이언트마다 22:30~23:30 사이 무작위 시각 배정
-        base = datetime.datetime.now().replace(hour=22, minute=30, second=0, microsecond=0)
-        window = 60 * 60  # 1시간(3600초)
+        # 각 클라이언트마다 23:30~23:50 사이 무작위 시각 배정
+        base = datetime.datetime.now().replace(hour=23, minute=30, second=0, microsecond=0)
+        window = 20 * 60  # 20분(1200초)
         schedule = sorted([(random.uniform(0, window), i, s) for i, s in active])
 
-        self.status.set(f"🕘 22:30~23:30 우편함 {len(active)}개 랜덤 실행 대기...")
+        self.status.set(f"🕘 23:30~23:50 우편함 {len(active)}개 랜덤 실행 대기...")
         elapsed = (datetime.datetime.now() - base).total_seconds()
 
         for delay, si, slot in schedule:
@@ -5401,6 +5396,7 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_mail(self, idx):
+        self._minimize_all()
         threading.Thread(target=self._run_mail, args=(idx,), daemon=True).start()
 
     def _del_mail(self, idx):
@@ -5462,8 +5458,7 @@ class App(tk.Tk):
         self._dungeon_stop = False
         self._set_btn("btn_dungeon_run", state="disabled")
         self._set_btn("btn_dungeon_stop", state="normal")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         self.after(300, lambda: threading.Thread(target=self._run_task, args=("주말던전", self._run_dungeon), daemon=True).start())
 
     def _run_dungeon(self, slot_idx=None):
@@ -5520,6 +5515,7 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_dungeon(self, idx):
+        self._minimize_all()
         threading.Thread(target=self._run_dungeon, args=(idx,), daemon=True).start()
 
     def _del_dungeon(self, idx):
@@ -5661,6 +5657,7 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_past(self, idx):
+        self._minimize_all()
         threading.Thread(target=self._run_past, args=(idx,), daemon=True).start()
 
     def _del_past(self, idx):
@@ -5833,6 +5830,7 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_sched(self, idx):
+        self._minimize_all()
         threading.Thread(target=self._run_sched, args=(idx,), daemon=True).start()
 
     def _del_sched(self, idx):
@@ -6626,8 +6624,7 @@ class App(tk.Tk):
         self._click_stop = False
         self.btn_click_run.config(state="disabled")
         self.btn_click_stop.config(state="normal")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         threading.Thread(target=self._run_task, args=("클릭실행", self._run_click_standalone), daemon=True).start()
 
     def _run_click_standalone(self):
@@ -6670,8 +6667,7 @@ class App(tk.Tk):
         self._hunt_stop = False
         self._set_btn("btn_hunt_run", state="disabled")
         self._set_btn("btn_hunt_stop", state="normal")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         threading.Thread(target=self._run_task, args=("사냥", self._run_hunt_standalone), daemon=True).start()
 
     def _run_hunt_standalone(self):
@@ -6751,8 +6747,7 @@ class App(tk.Tk):
         self._running   = True
         self.btn_start.config(state="disabled")
         self.btn_stop.config(state="normal")
-        self._minimize_claude()
-        self.iconify()
+        self._minimize_all()
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
