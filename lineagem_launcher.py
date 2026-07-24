@@ -177,6 +177,9 @@ DEFAULT_CFG = {
                      for _ in range(PAST_SLOTS)],
     "sched_slots":  [{"name": "미등록", "coords": [None] * SCHED_CLICKS}
                      for _ in range(SCHED_SLOTS)],
+    "item_slots":   None,               # 아이템정리 — 처음 로드 때 스케줄 슬롯을 복사해 생성
+    "item_hotkey":  None,               # 아이템정리 실행 단축키 (가상키 코드)
+    "item_on":      False,              # 아이템정리 단축키 활성화 상태 (재시작 유지)
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
     "seq_slots":    [None]*SEQ_SLOTS,   # 연속 클릭 좌표 (각 [x,y] 또는 None)
     "seq_hotkey":   None,               # 연속 클릭 실행 단축키 (가상키 코드)
@@ -348,6 +351,23 @@ def load_cfg():
         while len(ns) < SCHED_SLOTS:
             ns.append({"name": "미등록", "coords": [None] * SCHED_CLICKS})
         cfg["sched_slots"] = ns[:SCHED_SLOTS]
+        # item_slots (아이템정리) — 스케줄과 동일 구조. 처음 생기면 스케줄 슬롯을 그대로 복사
+        import copy as _cp
+        il = cfg.get("item_slots")
+        if not il:
+            cfg["item_slots"] = _cp.deepcopy(cfg["sched_slots"])
+        else:
+            ni = []
+            for s in il:
+                if isinstance(s, dict):
+                    c = s.get("coords", [None] * SCHED_CLICKS)
+                    while len(c) < SCHED_CLICKS: c.append(None)
+                    ni.append({"name": s.get("name", "미등록"), "coords": c[:SCHED_CLICKS]})
+                else:
+                    ni.append({"name": "미등록", "coords": [None] * SCHED_CLICKS})
+            while len(ni) < SCHED_SLOTS:
+                ni.append({"name": "미등록", "coords": [None] * SCHED_CLICKS})
+            cfg["item_slots"] = ni[:SCHED_SLOTS]
         ps = cfg.get("pass_slots", [])
         while len(ps) < PASS_SLOTS:
             ps.append({"name": "미등록", "coords": [None]*PASS_CLICKS})
@@ -574,6 +594,8 @@ class App(tk.Tk):
         self._dc_on        = bool(self.cfg.get("dc_on", False))
         self._dc_running   = False
         self._doll_stop    = False
+        self._item_on      = bool(self.cfg.get("item_on", False))
+        self._item_stop    = False
         self._task_queue   = []   # 연속으로 누른 실행/재측정 순차 실행 대기열
         self._build_ui()
         self._sync_sched_click1()   # 스케줄 클릭1 = 과거섬 클릭1 (시작 시 1회 동기화)
@@ -586,6 +608,7 @@ class App(tk.Tk):
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._wdoff_hotkey_loop, daemon=True).start()
+        threading.Thread(target=self._item_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._popup_guard_loop, daemon=True).start()
         threading.Thread(target=self._claude_attention_loop, daemon=True).start()
         # 작업 중에는 클로드를 강제로 내리지 않는다(예전 시작 버스트 제거).
@@ -848,6 +871,16 @@ class App(tk.Tk):
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
             command=self._start_sched).pack(side="left", padx=(2,0))
+        # 스케줄 아래: 아이템정리 (스케줄과 동일 구조 + 단축키)
+        r4 = tk.Frame(dc_col); r4.pack(anchor="n", pady=(4,0))
+        tk.Button(r4, text="🧹 아이템\n정리",
+            font=("맑은 고딕", 9, "bold"), bg="#7d6608", fg="white",
+            activebackground="#5d4c06", width=7, height=2,
+            command=self._open_item_win).pack(side="left")
+        tk.Button(r4, text="▶\n실행",
+            font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
+            activebackground="#1e8449", width=4, height=2,
+            command=self._start_item).pack(side="left", padx=(2,0))
 
         winmgmt = tk.Frame(front_row); winmgmt.pack(side="left", padx=(4,10), anchor="n")
         self._build_winmgmt(winmgmt)
@@ -2349,6 +2382,238 @@ class App(tk.Tk):
 
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
         self._build_slot_grid(parent, "sched")   # 4×4 그리드 (화면 배치와 동일)
+
+    # ── 아이템정리 (스케줄과 동일 구조 + 단축키) ─────────────────────────
+    def _open_item_win(self):
+        self._open_section_win("_item_win", "🧹 아이템정리", self._build_item, w=470, h=620)
+
+    def _build_item(self, parent):
+        tk.Label(parent, text="아이템정리",
+                 font=("맑은 고딕", 9, "bold"), fg="#7d6608").pack(anchor="w", padx=4, pady=(4,2))
+
+        pr = tk.Frame(parent); pr.pack(pady=3)
+        self._item_stop = False
+        self.btn_item_run = tk.Button(pr, text="▶  실행",
+            font=("맑은 고딕", 9, "bold"), bg="#7d6608", fg="white",
+            activebackground="#5d4c06", width=13, height=2,
+            command=self._start_item)
+        self.btn_item_run.pack(side="left", padx=(0,3))
+        self.btn_item_stop = tk.Button(pr, text="■ 멈춤",
+            font=("맑은 고딕", 8, "bold"), bg="#7f8c8d", fg="white",
+            width=6, height=2,
+            command=lambda: setattr(self, "_item_stop", True) or
+                            self.status.set("멈추는 중..."),
+            state="disabled")
+        self.btn_item_stop.pack(side="left")
+        tk.Button(pr, text="🔀 그룹복사 (#01→전체)",
+            font=("맑은 고딕", 8), bg="#5d4c06", fg="white", width=18,
+            command=self._group_copy_item).pack(side="left", padx=(8,0))
+
+        # 단축키 (연속클릭과 동일 방식 — ON/OFF + 키 지정)
+        hk = tk.Frame(parent); hk.pack(pady=2)
+        self._item_toggle_btn = tk.Button(hk, text="ON" if self._item_on else "OFF",
+            font=("맑은 고딕", 9, "bold"),
+            bg="#27ae60" if self._item_on else "#7f8c8d", fg="white", width=6,
+            command=self._toggle_item)
+        self._item_toggle_btn.pack(side="left", padx=(0, 3))
+        tk.Button(hk, text="⌨ 단축키", font=("맑은 고딕", 8),
+                  bg="#2c3e50", fg="white",
+                  command=self._assign_item_hotkey).pack(side="left", padx=3)
+        self._item_hotkey_var = tk.StringVar(value=self._item_hotkey_label())
+        tk.Label(hk, textvariable=self._item_hotkey_var,
+                 font=("맑은 고딕", 8), fg="#34495e").pack(side="left", padx=(6,0))
+
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
+        self._build_slot_grid(parent, "item")   # 4×4 그리드 (화면 배치와 동일)
+
+    def _item_hotkey_label(self):
+        return f"단축키: {self._vk_name(self.cfg.get('item_hotkey'))}"
+
+    def _toggle_item(self):
+        self._item_on = not getattr(self, "_item_on", False)
+        self.cfg["item_on"] = self._item_on
+        save_cfg(self.cfg)
+        if hasattr(self, "_item_toggle_btn"):
+            try:
+                self._item_toggle_btn.config(text="ON" if self._item_on else "OFF",
+                                             bg="#27ae60" if self._item_on else "#7f8c8d")
+            except Exception:
+                pass
+        if self._item_on:
+            self.status.set(f"아이템정리 ON — {self._vk_name(self.cfg.get('item_hotkey'))} 누르면 실행")
+        else:
+            self.status.set("아이템정리 OFF")
+
+    def _assign_item_hotkey(self):
+        self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
+        def _cap():
+            import ctypes
+            time.sleep(0.3)
+            end = time.time() + 5
+            captured = None
+            while time.time() < end:
+                for vk in range(0x08, 0xFF):
+                    if vk in (0x01, 0x02, 0x04):
+                        continue
+                    if ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000:
+                        captured = vk
+                        break
+                if captured is not None:
+                    break
+                time.sleep(0.02)
+            if captured is None:
+                self.after(0, lambda: self.status.set("단축키 지정 취소 (시간초과)"))
+                return
+            if captured == 0x1B:
+                self.after(0, lambda: self.status.set("단축키 지정 취소"))
+                return
+            self.cfg["item_hotkey"] = captured
+            save_cfg(self.cfg)
+            name = self._vk_name(captured)
+            def _upd():
+                if hasattr(self, "_item_hotkey_var"):
+                    self._item_hotkey_var.set(f"단축키: {name}")
+                self.status.set(f"✔ 단축키 지정: {name}")
+            self.after(0, _upd)
+        threading.Thread(target=_cap, daemon=True).start()
+
+    def _item_hotkey_loop(self):
+        """전역 단축키 감시 — ON 상태에서 지정키가 눌리면 아이템정리 실행."""
+        import ctypes
+        prev = False
+        while True:
+            time.sleep(0.03)
+            vk = self.cfg.get("item_hotkey")
+            if not getattr(self, "_item_on", False) or not vk:
+                prev = False
+                continue
+            try:
+                down = bool(ctypes.windll.user32.GetAsyncKeyState(int(vk)) & 0x8000)
+            except Exception:
+                prev = False
+                continue
+            if down and not prev:
+                self.after(0, self._start_item)
+            prev = down
+
+    def _reg_item_click(self, slot_idx, click_idx):
+        self._reg_item_slot_idx  = slot_idx
+        self._reg_item_click_idx = click_idx
+        if click_idx == 1:
+            # 이동 좌표는 카운트다운 후 현재 마우스 위치 자동 캡처 (스케줄과 동일)
+            self._minimize_claude()
+            self._item_hover_countdown(slot_idx, 3)
+        else:
+            self.status.set(f"3초 후 아이템정리 #{slot_idx+1} [클릭{click_idx+1}] 위치 클릭하세요!")
+            self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                       CoordOverlay(self, mode="item")])
+
+    def _item_hover_countdown(self, slot_idx, remaining):
+        if remaining > 0:
+            self.status.set(f"⏱ {remaining}초 안에 마우스를 이동해두세요 — 자동 저장됩니다")
+            self.after(1000, lambda: self._item_hover_countdown(slot_idx, remaining - 1))
+        else:
+            x, y = pyautogui.position()
+            self.on_item_coord(x, y)
+
+    def on_item_coord(self, x, y):
+        si = self._reg_item_slot_idx
+        ci = self._reg_item_click_idx
+        self.cfg["item_slots"][si]["coords"][ci] = [x, y]
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ 아이템정리 #{si+1} 클릭{ci+1} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _del_item(self, idx):
+        if not messagebox.askyesno("슬롯 삭제", f"아이템정리 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
+            return
+        self.cfg["item_slots"][idx] = {"name": "미등록", "coords": [None]*SCHED_CLICKS}
+        save_cfg(self.cfg); self._refresh_ui()
+
+    def _preview_item(self, idx):
+        coords = self.cfg["item_slots"][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
+        if not dots:
+            self.status.set(f"#{idx+1:02d} 등록된 좌표가 없습니다")
+            return
+        name = self.cfg["item_slots"][idx].get("name", f"#{idx+1:02d}")
+
+        def rereg(dot_idx):
+            self._reg_item_slot_idx  = idx
+            self._reg_item_click_idx = dot_idx if dot_idx is not None else 0
+            self.deiconify()
+            self.after(200, lambda: CoordOverlay(self, mode="item"))
+
+        def _save(dot_idx, nx, ny):
+            self.cfg["item_slots"][idx]["coords"][dot_idx] = [nx, ny]
+            save_cfg(self.cfg); self._refresh_ui()
+            self.status.set(f"✔ 아이템정리 #{idx+1:02d} 클릭{dot_idx+1} 이동 저장: ({nx},{ny})")
+
+        self._open_dot_preview(f"아이템정리 #{idx+1:02d} {name}", dots,
+                               rereg_fn=rereg, save_fn=_save)
+
+    def _group_copy_item(self):
+        import copy
+        src = self.cfg["item_slots"][0].get("coords", [])
+        if not any(src):
+            self.status.set("#01 슬롯에 복사할 좌표가 없습니다"); return
+        for i in range(1, SCHED_SLOTS):
+            self.cfg["item_slots"][i]["coords"] = copy.deepcopy(src)
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set("✔ #01 좌표를 전체 슬롯에 복사 완료")
+
+    def _test_item(self, idx):
+        self._minimize_all()
+        threading.Thread(target=self._run_item, args=(idx,), daemon=True).start()
+
+    def _start_item(self):
+        if not self._try_busy_or_queue("아이템정리", self._start_item): return
+        self._item_stop = False
+        self._set_btn("btn_item_run", state="disabled", bg="#f39c12", text="⏳ 실행중...")
+        self._set_btn("btn_item_stop", state="normal")
+        self._minimize_all()
+        self.after(300, lambda: threading.Thread(target=self._run_task, args=("아이템정리", self._run_item), daemon=True).start())
+
+    def _run_item(self, slot_idx=None):
+        try:
+            self.status.set("2초 후 아이템정리 실행...")
+            self.after(0, self.iconify)
+            time.sleep(2)
+            slots = self.cfg.get("item_slots", [])
+            if slot_idx is not None:
+                targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
+            else:
+                targets = [(i, s) for i, s in enumerate(slots)
+                           if any(s.get("coords", []))]
+                random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
+            for si, slot in targets:
+                if self._item_stop: break
+                name   = slot.get("name", f"#{si+1}")
+                coords = slot.get("coords", [None]*SCHED_CLICKS)
+                if not self._wait_mouse_idle("_item_stop"): return
+                if coords[0]:
+                    self.status.set(f"🧹 [{name}] 클릭1...")
+                    pyautogui.click(*coords[0])
+                    time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                if self._item_stop: break
+                if coords[1]:
+                    self.status.set(f"🧹 [{name}] 마우스 이동...")
+                    pyautogui.moveTo(*coords[1])
+                    time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                if self._item_stop: break
+                if len(coords) > 2 and coords[2]:
+                    self.status.set(f"🧹 [{name}] 클릭2...")
+                    pyautogui.click(*coords[2])
+                if self._item_stop: break
+                time.sleep(4)
+            self.status.set("✔ 아이템정리 완료!")
+        except Exception as e:
+            self.status.set(f"오류: {e}")
+        finally:
+            self.after(0, self.deiconify)
+            self.after(0, self._restore_all)
+            self._set_btn("btn_item_run", state="normal", bg="#7d6608", text="▶  실행")
+            self._set_btn("btn_item_stop", state="disabled")
 
     def _popup_reg_label(self):
         chk = "✔" if self.cfg.get("purple_popup_checkbox") else "✗"
@@ -4105,6 +4370,8 @@ class App(tk.Tk):
                             enable=True, assign=True),
             "pass":    dict(title="패스권",   key="pass_slots",    clicks=PASS_CLICKS,    color="#6c3483",
                             reg=self._reg_pass_click,    test=self._test_pass,    prev=self._preview_pass,    delete=self._del_pass),
+            "item":    dict(title="아이템정리", key="item_slots",   clicks=SCHED_CLICKS,   color="#7d6608",
+                            reg=self._reg_item_click,    test=self._test_item,    prev=self._preview_item,    delete=self._del_item),
         }
         return S[fkey]
 
@@ -6097,7 +6364,7 @@ class App(tk.Tk):
     def _section_wins(self):
         attrs = ["_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
-                 "_dc_win","_accounts_win","_doll_win","_wdoff_win"]
+                 "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win"]
         return [getattr(self, a) for a in attrs
                 if getattr(self, a, None) and getattr(self, a).winfo_exists()]
 
@@ -6755,6 +7022,7 @@ class App(tk.Tk):
         self._doll_stop      = True
         self._dungeon_stop   = True
         self._pass_stop      = True
+        self._item_stop      = True
         self._reroll_running = False  # 오림의일기장도 정지
         self._busy_task      = None   # 잠금 해제
         self._task_queue.clear()      # 멈춤 시 대기열도 비움
@@ -8193,6 +8461,8 @@ class CoordOverlay(tk.Toplevel):
             label = f"패스권 #{app._reg_pass_slot_idx+1} [{PASS_LABELS[app._reg_pass_click_idx]}] 위치"
         elif mode == "sched":
             label = f"매일매일 스케줄 #{app._reg_sched_slot_idx+1} [클릭] 위치"
+        elif mode == "item":
+            label = f"아이템정리 #{app._reg_item_slot_idx+1} [클릭{app._reg_item_click_idx+1}] 위치"
         elif mode == "seq":
             label = f"연속클릭 #{app._seq_reg_idx+1} 위치"
         elif mode == "dc":
@@ -8221,6 +8491,7 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "past":      self.app.on_past_coord(x, y)
         elif self.mode == "pass":      self.app.on_pass_coord(x, y)
         elif self.mode == "sched":     self.app.on_sched_coord(x, y)
+        elif self.mode == "item":      self.app.on_item_coord(x, y)
         elif self.mode == "seq":       self.app.on_seq_coord(x, y)
         elif self.mode == "dc":        self.app.on_dc_coord(x, y)
         elif self.mode == "doll":      self.app.on_doll_coord(x, y)
