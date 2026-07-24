@@ -121,7 +121,8 @@ PAST_CLICKS    = 3
 PAST_INTERVAL  = 4.0   # 과거의말하는섬 클릭 간격(초)
 SCHED_SLOTS        = 16
 SCHED_CLICKS       = 3
-ITEM_SWIPE_DIST    = 375   # 아이템정리 클릭3: 누른 채 위로 쓸어올리는 거리(px)
+ITEM_SWIPE_DIST    = 250   # 아이템정리 클릭3: 누른 채 위로 쓸어올리는 거리(px)
+ITEM_SWIPE_COUNT   = 2     # 같은 자리에서 쓸어올리기 반복 횟수
 SCHED_INTERVAL     = 2.5
 PASS_SLOTS         = 16
 PASS_CLICKS        = 9
@@ -2592,17 +2593,21 @@ class App(tk.Tk):
                     time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._item_stop: break
                 if len(coords) > 2 and coords[2]:
-                    # 클릭3 = 누른 채 위로 한 번에 쓸어올리기 (스와이프)
-                    self.status.set(f"🧹 [{name}] 위로 쓸어올리기...")
+                    # 클릭3 = 누른 채 위로 쓸어올리기 (같은 자리에서 2회 반복)
                     sx, sy = coords[2]
-                    pyautogui.mouseDown(sx, sy)
-                    time.sleep(0.08)
-                    steps = 12
-                    for st in range(1, steps + 1):
-                        pyautogui.moveTo(sx, sy - int(ITEM_SWIPE_DIST * st / steps))
-                        time.sleep(0.015)
-                    time.sleep(0.05)
-                    pyautogui.mouseUp(sx, sy - ITEM_SWIPE_DIST)
+                    for rep in range(ITEM_SWIPE_COUNT):
+                        if self._item_stop: break
+                        self.status.set(f"🧹 [{name}] 위로 쓸어올리기 {rep+1}/{ITEM_SWIPE_COUNT}...")
+                        pyautogui.mouseDown(sx, sy)
+                        time.sleep(0.08)
+                        steps = 12
+                        for st in range(1, steps + 1):
+                            pyautogui.moveTo(sx, sy - int(ITEM_SWIPE_DIST * st / steps))
+                            time.sleep(0.015)
+                        time.sleep(0.05)
+                        pyautogui.mouseUp(sx, sy - ITEM_SWIPE_DIST)
+                        if rep < ITEM_SWIPE_COUNT - 1:
+                            time.sleep(random.uniform(0.4, 0.7))   # 다음 쓸어올리기 전 잠깐 대기
                 if self._item_stop: break
                 time.sleep(4)
             self.status.set("✔ 아이템정리 완료!")
