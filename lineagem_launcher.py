@@ -3221,6 +3221,9 @@ class App(tk.Tk):
         tk.Button(top, text="⌨ 단축키", font=("맑은 고딕", 8),
                   bg="#2c3e50", fg="white",
                   command=self._assign_seq_hotkey).pack(side="left", padx=3)
+        tk.Button(top, text="👁 전체보기", font=("맑은 고딕", 8),
+                  bg="#566573", fg="white",
+                  command=lambda: self._flat_preview_all("seq")).pack(side="left", padx=3)
 
         self._seq_hotkey_var = tk.StringVar(value=self._seq_hotkey_label())
         tk.Label(parent, textvariable=self._seq_hotkey_var,
@@ -3866,6 +3869,11 @@ class App(tk.Tk):
         tk.Button(hr, text="🔀 그룹복사 (#01→전체)",
             font=("맑은 고딕", 8), bg="#8e44ad", fg="white", width=18,
             command=self._group_copy_doll).pack(side="left", padx=(8,0))
+        tk.Button(hr, text="👁 전체보기", font=("맑은 고딕", 8),
+                  bg="#566573", fg="white",
+                  command=lambda: self._slots_preview_all(
+                      "인형탐험", "doll_slots", self._preview_doll,
+                      self._refresh_doll_display)).pack(side="left", padx=(6, 0))
 
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=6, pady=3)
 
@@ -4108,6 +4116,9 @@ class App(tk.Tk):
         st = self._grid_state.setdefault(fkey, {})
         st["cnt_vars"] = []; st["enable_btns"] = []
         st["pop"] = None; st["pop_slot"] = None
+        tk.Button(parent, text="👁 전체 좌표 보기", font=("맑은 고딕", 8),
+                  bg="#566573", fg="white",
+                  command=lambda f=fkey: self._grid_preview_all(f)).pack(pady=(4, 0))
         wg = tk.Frame(parent); wg.pack(padx=6, pady=4)
         for idx in range(16):
             r, c = idx % 4, idx // 4
@@ -4287,6 +4298,70 @@ class App(tk.Tk):
                       command=lambda x=idx, f=fkey: self._flat_paste(f, x)).pack(side="left", padx=(0, 2))
             tk.Button(row3, text="👁", font=("맑은 고딕", 6), bg="#566573", fg="white", width=2,
                       command=lambda x=idx, f=fkey: self._flat_preview(f, x)).pack(side="left")
+    def _slots_preview_all(self, title, key, prev_fn, refresh_fn=None):
+        """섹션 전체 슬롯 좌표 미리보기 — 점 드래그/WASD=수정 저장, 점 클릭=해당 슬롯 미리보기."""
+        slots = self.cfg.get(key) or []
+        items, dots = [], []
+        for si, s in enumerate(slots):
+            for ci, c in enumerate(s.get("coords", [])):
+                if c and len(c) >= 2:
+                    items.append((si, ci))
+                    dots.append((c[0], c[1], f"{si+1}-{ci+1}"))
+        if not dots:
+            self.status.set(f"{title}: 등록된 좌표가 없습니다"); return
+
+        def rereg(dot_idx):
+            if dot_idx is None:
+                self.deiconify(); return
+            prev_fn(items[dot_idx][0])   # 해당 슬롯 미리보기(점 클릭=재등록)로 이동
+
+        def _flush():
+            self._pa_save_job = None
+            save_cfg(self.cfg)
+            (refresh_fn or self._refresh_ui)()
+
+        def _save(dot_idx, nx, ny):
+            si, ci = items[dot_idx]
+            self.cfg[key][si]["coords"][ci] = [nx, ny]
+            # 그룹 이동은 점 수만큼 연속 호출됨 → 파일 저장/화면 갱신은 모아서 1회
+            job = getattr(self, "_pa_save_job", None)
+            if job:
+                try: self.after_cancel(job)
+                except Exception: pass
+            self._pa_save_job = self.after(300, _flush)
+
+        self._open_dot_preview(f"{title} — 전체 좌표", dots,
+                               rereg_fn=rereg, save_fn=_save, dot_r=7)
+
+    def _grid_preview_all(self, fkey):
+        sp = self._grid_spec(fkey)
+        self._slots_preview_all(sp["title"], sp["key"], sp["prev"])
+
+    def _flat_preview_all(self, fkey):
+        """연속클릭 등 1좌표 슬롯 섹션의 전체 좌표 미리보기 — 점 드래그=이동, 점 클릭=재등록."""
+        sp = self._flat_spec(fkey)
+        slots = self.cfg.get(sp["key"]) or []
+        reg = [(i, c) for i, c in enumerate(slots) if c]
+        if not reg:
+            self.status.set(f"{sp['title']}: 등록된 좌표가 없습니다"); return
+        dots = [(c[0], c[1], i + 1) for i, c in reg]
+
+        def rereg(di):
+            if di is None:
+                self.deiconify(); return
+            sp["reg"](reg[di][0])
+
+        def _save(di, nx, ny):
+            i = reg[di][0]
+            slots[i] = [nx, ny]
+            self.cfg[sp["key"]] = slots
+            save_cfg(self.cfg)
+            vl = getattr(self, sp["vars_attr"], None)
+            if vl and i < len(vl): vl[i].set(f"({nx},{ny})")
+
+        self._open_dot_preview(f"{sp['title']} — 전체 좌표", dots,
+                               rereg_fn=rereg, save_fn=_save, dot_r=8)
+
     def _flat_spec(self, fkey):
         return {
             "seq":   dict(title="연속클릭",     key="seq_slots",   reg=self._reg_seq_coord,   dele=self._del_seq_coord,   vars_attr="_seq_slot_vars"),
