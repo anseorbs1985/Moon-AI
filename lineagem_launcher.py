@@ -121,6 +121,7 @@ PAST_CLICKS    = 3
 PAST_INTERVAL  = 4.0   # 과거의말하는섬 클릭 간격(초)
 SCHED_SLOTS        = 16
 SCHED_CLICKS       = 3
+ITEM_SWIPE_DIST    = 250   # 아이템정리 클릭3: 누른 채 위로 쓸어올리는 거리(px)
 SCHED_INTERVAL     = 2.5
 PASS_SLOTS         = 16
 PASS_CLICKS        = 9
@@ -2497,24 +2498,13 @@ class App(tk.Tk):
             prev = down
 
     def _reg_item_click(self, slot_idx, click_idx):
+        # 클릭1·클릭2 = 일반 클릭, 클릭3 = 쓸어올리기 시작점 — 전부 클릭으로 등록
         self._reg_item_slot_idx  = slot_idx
         self._reg_item_click_idx = click_idx
-        if click_idx == 1:
-            # 이동 좌표는 카운트다운 후 현재 마우스 위치 자동 캡처 (스케줄과 동일)
-            self._minimize_claude()
-            self._item_hover_countdown(slot_idx, 3)
-        else:
-            self.status.set(f"3초 후 아이템정리 #{slot_idx+1} [클릭{click_idx+1}] 위치 클릭하세요!")
-            self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
-                                       CoordOverlay(self, mode="item")])
-
-    def _item_hover_countdown(self, slot_idx, remaining):
-        if remaining > 0:
-            self.status.set(f"⏱ {remaining}초 안에 마우스를 이동해두세요 — 자동 저장됩니다")
-            self.after(1000, lambda: self._item_hover_countdown(slot_idx, remaining - 1))
-        else:
-            x, y = pyautogui.position()
-            self.on_item_coord(x, y)
+        what = "쓸어올리기 시작점" if click_idx == 2 else f"클릭{click_idx+1}"
+        self.status.set(f"3초 후 아이템정리 #{slot_idx+1} [{what}] 위치 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="item")])
 
     def on_item_coord(self, x, y):
         si = self._reg_item_slot_idx
@@ -2597,13 +2587,22 @@ class App(tk.Tk):
                     time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._item_stop: break
                 if coords[1]:
-                    self.status.set(f"🧹 [{name}] 마우스 이동...")
-                    pyautogui.moveTo(*coords[1])
+                    self.status.set(f"🧹 [{name}] 클릭2...")
+                    pyautogui.click(*coords[1])
                     time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._item_stop: break
                 if len(coords) > 2 and coords[2]:
-                    self.status.set(f"🧹 [{name}] 클릭2...")
-                    pyautogui.click(*coords[2])
+                    # 클릭3 = 누른 채 위로 한 번에 쓸어올리기 (스와이프)
+                    self.status.set(f"🧹 [{name}] 위로 쓸어올리기...")
+                    sx, sy = coords[2]
+                    pyautogui.mouseDown(sx, sy)
+                    time.sleep(0.08)
+                    steps = 12
+                    for st in range(1, steps + 1):
+                        pyautogui.moveTo(sx, sy - int(ITEM_SWIPE_DIST * st / steps))
+                        time.sleep(0.015)
+                    time.sleep(0.05)
+                    pyautogui.mouseUp(sx, sy - ITEM_SWIPE_DIST)
                 if self._item_stop: break
                 time.sleep(4)
             self.status.set("✔ 아이템정리 완료!")
@@ -8462,7 +8461,9 @@ class CoordOverlay(tk.Toplevel):
         elif mode == "sched":
             label = f"매일매일 스케줄 #{app._reg_sched_slot_idx+1} [클릭] 위치"
         elif mode == "item":
-            label = f"아이템정리 #{app._reg_item_slot_idx+1} [클릭{app._reg_item_click_idx+1}] 위치"
+            _ci = app._reg_item_click_idx
+            _w  = "쓸어올리기 시작점" if _ci == 2 else f"클릭{_ci+1}"
+            label = f"아이템정리 #{app._reg_item_slot_idx+1} [{_w}] 위치"
         elif mode == "seq":
             label = f"연속클릭 #{app._seq_reg_idx+1} 위치"
         elif mode == "dc":
