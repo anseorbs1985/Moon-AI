@@ -375,6 +375,11 @@ class IslandApp(tk.Tk):
         stop_btn.pack(fill="x", padx=4, pady=(0,2))
         self._stop_btns[key] = stop_btn
 
+        tk.Button(parent, text="👁 전체 좌표 보기",
+                  font=("맑은 고딕", 8), bg="#566573", fg="white",
+                  command=lambda k=key: self._preview_all(k)
+                  ).pack(fill="x", padx=4, pady=(0,2))
+
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
 
         # 슬롯 4×4 그리드 (세로 열우선 — 화면 배치와 동일)
@@ -637,6 +642,19 @@ class IslandApp(tk.Tk):
         dots = [(c[0], c[1], n, ci) for n, (ci, c) in enumerate(valid, 1)]
         self.withdraw()
         self.after(1000, lambda: _IslandPreviewOverlay(self, key, idx, dots))
+
+    def _preview_all(self, key):
+        """이 던전의 16슬롯 전체 좌표 미리보기 — 점 드래그로 개별 수정 저장."""
+        dots = []
+        for si, s in enumerate(self.cfg.get(key, [])):
+            for ci, c in enumerate(s.get("coords", [])):
+                if c:
+                    dots.append((c[0], c[1], f"{si+1}-{ci+1}", (si, ci)))
+        if not dots:
+            self._status.set("등록된 좌표가 없습니다")
+            return
+        self.withdraw()
+        self.after(1000, lambda: _IslandPreviewOverlay(self, key, None, dots))
 
     def _del(self, key, idx):
         from tkinter import messagebox
@@ -948,7 +966,9 @@ class _IslandPreviewOverlay(tk.Toplevel):
     def _on_release(self, e):
         if self._drag is not None and self._moved:
             x, y, num, ci = self._dots[self._drag]
-            self.app.cfg[self.key][self.slot_idx]["coords"][ci] = [x, y]
+            # 전체보기(slot_idx=None)에서는 ci가 (슬롯, 클릭) 튜플로 들어온다
+            si, cj = ci if isinstance(ci, tuple) else (self.slot_idx, ci)
+            self.app.cfg[self.key][si]["coords"][cj] = [x, y]
             save_cfg(self.app.cfg)
             self.app._refresh(self.key)
             self.app._status.set(f"✔ 클릭{num} 이동 저장: ({x},{y})")

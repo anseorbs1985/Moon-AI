@@ -161,17 +161,19 @@ def _find_claude_hwnd():
 
 
 def ask_claude(reason):
-    """업데이트 실패 시 클로드 앱을 열고 해결 지시문(실패 상세 포함)을 자동 입력해 실행시킨다.
+    """업데이트 실패 시 클로드 앱을 열고 'git pull'을 입력+엔터 — 클로드가 바로 실행하게 한다.
+    (CLAUDE.md 지침: 'git pull' = 로컬우선 병합·배포·런처 재시작까지 전체 업데이트 절차)
     성공적으로 넘겼으면 True."""
     import ctypes
     u = ctypes.windll.user32
-    # 실패 상세(git 상태) 수집 — 클로드가 바로 분석할 수 있게 지시문에 포함
-    st = sh(["git", "status", "--short"], REPO).stdout.strip().splitlines()[:10]
-    detail = ("\n[git status]\n" + "\n".join(st)) if st else ""
-    prompt = (f"메인런처 [업데이트] 버튼이 실패했어. 원인: {reason}{detail}\n"
-              f"{REPO} 저장소의 git 상태(로컬 변경/충돌)를 분석해서 해결하고, "
-              "git pull 후 코드 파일들을 바탕화면으로 복사하고 워치독으로 메인런처를 재시작해서 "
-              "업데이트를 끝까지 마무리해줘.")
+    log(f"   실패 원인: {reason}")
+    try:
+        st = sh(["git", "status", "--short"], REPO).stdout.strip().splitlines()[:10]
+        for s in st:
+            log("   " + s)
+    except Exception:
+        pass
+    prompt = "git pull"
     # 1) 지시문을 클립보드에
     root.clipboard_clear(); root.clipboard_append(prompt); root.update()
     # 2) 클로드 앱 찾기(없으면 실행)
@@ -280,17 +282,21 @@ def finish(msg=""):
 
 
 def main():
+    global REPO
     try:
         if not REPO:
-            log("⚠ Moon-AI 저장소를 찾을 수 없습니다. 아래 위치 중 한 곳에 있어야 합니다:")
-            log(f"   · {os.path.join(HERE, 'Moon-AI')}")
-            log(f"   · {os.path.join(os.path.expanduser('~'), 'Moon-AI')}")
-            log("")
-            log("해결: 저장소 폴더(Moon-AI)를 런처 폴더 안으로 옮기거나, 아래 명령으로 새로 받으세요.")
-            log(f'   git clone https://github.com/anseorbs1985/Moon-AI.git "{os.path.join(HERE, "Moon-AI")}"')
-            ask_claude("Moon-AI 저장소 폴더를 찾을 수 없음 — 저장소를 찾거나 clone해서 업데이트를 마무리해줘")
-            finish()
-            return
+            # 자동복구: 저장소가 없으면 바로 새로 받는다
+            dest = os.path.join(HERE, "Moon-AI")
+            log("⚠ Moon-AI 저장소가 없습니다 — git clone으로 새로 받는 중...")
+            r = sh(["git", "clone", "https://github.com/anseorbs1985/Moon-AI.git", dest])
+            if r.returncode == 0 and _is_repo(dest):
+                REPO = dest
+                log(f"   ✔ clone 완료: {dest}")
+            else:
+                err = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "clone 실패"
+                ask_claude(f"저장소 없음 + clone 실패: {err}")
+                finish()
+                return
         log(f"저장소: {REPO}")
         _bn = backup_coords()
         log(f"0) 좌표 자동 백업 {_bn}개 (LOCALAPPDATA\\MoonAI\\backups)")
@@ -313,13 +319,23 @@ def main():
             sh(["git", "stash", "push", "--include-untracked", "-m", "업데이트 자동백업"], REPO)
             r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
             if r.returncode != 0:
-                # 2차: 클로드를 열어 해결 지시문 자동 입력
-                err = (r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "git pull 충돌")
-                log("⚠ 자동복구도 실패 — 클로드에게 해결을 맡깁니다")
-                ask_claude(err)
-                finish()
-                return
-            log("   ✔ 로컬 변경은 stash로 백업했고 최신 버전을 받았습니다")
+                # 2차 자동복구: 원격 기준으로 강제 동기화 (기존 상태는 백업 브랜치에 보관 —
+                # 좌표는 이미 파일백업 + 병합 스냅샷이 있어 로컬우선 병합으로 보존됨)
+                stamp = time.strftime("%Y%m%d_%H%M%S")
+                log("⚠ 재시도도 실패 — 원격 기준 강제 동기화 (이전 상태는 backup_" + stamp + " 브랜치 보관)")
+                sh(["git", "branch", f"backup_{stamp}"], REPO)
+                sh(["git", "fetch", "origin", "main"], REPO)
+                r = sh(["git", "reset", "--hard", "origin/main"], REPO)
+                if r.returncode != 0:
+                    # 3차: 클로드에 'git pull' 입력해 즉시 실행시킴
+                    err = (r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "git 동기화 실패")
+                    log("⚠ 강제 동기화도 실패 — 클로드에게 넘깁니다")
+                    ask_claude(err)
+                    finish()
+                    return
+                log("   ✔ 강제 동기화 완료")
+            else:
+                log("   ✔ 로컬 변경은 stash로 백업했고 최신 버전을 받았습니다")
         new = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
         changed = []
         if old != new:
@@ -337,8 +353,9 @@ def main():
 
         # 복사가 실패해도 런처는 반드시 다시 띄운다(꺼진 채로 방치 금지) → 오류는 잡아두고 뒤에서 보고
         copy_err = None
-        try:
-            log("4) 파일 복사...")
+        for _copy_try in (1, 2):
+          try:
+            log("4) 파일 복사..." if _copy_try == 1 else "4) 파일 복사 재시도...")
             n = 0
             for f in CODE_FILES:                      # 코드는 항상 동기화
                 s = os.path.join(REPO, f)
@@ -371,10 +388,21 @@ def main():
                         shutil.copy2(os.path.join(sdir, fn), os.path.join(ddir, fn))
                     log(f"   데이터 갱신: {d}/")
             log(f"   복사 {n}개 완료")
-        except Exception as e:
+            copy_err = None
+            break
+          except Exception as e:
             copy_err = e
             log(f"⚠ 파일 복사 중 오류: {e}")
-            log("   → 메인런처부터 다시 띄운 뒤 보고합니다")
+            if _copy_try == 1:
+                # 자동복구: 파일 점유가 흔한 원인 — 런처를 다시 종료하고 한 번 더
+                log("   → 런처를 다시 종료하고 복사를 재시도합니다...")
+                sh(["powershell", "-NoProfile", "-Command",
+                    "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' OR Name='python.exe'\" | "
+                    "Where-Object { $_.CommandLine -like '*lineagem_launcher*' } | "
+                    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"])
+                time.sleep(2)
+            else:
+                log("   → 메인런처부터 다시 띄운 뒤 보고합니다")
 
         log("5) 런처 재시작...")
         ok = ensure_launcher()
