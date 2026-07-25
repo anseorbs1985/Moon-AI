@@ -5455,12 +5455,11 @@ class App(tk.Tk):
             self.status.set(f"🏝 과거섬: {_dname}은 스케줄 실행 안 함 (건너뜀)")
         elif now.hour == 5 and 3 <= now.minute <= 25 and self._past_triggered_date != today:
             if self._is_busy():
-                self.status.set("🏝 과거섬 스케줄 대기 — 다른 작업 실행 중")
+                # 최우선: 대기열 맨 앞에 넣어 현재 작업이 끝나는 즉시 실행 (창이 지나도 실행)
+                self._enqueue_front("과거섬(스케줄)", self._start_past_scheduled)
+                self.status.set("🏝 과거섬 스케줄 — 현재 작업 끝나는 즉시 최우선 실행")
             else:
-                self._past_triggered_date = today
-                self._busy_task = "과거섬(스케줄)"
-                threading.Thread(target=self._run_task,
-                    args=("과거섬(스케줄)", self._run_past_scheduled), daemon=True).start()
+                self._start_past_scheduled()
         elif self._past_triggered_date != today:
             target = now.replace(hour=5, minute=3, second=0, microsecond=0)
             if now >= target:
@@ -5652,21 +5651,27 @@ class App(tk.Tk):
         ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii))
         return (ctypes.windll.kernel32.GetTickCount() - lii.dwTime) / 1000.0
 
-    def _wait_system_idle(self, minutes=15):
-        """시스템이 minutes분 이상 유휴 상태가 될 때까지 대기. 멈춤 시 즉시 반환."""
+    def _wait_system_idle(self, minutes=15, deadline=None):
+        """시스템이 minutes분 이상 유휴 상태가 될 때까지 대기. 멈춤 시 즉시 반환.
+        deadline(datetime)이 지나면 False 반환(대기 포기). 성공/중단은 True."""
+        import datetime as _dt
         required = minutes * 60
         while True:
             if getattr(self, "_sched_any_stop", False):
-                return
+                return True
+            if deadline and _dt.datetime.now() >= deadline:
+                return False
             idle = self._system_idle_seconds()
             if idle >= required:
-                return
+                return True
             remaining = int((required - idle) / 60)
             self.after(0, lambda r=remaining: self.status.set(
                 f"⏸ 컴퓨터 사용 중 — {r}분 더 대기 후 스케줄 실행..."))
             for _ in range(60):  # 30초를 0.5초씩 나눠 stop 즉시 감지
                 if getattr(self, "_sched_any_stop", False):
-                    return
+                    return True
+                if deadline and _dt.datetime.now() >= deadline:
+                    return False
                 time.sleep(0.5)
 
     def _wait_mouse_idle_sched(self, idle_sec=5.0):
@@ -5742,8 +5747,13 @@ class App(tk.Tk):
 
         self.status.set(f"🕘 23:30~23:50 우편함 {len(active)}개 랜덤 실행 대기...")
         elapsed = (datetime.datetime.now() - base).total_seconds()
+        # 시간대(23:50)를 넘기면 남은 슬롯은 포기하고 잠금을 놓는다 — 새벽 스케줄을 막지 않게
+        end_t = base + datetime.timedelta(seconds=window)
 
         for delay, si, slot in schedule:
+            if datetime.datetime.now() >= end_t:
+                self.status.set("🕘 우편함 — 23:50 지남, 남은 슬롯 포기 (내일 재시도)")
+                return
             wait = delay - elapsed
             if wait > 0:
                 mins = int(wait // 60); secs = int(wait % 60)
@@ -5756,7 +5766,9 @@ class App(tk.Tk):
             if getattr(self, "_sched_any_stop", False): return
             elapsed = (datetime.datetime.now() - base).total_seconds()
             name = slot.get("name", f"#{si+1}")
-            self._wait_system_idle(15)
+            if not self._wait_system_idle(15, deadline=end_t):
+                self.status.set("🕘 우편함 — 23:50까지 유휴시간 못 확보, 포기 (내일 재시도)")
+                return
             if getattr(self, "_sched_any_stop", False): return
             self.status.set(f"🕘 [{name}] 우편함 클릭 중...")
             self._run_mail(slot_idx=si)
@@ -6996,6 +7008,25 @@ class App(tk.Tk):
         return True
 
     # ── 작업 대기열: 실행 중에 누른 실행/재측정은 쌓아뒀다가 순차 실행 ──
+    def _start_past_scheduled(self):
+        """과거섬 스케줄 시작 — 대기열(최우선)에서 불려도 안전하게 잠금·중복 처리."""
+        import datetime
+        today = datetime.date.today()
+        if self._past_triggered_date == today:
+            return
+        if self._is_busy():
+            self._enqueue_front("과거섬(스케줄)", self._start_past_scheduled)
+            return
+        self._past_triggered_date = today
+        self._busy_task = "과거섬(스케줄)"
+        threading.Thread(target=self._run_task,
+            args=("과거섬(스케줄)", self._run_past_scheduled), daemon=True).start()
+
+    def _enqueue_front(self, label, fn):
+        """최우선 작업 — 대기열 맨 앞에 넣는다 (이미 있으면 맨 앞으로 이동)."""
+        self._task_queue = [(l, f) for l, f in self._task_queue if l != label]
+        self._task_queue.insert(0, (label, fn))
+
     def _enqueue(self, label, fn):
         """다른 작업 실행 중 → 대기열에 추가 (같은 라벨 중복 방지). 어느 스레드에서든 호출 가능."""
         if any(l == label for l, _ in self._task_queue):
