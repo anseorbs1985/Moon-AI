@@ -5053,6 +5053,15 @@ class App(tk.Tk):
         SW_HIDE = 0
         SW_MINIMIZE = 6
         my_pid = os.getpid()
+
+        def _glog(msg):
+            """가드가 창을 건드릴 때마다 기록 — 오작동 추적용."""
+            try:
+                import datetime as _dt
+                with open(os.path.join(LOGS_DIR, "popup_guard.txt"), "a", encoding="utf-8") as f:
+                    f.write(f"[{_dt.datetime.now():%m-%d %H:%M:%S}] {msg}\n")
+            except Exception:
+                pass
         SKIP_CLASSES = {
             "progman", "workerw", "shell_traywnd", "shell_secondarytraywnd",
             "button", "trayclockwclass", "notifyiconoverflowwindow",
@@ -5067,6 +5076,9 @@ class App(tk.Tk):
             "purple.exe", "purplebox.exe", "purpleon.exe", "purpleonp.exe",
             "purple-agent.exe", "ncoverlaycefweb32.exe", "lineagem.exe",
             "msedgewebview2.exe",
+            # 원격제어 프로그램 — 파일전송 창 포함 절대 건드리지 않음
+            "remotet.exe", "remoteview.exe", "rvagent.exe", "rvagtray.exe",
+            "anydesk.exe", "teamviewer.exe",
         }
 
         def _pid_of(hwnd):
@@ -5108,7 +5120,7 @@ class App(tk.Tk):
                 if any(kk in tl for kk in (
                         "purple", "리니지m", "claude",
                         "파일전송", "파일 전송", "file transfer",
-                        "리모트", "remoteview", "remote view",
+                        "리모트", "remote",   # RemoteT·RemoteView 등 원격제어 전반
                         "anydesk", "teamviewer", "원격")):
                     return True
                 r = wintypes.RECT(); u.GetWindowRect(hwnd, ctypes.byref(r))
@@ -5119,17 +5131,20 @@ class App(tk.Tk):
                 if (cls == "windows.ui.core.corewindow"
                         and r.right >= sw - 60 and r.bottom >= sh - 160
                         and w < 640 and h < 520):
-                    if _is_game_proc(pid):           # 게임/퍼플/NCSoft 창 보호
+                    if _is_game_proc(pid):           # 게임/퍼플/NCSoft/원격 창 보호
                         return True
                     u.ShowWindow(hwnd, SW_HIDE)
+                    _glog(f"토스트 숨김: '{title}' cls={cls} proc={_pname_of(pid)}")
                     return True
                 # 2) 실행 중일 때만: 항상 위(topmost) 낯선 창 → 최소화
                 if running and title:
                     ex = u.GetWindowLongW(hwnd, GWL_EXSTYLE)
                     if ex & WS_EX_TOPMOST:
-                        if _is_game_proc(pid):       # 게임/퍼플/NCSoft 창 보호 (전환 팝업 등)
+                        if _is_game_proc(pid):       # 게임/퍼플/NCSoft/원격 창 보호
                             return True
                         u.ShowWindow(hwnd, SW_MINIMIZE)
+                        _glog(f"topmost 최소화: '{title}' cls={cls} proc={_pname_of(pid)} "
+                              f"busy={getattr(self, '_busy_task', None)}")
             except Exception:
                 pass
             return True
