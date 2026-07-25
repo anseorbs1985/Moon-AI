@@ -5104,7 +5104,12 @@ class App(tk.Tk):
                 if cls in SKIP_CLASSES:
                     return True
                 tl = title.lower()
-                if "purple" in tl or "리니지m" in tl or "claude" in tl:  # 게임/런처/클로드(항상위라 오인 방지)
+                # 게임/런처/클로드 + 원격제어·파일전송 창은 절대 건드리지 않음
+                if any(kk in tl for kk in (
+                        "purple", "리니지m", "claude",
+                        "파일전송", "파일 전송", "file transfer",
+                        "리모트", "remoteview", "remote view",
+                        "anydesk", "teamviewer", "원격")):
                     return True
                 r = wintypes.RECT(); u.GetWindowRect(hwnd, ctypes.byref(r))
                 w = r.right - r.left; h = r.bottom - r.top
@@ -5132,8 +5137,11 @@ class App(tk.Tk):
         WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
         while True:
             try:
-                lh = u.FindWindowW(None, "리니지M 자동 실행")
-                running = bool(lh and u.IsIconic(lh))   # 런처 최소화 = 실행 중으로 간주
+                # 실제 작업이 돌고 있을 때만 낯선 topmost 창을 정리한다.
+                # (예전: 런처 최소화 = 실행 중 간주 → 유휴 자동최소화 때문에 사실상 항상
+                #  작동해서, 원격 파일전송 등 무관한 항상위 창까지 내려버리는 문제)
+                running = bool(getattr(self, "_busy_task", None)
+                               or getattr(self, "_running", False))
                 cb_ptr = WNDENUMPROC(lambda h, l, rn=running: _cb(h, rn))
                 u.EnumWindows(cb_ptr, 0)
             except Exception:
