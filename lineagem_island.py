@@ -415,6 +415,11 @@ class IslandApp(tk.Tk):
                       command=lambda k=key, x=i: self._preview(k, x)).pack(side="left", padx=(0, 1))
             tk.Button(r3, text="×", font=("맑은 고딕", 6), fg="red", width=2,
                       command=lambda k=key, x=i: self._del(k, x)).pack(side="left")
+            r4 = tk.Frame(cell); r4.pack(pady=(1, 0))
+            tk.Button(r4, text="복사", font=("맑은 고딕", 6), bg="#2980b9", fg="white", width=3,
+                      command=lambda k=key, x=i: self._slot_copy(k, x)).pack(side="left", padx=(0, 1))
+            tk.Button(r4, text="붙임", font=("맑은 고딕", 6), bg="#8e44ad", fg="white", width=3,
+                      command=lambda k=key, x=i: self._slot_paste(k, x)).pack(side="left")
 
         self._refresh(key)
 
@@ -460,6 +465,62 @@ class IslandApp(tk.Tk):
         tk.Button(bot, text="× 전체삭제", font=("맑은 고딕", 8), fg="white", bg="#c0392b",
                   command=lambda: self._del(key, idx)).pack(side="left", padx=3)
         tk.Button(bot, text="닫기", font=("맑은 고딕", 8), command=win.destroy).pack(side="left", padx=3)
+
+    def _client_rects_by_slot(self):
+        """리니지M 클라이언트 창 16개를 화면 배치(세로 열우선 01~16) 순서로 반환.
+        16개가 정확히 안 보이면 None (보정 불가) — 인형탐험과 동일 방식."""
+        try:
+            import win32gui
+            wins = []
+            def cb(h, _):
+                if win32gui.IsWindowVisible(h) and not win32gui.IsIconic(h):
+                    t = win32gui.GetWindowText(h)
+                    if t.startswith("리니지M l"):
+                        l, tp, r, b = win32gui.GetWindowRect(h)
+                        if r - l > 100 and b - tp > 100:
+                            wins.append((l, tp, r, b))
+                return True
+            win32gui.EnumWindows(cb, None)
+            if len(wins) != 16:
+                return None
+            wins.sort(key=lambda w: w[0])                     # x(열) 정렬
+            cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
+            return [w for col in cols for w in col]           # 01~16 (열 우선)
+        except Exception:
+            return None
+
+    def _slot_copy(self, key, idx):
+        """슬롯 좌표 복사 — 원하는 슬롯에서 [붙임]으로 붙여넣기 (인형탐험과 동일)."""
+        import copy
+        coords = self.cfg[key][idx].get("coords", [])
+        if not any(coords):
+            self._status.set(f"#{idx+1:02d} 복사할 좌표가 없습니다"); return
+        self._slot_clip = {"key": key, "src": idx, "coords": copy.deepcopy(coords)}
+        self._status.set(f"📋 #{idx+1:02d} 좌표 {sum(1 for c in coords if c)}개 복사됨 — 원하는 슬롯의 [붙임]을 누르세요")
+
+    def _slot_paste(self, key, idx):
+        """복사한 좌표 붙여넣기 — 클라이언트 창 위치 자동보정 (인형탐험과 동일)."""
+        import copy
+        clip = getattr(self, "_slot_clip", None)
+        if not clip or clip.get("key") != key:
+            self._status.set("먼저 이 던전의 슬롯에서 [복사]를 누르세요"); return
+        shifted = copy.deepcopy(clip["coords"])
+        src = clip["src"]; note = ""
+        if src != idx:
+            rects = self._client_rects_by_slot()
+            if rects:
+                dx = rects[idx][0] - rects[src][0]
+                dy = rects[idx][1] - rects[src][1]
+                for c in shifted:
+                    if c:
+                        c[0] += dx; c[1] += dy
+                note = f" — 클라이언트 위치 자동보정 ({dx:+},{dy:+})"
+            else:
+                note = " — ⚠ 클라이언트 16개 감지 실패, 원본 위치 그대로"
+        self.cfg[key][idx]["coords"] = shifted
+        save_cfg(self.cfg)
+        self._refresh(key)
+        self._status.set(f"✔ #{idx+1:02d} 붙여넣기 완료{note}")
 
     def _toggle_enable(self, key, idx):
         """슬롯 ON/OFF — OFF 슬롯은 대표(전체) 실행에서 건너뜀 (개별 ▶은 그대로 실행)."""
