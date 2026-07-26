@@ -386,14 +386,23 @@ class IslandApp(tk.Tk):
         if not hasattr(self, "_cnt_vars"):
             self._cnt_vars = {}
             self._pop = {}
+        if not hasattr(self, "_en_btns"):
+            self._en_btns = {}
         self._cnt_vars[key] = []
+        self._en_btns[key] = []
         wg = tk.Frame(parent); wg.pack(padx=2, pady=2)
         for i in range(SLOTS):
             r, c = i % 4, i // 4
             cell = tk.Frame(wg, bd=1, relief="groove", padx=2, pady=1)
             cell.grid(row=r, column=c, padx=2, pady=2, sticky="n")
-            tk.Label(cell, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"),
-                     fg="#555").pack()
+            head = tk.Frame(cell); head.pack()
+            tk.Label(head, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"),
+                     fg="#555").pack(side="left")
+            eb = tk.Button(head, text="ON", font=("맑은 고딕", 6, "bold"), width=3,
+                           bg="#27ae60", fg="white", pady=0,
+                           command=lambda k=key, x=i: self._toggle_enable(k, x))
+            eb.pack(side="left", padx=(3, 0))
+            self._en_btns[key].append(eb)
             sv = tk.StringVar(value=f"0/{CLICKS}")
             self._cnt_vars[key].append(sv)
             tk.Button(cell, textvariable=sv, font=("맑은 고딕", 7, "bold"),
@@ -452,6 +461,13 @@ class IslandApp(tk.Tk):
                   command=lambda: self._del(key, idx)).pack(side="left", padx=3)
         tk.Button(bot, text="닫기", font=("맑은 고딕", 8), command=win.destroy).pack(side="left", padx=3)
 
+    def _toggle_enable(self, key, idx):
+        """슬롯 ON/OFF — OFF 슬롯은 대표(전체) 실행에서 건너뜀 (개별 ▶은 그대로 실행)."""
+        s = self.cfg[key][idx]
+        s["enabled"] = not s.get("enabled", True)
+        save_cfg(self.cfg)
+        self._refresh(key)
+
     def _refresh(self, key):
         slots = self.cfg.get(key, [])
         # 그리드 셀 (좌표 개수)
@@ -459,6 +475,15 @@ class IslandApp(tk.Tk):
             if i >= len(slots): break
             coords = slots[i].get("coords", [])
             sv.set(f"{sum(1 for c in coords if c)}/{CLICKS}")
+        # ON/OFF 토글 표시
+        for i, eb in enumerate(getattr(self, "_en_btns", {}).get(key, [])):
+            if i >= len(slots): break
+            try:
+                en = slots[i].get("enabled", True)
+                eb.config(text="ON" if en else "OFF",
+                          bg="#27ae60" if en else "#7f8c8d")
+            except Exception:
+                pass
         # 열린 등록 팝업 갱신
         pop = getattr(self, "_pop", {})
         win = pop.get("win")
@@ -704,7 +729,7 @@ class IslandApp(tk.Tk):
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
             else:
                 targets = [(i, s) for i, s in enumerate(slots)
-                           if any(c for c in s.get("coords", []))]
+                           if s.get("enabled", True) and any(c for c in s.get("coords", []))]
             d = next(x for x in DUNGEONS if x["key"] == key)
             stop_fn   = lambda: self._stop_flag
             status_fn = lambda m: self.after(0, lambda m=m: self._status.set(m))
