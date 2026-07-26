@@ -1370,6 +1370,14 @@ class App(tk.Tk):
         tk.Button(pid_row, text="저장", font=("맑은 고딕", 7), bg="#2471a3", fg="white",
                   command=_save_pid).pack(side="left", padx=2)
 
+        # 🔍 퍼플 확인 테스트 — 새벽 4시 자동 전환+최소화 로직을 지금 수동으로 1회 실행
+        test_row = tk.Frame(parent); test_row.pack(fill="x", padx=4, pady=(0, 2))
+        tk.Button(test_row, text="🔍 퍼플 확인 테스트 (4시 로직 지금 실행)",
+                  font=("맑은 고딕", 8), bg="#7d3c98", fg="white",
+                  command=lambda: threading.Thread(
+                      target=self._purple_check_worker, daemon=True).start()
+                  ).pack(fill="x")
+
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=3)
 
         # 캐릭터 접속 버튼
@@ -3124,7 +3132,7 @@ class App(tk.Tk):
         _ProfileAreaOverlay(self)
 
     def _save_profile_ref_pixel(self):
-        """스크롤 계정 화면에서 아이디 영역 픽셀 기준값 저장"""
+        """난봉꾼 계정 화면에서 아이디 영역 픽셀 기준값 저장"""
         area = self.cfg.get("profile_id_area")
         if not area:
             self.status.set("아이디 표시 영역을 먼저 등록하세요."); return
@@ -3136,7 +3144,7 @@ class App(tk.Tk):
         self.cfg["profile_ref_pixel"] = arr
         save_cfg(self.cfg)
         self._profile_pix_var.set("저장됨")
-        self.status.set("✔ 스크롤 계정 기준 픽셀 저장 완료")
+        self.status.set("✔ 난봉꾼 계정 기준 픽셀 저장 완료")
 
     def _test_profile_pixel(self):
         """현재 화면과 기준 픽셀 비교 테스트"""
@@ -3152,7 +3160,7 @@ class App(tk.Tk):
         n = min(len(ref), len(arr))
         diff = sum(abs(ref[i] - arr[i]) for i in range(n)) / n
         matched = diff < 30
-        self.status.set(f"픽셀 차이: {diff:.1f} → {'✔ 스크롤 계정 일치' if matched else '✗ 다른 계정'}")
+        self.status.set(f"픽셀 차이: {diff:.1f} → {'✔ 난봉꾼 계정 일치' if matched else '✗ 다른 계정'}")
 
     def _is_scroll_account_at(self, hwnd):
         """hwnd 창 위치 기준으로 profile_id_area 좌표 보정 후 픽셀 비교"""
@@ -3176,7 +3184,7 @@ class App(tk.Tk):
             return False
 
     def _is_scroll_account(self):
-        """현재 화면이 스크롤 계정인지 픽셀 비교로 확인"""
+        """현재 화면이 난봉꾼 계정인지 픽셀 비교로 확인"""
         ref = self.cfg.get("profile_ref_pixel")
         area = self.cfg.get("profile_id_area")
         if not ref or not area:
@@ -3396,7 +3404,7 @@ class App(tk.Tk):
     def _check_profile_and_switch(self):
         """아이디 영역 OCR → 100% 일치하면 지정 계정으로 판단"""
         area = self.cfg.get("profile_id_area")
-        target = self.cfg.get("profile_target_id", "스크롤").strip()
+        target = self.cfg.get("profile_target_id", "난봉꾼").strip()
         if not area or not target:
             return True
         try:
@@ -3424,7 +3432,7 @@ class App(tk.Tk):
         """hwnd 창 위치를 기준으로 profile_id_area 절대좌표를 계산해서 OCR"""
         import win32gui
         area = self.cfg.get("profile_id_area")
-        target = self.cfg.get("profile_target_id", "스크롤").strip()
+        target = self.cfg.get("profile_target_id", "난봉꾼").strip()
         if not area or not target:
             return True
         try:
@@ -5508,9 +5516,10 @@ class App(tk.Tk):
         try:
             if hwnd:
                 orig_placement = win32gui.GetWindowPlacement(hwnd)
-                # 퍼플을 맨 앞으로 — 아이디 확인/캡처가 되려면 퍼플이 최상단이어야 함
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                time.sleep(0.5)
+                # 퍼플을 맨 앞 + '최대화' — 아이디 표시 영역/버튼 좌표가 최대화 상태 기준이라
+                # 반드시 최대화해야 OCR 캡처가 올바른 위치에서 찍힌다. (축소/복원 상태면 오인식)
+                win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+                time.sleep(0.6)
                 try:
                     ctypes.windll.user32.SetForegroundWindow(hwnd)
                 except Exception:
@@ -5552,7 +5561,7 @@ class App(tk.Tk):
                 if _re:
                     hwnd = _re
                     try:
-                        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE); time.sleep(0.5)
+                        win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE); time.sleep(0.5)
                         ctypes.windll.user32.SetForegroundWindow(hwnd)
                         win32gui.BringWindowToTop(hwnd)
                     except Exception:
@@ -5610,6 +5619,20 @@ class App(tk.Tk):
 
             orig_placement = win32gui.GetWindowPlacement(hwnd)
 
+            # 캡처 전에 퍼플을 '최대화 + 앞으로' — 아이디 표시 영역 좌표가 최대화 기준이라
+            # 최대화 상태에서 찍어야 OCR 인식이 맞다.
+            win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+            time.sleep(0.6)
+            try:
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+            try:
+                win32gui.BringWindowToTop(hwnd)
+            except Exception:
+                pass
+            time.sleep(0.6)
+
             # 1단계: 리니지M 좌측버튼(profile_reveal_btn) 클릭 → 계정 확인
             if self.cfg.get("profile_reveal_btn"):
                 pyautogui.click(*self.cfg["profile_reveal_btn"])
@@ -5619,8 +5642,8 @@ class App(tk.Tk):
             self.status.set(f"{'✔ 아이디 확인됨' if matched else '🔄 아이디 다름 → 퍼플 전환 중...'} ('{ocr_id}' {int(ratio*100)}%)")
 
             if not matched:
-                # 2단계: Purple 포그라운드로 가져와서 프로필 전환
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                # 2단계: Purple 포그라운드로 가져와서 프로필 전환 (이미 최대화 상태)
+                win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
                 time.sleep(0.3)
                 try:
                     ctypes.windll.user32.SetForegroundWindow(hwnd)
@@ -8474,6 +8497,10 @@ class CoordOverlay(tk.Toplevel):
         self.app  = app
         self.mode = mode
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        # ⚠ 캡처가 끝날 때까지 이 창을 절대 보이면 안 된다.
+        #    전체화면 창이 먼저 뜬 상태로 ImageGrab 하면 '아직 안 그려진 자기 자신(검은 화면)'이
+        #    배경으로 찍혀서 화면 전체가 새까맣게 되고, 그대로 갇힌다.
+        self.withdraw()
         self.geometry(f"{sw}x{sh}+0+0")
         self.overrideredirect(True)
         self.attributes("-topmost", True)
@@ -8537,6 +8564,12 @@ class CoordOverlay(tk.Toplevel):
                       fill="white", font=("맑은 고딕", 14))
         c.bind("<ButtonPress-1>", self._click)
         self.bind("<Escape>", lambda e: [self.destroy(), app.deiconify()])
+
+        # 배경(스크린샷)이 준비된 뒤에야 보여준다 → 검은 화면이 찍히는 일이 없다.
+        self.deiconify()
+        self.lift()
+        # 포커스를 강제로 가져와야 ESC 취소가 먹는다. (없으면 전체화면에 갇힘)
+        self.focus_force()
 
     def _click(self, e):
         x, y = e.x, e.y
