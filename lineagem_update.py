@@ -361,32 +361,46 @@ def main():
                 s = os.path.join(REPO, f)
                 if os.path.exists(s):
                     shutil.copy2(s, os.path.join(DESK, f)); n += 1
-            for f in DATA_FILES:                      # 데이터는 이번 pull에서 바뀐 것만
-                if f in changed and os.path.exists(os.path.join(REPO, f)):
-                    dst = os.path.join(DESK, f)
-                    if f in MERGE_FILES and local_snap.get(f) is not None:
-                        # 로컬 우선 병합: 이 컴퓨터에 등록된 좌표는 그대로, 빈 곳만 원격에서 채움
-                        try:
-                            with open(os.path.join(REPO, f), encoding="utf-8") as fp:
-                                remote = json.load(fp)
-                            stats = [0]
-                            merged = _merge_local_first(remote, local_snap[f], stats)
-                            with open(dst, "w", encoding="utf-8") as fp:
-                                json.dump(merged, fp, ensure_ascii=False, indent=2)
-                            n += 1
-                            log(f"   데이터 병합: {f} (로컬 등록 {stats[0]}곳 유지, 빈 곳만 원격 반영)")
-                            continue
-                        except Exception as e:
-                            log(f"   병합 실패({e}) → 원격 버전으로 대체")
-                    shutil.copy2(os.path.join(REPO, f), dst); n += 1
-                    log(f"   데이터 갱신: {f}")
+            # 데이터: '이번 pull에서 바뀐 것만'이 아니라 원격과 내용이 다르면 항상 반영
+            # (이전 업데이트가 복사 단계에서 실패했거나 pull만 미리 된 경우의 누락 방지)
+            for f in DATA_FILES:
+                s = os.path.join(REPO, f)
+                if not os.path.exists(s):
+                    continue
+                dst = os.path.join(DESK, f)
+                try:
+                    with open(s, "rb") as fa, open(dst, "rb") as fb:
+                        if fa.read() == fb.read():
+                            continue           # 이미 동일 — 건너뜀
+                except Exception:
+                    pass                       # 로컬에 없거나 비교 실패 → 반영 진행
+                if f in MERGE_FILES and local_snap.get(f) is not None:
+                    # 로컬 우선 병합: 이 컴퓨터에 등록된 좌표는 그대로, 빈 곳만 원격에서 채움
+                    try:
+                        with open(s, encoding="utf-8") as fp:
+                            remote = json.load(fp)
+                        stats = [0]
+                        merged = _merge_local_first(remote, local_snap[f], stats)
+                        with open(dst, "w", encoding="utf-8") as fp:
+                            json.dump(merged, fp, ensure_ascii=False, indent=2)
+                        n += 1
+                        log(f"   데이터 병합: {f} (로컬 등록 {stats[0]}곳 유지, 빈 곳만 원격 반영)")
+                        continue
+                    except Exception as e:
+                        log(f"   병합 실패({e}) → 원격 버전으로 대체")
+                shutil.copy2(s, dst); n += 1
+                log(f"   데이터 갱신: {f}")
             for d in DATA_DIRS:
-                if any(c.startswith(d + "/") for c in changed):
-                    sdir, ddir = os.path.join(REPO, d), os.path.join(DESK, d)
-                    os.makedirs(ddir, exist_ok=True)
-                    for fn in os.listdir(sdir):
-                        shutil.copy2(os.path.join(sdir, fn), os.path.join(ddir, fn))
-                    log(f"   데이터 갱신: {d}/")
+                sdir, ddir = os.path.join(REPO, d), os.path.join(DESK, d)
+                if not os.path.isdir(sdir):
+                    continue
+                os.makedirs(ddir, exist_ok=True)
+                for fn in os.listdir(sdir):
+                    sp_, dp_ = os.path.join(sdir, fn), os.path.join(ddir, fn)
+                    if (not os.path.exists(dp_)
+                            or os.path.getsize(sp_) != os.path.getsize(dp_)):
+                        shutil.copy2(sp_, dp_); n += 1
+                        log(f"   데이터 갱신: {d}/{fn}")
             log(f"   복사 {n}개 완료")
             copy_err = None
             break
