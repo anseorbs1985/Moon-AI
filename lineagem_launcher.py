@@ -2130,6 +2130,8 @@ class App(tk.Tk):
         self._did_initial_fit = True   # normal 상태에서 실제로 맞췄을 때만 완료 표시
 
     def _bring_to_front(self, e=None):
+        if getattr(self, "_quiet_restore", False):   # 맨뒤 복원 중엔 올리지 않음
+            return
         self.lift()
 
     def _raise_main(self):
@@ -2163,7 +2165,9 @@ class App(tk.Tk):
             self.after(50, self.iconify)
             return
         self._last_activity = time.time()   # 다시 올라오면 유휴 타이머 리셋
-        self._bring_to_front()
+        # 작업 완료 후 '맨 뒤로 복원'(_restore_back) 중에는 앞으로 올리지 않는다
+        if not getattr(self, "_quiet_restore", False):
+            self._bring_to_front()
         # 워치독이 최소화 상태로 띄우면 시작 시 크기맞춤이 걸리지 않으므로,
         # 최초로 창이 보여질 때 딱 한 번만 콘텐츠 크기에 맞춘다(맵 이벤트 폭주 방지: 1회성).
         if not getattr(self, "_did_initial_fit", False):
@@ -6466,20 +6470,25 @@ class App(tk.Tk):
     def _restore_back(self):
         """작업/스케줄 완료 후 복원 — 런처를 앞으로 올리지 않고 '맨 뒤'로 되살린다.
         리니지M 클라이언트를 가리지 않게 하고, 항상위 서브창들은 최소화 상태 유지."""
+        self._quiet_restore = True   # <Map> 핸들러의 '앞으로 올리기' 억제
         try:
             self.deiconify()
         except Exception:
             pass
-        try:
-            self.lower()
-            import win32gui, win32con
-            hwnd = win32gui.FindWindow(None, "리니지M 자동 실행")
-            if hwnd:
-                win32gui.SetWindowPos(hwnd, win32con.HWND_BOTTOM, 0, 0, 0, 0,
-                                      win32con.SWP_NOMOVE | win32con.SWP_NOSIZE |
-                                      win32con.SWP_NOACTIVATE)
-        except Exception:
-            pass
+        def _lower():
+            try:
+                self.lower()
+                import win32gui, win32con
+                hwnd = win32gui.FindWindow(None, "리니지M 자동 실행")
+                if hwnd:
+                    win32gui.SetWindowPos(hwnd, win32con.HWND_BOTTOM, 0, 0, 0, 0,
+                                          win32con.SWP_NOMOVE | win32con.SWP_NOSIZE |
+                                          win32con.SWP_NOACTIVATE)
+            except Exception:
+                pass
+        _lower()
+        self.after(300, _lower)     # 복원 애니메이션/맵 이벤트 뒤에 한 번 더 확실히 내림
+        self.after(1500, lambda: setattr(self, "_quiet_restore", False))
 
     def _restore_all(self):
         self.deiconify()
