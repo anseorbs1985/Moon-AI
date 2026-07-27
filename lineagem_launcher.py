@@ -2095,7 +2095,8 @@ class App(tk.Tk):
         """콘텐츠에 맞는 목표 창 크기/위치 (폭=섹션행, 높이=콘텐츠+1cm, 작업표시줄 위로)."""
         self.update_idletasks()
         needed = self.winfo_reqheight() + 38   # 슬롯 끝에서 약 1cm 여유
-        x, y = 76, 75                           # 초기 위치와 동일
+        pos = self.cfg.get("main_win_pos")     # 사용자가 옮겨둔 고정 위치 우선
+        x, y = (int(pos[0]), int(pos[1])) if pos else (76, 75)
         work_bottom = self.winfo_screenheight() - 48   # fallback
         try:
             import ctypes
