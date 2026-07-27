@@ -692,7 +692,7 @@ class App(tk.Tk):
             try: proc.wait()
             except Exception: pass
             def _done():
-                self.deiconify(); self.lift()
+                self._restore_back()   # 앞으로 올리지 않고 맨 뒤로 복원 (클라 안 가림)
                 self._refresh_count()
                 self.status.set("✔ 다야 전체 스캔 완료")
             self.after(0, _done)
@@ -710,7 +710,7 @@ class App(tk.Tk):
         proc.wait()
         self._island_proc = None
         if not (self._pass_win and self._pass_win.winfo_exists()):
-            self.after(0, self.deiconify)
+            self.after(0, self._restore_back)
         self._restore_claude()
 
     def _restore_claude(self):
@@ -1273,7 +1273,7 @@ class App(tk.Tk):
         except Exception:
             pass
         def _done():
-            self.deiconify(); self.lift()   # 끝나면 런처 다시 보여주기
+            self._restore_back()            # 앞으로 올리지 않고 맨 뒤로 복원 (클라 안 가림)
             self._refresh_count()           # 숫자 + 캡처 사진(썸네일) 갱신
             self.status.set(f"✔ #{idx+1:02d} 다야 재측정 완료")
         self.after(0, _done)
@@ -2621,8 +2621,7 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"오류: {e}")
         finally:
-            self.after(0, self.deiconify)
-            self.after(0, self._restore_all)
+            self.after(0, self._restore_back)
             self._set_btn("btn_item_run", state="normal", bg="#7d6608", text="▶  실행")
             self._set_btn("btn_item_stop", state="disabled")
 
@@ -3625,7 +3624,7 @@ class App(tk.Tk):
         finally:
             self._seq_running = False
             self._clear_busy("연속클릭")
-            self.after(0, self._restore_all)   # 완료 후 런처/서브창 복원
+            self.after(0, self._restore_back)   # 완료 후 런처/서브창 복원
 
     def _assign_seq_hotkey(self):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
@@ -3836,7 +3835,7 @@ class App(tk.Tk):
         finally:
             self._wdoff_running = False
             self._clear_busy("주말던전끄기")
-            self.after(0, self._restore_all)
+            self.after(0, self._restore_back)
 
     def _assign_wdoff_hotkey(self):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
@@ -4069,7 +4068,7 @@ class App(tk.Tk):
         finally:
             self._dc_running = False
             self._clear_busy("일반던전충전")
-            self.after(0, self._restore_all)   # 완료 후 런처/서브창 복원
+            self.after(0, self._restore_back)   # 완료 후 런처/서브창 복원
 
     def _assign_dc_hotkey(self):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
@@ -4782,7 +4781,7 @@ class App(tk.Tk):
         self._set_btn("btn_doll_run", state="normal", bg="#b9770e", text="▶  인형탐험 실행")
         self._set_btn("btn_doll_stop", state="disabled")
         self._doll_stop = False
-        self.after(0, self._restore_all)
+        self.after(0, self._restore_back)
 
     def _run_doll(self):
         try:
@@ -5816,7 +5815,7 @@ class App(tk.Tk):
         self.after(0, lambda: self._set_btn("btn_mail_run", state="normal"))
         self.after(0, lambda: self._set_btn("btn_mail_stop", state="disabled"))
         self._mail_stop = False
-        self.after(0, self._restore_all)
+        self.after(0, self._restore_back)
 
     def _run_mail(self, slot_idx=None):
         """slot_idx 지정 시 해당 슬롯만, None이면 전체 16개 랜덤 순서 실행"""
@@ -6094,7 +6093,7 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"오류: {e}")
         finally:
-            self.after(0, self._restore_all)
+            self.after(0, self._restore_back)
             self._set_btn("btn_past_run", state="normal", bg="#c0392b", text="▶  실행")
             self._set_btn("btn_past_stop", state="disabled")
 
@@ -6266,8 +6265,7 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"오류: {e}")
         finally:
-            self.after(0, self.deiconify)
-            self.after(0, self._restore_all)
+            self.after(0, self._restore_back)
             self._set_btn("btn_sched_run", state="normal", bg="#16a085", text="▶  실행")
             self._set_btn("btn_sched_stop", state="disabled")
 
@@ -6434,6 +6432,24 @@ class App(tk.Tk):
             w.iconify()
         self.iconify()
         self._minimize_claude()
+
+    def _restore_back(self):
+        """작업/스케줄 완료 후 복원 — 런처를 앞으로 올리지 않고 '맨 뒤'로 되살린다.
+        리니지M 클라이언트를 가리지 않게 하고, 항상위 서브창들은 최소화 상태 유지."""
+        try:
+            self.deiconify()
+        except Exception:
+            pass
+        try:
+            self.lower()
+            import win32gui, win32con
+            hwnd = win32gui.FindWindow(None, "리니지M 자동 실행")
+            if hwnd:
+                win32gui.SetWindowPos(hwnd, win32con.HWND_BOTTOM, 0, 0, 0, 0,
+                                      win32con.SWP_NOMOVE | win32con.SWP_NOSIZE |
+                                      win32con.SWP_NOACTIVATE)
+        except Exception:
+            pass
 
     def _restore_all(self):
         self.deiconify()
@@ -7544,7 +7560,7 @@ class App(tk.Tk):
             self.btn_start.config(state="normal")
             self.btn_stop.config(state="disabled")
             self._stop_flag = False
-            self.after(0, self._restore_all)
+            self.after(0, self._restore_back)
 
 
 # ── 좌표 오버레이 ─────────────────────────────────────────────────────────
