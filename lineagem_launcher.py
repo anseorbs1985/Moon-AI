@@ -600,6 +600,14 @@ class App(tk.Tk):
         self._item_stop    = False
         self._task_queue   = []   # 연속으로 누른 실행/재측정 순차 실행 대기열
         self._build_ui()
+        # 메인런처 위치 기억 — 옮겨두면 재시작해도 그 자리 (기본: 좌측 약 2cm)
+        _pos = self.cfg.get("main_win_pos") or [80, 120]
+        try:
+            self.geometry(f"+{int(_pos[0])}+{int(_pos[1])}")
+        except Exception:
+            pass
+        self._pos_save_job = None
+        self.bind("<Configure>", self._on_main_move, add="+")
         self._sync_sched_click1()   # 스케줄 클릭1 = 과거섬 클릭1 (시작 시 1회 동기화)
         self.after(1000, self._mail_scheduler_tick)
         self.after(1000, self._past_scheduler_tick)
@@ -6432,6 +6440,25 @@ class App(tk.Tk):
             w.iconify()
         self.iconify()
         self._minimize_claude()
+
+    def _on_main_move(self, e=None):
+        """메인런처를 옮기면 1.5초 뒤 위치 저장 (재시작 후에도 같은 자리)."""
+        if getattr(self, "_pos_save_job", None):
+            try: self.after_cancel(self._pos_save_job)
+            except Exception: pass
+        self._pos_save_job = self.after(1500, self._save_main_pos)
+
+    def _save_main_pos(self):
+        self._pos_save_job = None
+        try:
+            if self.state() != "normal":
+                return
+            x, y = self.winfo_x(), self.winfo_y()
+            if x > -100 and y > -100 and self.cfg.get("main_win_pos") != [x, y]:
+                self.cfg["main_win_pos"] = [x, y]
+                save_cfg(self.cfg)
+        except Exception:
+            pass
 
     def _restore_back(self):
         """작업/스케줄 완료 후 복원 — 런처를 앞으로 올리지 않고 '맨 뒤'로 되살린다.
