@@ -4874,14 +4874,13 @@ class App(tk.Tk):
         return st["vis"], st["fg"]
 
     def _center_claude(self):
-        """클로드 앱 창을 화면 가운데로 이동 (아이디 영역 등 우측을 가리지 않게).
-        크기는 그대로, 위치만 중앙으로. 최소화 상태면 건드리지 않음.
-        사용자가 직접 옮겼으면(중앙 근처가 아닌 곳에 두면) 더는 강제로 안 옮김."""
-        if getattr(self, "_claude_user_moved", False):
-            return
+        """클로드 앱 창을 고정 위치(claude_win_pos)로 유지 — 없으면 화면 가운데.
+        크기는 그대로, 위치만. 최소화 상태면 건드리지 않음.
+        사용자가 옮기면 그 자리가 새 고정 위치로 저장된다(_center_claude_tick)."""
         from ctypes import wintypes
         u = ctypes.windll.user32
         sw = u.GetSystemMetrics(0); sh = u.GetSystemMetrics(1)
+        target = self.cfg.get("claude_win_pos")   # 사용자가 정한 고정 위치
         SWP_NOSIZE = 0x0001; SWP_NOZORDER = 0x0004; SWP_NOACTIVATE = 0x0010
         def cb(hwnd, _):
             try:
@@ -4893,10 +4892,13 @@ class App(tk.Tk):
                 r = wintypes.RECT(); u.GetWindowRect(hwnd, ctypes.byref(r))
                 w = r.right - r.left; h = r.bottom - r.top
                 if w > 200 and h > 200:   # 실제 앱 창만 (작은 부속 창 제외)
-                    x = max(0, (sw - w) // 2)
-                    y = max(0, (sh - h) // 2)
+                    if target:
+                        x, y = int(target[0]), int(target[1])
+                    else:
+                        x = max(0, (sw - w) // 2)
+                        y = max(0, (sh - h) // 2)
                     self._claude_center_pos = (x, y)
-                    if abs(r.left - x) > 3 or abs(r.top - y) > 3:   # 이미 중앙이면 안 건드림
+                    if abs(r.left - x) > 3 or abs(r.top - y) > 3:   # 이미 제자리면 안 건드림
                         u.SetWindowPos(hwnd, 0, x, y, 0, 0,
                                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
             except Exception:
@@ -4930,15 +4932,15 @@ class App(tk.Tk):
         return res["p"]
 
     def _center_claude_tick(self):
-        """클로드를 화면 가운데로 유지. 단, 사용자가 직접 옮기면(우리가 둔 위치에서 벗어나면) 중단."""
+        """클로드를 고정 위치에 유지. 사용자가 옮기면 그 자리를 새 고정 위치로 저장."""
         try:
-            if not getattr(self, "_claude_user_moved", False):
-                cur = self._claude_pos()
-                cp = getattr(self, "_claude_center_pos", None)
-                if cur and cp and (abs(cur[0] - cp[0]) > 20 or abs(cur[1] - cp[1]) > 20):
-                    self._claude_user_moved = True   # 사용자가 옮김 → 더는 강제 중앙 배치 안 함
-                else:
-                    self._center_claude()
+            cur = self._claude_pos()
+            cp  = getattr(self, "_claude_center_pos", None)
+            if cur and cp and (abs(cur[0] - cp[0]) > 20 or abs(cur[1] - cp[1]) > 20):
+                # 사용자가 클로드를 옮김 → 그 자리가 새 고정 위치
+                self.cfg["claude_win_pos"] = [cur[0], cur[1]]
+                save_cfg(self.cfg)
+            self._center_claude()
         except Exception:
             pass
         self.after(8000, self._center_claude_tick)
