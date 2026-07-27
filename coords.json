@@ -17996,5 +17996,13 @@
   "profile_id_area_win": [
     0,
     0
+  ],
+  "main_win_pos": [
+    523,
+    118
+  ],
+  "claude_win_pos": [
+    692,
+    360
   ]
 }
