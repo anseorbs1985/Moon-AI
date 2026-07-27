@@ -2216,7 +2216,7 @@ class App(tk.Tk):
         self._pass_stop = False
         self.btn_pass_run.config(state="disabled", bg="#f39c12", text="⏳ 실행중...")
         self.btn_pass_stop.config(state="normal")
-        self._minimize_pass_ui()
+        self._minimize_all()
         threading.Thread(target=self._run_task, args=("패스권", self._run_pass), daemon=True).start()
 
     def _minimize_pass_ui(self):
@@ -2242,7 +2242,7 @@ class App(tk.Tk):
     def _run_pass(self, slot_idx=None):
         try:
             self.status.set("2초 후 패스권 실행...")
-            self.after(0, self._minimize_pass_ui)
+            self.after(0, self._minimize_all)
             time.sleep(2)
             slots = self.cfg.get("pass_slots", [])
             if slot_idx is not None:
@@ -7097,7 +7097,9 @@ class App(tk.Tk):
         self._task_queue.insert(0, (label, fn))
 
     def _enqueue(self, label, fn):
-        """다른 작업 실행 중 → 대기열에 추가 (같은 라벨 중복 방지). 어느 스레드에서든 호출 가능."""
+        """다른 작업 실행 중 → 대기열에 추가 (같은 라벨 중복 방지). 어느 스레드에서든 호출 가능.
+        지금 돌고 있는 작업이 화면을 클릭 중이므로, 열린 창들이 가리지 않게 즉시 전부 최소화."""
+        self.after(0, self._minimize_all)
         if any(l == label for l, _ in self._task_queue):
             self.after(0, lambda: self.status.set(f"⏳ '{label}' 이미 대기열에 있음 (대기 {len(self._task_queue)}개)"))
             return
