@@ -182,6 +182,8 @@ DEFAULT_CFG = {
     "item_slots":   None,               # 아이템정리 — 처음 로드 때 스케줄 슬롯을 복사해 생성
     "item_hotkey":  None,               # 아이템정리 실행 단축키 (가상키 코드)
     "item_on":      False,              # 아이템정리 단축키 활성화 상태 (재시작 유지)
+    "dollchk_slots": None,              # 인형확인용 — 처음 로드 때 변신확인용 복사
+    "relic_slots":   None,              # 성물확인용 — 처음 로드 때 변신확인용 복사
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
     "seq_slots":    [None]*SEQ_SLOTS,   # 연속 클릭 좌표 (각 [x,y] 또는 None)
     "seq_hotkey":   None,               # 연속 클릭 실행 단축키 (가상키 코드)
@@ -393,6 +395,24 @@ def load_cfg():
                 while len(c) < DUNGEON_CLICKS:
                     c.append(None)
                 s["coords"] = c[:DUNGEON_CLICKS]
+        # 인형확인용/성물확인용 — 변신확인용과 동일 구조, 처음 생기면 그대로 복사
+        import copy as _cp2
+        for _k2 in ("dollchk_slots", "relic_slots"):
+            l2 = cfg.get(_k2)
+            if not l2:
+                cfg[_k2] = _cp2.deepcopy(cfg.get("dungeon_slots", []))
+            else:
+                n2 = []
+                for s in l2:
+                    if isinstance(s, dict):
+                        c = s.get("coords", [None] * DUNGEON_CLICKS)
+                        while len(c) < DUNGEON_CLICKS: c.append(None)
+                        n2.append({"name": s.get("name", "미등록"), "coords": c[:DUNGEON_CLICKS]})
+                    else:
+                        n2.append({"name": "미등록", "coords": [None] * DUNGEON_CLICKS})
+                while len(n2) < 16:
+                    n2.append({"name": "미등록", "coords": [None] * DUNGEON_CLICKS})
+                cfg[_k2] = n2[:16]
         # wdoff_slots (주말던전 끄기 좌표 16개 고정)
         wq = cfg.get("wdoff_slots", [])
         if not isinstance(wq, list):
@@ -598,6 +618,8 @@ class App(tk.Tk):
         self._doll_stop    = False
         self._item_on      = bool(self.cfg.get("item_on", False))
         self._item_stop    = False
+        self._dollchk_stop = False
+        self._relic_stop   = False
         self._task_queue   = []   # 연속으로 누른 실행/재측정 순차 실행 대기열
         self._build_ui()
         # 메인런처 위치 기억 — 옮겨두면 재시작해도 그 자리 (기본: 좌측 약 2cm)
@@ -891,6 +913,19 @@ class App(tk.Tk):
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
             command=self._start_item).pack(side="left", padx=(2,0))
+
+        # 확인용 3종 묶음: 변신확인용 / 인형확인용 / 성물확인용 (세로로 한 곳에)
+        chk_col = tk.Frame(front_row); chk_col.pack(side="left", padx=(4,8), anchor="n")
+        for _t, _bg, _open, _run in (
+                ("🏰 변신\n확인용", "#d35400", self._open_dungeon_win, self._start_dungeon),
+                ("🧸 인형\n확인용", "#b9770e", self._open_dollchk_win, lambda: self._start_dgn2("dollchk")),
+                ("🗿 성물\n확인용", "#117864", self._open_relic_win,   lambda: self._start_dgn2("relic"))):
+            rr = tk.Frame(chk_col); rr.pack(anchor="n", pady=(0,4))
+            tk.Button(rr, text=_t, font=("맑은 고딕", 9, "bold"), bg=_bg, fg="white",
+                      width=7, height=2, command=_open).pack(side="left")
+            tk.Button(rr, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
+                      bg="#27ae60", fg="white", activebackground="#1e8449",
+                      width=4, height=2, command=_run).pack(side="left", padx=(2,0))
 
         winmgmt = tk.Frame(front_row); winmgmt.pack(side="left", padx=(4,10), anchor="n")
         self._build_winmgmt(winmgmt)
@@ -2029,6 +2064,133 @@ class App(tk.Tk):
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
         self._build_slot_grid(parent, "dungeon")   # 4×4 그리드 (화면 배치와 동일)
 
+    # ── 인형확인용/성물확인용 (변신확인용 복제 — 동일 실행 로직) ────────
+    def _dgn2_info(self, fkey):
+        return {"dollchk": ("dollchk_slots", "인형확인용", "🧸"),
+                "relic":   ("relic_slots",   "성물확인용", "🗿")}[fkey]
+
+    def _open_dollchk_win(self):
+        self._open_section_win("_dollchk_win", "🧸 인형확인용",
+                               lambda p: self._build_dgn2("dollchk", p), w=470, h=600, pinnable=True)
+
+    def _open_relic_win(self):
+        self._open_section_win("_relic_win", "🗿 성물확인용",
+                               lambda p: self._build_dgn2("relic", p), w=470, h=600, pinnable=True)
+
+    def _build_dgn2(self, fkey, parent):
+        key, title, icon = self._dgn2_info(fkey)
+        color = self._grid_spec(fkey)["color"]
+        tk.Label(parent, text=f"{title}  (슬롯 순서 랜덤 / 클릭1~5 순서대로, 간격 랜덤)",
+                 font=("맑은 고딕", 9, "bold"), fg=color).pack(anchor="w", padx=4, pady=(4,2))
+        dr = tk.Frame(parent); dr.pack(pady=3)
+        setattr(self, f"_{fkey}_stop", False)
+        run = tk.Button(dr, text="▶  실행",
+            font=("맑은 고딕", 9, "bold"), bg=color, fg="white",
+            width=13, height=2, command=lambda: self._start_dgn2(fkey))
+        run.pack(side="left", padx=(0,3))
+        setattr(self, f"btn_{fkey}_run", run)
+        stopb = tk.Button(dr, text="■ 멈춤",
+            font=("맑은 고딕", 8, "bold"), bg="#c0392b", fg="white",
+            activebackground="#922b21", width=6, height=2,
+            command=lambda: setattr(self, f"_{fkey}_stop", True) or
+                            self.status.set(f"{title} 멈추는 중..."),
+            state="disabled")
+        stopb.pack(side="left")
+        setattr(self, f"btn_{fkey}_stop", stopb)
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
+        self._build_slot_grid(parent, fkey)   # 4×4 그리드 (화면 배치와 동일)
+
+    def _reg_dgn2_click(self, fkey, slot_idx, click_idx):
+        key, title, _ = self._dgn2_info(fkey)
+        self._reg_dgn2 = (fkey, slot_idx, click_idx)
+        self.status.set(f"3초 후 {title} #{slot_idx+1} [클릭{click_idx+1}] 위치 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="dgn2")])
+
+    def on_dgn2_coord(self, x, y):
+        fkey, si, ci = self._reg_dgn2
+        key, title, _ = self._dgn2_info(fkey)
+        self.cfg[key][si]["coords"][ci] = [x, y]
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ {title} #{si+1} [클릭{ci+1}] 등록: ({x},{y})")
+        self.deiconify()
+
+    def _test_dgn2(self, fkey, idx):
+        self._minimize_all()
+        threading.Thread(target=self._run_dgn2, args=(fkey, idx), daemon=True).start()
+
+    def _del_dgn2(self, fkey, idx):
+        key, title, _ = self._dgn2_info(fkey)
+        if not messagebox.askyesno("슬롯 삭제", f"{title} #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
+            return
+        self.cfg[key][idx] = {"name": "미등록", "coords": [None]*DUNGEON_CLICKS}
+        save_cfg(self.cfg); self._refresh_ui()
+
+    def _preview_dgn2(self, fkey, idx):
+        key, title, _ = self._dgn2_info(fkey)
+        coords = self.cfg[key][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
+        if not dots:
+            self.status.set(f"{title} #{idx+1:02d} 등록된 좌표가 없습니다"); return
+        name = self.cfg[key][idx].get("name", f"#{idx+1:02d}")
+
+        def rereg(dot_idx):
+            self._reg_dgn2 = (fkey, idx, dot_idx if dot_idx is not None else 0)
+            self.deiconify()
+            self.after(200, lambda: CoordOverlay(self, mode="dgn2"))
+
+        def _save(dot_idx, nx, ny):
+            self.cfg[key][idx]["coords"][dot_idx] = [nx, ny]
+            save_cfg(self.cfg); self._refresh_ui()
+            self.status.set(f"✔ {title} #{idx+1:02d} 클릭{dot_idx+1} 이동 저장: ({nx},{ny})")
+
+        self._open_dot_preview(f"{title} #{idx+1:02d} {name}", dots,
+                               rereg_fn=rereg, save_fn=_save)
+
+    def _start_dgn2(self, fkey):
+        key, title, _ = self._dgn2_info(fkey)
+        if not self._try_busy_or_queue(title, lambda: self._start_dgn2(fkey)): return
+        setattr(self, f"_{fkey}_stop", False)
+        self._set_btn(f"btn_{fkey}_run", state="disabled")
+        self._set_btn(f"btn_{fkey}_stop", state="normal")
+        self._minimize_all()
+        self.after(300, lambda: threading.Thread(
+            target=self._run_task, args=(title, lambda: self._run_dgn2(fkey)), daemon=True).start())
+
+    def _run_dgn2(self, fkey, slot_idx=None):
+        key, title, icon = self._dgn2_info(fkey)
+        stop = f"_{fkey}_stop"
+        try:
+            slots = self.cfg.get(key, [])
+            if slot_idx is not None:
+                targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
+            else:
+                targets = [(i, s) for i, s in enumerate(slots)
+                           if any(s.get("coords", []))]
+                random.shuffle(targets)   # 슬롯 클릭 순서 매번 랜덤
+            for si, slot in targets:
+                if getattr(self, stop, False): break
+                name = slot.get("name", f"#{si+1}")
+                coords = slot.get("coords", [])
+                while len(coords) < DUNGEON_CLICKS:
+                    coords.append(None)
+                if not self._wait_mouse_idle(stop): return
+                # 클릭1~5를 순서대로, 클릭 사이 간격만 랜덤
+                order = [j for j in range(DUNGEON_CLICKS) if coords[j]]
+                for n, j in enumerate(order):
+                    if getattr(self, stop, False): break
+                    self.status.set(f"{icon} [{name}] 클릭{j+1}...")
+                    pyautogui.click(*coords[j])
+                    if n < len(order) - 1:
+                        time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+            self.status.set(f"✔ {title} 실행 완료!")
+        except Exception as e:
+            self.status.set(f"오류: {e}")
+        finally:
+            self._set_btn(f"btn_{fkey}_run", state="normal")
+            self._set_btn(f"btn_{fkey}_stop", state="disabled")
+            self.after(0, self._restore_back)
+
     def _build_past(self, parent):
         tk.Label(parent, text=f"과거의말하는섬  (3번 클릭 / {PAST_INTERVAL}초 간격)",
                  font=("맑은 고딕", 9, "bold"), fg="#c0392b").pack(anchor="w", padx=4, pady=(4,2))
@@ -2775,7 +2937,6 @@ class App(tk.Tk):
             ("카매사오기",   "#1a5276", lambda: self._open_past_slot(5),                 "#154360", lambda: self._run_island_slot(5)),
             ("📬 우편함",    "#2471a3", self._open_mail_win,     "#1a5276", self._start_mail),
             ("🏝 과거섬",    "#c0392b", self._open_past_win,     "#922b21", self._start_past),
-            ("🏰변신확인용", "#d35400", self._open_dungeon_win,  "#a04000", self._start_dungeon),
             ("주말던전끄기", "#5d6d7e", self._open_wdoff_win,    "#34495e", self._start_wdoff),
             ("🏹 사냥",      "#27ae60", self._open_hunt_win,     "#1e8449", self._start_hunt),
             ("💰 다야OCR",   "#27ae60", self._open_ocr,          "#1e8449", self._open_ocr_scan),
@@ -4395,6 +4556,16 @@ class App(tk.Tk):
                             reg=self._reg_pass_click,    test=self._test_pass,    prev=self._preview_pass,    delete=self._del_pass),
             "item":    dict(title="아이템정리", key="item_slots",   clicks=SCHED_CLICKS,   color="#7d6608",
                             reg=self._reg_item_click,    test=self._test_item,    prev=self._preview_item,    delete=self._del_item),
+            "dollchk": dict(title="인형확인용", key="dollchk_slots", clicks=DUNGEON_CLICKS, color="#b9770e",
+                            reg=lambda s, c: self._reg_dgn2_click("dollchk", s, c),
+                            test=lambda i: self._test_dgn2("dollchk", i),
+                            prev=lambda i: self._preview_dgn2("dollchk", i),
+                            delete=lambda i: self._del_dgn2("dollchk", i)),
+            "relic":   dict(title="성물확인용", key="relic_slots",   clicks=DUNGEON_CLICKS, color="#117864",
+                            reg=lambda s, c: self._reg_dgn2_click("relic", s, c),
+                            test=lambda i: self._test_dgn2("relic", i),
+                            prev=lambda i: self._preview_dgn2("relic", i),
+                            delete=lambda i: self._del_dgn2("relic", i)),
         }
         return S[fkey]
 
@@ -6438,7 +6609,8 @@ class App(tk.Tk):
     def _section_wins(self):
         attrs = ["_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
-                 "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win"]
+                 "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
+                 "_dollchk_win","_relic_win"]
         return [getattr(self, a) for a in attrs
                 if getattr(self, a, None) and getattr(self, a).winfo_exists()]
 
@@ -7160,6 +7332,8 @@ class App(tk.Tk):
         self._dungeon_stop   = True
         self._pass_stop      = True
         self._item_stop      = True
+        self._dollchk_stop   = True
+        self._relic_stop     = True
         self._reroll_running = False  # 오림의일기장도 정지
         self._busy_task      = None   # 잠금 해제
         self._task_queue.clear()      # 멈춤 시 대기열도 비움
@@ -8602,6 +8776,10 @@ class CoordOverlay(tk.Toplevel):
             label = f"패스권 #{app._reg_pass_slot_idx+1} [{PASS_LABELS[app._reg_pass_click_idx]}] 위치"
         elif mode == "sched":
             label = f"매일매일 스케줄 #{app._reg_sched_slot_idx+1} [클릭] 위치"
+        elif mode == "dgn2":
+            _f, _s, _c = app._reg_dgn2
+            _t = {"dollchk": "인형확인용", "relic": "성물확인용"}[_f]
+            label = f"{_t} #{_s+1} [클릭{_c+1}] 위치"
         elif mode == "item":
             _ci = app._reg_item_click_idx
             _w  = "쓸어올리기 시작점" if _ci == 2 else f"클릭{_ci+1}"
@@ -8640,6 +8818,7 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "past":      self.app.on_past_coord(x, y)
         elif self.mode == "pass":      self.app.on_pass_coord(x, y)
         elif self.mode == "sched":     self.app.on_sched_coord(x, y)
+        elif self.mode == "dgn2":      self.app.on_dgn2_coord(x, y)
         elif self.mode == "item":      self.app.on_item_coord(x, y)
         elif self.mode == "seq":       self.app.on_seq_coord(x, y)
         elif self.mode == "dc":        self.app.on_dc_coord(x, y)
