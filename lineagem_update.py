@@ -116,7 +116,7 @@ DESK = os.path.dirname(HERE) if os.path.basename(HERE).lower() == "moon-ai" else
 
 CODE_FILES = ["lineagem_launcher.py", "lineagem_ocr.py", "lineagem_island.py",
               "lineagem_dungeon.py", "lineagem_watchdog.py", "precise_click.py",
-              "open_launcher.pyw", "lineagem_update.py"]
+              "open_launcher.pyw", "lineagem_update.py", "moon.ico"]
 # 다야 측정값/좌표(daya_counts·history·regions)는 머신별 데이터 — 업데이트로 절대 덮어쓰지 않음
 DATA_FILES = ["coords.json", "island_coords.json", "island_counts.json"]
 DATA_DIRS  = ["reroll_templates"]
@@ -305,9 +305,31 @@ def ensure_keepalive():
         pass
 
 
+def ensure_shortcut_icon():
+    """바탕화면 메인런처 바로가기 아이콘을 moon.ico로 통일 (모든 컴퓨터 공통)."""
+    try:
+        ico = os.path.join(DESK, "moon.ico")
+        if not os.path.exists(ico):
+            return
+        ps = (
+            "$sh = New-Object -ComObject WScript.Shell; "
+            "$dt = [Environment]::GetFolderPath('Desktop'); "
+            "Get-ChildItem \"$dt\\*.lnk\" | ForEach-Object { "
+            "$s = $sh.CreateShortcut($_.FullName); "
+            "if (($s.Arguments -match 'open_launcher|lineagem_launcher') -or "
+            "($s.TargetPath -match 'open_launcher|lineagem_launcher')) { "
+            "if ($s.IconLocation -notmatch 'moon') { "
+            "$s.IconLocation = '" + ico.replace("\\", "\\\\") + ",0'; $s.Save() } } }"
+        )
+        sh(["powershell", "-NoProfile", "-Command", ps])
+    except Exception:
+        pass
+
+
 def finish(msg=""):
     """모든 종료 경로 공통: 런처 재시작 확인 → 창 띄워서 보여줌 → '5초 후 꺼짐' 알림 → 종료."""
     ensure_keepalive()               # 상시감시 예약 작업 보장 (없으면 등록)
+    ensure_shortcut_icon()           # 바로가기 아이콘 통일 (moon.ico)
     ok = ensure_launcher()
     if ok:
         time.sleep(2)               # 워치독의 시작 최소화가 지나간 뒤

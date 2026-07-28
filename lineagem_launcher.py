@@ -571,6 +571,11 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("리니지M 자동 실행")
+        try:
+            # Moon-AI 공통 아이콘 (default= → 모든 서브창에도 적용)
+            self.iconbitmap(default=os.path.join(BASE, "moon.ico"))
+        except Exception:
+            pass
         sh = self.winfo_screenheight()
         self.geometry(f"2117x1010+76+75")   # 콘텐츠에 맞춘 높이 (작업표시줄 위로)
         self.resizable(True, True)
