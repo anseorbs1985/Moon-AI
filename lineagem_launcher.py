@@ -582,6 +582,7 @@ class App(tk.Tk):
         self._last_activity = time.time()
         self.bind_all("<Button>", self._mark_activity, add="+")
         self.bind_all("<Key>",    self._mark_activity, add="+")
+        self.bind("<FocusIn>",    self._mark_activity, add="+")   # 작업표시줄로 올려도 유휴 리셋
         # 런처↔클로드 최소화 커플링은 시작 20초 후부터 (워치독 시작 최소화 제외)
         self._unmap_couple_ok = False
         self.after(20000, lambda: setattr(self, "_unmap_couple_ok", True))
@@ -5220,8 +5221,8 @@ class App(tk.Tk):
         self._last_activity = time.time()
 
     def _idle_minimize_tick(self):
-        """5분간 아무 조작이 없으면 메인런처를 최소화(뒤 화면 가리지 않게).
-        사용자가 클릭해서 다시 올리면(맵 이벤트) 타이머가 리셋된다."""
+        """5분간 아무 조작이 없으면 메인런처를 최소화 대신 '맨 뒤'로 보낸다
+        (제자리에 남아 있어 스케줄 실행에 지장 없음). 클릭/포커스 주면 타이머 리셋."""
         try:
             idle = time.time() - getattr(self, "_last_activity", time.time())
             running = getattr(self, "_running", False)  # 전체 자동실행 중이면 관여 안 함
@@ -5229,7 +5230,7 @@ class App(tk.Tk):
                 try: normal = (self.state() == "normal")
                 except Exception: normal = False
                 if normal:
-                    self.iconify()
+                    self._send_to_back()
         except Exception:
             pass
         self.after(15000, self._idle_minimize_tick)
@@ -6639,6 +6640,19 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _send_to_back(self):
+        """창을 최소화하지 않고 z순서 맨 뒤로 (리니지M 클라이언트 뒤)."""
+        try:
+            self.lower()
+            import win32gui, win32con
+            hwnd = win32gui.FindWindow(None, "리니지M 자동 실행")
+            if hwnd:
+                win32gui.SetWindowPos(hwnd, win32con.HWND_BOTTOM, 0, 0, 0, 0,
+                                      win32con.SWP_NOMOVE | win32con.SWP_NOSIZE |
+                                      win32con.SWP_NOACTIVATE)
+        except Exception:
+            pass
+
     def _restore_back(self):
         """작업/스케줄 완료 후 복원 — 런처를 앞으로 올리지 않고 '맨 뒤'로 되살린다.
         리니지M 클라이언트를 가리지 않게 하고, 항상위 서브창들은 최소화 상태 유지."""
@@ -6647,19 +6661,8 @@ class App(tk.Tk):
             self.deiconify()
         except Exception:
             pass
-        def _lower():
-            try:
-                self.lower()
-                import win32gui, win32con
-                hwnd = win32gui.FindWindow(None, "리니지M 자동 실행")
-                if hwnd:
-                    win32gui.SetWindowPos(hwnd, win32con.HWND_BOTTOM, 0, 0, 0, 0,
-                                          win32con.SWP_NOMOVE | win32con.SWP_NOSIZE |
-                                          win32con.SWP_NOACTIVATE)
-            except Exception:
-                pass
-        _lower()
-        self.after(300, _lower)     # 복원 애니메이션/맵 이벤트 뒤에 한 번 더 확실히 내림
+        self._send_to_back()
+        self.after(300, self._send_to_back)   # 복원 애니메이션/맵 이벤트 뒤에 한 번 더 확실히 내림
         self.after(1500, lambda: setattr(self, "_quiet_restore", False))
 
     def _restore_all(self):
