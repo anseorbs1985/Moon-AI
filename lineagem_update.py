@@ -39,6 +39,44 @@ def _merge_local_first(remote, local, stats):
         return local
     return remote
 
+
+def _merge_3way(base, remote, local, stats):
+    """3자 병합: base(이 컴퓨터가 마지막으로 받았던 원격 버전) 기준으로
+    - 로컬이 base에서 안 바뀐 부분 → 원격(메인의 수정) 반영
+    - 로컬이 직접 수정한 부분 → 로컬 유지
+    - 둘 다 바뀐 부분 → 안쪽으로 내려가 항목별 판정, 최종 충돌은 로컬 우선.
+    stats = [로컬 유지 수, 원격 반영 수]"""
+    if local == base:                              # 로컬 무수정 → 원격 채택
+        if remote != local:
+            stats[1] += 1
+        return remote
+    if remote == base:                             # 원격 무변경 → 로컬 유지
+        stats[0] += 1
+        return local
+    if isinstance(remote, dict) and isinstance(local, dict):
+        b = base if isinstance(base, dict) else {}
+        out = {}
+        for k in set(remote) | set(local):
+            out[k] = _merge_3way(b.get(k), remote.get(k), local.get(k), stats)
+        return out
+    if isinstance(remote, list) and isinstance(local, list):
+        b = base if isinstance(base, list) else []
+        out = []
+        for i in range(max(len(remote), len(local))):
+            bi = b[i] if i < len(b) else None
+            ri = remote[i] if i < len(remote) else None
+            li = local[i] if i < len(local) else None
+            if li is None:
+                out.append(ri)
+            elif ri is None:
+                out.append(li)
+            else:
+                out.append(_merge_3way(bi, ri, li, stats))
+        return out
+    stats[0] += 1                                  # 스칼라 충돌 → 로컬 우선
+    return local
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -337,6 +375,14 @@ def main():
             else:
                 log("   ✔ 로컬 변경은 stash로 백업했고 최신 버전을 받았습니다")
         new = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
+        # 3자 병합용 base: 이 컴퓨터가 pull 전에 갖고 있던 버전 (로컬 수정 여부 판별 기준)
+        bases = {}
+        for f in MERGE_FILES:
+            try:
+                r0 = sh(["git", "show", f"{old}:{f}"], REPO)
+                bases[f] = json.loads(r0.stdout) if (r0.returncode == 0 and r0.stdout.strip()) else None
+            except Exception:
+                bases[f] = None
         changed = []
         if old != new:
             changed = sh(["git", "diff", "--name-only", old, new], REPO).stdout.split()
@@ -379,12 +425,19 @@ def main():
                     try:
                         with open(s, encoding="utf-8") as fp:
                             remote = json.load(fp)
-                        stats = [0]
-                        merged = _merge_local_first(remote, local_snap[f], stats)
+                        stats = [0, 0]
+                        base = bases.get(f)
+                        if base is not None:
+                            # 3자 병합: 로컬이 직접 수정한 곳만 유지, 나머지는 원격(메인) 수정 반영
+                            merged = _merge_3way(base, remote, local_snap[f], stats)
+                            note = f"로컬 수정 {stats[0]}곳 유지, 원격 변경 {stats[1]}곳 반영"
+                        else:
+                            merged = _merge_local_first(remote, local_snap[f], stats)
+                            note = f"로컬 등록 {stats[0]}곳 유지, 빈 곳만 원격 반영"
                         with open(dst, "w", encoding="utf-8") as fp:
                             json.dump(merged, fp, ensure_ascii=False, indent=2)
                         n += 1
-                        log(f"   데이터 병합: {f} (로컬 등록 {stats[0]}곳 유지, 빈 곳만 원격 반영)")
+                        log(f"   데이터 병합: {f} ({note})")
                         continue
                     except Exception as e:
                         log(f"   병합 실패({e}) → 원격 버전으로 대체")
