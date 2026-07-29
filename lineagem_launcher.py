@@ -1611,6 +1611,11 @@ class App(tk.Tk):
                   command=self._save_accounts).pack(side="right")
 
         TYPES, TYPE_COLORS = self.ACC_TYPES, self.ACC_COLORS
+        # 창을 다시 열 때 이전 창의 폰트맞춤 trace 제거 (중복 누적 방지)
+        for (v, tid) in getattr(self, "_acc_fit_traces", {}).values():
+            try: v.trace_remove("write", tid)
+            except Exception: pass
+        self._acc_fit_traces = {}
         acc_grid = tk.Frame(parent); acc_grid.pack(pady=(2,4), padx=4)
         for r in range(4):
             for c in range(4):
@@ -1633,8 +1638,36 @@ class App(tk.Tk):
                 om.pack(side="left", padx=(2,0))
                 self._acc_type_btns[idx] = om
                 for j in range(5):
-                    tk.Entry(cell, textvariable=self._acc_vars[idx][j],
-                             font=("맑은 고딕", 8), width=12).pack(fill="x", pady=(0,0))
+                    fr = tk.Frame(cell); fr.pack(fill="x")
+                    var = self._acc_vars[idx][j]
+                    ent = tk.Entry(fr, textvariable=var,
+                                   font=("맑은 고딕", 8), width=12)
+                    ent.pack(side="left", fill="x", expand=True)
+                    # 글자 수에 맞춰 폰트 축소 — 긴 내용도 칸 안에 보이게
+                    tid = var.trace_add("write",
+                        lambda *a, e=ent, v=var: self._fit_acc_entry(e, v))
+                    self._acc_fit_traces[(idx, j)] = (var, tid)
+                    self._fit_acc_entry(ent, var)
+                    tk.Button(fr, text="📋", font=("맑은 고딕", 6), width=2, pady=0,
+                              command=lambda i=idx, jj=j: self._copy_acc_field(i, jj)
+                              ).pack(side="left", padx=(1, 0))
+
+    def _fit_acc_entry(self, ent, var):
+        """계정 칸 글자 수에 맞춰 폰트 크기 자동 축소 (칸 밖으로 안 벗어나게)."""
+        try:
+            n = len(var.get())
+            size = 8 if n <= 13 else (7 if n <= 17 else 6)
+            ent.config(font=("맑은 고딕", size))
+        except Exception:
+            pass
+
+    def _copy_acc_field(self, idx, j):
+        """계정 칸 하나를 클립보드로 복사."""
+        val = self._acc_vars[idx][j].get().strip()
+        if not val:
+            self.status.set(f"#{idx+1:02d} {j+1}번 칸이 비어 있습니다"); return
+        self.clipboard_clear(); self.clipboard_append(val)
+        self.status.set(f"📋 #{idx+1:02d} {j+1}번 칸 복사됨: {val[:20]}")
 
     # ── 아이템 리롤(새로고침 매크로) ─────────────────────────────────
     def _reroll_targets_cfg(self):
