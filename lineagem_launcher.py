@@ -606,6 +606,7 @@ class App(tk.Tk):
         self.bind_all("<Button>", self._mark_activity, add="+")
         self.bind_all("<Key>",    self._mark_activity, add="+")
         self.bind("<FocusIn>",    self._mark_activity, add="+")   # 작업표시줄로 올려도 유휴 리셋
+        self.bind("<Button-1>",   self._raise_on_click, add="+")  # 런처 아무 곳이나 클릭 → 앞으로
         # 런처↔클로드 최소화 커플링은 시작 20초 후부터 (워치독 시작 최소화 제외)
         self._unmap_couple_ok = False
         self.after(20000, lambda: setattr(self, "_unmap_couple_ok", True))
@@ -2509,6 +2510,24 @@ class App(tk.Tk):
                 self._btnrow_pad.config(width=w)
                 if _tries < 4:
                     self.after(150, lambda: self._align_tj_to_dc(_tries + 1))
+        except Exception:
+            pass
+
+    def _raise_on_click(self, e=None):
+        """메인런처 안 아무 곳(빈 곳 포함)이나 클릭하면 창을 앞으로 올린다."""
+        try:
+            if self.state() != "normal" or getattr(self, "_quiet_restore", False):
+                return
+            self.lift()
+            import win32gui, win32con
+            hwnd = win32gui.FindWindow(None, "리니지M 자동 실행")
+            if hwnd:
+                win32gui.SetWindowPos(hwnd, win32con.HWND_TOP, 0, 0, 0, 0,
+                                      win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+                try:
+                    win32gui.SetForegroundWindow(hwnd)
+                except Exception:
+                    pass
         except Exception:
             pass
 
