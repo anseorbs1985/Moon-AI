@@ -122,6 +122,7 @@ PAST_INTERVAL  = 4.0   # 과거의말하는섬 클릭 간격(초)
 SCHED_SLOTS        = 16
 SCHED_CLICKS       = 3
 ITEM_SWIPE_DIST    = 250   # 아이템정리 클릭3: 누른 채 위로 쓸어올리는 거리(px) — 클라이언트 창 안에 있어야 함
+TJ_CLICKS          = 3     # TJ성공!! 슬롯당 좌표 수 (인형탐험식 실행)
 ITEM_SWIPE_COUNT   = 1     # 같은 자리에서 쓸어올리기 반복 횟수
 SCHED_INTERVAL     = 2.5
 PASS_SLOTS         = 16
@@ -184,6 +185,10 @@ DEFAULT_CFG = {
     "item_on":      False,              # 아이템정리 단축키 활성화 상태 (재시작 유지)
     "dollchk_slots": None,              # 인형확인용 — 처음 로드 때 변신확인용 복사
     "relic_slots":   None,              # 성물확인용 — 처음 로드 때 변신확인용 복사
+    "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
+    "seq2_slots":    None,              # 연속클릭2 — 처음 로드 때 연속클릭 좌표 복사
+    "seq2_hotkey":   None,
+    "seq2_on":       False,
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
     "seq_slots":    [None]*SEQ_SLOTS,   # 연속 클릭 좌표 (각 [x,y] 또는 None)
     "seq_hotkey":   None,               # 연속 클릭 실행 단축키 (가상키 코드)
@@ -413,6 +418,25 @@ def load_cfg():
                 while len(n2) < 16:
                     n2.append({"name": "미등록", "coords": [None] * DUNGEON_CLICKS})
                 cfg[_k2] = n2[:16]
+        # tj_slots (TJ성공!!) — 16슬롯 × 좌표 3
+        nt = []
+        for s in (cfg.get("tj_slots") or []):
+            if isinstance(s, dict):
+                c = s.get("coords", [None] * TJ_CLICKS)
+                while len(c) < TJ_CLICKS: c.append(None)
+                nt.append({"name": s.get("name", "미등록"), "coords": c[:TJ_CLICKS]})
+            else:
+                nt.append({"name": "미등록", "coords": [None] * TJ_CLICKS})
+        while len(nt) < 16:
+            nt.append({"name": "미등록", "coords": [None] * TJ_CLICKS})
+        cfg["tj_slots"] = nt[:16]
+        # seq2_slots (연속클릭2) — 처음 생기면 연속클릭 좌표 그대로 복사
+        s2 = cfg.get("seq2_slots")
+        if not s2:
+            cfg["seq2_slots"] = _cp2.deepcopy(cfg.get("seq_slots") or [None] * SEQ_SLOTS)
+        else:
+            while len(s2) < SEQ_SLOTS: s2.append(None)
+            cfg["seq2_slots"] = s2[:SEQ_SLOTS]
         # wdoff_slots (주말던전 끄기 좌표 16개 고정)
         wq = cfg.get("wdoff_slots", [])
         if not isinstance(wq, list):
@@ -626,6 +650,9 @@ class App(tk.Tk):
         self._item_stop    = False
         self._dollchk_stop = False
         self._relic_stop   = False
+        self._tj_stop      = False
+        self._seq2_on      = bool(self.cfg.get("seq2_on", False))
+        self._seq2_running = False
         self._task_queue   = []   # 연속으로 누른 실행/재측정 순차 실행 대기열
         self._build_ui()
         # 메인런처 위치 기억 — 옮겨두면 재시작해도 그 자리 (기본: 좌측 약 2cm)
@@ -647,6 +674,7 @@ class App(tk.Tk):
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._wdoff_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._item_hotkey_loop, daemon=True).start()
+        threading.Thread(target=self._seq2_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._popup_guard_loop, daemon=True).start()
         threading.Thread(target=self._claude_attention_loop, daemon=True).start()
         # 작업 중에는 클로드를 강제로 내리지 않는다(예전 시작 버스트 제거).
@@ -776,6 +804,26 @@ class App(tk.Tk):
 
         # 실행 / 멈춤
         btn_row = tk.Frame(self); btn_row.pack(pady=6)
+        # TJ성공!! (동그라미 버튼) + 실행 — 계정관리 왼쪽
+        tjcol = tk.Frame(btn_row); tjcol.pack(side="left", padx=(0, 4))
+        tjc = tk.Canvas(tjcol, width=58, height=58, highlightthickness=0,
+                        bg=self.cget("bg"), cursor="hand2")
+        tjc.pack()
+        tjc.create_oval(2, 2, 56, 56, fill="#ad1457", outline="#6d0f38", width=3)
+        tjc.create_text(29, 29, text="TJ\n성공!!", fill="white",
+                        font=("맑은 고딕", 8, "bold"), justify="center")
+        tjc.bind("<Button-1>", lambda e: self._open_tj_win())
+        tk.Button(tjcol, text="▶ 실행", font=("맑은 고딕", 7, "bold"),
+                  bg="#27ae60", fg="white", activebackground="#1e8449",
+                  width=6, command=self._start_tj).pack(pady=(2, 0))
+        # 연속클릭2 + 실행 — TJ성공!! 옆
+        s2col = tk.Frame(btn_row); s2col.pack(side="left", padx=(0, 6))
+        tk.Button(s2col, text="🔗 연속\n클릭2", font=("맑은 고딕", 8, "bold"),
+                  bg="#7d3c98", fg="white", activebackground="#5b2c6f",
+                  width=6, height=2, command=self._open_seq2_win).pack()
+        tk.Button(s2col, text="▶ 실행", font=("맑은 고딕", 7, "bold"),
+                  bg="#27ae60", fg="white", activebackground="#1e8449",
+                  width=6, command=self._start_seq2).pack(pady=(2, 0))
         tk.Button(btn_row, text="🔑 계정\n관리",
             font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
             activebackground="#0e6655", width=7, height=2,
@@ -2102,6 +2150,121 @@ class App(tk.Tk):
 
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
         self._build_slot_grid(parent, "dungeon")   # 4×4 그리드 (화면 배치와 동일)
+
+    # ── TJ성공!! (인형탐험식 실행 — 슬롯당 좌표 3개) ─────────────────────
+    def _open_tj_win(self):
+        self._open_section_win("_tj_win", "⭕ TJ성공!!", self._build_tj, w=470, h=600)
+
+    def _build_tj(self, parent):
+        tk.Label(parent, text="TJ성공!!  (슬롯 순서 랜덤 / 좌표1~3 순서대로, 인형탐험식 간격)",
+                 font=("맑은 고딕", 9, "bold"), fg="#ad1457").pack(anchor="w", padx=4, pady=(4,2))
+        pr = tk.Frame(parent); pr.pack(pady=3)
+        self._tj_stop = False
+        self.btn_tj_run = tk.Button(pr, text="▶  실행",
+            font=("맑은 고딕", 9, "bold"), bg="#ad1457", fg="white",
+            activebackground="#6d0f38", width=13, height=2,
+            command=self._start_tj)
+        self.btn_tj_run.pack(side="left", padx=(0,3))
+        self.btn_tj_stop = tk.Button(pr, text="■ 멈춤",
+            font=("맑은 고딕", 8, "bold"), bg="#c0392b", fg="white",
+            activebackground="#922b21", width=6, height=2,
+            command=lambda: setattr(self, "_tj_stop", True) or
+                            self.status.set("TJ성공!! 멈추는 중..."),
+            state="disabled")
+        self.btn_tj_stop.pack(side="left")
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
+        self._build_slot_grid(parent, "tj")   # 4×4 그리드 (화면 배치와 동일)
+
+    def _reg_tj_click(self, slot_idx, click_idx):
+        self._reg_tj_slot_idx  = slot_idx
+        self._reg_tj_click_idx = click_idx
+        self.status.set(f"3초 후 TJ성공!! #{slot_idx+1} [좌표{click_idx+1}] 위치 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="tj")])
+
+    def on_tj_coord(self, x, y):
+        si = self._reg_tj_slot_idx
+        ci = self._reg_tj_click_idx
+        self.cfg["tj_slots"][si]["coords"][ci] = [x, y]
+        save_cfg(self.cfg); self._refresh_ui()
+        self.status.set(f"✔ TJ성공!! #{si+1} 좌표{ci+1} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _test_tj(self, idx):
+        self._minimize_all()
+        threading.Thread(target=self._run_tj, args=(idx,), daemon=True).start()
+
+    def _del_tj(self, idx):
+        if not messagebox.askyesno("슬롯 삭제", f"TJ성공!! #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
+            return
+        self.cfg["tj_slots"][idx] = {"name": "미등록", "coords": [None]*TJ_CLICKS}
+        save_cfg(self.cfg); self._refresh_ui()
+
+    def _preview_tj(self, idx):
+        coords = self.cfg["tj_slots"][idx].get("coords", [])
+        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
+        if not dots:
+            self.status.set(f"TJ성공!! #{idx+1:02d} 등록된 좌표가 없습니다"); return
+        name = self.cfg["tj_slots"][idx].get("name", f"#{idx+1:02d}")
+
+        def rereg(dot_idx):
+            self._reg_tj_slot_idx  = idx
+            self._reg_tj_click_idx = dot_idx if dot_idx is not None else 0
+            self.deiconify()
+            self.after(200, lambda: CoordOverlay(self, mode="tj"))
+
+        def _save(dot_idx, nx, ny):
+            self.cfg["tj_slots"][idx]["coords"][dot_idx] = [nx, ny]
+            save_cfg(self.cfg); self._refresh_ui()
+            self.status.set(f"✔ TJ성공!! #{idx+1:02d} 좌표{dot_idx+1} 이동 저장: ({nx},{ny})")
+
+        self._open_dot_preview(f"TJ성공!! #{idx+1:02d} {name}", dots,
+                               rereg_fn=rereg, save_fn=_save)
+
+    def _start_tj(self):
+        if not self._try_busy_or_queue("TJ성공", self._start_tj): return
+        self._tj_stop = False
+        self._set_btn("btn_tj_run", state="disabled")
+        self._set_btn("btn_tj_stop", state="normal")
+        self._minimize_all()
+        self.after(300, lambda: threading.Thread(
+            target=self._run_task, args=("TJ성공", self._run_tj), daemon=True).start())
+
+    def _run_tj(self, slot_idx=None):
+        try:
+            slots = self.cfg.get("tj_slots", [])
+            if slot_idx is not None:
+                targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
+            else:
+                targets = [(i, s) for i, s in enumerate(slots)
+                           if any(s.get("coords", []))]
+                random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
+            for ti, (si, slot) in enumerate(targets):
+                if getattr(self, "_tj_stop", False): break
+                name   = slot.get("name", f"#{si+1}")
+                coords = slot.get("coords", [None]*TJ_CLICKS)
+                _clicked = 0
+                for j, coord in enumerate(coords):
+                    if not coord: continue
+                    if getattr(self, "_tj_stop", False): break
+                    if _clicked == 0:
+                        # 첫 클릭 전 여유 (인형탐험과 동일)
+                        time.sleep(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))
+                    self.status.set(f"⭕ [{name}] 좌표{j+1}/{TJ_CLICKS}...")
+                    pyautogui.click(*coord)
+                    _clicked += 1
+                    if j < len(coords) - 1:
+                        time.sleep(random.uniform(DOLL_MIN, DOLL_MAX))
+                if getattr(self, "_tj_stop", False): break
+                if ti < len(targets) - 1:
+                    time.sleep(random.uniform(DOLL_SLOT_MIN, DOLL_SLOT_MAX))  # 슬롯 간 간격
+            self.status.set("✔ TJ성공!! 완료!" if not getattr(self, "_tj_stop", False) else "TJ성공!! 멈춤")
+        except Exception as e:
+            self.status.set(f"TJ성공!! 오류: {e}")
+        finally:
+            self._set_btn("btn_tj_run", state="normal")
+            self._set_btn("btn_tj_stop", state="disabled")
+            self.after(0, self._restore_back)
 
     # ── 인형확인용/성물확인용 (변신확인용 복제 — 동일 실행 로직) ────────
     def _dgn2_info(self, fkey):
@@ -3891,6 +4054,165 @@ class App(tk.Tk):
                 threading.Thread(target=self._run_seq, daemon=True).start()
             prev = down
 
+    # ── 연속클릭2 (연속클릭 복제 — 별도 좌표/단축키/ON·OFF, 간격 설정은 공유) ──
+    def _open_seq2_win(self):
+        self._open_section_win("_seq2_win", "🔗 연속 클릭 2", self._build_seq2, w=500, h=580)
+
+    def _build_seq2(self, parent):
+        tk.Label(parent, text="연속 클릭 2 — 단축키를 누르면 순서대로 1회씩 (간격 설정은 연속클릭과 공유)",
+                 font=("맑은 고딕", 9, "bold"), fg="#7d3c98").pack(anchor="w", padx=4, pady=(4,2))
+        top = tk.Frame(parent); top.pack(pady=3)
+        self._seq2_toggle_btn = tk.Button(top, text="ON" if self._seq2_on else "OFF",
+                                          font=("맑은 고딕", 9, "bold"),
+                                          bg="#27ae60" if self._seq2_on else "#7f8c8d",
+                                          fg="white", width=6, command=self._toggle_seq2)
+        self._seq2_toggle_btn.pack(side="left", padx=(0, 3))
+        tk.Button(top, text="▶ 실행", font=("맑은 고딕", 9, "bold"),
+                  bg="#27ae60", fg="white", width=6,
+                  command=self._start_seq2).pack(side="left", padx=3)
+        tk.Button(top, text="⌨ 단축키", font=("맑은 고딕", 8),
+                  bg="#2c3e50", fg="white",
+                  command=self._assign_seq2_hotkey).pack(side="left", padx=3)
+        tk.Button(top, text="👁 전체보기", font=("맑은 고딕", 8),
+                  bg="#566573", fg="white",
+                  command=lambda: self._flat_preview_all("seq2")).pack(side="left", padx=3)
+        self._seq2_hotkey_var = tk.StringVar(
+            value=f"단축키: {self._vk_name(self.cfg.get('seq2_hotkey'))}")
+        tk.Label(parent, textvariable=self._seq2_hotkey_var,
+                 font=("맑은 고딕", 8), fg="#34495e").pack()
+        self._build_flat_grid(parent, "seq2")   # 4×4 그리드 (화면 배치와 동일)
+
+    def _reg_seq2_coord(self, idx):
+        self._seq2_reg_idx = idx
+        self.status.set(f"3초 후 연속클릭2 #{idx+1} 위치를 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="seq2")])
+
+    def on_seq2_coord(self, x, y):
+        seq = self.cfg.get("seq2_slots") or [None] * SEQ_SLOTS
+        while len(seq) < SEQ_SLOTS:
+            seq.append(None)
+        seq[self._seq2_reg_idx] = [x, y]
+        self.cfg["seq2_slots"] = seq
+        save_cfg(self.cfg)
+        if hasattr(self, "_seq2_slot_vars") and self._seq2_reg_idx < len(self._seq2_slot_vars):
+            self._seq2_slot_vars[self._seq2_reg_idx].set(f"({x},{y})")
+        self.status.set(f"✔ 연속클릭2 #{self._seq2_reg_idx+1} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _del_seq2_coord(self, idx):
+        seq = self.cfg.get("seq2_slots") or [None] * SEQ_SLOTS
+        if idx < len(seq):
+            seq[idx] = None
+            self.cfg["seq2_slots"] = seq
+            save_cfg(self.cfg)
+        if hasattr(self, "_seq2_slot_vars") and idx < len(self._seq2_slot_vars):
+            self._seq2_slot_vars[idx].set("미등록")
+        self.status.set(f"연속클릭2 #{idx+1} 삭제")
+
+    def _toggle_seq2(self):
+        self._seq2_on = not getattr(self, "_seq2_on", False)
+        self.cfg["seq2_on"] = self._seq2_on
+        save_cfg(self.cfg)
+        if hasattr(self, "_seq2_toggle_btn"):
+            try:
+                self._seq2_toggle_btn.config(text="ON" if self._seq2_on else "OFF",
+                                             bg="#27ae60" if self._seq2_on else "#7f8c8d")
+            except Exception:
+                pass
+        if self._seq2_on:
+            self.status.set(f"연속클릭2 ON — {self._vk_name(self.cfg.get('seq2_hotkey'))} 누르면 실행")
+        else:
+            self.status.set("연속클릭2 OFF")
+
+    def _assign_seq2_hotkey(self):
+        self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
+        def _cap():
+            import ctypes
+            time.sleep(0.3)
+            end = time.time() + 5
+            captured = None
+            while time.time() < end:
+                for vk in range(0x08, 0xFF):
+                    if vk in (0x01, 0x02, 0x04):
+                        continue
+                    if ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000:
+                        captured = vk
+                        break
+                if captured is not None:
+                    break
+                time.sleep(0.02)
+            if captured is None:
+                self.after(0, lambda: self.status.set("단축키 지정 취소 (시간초과)"))
+                return
+            if captured == 0x1B:
+                self.after(0, lambda: self.status.set("단축키 지정 취소"))
+                return
+            self.cfg["seq2_hotkey"] = captured
+            save_cfg(self.cfg)
+            name = self._vk_name(captured)
+            def _upd():
+                if hasattr(self, "_seq2_hotkey_var"):
+                    self._seq2_hotkey_var.set(f"단축키: {name}")
+                self.status.set(f"✔ 단축키 지정: {name}")
+            self.after(0, _upd)
+        threading.Thread(target=_cap, daemon=True).start()
+
+    def _seq2_hotkey_loop(self):
+        """전역 단축키 감시 — ON 상태에서 지정키가 눌리면 연속클릭2 실행."""
+        import ctypes
+        prev = False
+        while True:
+            time.sleep(0.03)
+            vk = self.cfg.get("seq2_hotkey")
+            if not getattr(self, "_seq2_on", False) or not vk:
+                prev = False
+                continue
+            try:
+                down = bool(ctypes.windll.user32.GetAsyncKeyState(int(vk)) & 0x8000)
+            except Exception:
+                prev = False
+                continue
+            if down and not prev and not getattr(self, "_seq2_running", False):
+                threading.Thread(target=self._run_seq2, daemon=True).start()
+            prev = down
+
+    def _start_seq2(self):
+        threading.Thread(target=self._run_seq2, daemon=True).start()
+
+    def _run_seq2(self):
+        if getattr(self, "_seq2_running", False):
+            return
+        seq = self.cfg.get("seq2_slots") or []
+        coords = [c for c in seq if c]
+        if not coords:
+            self.after(0, lambda: self.status.set("연속클릭2: 등록된 좌표가 없습니다"))
+            return
+        if not self._try_busy_or_queue("연속클릭2", self._start_seq2):
+            return
+        self._seq2_running = True
+        try:
+            self.after(0, self._seq_hide)
+            time.sleep(0.5)
+            mn = float(self.cfg.get("seq_min", SEQ_MIN))   # 간격은 연속클릭 설정 공유
+            mx = float(self.cfg.get("seq_max", SEQ_MAX))
+            if mx < mn:
+                mn, mx = mx, mn
+            random.shuffle(coords)   # 매 실행마다 클릭 순서 무작위
+            n = len(coords)
+            for i, (x, y) in enumerate(coords):
+                self.after(0, lambda a=i: self.status.set(f"🔗 연속클릭2 {a+1}/{n} (랜덤 순서)..."))
+                pyautogui.click(x, y)
+                if i < n - 1:
+                    time.sleep(random.uniform(mn, mx))
+            self.after(0, lambda: self.status.set(f"✔ 연속클릭2 완료 ({n}개)"))
+        except Exception as e:
+            self.after(0, lambda err=e: self.status.set(f"연속클릭2 오류: {err}"))
+        finally:
+            self._seq2_running = False
+            self._clear_busy("연속클릭2")
+            self.after(0, self._restore_back)
+
     # ── 주말던전 끄기 (연속클릭과 동일 — 별도 좌표/단축키/ON·OFF) ──
     def _open_wdoff_win(self):
         self._open_section_win("_wdoff_win", "🚪 주말던전 끄기", self._build_wdoff, w=500, h=580)
@@ -4605,6 +4927,8 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("relic", i),
                             prev=lambda i: self._preview_dgn2("relic", i),
                             delete=lambda i: self._del_dgn2("relic", i)),
+            "tj":      dict(title="TJ성공!!", key="tj_slots",       clicks=TJ_CLICKS,      color="#ad1457",
+                            reg=self._reg_tj_click,      test=self._test_tj,      prev=self._preview_tj,      delete=self._del_tj),
         }
         return S[fkey]
 
@@ -4865,6 +5189,7 @@ class App(tk.Tk):
     def _flat_spec(self, fkey):
         return {
             "seq":   dict(title="연속클릭",     key="seq_slots",   reg=self._reg_seq_coord,   dele=self._del_seq_coord,   vars_attr="_seq_slot_vars"),
+            "seq2":  dict(title="연속클릭2",    key="seq2_slots",  reg=self._reg_seq2_coord,  dele=self._del_seq2_coord,  vars_attr="_seq2_slot_vars"),
             "wdoff": dict(title="주말던전끄기", key="wdoff_slots", reg=self._reg_wdoff_coord, dele=self._del_wdoff_coord, vars_attr="_wdoff_slot_vars"),
         }[fkey]
 
@@ -6649,7 +6974,7 @@ class App(tk.Tk):
         attrs = ["_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_dollchk_win","_relic_win"]
+                 "_dollchk_win","_relic_win","_tj_win","_seq2_win"]
         return [getattr(self, a) for a in attrs
                 if getattr(self, a, None) and getattr(self, a).winfo_exists()]
 
@@ -7375,6 +7700,7 @@ class App(tk.Tk):
         self._item_stop      = True
         self._dollchk_stop   = True
         self._relic_stop     = True
+        self._tj_stop        = True
         self._reroll_running = False  # 오림의일기장도 정지
         self._busy_task      = None   # 잠금 해제
         self._task_queue.clear()      # 멈춤 시 대기열도 비움
@@ -8827,6 +9153,10 @@ class CoordOverlay(tk.Toplevel):
             label = f"아이템정리 #{app._reg_item_slot_idx+1} [{_w}] 위치"
         elif mode == "seq":
             label = f"연속클릭 #{app._seq_reg_idx+1} 위치"
+        elif mode == "seq2":
+            label = f"연속클릭2 #{app._seq2_reg_idx+1} 위치"
+        elif mode == "tj":
+            label = f"TJ성공!! #{app._reg_tj_slot_idx+1} [좌표{app._reg_tj_click_idx+1}] 위치"
         elif mode == "dc":
             label = f"일반던전충전 #{app._dc_reg_idx+1} 위치"
         elif mode == "doll":
@@ -8861,6 +9191,8 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "sched":     self.app.on_sched_coord(x, y)
         elif self.mode == "dgn2":      self.app.on_dgn2_coord(x, y)
         elif self.mode == "item":      self.app.on_item_coord(x, y)
+        elif self.mode == "tj":        self.app.on_tj_coord(x, y)
+        elif self.mode == "seq2":      self.app.on_seq2_coord(x, y)
         elif self.mode == "seq":       self.app.on_seq_coord(x, y)
         elif self.mode == "dc":        self.app.on_dc_coord(x, y)
         elif self.mode == "doll":      self.app.on_doll_coord(x, y)
