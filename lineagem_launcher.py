@@ -190,11 +190,6 @@ DEFAULT_CFG = {
     "dollchk_slots": None,              # 인형확인용 — 처음 로드 때 변신확인용 복사
     "relic_slots":   None,              # 성물확인용 — 처음 로드 때 변신확인용 복사
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
-    "seq2_slots":    None,              # 뒤로가기 — 처음 로드 때 연속클릭 좌표 복사
-    "seq2_hotkey":   None,
-    "seq2_on":       False,
-    "seq2_min":      None,              # 뒤로가기 간격 — 처음엔 연속클릭 값 복사, 이후 독립
-    "seq2_max":      None,
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
     "seq_slots":    [None]*SEQ_SLOTS,   # 연속 클릭 좌표 (각 [x,y] 또는 None)
     "seq_hotkey":   None,               # 연속 클릭 실행 단축키 (가상키 코드)
@@ -436,18 +431,6 @@ def load_cfg():
         while len(nt) < 16:
             nt.append({"name": "미등록", "coords": [None] * TJ_CLICKS})
         cfg["tj_slots"] = nt[:16]
-        # seq2_slots (뒤로가기) — 처음 생기면 연속클릭 좌표 그대로 복사
-        s2 = cfg.get("seq2_slots")
-        if not s2:
-            cfg["seq2_slots"] = _cp2.deepcopy(cfg.get("seq_slots") or [None] * SEQ_SLOTS)
-        else:
-            while len(s2) < SEQ_SLOTS: s2.append(None)
-            cfg["seq2_slots"] = s2[:SEQ_SLOTS]
-        # 뒤로가기 간격 — 처음엔 연속클릭 간격을 복사해 오되 이후엔 독립
-        if cfg.get("seq2_min") is None:
-            cfg["seq2_min"] = cfg.get("seq_min", SEQ_MIN)
-        if cfg.get("seq2_max") is None:
-            cfg["seq2_max"] = cfg.get("seq_max", SEQ_MAX)
         # wdoff_slots (주말던전 끄기 좌표 16개 고정)
         wq = cfg.get("wdoff_slots", [])
         if not isinstance(wq, list):
@@ -662,8 +645,6 @@ class App(tk.Tk):
         self._dollchk_stop = False
         self._relic_stop   = False
         self._tj_stop      = False
-        self._seq2_on      = bool(self.cfg.get("seq2_on", False))
-        self._seq2_running = False
         self._task_queue   = []   # 연속으로 누른 실행/재측정 순차 실행 대기열
         self._build_ui()
         # 메인런처 위치 기억 — 옮겨두면 재시작해도 그 자리 (기본: 좌측 약 2cm)
@@ -686,7 +667,6 @@ class App(tk.Tk):
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._wdoff_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._item_hotkey_loop, daemon=True).start()
-        threading.Thread(target=self._seq2_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._popup_guard_loop, daemon=True).start()
         threading.Thread(target=self._claude_attention_loop, daemon=True).start()
         # 작업 중에는 클로드를 강제로 내리지 않는다(예전 시작 버스트 제거).
@@ -817,7 +797,7 @@ class App(tk.Tk):
         # 실행 / 멈춤
         btn_row = tk.Frame(self); btn_row.pack(pady=6)
         # TJ성공!! (동그라미 버튼) + 실행 — 계정관리 왼쪽
-        tjcol = tk.Frame(btn_row); tjcol.pack(side="left", padx=(0, 4))
+        tjcol = tk.Frame(btn_row); tjcol.pack(side="left", padx=(0, 47))
         self._tjcol = tjcol
         tjc = tk.Canvas(tjcol, width=58, height=58, highlightthickness=0,
                         bg=self.cget("bg"), cursor="hand2")
@@ -829,18 +809,6 @@ class App(tk.Tk):
         tk.Button(tjcol, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
                   width=4, height=2, command=self._start_tj).pack(pady=(2, 0))
-        # 뒤로가기 (동그라미 버튼) + 실행 — TJ성공!! 옆
-        s2col = tk.Frame(btn_row); s2col.pack(side="left", padx=(0, 47))
-        s2c = tk.Canvas(s2col, width=58, height=58, highlightthickness=0,
-                        bg=self.cget("bg"), cursor="hand2")
-        s2c.pack()
-        s2c.create_oval(2, 2, 56, 56, fill="#7d3c98", outline="#5b2c6f", width=3)
-        s2c.create_text(29, 29, text="↩ 뒤로\n가기", fill="white",
-                        font=("맑은 고딕", 8, "bold"), justify="center")
-        s2c.bind("<Button-1>", lambda e: self._open_seq2_win())
-        tk.Button(s2col, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
-                  bg="#27ae60", fg="white", activebackground="#1e8449",
-                  width=4, height=2, command=self._start_seq2).pack(pady=(2, 0))
         tk.Button(btn_row, text="🔑 계정\n관리",
             font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
             activebackground="#0e6655", width=7, height=2,
@@ -2277,6 +2245,14 @@ class App(tk.Tk):
             speed = 1.0
             for phase in range(TJ_CLICKS):
                 if getattr(self, "_tj_stop", False): break
+                if phase == TJ_CLICKS - 1:
+                    # 좌표3(닫기)은 좌표2 웨이브를 전부 누른 뒤 40초~1분 후에
+                    wait_end = time.time() + random.uniform(40, 60)
+                    while time.time() < wait_end:
+                        if getattr(self, "_tj_stop", False): break
+                        self.status.set(f"⭕ 닫기(좌표3)까지 {int(wait_end - time.time())}초 대기...")
+                        time.sleep(0.5)
+                    if getattr(self, "_tj_stop", False): break
                 wave = [(i, s) for i, s in targets
                         if s.get("coords", [None]*TJ_CLICKS)[phase]]
                 random.shuffle(wave)   # 웨이브마다 슬롯 순서 랜덤
@@ -4097,189 +4073,6 @@ class App(tk.Tk):
                 threading.Thread(target=self._run_seq, daemon=True).start()
             prev = down
 
-    # ── 뒤로가기 (연속클릭 복제 — 좌표/단축키/ON·OFF/간격 전부 독립) ──
-    def _open_seq2_win(self):
-        self._open_section_win("_seq2_win", "↩ 뒤로가기", self._build_seq2, w=500, h=580)
-
-    def _build_seq2(self, parent):
-        tk.Label(parent, text="뒤로가기 — 단축키를 누르면 순서대로 1회씩",
-                 font=("맑은 고딕", 9, "bold"), fg="#7d3c98").pack(anchor="w", padx=4, pady=(4,2))
-        top = tk.Frame(parent); top.pack(pady=3)
-        self._seq2_toggle_btn = tk.Button(top, text="ON" if self._seq2_on else "OFF",
-                                          font=("맑은 고딕", 9, "bold"),
-                                          bg="#27ae60" if self._seq2_on else "#7f8c8d",
-                                          fg="white", width=6, command=self._toggle_seq2)
-        self._seq2_toggle_btn.pack(side="left", padx=(0, 3))
-        tk.Button(top, text="▶ 실행", font=("맑은 고딕", 9, "bold"),
-                  bg="#27ae60", fg="white", width=6,
-                  command=self._start_seq2).pack(side="left", padx=3)
-        tk.Button(top, text="⌨ 단축키", font=("맑은 고딕", 8),
-                  bg="#2c3e50", fg="white",
-                  command=self._assign_seq2_hotkey).pack(side="left", padx=3)
-        tk.Button(top, text="👁 전체보기", font=("맑은 고딕", 8),
-                  bg="#566573", fg="white",
-                  command=lambda: self._flat_preview_all("seq2")).pack(side="left", padx=3)
-        self._seq2_hotkey_var = tk.StringVar(
-            value=f"단축키: {self._vk_name(self.cfg.get('seq2_hotkey'))}")
-        tk.Label(parent, textvariable=self._seq2_hotkey_var,
-                 font=("맑은 고딕", 8), fg="#34495e").pack()
-        int_row = tk.Frame(parent); int_row.pack(pady=2)
-        tk.Label(int_row, text="간격(초)", font=("맑은 고딕", 8)).pack(side="left")
-        self._seq2_min_var = tk.StringVar(value=str(self.cfg.get("seq2_min", SEQ_MIN)))
-        self._seq2_max_var = tk.StringVar(value=str(self.cfg.get("seq2_max", SEQ_MAX)))
-        tk.Entry(int_row, textvariable=self._seq2_min_var, width=5,
-                 font=("맑은 고딕", 8)).pack(side="left", padx=2)
-        tk.Label(int_row, text="~").pack(side="left")
-        tk.Entry(int_row, textvariable=self._seq2_max_var, width=5,
-                 font=("맑은 고딕", 8)).pack(side="left", padx=2)
-        tk.Button(int_row, text="저장", font=("맑은 고딕", 7),
-                  command=self._save_seq2_interval).pack(side="left", padx=4)
-        self._build_flat_grid(parent, "seq2")   # 4×4 그리드 (화면 배치와 동일)
-
-    def _save_seq2_interval(self):
-        try:
-            mn = float(self._seq2_min_var.get())
-            mx = float(self._seq2_max_var.get())
-            if mx < mn:
-                mn, mx = mx, mn
-            self.cfg["seq2_min"] = mn
-            self.cfg["seq2_max"] = mx
-            save_cfg(self.cfg)
-            self.status.set(f"✔ 뒤로가기 간격 저장: {mn}~{mx}초")
-        except Exception:
-            self.status.set("간격 값이 잘못됐습니다 (숫자로 입력)")
-
-    def _reg_seq2_coord(self, idx):
-        self._seq2_reg_idx = idx
-        self.status.set(f"3초 후 뒤로가기 #{idx+1} 위치를 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
-                                   CoordOverlay(self, mode="seq2")])
-
-    def on_seq2_coord(self, x, y):
-        seq = self.cfg.get("seq2_slots") or [None] * SEQ_SLOTS
-        while len(seq) < SEQ_SLOTS:
-            seq.append(None)
-        seq[self._seq2_reg_idx] = [x, y]
-        self.cfg["seq2_slots"] = seq
-        save_cfg(self.cfg)
-        if hasattr(self, "_seq2_slot_vars") and self._seq2_reg_idx < len(self._seq2_slot_vars):
-            self._seq2_slot_vars[self._seq2_reg_idx].set(f"({x},{y})")
-        self.status.set(f"✔ 뒤로가기 #{self._seq2_reg_idx+1} 등록: ({x},{y})")
-        self.deiconify()
-
-    def _del_seq2_coord(self, idx):
-        seq = self.cfg.get("seq2_slots") or [None] * SEQ_SLOTS
-        if idx < len(seq):
-            seq[idx] = None
-            self.cfg["seq2_slots"] = seq
-            save_cfg(self.cfg)
-        if hasattr(self, "_seq2_slot_vars") and idx < len(self._seq2_slot_vars):
-            self._seq2_slot_vars[idx].set("미등록")
-        self.status.set(f"뒤로가기 #{idx+1} 삭제")
-
-    def _toggle_seq2(self):
-        self._seq2_on = not getattr(self, "_seq2_on", False)
-        self.cfg["seq2_on"] = self._seq2_on
-        save_cfg(self.cfg)
-        if hasattr(self, "_seq2_toggle_btn"):
-            try:
-                self._seq2_toggle_btn.config(text="ON" if self._seq2_on else "OFF",
-                                             bg="#27ae60" if self._seq2_on else "#7f8c8d")
-            except Exception:
-                pass
-        if self._seq2_on:
-            self.status.set(f"뒤로가기 ON — {self._vk_name(self.cfg.get('seq2_hotkey'))} 누르면 실행")
-        else:
-            self.status.set("뒤로가기 OFF")
-
-    def _assign_seq2_hotkey(self):
-        self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
-        def _cap():
-            import ctypes
-            time.sleep(0.3)
-            end = time.time() + 5
-            captured = None
-            while time.time() < end:
-                for vk in range(0x08, 0xFF):
-                    if vk in (0x01, 0x02, 0x04):
-                        continue
-                    if ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000:
-                        captured = vk
-                        break
-                if captured is not None:
-                    break
-                time.sleep(0.02)
-            if captured is None:
-                self.after(0, lambda: self.status.set("단축키 지정 취소 (시간초과)"))
-                return
-            if captured == 0x1B:
-                self.after(0, lambda: self.status.set("단축키 지정 취소"))
-                return
-            self.cfg["seq2_hotkey"] = captured
-            save_cfg(self.cfg)
-            name = self._vk_name(captured)
-            def _upd():
-                if hasattr(self, "_seq2_hotkey_var"):
-                    self._seq2_hotkey_var.set(f"단축키: {name}")
-                self.status.set(f"✔ 단축키 지정: {name}")
-            self.after(0, _upd)
-        threading.Thread(target=_cap, daemon=True).start()
-
-    def _seq2_hotkey_loop(self):
-        """전역 단축키 감시 — ON 상태에서 지정키가 눌리면 뒤로가기 실행."""
-        import ctypes
-        prev = False
-        while True:
-            time.sleep(0.03)
-            vk = self.cfg.get("seq2_hotkey")
-            if not getattr(self, "_seq2_on", False) or not vk:
-                prev = False
-                continue
-            try:
-                down = bool(ctypes.windll.user32.GetAsyncKeyState(int(vk)) & 0x8000)
-            except Exception:
-                prev = False
-                continue
-            if down and not prev and not getattr(self, "_seq2_running", False):
-                threading.Thread(target=self._run_seq2, daemon=True).start()
-            prev = down
-
-    def _start_seq2(self):
-        threading.Thread(target=self._run_seq2, daemon=True).start()
-
-    def _run_seq2(self):
-        if getattr(self, "_seq2_running", False):
-            return
-        seq = self.cfg.get("seq2_slots") or []
-        coords = [c for c in seq if c]
-        if not coords:
-            self.after(0, lambda: self.status.set("뒤로가기: 등록된 좌표가 없습니다"))
-            return
-        if not self._try_busy_or_queue("뒤로가기", self._start_seq2):
-            return
-        self._seq2_running = True
-        try:
-            self.after(0, self._seq_hide)
-            time.sleep(0.5)
-            mn = float(self.cfg.get("seq2_min", SEQ_MIN))   # 뒤로가기 전용 간격 (독립)
-            mx = float(self.cfg.get("seq2_max", SEQ_MAX))
-            if mx < mn:
-                mn, mx = mx, mn
-            random.shuffle(coords)   # 매 실행마다 클릭 순서 무작위
-            n = len(coords)
-            for i, (x, y) in enumerate(coords):
-                self.after(0, lambda a=i: self.status.set(f"↩ 뒤로가기 {a+1}/{n} (랜덤 순서)..."))
-                pyautogui.click(x, y)
-                if i < n - 1:
-                    time.sleep(random.uniform(mn, mx))
-            self.after(0, lambda: self.status.set(f"✔ 뒤로가기 완료 ({n}개)"))
-        except Exception as e:
-            self.after(0, lambda err=e: self.status.set(f"뒤로가기 오류: {err}"))
-        finally:
-            self._seq2_running = False
-            self._clear_busy("뒤로가기")
-            self.after(0, self._restore_back)
-
     # ── 주말던전 끄기 (연속클릭과 동일 — 별도 좌표/단축키/ON·OFF) ──
     def _open_wdoff_win(self):
         self._open_section_win("_wdoff_win", "🚪 주말던전 끄기", self._build_wdoff, w=500, h=580)
@@ -5256,7 +5049,6 @@ class App(tk.Tk):
     def _flat_spec(self, fkey):
         return {
             "seq":   dict(title="연속클릭",     key="seq_slots",   reg=self._reg_seq_coord,   dele=self._del_seq_coord,   vars_attr="_seq_slot_vars"),
-            "seq2":  dict(title="뒤로가기",     key="seq2_slots",  reg=self._reg_seq2_coord,  dele=self._del_seq2_coord,  vars_attr="_seq2_slot_vars"),
             "wdoff": dict(title="주말던전끄기", key="wdoff_slots", reg=self._reg_wdoff_coord, dele=self._del_wdoff_coord, vars_attr="_wdoff_slot_vars"),
         }[fkey]
 
@@ -7041,7 +6833,7 @@ class App(tk.Tk):
         attrs = ["_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_dollchk_win","_relic_win","_tj_win","_seq2_win"]
+                 "_dollchk_win","_relic_win","_tj_win"]
         return [getattr(self, a) for a in attrs
                 if getattr(self, a, None) and getattr(self, a).winfo_exists()]
 
@@ -9220,8 +9012,6 @@ class CoordOverlay(tk.Toplevel):
             label = f"아이템정리 #{app._reg_item_slot_idx+1} [{_w}] 위치"
         elif mode == "seq":
             label = f"연속클릭 #{app._seq_reg_idx+1} 위치"
-        elif mode == "seq2":
-            label = f"뒤로가기 #{app._seq2_reg_idx+1} 위치"
         elif mode == "tj":
             label = f"TJ성공!! #{app._reg_tj_slot_idx+1} [좌표{app._reg_tj_click_idx+1}] 위치"
         elif mode == "dc":
@@ -9259,7 +9049,6 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "dgn2":      self.app.on_dgn2_coord(x, y)
         elif self.mode == "item":      self.app.on_item_coord(x, y)
         elif self.mode == "tj":        self.app.on_tj_coord(x, y)
-        elif self.mode == "seq2":      self.app.on_seq2_coord(x, y)
         elif self.mode == "seq":       self.app.on_seq_coord(x, y)
         elif self.mode == "dc":        self.app.on_dc_coord(x, y)
         elif self.mode == "doll":      self.app.on_doll_coord(x, y)
