@@ -670,6 +670,7 @@ class App(tk.Tk):
             pass
         self._pos_save_job = None
         self.bind("<Configure>", self._on_main_move, add="+")
+        self.after(600, self._align_tj_to_dc)   # TJ성공!! 좌측 끝 = 일반던전충전 좌측 끝
         self._sync_sched_click1()   # 스케줄 클릭1 = 과거섬 클릭1 (시작 시 1회 동기화)
         self.after(1000, self._mail_scheduler_tick)
         self.after(1000, self._past_scheduler_tick)
@@ -813,6 +814,7 @@ class App(tk.Tk):
         btn_row = tk.Frame(self); btn_row.pack(pady=6)
         # TJ성공!! (동그라미 버튼) + 실행 — 계정관리 왼쪽
         tjcol = tk.Frame(btn_row); tjcol.pack(side="left", padx=(0, 4))
+        self._tjcol = tjcol
         tjc = tk.Canvas(tjcol, width=58, height=58, highlightthickness=0,
                         bg=self.cget("bg"), cursor="hand2")
         tjc.pack()
@@ -823,11 +825,15 @@ class App(tk.Tk):
         tk.Button(tjcol, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
                   width=4, height=2, command=self._start_tj).pack(pady=(2, 0))
-        # 뒤로가기 + 실행 — TJ성공!! 옆 (계정관리와 1.1cm 간격 → 두 버튼이 왼쪽으로)
+        # 뒤로가기 (동그라미 버튼) + 실행 — TJ성공!! 옆
         s2col = tk.Frame(btn_row); s2col.pack(side="left", padx=(0, 47))
-        tk.Button(s2col, text="↩ 뒤로\n가기", font=("맑은 고딕", 8, "bold"),
-                  bg="#7d3c98", fg="white", activebackground="#5b2c6f",
-                  width=6, height=2, command=self._open_seq2_win).pack()
+        s2c = tk.Canvas(s2col, width=58, height=58, highlightthickness=0,
+                        bg=self.cget("bg"), cursor="hand2")
+        s2c.pack()
+        s2c.create_oval(2, 2, 56, 56, fill="#7d3c98", outline="#5b2c6f", width=3)
+        s2c.create_text(29, 29, text="↩ 뒤로\n가기", fill="white",
+                        font=("맑은 고딕", 8, "bold"), justify="center")
+        s2c.bind("<Button-1>", lambda e: self._open_seq2_win())
         tk.Button(s2col, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
                   width=4, height=2, command=self._start_seq2).pack(pady=(2, 0))
@@ -902,6 +908,9 @@ class App(tk.Tk):
         upd.create_text(39, 29, text="🔄", font=("맑은 고딕", 13))
         upd.create_text(39, 52, text="업데이트", fill="white", font=("맑은 고딕", 9, "bold"))
         upd.bind("<Button-1>", lambda e: self._run_updater())
+        # TJ성공!! 좌측 끝 정렬용 가변 여백 (행이 가운데 정렬이라 오른쪽을 늘려 왼쪽으로 밀기)
+        self._btnrow_pad = tk.Frame(btn_row, width=0, height=1)
+        self._btnrow_pad.pack(side="left")
 
         # 다야 카운트 데이터 변수 (UI는 별도 창)
         self._cnt_total_var = tk.StringVar(value="합계: 0")
@@ -937,10 +946,11 @@ class App(tk.Tk):
         # 배열창 재배치 왼쪽: (1행) 일반던전충전+실행  (2행) 인형탐험+실행 — 각 버튼 옆에 실행
         dc_col = tk.Frame(front_row); dc_col.pack(side="left", padx=(4,8), anchor="n")
         r1 = tk.Frame(dc_col); r1.pack(anchor="n")
-        tk.Button(r1, text="🎯 일반\n던전충전",
+        self._dc_open_btn = tk.Button(r1, text="🎯 일반\n던전충전",
             font=("맑은 고딕", 9, "bold"), bg="#6c3483", fg="white",
             activebackground="#512e6f", width=7, height=2,
-            command=self._open_dc_win).pack(side="left")
+            command=self._open_dc_win)
+        self._dc_open_btn.pack(side="left")
         tk.Button(r1, text="▶\n실행",
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
@@ -2499,6 +2509,20 @@ class App(tk.Tk):
         w, h, x, y = self._target_geometry()
         self.geometry(f"{w}x{h}+{x}+{y}")
         self._did_initial_fit = True   # normal 상태에서 실제로 맞췄을 때만 완료 표시
+
+    def _align_tj_to_dc(self, _tries=0):
+        """TJ성공!! 왼쪽 끝을 일반던전충전 버튼 왼쪽 끝에 맞춤
+        (버튼 행이 가운데 정렬이라, 행 오른쪽 여백을 늘려 왼쪽으로 민다)."""
+        try:
+            self.update_idletasks()
+            dx = self._tjcol.winfo_rootx() - self._dc_open_btn.winfo_rootx()
+            if abs(dx) > 2:
+                w = max(0, self._btnrow_pad.winfo_reqwidth() + 2 * dx)
+                self._btnrow_pad.config(width=w)
+                if _tries < 4:
+                    self.after(150, lambda: self._align_tj_to_dc(_tries + 1))
+        except Exception:
+            pass
 
     def _bring_to_front(self, e=None):
         if getattr(self, "_quiet_restore", False):   # 맨뒤 복원 중엔 올리지 않음
