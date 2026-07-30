@@ -739,7 +739,7 @@ class App(tk.Tk):
         import subprocess, sys
         exe = sys.executable.replace("python.exe", "pythonw.exe")
         self._ocr_proc = subprocess.Popen([exe, os.path.join(BASE, "lineagem_ocr.py")])
-        self.iconify()
+        self._send_to_back()
 
     def _open_ocr_scan(self):
         """다야 전체 스캔 — OCR 창 없이 바로 실행, 끝나면 메인런처 복귀+숫자 갱신."""
@@ -763,7 +763,7 @@ class App(tk.Tk):
 
     def _open_island(self):
         import subprocess
-        self.iconify()
+        self._send_to_back()
         self._minimize_claude()
         proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py")])
         self._island_proc = proc
@@ -798,7 +798,7 @@ class App(tk.Tk):
         back_row = tk.Frame(self); back_row.pack(fill="x", padx=16)
         tk.Button(back_row, text="⬇ 맨뒤로", font=("맑은 고딕", 8, "bold"),
                   bg="#5d6d7e", fg="white", activebackground="#34495e",
-                  width=8, command=self._send_to_back).pack(side="left")
+                  width=8, command=self._back_and_claude).pack(side="left")
 
         # 계정 수
         row_acc = tk.Frame(self); row_acc.pack(fill="x", padx=16, pady=2)
@@ -1181,7 +1181,7 @@ class App(tk.Tk):
 
     def _open_past_slot(self, idx):
         """해당 던전 컬럼만 단독으로 섬/던전 실행기 열기."""
-        self.iconify()
+        self._send_to_back()
         self._minimize_claude()
         proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(idx)])
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
@@ -2912,7 +2912,7 @@ class App(tk.Tk):
         """패스권 창이 켜져 있으면 메인 런처 최소화 유지 (섬/던전은 사용자가 직접 복원 가능)"""
         pass_open = self._pass_win and self._pass_win.winfo_exists()
         if pass_open:
-            self.after(50, self.iconify)
+            self.after(50, self._send_to_back)
             return
         self._last_activity = time.time()   # 다시 올라오면 유휴 타이머 리셋
         # 작업 완료 후 '맨 뒤로 복원'(_restore_back) 중에는 앞으로 올리지 않는다
@@ -2926,7 +2926,7 @@ class App(tk.Tk):
     def _open_pass_win(self):
         if self._pass_win and self._pass_win.winfo_exists():
             self._pass_win.lift(); return
-        self.iconify()
+        self._send_to_back()
         win = tk.Toplevel(self)
         win.title("🎫 패스권 새로운 등록")
         win.geometry("480x720")
@@ -2974,8 +2974,8 @@ class App(tk.Tk):
         threading.Thread(target=self._run_task, args=("패스권", self._run_pass), daemon=True).start()
 
     def _minimize_pass_ui(self):
-        """패스권 실행 시 메인 런처 + 패스권 창 + 클로드 모두 최소화 (클릭이 게임에 닿도록)."""
-        self.iconify()
+        """패스권 실행 시 — 메인은 맨 뒤로, 패스권 창·클로드는 최소화 (클릭이 게임에 닿도록)."""
+        self._send_to_back()
         try:
             if self._pass_win and self._pass_win.winfo_exists():
                 self._pass_win.iconify()
@@ -3339,7 +3339,7 @@ class App(tk.Tk):
     def _run_item(self, slot_idx=None):
         try:
             self.status.set("2초 후 아이템정리 실행...")
-            self.after(0, self.iconify)
+            self.after(0, self._send_to_back)
             time.sleep(2)
             slots = self.cfg.get("item_slots", [])
             if slot_idx is not None:
@@ -4109,7 +4109,7 @@ class App(tk.Tk):
             except Exception:
                 pass
             self.after(0, lambda: _ProfileRefOverlay(self))
-        self.iconify()   # 게임 화면이 보이게 런처 최소화
+        self._send_to_back()   # 게임 화면이 보이게 런처를 맨 뒤로
         self.status.set("기준으로 쓸 영역을 드래그하세요...")
         threading.Thread(target=_do, daemon=True).start()
 
@@ -4339,17 +4339,10 @@ class App(tk.Tk):
     def _seq_hide(self):
         """연속클릭 실행 전, 리니지M 외 창(서브창/메인런처/클로드)을 최소화. 메인스레드에서 호출."""
         try:
-            self._minimize_all()   # 서브창 + 메인 + 클로드 (다른 실행과 동일)
+            self._minimize_all()   # 서브창 + 클로드 최소화, 메인은 맨 뒤로
         except Exception:
             pass
-        # iconify가 안 먹는 경우 대비 — 메인런처를 win32로도 확실히 최소화
-        try:
-            import win32gui, win32con
-            hwnd = win32gui.FindWindow(None, "리니지M 자동 실행")
-            if hwnd:
-                win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
-        except Exception:
-            pass
+        self._send_to_back()       # 한 번 더 확실히 맨 뒤로
 
     def _start_seq(self):
         threading.Thread(target=self._run_seq, daemon=True).start()
@@ -6280,7 +6273,7 @@ class App(tk.Tk):
         import win32gui, win32con, ctypes
         self._plog(f"=== 시작 (타깃='{(self.cfg.get('profile_target_id') or '').strip()}') ===")
         self._minimize_claude()          # 클로드(항상위)가 클릭을 가리지 않게 먼저 내림
-        self.after(0, self.iconify)      # 메인런처도 내림
+        self.after(0, self._send_to_back)      # 메인런처도 내림
         win = find_purple()
         if not win:
             self._plog("퍼플 창 없음 — 종료")
@@ -6497,7 +6490,7 @@ class App(tk.Tk):
         self._sched_any_stop = False
         self._past_stop = False
         self._minimize_claude()          # 클로드(항상위)가 클릭 가리지 않게 먼저 내림
-        self.after(0, self.iconify)
+        self.after(0, self._send_to_back)
         slots = self.cfg.get("past_slots", [])
         active = [(i, s) for i, s in enumerate(slots)
                   if any(s.get("coords", []))]
@@ -6531,7 +6524,7 @@ class App(tk.Tk):
     def _run_mail_scheduled(self):
         import random, datetime
         self._minimize_claude()          # 클로드(항상위)가 클릭 가리지 않게 먼저 내림
-        self.after(0, self.iconify)
+        self.after(0, self._send_to_back)
         slots = self.cfg.get("mail_slots", [])
         active = [(i, s) for i, s in enumerate(slots)
                   if any(c for c in s.get("coords", []))]
@@ -6824,7 +6817,7 @@ class App(tk.Tk):
     def _run_past(self, slot_idx=None):
         try:
             self.status.set("2초 후 과거의말하는섬 실행...")
-            self.after(0, self.iconify)
+            self.after(0, self._send_to_back)
             time.sleep(2)
             slots = self.cfg.get("past_slots", [])
             if slot_idx is not None:
@@ -7008,7 +7001,7 @@ class App(tk.Tk):
         try:
             self._sync_sched_click1()   # 실행 직전 과거섬 클릭1 반영(항상 최신값으로 실행)
             self.status.set("2초 후 매일매일 스케줄 실행...")
-            self.after(0, self.iconify)
+            self.after(0, self._send_to_back)
             time.sleep(2)
             slots = self.cfg.get("sched_slots", [])
             if slot_idx is not None:
@@ -7205,9 +7198,10 @@ class App(tk.Tk):
                 if getattr(self, a, None) and getattr(self, a).winfo_exists()]
 
     def _minimize_all(self):
+        # 원칙: 메인런처는 최소화하지 않고 '맨 뒤'로만 보낸다 (서브창·클로드는 최소화)
         for w in self._section_wins():
             w.iconify()
-        self.iconify()
+        self._send_to_back()
         self._minimize_claude()
 
     def _on_main_move(self, e=None):
@@ -7228,6 +7222,11 @@ class App(tk.Tk):
                 save_cfg(self.cfg)
         except Exception:
             pass
+
+    def _back_and_claude(self):
+        """[⬇ 맨뒤로] 버튼 — 런처는 맨 뒤로, 클로드 창은 최소화."""
+        self._send_to_back()
+        self._minimize_claude()
 
     def _send_to_back(self):
         """창을 최소화하지 않고 z순서 맨 뒤로 (리니지M 클라이언트 뒤)."""
@@ -7494,7 +7493,7 @@ class App(tk.Tk):
         area = self.cfg.get("name_ocr_area")
         if not area:
             self.status.set("먼저 📷 이름 영역등록 버튼으로 영역을 등록해주세요."); return
-        self.iconify()
+        self._send_to_back()
         threading.Thread(target=self._do_ocr_all_names, daemon=True).start()
 
     def _do_ocr_all_names(self):
