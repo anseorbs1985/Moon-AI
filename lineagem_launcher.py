@@ -820,17 +820,17 @@ class App(tk.Tk):
         tjc.create_text(29, 29, text="TJ\n성공!!", fill="white",
                         font=("맑은 고딕", 8, "bold"), justify="center")
         tjc.bind("<Button-1>", lambda e: self._open_tj_win())
-        tk.Button(tjcol, text="▶ 실행", font=("맑은 고딕", 7, "bold"),
+        tk.Button(tjcol, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
-                  width=6, command=self._start_tj).pack(pady=(2, 0))
-        # 뒤로가기 + 실행 — TJ성공!! 옆 (계정관리와 0.5cm 간격 → 두 버튼이 왼쪽으로)
-        s2col = tk.Frame(btn_row); s2col.pack(side="left", padx=(0, 25))
+                  width=4, height=2, command=self._start_tj).pack(pady=(2, 0))
+        # 뒤로가기 + 실행 — TJ성공!! 옆 (계정관리와 0.8cm 간격 → 두 버튼이 왼쪽으로)
+        s2col = tk.Frame(btn_row); s2col.pack(side="left", padx=(0, 36))
         tk.Button(s2col, text="↩ 뒤로\n가기", font=("맑은 고딕", 8, "bold"),
                   bg="#7d3c98", fg="white", activebackground="#5b2c6f",
                   width=6, height=2, command=self._open_seq2_win).pack()
-        tk.Button(s2col, text="▶ 실행", font=("맑은 고딕", 7, "bold"),
+        tk.Button(s2col, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
-                  width=6, command=self._start_seq2).pack(pady=(2, 0))
+                  width=4, height=2, command=self._start_seq2).pack(pady=(2, 0))
         tk.Button(btn_row, text="🔑 계정\n관리",
             font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
             activebackground="#0e6655", width=7, height=2,
