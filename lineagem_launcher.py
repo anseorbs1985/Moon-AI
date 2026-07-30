@@ -2838,14 +2838,19 @@ class App(tk.Tk):
 
     def _align_tj_to_dc(self, _tries=0):
         """TJ성공!! 왼쪽 끝을 일반던전충전 버튼 왼쪽 끝에 맞춤
-        (버튼 행이 가운데 정렬이라, 행 오른쪽 여백을 늘려 왼쪽으로 민다)."""
+        (버튼 행이 가운데 정렬이라, 행 오른쪽 여백을 늘려 왼쪽으로 민다).
+        최소화 상태에선 좌표가 쓰레기값이라 절대 계산하지 않는다."""
         try:
+            if self.state() != "normal":
+                if _tries < 30:   # 창이 보일 때까지 기다렸다가 계산
+                    self.after(1000, lambda: self._align_tj_to_dc(_tries + 1))
+                return
             self.update_idletasks()
             dx = self._tjcol.winfo_rootx() - self._dc_open_btn.winfo_rootx()
-            if abs(dx) > 2:
-                w = max(0, self._btnrow_pad.winfo_reqwidth() + 2 * dx)
+            if abs(dx) > 2 and abs(dx) < 400:   # 비정상 측정값 무시
+                w = max(0, min(250, self._btnrow_pad.winfo_reqwidth() + 2 * dx))
                 self._btnrow_pad.config(width=w)
-                if _tries < 4:
+                if _tries < 34:
                     self.after(150, lambda: self._align_tj_to_dc(_tries + 1))
         except Exception:
             pass
