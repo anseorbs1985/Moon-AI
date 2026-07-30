@@ -125,6 +125,8 @@ ITEM_SWIPE_DIST    = 250   # 아이템정리 클릭3: 누른 채 위로 쓸어�
 TJ_CLICKS          = 3     # TJ성공!! 슬롯당 좌표 수
 TJ_MIN             = 0.7   # TJ성공!! 좌표 간 클릭 간격(초) — 0.7~1.2 랜덤
 TJ_MAX             = 1.2
+TJ_SLOT_MIN        = 0.7   # TJ성공!! 슬롯 간 간격(초) — 0.7~2.3 랜덤
+TJ_SLOT_MAX        = 2.3
 ITEM_SWIPE_COUNT   = 1     # 같은 자리에서 쓸어올리기 반복 횟수
 SCHED_INTERVAL     = 2.5
 PASS_SLOTS         = 16
@@ -2276,7 +2278,7 @@ class App(tk.Tk):
                         time.sleep(random.uniform(TJ_MIN, TJ_MAX))   # 매 클릭 0.7~1.2초 랜덤
                 if getattr(self, "_tj_stop", False): break
                 if ti < len(targets) - 1:
-                    time.sleep(random.uniform(DOLL_SLOT_MIN, DOLL_SLOT_MAX))  # 슬롯 간 간격
+                    time.sleep(random.uniform(TJ_SLOT_MIN, TJ_SLOT_MAX))  # 슬롯 간 0.7~2.3초 랜덤
             self.status.set("✔ TJ성공!! 완료!" if not getattr(self, "_tj_stop", False) else "TJ성공!! 멈춤")
         except Exception as e:
             self.status.set(f"TJ성공!! 오류: {e}")
