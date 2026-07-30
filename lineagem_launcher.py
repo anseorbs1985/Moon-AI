@@ -794,11 +794,16 @@ class App(tk.Tk):
         tk.Label(self, text="리니지M 자동 실행",
                  font=("맑은 고딕", 13, "bold"), fg="#c8a951").pack(pady=(10, 2))
 
-        # 전환할 계정 수 위: 런처를 맨 뒤로 보내는 버튼 (클라 확인할 때)
-        back_row = tk.Frame(self); back_row.pack(fill="x", padx=16)
-        tk.Button(back_row, text="⬇ 맨뒤로", font=("맑은 고딕", 8, "bold"),
-                  bg="#5d6d7e", fg="white", activebackground="#34495e",
-                  width=8, command=self._back_and_claude).pack(side="left")
+        # 전환할 계정 수 위: 맨뒤로 동그라미 버튼 (세로선은 TJ성공!!과 자동 정렬)
+        back_row = tk.Frame(self); back_row.pack(fill="x")
+        self._back_circle = tk.Canvas(back_row, width=58, height=58, highlightthickness=0,
+                                      bg=self.cget("bg"), cursor="hand2")
+        self._back_circle.pack(side="left", padx=(30, 0))
+        self._back_circle.create_oval(2, 2, 56, 56, fill="#5d6d7e", outline="#34495e", width=3)
+        self._back_circle.create_text(29, 29, text="⬇ 맨\n뒤로", fill="white",
+                                      font=("맑은 고딕", 8, "bold"), justify="center")
+        # "break" 반환으로 '클릭=앞으로' 핸들러(_raise_on_click)가 도로 올리는 것 차단
+        self._back_circle.bind("<Button-1>", lambda e: (self._back_and_claude() or "break"))
 
         # 계정 수
         row_acc = tk.Frame(self); row_acc.pack(fill="x", padx=16, pady=2)
@@ -810,7 +815,7 @@ class App(tk.Tk):
         # 실행 / 멈춤
         btn_row = tk.Frame(self); btn_row.pack(pady=6)
         # TJ성공!! (동그라미 버튼) + 실행 — 계정관리 왼쪽
-        tjcol = tk.Frame(btn_row); tjcol.pack(side="left", padx=(0, 47))
+        tjcol = tk.Frame(btn_row); tjcol.pack(side="left", padx=(0, 47), anchor="n")
         self._tjcol = tjcol
         tjc = tk.Canvas(tjcol, width=58, height=58, highlightthickness=0,
                         bg=self.cget("bg"), cursor="hand2")
@@ -2858,6 +2863,13 @@ class App(tk.Tk):
                 self._btnrow_pad.config(width=w)
                 if _tries < 34:
                     self.after(150, lambda: self._align_tj_to_dc(_tries + 1))
+            # 맨뒤로 동그라미도 TJ성공!!과 같은 세로선에
+            try:
+                bx = self._tjcol.winfo_rootx() - self.winfo_rootx()
+                if 0 <= bx < 800:
+                    self._back_circle.pack_configure(padx=(bx, 0))
+            except Exception:
+                pass
         except Exception:
             pass
 
