@@ -3003,11 +3003,11 @@ class App(tk.Tk):
                         if self._item_stop: break
                         self.status.set(f"🧹 [{name}] 위로 쓸어올리기 {rep+1}/{ITEM_SWIPE_COUNT}...")
                         pyautogui.mouseDown(sx, sy)
-                        time.sleep(0.10)              # 드래그로 인식될 시간
-                        steps = 12
+                        time.sleep(0.09)              # 드래그로 인식될 시간
+                        steps = 6                     # 빠른 플릭 — 속도가 높을수록 관성 스크롤이 세짐
                         for st in range(1, steps + 1):
                             pyautogui.moveTo(sx, sy - int(ITEM_SWIPE_DIST * st / steps))
-                            time.sleep(0.012)
+                            time.sleep(0.005)
                         pyautogui.mouseUp(sx, sy - ITEM_SWIPE_DIST)   # 끝에서 바로 놓기 → 관성 스크롤
                         if rep < ITEM_SWIPE_COUNT - 1:
                             time.sleep(random.uniform(0.4, 0.7))   # 다음 쓸어올리기 전 잠깐 대기
