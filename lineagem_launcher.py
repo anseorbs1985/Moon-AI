@@ -823,8 +823,8 @@ class App(tk.Tk):
         tk.Button(tjcol, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
                   width=4, height=2, command=self._start_tj).pack(pady=(2, 0))
-        # 뒤로가기 + 실행 — TJ성공!! 옆 (계정관리와 0.8cm 간격 → 두 버튼이 왼쪽으로)
-        s2col = tk.Frame(btn_row); s2col.pack(side="left", padx=(0, 36))
+        # 뒤로가기 + 실행 — TJ성공!! 옆 (계정관리와 1.1cm 간격 → 두 버튼이 왼쪽으로)
+        s2col = tk.Frame(btn_row); s2col.pack(side="left", padx=(0, 47))
         tk.Button(s2col, text="↩ 뒤로\n가기", font=("맑은 고딕", 8, "bold"),
                   bg="#7d3c98", fg="white", activebackground="#5b2c6f",
                   width=6, height=2, command=self._open_seq2_win).pack()
