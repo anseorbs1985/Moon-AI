@@ -5904,6 +5904,13 @@ class App(tk.Tk):
                 if cls in SKIP_CLASSES:
                     return True
                 tl = title.lower()
+                # 퍼플 로고 전체화면 스플래시(계정 전환 시 화면을 검게 덮음) — 항상 숨김
+                if tl.startswith("ngp_purplelogo"):
+                    r0 = wintypes.RECT(); u.GetWindowRect(hwnd, ctypes.byref(r0))
+                    if (r0.right - r0.left) >= sw - 10 and (r0.bottom - r0.top) >= sh - 10:
+                        u.ShowWindow(hwnd, SW_HIDE)
+                        _glog(f"퍼플 로고 스플래시 숨김: '{title}'")
+                        return True
                 # 게임/런처/클로드 + 원격제어·파일전송 창은 절대 건드리지 않음
                 if any(kk in tl for kk in (
                         "purple", "리니지m", "claude",
