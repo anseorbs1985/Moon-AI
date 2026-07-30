@@ -655,6 +655,12 @@ class App(tk.Tk):
         except Exception:
             pass
         self._pos_save_job = None
+        # 떠있는 클라 메모 4개 — 완전 분리 실행. 실패해도 런처엔 영향 없음.
+        try:
+            self._memo_wins = {}
+            self.after(3000, self._memo_tick)
+        except Exception:
+            pass
         self.bind("<Configure>", self._on_main_move, add="+")
         self.after(600, self._align_tj_to_dc)   # TJ성공!! 좌측 끝 = 일반던전충전 좌측 끝
         self._sync_sched_click1()   # 스케줄 클릭1 = 과거섬 클릭1 (시작 시 1회 동기화)
@@ -1057,7 +1063,7 @@ class App(tk.Tk):
         except Exception:
             pass
 
-    def _open_section_win(self, attr, title, build_fn, w=420, h=700, pinnable=False):
+    def _open_section_win(self, attr, title, build_fn, w=420, h=700, pinnable=False, fit=True):
         win = getattr(self, attr, None)
         if win and win.winfo_exists():
             win.lift(); return
@@ -1083,13 +1089,14 @@ class App(tk.Tk):
         if pinnable:
             self._add_drag_bar(win, attr, pos_key)
         self._refresh_ui()
-        # 내용 크기에 맞게 창 가로+세로 자동 조정 (셀에 딱 맞춤)
-        def _fit():
-            win.update_idletasks()
-            nw = win.winfo_reqwidth() + 10
-            nh = win.winfo_reqheight() + 6
-            win.geometry(f"{nw}x{nh}")
-        win.after(80, _fit)
+        # 내용 크기에 맞게 창 가로+세로 자동 조정 (셀에 딱 맞춤). fit=False면 지정 크기 고정.
+        if fit:
+            def _fit():
+                win.update_idletasks()
+                nw = win.winfo_reqwidth() + 10
+                nh = win.winfo_reqheight() + 6
+                win.geometry(f"{nw}x{nh}")
+            win.after(80, _fit)
 
     def _close_subwin(self, win):
         """서브창을 닫고 메인런처를 앞으로 띄운다."""
@@ -1647,6 +1654,8 @@ class App(tk.Tk):
                   command=self._clear_accounts).pack(side="right", padx=(2,0))
         tk.Button(acc_title, text="전체저장", font=("맑은 고딕", 7), bg="#27ae60", fg="white",
                   command=self._save_accounts).pack(side="right")
+        tk.Button(acc_title, text="🔐 본인확인", font=("맑은 고딕", 7), bg="#7d3c98", fg="white",
+                  command=self._open_verify_win).pack(side="right", padx=(0,4))
 
         TYPES, TYPE_COLORS = self.ACC_TYPES, self.ACC_COLORS
         # 창을 다시 열 때 이전 창의 폰트맞춤 trace 제거 (중복 누적 방지)
@@ -1664,7 +1673,8 @@ class App(tk.Tk):
                 tk.Label(top, text=f"{idx+1:02d}", font=("맑은 고딕", 7, "bold"), fg="#888").pack(side="left")
                 t = self._acc_type_vars[idx].get()
                 om = tk.OptionMenu(top, self._acc_type_vars[idx], *TYPES,
-                                   command=lambda val, i=idx: self._acc_color_for(i, val))
+                                   command=lambda val, i=idx: (self._acc_color_for(i, val),
+                                                               self._schedule_acc_autosave()))
                 om.config(font=("맑은 고딕", 7, "bold"), fg="white", width=6,
                           bg=TYPE_COLORS[TYPES.index(t) if t in TYPES else 0],
                           activebackground="#555", pady=0, relief="raised",
@@ -1683,7 +1693,8 @@ class App(tk.Tk):
                     ent.pack(side="left", fill="x", expand=True)
                     # 글자 수에 맞춰 폰트 축소 — 긴 내용도 칸 안에 보이게
                     tid = var.trace_add("write",
-                        lambda *a, e=ent, v=var: self._fit_acc_entry(e, v))
+                        lambda *a, e=ent, v=var: (self._fit_acc_entry(e, v),
+                                                  self._schedule_acc_autosave()))
                     self._acc_fit_traces[(idx, j)] = (var, tid)
                     self._fit_acc_entry(ent, var)
                     tk.Button(fr, text="📋", font=("맑은 고딕", 6), width=2, pady=0,
@@ -2460,6 +2471,332 @@ class App(tk.Tk):
                 self._accounts[i][f"f{j+1}"] = self._acc_vars[i][j].get()
         save_accounts(self._accounts)
         self.status.set("✔ 계정 정보 저장 완료")
+
+    def _schedule_acc_autosave(self):
+        """계정 칸 수정 시 자동저장 예약 (0.8초 디바운스 — 저장 버튼 안 눌러도 안 날아감)."""
+        job = getattr(self, "_acc_save_job", None)
+        if job:
+            try: self.after_cancel(job)
+            except Exception: pass
+        self._acc_save_job = self.after(800, self._autosave_accounts)
+
+    def _autosave_accounts(self):
+        self._acc_save_job = None
+        try:
+            for i in range(20):
+                self._accounts[i]["type"] = self._acc_type_vars[i].get()
+                for j in range(5):
+                    self._accounts[i][f"f{j+1}"] = self._acc_vars[i][j].get()
+            save_accounts(self._accounts)
+            self.status.set("💾 계정 자동저장됨")
+        except Exception:
+            pass
+
+    # ── 🔐 본인확인 도우미 (임시제한 해제 시 전화·이메일 붙여넣기 보조) ──────
+    #    감지+계정확인+전화/이메일 클립보드 복사까지만. 붙여넣기·확인은 사람이.
+    @staticmethod
+    def _vf_is_phone(v):
+        import re
+        v = str(v).strip()
+        return bool(re.search(r"01[016789][-\s]?\d{3,4}[-\s]?\d{4}", v)) or \
+               bool(re.match(r"^\d[\d\-\s]{8,}$", v))
+
+    def _vf_id_of(self, fields):
+        """계정 5칸 중 표시할 아이디 하나 — 한글 아이디 우선 (전화·이메일·영어 제외)."""
+        names = [f for f in fields if f and not self._vf_is_phone(f) and "@" not in f]
+        if not names:
+            return ""
+        return next((f for f in names
+                     if any('가' <= ch <= '힣' for ch in f)), names[0])
+
+    def _open_verify_win(self):
+        self._open_section_win("_verify_win", "🔐 본인확인 도우미", self._build_verify, w=601, h=576, fit=False)
+
+    def _build_verify(self, parent):
+        tk.Label(parent, text="🔐 본인확인 도우미", font=("맑은 고딕", 10, "bold"),
+                 fg="#2c3e50").pack(anchor="w", padx=6, pady=(6, 0))
+        tk.Label(parent, text="계정 클릭 → 전화·이메일 복사 → Ctrl+V   |   칸 우클릭 = 색 지정 (8개씩 그룹 구분)",
+                 font=("맑은 고딕", 8), fg="#666").pack(anchor="w", padx=6, pady=(0, 4))
+
+        tk.Button(parent, text="🔍 영역 확대해서 보기 (아이디가 가려/쪼개질 때)",
+                  font=("맑은 고딕", 10, "bold"), bg="#16a085", fg="white",
+                  command=self._vf_zoom_region).pack(fill="x", padx=6, pady=(0, 6))
+
+        # 계정 4열 4행 그리드 — 아이디(클릭 선택) + 그 밑에 메모 입력 (셀 세로 1.4배)
+        grid = tk.Frame(parent); grid.pack(fill="x", padx=6, pady=2)
+        for cc in range(4):
+            grid.columnconfigure(cc, weight=1)
+        self._vf_cells = []
+        self._vf_cell_lbls = []
+        colors = self.cfg.get("verify_colors") or {}
+        for i in range(16):
+            r, c = divmod(i, 4)
+            x = self._accounts[i] if i < len(self._accounts) else {}
+            fields = [str(x.get(f"f{j+1}", "")).strip() for j in range(5)]
+            disp = self._vf_id_of(fields) or "(빈칸)"
+            bg = colors.get(str(i)) or "#ecf0f1"
+            cell = tk.Frame(grid, bg=bg, relief="raised", bd=1)
+            cell.grid(row=r, column=c, padx=2, pady=2, sticky="nsew")
+            lbl = tk.Label(cell, text=disp, font=("맑은 고딕", 12, "bold"),
+                           bg=bg, wraplength=120, justify="center", height=2)
+            lbl.pack(fill="both", expand=True, padx=4, pady=8)
+            for wdg in (cell, lbl):
+                wdg.bind("<Button-1>", lambda e, ii=i: self._vf_pick_cell(ii))
+                wdg.bind("<Button-3>", lambda e, ii=i: self._vf_color_menu(e, ii))
+            self._vf_cells.append(cell)
+            self._vf_cell_lbls.append(lbl)
+
+        self._vf_result = tk.StringVar(value="— 위 표에서 계정을 선택하세요 —")
+        tk.Label(parent, textvariable=self._vf_result, font=("맑은 고딕", 10), fg="#1a5276",
+                 justify="left", anchor="w", wraplength=440).pack(fill="x", padx=6, pady=6)
+
+        br = tk.Frame(parent); br.pack(fill="x", padx=6, pady=4)
+        tk.Button(br, text="📋 전화 복사", font=("맑은 고딕", 11, "bold"), bg="#27ae60", fg="white",
+                  height=2, command=lambda: self._vf_copy("phone")).pack(side="left", expand=True, fill="x", padx=(0, 3))
+        tk.Button(br, text="📋 이메일 복사", font=("맑은 고딕", 11, "bold"), bg="#e67e22", fg="white",
+                  height=2, command=lambda: self._vf_copy("email")).pack(side="left", expand=True, fill="x", padx=(3, 0))
+        self._vf_match = None
+
+        # 📝 떠있는 클라 메모 4개 — 각각 체크로 켜고, 직접 입력, Ctrl+드래그로 이동
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=6, pady=(6, 2))
+        mrow = tk.Frame(parent); mrow.pack(fill="x", padx=6, pady=(0, 2))
+        tk.Label(mrow, text="📝 클라 위 메모:", font=("맑은 고딕", 8, "bold")).pack(side="left")
+        self._memo_on_vars = []
+        ons, _t, _p = self._memo_lists()
+        for i in range(4):
+            v = tk.BooleanVar(value=ons[i])
+            self._memo_on_vars.append(v)
+            tk.Checkbutton(mrow, text=f"{i+1}", variable=v,
+                           command=lambda ii=i: self._memo_toggle(ii),
+                           font=("맑은 고딕", 8)).pack(side="left")
+        tk.Label(parent, text="(체크하면 노란 메모가 뜸 · 직접 입력 · Ctrl+드래그로 이동 · 리니지M이 앞에 있을 때만 그 위에 보임/항상위 아님)",
+                 font=("맑은 고딕", 7), fg="#888").pack(anchor="w", padx=6)
+
+    def _memo_toggle(self, i):
+        ons = list(self.cfg.get("float_memo_ons") or [])
+        while len(ons) < 4:
+            ons.append(False)
+        ons[i] = bool(self._memo_on_vars[i].get())
+        self.cfg["float_memo_ons"] = ons; save_cfg(self.cfg)
+        self.status.set(f"📝 메모{i+1} " + ("켬" if ons[i] else "끔"))
+
+    def _vf_pick_cell(self, idx):
+        """4x4 그리드에서 계정 클릭 → 선택 확정 + 전화·이메일 표시."""
+        x = self._accounts[idx] if idx < len(self._accounts) else {}
+        fields = [str(x.get(f"f{j+1}", "")).strip() for j in range(5)]
+        phone = next((f for f in fields if self._vf_is_phone(f)), "")
+        email = next((f for f in fields if "@" in f), "")
+        disp = self._vf_id_of(fields) or f"#{idx+1:02d}"
+        self._vf_match = {"idx": idx, "disp": disp, "phone": phone, "email": email}
+        # 색은 유지, 선택 표시는 테두리로
+        for k, cell in enumerate(self._vf_cells):
+            cell.config(relief=("solid" if k == idx else "raised"),
+                        bd=(3 if k == idx else 1))
+        self._vf_result.set(f"✔ {disp}\n전화: {phone or '(없음)'}\n이메일: {email or '(없음)'}")
+
+    _VF_PALETTE = [("🟡 노랑", "#f9e79f"), ("🟢 초록", "#abebc6"), ("🔵 파랑", "#aed6f1"),
+                   ("🟣 보라", "#d7bde2"), ("🩷 분홍", "#f5b7b1"), ("🟠 주황", "#fad7a0"),
+                   ("⬜ 기본색(지우기)", "")]
+
+    def _vf_color_menu(self, event, idx):
+        """칸 우클릭 → 색 선택 메뉴 (8개씩 그룹 구분용)."""
+        m = tk.Menu(self, tearoff=0)
+        for name, col in self._VF_PALETTE:
+            m.add_command(label=name, command=lambda c=col, i=idx: self._vf_set_color(i, c))
+        try:
+            m.tk_popup(event.x_root, event.y_root)
+        finally:
+            m.grab_release()
+
+    def _vf_set_color(self, idx, color):
+        colors = dict(self.cfg.get("verify_colors") or {})
+        if color:
+            colors[str(idx)] = color
+        else:
+            colors.pop(str(idx), None)
+        self.cfg["verify_colors"] = colors
+        save_cfg(self.cfg)
+        try:
+            bg = color or "#ecf0f1"
+            self._vf_cells[idx].config(bg=bg)
+            self._vf_cell_lbls[idx].config(bg=bg)
+        except Exception:
+            pass
+        self.status.set(f"🎨 #{idx+1:02d} 색 {'지움' if not color else '변경됨 (저장됨)'}")
+
+    def _vf_copy(self, which):
+        r = self._vf_match
+        if not r:
+            self.status.set("먼저 계정을 조회하거나 선택하세요."); return
+        val = r.get(which, "")
+        label = "전화" if which == "phone" else "이메일"
+        if not val:
+            self.status.set(f"{label}가 없습니다."); return
+        self.clipboard_clear(); self.clipboard_append(val)
+        self.status.set(f"📋 #{r['idx']+1:02d} {label} 복사됨 — 칸 클릭 후 Ctrl+V")
+
+    # ── 📝 떠있는 클라 메모 4개 (각각 체크로 켬 · 리니지M 앞일 때만 그 위에 보임/항상위 아님) ──
+    _MEMO_N = 4
+
+    def _memo_lists(self):
+        ons = list(self.cfg.get("float_memo_ons") or [])
+        txts = list(self.cfg.get("float_memo_texts") or [])
+        poss = list(self.cfg.get("float_memo_positions") or [])
+        dft = [[500, 40], [660, 40], [500, 90], [660, 90]]
+        while len(ons) < self._MEMO_N: ons.append(False)
+        while len(txts) < self._MEMO_N: txts.append("")
+        while len(poss) < self._MEMO_N: poss.append(dft[len(poss) % 4])
+        return ons[:self._MEMO_N], txts[:self._MEMO_N], poss[:self._MEMO_N]
+
+    def _memo_tick(self):
+        try:
+            ons, txts, poss = self._memo_lists()
+            if getattr(self, "_memo_wins", None) is None:
+                self._memo_wins = {}
+            for i in range(self._MEMO_N):
+                if ons[i]:
+                    self._memo_show_one(i, txts[i], poss[i])
+                else:
+                    self._memo_hide_one(i)
+            self._memo_raise_over_lineage()
+        except Exception:
+            pass
+        # 클라를 클릭해 앞으로 나와도 곧바로 메모가 다시 위로 오도록 자주 확인
+        self.after(300, self._memo_tick)
+
+    def _memo_show_one(self, i, txt, pos):
+        store = self._memo_wins
+        w = store.get(i)
+        if w and w[0].winfo_exists():
+            return
+        try:
+            win = tk.Toplevel(self)
+            win.overrideredirect(True)          # 항상위 아님
+            var = tk.StringVar(value=txt)
+            ent = tk.Entry(win, textvariable=var, font=("맑은 고딕", 12, "bold"),
+                           fg="#000000", bg="#fff59d", width=14, justify="center",
+                           relief="solid", bd=2)
+            ent.pack(ipady=5)   # 세로 약 1.3배 (내부 여백)
+            win.geometry(f"+{int(pos[0])}+{int(pos[1])}")
+            var.trace_add("write", lambda *a: self._memo_save_texts())
+            ent.bind("<Control-Button-1>", lambda e, ww=win: setattr(ww, "_d", (e.x, e.y)))
+            ent.bind("<Control-B1-Motion>", lambda e, ww=win: ww.geometry(
+                f"+{ww.winfo_x()+e.x-getattr(ww,'_d',(0,0))[0]}+{ww.winfo_y()+e.y-getattr(ww,'_d',(0,0))[1]}"))
+            ent.bind("<Control-ButtonRelease-1>", lambda e: self._memo_save_positions())
+            store[i] = (win, var)
+        except Exception:
+            pass
+
+    def _memo_hide_one(self, i):
+        store = getattr(self, "_memo_wins", {}) or {}
+        w = store.pop(i, None)
+        if w:
+            try: w[0].destroy()
+            except Exception: pass
+
+    def _memo_save_texts(self):
+        try:
+            _o, txts, _p = self._memo_lists()
+            for i, (win, var) in self._memo_wins.items():
+                txts[i] = var.get()
+            self.cfg["float_memo_texts"] = txts; save_cfg(self.cfg)
+        except Exception:
+            pass
+
+    def _memo_save_positions(self):
+        try:
+            _o, _t, poss = self._memo_lists()
+            for i, (win, var) in self._memo_wins.items():
+                if win.winfo_exists():
+                    poss[i] = [win.winfo_x(), win.winfo_y()]
+            self.cfg["float_memo_positions"] = poss; save_cfg(self.cfg)
+        except Exception:
+            pass
+
+    def _memo_fg_is_lineage(self):
+        """맨 앞 창이 리니지M 클라이고 '지금 상태(확대 아님)'이면 True.
+        판단: 다른 타일 클라들보다 눈에 띄게 크거나 최대화면 확대로 보고 False."""
+        try:
+            import ctypes
+            from ctypes import wintypes
+            u = ctypes.windll.user32
+            h = u.GetForegroundWindow()
+            b = ctypes.create_unicode_buffer(300); u.GetWindowTextW(h, b, 300)
+            t = b.value
+            if ("리니지" not in t) or t == "리니지M 자동 실행":
+                return False
+            if u.IsZoomed(h):                       # 완전 최대화 → 확대
+                return False
+            r = wintypes.RECT(); u.GetWindowRect(h, ctypes.byref(r))
+            fw = r.right - r.left; fh = r.bottom - r.top
+            # 다른 리니지M 클라들의 가로·세로 수집 (타일 상태 기준)
+            ws, hs = [], []
+            def cb(hh, _):
+                if hh != h and u.IsWindowVisible(hh) and not u.IsIconic(hh):
+                    bb = ctypes.create_unicode_buffer(300); u.GetWindowTextW(hh, bb, 300)
+                    tt = bb.value
+                    if ("리니지" in tt) and tt != "리니지M 자동 실행":
+                        rr = wintypes.RECT(); u.GetWindowRect(hh, ctypes.byref(rr))
+                        w = rr.right - rr.left; ht = rr.bottom - rr.top
+                        if w > 100 and ht > 100:
+                            ws.append(w); hs.append(ht)
+                return True
+            WN = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+            u.EnumWindows(WN(cb), 0)
+            if ws:
+                # 가장 작은(타일) 클라 기준 — 여러 개 확대해도 흔들리지 않음
+                if fw > min(ws) * 1.25 or fh > min(hs) * 1.25:
+                    return False                          # 확대 → 안 띄움
+                return True
+            # 비교할 다른 클라 없으면 화면폭 60% 미만이면 지금상태로 봄
+            return fw < u.GetSystemMetrics(0) * 0.6
+        except Exception:
+            return False
+
+    def _memo_raise_over_lineage(self):
+        """리니지M이 맨 앞이면 메모를 topmost로(클라가 항상위여도 그 위) 올리고,
+        다른 앱(브라우저 등)이 앞이면 topmost 해제 → 그 앱이 메모를 가림(항상위 아님)."""
+        fg = self._memo_fg_is_lineage()
+        for i, (win, var) in list(getattr(self, "_memo_wins", {}).items()):
+            try:
+                if win.winfo_exists():
+                    win.attributes("-topmost", bool(fg))
+                    if fg:
+                        win.lift()
+            except Exception:
+                pass
+
+    def _vf_zoom_region(self):
+        """영역을 드래그하면 그 부분을 크게 확대해 보여준다 — 가려/쪼개진 아이디를 눈으로 읽기."""
+        self.status.set("1초 후 확대해서 볼 영역(아이디 부분)을 드래그하세요!")
+        self.after(1000, lambda: [self.withdraw(), self.after(150, lambda: _ZoomCaptureOverlay(self))])
+
+    def _vf_show_zoom(self, bbox):
+        try:
+            from PIL import ImageGrab, Image, ImageTk
+            x0, y0, x1, y1 = bbox
+            bx0, by0, bx1, by1 = min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
+            if (bx1 - bx0) < 4 or (by1 - by0) < 4:
+                self.deiconify(); self.status.set("영역이 너무 작습니다. 다시 드래그하세요."); return
+            img = ImageGrab.grab(bbox=(bx0, by0, bx1, by1), all_screens=True)
+            sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+            maxw, maxh = int(sw * 0.85), int(sh * 0.7)
+            scale = min(6.0, maxw / max(img.width, 1), maxh / max(img.height, 1))
+            scale = max(1.0, scale)
+            big = img.resize((int(img.width * scale), int(img.height * scale)), Image.LANCZOS)
+            win = tk.Toplevel(self)
+            win.title("🔍 아이디 확대 — 읽고 4×4 표에서 계정 선택 (4초 후 자동 닫힘)")
+            win.attributes("-topmost", True)
+            self._vf_zoom_imgtk = ImageTk.PhotoImage(big)   # GC 방지용 참조 유지
+            tk.Label(win, text="↓ 이 아이디를 도우미 창의 4×4 표에서 고르세요  (4초 후 자동 닫힘)",
+                     font=("맑은 고딕", 9), fg="#16a085").pack(pady=(6, 0))
+            tk.Label(win, image=self._vf_zoom_imgtk, bd=1, relief="solid").pack(padx=8, pady=8)
+            tk.Button(win, text="닫기", command=win.destroy).pack(pady=(0, 8))
+            # 4초 후 자동으로 닫힘 (확대 창만) — 미리 닫혀 있으면 무시
+            win.after(4000, lambda w=win: w.winfo_exists() and w.destroy())
+            self.deiconify()
+        except Exception as e:
+            self.deiconify(); self.status.set(f"확대 오류: {e}")
 
     def _target_geometry(self):
         """콘텐츠에 맞는 목표 창 크기/위치 (폭=섹션행, 높이=콘텐츠+1cm, 작업표시줄 위로)."""
@@ -8734,6 +9071,50 @@ class _DotPreviewOverlayNav(_DotPreviewOverlay):
             if nx <= e.x <= nx+pw:
                 self._close(); self.app.after(300, self._next_fn); return
         super()._on_release(e)
+
+
+class _ZoomCaptureOverlay(tk.Toplevel):
+    """드래그한 영역을 캡처해 확대 표시 (가려/쪼개진 아이디를 사람이 읽기 쉽게)"""
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.attributes("-alpha", 0.3)
+        sw = self.winfo_screenwidth(); sh = self.winfo_screenheight()
+        self.geometry(f"{sw}x{sh}+0+0")
+        self.configure(bg="black")
+        self._start = None; self._rect = None
+        tk.Label(self, text="확대해서 볼 영역(아이디)을 드래그하세요\nESC = 취소",
+                 font=("맑은 고딕", 16, "bold"), fg="white", bg="black",
+                 justify="center").place(relx=0.5, rely=0.06, anchor="center")
+        self._canvas = tk.Canvas(self, bg="black", highlightthickness=0)
+        self._canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        self._canvas.bind("<ButtonPress-1>", self._on_press)
+        self._canvas.bind("<B1-Motion>", self._on_drag)
+        self._canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", self._cancel)
+        self.focus_force()
+
+    def _on_press(self, e):
+        self._start = (e.x_root, e.y_root)
+        if self._rect: self._canvas.delete(self._rect)
+
+    def _on_drag(self, e):
+        if not self._start: return
+        if self._rect: self._canvas.delete(self._rect)
+        x0, y0 = self._start
+        self._rect = self._canvas.create_rectangle(x0, y0, e.x_root, e.y_root, outline="cyan", width=2)
+
+    def _on_release(self, e):
+        if not self._start: return
+        x0, y0 = self._start; x1, y1 = e.x_root, e.y_root
+        self.destroy()
+        # 오버레이가 완전히 사라진 뒤 캡처 (오버레이가 스샷에 안 찍히게)
+        self.app.after(180, lambda: self.app._vf_show_zoom((x0, y0, x1, y1)))
+
+    def _cancel(self, e=None):
+        self.destroy(); self.app.deiconify()
 
 
 class _ProfileAreaOverlay(tk.Toplevel):
