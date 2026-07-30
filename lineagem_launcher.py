@@ -794,6 +794,12 @@ class App(tk.Tk):
         tk.Label(self, text="리니지M 자동 실행",
                  font=("맑은 고딕", 13, "bold"), fg="#c8a951").pack(pady=(10, 2))
 
+        # 전환할 계정 수 위: 런처를 맨 뒤로 보내는 버튼 (클라 확인할 때)
+        back_row = tk.Frame(self); back_row.pack(fill="x", padx=16)
+        tk.Button(back_row, text="⬇ 맨뒤로", font=("맑은 고딕", 8, "bold"),
+                  bg="#5d6d7e", fg="white", activebackground="#34495e",
+                  width=8, command=self._send_to_back).pack(side="left")
+
         # 계정 수
         row_acc = tk.Frame(self); row_acc.pack(fill="x", padx=16, pady=2)
         tk.Label(row_acc, text="전환할 계정 수:", font=("맑은 고딕", 9)).pack(side="left")
