@@ -2255,30 +2255,38 @@ class App(tk.Tk):
         try:
             slots = self.cfg.get("tj_slots", [])
             if slot_idx is not None:
-                targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
-            else:
-                targets = [(i, s) for i, s in enumerate(slots)
-                           if any(s.get("coords", []))]
-                random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
-            for ti, (si, slot) in enumerate(targets):
+                # 단일 슬롯 테스트 — 좌표 1→2→3 순서대로
+                s = slots[slot_idx] if slot_idx < len(slots) else None
+                if s and any(s.get("coords", [])):
+                    name = s.get("name", f"#{slot_idx+1}")
+                    time.sleep(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))
+                    for j, c in enumerate(s.get("coords", [])):
+                        if not c: continue
+                        if getattr(self, "_tj_stop", False): break
+                        self.status.set(f"⭕ [{name}] 좌표{j+1}...")
+                        pyautogui.click(*c)
+                        time.sleep(random.uniform(TJ_MIN, TJ_MAX))
+                return
+            # 전체 실행 — 웨이브 방식: 좌표1을 전 슬롯에 쫙 → 좌표2 웨이브는 30% 앞당겨
+            # → 좌표3은 더 빠르게 (점점 몰아치는 템포, 웨이브마다 슬롯 순서 랜덤)
+            targets = [(i, s) for i, s in enumerate(slots)
+                       if any(s.get("coords", []))]
+            if not targets:
+                self.status.set("TJ성공!!: 등록된 좌표가 없습니다"); return
+            time.sleep(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))
+            speed = 1.0
+            for phase in range(TJ_CLICKS):
                 if getattr(self, "_tj_stop", False): break
-                name   = slot.get("name", f"#{si+1}")
-                coords = slot.get("coords", [None]*TJ_CLICKS)
-                _clicked = 0
-                for j, coord in enumerate(coords):
-                    if not coord: continue
+                wave = [(i, s) for i, s in targets
+                        if s.get("coords", [None]*TJ_CLICKS)[phase]]
+                random.shuffle(wave)   # 웨이브마다 슬롯 순서 랜덤
+                for k, (si, s) in enumerate(wave):
                     if getattr(self, "_tj_stop", False): break
-                    if _clicked == 0:
-                        # 첫 클릭 전 여유 (인형탐험과 동일)
-                        time.sleep(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))
-                    self.status.set(f"⭕ [{name}] 좌표{j+1}/{TJ_CLICKS}...")
-                    pyautogui.click(*coord)
-                    _clicked += 1
-                    if j < len(coords) - 1:
-                        time.sleep(random.uniform(TJ_MIN, TJ_MAX))   # 매 클릭 0.7~1.2초 랜덤
-                if getattr(self, "_tj_stop", False): break
-                if ti < len(targets) - 1:
-                    time.sleep(random.uniform(TJ_SLOT_MIN, TJ_SLOT_MAX))  # 슬롯 간 0.7~2.3초 랜덤
+                    name = s.get("name", f"#{si+1}")
+                    self.status.set(f"⭕ 좌표{phase+1} 웨이브 [{name}] ({k+1}/{len(wave)})...")
+                    pyautogui.click(*s["coords"][phase])
+                    time.sleep(random.uniform(TJ_MIN, TJ_MAX) * speed)
+                speed *= 0.7   # 다음 웨이브는 30% 앞당김
             self.status.set("✔ TJ성공!! 완료!" if not getattr(self, "_tj_stop", False) else "TJ성공!! 멈춤")
         except Exception as e:
             self.status.set(f"TJ성공!! 오류: {e}")
