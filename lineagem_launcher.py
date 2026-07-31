@@ -648,20 +648,19 @@ class App(tk.Tk):
         self._tj_stop      = False
         self._task_queue   = []   # 연속으로 누른 실행/재측정 순차 실행 대기열
         self._build_ui()
-        # 메인런처 위치 기억 — 옮겨두면 재시작해도 그 자리 (기본: 좌측 약 2cm)
-        _pos = self.cfg.get("main_win_pos") or [80, 120]
+        # 메인런처 고정 위치 — 드래그해도 자동 저장하지 않음(모든 컴퓨터 동일 위치 유지).
+        # 잠깐 옮겨 쓰다가 [📍 제자리] 버튼으로 복귀. 고정값 변경은 클로드에게 요청.
+        _pos = self.cfg.get("main_win_fixed") or self.cfg.get("main_win_pos") or [80, 120]
         try:
             self.geometry(f"+{int(_pos[0])}+{int(_pos[1])}")
         except Exception:
             pass
-        self._pos_save_job = None
         # 떠있는 클라 메모 4개 — 완전 분리 실행. 실패해도 런처엔 영향 없음.
         try:
             self._memo_wins = {}
             self.after(3000, self._memo_tick)
         except Exception:
             pass
-        self.bind("<Configure>", self._on_main_move, add="+")
         self.after(600, self._align_tj_to_dc)   # TJ성공!! 좌측 끝 = 일반던전충전 좌측 끝
         self._sync_sched_click1()   # 스케줄 클릭1 = 과거섬 클릭1 (시작 시 1회 동기화)
         self.after(1000, self._mail_scheduler_tick)
@@ -804,6 +803,14 @@ class App(tk.Tk):
                                       font=("맑은 고딕", 8, "bold"), justify="center")
         # "break" 반환으로 '클릭=앞으로' 핸들러(_raise_on_click)가 도로 올리는 것 차단
         self._back_circle.bind("<Button-1>", lambda e: (self._back_and_claude() or "break"))
+        # 제자리 동그라미 — 옮겨 쓰다가 누르면 고정 위치로 복귀
+        home_c = tk.Canvas(back_row, width=58, height=58, highlightthickness=0,
+                           bg=self.cget("bg"), cursor="hand2")
+        home_c.pack(side="left", padx=(6, 0))
+        home_c.create_oval(2, 2, 56, 56, fill="#117864", outline="#0b4f42", width=3)
+        home_c.create_text(29, 29, text="📍 제\n자리", fill="white",
+                           font=("맑은 고딕", 8, "bold"), justify="center")
+        home_c.bind("<Button-1>", lambda e: self._go_home())
 
         # 계정 수
         row_acc = tk.Frame(self); row_acc.pack(fill="x", padx=16, pady=2)
@@ -2813,7 +2820,7 @@ class App(tk.Tk):
         """콘텐츠에 맞는 목표 창 크기/위치 (폭=섹션행, 높이=콘텐츠+1cm, 작업표시줄 위로)."""
         self.update_idletasks()
         needed = self.winfo_reqheight() + 38   # 슬롯 끝에서 약 1cm 여유
-        pos = self.cfg.get("main_win_pos")     # 사용자가 옮겨둔 고정 위치 우선
+        pos = self.cfg.get("main_win_fixed") or self.cfg.get("main_win_pos")   # 고정 위치 우선
         x, y = (int(pos[0]), int(pos[1])) if pos else (76, 75)
         work_bottom = self.winfo_screenheight() - 48   # fallback
         try:
@@ -7223,22 +7230,14 @@ class App(tk.Tk):
         self._send_to_back()
         self._minimize_claude()
 
-    def _on_main_move(self, e=None):
-        """메인런처를 옮기면 1.5초 뒤 위치 저장 (재시작 후에도 같은 자리)."""
-        if getattr(self, "_pos_save_job", None):
-            try: self.after_cancel(self._pos_save_job)
-            except Exception: pass
-        self._pos_save_job = self.after(1500, self._save_main_pos)
-
-    def _save_main_pos(self):
-        self._pos_save_job = None
+    def _go_home(self):
+        """[📍 제자리] — 런처를 고정 위치로 되돌린다."""
+        pos = self.cfg.get("main_win_fixed") or self.cfg.get("main_win_pos")
+        if not pos:
+            self.status.set("고정 위치가 없습니다"); return
         try:
-            if self.state() != "normal":
-                return
-            x, y = self.winfo_x(), self.winfo_y()
-            if x > -100 and y > -100 and self.cfg.get("main_win_pos") != [x, y]:
-                self.cfg["main_win_pos"] = [x, y]
-                save_cfg(self.cfg)
+            self.deiconify()
+            self.geometry(f"+{int(pos[0])}+{int(pos[1])}")
         except Exception:
             pass
 
