@@ -77,6 +77,26 @@ def _merge_3way(base, remote, local, stats):
     return local
 
 
+def _count_coords(path):
+    """파일 안의 [x, y] 좌표 개수 — 동기화 결과 확인용."""
+    try:
+        with open(path, encoding="utf-8") as fp:
+            data = json.load(fp)
+        cnt = [0]
+        def walk(v):
+            if isinstance(v, list):
+                if (len(v) == 2 and all(isinstance(x, (int, float)) for x in v)):
+                    cnt[0] += 1
+                else:
+                    for x in v: walk(x)
+            elif isinstance(v, dict):
+                for x in v.values(): walk(x)
+        walk(data)
+        return cnt[0]
+    except Exception:
+        return -1
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -360,15 +380,7 @@ def main():
         log(f"저장소: {REPO}")
         _bn = backup_coords()
         log(f"0) 좌표 자동 백업 {_bn}개 (LOCALAPPDATA\\MoonAI\\backups)")
-        # 병합용 스냅샷: 로컬(현재 사용 중) 좌표 — pull 전에 확보
-        MERGE_FILES = ("coords.json", "island_coords.json")
-        local_snap = {}
-        for f in MERGE_FILES:
-            try:
-                with open(os.path.join(DESK, f), encoding="utf-8") as fp:
-                    local_snap[f] = json.load(fp)
-            except Exception:
-                local_snap[f] = None
+        MERGE_FILES = ("coords.json", "island_coords.json")   # 좌표 파일 (메인이 원본)
         log("1) GitHub에서 최신 버전 받는 중...")
         old = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
         r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
@@ -397,14 +409,14 @@ def main():
             else:
                 log("   ✔ 로컬 변경은 stash로 백업했고 최신 버전을 받았습니다")
         new = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
-        # 3자 병합용 base: 이 컴퓨터가 pull 전에 갖고 있던 버전 (로컬 수정 여부 판별 기준)
-        bases = {}
-        for f in MERGE_FILES:
-            try:
-                r0 = sh(["git", "show", f"{old}:{f}"], REPO)
-                bases[f] = json.loads(r0.stdout) if (r0.returncode == 0 and r0.stdout.strip()) else None
-            except Exception:
-                bases[f] = None
+        # 좌표 동기화 정책: 좌표는 모든 컴퓨터가 동일하고 메인이 유일한 원본.
+        # 메인이 아닌 컴퓨터는 병합 없이 '통째로' 원격(메인) 버전으로 맞춘다.
+        is_main = False
+        try:
+            with open(os.path.join(DESK, "local_config.json"), encoding="utf-8") as fp:
+                is_main = bool(json.load(fp).get("is_main"))
+        except Exception:
+            pass
         changed = []
         if old != new:
             changed = sh(["git", "diff", "--name-only", old, new], REPO).stdout.split()
@@ -429,42 +441,34 @@ def main():
                 s = os.path.join(REPO, f)
                 if os.path.exists(s):
                     shutil.copy2(s, os.path.join(DESK, f)); n += 1
-            # 데이터: '이번 pull에서 바뀐 것만'이 아니라 원격과 내용이 다르면 항상 반영
-            # (이전 업데이트가 복사 단계에서 실패했거나 pull만 미리 된 경우의 누락 방지)
+            # 데이터(좌표): 병합 없음 — 메인이 아니면 원격(메인) 버전으로 통째로 동기화.
+            # 메인 컴퓨터는 자기(바탕화면) 좌표가 원본이므로 절대 덮어쓰지 않음.
             for f in DATA_FILES:
                 s = os.path.join(REPO, f)
                 if not os.path.exists(s):
                     continue
                 dst = os.path.join(DESK, f)
+                if is_main and f in MERGE_FILES:
+                    log(f"   {f}: 메인 컴퓨터 — 로컬 원본 유지")
+                    continue
                 try:
                     with open(s, "rb") as fa, open(dst, "rb") as fb:
                         if fa.read() == fb.read():
-                            continue           # 이미 동일 — 건너뜀
+                            log(f"   {f}: 이미 메인과 동일")
+                            continue
                 except Exception:
                     pass                       # 로컬에 없거나 비교 실패 → 반영 진행
-                if f in MERGE_FILES and local_snap.get(f) is not None:
-                    # 로컬 우선 병합: 이 컴퓨터에 등록된 좌표는 그대로, 빈 곳만 원격에서 채움
-                    try:
-                        with open(s, encoding="utf-8") as fp:
-                            remote = json.load(fp)
-                        stats = [0, 0]
-                        base = bases.get(f)
-                        if base is not None:
-                            # 3자 병합: 로컬이 직접 수정한 곳만 유지, 나머지는 원격(메인) 수정 반영
-                            merged = _merge_3way(base, remote, local_snap[f], stats)
-                            note = f"로컬 수정 {stats[0]}곳 유지, 원격 변경 {stats[1]}곳 반영"
-                        else:
-                            merged = _merge_local_first(remote, local_snap[f], stats)
-                            note = f"로컬 등록 {stats[0]}곳 유지, 빈 곳만 원격 반영"
-                        with open(dst, "w", encoding="utf-8") as fp:
-                            json.dump(merged, fp, ensure_ascii=False, indent=2)
-                        n += 1
-                        log(f"   데이터 병합: {f} ({note})")
-                        continue
-                    except Exception as e:
-                        log(f"   병합 실패({e}) → 원격 버전으로 대체")
                 shutil.copy2(s, dst); n += 1
-                log(f"   데이터 갱신: {f}")
+                # 복사 검증 — 메인과 바이트 단위로 일치하는지 확인
+                try:
+                    with open(s, "rb") as fa, open(dst, "rb") as fb:
+                        ok = fa.read() == fb.read()
+                except Exception:
+                    ok = False
+                if ok:
+                    log(f"   좌표 동기화: {f} — 메인과 100% 일치 확인 ✔ (좌표 {_count_coords(dst)}개)")
+                else:
+                    log(f"   ⚠ {f} 복사 검증 실패 — 업데이트를 한 번 더 실행해주세요")
             for d in DATA_DIRS:
                 sdir, ddir = os.path.join(REPO, d), os.path.join(DESK, d)
                 if not os.path.isdir(sdir):
