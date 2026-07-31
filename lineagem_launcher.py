@@ -2671,12 +2671,15 @@ class App(tk.Tk):
             ons, txts, poss = self._memo_lists()
             if getattr(self, "_memo_wins", None) is None:
                 self._memo_wins = {}
+            # 매크로/작업 실행 중엔 메모를 아예 숨김 — 자동 클릭을 가로채지 않게
+            busy = self._is_busy() or getattr(self, "_running", False)
             for i in range(self._MEMO_N):
-                if ons[i]:
+                if ons[i] and not busy:
                     self._memo_show_one(i, txts[i], poss[i])
                 else:
                     self._memo_hide_one(i)
-            self._memo_raise_over_lineage()
+            if not busy:
+                self._memo_raise_over_lineage()
         except Exception:
             pass
         # 클라를 클릭해 앞으로 나와도 곧바로 메모가 다시 위로 오도록 자주 확인
@@ -2772,14 +2775,22 @@ class App(tk.Tk):
             return False
 
     def _memo_raise_over_lineage(self):
-        """리니지M이 맨 앞이면 메모를 topmost로(클라가 항상위여도 그 위) 올리고,
-        다른 앱(브라우저 등)이 앞이면 topmost 해제 → 그 앱이 메모를 가림(항상위 아님)."""
+        """리니지M 클라가 맨 앞이면 메모를 '일반 z순서 맨 위'로만 올린다 (topmost 아님).
+        → 브라우저 등 다른 앱을 클릭하면 그 앱이 메모 위로 정상적으로 올라온다."""
         fg = self._memo_fg_is_lineage()
         for i, (win, var) in list(getattr(self, "_memo_wins", {}).items()):
             try:
-                if win.winfo_exists():
-                    win.attributes("-topmost", bool(fg))
-                    if fg:
+                if not win.winfo_exists():
+                    continue
+                win.attributes("-topmost", False)   # 항상위 금지
+                if fg:
+                    try:
+                        import win32gui, win32con
+                        hwnd = win32gui.GetParent(win.winfo_id()) or win.winfo_id()
+                        win32gui.SetWindowPos(hwnd, win32con.HWND_TOP, 0, 0, 0, 0,
+                                              win32con.SWP_NOMOVE | win32con.SWP_NOSIZE |
+                                              win32con.SWP_NOACTIVATE)
+                    except Exception:
                         win.lift()
             except Exception:
                 pass
