@@ -795,21 +795,21 @@ class App(tk.Tk):
 
         # 전환할 계정 수 위: 맨뒤로 동그라미 버튼 (세로선은 TJ성공!!과 자동 정렬)
         back_row = tk.Frame(self); back_row.pack(fill="x")
-        self._back_circle = tk.Canvas(back_row, width=58, height=58, highlightthickness=0,
+        self._back_circle = tk.Canvas(back_row, width=46, height=46, highlightthickness=0,
                                       bg=self.cget("bg"), cursor="hand2")
         self._back_circle.pack(side="left", padx=(30, 0))
-        self._back_circle.create_oval(2, 2, 56, 56, fill="#5d6d7e", outline="#34495e", width=3)
-        self._back_circle.create_text(29, 29, text="⬇ 맨\n뒤로", fill="white",
-                                      font=("맑은 고딕", 8, "bold"), justify="center")
+        self._back_circle.create_oval(2, 2, 44, 44, fill="#5d6d7e", outline="#34495e", width=2)
+        self._back_circle.create_text(23, 23, text="⬇ 맨\n뒤로", fill="white",
+                                      font=("맑은 고딕", 7, "bold"), justify="center")
         # "break" 반환으로 '클릭=앞으로' 핸들러(_raise_on_click)가 도로 올리는 것 차단
         self._back_circle.bind("<Button-1>", lambda e: (self._back_and_claude() or "break"))
         # 제자리 동그라미 — 옮겨 쓰다가 누르면 고정 위치로 복귀
-        home_c = tk.Canvas(back_row, width=58, height=58, highlightthickness=0,
+        home_c = tk.Canvas(back_row, width=46, height=46, highlightthickness=0,
                            bg=self.cget("bg"), cursor="hand2")
         home_c.pack(side="left", padx=(6, 0))
-        home_c.create_oval(2, 2, 56, 56, fill="#117864", outline="#0b4f42", width=3)
-        home_c.create_text(29, 29, text="📍 제\n자리", fill="white",
-                           font=("맑은 고딕", 8, "bold"), justify="center")
+        home_c.create_oval(2, 2, 44, 44, fill="#117864", outline="#0b4f42", width=2)
+        home_c.create_text(23, 23, text="📍 제\n자리", fill="white",
+                           font=("맑은 고딕", 7, "bold"), justify="center")
         home_c.bind("<Button-1>", lambda e: self._go_home())
 
         # 계정 수
