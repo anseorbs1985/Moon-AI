@@ -381,34 +381,6 @@ def main():
         _bn = backup_coords()
         log(f"0) 좌표 자동 백업 {_bn}개 (LOCALAPPDATA\\MoonAI\\backups)")
         MERGE_FILES = ("coords.json", "island_coords.json")   # 좌표 파일 (메인이 원본)
-        log("1) GitHub에서 최신 버전 받는 중...")
-        old = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
-        r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
-        log("   " + (r.stdout.strip().splitlines()[-1] if r.stdout.strip() else r.stderr.strip()))
-        if r.returncode != 0:
-            # 1차 자동복구: 로컬 변경을 stash로 백업하고 재시도 (대부분 여기서 해결)
-            log("⚠ git pull 실패 — 로컬 변경을 백업(stash)하고 재시도...")
-            sh(["git", "stash", "push", "--include-untracked", "-m", "업데이트 자동백업"], REPO)
-            r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
-            if r.returncode != 0:
-                # 2차 자동복구: 원격 기준으로 강제 동기화 (기존 상태는 백업 브랜치에 보관 —
-                # 좌표는 이미 파일백업 + 병합 스냅샷이 있어 로컬우선 병합으로 보존됨)
-                stamp = time.strftime("%Y%m%d_%H%M%S")
-                log("⚠ 재시도도 실패 — 원격 기준 강제 동기화 (이전 상태는 backup_" + stamp + " 브랜치 보관)")
-                sh(["git", "branch", f"backup_{stamp}"], REPO)
-                sh(["git", "fetch", "origin", "main"], REPO)
-                r = sh(["git", "reset", "--hard", "origin/main"], REPO)
-                if r.returncode != 0:
-                    # 3차: 클로드에 'git pull' 입력해 즉시 실행시킴
-                    err = (r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "git 동기화 실패")
-                    log("⚠ 강제 동기화도 실패 — 클로드에게 넘깁니다")
-                    ask_claude(err)
-                    finish()
-                    return
-                log("   ✔ 강제 동기화 완료")
-            else:
-                log("   ✔ 로컬 변경은 stash로 백업했고 최신 버전을 받았습니다")
-        new = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
         # 좌표 동기화 정책: 좌표는 모든 컴퓨터가 동일하고 메인이 유일한 원본.
         # 메인이 아닌 컴퓨터는 병합 없이 '통째로' 원격(메인) 버전으로 맞춘다.
         is_main = False
@@ -417,6 +389,45 @@ def main():
                 is_main = bool(json.load(fp).get("is_main"))
         except Exception:
             pass
+        log("1) GitHub에서 최신 버전 받는 중...")
+        old = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
+        if not is_main:
+            # 로컬 컴퓨터: 저장소 상태가 어떻든 원격과 100% 일치시킨다 (충돌·병합 개념 없음)
+            sh(["git", "fetch", "origin", "main"], REPO)
+            r = sh(["git", "reset", "--hard", "origin/main"], REPO)
+            if r.returncode != 0:
+                err = (r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "git 동기화 실패")
+                log("⚠ 원격 동기화 실패 — 클로드에게 넘깁니다")
+                ask_claude(err)
+                finish()
+                return
+            log("   ✔ 저장소를 원격(메인)과 100% 일치시켰습니다")
+        else:
+            r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
+            log("   " + (r.stdout.strip().splitlines()[-1] if r.stdout.strip() else r.stderr.strip()))
+            if r.returncode != 0:
+                # 1차 자동복구: 로컬 변경을 stash로 백업하고 재시도 (대부분 여기서 해결)
+                log("⚠ git pull 실패 — 로컬 변경을 백업(stash)하고 재시도...")
+                sh(["git", "stash", "push", "--include-untracked", "-m", "업데이트 자동백업"], REPO)
+                r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
+                if r.returncode != 0:
+                    # 2차 자동복구: 원격 기준으로 강제 동기화 (기존 상태는 백업 브랜치에 보관)
+                    stamp = time.strftime("%Y%m%d_%H%M%S")
+                    log("⚠ 재시도도 실패 — 원격 기준 강제 동기화 (이전 상태는 backup_" + stamp + " 브랜치 보관)")
+                    sh(["git", "branch", f"backup_{stamp}"], REPO)
+                    sh(["git", "fetch", "origin", "main"], REPO)
+                    r = sh(["git", "reset", "--hard", "origin/main"], REPO)
+                    if r.returncode != 0:
+                        # 3차: 클로드에 'git pull' 입력해 즉시 실행시킴
+                        err = (r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "git 동기화 실패")
+                        log("⚠ 강제 동기화도 실패 — 클로드에게 넘깁니다")
+                        ask_claude(err)
+                        finish()
+                        return
+                    log("   ✔ 강제 동기화 완료")
+                else:
+                    log("   ✔ 로컬 변경은 stash로 백업했고 최신 버전을 받았습니다")
+        new = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
         changed = []
         if old != new:
             changed = sh(["git", "diff", "--name-only", old, new], REPO).stdout.split()
@@ -424,10 +435,10 @@ def main():
         else:
             log("2) 이미 최신입니다 — 코드 파일만 동기화합니다")
 
-        log("3) 메인런처 종료...")
+        log("3) 런처·실행기·OCR 전부 종료... (좌표를 되돌려 쓰는 프로세스 차단)")
         sh(["powershell", "-NoProfile", "-Command",
             "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' OR Name='python.exe'\" | "
-            "Where-Object { $_.CommandLine -like '*lineagem_launcher*' } | "
+            "Where-Object { $_.CommandLine -match 'lineagem_launcher|lineagem_island|lineagem_ocr|lineagem_dungeon' } | "
             "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"])
         time.sleep(1.2)
 
@@ -510,7 +521,7 @@ def main():
                 log("   → 런처를 다시 종료하고 복사를 재시도합니다...")
                 sh(["powershell", "-NoProfile", "-Command",
                     "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' OR Name='python.exe'\" | "
-                    "Where-Object { $_.CommandLine -like '*lineagem_launcher*' } | "
+                    "Where-Object { $_.CommandLine -match 'lineagem_launcher|lineagem_island|lineagem_ocr|lineagem_dungeon' } | "
                     "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"])
                 time.sleep(2)
             else:
