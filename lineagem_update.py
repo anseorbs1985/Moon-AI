@@ -469,6 +469,25 @@ def main():
                     log(f"   좌표 동기화: {f} — 메인과 100% 일치 확인 ✔ (좌표 {_count_coords(dst)}개)")
                 else:
                     log(f"   ⚠ {f} 복사 검증 실패 — 업데이트를 한 번 더 실행해주세요")
+            # 다야 OCR 캡처영역(daya_regions.json)도 메인과 동일하게 동기화
+            # (측정값 daya_counts/history는 머신별 데이터라 절대 건드리지 않음)
+            try:
+                src_r = os.path.join(REPO, "daya_regions.json")
+                if os.path.exists(src_r) and not is_main:
+                    ldir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
+                    os.makedirs(ldir, exist_ok=True)
+                    dst_r = os.path.join(ldir, "daya_regions.json")
+                    same_r = False
+                    try:
+                        with open(src_r, "rb") as fa, open(dst_r, "rb") as fb:
+                            same_r = fa.read() == fb.read()
+                    except Exception:
+                        pass
+                    if not same_r:
+                        shutil.copy2(src_r, dst_r); n += 1
+                        log("   다야 OCR 영역 동기화: daya_regions.json — 메인과 동일하게 반영 ✔")
+            except Exception as e:
+                log(f"   ⚠ 다야 영역 동기화 실패: {e}")
             for d in DATA_DIRS:
                 sdir, ddir = os.path.join(REPO, d), os.path.join(DESK, d)
                 if not os.path.isdir(sdir):
