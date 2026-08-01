@@ -6263,9 +6263,14 @@ class App(tk.Tk):
         now = datetime.datetime.now()
         today = now.date()
         is_skip_day = now.weekday() in (2, 5)   # 월=0 … 수=2, 토=5 : 수·토요일엔 과거섬 스케줄 건너뜀
-        if is_skip_day:
-            _dname = "수요일" if now.weekday() == 2 else "토요일"
-            self.status.set(f"🏝 과거섬: {_dname}은 스케줄 실행 안 함 (건너뜀)")
+        # 사용자가 특정 날짜 하루 건너뛰기를 지정한 경우 (cfg past_skip_date = "YYYY-MM-DD")
+        user_skip = (str(self.cfg.get("past_skip_date") or "") == now.strftime("%Y-%m-%d"))
+        if is_skip_day or user_skip:
+            if user_skip:
+                self.status.set("🏝 과거섬: 오늘은 사용자 지시로 건너뜀")
+            else:
+                _dname = "수요일" if now.weekday() == 2 else "토요일"
+                self.status.set(f"🏝 과거섬: {_dname}은 스케줄 실행 안 함 (건너뜀)")
         elif now.hour == 5 and 3 <= now.minute <= 25 and self._past_triggered_date != today:
             if self._is_busy():
                 # 최우선: 대기열 맨 앞에 넣어 현재 작업이 끝나는 즉시 실행 (창이 지나도 실행)
