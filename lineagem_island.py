@@ -305,7 +305,7 @@ class IslandApp(tk.Tk):
                 self.tk.call("tk", "scaling", cur * 1.45)   # 글씨 확대 — 셀에 맞게 크게
             except Exception:
                 pass
-            self.geometry(f"840x{int(sh * 0.78)}+{ox}+{oy}")
+            self.geometry(f"1050x{int(sh * 0.75)}+{ox}+{oy}")   # 가로 1.25배 (세로 그대로)
         elif focus_idx is not None:
             self.geometry(f"500x{sh * 2 // 3}+{ox}+{oy}")
         else:
