@@ -2581,6 +2581,12 @@ class App(tk.Tk):
                             time.sleep(0.15)
                             self._paste_ctrl_v()
                             self._coupon_log("Ctrl+V 전송 완료")
+                            time.sleep(random.uniform(0.6, 0.9))
+                            # 입력칸이 계속 활성화돼 있으면 다음 클릭을 게임이 씹으므로 Enter로 입력 확정
+                            self._send_key_input_cp(0x1C, 0x0008)
+                            time.sleep(0.08)
+                            self._send_key_input_cp(0x1C, 0x0008 | 0x0002)
+                            self._coupon_log("Enter(입력 확정) 전송 완료")
                             time.sleep(random.uniform(0.5, 0.8))
                             self.status.set(f"{icon} [{name}] 붙여넣기 완료")
                         except Exception as e:
