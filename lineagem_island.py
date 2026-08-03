@@ -131,7 +131,8 @@ CLICK_INTERVAL = 2.0  # 클릭 간격(초) — 현재 2초
 CLICK_LABELS = ["클릭1", "클릭2", "추가", "클릭3", "클릭4", "클릭5"]
 
 # 던전별 좌표 개수 (기본 6개, 예외만 지정)
-CLICKS_BY_KEY = {"월요일_잊혀진섬": 26}
+CLICKS_BY_KEY = {"월요일_잊혀진섬": 26, "수금_오만의탑": 26,
+                 "토요일_악몽의섬": 26, "화요일_에카": 26}
 
 def clicks_for(key):
     return CLICKS_BY_KEY.get(key, CLICKS)
@@ -296,9 +297,9 @@ class IslandApp(tk.Tk):
         sh = self.winfo_screenheight()
         ox = int(sw * 0.03)
         oy = int(sh * 0.03)
-        # 잊혀진섬 단독 창은 2배 크기 + 글씨도 비례해서 확대
+        # 26칸 던전(잊혀진섬·오만의탑·악몽의섬·에카) 단독 창은 확대 + 셀 스트레치
         _is_forgotten = (focus_idx is not None
-                         and DUNGEONS[focus_idx]["key"] == "월요일_잊혀진섬")
+                         and DUNGEONS[focus_idx]["key"] in CLICKS_BY_KEY)
         if _is_forgotten:
             try:
                 cur = float(self.tk.call("tk", "scaling"))
