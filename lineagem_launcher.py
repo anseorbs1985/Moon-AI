@@ -793,12 +793,15 @@ class App(tk.Tk):
         tk.Label(self, text="리니지M 자동 실행",
                  font=("맑은 고딕", 13, "bold"), fg="#c8a951").pack(pady=(10, 2))
 
-        # 혈레이드 — 클라 위 메모를 5분 동안만 맨 위로 (평소엔 안 올라옴)
+        # 혈레이드 — 클라 위 메모를 5분 동안만 맨 위로 (평소엔 안 올라옴) — 동그라미 버튼
         boost_row = tk.Frame(self); boost_row.pack(fill="x")
-        self._boost_btn = tk.Button(boost_row, text="🔥 혈레이드", font=("맑은 고딕", 8, "bold"),
-                                    bg="#c0392b", fg="white", activebackground="#922b21",
-                                    width=10, command=self._memo_boost)
+        self._boost_btn = tk.Canvas(boost_row, width=46, height=46, highlightthickness=0,
+                                    bg=self.cget("bg"), cursor="hand2")
         self._boost_btn.pack(side="left", padx=(30, 0), pady=(2, 0))
+        self._boost_btn.create_oval(2, 2, 44, 44, fill="#c0392b", outline="#7b241c", width=2)
+        self._boost_btn.create_text(23, 23, text="🔥 혈\n레이드", fill="white",
+                                    font=("맑은 고딕", 7, "bold"), justify="center")
+        self._boost_btn.bind("<Button-1>", lambda e: self._memo_boost())
         # 전환할 계정 수 위: 맨뒤로 동그라미 버튼 (세로선은 TJ성공!!과 자동 정렬)
         back_row = tk.Frame(self); back_row.pack(fill="x")
         self._back_circle = tk.Canvas(back_row, width=46, height=46, highlightthickness=0,
