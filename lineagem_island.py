@@ -470,30 +470,32 @@ class IslandApp(tk.Tk):
             self.cfg[key][idx]["moves"] = mvv.get().strip()
             save_cfg(self.cfg)
         me.bind("<FocusOut>", _smv); me.bind("<Return>", _smv)
-        # 클릭 간격 — 기본값 + 클릭별 예외 (예외: "3=5 10=8" → 클릭3 뒤 5초, 클릭10 뒤 8초)
-        grow = tk.Frame(win); grow.pack(pady=(0, 2))
-        tk.Label(grow, text="간격(초):", font=("맑은 고딕", 8, "bold")).pack(side="left")
-        gv = tk.StringVar(value=str(slot.get("gap", "") or ""))
-        ge = tk.Entry(grow, textvariable=gv, font=("맑은 고딕", 9), width=5)
-        ge.pack(side="left", padx=(2, 6))
-        tk.Label(grow, text="예외:", font=("맑은 고딕", 8, "bold")).pack(side="left")
-        gxv = tk.StringVar(value=slot.get("gaps", ""))
-        gxe = tk.Entry(grow, textvariable=gxv, font=("맑은 고딕", 9), width=16)
-        gxe.pack(side="left", padx=(2, 4))
-        tk.Label(grow, text=f"기본 {CLICK_INTERVAL}초, 예: 3=5 10=8",
-                 font=("맑은 고딕", 7), fg="#888").pack(side="left")
-        def _sgap(e=None):
-            self.cfg[key][idx]["gap"]  = gv.get().strip()
-            self.cfg[key][idx]["gaps"] = gxv.get().strip()
-            save_cfg(self.cfg)
-        for _w in (ge, gxe):
-            _w.bind("<FocusOut>", _sgap); _w.bind("<Return>", _sgap)
+        tk.Label(win, text=f"클릭 사이 'ㅡ' 위 칸 = 그 클릭 뒤 대기 초 (비우면 기본 {CLICK_INTERVAL}초)",
+                 font=("맑은 고딕", 7), fg="#888").pack()
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         _n_clicks = clicks_for(key)
         _labels   = labels_for(key)
         coords = slot.get("coords", [None] * _n_clicks)
+        # 클릭별 간격 목록 (gap_list[j] = 클릭 j+1 뒤 대기 초, None=기본)
+        gl = list(slot.get("gap_list") or [])
+        while len(gl) < _n_clicks - 1:
+            gl.append(None)
+        gap_vars = []
+        def _save_gaps(e=None):
+            out = []
+            for v in gap_vars:
+                s = v.get().strip().replace("초", "")
+                if not s:
+                    out.append(None)
+                else:
+                    try:
+                        out.append(float(s))
+                    except Exception:
+                        out.append(None)
+            self.cfg[key][idx]["gap_list"] = out
+            save_cfg(self.cfg)
         for j in range(_n_clicks):
-            cc = tk.Frame(grid); cc.grid(row=j // 6, column=j % 6, padx=4, pady=4)
+            cc = tk.Frame(grid); cc.grid(row=j // 6, column=(j % 6) * 2, padx=2, pady=4)
             tk.Label(cc, text=_labels[j], font=("맑은 고딕", 7), fg="#555").pack()
             on = j < len(coords) and coords[j]
             cv = tk.StringVar(value="✔" if on else "✗")
@@ -502,6 +504,16 @@ class IslandApp(tk.Tk):
                           bg=d["color"] if on else "#7f8c8d", fg="white",
                           command=lambda k=key, x=idx, c=j: self._reg(k, x, c))
             b.pack(); self._pop["btns"].append(b)
+            if j < _n_clicks - 1:
+                # 클릭 사이 간격: ㅡ 위에 초 입력 (비우면 기본)
+                gc = tk.Frame(grid); gc.grid(row=j // 6, column=(j % 6) * 2 + 1)
+                v = tk.StringVar(value="" if gl[j] is None else f"{gl[j]:g}")
+                gap_vars.append(v)
+                en = tk.Entry(gc, textvariable=v, width=4, justify="center",
+                              font=("맑은 고딕", 8))
+                en.pack()
+                tk.Label(gc, text="ㅡ", font=("맑은 고딕", 8, "bold"), fg="#888").pack()
+                en.bind("<FocusOut>", _save_gaps); en.bind("<Return>", _save_gaps)
         bot = tk.Frame(win); bot.pack(pady=(4, 10))
         if idx > 0:
             tk.Button(bot, text="↑ 윗슬롯 복사", font=("맑은 고딕", 8), bg="#7d6608", fg="white",
@@ -874,16 +886,8 @@ class IslandApp(tk.Tk):
                     coords.append(None)
                 if not any(coords): continue
                 move_set = MOVE_ONLY_INDICES.get(key, set())
-                # 슬롯별 클릭 간격: 기본값(gap, 비면 CLICK_INTERVAL) + 클릭별 예외(gaps "3=5 10=8")
-                try:
-                    base_gap = float(slot.get("gap") or CLICK_INTERVAL)
-                except Exception:
-                    base_gap = CLICK_INTERVAL
-                import re as _re
-                gap_map = {}
-                for _g in _re.finditer(r"(\d+)\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)",
-                                       str(slot.get("gaps") or "")):
-                    gap_map[int(_g.group(1))] = float(_g.group(2))
+                # 클릭별 간격(gap_list) — 팝업의 'ㅡ' 위 칸에 적은 초, 비우면 기본
+                gl = slot.get("gap_list") or []
                 for j, lbl in enumerate(_labels):
                     if self._stop_flag: break
                     if not coords[j]: continue
@@ -892,7 +896,10 @@ class IslandApp(tk.Tk):
                         pyautogui.moveTo(*coords[j])
                     else:
                         pyautogui.click(*coords[j])
-                    time.sleep(gap_map.get(j + 1, base_gap))
+                    g = CLICK_INTERVAL
+                    if j < len(gl) and isinstance(gl[j], (int, float)):
+                        g = float(gl[j])
+                    time.sleep(g)
                 # 이동 스텝 — 방향키를 지정 초만큼 눌러 캐릭터 이동 (예: "하3 우1.5")
                 mv = (slot.get("moves") or "").strip()
                 if mv and not self._stop_flag:
