@@ -548,7 +548,7 @@ class IslandApp(tk.Tk):
             self.cfg[key][idx]["name"] = nv.get().strip() or "미등록"
             save_cfg(self.cfg)
         ent.bind("<FocusOut>", _sv); ent.bind("<Return>", _sv)
-        tk.Label(win, text=f"[방향][초]: ↑↓←→↖↗↙↘=이동 / ⇩=좌표 잡고 끌어내리기(숫자=거리)  |  'ㅡ' 칸=클릭 뒤 대기 초 — 8~10 이라고 쓰면 매번 그 사이 랜덤 (비우면 {CLICK_INTERVAL})",
+        tk.Label(win, text=f"[방향]: ↑↓←→↖↗↙↘=이동 / ⇩=끌어내리기 / ⏺=녹화(선택하면 3초 뒤 내 마우스·방향키를 녹화, ESC 종료 → 실행 때 재생)  |  'ㅡ' 칸=대기 초, 8~10=랜덤 (비우면 {CLICK_INTERVAL})",
                  font=("맑은 고딕", 7), fg="#888").pack()
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         _n_clicks = clicks_for(key)
@@ -582,13 +582,13 @@ class IslandApp(tk.Tk):
         dirs = list(slot.get("dirs") or [])
         while len(dirs) < _n_clicks:
             dirs.append(None)
-        DIRS = ["ㅡ", "↑", "↓", "←", "→", "↖", "↗", "↙", "↘", "⇩"]   # ⇩ = 좌표 짧게 누르고 아래로 끌기(스크롤)
+        DIRS = ["ㅡ", "↑", "↓", "←", "→", "↖", "↗", "↙", "↘", "⇩", "⏺"]   # ⇩=끌어내리기, ⏺=녹화 재생
         dir_vars, sec_vars = [], []
         def _save_dirs(*a):
             out = []
             for dv, sv2 in zip(dir_vars, sec_vars):
                 d_ = dv.get()
-                if d_ not in ("↑", "↓", "←", "→", "↖", "↗", "↙", "↘", "⇩"):
+                if d_ not in ("↑", "↓", "←", "→", "↖", "↗", "↙", "↘", "⇩", "⏺"):
                     out.append(None)
                 else:
                     try:
@@ -629,7 +629,9 @@ class IslandApp(tk.Tk):
             sv2 = tk.StringVar(value=(f"{cur[1]:g}" if cur else "1"))
             dir_vars.append(dv); sec_vars.append(sv2)
             self._pop["dir_vars"].append(dv)
-            om = tk.OptionMenu(drow, dv, *DIRS, command=lambda *_: _save_dirs())
+            om = tk.OptionMenu(drow, dv, *DIRS,
+                               command=lambda val, jj=j: (_save_dirs(),
+                                   self._start_record(key, idx, jj) if val == "⏺" else None))
             om.config(font=("맑은 고딕", 7), width=1, pady=0, highlightthickness=0)
             om.pack(side="left")
             om2 = tk.OptionMenu(drow, sv2, *[str(i) for i in range(1, 11)],
@@ -964,7 +966,12 @@ class IslandApp(tk.Tk):
                 cn = slot.get("click_names") or []
                 lbl = (cn[ci] if ci < len(cn) and cn[ci] else labels_for(key)[ci])
                 time.sleep(0.3)
-                if d_ and d_[0] == "⇩":
+                if d_ and d_[0] == "⏺":
+                    ev = (slot.get("recs") or {}).get(str(ci))
+                    if not ev:
+                        self._status.set(f"{lbl}: 저장된 녹화가 없습니다 (⏺를 다시 선택해 녹화)"); return
+                    self._play_events(ev, name)
+                elif d_ and d_[0] == "⇩":
                     if not c:
                         self._status.set(f"{lbl}: ⇩는 좌표 등록이 필요합니다"); return
                     dist = max(30, int(float(d_[1]) * 30))
@@ -1042,6 +1049,88 @@ class IslandApp(tk.Tk):
         self.iconify()
         self._minimize_claude()
         threading.Thread(target=self._run, args=(key,), daemon=True).start()
+
+    # ── 녹화/재생 (⏺) — 사용자의 마우스·방향키 입력을 그대로 담았다가 재생 ──
+    def _start_record(self, key, idx, ci):
+        """⏺ 선택 시: 3초 뒤부터 마우스(클릭·드래그)와 방향키를 녹화, ESC로 종료."""
+        def rec():
+            import ctypes
+            from ctypes import wintypes
+            u = ctypes.windll.user32
+            for n in (3, 2, 1):
+                self._status.set(f"⏺ {n}초 후 녹화 시작 — 끝나면 ESC (최대 60초)")
+                time.sleep(1)
+            self._status.set("⏺ 녹화 중... (ESC로 종료)")
+            events = []
+            t0 = time.time()
+            ARROWS = {0x25: 1, 0x26: 1, 0x27: 1, 0x28: 1}
+            prev_btn = False
+            prev_keys = {vk: False for vk in ARROWS}
+            last_mm = 0.0
+            pt = wintypes.POINT()
+            while time.time() - t0 < 60:
+                if u.GetAsyncKeyState(0x1B) & 0x8000:   # ESC
+                    break
+                t = round(time.time() - t0, 3)
+                u.GetCursorPos(ctypes.byref(pt))
+                btn = bool(u.GetAsyncKeyState(0x01) & 0x8000)
+                if btn != prev_btn:
+                    events.append([t, "md" if btn else "mu", pt.x, pt.y])
+                    prev_btn = btn
+                elif btn and t - last_mm >= 0.03:
+                    events.append([t, "mm", pt.x, pt.y]); last_mm = t
+                for vk in ARROWS:
+                    k = bool(u.GetAsyncKeyState(vk) & 0x8000)
+                    if k != prev_keys[vk]:
+                        events.append([t, "kd" if k else "ku", vk])
+                        prev_keys[vk] = k
+                time.sleep(0.01)
+            # 안 떼고 끝난 입력 정리
+            tend = round(time.time() - t0, 3)
+            if prev_btn:
+                u.GetCursorPos(ctypes.byref(pt))
+                events.append([tend, "mu", pt.x, pt.y])
+            for vk, on in prev_keys.items():
+                if on:
+                    events.append([tend, "ku", vk])
+            slot = self.cfg[key][idx]
+            recs = slot.get("recs") or {}
+            recs[str(ci)] = events
+            slot["recs"] = recs
+            save_cfg(self.cfg)
+            dur = events[-1][0] if events else 0
+            self.after(0, self.deiconify)
+            self._status.set(f"✔ ⏺ 녹화 저장 ({dur:.1f}초, 동작 {len(events)}개) — 실행 때 그대로 재생됩니다")
+        self.withdraw()
+        threading.Thread(target=rec, daemon=True).start()
+
+    def _play_events(self, events, name):
+        """녹화 재생 — 저장된 타이밍 그대로 마우스/방향키 입력."""
+        SCAN = {0x26: 0x48, 0x28: 0x50, 0x25: 0x4B, 0x27: 0x4D}
+        self._status.set(f"▶ [{name}] 녹화 재생 중... ({(events[-1][0] if events else 0):.1f}초)")
+        t0 = time.time()
+        held = set()
+        try:
+            for ev in events:
+                if self._stop_flag: break
+                while time.time() - t0 < ev[0]:
+                    if self._stop_flag: break
+                    time.sleep(0.005)
+                typ = ev[1]
+                if typ == "mm":
+                    pyautogui.moveTo(ev[2], ev[3])
+                elif typ == "md":
+                    pyautogui.mouseDown(ev[2], ev[3])
+                elif typ == "mu":
+                    pyautogui.mouseUp(ev[2], ev[3])
+                elif typ == "kd":
+                    _send_scan_key([SCAN[ev[2]]], True); held.add(ev[2])
+                elif typ == "ku":
+                    _send_scan_key([SCAN[ev[2]]], False); held.discard(ev[2])
+        finally:
+            for vk in list(held):                       # 중단 시 눌린 키 해제
+                _send_scan_key([SCAN[vk]], False)
+        time.sleep(0.15)
 
     def _hold_arrow(self, word, sec, name):
         """방향키를 sec초 동안 눌러 이동 — 대각선(↖↗↙↘)은 두 키 동시 홀드.
@@ -1149,7 +1238,13 @@ class IslandApp(tk.Tk):
                 for j, lbl in enumerate(_labels):
                     if self._stop_flag: break
                     d_ = dirs[j] if j < len(dirs) else None
-                    if d_ and d_[0] == "⇩":
+                    if d_ and d_[0] == "⏺":
+                        # 이 자리는 녹화 재생 — 끝나면 다음 좌표로
+                        ev = (slot.get("recs") or {}).get(str(j))
+                        if not ev:
+                            continue
+                        self._play_events(ev, name)
+                    elif d_ and d_[0] == "⇩":
                         # 등록한 좌표를 짧게 누르고 아래로 살짝 끌어내리기 (스크롤)
                         if not coords[j]:
                             continue   # ⇩는 좌표 등록이 필요
