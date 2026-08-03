@@ -470,6 +470,24 @@ class IslandApp(tk.Tk):
             self.cfg[key][idx]["moves"] = mvv.get().strip()
             save_cfg(self.cfg)
         me.bind("<FocusOut>", _smv); me.bind("<Return>", _smv)
+        # 클릭 간격 — 기본값 + 클릭별 예외 (예외: "3=5 10=8" → 클릭3 뒤 5초, 클릭10 뒤 8초)
+        grow = tk.Frame(win); grow.pack(pady=(0, 2))
+        tk.Label(grow, text="간격(초):", font=("맑은 고딕", 8, "bold")).pack(side="left")
+        gv = tk.StringVar(value=str(slot.get("gap", "") or ""))
+        ge = tk.Entry(grow, textvariable=gv, font=("맑은 고딕", 9), width=5)
+        ge.pack(side="left", padx=(2, 6))
+        tk.Label(grow, text="예외:", font=("맑은 고딕", 8, "bold")).pack(side="left")
+        gxv = tk.StringVar(value=slot.get("gaps", ""))
+        gxe = tk.Entry(grow, textvariable=gxv, font=("맑은 고딕", 9), width=16)
+        gxe.pack(side="left", padx=(2, 4))
+        tk.Label(grow, text=f"기본 {CLICK_INTERVAL}초, 예: 3=5 10=8",
+                 font=("맑은 고딕", 7), fg="#888").pack(side="left")
+        def _sgap(e=None):
+            self.cfg[key][idx]["gap"]  = gv.get().strip()
+            self.cfg[key][idx]["gaps"] = gxv.get().strip()
+            save_cfg(self.cfg)
+        for _w in (ge, gxe):
+            _w.bind("<FocusOut>", _sgap); _w.bind("<Return>", _sgap)
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         _n_clicks = clicks_for(key)
         _labels   = labels_for(key)
@@ -856,6 +874,16 @@ class IslandApp(tk.Tk):
                     coords.append(None)
                 if not any(coords): continue
                 move_set = MOVE_ONLY_INDICES.get(key, set())
+                # 슬롯별 클릭 간격: 기본값(gap, 비면 CLICK_INTERVAL) + 클릭별 예외(gaps "3=5 10=8")
+                try:
+                    base_gap = float(slot.get("gap") or CLICK_INTERVAL)
+                except Exception:
+                    base_gap = CLICK_INTERVAL
+                import re as _re
+                gap_map = {}
+                for _g in _re.finditer(r"(\d+)\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)",
+                                       str(slot.get("gaps") or "")):
+                    gap_map[int(_g.group(1))] = float(_g.group(2))
                 for j, lbl in enumerate(_labels):
                     if self._stop_flag: break
                     if not coords[j]: continue
@@ -864,7 +892,7 @@ class IslandApp(tk.Tk):
                         pyautogui.moveTo(*coords[j])
                     else:
                         pyautogui.click(*coords[j])
-                    time.sleep(CLICK_INTERVAL)
+                    time.sleep(gap_map.get(j + 1, base_gap))
                 # 이동 스텝 — 방향키를 지정 초만큼 눌러 캐릭터 이동 (예: "하3 우1.5")
                 mv = (slot.get("moves") or "").strip()
                 if mv and not self._stop_flag:
