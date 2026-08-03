@@ -2800,16 +2800,7 @@ class App(tk.Tk):
                     win.attributes("-topmost", True)
                     win.lift()
                 else:
-                    # 평소엔 맨 뒤에 눌러둠 — 화면을 절대 가리지 않음
-                    win.attributes("-topmost", False)
-                    try:
-                        import win32gui, win32con
-                        hwnd = win32gui.GetParent(win.winfo_id()) or win.winfo_id()
-                        win32gui.SetWindowPos(hwnd, win32con.HWND_BOTTOM, 0, 0, 0, 0,
-                                              win32con.SWP_NOMOVE | win32con.SWP_NOSIZE |
-                                              win32con.SWP_NOACTIVATE)
-                    except Exception:
-                        win.lower()
+                    win.attributes("-topmost", False)   # 항상위만 해제 — 나머지는 그대로 둠
             except Exception:
                 pass
 
@@ -7985,18 +7976,19 @@ class App(tk.Tk):
         self._reroll_running = False  # 오림의일기장도 정지
         self._busy_task      = None   # 잠금 해제
         self._task_queue.clear()      # 멈춤 시 대기열도 비움
-        # 다야 OCR 프로세스 종료
-        proc = getattr(self, "_ocr_proc", None)
-        if proc and proc.poll() is None:
-            try: proc.terminate()
-            except: pass
-            self._ocr_proc = None
-        # 섬·던전 실행기(별도 프로세스)도 종료
-        ip = getattr(self, "_island_proc", None)
-        if ip and ip.poll() is None:
-            try: ip.terminate()
-            except: pass
-            self._island_proc = None
+        # 별도 프로세스(섬/던전 실행기·다야 OCR·던전) 전부 강제 종료 — 재개 없이 완전히 끔
+        # (추적 안 된 단독 창(잊혀진섬 등)까지 명령줄 기준으로 모두 종료)
+        try:
+            import subprocess as _sp
+            _sp.Popen(["powershell", "-NoProfile", "-Command",
+                "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' OR Name='python.exe'\" | "
+                "Where-Object { $_.CommandLine -match 'lineagem_island|lineagem_ocr|lineagem_dungeon' } | "
+                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+                creationflags=0x08000000)
+        except Exception:
+            pass
+        self._ocr_proc = None
+        self._island_proc = None
         self.status.set("멈추는 중...")
 
     # ── 클릭 실행 ─────────────────────────────────────────────────────
