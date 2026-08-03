@@ -445,7 +445,8 @@ class IslandApp(tk.Tk):
             try: old.destroy()
             except Exception: pass
         win = tk.Toplevel(self)
-        self._pop = {"win": win, "key": key, "slot": idx, "vars": [], "btns": []}
+        self._pop = {"win": win, "key": key, "slot": idx, "vars": [], "btns": [],
+                     "dir_vars": []}
         win.title(f"{d['label'].replace(chr(10), ' ')} #{idx+1:02d} 좌표 등록")
         win.attributes("-topmost", True)
         slot = self.cfg[key][idx]
@@ -502,16 +503,21 @@ class IslandApp(tk.Tk):
             on = j < len(coords) and coords[j]
             cv = tk.StringVar(value="✔" if on else "✗")
             self._pop["vars"].append(cv)
-            b = tk.Button(cc, textvariable=cv, font=("맑은 고딕", 8), width=4, pady=2,
+            brow = tk.Frame(cc); brow.pack()
+            b = tk.Button(brow, textvariable=cv, font=("맑은 고딕", 8), width=4, pady=2,
                           bg=d["color"] if on else "#7f8c8d", fg="white",
                           command=lambda k=key, x=idx, c=j: self._reg(k, x, c))
-            b.pack(); self._pop["btns"].append(b)
+            b.pack(side="left"); self._pop["btns"].append(b)
+            tk.Button(brow, text="×", font=("맑은 고딕", 7, "bold"), fg="red", width=1, pady=0,
+                      command=lambda k=key, x=idx, c=j: self._del_click(k, x, c)
+                      ).pack(side="left", padx=(1, 0))
             # [방향][초] 선택 — 방향을 고르면 이 자리는 클릭 대신 방향키 이동
             drow = tk.Frame(cc); drow.pack()
             cur = dirs[j]
             dv = tk.StringVar(value=(cur[0] if cur else "ㅡ"))
             sv2 = tk.StringVar(value=(f"{cur[1]:g}" if cur else "1"))
             dir_vars.append(dv); sec_vars.append(sv2)
+            self._pop["dir_vars"].append(dv)
             om = tk.OptionMenu(drow, dv, *DIRS, command=lambda *_: _save_dirs())
             om.config(font=("맑은 고딕", 7), width=1, pady=0, highlightthickness=0)
             om.pack(side="left")
@@ -816,6 +822,28 @@ class IslandApp(tk.Tk):
             return
         self.withdraw()
         self.after(1000, lambda: _IslandPreviewOverlay(self, key, None, dots))
+
+    def _del_click(self, key, idx, ci):
+        """좌표 하나만 삭제 — 실행 때 그 자리는 건너뛰고 다음 좌표부터 진행."""
+        slot = self.cfg[key][idx]
+        coords = slot.get("coords", [])
+        if ci < len(coords):
+            coords[ci] = None
+            slot["coords"] = coords
+        dirs = slot.get("dirs") or []
+        if ci < len(dirs) and dirs[ci]:
+            dirs[ci] = None
+            slot["dirs"] = dirs
+        save_cfg(self.cfg)
+        self._refresh(key)
+        # 열려 있는 팝업의 방향 드롭다운도 초기화 표시
+        pop = getattr(self, "_pop", {}) or {}
+        if (pop.get("win") and pop["win"].winfo_exists()
+                and pop.get("key") == key and pop.get("slot") == idx):
+            dvs = pop.get("dir_vars") or []
+            if ci < len(dvs):
+                dvs[ci].set("ㅡ")
+        self._status.set(f"#{idx+1} {labels_for(key)[ci]} 삭제 — 실행 시 건너뜁니다")
 
     def _del(self, key, idx):
         from tkinter import messagebox
