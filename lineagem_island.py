@@ -1065,15 +1065,39 @@ class IslandApp(tk.Tk):
 
     # ── 녹화/재생 (⏺) — 사용자의 마우스·방향키 입력을 그대로 담았다가 재생 ──
     def _start_record(self, key, idx, ci):
-        """⏺ 선택 시: 3초 뒤부터 마우스(클릭·드래그)와 방향키를 녹화, ESC로 종료."""
+        """⏺ 버튼: 3초 뒤부터 마우스(클릭·드래그)와 방향키를 녹화, ESC로 종료.
+        녹화 중에는 화면 상단에 빨간 표시줄이 떠서 상태를 보여준다."""
+        # 항상 위 녹화 표시줄 — 창을 숨겨도 이건 보임
+        ind = tk.Toplevel(self)
+        ind.overrideredirect(True)
+        ind.attributes("-topmost", True)
+        sw = self.winfo_screenwidth()
+        ind.geometry(f"440x44+{(sw - 440) // 2}+8")
+        ind.configure(bg="#7b241c")
+        iv = tk.StringVar(value="⏺ 3초 후 녹화 시작...")
+        tk.Label(ind, textvariable=iv, bg="#7b241c", fg="white",
+                 font=("맑은 고딕", 12, "bold")).pack(expand=True, fill="both")
+
+        def set_iv(t):
+            try:
+                self.after(0, iv.set, t)
+            except Exception:
+                pass
+
+        def close_ind():
+            try:
+                self.after(0, ind.destroy)
+            except Exception:
+                pass
+
         def rec():
             import ctypes
             from ctypes import wintypes
             u = ctypes.windll.user32
             for n in (3, 2, 1):
-                self._status.set(f"⏺ {n}초 후 녹화 시작 — 끝나면 ESC (최대 60초)")
+                set_iv(f"⏺ {n}초 후 녹화 시작 — 준비하세요")
                 time.sleep(1)
-            self._status.set("⏺ 녹화 중... (ESC로 종료)")
+            set_iv("🔴 녹화 중! 마우스 클릭·드래그, 방향키가 기록됩니다 — ESC로 종료")
             events = []
             t0 = time.time()
             ARROWS = {0x25: 1, 0x26: 1, 0x27: 1, 0x28: 1}
@@ -1106,6 +1130,12 @@ class IslandApp(tk.Tk):
             for vk, on in prev_keys.items():
                 if on:
                     events.append([tend, "ku", vk])
+            close_ind()
+            if not events:
+                # 빈 녹화는 저장하지 않음 — 헷갈림 방지
+                self.after(0, self.deiconify)
+                self._status.set("⚠ 녹화된 동작이 없어 저장 안 함 — 녹화 중에 마우스 클릭·드래그나 방향키를 써야 기록됩니다")
+                return
             slot = self.cfg[key][idx]
             recs = slot.get("recs") or {}
             recs[str(ci)] = events
