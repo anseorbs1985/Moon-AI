@@ -556,6 +556,9 @@ class IslandApp(tk.Tk):
                 tk.Label(gc, text="ㅡ", font=("맑은 고딕", 8, "bold"), fg="#888").pack()
                 en.bind("<FocusOut>", _save_gaps); en.bind("<Return>", _save_gaps)
         bot = tk.Frame(win); bot.pack(pady=(4, 10))
+        tk.Button(bot, text="▶ 이 슬롯 테스트", font=("맑은 고딕", 8, "bold"),
+                  bg="#1e8449", fg="white",
+                  command=lambda: self._test(key, idx)).pack(side="left", padx=3)
         if idx > 0:
             tk.Button(bot, text="↑ 윗슬롯 복사", font=("맑은 고딕", 8), bg="#7d6608", fg="white",
                       command=lambda: self._copy_from_above(key, idx)).pack(side="left", padx=3)
