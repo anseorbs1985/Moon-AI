@@ -477,6 +477,18 @@ class IslandApp(tk.Tk):
                 out.append(s if s else None)   # 문자열 그대로 저장 (숫자·이동 조합)
             self.cfg[key][idx]["gap_list"] = out
             save_cfg(self.cfg)
+        # 클릭칸 이름표 — 캐릭/용도별로 구분할 수 있게 직접 수정 가능 (슬롯마다 저장)
+        cn = list(slot.get("click_names") or [])
+        while len(cn) < _n_clicks:
+            cn.append(None)
+        name_vars = []
+        def _save_click_names(e=None):
+            out = []
+            for i2, v in enumerate(name_vars):
+                s = v.get().strip()
+                out.append(None if (not s or s == _labels[i2]) else s)
+            self.cfg[key][idx]["click_names"] = out
+            save_cfg(self.cfg)
         # 클릭 대신 방향키 이동으로 쓸 자리 (dirs[j] = [방향, 초] 또는 None)
         dirs = list(slot.get("dirs") or [])
         while len(dirs) < _n_clicks:
@@ -499,7 +511,13 @@ class IslandApp(tk.Tk):
             save_cfg(self.cfg)
         for j in range(_n_clicks):
             cc = tk.Frame(grid); cc.grid(row=j // 6, column=(j % 6) * 2, padx=2, pady=4)
-            tk.Label(cc, text=_labels[j], font=("맑은 고딕", 7), fg="#555").pack()
+            # 이름표: 클릭해서 직접 수정 (예: 물약, 이동문) — 비우면 기본 '클릭N'
+            nv2 = tk.StringVar(value=cn[j] or _labels[j])
+            name_vars.append(nv2)
+            ne = tk.Entry(cc, textvariable=nv2, font=("맑은 고딕", 7), width=7,
+                          justify="center", relief="flat", fg="#2c3e50", bg="#f2f2f2")
+            ne.pack()
+            ne.bind("<FocusOut>", _save_click_names); ne.bind("<Return>", _save_click_names)
             on = j < len(coords) and coords[j]
             cv = tk.StringVar(value="✔" if on else "✗")
             self._pop["vars"].append(cv)
@@ -987,7 +1005,9 @@ class IslandApp(tk.Tk):
                         # 이 자리는 클릭 대신 방향키 이동 ([방향, 초] — 대각선 포함)
                         self._hold_arrow(d_[0], float(d_[1]), name)
                     elif coords[j]:
-                        self._status.set(f"🏝 [{name}] {lbl}...")
+                        _cn = slot.get("click_names") or []
+                        _disp = _cn[j] if (j < len(_cn) and _cn[j]) else lbl
+                        self._status.set(f"🏝 [{name}] {_disp}...")
                         if j in move_set:
                             pyautogui.moveTo(*coords[j])
                         else:
