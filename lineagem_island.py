@@ -131,7 +131,7 @@ CLICK_INTERVAL = 2.0  # 클릭 간격(초) — 현재 2초
 CLICK_LABELS = ["클릭1", "클릭2", "추가", "클릭3", "클릭4", "클릭5"]
 
 # 던전별 좌표 개수 (기본 6개, 예외만 지정)
-CLICKS_BY_KEY = {"월요일_잊혀진섬": 27}
+CLICKS_BY_KEY = {"월요일_잊혀진섬": 26}
 
 def clicks_for(key):
     return CLICKS_BY_KEY.get(key, CLICKS)
