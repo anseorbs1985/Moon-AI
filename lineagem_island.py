@@ -191,9 +191,22 @@ def load_cfg():
                 slot["coords"] = coords
     return data
 
+SAVE_KEYS = None  # 이 창이 소유한 던전 키 — 단독 창은 자기 던전만 파일에 반영
+
 def save_cfg(cfg):
+    # 여러 창이 동시에 열려 있어도 서로의 데이터를 지우지 않도록,
+    # 디스크 최신본을 다시 읽어 이 창이 소유한 키만 덮어쓴다 (전체 덮어쓰기 금지)
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            disk = json.load(f)
+    except Exception:
+        disk = {}
+    keys = SAVE_KEYS if SAVE_KEYS else list(cfg.keys())
+    for k in keys:
+        if k in cfg:
+            disk[k] = cfg[k]
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+        json.dump(disk, f, ensure_ascii=False, indent=2)
 
 
 class CoordOverlay(tk.Toplevel):
@@ -286,6 +299,9 @@ class IslandApp(tk.Tk):
         self._focus_idx = focus_idx  # None=전체, 0~3=해당 던전만
         dungeons_to_show = [DUNGEONS[focus_idx]] if focus_idx is not None else DUNGEONS
         self._dungeons_to_show = dungeons_to_show
+        if focus_idx is not None:
+            global SAVE_KEYS
+            SAVE_KEYS = [d["key"] for d in dungeons_to_show]
 
         if focus_idx is not None:
             d = DUNGEONS[focus_idx]
