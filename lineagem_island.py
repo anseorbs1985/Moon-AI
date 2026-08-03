@@ -302,10 +302,11 @@ class IslandApp(tk.Tk):
         if _is_forgotten:
             try:
                 cur = float(self.tk.call("tk", "scaling"))
-                self.tk.call("tk", "scaling", cur * 1.5)   # 866px 폭에 4열이 맞는 배율 (글씨 크게)
+                self.tk.call("tk", "scaling", cur * 1.63)   # 세로에 꽉 차는 배율 (글씨 크게)
             except Exception:
                 pass
-            self.geometry("866x1129+76+43")   # 가로 +30%, 세로 +10%
+            self._fixed_geometry = "866x1129+76+43"   # 가로 +30%, 세로 +10% — 자동맞춤 무시
+            self.geometry(self._fixed_geometry)
         elif focus_idx is not None:
             self.geometry(f"500x{sh * 2 // 3}+{ox}+{oy}")
         else:
@@ -340,6 +341,10 @@ class IslandApp(tk.Tk):
 
     def _fit_width(self):
         # 내용 크기에 맞게 가로+세로 모두 조정 (셀에 딱 맞춤 — 길쭉한 빈 공간 제거)
+        # 잊혀진섬 단독 창은 사용자 지정 크기 고정 — 자동 맞춤이 덮어쓰지 않음
+        if getattr(self, "_fixed_geometry", None):
+            self.geometry(self._fixed_geometry)
+            return
         self.update_idletasks()
         nw = self.winfo_reqwidth() + 10
         nh = self.winfo_reqheight() + 8
