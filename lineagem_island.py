@@ -1125,14 +1125,20 @@ class IslandApp(tk.Tk):
             slot["recs"] = recs
         save_cfg(self.cfg)
         self._refresh(key)
-        # 열려 있는 팝업의 방향 드롭다운도 초기화 표시
+        # 열려 있는 팝업의 방향 드롭다운·녹화 버튼도 초기화 표시
         pop = getattr(self, "_pop", {}) or {}
         if (pop.get("win") and pop["win"].winfo_exists()
                 and pop.get("key") == key and pop.get("slot") == idx):
             dvs = pop.get("dir_vars") or []
             if ci < len(dvs):
                 dvs[ci].set("ㅡ")
-        self._status.set(f"#{idx+1} {labels_for(key)[ci]} 삭제 — 실행 시 건너뜁니다")
+            rbs = pop.get("rec_btns") or []
+            if ci < len(rbs):
+                try:
+                    rbs[ci].config(text="⏺", bg="#7f8c8d")
+                except Exception:
+                    pass
+        self._status.set(f"#{idx+1} {labels_for(key)[ci]} 삭제 — 좌표·방향·녹화 모두 초기화")
 
     def _del(self, key, idx):
         from tkinter import messagebox
