@@ -553,7 +553,7 @@ class IslandApp(tk.Tk):
             self.cfg[key][idx]["name"] = nv.get().strip() or "미등록"
             save_cfg(self.cfg)
         ent.bind("<FocusOut>", _sv); ent.bind("<Return>", _sv)
-        tk.Label(win, text=f"버튼: [✔등록][×삭제][▶테스트][⏺녹화 — 누르면 3초 뒤 녹화, ESC 종료, 저장되면 ✔]  |  [방향]: 이동·⇩끌어내리기  |  'ㅡ'=대기 초(8~10=랜덤, 비우면 {CLICK_INTERVAL})",
+        tk.Label(win, text=f"버튼: [✔등록][×삭제][▶테스트][⏺녹화 — 3초 뒤 녹화, ESC 종료, 저장되면 빨간 ●]  |  [방향]: 이동·⇩끌어내리기  |  'ㅡ'=대기 초(8~10=랜덤, 비우면 {CLICK_INTERVAL})",
                  font=("맑은 고딕", 7), fg="#888").pack()
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         _n_clicks = clicks_for(key)
@@ -627,11 +627,11 @@ class IslandApp(tk.Tk):
                       width=1, pady=0,
                       command=lambda k=key, x=idx, c=j: self._test_click(k, x, c)
                       ).pack(side="left", padx=(1, 0))
-            # 녹화 버튼 — 클릭과 별개. 녹화가 저장돼 있으면 ✔ 표시, 누르면 (재)녹화
+            # 녹화 버튼 — 클릭과 별개. 녹화가 저장돼 있으면 빨간 ● 표시, 누르면 (재)녹화
             _has_rec = bool((slot.get("recs") or {}).get(str(j)))
-            rb = tk.Button(brow, text="✔" if _has_rec else "⏺",
+            rb = tk.Button(brow, text="●" if _has_rec else "⏺",
                            font=("맑은 고딕", 7, "bold"), width=1, pady=0,
-                           fg="white", bg="#1e8449" if _has_rec else "#7f8c8d",
+                           fg="white", bg="#c0392b" if _has_rec else "#7f8c8d",
                            command=lambda k=key, x=idx, c=j: self._start_record(k, x, c))
             rb.pack(side="left", padx=(1, 0))
             self._pop.setdefault("rec_btns", []).append(rb)
@@ -1188,7 +1188,7 @@ class IslandApp(tk.Tk):
                     btns = pop.get("rec_btns") or []
                     if ci < len(btns):
                         try:
-                            btns[ci].config(text="✔", bg="#1e8449")
+                            btns[ci].config(text="●", bg="#c0392b")
                         except Exception:
                             pass
             self.after(0, _upd)
