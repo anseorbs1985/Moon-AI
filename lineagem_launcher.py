@@ -116,6 +116,7 @@ MAIL_INTERVAL  = 1.6   # 우편함 클릭 간격(초)
 DUNGEON_SLOTS  = 16
 DUNGEON_CLICKS = 5
 DUNGEON_HOVER  = 1.5
+COUPON_CLICKS  = 7     # 쿠폰등록 — 슬롯당 좌표 7개 (클릭5에서 글 붙여넣기)
 PAST_SLOTS     = 16
 PAST_CLICKS    = 3
 PAST_INTERVAL  = 4.0   # 과거의말하는섬 클릭 간격(초)
@@ -189,6 +190,8 @@ DEFAULT_CFG = {
     "item_on":      False,              # 아이템정리 단축키 활성화 상태 (재시작 유지)
     "dollchk_slots": None,              # 인형확인용 — 처음 로드 때 변신확인용 복사
     "relic_slots":   None,              # 성물확인용 — 처음 로드 때 변신확인용 복사
+    "coupon_slots":  None,              # 쿠폰등록 — 16슬롯 × 좌표7 (변신확인용 방식)
+    "coupon_text":   "",                # 쿠폰등록 클릭5에서 붙여넣을 글
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
     "seq_slots":    [None]*SEQ_SLOTS,   # 연속 클릭 좌표 (각 [x,y] 또는 None)
@@ -419,6 +422,18 @@ def load_cfg():
                 while len(n2) < 16:
                     n2.append({"name": "미등록", "coords": [None] * DUNGEON_CLICKS})
                 cfg[_k2] = n2[:16]
+        # coupon_slots (쿠폰등록) — 16슬롯 × 좌표 7
+        nc = []
+        for s in (cfg.get("coupon_slots") or []):
+            if isinstance(s, dict):
+                c = s.get("coords", [None] * COUPON_CLICKS)
+                while len(c) < COUPON_CLICKS: c.append(None)
+                nc.append({"name": s.get("name", "미등록"), "coords": c[:COUPON_CLICKS]})
+            else:
+                nc.append({"name": "미등록", "coords": [None] * COUPON_CLICKS})
+        while len(nc) < 16:
+            nc.append({"name": "미등록", "coords": [None] * COUPON_CLICKS})
+        cfg["coupon_slots"] = nc[:16]
         # tj_slots (TJ성공!!) — 16슬롯 × 좌표 3
         nt = []
         for s in (cfg.get("tj_slots") or []):
@@ -645,6 +660,7 @@ class App(tk.Tk):
         self._item_stop    = False
         self._dollchk_stop = False
         self._relic_stop   = False
+        self._coupon_stop  = False
         self._tj_stop      = False
         self._task_queue   = []   # 연속으로 누른 실행/재측정 순차 실행 대기열
         self._build_ui()
@@ -916,6 +932,11 @@ class App(tk.Tk):
         upd.create_text(39, 29, text="🔄", font=("맑은 고딕", 13))
         upd.create_text(39, 52, text="업데이트", fill="white", font=("맑은 고딕", 9, "bold"))
         upd.bind("<Button-1>", lambda e: self._run_updater())
+
+        # 업데이트 오른쪽: 🎟 쿠폰등록 네모 버튼 (변신확인용 방식 — 좌표7개, 클릭5에서 글 붙여넣기)
+        tk.Button(btn_row, text="🎟 쿠폰\n등록", font=("맑은 고딕", 10, "bold"),
+                  bg="#1f618d", fg="white", activebackground="#154360",
+                  width=7, height=3, command=self._open_coupon_win).pack(side="left", padx=(6, 0))
         # TJ성공!! 좌측 끝 정렬용 가변 여백 (행이 가운데 정렬이라 오른쪽을 늘려 왼쪽으로 밀기)
         self._btnrow_pad = tk.Frame(btn_row, width=0, height=1)
         self._btnrow_pad.pack(side="left")
@@ -2318,7 +2339,12 @@ class App(tk.Tk):
     # ── 인형확인용/성물확인용 (변신확인용 복제 — 동일 실행 로직) ────────
     def _dgn2_info(self, fkey):
         return {"dollchk": ("dollchk_slots", "인형확인용", "🧸"),
-                "relic":   ("relic_slots",   "성물확인용", "🗿")}[fkey]
+                "relic":   ("relic_slots",   "성물확인용", "🗿"),
+                "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟")}[fkey]
+
+    def _open_coupon_win(self):
+        self._open_section_win("_coupon_win", "🎟 쿠폰등록",
+                               lambda p: self._build_dgn2("coupon", p), w=470, h=640, pinnable=True)
 
     def _open_dollchk_win(self):
         self._open_section_win("_dollchk_win", "🧸 인형확인용",
@@ -2330,9 +2356,23 @@ class App(tk.Tk):
 
     def _build_dgn2(self, fkey, parent):
         key, title, icon = self._dgn2_info(fkey)
-        color = self._grid_spec(fkey)["color"]
-        tk.Label(parent, text=f"{title}  (슬롯 순서 랜덤 / 클릭1~5 순서대로, 간격 랜덤)",
+        sp = self._grid_spec(fkey)
+        color = sp["color"]
+        sub = "클릭5에서 글 붙여넣기" if fkey == "coupon" else "간격 랜덤"
+        tk.Label(parent, text=f"{title}  (슬롯 순서 랜덤 / 클릭1~{sp['clicks']} 순서대로, {sub})",
                  font=("맑은 고딕", 9, "bold"), fg=color).pack(anchor="w", padx=4, pady=(4,2))
+        if fkey == "coupon":
+            # 클릭5에서 붙여넣을 글 — 여기 적으면 자동 저장, 모든 슬롯 공통
+            tr = tk.Frame(parent); tr.pack(fill="x", padx=6, pady=(0, 3))
+            tk.Label(tr, text="붙여넣을 글", font=("맑은 고딕", 9, "bold"),
+                     fg=color).pack(side="left")
+            tv = tk.StringVar(value=str(self.cfg.get("coupon_text", "") or ""))
+            ent = tk.Entry(tr, textvariable=tv, font=("맑은 고딕", 10))
+            ent.pack(side="left", fill="x", expand=True, padx=6)
+            def _save_txt(e=None):
+                self.cfg["coupon_text"] = tv.get()
+                save_cfg(self.cfg)
+            ent.bind("<FocusOut>", _save_txt); ent.bind("<Return>", _save_txt)
         dr = tk.Frame(parent); dr.pack(pady=3)
         setattr(self, f"_{fkey}_stop", False)
         run = tk.Button(dr, text="▶  실행",
@@ -2374,7 +2414,7 @@ class App(tk.Tk):
         key, title, _ = self._dgn2_info(fkey)
         if not messagebox.askyesno("슬롯 삭제", f"{title} #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
             return
-        self.cfg[key][idx] = {"name": "미등록", "coords": [None]*DUNGEON_CLICKS}
+        self.cfg[key][idx] = {"name": "미등록", "coords": [None]*self._grid_spec(fkey)["clicks"]}
         save_cfg(self.cfg); self._refresh_ui()
 
     def _preview_dgn2(self, fkey, idx):
@@ -2398,6 +2438,33 @@ class App(tk.Tk):
         self._open_dot_preview(f"{title} #{idx+1:02d} {name}", dots,
                                rereg_fn=rereg, save_fn=_save)
 
+    @staticmethod
+    def _set_clipboard_text(text):
+        # 실행 스레드에서도 안전한 Win32 클립보드 쓰기 (tk 클립보드는 메인스레드 전용)
+        import ctypes
+        u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
+        k32.GlobalAlloc.restype = ctypes.c_void_p
+        k32.GlobalLock.restype = ctypes.c_void_p
+        k32.GlobalLock.argtypes = [ctypes.c_void_p]
+        k32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+        u32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+        for _ in range(5):
+            if u32.OpenClipboard(0): break
+            time.sleep(0.05)
+        else:
+            return False
+        try:
+            u32.EmptyClipboard()
+            data = str(text).encode("utf-16-le") + b"\x00\x00"
+            h = k32.GlobalAlloc(0x0042, len(data))   # GMEM_MOVEABLE | GMEM_ZEROINIT
+            p = k32.GlobalLock(h)
+            ctypes.memmove(p, data, len(data))
+            k32.GlobalUnlock(h)
+            u32.SetClipboardData(13, h)              # CF_UNICODETEXT
+        finally:
+            u32.CloseClipboard()
+        return True
+
     def _start_dgn2(self, fkey):
         key, title, _ = self._dgn2_info(fkey)
         if not self._try_busy_or_queue(title, lambda: self._start_dgn2(fkey)): return
@@ -2410,9 +2477,16 @@ class App(tk.Tk):
 
     def _run_dgn2(self, fkey, slot_idx=None):
         key, title, icon = self._dgn2_info(fkey)
+        nclk = self._grid_spec(fkey)["clicks"]
         stop = f"_{fkey}_stop"
         try:
             slots = self.cfg.get(key, [])
+            if fkey == "coupon":
+                txt = str(self.cfg.get("coupon_text", "") or "")
+                if not txt.strip():
+                    self.status.set("🎟 쿠폰등록: 붙여넣을 글이 비어 있습니다 — 창에서 글을 먼저 적어주세요")
+                    return
+                self._set_clipboard_text(txt)
             if slot_idx is not None:
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
             else:
@@ -2423,15 +2497,20 @@ class App(tk.Tk):
                 if getattr(self, stop, False): break
                 name = slot.get("name", f"#{si+1}")
                 coords = slot.get("coords", [])
-                while len(coords) < DUNGEON_CLICKS:
+                while len(coords) < nclk:
                     coords.append(None)
                 if not self._wait_mouse_idle(stop): return
-                # 클릭1~5를 순서대로, 클릭 사이 간격만 랜덤
-                order = [j for j in range(DUNGEON_CLICKS) if coords[j]]
+                # 클릭1~N을 순서대로, 클릭 사이 간격만 랜덤
+                order = [j for j in range(nclk) if coords[j]]
                 for n, j in enumerate(order):
                     if getattr(self, stop, False): break
                     self.status.set(f"{icon} [{name}] 클릭{j+1}...")
                     pyautogui.click(*coords[j])
+                    if fkey == "coupon" and j == 4:
+                        # 클릭5 = 글 입력칸 — 클릭한 뒤 등록해둔 글 붙여넣기(Ctrl+V)
+                        time.sleep(random.uniform(0.4, 0.7))
+                        pyautogui.hotkey("ctrl", "v")
+                        self.status.set(f"{icon} [{name}] 클릭5 글 붙여넣기 완료")
                     if n < len(order) - 1:
                         time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
             self.status.set(f"✔ {title} 실행 완료!")
@@ -5229,6 +5308,11 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("relic", i),
                             prev=lambda i: self._preview_dgn2("relic", i),
                             delete=lambda i: self._del_dgn2("relic", i)),
+            "coupon":  dict(title="쿠폰등록",  key="coupon_slots",  clicks=COUPON_CLICKS,  color="#1f618d",
+                            reg=lambda s, c: self._reg_dgn2_click("coupon", s, c),
+                            test=lambda i: self._test_dgn2("coupon", i),
+                            prev=lambda i: self._preview_dgn2("coupon", i),
+                            delete=lambda i: self._del_dgn2("coupon", i)),
             "tj":      dict(title="TJ성공!!", key="tj_slots",       clicks=TJ_CLICKS,      color="#ad1457",
                             reg=self._reg_tj_click,      test=self._test_tj,      prev=self._preview_tj,      delete=self._del_tj),
         }
@@ -8057,6 +8141,7 @@ class App(tk.Tk):
         self._item_stop      = True
         self._dollchk_stop   = True
         self._relic_stop     = True
+        self._coupon_stop    = True
         self._tj_stop        = True
         self._reroll_running = False  # 오림의일기장도 정지
         self._busy_task      = None   # 잠금 해제
