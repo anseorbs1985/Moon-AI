@@ -320,6 +320,8 @@ class IslandApp(tk.Tk):
         self._auto_run = len(sys.argv) > 2 and sys.argv[2] == "--run"
 
         self._build_ui()
+        self._repeat_next = {}
+        self.after(15000, self._repeat_tick)   # 슬롯별 반복 타이머 (1~4시간)
         self.after(300, self._scroll_all_to_bottom)
         self.after(80, self._fit_width)
         if self._auto_run and self._focus_idx is not None:
@@ -528,6 +530,14 @@ class IslandApp(tk.Tk):
                       command=lambda k=key, x=i: self._slot_copy(k, x)).pack(side="left", padx=(0, 1))
             tk.Button(r4, text="붙임", font=("맑은 고딕", 6), bg="#8e44ad", fg="white", width=3,
                       command=lambda k=key, x=i: self._slot_paste(k, x)).pack(side="left")
+            # 반복 타이머 — N시간마다 이 슬롯 자동 재실행 (실행기 켜져 있는 동안)
+            _rh = self.cfg.get(key, [{}]*SLOTS)[i].get("repeat_h") or 0
+            rv = tk.StringVar(value=f"⏰{_rh}h" if _rh else "⏰없음")
+            rom = tk.OptionMenu(cell, rv, "⏰없음", "⏰1h", "⏰2h", "⏰3h", "⏰4h",
+                                command=lambda val, k=key, x=i: self._set_repeat(k, x, val))
+            rom.config(font=("맑은 고딕", 6), width=5, pady=0, highlightthickness=0,
+                       bg="#34495e", fg="white", activebackground="#2c3e50")
+            rom.pack(pady=(1, 0))
 
         self._refresh(key)
 
@@ -1090,6 +1100,46 @@ class IslandApp(tk.Tk):
         except Exception:
             pass
 
+    def _set_repeat(self, key, idx, val):
+        """슬롯 반복 타이머 설정 — ⏰없음/1h/2h/3h/4h."""
+        h = {"⏰없음": 0, "⏰1h": 1, "⏰2h": 2, "⏰3h": 3, "⏰4h": 4}.get(val, 0)
+        self.cfg[key][idx]["repeat_h"] = h
+        save_cfg(self.cfg)
+        if not hasattr(self, "_repeat_next"):
+            self._repeat_next = {}
+        if h:
+            self._repeat_next[(key, idx)] = time.time() + h * 3600
+            self._status.set(f"⏰ #{idx+1}: {h}시간마다 자동 재실행 (실행기가 켜져 있는 동안)")
+        else:
+            self._repeat_next.pop((key, idx), None)
+            self._status.set(f"#{idx+1}: 반복 끔")
+
+    def _repeat_tick(self):
+        """15초마다 반복 타이머 확인 — 시간이 되면 그 슬롯을 자동 실행."""
+        try:
+            if not hasattr(self, "_repeat_next"):
+                self._repeat_next = {}
+            now = time.time()
+            for d in DUNGEONS:
+                key = d["key"]
+                for i, s in enumerate(self.cfg.get(key, [])):
+                    h = s.get("repeat_h") or 0
+                    if not h:
+                        self._repeat_next.pop((key, i), None)
+                        continue
+                    nxt = self._repeat_next.get((key, i))
+                    if nxt is None:
+                        self._repeat_next[(key, i)] = now + h * 3600
+                    elif now >= nxt:
+                        if getattr(self, "_slot_running", False):
+                            continue   # 다른 실행 중 — 다음 틱에 재시도
+                        self._repeat_next[(key, i)] = now + h * 3600
+                        self._status.set(f"⏰ #{i+1} {h}시간 반복 — 자동 실행")
+                        self._test(key, i)
+        except Exception:
+            pass
+        self.after(15000, self._repeat_tick)
+
     def _test(self, key, idx):
         self.iconify()
         self._minimize_claude()
@@ -1326,6 +1376,7 @@ class IslandApp(tk.Tk):
             btn.config(state="disabled")
 
     def _run(self, key, slot_idx=None):
+        self._slot_running = True
         try:
             self._status.set("2초 후 실행 시작...")
             time.sleep(2)
@@ -1418,6 +1469,7 @@ class IslandApp(tk.Tk):
         except Exception as e:
             self._status.set(f"오류: {e}")
         finally:
+            self._slot_running = False
             for btn in self._stop_btns.values():
                 btn.config(state="disabled")
             def _restore():
