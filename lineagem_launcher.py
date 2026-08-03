@@ -116,7 +116,8 @@ MAIL_INTERVAL  = 1.6   # 우편함 클릭 간격(초)
 DUNGEON_SLOTS  = 16
 DUNGEON_CLICKS = 5
 DUNGEON_HOVER  = 1.5
-COUPON_CLICKS  = 7     # 쿠폰등록 — 슬롯당 좌표 7개 (클릭5에서 글 붙여넣기)
+COUPON_CLICKS  = 9     # 쿠폰등록 — 슬롯당 좌표 9개 (클릭5에서 글 붙여넣기)
+COUPON_SLOT_GAP = 3.0  # 쿠폰등록 슬롯 간 기본 간격(초) — 슬롯마다 ×1.02~1.18 랜덤
 PAST_SLOTS     = 16
 PAST_CLICKS    = 3
 PAST_INTERVAL  = 4.0   # 과거의말하는섬 클릭 간격(초)
@@ -2550,13 +2551,15 @@ class App(tk.Tk):
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
                 random.shuffle(targets)   # 슬롯 클릭 순서 매번 랜덤
-            for si, slot in targets:
+            for tn, (si, slot) in enumerate(targets):
                 if getattr(self, stop, False): break
                 name = slot.get("name", f"#{si+1}")
                 coords = slot.get("coords", [])
                 while len(coords) < nclk:
                     coords.append(None)
                 if not self._wait_mouse_idle(stop): return
+                # 쿠폰: 슬롯마다 클릭 간격 배수를 새로 뽑음 (기본의 -5%~+20%)
+                c_mult = random.uniform(0.95, 1.20) if fkey == "coupon" else 1.0
                 # 클릭1~N을 순서대로, 클릭 사이 간격만 랜덤
                 order = [j for j in range(nclk) if coords[j]]
                 # 쿠폰: 클릭5(입력칸)가 등록돼 있으면 그 직후, 없으면 클릭4 직후에 붙여넣기
@@ -2593,9 +2596,14 @@ class App(tk.Tk):
                             self._coupon_log(f"붙여넣기 오류: {e!r}")
                             self.status.set(f"{icon} 붙여넣기 오류: {e}")
                     if n < len(order) - 1:
-                        time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                        time.sleep((random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX)) * c_mult)
                 if fkey == "coupon":
-                    self._coupon_log(f"슬롯 [{name}] 끝")
+                    self._coupon_log(f"슬롯 [{name}] 끝 (클릭간격 배수 {c_mult:.2f})")
+                    # 슬롯 간 간격 — 기본 3초의 +2%~18% 랜덤 (마지막 슬롯 뒤엔 생략)
+                    if slot_idx is None and tn < len(targets) - 1:
+                        g = COUPON_SLOT_GAP * random.uniform(1.02, 1.18)
+                        self._coupon_log(f"슬롯 간격 {g:.2f}초 대기")
+                        time.sleep(g)
             self.status.set(f"✔ {title} 실행 완료!")
         except Exception as e:
             self.status.set(f"오류: {e}")
