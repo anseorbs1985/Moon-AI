@@ -1082,6 +1082,9 @@ class App(tk.Tk):
 
     # ── 섹션 창 열기 ────────────────────────────────────────────────────
     def _minimize_claude(self):
+        # 승인 버튼(항상 허용/한 번 허용) 등 주의 요청 후 3분간은 최소화하지 않음
+        if time.time() - getattr(self, "_claude_attention_ts", 0) < 180:
+            return
         try:
             import win32gui, win32con
             def _do(hwnd, _):
@@ -2893,13 +2896,12 @@ class App(tk.Tk):
                 w = max(0, min(250, self._btnrow_pad.winfo_reqwidth() + 2 * dx))
                 self._btnrow_pad.config(width=w)
                 need_more = True
-            # 2) 맨뒤로/혈레이드/제자리 ← TJ성공!! 세로선에서 0.8cm(30px) 왼쪽
+            # 2) 맨뒤로/혈레이드/제자리 ← TJ성공!! 좌측 라인에 일렬로
             try:
                 bx = self._tjcol.winfo_rootx() - self.winfo_rootx()
                 if 0 <= bx < 800:
-                    bx2 = max(0, bx - 30)
-                    self._back_circle.pack_configure(padx=(bx2, 0))
-                    self._boost_btn.pack_configure(padx=(bx2, 0))
+                    self._back_circle.pack_configure(padx=(bx, 0))
+                    self._boost_btn.pack_configure(padx=(bx, 0))
             except Exception:
                 pass
             # 3) ★ 과거섬 패스 ← 일반던전충전 좌측 라인 (맞을 때까지 반복)
@@ -5665,6 +5667,8 @@ class App(tk.Tk):
     def _minimize_claude_windows(self, only_background=False):
         """제목에 'claude'가 들어간 창을 최소화한다.
         only_background=True면 사용자가 보고 있는(포그라운드) 창은 건드리지 않는다."""
+        if time.time() - getattr(self, "_claude_attention_ts", 0) < 180:
+            return   # 승인 대기 중일 수 있음 — 내리지 않음
         import ctypes
         SW_MINIMIZE = 6
         user32 = ctypes.windll.user32
@@ -5842,9 +5846,12 @@ class App(tk.Tk):
             try:
                 if not hwnd or idObject != OBJID_WINDOW:
                     return
-                if not u.IsIconic(hwnd):     # 이미 보이면 무시
-                    return
                 if not _is_claude(hwnd):
+                    return
+                # 승인 버튼(항상 허용/한 번 허용) 등 주의 요청 감지 시각 기록
+                # → 이후 3분간은 클로드를 최소화하지 않는다
+                self._claude_attention_ts = time.time()
+                if not u.IsIconic(hwnd):     # 이미 보이면 복원 불필요
                     return
                 now = time.time()
                 ts = [t for t in hits.get(hwnd, []) if now - t < 2.0] + [now]
