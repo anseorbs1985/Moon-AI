@@ -70,6 +70,18 @@ HOVER_WAIT   = 2.0
 CLICK_INTERVAL = 2.0  # 클릭 간격(초) — 현재 2초
 CLICK_LABELS = ["클릭1", "클릭2", "추가", "클릭3", "클릭4", "클릭5"]
 
+# 던전별 좌표 개수 (기본 6개, 예외만 지정)
+CLICKS_BY_KEY = {"월요일_잊혀진섬": 25}
+
+def clicks_for(key):
+    return CLICKS_BY_KEY.get(key, CLICKS)
+
+def labels_for(key):
+    n = clicks_for(key)
+    if n == CLICKS:
+        return CLICK_LABELS
+    return [f"클릭{i+1}" for i in range(n)]
+
 DUNGEONS = [
     {"key": "수금_오만의탑",   "label": "수~금\n오만의탑",   "color": "#e67e22"},
     {"key": "토요일_악몽의섬", "label": "토요일\n악몽의섬",   "color": "#8e44ad"},
@@ -105,14 +117,15 @@ def load_cfg():
     except Exception:
         data = {}
     for d in DUNGEONS:
+        n = clicks_for(d["key"])
         if d["key"] not in data:
-            data[d["key"]] = [{"name": "미등록", "coords": [None]*CLICKS}
+            data[d["key"]] = [{"name": "미등록", "coords": [None]*n}
                                for _ in range(SLOTS)]
         else:
-            # 기존 좌표 배열이 짧으면 CLICKS 길이로 패딩
+            # 기존 좌표 배열이 짧으면 해당 던전의 좌표 수만큼 패딩
             for slot in data[d["key"]]:
                 coords = slot.get("coords", [])
-                while len(coords) < CLICKS:
+                while len(coords) < n:
                     coords.append(None)
                 slot["coords"] = coords
     return data
@@ -141,7 +154,7 @@ class CoordOverlay(tk.Toplevel):
         ci  = app._reg_click_idx
         key = app._reg_key
         name = app.cfg[key][si].get("name", f"#{si+1}")
-        lbl = f"[{name}]  {CLICK_LABELS[ci]} 위치를 클릭하세요   (ESC: 취소)"
+        lbl = f"[{name}]  {labels_for(key)[ci]} 위치를 클릭하세요   (ESC: 취소)"
         c.create_text(sw//2, 60, text=lbl, fill="white", font=("맑은 고딕", 14))
         c.bind("<ButtonPress-1>", self._on_click)
         self.bind("<Escape>", lambda e: [self.destroy(), app.deiconify()])
@@ -194,7 +207,8 @@ class BatchOverlay(tk.Toplevel):
         c = tk.Canvas(self, bg="black", highlightthickness=0)
         c.pack(fill="both", expand=True)
         idx = app._batch_idx
-        lbl = f"[{CLICK_LABELS[idx]}] 위치 클릭  ({idx+1}/{CLICKS})  —  ESC: 취소"
+        _bl = labels_for(app._batch_key)
+        lbl = f"[{_bl[idx]}] 위치 클릭  ({idx+1}/{len(_bl)})  —  ESC: 취소"
         c.create_text(sw//2, 60, text=lbl, fill="white", font=("맑은 고딕", 14))
         c.bind("<ButtonPress-1>", self._on_click)
         self.bind("<Escape>", lambda e: [self.destroy(), app.deiconify()])
@@ -403,7 +417,7 @@ class IslandApp(tk.Tk):
                            command=lambda k=key, x=i: self._toggle_enable(k, x))
             eb.pack(side="left", padx=(3, 0))
             self._en_btns[key].append(eb)
-            sv = tk.StringVar(value=f"0/{CLICKS}")
+            sv = tk.StringVar(value=f"0/{clicks_for(key)}")
             self._cnt_vars[key].append(sv)
             tk.Button(cell, textvariable=sv, font=("맑은 고딕", 7, "bold"),
                       bg=color, fg="white", width=7,
@@ -444,11 +458,25 @@ class IslandApp(tk.Tk):
             self.cfg[key][idx]["name"] = nv.get().strip() or "미등록"
             save_cfg(self.cfg)
         ent.bind("<FocusOut>", _sv); ent.bind("<Return>", _sv)
+        # 이동 스텝 (방향키 홀드) — 예: "하3 우1.5" = ↓3초, →1.5초. 클릭이 모두 끝난 뒤 실행
+        mrow = tk.Frame(win); mrow.pack(pady=(0, 2))
+        tk.Label(mrow, text="이동:", font=("맑은 고딕", 8, "bold")).pack(side="left")
+        mvv = tk.StringVar(value=slot.get("moves", ""))
+        me = tk.Entry(mrow, textvariable=mvv, font=("맑은 고딕", 9), width=20)
+        me.pack(side="left", padx=(2, 4))
+        tk.Label(mrow, text="예: 하3 우1.5 (방향+초, 클릭 후 실행)",
+                 font=("맑은 고딕", 7), fg="#888").pack(side="left")
+        def _smv(e=None):
+            self.cfg[key][idx]["moves"] = mvv.get().strip()
+            save_cfg(self.cfg)
+        me.bind("<FocusOut>", _smv); me.bind("<Return>", _smv)
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
-        coords = slot.get("coords", [None] * CLICKS)
-        for j in range(CLICKS):
+        _n_clicks = clicks_for(key)
+        _labels   = labels_for(key)
+        coords = slot.get("coords", [None] * _n_clicks)
+        for j in range(_n_clicks):
             cc = tk.Frame(grid); cc.grid(row=j // 6, column=j % 6, padx=4, pady=4)
-            tk.Label(cc, text=CLICK_LABELS[j], font=("맑은 고딕", 7), fg="#555").pack()
+            tk.Label(cc, text=_labels[j], font=("맑은 고딕", 7), fg="#555").pack()
             on = j < len(coords) and coords[j]
             cv = tk.StringVar(value="✔" if on else "✗")
             self._pop["vars"].append(cv)
@@ -535,7 +563,7 @@ class IslandApp(tk.Tk):
         for i, sv in enumerate(self._cnt_vars.get(key, [])):
             if i >= len(slots): break
             coords = slots[i].get("coords", [])
-            sv.set(f"{sum(1 for c in coords if c)}/{CLICKS}")
+            sv.set(f"{sum(1 for c in coords if c)}/{clicks_for(key)}")
         # ON/OFF 토글 표시
         for i, eb in enumerate(getattr(self, "_en_btns", {}).get(key, [])):
             if i >= len(slots): break
@@ -576,7 +604,7 @@ class IslandApp(tk.Tk):
         self._reg_key       = key
         self._reg_slot_idx  = slot_idx
         self._reg_click_idx = click_idx
-        lbl = CLICK_LABELS[click_idx]
+        lbl = labels_for(key)[click_idx]
         self._status.set(f"3초 후 슬롯#{slot_idx+1} [{lbl}] 위치 클릭하세요!")
         self.after(3000, self._open_overlay)
 
@@ -596,7 +624,7 @@ class IslandApp(tk.Tk):
             self.cfg[key][si]["coords"] = coords
             save_cfg(self.cfg)
             self._refresh(key)
-            self._status.set(f"✔ #{si+1} [{CLICK_LABELS[ci]}] 등록: ({x},{y})")
+            self._status.set(f"✔ #{si+1} [{labels_for(key)[ci]}] 등록: ({x},{y})")
         except Exception as e:
             self._status.set(f"오류: {e}")
         finally:
@@ -688,13 +716,13 @@ class IslandApp(tk.Tk):
         )
         if not ok: return
         self._batch_key    = key
-        self._batch_coords = [None] * CLICKS
+        self._batch_coords = [None] * clicks_for(key)
         self._batch_idx    = 0
         self._batch_next()
 
     def _batch_next(self):
         idx = self._batch_idx
-        if idx >= CLICKS:
+        if idx >= clicks_for(self._batch_key):
             key = self._batch_key
             for slot in self.cfg[key]:
                 slot["coords"] = [list(c) if c else None for c in self._batch_coords]
@@ -703,8 +731,8 @@ class IslandApp(tk.Tk):
             self._status.set(f"✔ [{key}] 전체 {SLOTS}슬롯 좌표 적용 완료!")
             self.deiconify()
             return
-        lbl = CLICK_LABELS[idx]
-        self._status.set(f"3초 후 [{lbl}] 위치를 클릭하세요! ({idx+1}/{CLICKS})")
+        lbl = labels_for(self._batch_key)[idx]
+        self._status.set(f"3초 후 [{lbl}] 위치를 클릭하세요! ({idx+1}/{clicks_for(self._batch_key)})")
         self._reg_key       = self._batch_key
         self._reg_slot_idx  = 0
         self._reg_click_idx = idx
@@ -746,7 +774,7 @@ class IslandApp(tk.Tk):
         from tkinter import messagebox
         if not messagebox.askyesno("삭제 확인", f"#{idx+1} 슬롯 좌표를 삭제하시겠습니까?", default="no"):
             return
-        self.cfg[key][idx] = {"name": "미등록", "coords": [None]*CLICKS}
+        self.cfg[key][idx] = {"name": "미등록", "coords": [None]*clicks_for(key)}
         save_cfg(self.cfg); self._refresh(key)
 
     def _minimize_claude(self):
@@ -775,6 +803,30 @@ class IslandApp(tk.Tk):
         self._minimize_claude()
         threading.Thread(target=self._run, args=(key,), daemon=True).start()
 
+    def _do_moves(self, spec, name):
+        """'하3 우1.5 상2 좌0.5' — 방향키를 지정 초만큼 눌러 이동.
+        직전 클릭으로 포커스된 클라이언트가 키를 받는다."""
+        import re, ctypes
+        u = ctypes.windll.user32
+        VK = {"상": 0x26, "위": 0x26, "하": 0x28, "아": 0x28,
+              "좌": 0x25, "왼": 0x25, "우": 0x27, "오": 0x27}
+        EXT = 0x0001; UP = 0x0002
+        for m in re.finditer(r"(상|위|하|아래|좌|왼쪽?|우|오른쪽?)\s*:?\s*([0-9]+(?:\.[0-9]+)?)", spec):
+            if self._stop_flag: break
+            word, sec = m.group(1), float(m.group(2))
+            vk = VK.get(word[0])
+            if not vk or sec <= 0: continue
+            self._status.set(f"🏃 [{name}] {word} {sec}초 이동...")
+            u.keybd_event(vk, 0, EXT, 0)
+            t0 = time.time()
+            try:
+                while time.time() - t0 < sec:
+                    if self._stop_flag: break
+                    time.sleep(0.05)
+            finally:
+                u.keybd_event(vk, 0, EXT | UP, 0)
+            time.sleep(0.15)
+
     def _stop(self):
         self._stop_flag = True
         self._status.set("멈추는 중...")
@@ -798,10 +850,13 @@ class IslandApp(tk.Tk):
                 if self._stop_flag: break
                 if not wait_mouse_idle(stop_fn, status_fn): break
                 name   = slot.get("name", f"#{si+1}")
-                coords = slot.get("coords", [None]*CLICKS)
+                _labels = labels_for(key)
+                coords = slot.get("coords", [None]*len(_labels))
+                while len(coords) < len(_labels):
+                    coords.append(None)
                 if not any(coords): continue
                 move_set = MOVE_ONLY_INDICES.get(key, set())
-                for j, lbl in enumerate(CLICK_LABELS):
+                for j, lbl in enumerate(_labels):
                     if self._stop_flag: break
                     if not coords[j]: continue
                     self._status.set(f"🏝 [{name}] {lbl}...")
@@ -810,6 +865,10 @@ class IslandApp(tk.Tk):
                     else:
                         pyautogui.click(*coords[j])
                     time.sleep(CLICK_INTERVAL)
+                # 이동 스텝 — 방향키를 지정 초만큼 눌러 캐릭터 이동 (예: "하3 우1.5")
+                mv = (slot.get("moves") or "").strip()
+                if mv and not self._stop_flag:
+                    self._do_moves(mv, name)
                 self._add_count(si)
                 if self._stop_flag: break
                 time.sleep(5)
