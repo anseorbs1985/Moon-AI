@@ -548,7 +548,7 @@ class IslandApp(tk.Tk):
             self.cfg[key][idx]["name"] = nv.get().strip() or "미등록"
             save_cfg(self.cfg)
         ent.bind("<FocusOut>", _sv); ent.bind("<Return>", _sv)
-        tk.Label(win, text=f"[방향]: ↑↓←→↖↗↙↘=이동 / ⇩=끌어내리기 / ⏺=녹화(선택하면 3초 뒤 내 마우스·방향키를 녹화, ESC 종료 → 실행 때 재생)  |  'ㅡ' 칸=대기 초, 8~10=랜덤 (비우면 {CLICK_INTERVAL})",
+        tk.Label(win, text=f"버튼: [✔등록][×삭제][▶테스트][⏺녹화 — 누르면 3초 뒤 녹화, ESC 종료, 저장되면 ✔]  |  [방향]: 이동·⇩끌어내리기  |  'ㅡ'=대기 초(8~10=랜덤, 비우면 {CLICK_INTERVAL})",
                  font=("맑은 고딕", 7), fg="#888").pack()
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         _n_clicks = clicks_for(key)
@@ -582,13 +582,13 @@ class IslandApp(tk.Tk):
         dirs = list(slot.get("dirs") or [])
         while len(dirs) < _n_clicks:
             dirs.append(None)
-        DIRS = ["ㅡ", "↑", "↓", "←", "→", "↖", "↗", "↙", "↘", "⇩", "⏺"]   # ⇩=끌어내리기, ⏺=녹화 재생
+        DIRS = ["ㅡ", "↑", "↓", "←", "→", "↖", "↗", "↙", "↘", "⇩"]   # ⇩=끌어내리기
         dir_vars, sec_vars = [], []
         def _save_dirs(*a):
             out = []
             for dv, sv2 in zip(dir_vars, sec_vars):
                 d_ = dv.get()
-                if d_ not in ("↑", "↓", "←", "→", "↖", "↗", "↙", "↘", "⇩", "⏺"):
+                if d_ not in ("↑", "↓", "←", "→", "↖", "↗", "↙", "↘", "⇩"):
                     out.append(None)
                 else:
                     try:
@@ -622,6 +622,14 @@ class IslandApp(tk.Tk):
                       width=1, pady=0,
                       command=lambda k=key, x=idx, c=j: self._test_click(k, x, c)
                       ).pack(side="left", padx=(1, 0))
+            # 녹화 버튼 — 클릭과 별개. 녹화가 저장돼 있으면 ✔ 표시, 누르면 (재)녹화
+            _has_rec = bool((slot.get("recs") or {}).get(str(j)))
+            rb = tk.Button(brow, text="✔" if _has_rec else "⏺",
+                           font=("맑은 고딕", 7, "bold"), width=1, pady=0,
+                           fg="white", bg="#1e8449" if _has_rec else "#7f8c8d",
+                           command=lambda k=key, x=idx, c=j: self._start_record(k, x, c))
+            rb.pack(side="left", padx=(1, 0))
+            self._pop.setdefault("rec_btns", []).append(rb)
             # [방향][초] 선택 — 방향을 고르면 이 자리는 클릭 대신 방향키 이동
             drow = tk.Frame(cc); drow.pack()
             cur = dirs[j]
@@ -629,9 +637,7 @@ class IslandApp(tk.Tk):
             sv2 = tk.StringVar(value=(f"{cur[1]:g}" if cur else "1"))
             dir_vars.append(dv); sec_vars.append(sv2)
             self._pop["dir_vars"].append(dv)
-            om = tk.OptionMenu(drow, dv, *DIRS,
-                               command=lambda val, jj=j: (_save_dirs(),
-                                   self._start_record(key, idx, jj) if val == "⏺" else None))
+            om = tk.OptionMenu(drow, dv, *DIRS, command=lambda *_: _save_dirs())
             om.config(font=("맑은 고딕", 7), width=1, pady=0, highlightthickness=0)
             om.pack(side="left")
             om2 = tk.OptionMenu(drow, sv2, *[str(i) for i in range(1, 11)],
@@ -966,12 +972,13 @@ class IslandApp(tk.Tk):
                 cn = slot.get("click_names") or []
                 lbl = (cn[ci] if ci < len(cn) and cn[ci] else labels_for(key)[ci])
                 time.sleep(0.3)
+                rec = (slot.get("recs") or {}).get(str(ci))
                 if d_ and d_[0] == "⏺":
-                    ev = (slot.get("recs") or {}).get(str(ci))
-                    if not ev:
-                        self._status.set(f"{lbl}: 저장된 녹화가 없습니다 (⏺를 다시 선택해 녹화)"); return
-                    self._play_events(ev, name)
-                elif d_ and d_[0] == "⇩":
+                    d_ = None
+                if rec and not (d_ or c):
+                    self._play_events(rec, name)
+                    self._status.set(f"✔ [{name}] {lbl} 녹화 재생 완료"); return
+                if d_ and d_[0] == "⇩":
                     if not c:
                         self._status.set(f"{lbl}: ⇩는 좌표 등록이 필요합니다"); return
                     dist = max(30, int(float(d_[1]) * 30))
@@ -988,6 +995,8 @@ class IslandApp(tk.Tk):
                     pyautogui.click(*c)
                 else:
                     self._status.set(f"{lbl}: 등록된 좌표/동작이 없습니다"); return
+                if rec and not self._stop_flag:
+                    self._play_events(rec, name)   # 클릭/이동 후 녹화도 이어서 재생
                 self._status.set(f"✔ [{name}] {lbl} 테스트 완료")
             except Exception as e:
                 self._status.set(f"테스트 오류: {e}")
@@ -1006,6 +1015,10 @@ class IslandApp(tk.Tk):
         if ci < len(dirs) and dirs[ci]:
             dirs[ci] = None
             slot["dirs"] = dirs
+        recs = slot.get("recs") or {}
+        if str(ci) in recs:
+            del recs[str(ci)]
+            slot["recs"] = recs
         save_cfg(self.cfg)
         self._refresh(key)
         # 열려 있는 팝업의 방향 드롭다운도 초기화 표시
@@ -1099,8 +1112,18 @@ class IslandApp(tk.Tk):
             slot["recs"] = recs
             save_cfg(self.cfg)
             dur = events[-1][0] if events else 0
-            self.after(0, self.deiconify)
-            self._status.set(f"✔ ⏺ 녹화 저장 ({dur:.1f}초, 동작 {len(events)}개) — 실행 때 그대로 재생됩니다")
+            def _upd():
+                self.deiconify()
+                pop = getattr(self, "_pop", {}) or {}
+                if pop.get("key") == key and pop.get("slot") == idx:
+                    btns = pop.get("rec_btns") or []
+                    if ci < len(btns):
+                        try:
+                            btns[ci].config(text="✔", bg="#1e8449")
+                        except Exception:
+                            pass
+            self.after(0, _upd)
+            self._status.set(f"✔ 녹화 저장 ({dur:.1f}초, 동작 {len(events)}개) — 실행 때 이 자리에서 재생됩니다")
         self.withdraw()
         threading.Thread(target=rec, daemon=True).start()
 
@@ -1231,36 +1254,37 @@ class IslandApp(tk.Tk):
                 while len(coords) < len(_labels):
                     coords.append(None)
                 dirs = slot.get("dirs") or []
-                if not any(coords) and not any(dirs): continue
+                if not any(coords) and not any(dirs) and not (slot.get("recs") or {}):
+                    continue
                 move_set = MOVE_ONLY_INDICES.get(key, set())
                 # 클릭별 간격(gap_list) — 팝업의 'ㅡ' 위 칸에 적은 초, 비우면 기본
                 gl = slot.get("gap_list") or []
+                recs = slot.get("recs") or {}
                 for j, lbl in enumerate(_labels):
                     if self._stop_flag: break
                     d_ = dirs[j] if j < len(dirs) else None
-                    if d_ and d_[0] == "⏺":
-                        # 이 자리는 녹화 재생 — 끝나면 다음 좌표로
-                        ev = (slot.get("recs") or {}).get(str(j))
-                        if not ev:
-                            continue
-                        self._play_events(ev, name)
-                    elif d_ and d_[0] == "⇩":
+                    if d_ and d_[0] == "⏺":   # 구버전 데이터 호환 — 이제 녹화는 별도 버튼
+                        d_ = None
+                    rec = recs.get(str(j))
+                    did = False
+                    if d_ and d_[0] == "⇩":
                         # 등록한 좌표를 짧게 누르고 아래로 살짝 끌어내리기 (스크롤)
-                        if not coords[j]:
-                            continue   # ⇩는 좌표 등록이 필요
-                        dist = max(30, int(float(d_[1]) * 30))   # 1=30px(살짝) ~ 10=300px
-                        sx, sy = coords[j]
-                        self._status.set(f"🖱 [{name}] {lbl} 끌어내리기 {dist}px...")
-                        pyautogui.mouseDown(sx, sy)
-                        time.sleep(0.08)
-                        _steps = 6
-                        for _st in range(1, _steps + 1):
-                            pyautogui.moveTo(sx, sy + int(dist * _st / _steps))
-                            time.sleep(0.02)
-                        pyautogui.mouseUp(sx, sy + dist)
+                        if coords[j]:
+                            dist = max(30, int(float(d_[1]) * 30))   # 1=30px(살짝) ~ 10=300px
+                            sx, sy = coords[j]
+                            self._status.set(f"🖱 [{name}] {lbl} 끌어내리기 {dist}px...")
+                            pyautogui.mouseDown(sx, sy)
+                            time.sleep(0.08)
+                            _steps = 6
+                            for _st in range(1, _steps + 1):
+                                pyautogui.moveTo(sx, sy + int(dist * _st / _steps))
+                                time.sleep(0.02)
+                            pyautogui.mouseUp(sx, sy + dist)
+                            did = True
                     elif d_:
                         # 이 자리는 클릭 대신 방향키 이동 ([방향, 초] — 대각선 포함)
                         self._hold_arrow(d_[0], float(d_[1]), name)
+                        did = True
                     elif coords[j]:
                         _cn = slot.get("click_names") or []
                         _disp = _cn[j] if (j < len(_cn) and _cn[j]) else lbl
@@ -1269,7 +1293,12 @@ class IslandApp(tk.Tk):
                             pyautogui.moveTo(*coords[j])
                         else:
                             pyautogui.click(*coords[j])
-                    else:
+                        did = True
+                    if rec and not self._stop_flag:
+                        # 녹화는 클릭과 별개 — 이 자리 동작 후 녹화 재생
+                        self._play_events(rec, name)
+                        did = True
+                    if not did:
                         continue
                     g = gl[j] if j < len(gl) else None
                     if g is None or g == "":
