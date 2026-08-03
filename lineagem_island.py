@@ -627,6 +627,10 @@ class IslandApp(tk.Tk):
                       width=1, pady=0,
                       command=lambda k=key, x=idx, c=j: self._test_click(k, x, c)
                       ).pack(side="left", padx=(1, 0))
+            tk.Button(brow, text="👁", font=("맑은 고딕", 7), width=1, pady=0,
+                      bg="#566573", fg="white",
+                      command=lambda k=key, x=idx, c=j: self._preview_click(k, x, c)
+                      ).pack(side="left", padx=(1, 0))
             # 녹화 버튼 — 좌표 버튼과 같은 크기, 녹화가 저장돼 있으면 빨간 ●
             _has_rec = bool((slot.get("recs") or {}).get(str(j)))
             rb = tk.Button(cc, text="●" if _has_rec else "⏺",
@@ -951,6 +955,17 @@ class IslandApp(tk.Tk):
         dots = [(c[0], c[1], ci + 1, ci) for ci, c in valid]
         self.withdraw()
         self.after(1000, lambda: _IslandPreviewOverlay(self, key, idx, dots))
+
+    def _preview_click(self, key, idx, ci):
+        """좌표 하나만 미리보기 — 그 클릭 위치를 점으로 표시, 드래그하면 수정 저장."""
+        coords = self.cfg[key][idx].get("coords", [])
+        c = coords[ci] if ci < len(coords) else None
+        if not c:
+            self._status.set(f"클릭{ci+1}: 등록된 좌표가 없습니다")
+            return
+        dots = [(c[0], c[1], ci + 1, ci)]
+        self.withdraw()
+        self.after(600, lambda: _IslandPreviewOverlay(self, key, idx, dots))
 
     def _preview_all(self, key):
         """이 던전의 16슬롯 전체 좌표 미리보기 — 점 드래그로 개별 수정 저장."""
