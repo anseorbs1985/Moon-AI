@@ -2877,8 +2877,8 @@ class App(tk.Tk):
         self._did_initial_fit = True   # normal 상태에서 실제로 맞췄을 때만 완료 표시
 
     def _align_tj_to_dc(self, _tries=0):
-        """TJ성공!! 왼쪽 끝을 일반던전충전 버튼 왼쪽 끝에 맞춤
-        (버튼 행이 가운데 정렬이라, 행 오른쪽 여백을 늘려 왼쪽으로 민다).
+        """TJ성공!!·맨뒤로·혈레이드·★과거섬패스를 일반던전충전 좌측 라인에 맞춤.
+        (행들이 가운데 정렬이라 여백을 조절하며 맞을 때까지 반복 보정.)
         최소화 상태에선 좌표가 쓰레기값이라 절대 계산하지 않는다."""
         try:
             if self.state() != "normal":
@@ -2886,32 +2886,47 @@ class App(tk.Tk):
                     self.after(1000, lambda: self._align_tj_to_dc(_tries + 1))
                 return
             self.update_idletasks()
+            need_more = False
+            # 1) TJ성공!! ← 일반던전충전
             dx = self._tjcol.winfo_rootx() - self._dc_open_btn.winfo_rootx()
-            if abs(dx) > 2 and abs(dx) < 400:   # 비정상 측정값 무시
+            if 2 < abs(dx) < 400:
                 w = max(0, min(250, self._btnrow_pad.winfo_reqwidth() + 2 * dx))
                 self._btnrow_pad.config(width=w)
-                if _tries < 34:
-                    self.after(150, lambda: self._align_tj_to_dc(_tries + 1))
-            # 맨뒤로 동그라미도 TJ성공!!과 같은 세로선에
+                need_more = True
+            # 2) 맨뒤로/혈레이드 ← TJ성공!! 세로선
             try:
                 bx = self._tjcol.winfo_rootx() - self.winfo_rootx()
                 if 0 <= bx < 800:
                     self._back_circle.pack_configure(padx=(bx, 0))
-                    try:
-                        self._boost_btn.pack_configure(padx=(bx, 0))
-                    except Exception:
-                        pass
-                # ★ 과거섬 패스 버튼 — 일반던전충전 버튼의 좌측 라인에 맞춤 (반복 보정)
-                try:
-                    dx2 = self._dc_open_btn.winfo_rootx() - self._past_skip_btn.winfo_rootx()
-                    if abs(dx2) > 2:
-                        pad = max(0, min(600, getattr(self, "_star_pad", 0) + dx2))
-                        self._star_pad = pad
-                        self._past_skip_btn.pack_configure(padx=(pad, 4))
-                except Exception:
-                    pass
+                    self._boost_btn.pack_configure(padx=(bx, 0))
             except Exception:
                 pass
+            # 3) ★ 과거섬 패스 ← 일반던전충전 좌측 라인 (맞을 때까지 반복)
+            try:
+                dx2 = self._dc_open_btn.winfo_rootx() - self._past_skip_btn.winfo_rootx()
+                if 2 < abs(dx2) < 900:
+                    if dx2 > 0:
+                        # 오른쪽으로 이동 — 별 버튼 왼쪽 여백 증가
+                        pad = min(600, getattr(self, "_star_pad", 0) + dx2)
+                        self._star_pad = pad
+                        self._past_skip_btn.pack_configure(padx=(pad, 4))
+                    else:
+                        # 왼쪽으로 이동 — 행 오른쪽 여백을 늘려 행 전체를 왼쪽으로
+                        cur_p = getattr(self, "_star_pad", 0)
+                        if cur_p > 0:
+                            take = min(cur_p, -dx2)
+                            self._star_pad = cur_p - take
+                            self._past_skip_btn.pack_configure(padx=(self._star_pad, 4))
+                            dx2 += take
+                        if dx2 < -2:
+                            w2 = min(1200, getattr(self, "_secrow_pad_w", 0) + 2 * (-dx2))
+                            self._secrow_pad_w = w2
+                            self._secrow_pad.config(width=w2)
+                    need_more = True
+            except Exception:
+                pass
+            if need_more and _tries < 40:
+                self.after(150, lambda: self._align_tj_to_dc(_tries + 1))
         except Exception:
             pass
 
@@ -3624,6 +3639,9 @@ class App(tk.Tk):
                       command=lambda x=i: self._run_island_slot(x)
                       ).pack(side="top", pady=(1, 0))
 
+        # ★ 정렬용 가변 여백 (오른쪽을 늘려 행 전체를 왼쪽으로 밀기)
+        self._secrow_pad = tk.Frame(self._sec_row, width=getattr(self, "_secrow_pad_w", 0), height=1)
+        self._secrow_pad.pack(side="left")
         # 버튼 행 너비에 맞게 창 자동 조정
         self.after(50, self._fit_width_to_sec_row)
 
