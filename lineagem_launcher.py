@@ -2901,6 +2901,15 @@ class App(tk.Tk):
                         self._boost_btn.pack_configure(padx=(bx, 0))
                     except Exception:
                         pass
+                # ★ 과거섬 패스 버튼도 TJ성공 왼쪽 라인에 맞춤 (섹션 행은 가운데 정렬이라 반복 보정)
+                try:
+                    dx2 = self._tjcol.winfo_rootx() - self._past_skip_btn.winfo_rootx()
+                    if abs(dx2) > 2:
+                        pad = max(0, min(600, getattr(self, "_star_pad", 0) + dx2))
+                        self._star_pad = pad
+                        self._past_skip_btn.pack_configure(padx=(pad, 4))
+                except Exception:
+                    pass
             except Exception:
                 pass
         except Exception:
@@ -3565,10 +3574,10 @@ class App(tk.Tk):
             w.destroy()
 
         # ★ 과거섬 하루 패스 버튼 — 누르면 다음 새벽 실행 건너뜀, 다시 누르면 취소, 다음날 자동 재개
-        self._past_skip_btn = tk.Button(self._sec_row, text="★",
-            font=("맑은 고딕", 14, "bold"), width=3, height=1,
+        self._past_skip_btn = tk.Button(self._sec_row, text="★ 과거섬 패스!",
+            font=("맑은 고딕", 9, "bold"), width=11, height=2,
             command=self._toggle_past_skip)
-        self._past_skip_btn.pack(side="left", padx=(0, 4))
+        self._past_skip_btn.pack(side="left", padx=(getattr(self, "_star_pad", 0), 4))
         self._refresh_past_skip_btn()
 
         fixed = [
