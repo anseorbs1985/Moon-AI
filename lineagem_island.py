@@ -947,7 +947,8 @@ class IslandApp(tk.Tk):
         if not valid:
             self._status.set("등록된 좌표가 없습니다")
             return
-        dots = [(c[0], c[1], n, ci) for n, (ci, c) in enumerate(valid, 1)]
+        # 점 번호 = 실제 클릭 번호 (클릭1, 클릭2 …) — 중간이 비어도 번호가 안 밀림
+        dots = [(c[0], c[1], ci + 1, ci) for ci, c in valid]
         self.withdraw()
         self.after(1000, lambda: _IslandPreviewOverlay(self, key, idx, dots))
 
