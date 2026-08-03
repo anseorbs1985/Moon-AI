@@ -2480,6 +2480,18 @@ class App(tk.Tk):
             time.sleep(random.uniform(0.04, 0.09))
 
     @staticmethod
+    def _coupon_log(msg):
+        # 쿠폰등록 진단 로그 — %LOCALAPPDATA%\MoonAI\coupon_debug.log
+        try:
+            import datetime
+            d = os.path.join(os.environ.get("LOCALAPPDATA", ""), "MoonAI")
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "coupon_debug.log"), "a", encoding="utf-8") as f:
+                f.write(f"[{datetime.datetime.now():%H:%M:%S.%f}] {msg}\n")
+        except Exception:
+            pass
+
+    @staticmethod
     def _set_clipboard_text(text):
         # 실행 스레드에서도 안전한 Win32 클립보드 쓰기 (tk 클립보드는 메인스레드 전용)
         import ctypes
@@ -2498,7 +2510,11 @@ class App(tk.Tk):
             u32.EmptyClipboard()
             data = str(text).encode("utf-16-le") + b"\x00\x00"
             h = k32.GlobalAlloc(0x0042, len(data))   # GMEM_MOVEABLE | GMEM_ZEROINIT
+            if not h:
+                return False
             p = k32.GlobalLock(h)
+            if not p:
+                return False
             ctypes.memmove(p, data, len(data))
             k32.GlobalUnlock(h)
             u32.SetClipboardData(13, h)              # CF_UNICODETEXT
@@ -2545,21 +2561,35 @@ class App(tk.Tk):
                 order = [j for j in range(nclk) if coords[j]]
                 # 쿠폰: 클릭5(입력칸)가 등록돼 있으면 그 직후, 없으면 클릭4 직후에 붙여넣기
                 paste_after = (4 if (len(coords) > 4 and coords[4]) else 3) if fkey == "coupon" else None
+                if fkey == "coupon":
+                    self._coupon_log(f"슬롯 [{name}] 시작 — 등록클릭 {[x+1 for x in order]}, 붙여넣기는 클릭{(paste_after or 0)+1} 직후")
                 for n, j in enumerate(order):
-                    if getattr(self, stop, False): break
+                    if getattr(self, stop, False):
+                        if fkey == "coupon": self._coupon_log(f"멈춤 플래그로 중단 (클릭{j+1} 직전)")
+                        break
                     self.status.set(f"{icon} [{name}] 클릭{j+1}...")
                     pyautogui.click(*coords[j])
+                    if fkey == "coupon":
+                        self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
                     if fkey == "coupon" and j == paste_after:
-                        # 클릭5 = 글 입력칸 — 입력칸 포커스가 잡힐 때까지 넉넉히 기다린 뒤
-                        # 복사해둔 글을 Ctrl+V(스캔코드)로 한 번에 붙여넣기
-                        time.sleep(random.uniform(1.3, 1.7))
-                        self._set_clipboard_text(txt)   # 매번 직전에 다시 복사 (다른 앱이 덮어써도 안전)
-                        time.sleep(0.15)
-                        self._paste_ctrl_v()
-                        time.sleep(random.uniform(0.5, 0.8))
-                        self.status.set(f"{icon} [{name}] 클릭5 글 붙여넣기 완료")
+                        # 클릭 후 입력칸 포커스가 잡힐 때까지 기다렸다가 Ctrl+V(스캔코드) 붙여넣기
+                        # 오류가 나도 뒤 클릭이 끊기지 않게 보호
+                        try:
+                            time.sleep(random.uniform(1.3, 1.7))
+                            ok = self._set_clipboard_text(txt)
+                            self._coupon_log(f"클립보드 복사 {'성공' if ok else '실패'}: {txt!r}")
+                            time.sleep(0.15)
+                            self._paste_ctrl_v()
+                            self._coupon_log("Ctrl+V 전송 완료")
+                            time.sleep(random.uniform(0.5, 0.8))
+                            self.status.set(f"{icon} [{name}] 붙여넣기 완료")
+                        except Exception as e:
+                            self._coupon_log(f"붙여넣기 오류: {e!r}")
+                            self.status.set(f"{icon} 붙여넣기 오류: {e}")
                     if n < len(order) - 1:
                         time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                if fkey == "coupon":
+                    self._coupon_log(f"슬롯 [{name}] 끝")
             self.status.set(f"✔ {title} 실행 완료!")
         except Exception as e:
             self.status.set(f"오류: {e}")
