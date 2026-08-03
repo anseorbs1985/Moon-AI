@@ -2796,9 +2796,20 @@ class App(tk.Tk):
             try:
                 if not win.winfo_exists():
                     continue
-                win.attributes("-topmost", bool(boost))
                 if boost:
+                    win.attributes("-topmost", True)
                     win.lift()
+                else:
+                    # 평소엔 맨 뒤에 눌러둠 — 화면을 절대 가리지 않음
+                    win.attributes("-topmost", False)
+                    try:
+                        import win32gui, win32con
+                        hwnd = win32gui.GetParent(win.winfo_id()) or win.winfo_id()
+                        win32gui.SetWindowPos(hwnd, win32con.HWND_BOTTOM, 0, 0, 0, 0,
+                                              win32con.SWP_NOMOVE | win32con.SWP_NOSIZE |
+                                              win32con.SWP_NOACTIVATE)
+                    except Exception:
+                        win.lower()
             except Exception:
                 pass
 
