@@ -6915,13 +6915,22 @@ class App(tk.Tk):
                 if self._mail_stop: break
                 name = slot.get("name", f"#{si+1}")
                 coords = slot.get("coords", [])
-                valid = [c for c in coords if c and len(c) >= 2]
+                valid = [(j, c) for j, c in enumerate(coords) if c and len(c) >= 2]
                 if not valid: continue
-                for k, coord in enumerate(valid):
+                for k, (j, coord) in enumerate(valid):
                     if self._mail_stop: break
                     if not self._wait_mouse_idle("_mail_stop"): break
-                    self.status.set(f"🕘 [{name}] 우편함 클릭 {k+1}/{len(valid)}...")
-                    pyautogui.click(*coord)
+                    if j == 1:
+                        # 좌표2는 연속 7번 딱딱딱 (짧은 간격)
+                        for t in range(7):
+                            if self._mail_stop: break
+                            self.status.set(f"🕘 [{name}] 클릭2 연속 {t+1}/7...")
+                            pyautogui.click(*coord)
+                            if t < 6:
+                                time.sleep(random.uniform(0.12, 0.25))
+                    else:
+                        self.status.set(f"🕘 [{name}] 우편함 클릭 {j+1}...")
+                        pyautogui.click(*coord)
                     if k < len(valid) - 1:
                         time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if not self._mail_stop:
