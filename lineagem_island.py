@@ -26,7 +26,7 @@ except Exception:
     except Exception: pass
 
 import tkinter as tk
-import time, threading, json, os
+import time, threading, json, os, random
 import pyautogui
 
 try:
@@ -491,7 +491,7 @@ class IslandApp(tk.Tk):
             self.cfg[key][idx]["name"] = nv.get().strip() or "미등록"
             save_cfg(self.cfg)
         ent.bind("<FocusOut>", _sv); ent.bind("<Return>", _sv)
-        tk.Label(win, text=f"[방향][초]: ↑↓←→↖↗↙↘=방향키 이동(초) / ⇩=그 좌표 짧게 누르고 아래로 끌기(숫자=거리 1살짝~10많이)  |  'ㅡ' 칸=클릭 뒤 대기 초(비우면 {CLICK_INTERVAL})",
+        tk.Label(win, text=f"[방향][초]: ↑↓←→↖↗↙↘=이동 / ⇩=좌표 잡고 끌어내리기(숫자=거리)  |  'ㅡ' 칸=클릭 뒤 대기 초 — 8~10 이라고 쓰면 매번 그 사이 랜덤 (비우면 {CLICK_INTERVAL})",
                  font=("맑은 고딕", 7), fg="#888").pack()
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         _n_clicks = clicks_for(key)
@@ -1011,17 +1011,24 @@ class IslandApp(tk.Tk):
             self._hold_arrow(m.group(1), float(m.group(2)), name)
 
     def _do_gap_spec(self, spec, name):
-        """클릭 사이 'ㅡ' 칸 해석 — 숫자=대기 초, 방향+숫자=방향키 이동, 적힌 순서대로.
-        예: "2 하3" = 2초 대기 후 ↓3초 이동. 해석할 게 없으면 기본 간격."""
+        """클릭 사이 'ㅡ' 칸 해석 — 숫자=대기 초, "8~10"=그 사이 랜덤 초,
+        방향+숫자=방향키 이동, 적힌 순서대로. 해석할 게 없으면 기본 간격."""
         import re
         acted = False
-        for m in re.finditer(r"(상|위|하|아래|좌|왼쪽?|우|오른쪽?)?\s*:?\s*([0-9]+(?:\.[0-9]+)?)", spec):
+        pat = (r"(상|위|하|아래|좌|왼쪽?|우|오른쪽?)?\s*:?\s*"
+               r"([0-9]+(?:\.[0-9]+)?)(?:\s*[~\-]\s*([0-9]+(?:\.[0-9]+)?))?")
+        for m in re.finditer(pat, spec):
             if self._stop_flag: break
-            word, sec = m.group(1), float(m.group(2))
+            word = m.group(1)
+            a = float(m.group(2))
+            b = m.group(3)
+            sec = a if b is None else random.uniform(min(a, float(b)), max(a, float(b)))
             acted = True
             if word:
                 self._hold_arrow(word, sec, name)
             else:
+                if b is not None:
+                    self._status.set(f"⏱ [{name}] {sec:.1f}초 대기 (랜덤 {m.group(2)}~{b})...")
                 t0 = time.time()
                 while time.time() - t0 < sec:
                     if self._stop_flag: break
