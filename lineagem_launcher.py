@@ -6339,9 +6339,12 @@ class App(tk.Tk):
         try:
             armed = (str(self.cfg.get("past_skip_date") or "")
                      == self._next_past_run_date().strftime("%Y-%m-%d"))
-            btn.config(bg="#c0392b" if armed else "#dfe3e6",
-                       fg="white" if armed else "#c0392b",
-                       activebackground="#922b21" if armed else "#cfd4d8")
+            if armed:
+                btn.config(text="★ 패스중!", bg="#c0392b", fg="white",
+                           activebackground="#922b21")
+            else:
+                btn.config(text="★ 과거섬\n패스!", bg="#dfe3e6", fg="#c0392b",
+                           activebackground="#cfd4d8")
         except Exception:
             pass
 
