@@ -2543,11 +2543,13 @@ class App(tk.Tk):
                 if not self._wait_mouse_idle(stop): return
                 # 클릭1~N을 순서대로, 클릭 사이 간격만 랜덤
                 order = [j for j in range(nclk) if coords[j]]
+                # 쿠폰: 클릭5(입력칸)가 등록돼 있으면 그 직후, 없으면 클릭4 직후에 붙여넣기
+                paste_after = (4 if (len(coords) > 4 and coords[4]) else 3) if fkey == "coupon" else None
                 for n, j in enumerate(order):
                     if getattr(self, stop, False): break
                     self.status.set(f"{icon} [{name}] 클릭{j+1}...")
                     pyautogui.click(*coords[j])
-                    if fkey == "coupon" and j == 4:
+                    if fkey == "coupon" and j == paste_after:
                         # 클릭5 = 글 입력칸 — 입력칸 포커스가 잡힐 때까지 넉넉히 기다린 뒤
                         # 복사해둔 글을 Ctrl+V(스캔코드)로 한 번에 붙여넣기
                         time.sleep(random.uniform(1.3, 1.7))
