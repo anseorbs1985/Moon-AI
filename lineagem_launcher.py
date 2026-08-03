@@ -2893,12 +2893,13 @@ class App(tk.Tk):
                 w = max(0, min(250, self._btnrow_pad.winfo_reqwidth() + 2 * dx))
                 self._btnrow_pad.config(width=w)
                 need_more = True
-            # 2) 맨뒤로/혈레이드 ← TJ성공!! 세로선
+            # 2) 맨뒤로/혈레이드/제자리 ← TJ성공!! 세로선에서 0.8cm(30px) 왼쪽
             try:
                 bx = self._tjcol.winfo_rootx() - self.winfo_rootx()
                 if 0 <= bx < 800:
-                    self._back_circle.pack_configure(padx=(bx, 0))
-                    self._boost_btn.pack_configure(padx=(bx, 0))
+                    bx2 = max(0, bx - 30)
+                    self._back_circle.pack_configure(padx=(bx2, 0))
+                    self._boost_btn.pack_configure(padx=(bx2, 0))
             except Exception:
                 pass
             # 3) ★ 과거섬 패스 ← 일반던전충전 좌측 라인 (맞을 때까지 반복)
