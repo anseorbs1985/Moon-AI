@@ -305,7 +305,7 @@ class IslandApp(tk.Tk):
                 self.tk.call("tk", "scaling", cur * 1.63)   # 세로에 꽉 차는 배율 (글씨 크게)
             except Exception:
                 pass
-            self._fixed_geometry = "866x1129+76+43"   # 가로 +30%, 세로 +10% — 자동맞춤 무시
+            self._fixed_geometry = "980x1129+76+43"   # 가로 3cm 추가 확장 — 자동맞춤 무시
             self.geometry(self._fixed_geometry)
         elif focus_idx is not None:
             self.geometry(f"500x{sh * 2 // 3}+{ox}+{oy}")
@@ -366,9 +366,14 @@ class IslandApp(tk.Tk):
         # 컬럼 패널
         body = tk.Frame(self); body.pack(fill="both", expand=True, padx=6, pady=4)
 
+        _stretch = bool(getattr(self, "_fixed_geometry", None))
         for d in self._dungeons_to_show:
             col = tk.Frame(body, bd=2, relief="groove")
-            col.pack(side="left", padx=4, pady=2, anchor="n")
+            if _stretch:
+                # 단독(잊혀진섬) 모드: 컬럼이 창 폭을 꽉 채움 — 빈 옆공간 제거
+                col.pack(side="left", padx=4, pady=2, fill="both", expand=True)
+            else:
+                col.pack(side="left", padx=4, pady=2, anchor="n")
             self._build_col(col, d)
 
         # 오른쪽 카운트 패널 (전체 모드에서만)
@@ -518,11 +523,19 @@ class IslandApp(tk.Tk):
         if not hasattr(self, "_cell_name_vars"):
             self._cell_name_vars = {}
         self._cell_name_vars[key] = []
-        wg = tk.Frame(parent); wg.pack(padx=2, pady=2)
+        _stretch = bool(getattr(self, "_fixed_geometry", None))
+        wg = tk.Frame(parent)
+        if _stretch:
+            wg.pack(padx=2, pady=2, fill="both", expand=True)
+            for _c in range(4):
+                wg.grid_columnconfigure(_c, weight=1, uniform="slotcol")
+        else:
+            wg.pack(padx=2, pady=2)
         for i in range(SLOTS):
             r, c = i % 4, i // 4
             cell = tk.Frame(wg, bd=1, relief="groove", padx=2, pady=1)
-            cell.grid(row=r, column=c, padx=2, pady=2, sticky="n")
+            cell.grid(row=r, column=c, padx=2, pady=2,
+                      sticky="nsew" if _stretch else "n")
             # 슬롯 이름 — 직접 입력, 팝업의 이름과 연동
             _nm = (self.cfg.get(key, [{}] * SLOTS)[i].get("name") or "").strip()
             nvv = tk.StringVar(value="" if _nm == "미등록" else _nm)
@@ -546,7 +559,7 @@ class IslandApp(tk.Tk):
             self._cnt_vars[key].append(sv)
             tk.Button(cell, textvariable=sv, font=("맑은 고딕", 7, "bold"),
                       bg=color, fg="white", width=7,
-                      command=lambda k=key, x=i: self._open_slot_pop(k, x)).pack(pady=(1, 0))
+                      command=lambda k=key, x=i: self._open_slot_pop(k, x)).pack(pady=(1, 0), fill="x")
             r3 = tk.Frame(cell); r3.pack(pady=(1, 0))
             tk.Button(r3, text="▶", font=("맑은 고딕", 6), fg="white", bg=color, width=2,
                       command=lambda k=key, x=i: self._test(k, x)).pack(side="left", padx=(0, 1))
