@@ -2439,8 +2439,8 @@ class App(tk.Tk):
                                rereg_fn=rereg, save_fn=_save)
 
     @staticmethod
-    def _send_scan_key_cp(scan, down):
-        # 게임 클라이언트는 가상키(vk) 입력을 무시하므로 스캔코드 SendInput으로 키 전송
+    def _send_key_input_cp(scan, flags):
+        # 게임 클라이언트가 못 씹는 저수준 SendInput 키 전송 (스캔코드/유니코드 공용)
         import ctypes
         PUL = ctypes.c_void_p
         class KEYBDINPUT(ctypes.Structure):
@@ -2455,17 +2455,29 @@ class App(tk.Tk):
             _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT)]
         class INPUT(ctypes.Structure):
             _fields_ = [("type", ctypes.c_ulong), ("u", _IN)]
-        flags = 0x0008 | (0 if down else 0x0002)   # SCANCODE (+KEYUP)
         inp = INPUT(type=1)
         inp.u.ki = KEYBDINPUT(0, scan, flags, 0, None)
         ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
 
     def _paste_ctrl_v(self):
-        # Ctrl(0x1D)+V(0x2F) 스캔코드 순서대로 누르고 떼기
-        self._send_scan_key_cp(0x1D, True);  time.sleep(0.06)
-        self._send_scan_key_cp(0x2F, True);  time.sleep(0.06)
-        self._send_scan_key_cp(0x2F, False); time.sleep(0.04)
-        self._send_scan_key_cp(0x1D, False)
+        # Ctrl(0x1D)+V(0x2F) 스캔코드 순서대로 누르고 떼기 — 게임 프레임이 놓치지 않게 여유 있게
+        self._send_key_input_cp(0x1D, 0x0008);          time.sleep(0.12)
+        self._send_key_input_cp(0x2F, 0x0008);          time.sleep(0.12)
+        self._send_key_input_cp(0x2F, 0x0008 | 0x0002); time.sleep(0.08)
+        self._send_key_input_cp(0x1D, 0x0008 | 0x0002)
+
+    def _type_text_cp(self, text, stop_attr=None):
+        # 유니코드 SendInput으로 글자를 한 자씩 직접 입력 — 클립보드/키배열 무관, 게임에서도 확실
+        import struct
+        data = str(text).encode("utf-16-le")
+        units = struct.unpack(f"<{len(data)//2}H", data)
+        for u in units:
+            if stop_attr and getattr(self, stop_attr, False):
+                return
+            self._send_key_input_cp(u, 0x0004)              # KEYEVENTF_UNICODE down
+            time.sleep(0.03)
+            self._send_key_input_cp(u, 0x0004 | 0x0002)     # up
+            time.sleep(random.uniform(0.04, 0.09))
 
     @staticmethod
     def _set_clipboard_text(text):
@@ -2536,9 +2548,13 @@ class App(tk.Tk):
                     self.status.set(f"{icon} [{name}] 클릭{j+1}...")
                     pyautogui.click(*coords[j])
                     if fkey == "coupon" and j == 4:
-                        # 클릭5 = 글 입력칸 — 클릭한 뒤 등록해둔 글 붙여넣기(스캔코드 Ctrl+V)
-                        time.sleep(random.uniform(0.5, 0.8))
+                        # 클릭5 = 글 입력칸 — 입력칸 포커스가 잡힐 때까지 넉넉히 기다린 뒤
+                        # 복사해둔 글을 Ctrl+V(스캔코드)로 한 번에 붙여넣기
+                        time.sleep(random.uniform(1.3, 1.7))
+                        self._set_clipboard_text(txt)   # 매번 직전에 다시 복사 (다른 앱이 덮어써도 안전)
+                        time.sleep(0.15)
                         self._paste_ctrl_v()
+                        time.sleep(random.uniform(0.5, 0.8))
                         self.status.set(f"{icon} [{name}] 클릭5 글 붙여넣기 완료")
                     if n < len(order) - 1:
                         time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
