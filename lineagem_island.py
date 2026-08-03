@@ -1053,11 +1053,21 @@ class IslandApp(tk.Tk):
                 targets = [(i, s) for i, s in enumerate(slots)
                            if s.get("enabled", True)
                            and (any(c for c in s.get("coords", [])) or any(s.get("dirs") or []))]
+                random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
             d = next(x for x in DUNGEONS if x["key"] == key)
             stop_fn   = lambda: self._stop_flag
             status_fn = lambda m: self.after(0, lambda m=m: self._status.set(m))
-            for si, slot in targets:
+            for ti, (si, slot) in enumerate(targets):
                 if self._stop_flag: break
+                if ti > 0:
+                    # 슬롯 사이 간격 — 2~7초 랜덤
+                    _sg = random.uniform(2, 7)
+                    self._status.set(f"⏱ 다음 슬롯까지 {_sg:.1f}초 (랜덤 2~7)...")
+                    _t0 = time.time()
+                    while time.time() - _t0 < _sg:
+                        if self._stop_flag: break
+                        time.sleep(0.1)
+                    if self._stop_flag: break
                 if not wait_mouse_idle(stop_fn, status_fn): break
                 name   = slot.get("name", f"#{si+1}")
                 _labels = labels_for(key)
