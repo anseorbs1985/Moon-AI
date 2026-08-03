@@ -878,43 +878,6 @@ class IslandApp(tk.Tk):
         self._minimize_claude()
         threading.Thread(target=self._run, args=(key,), daemon=True).start()
 
-    def _client_hwnds_by_slot(self):
-        """리니지M 클라이언트 16개 창 핸들을 화면 배치(열우선 01~16) 순서로."""
-        try:
-            import win32gui
-            wins = []
-            def cb(h, _):
-                if win32gui.IsWindowVisible(h) and not win32gui.IsIconic(h):
-                    t = win32gui.GetWindowText(h)
-                    if t.startswith("리니지M l"):
-                        l, tp, r, b = win32gui.GetWindowRect(h)
-                        if r - l > 100 and b - tp > 100:
-                            wins.append((h, l, tp))
-                return True
-            win32gui.EnumWindows(cb, None)
-            if len(wins) != 16:
-                return None
-            wins.sort(key=lambda w: w[1])
-            cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[2]) for i in range(4)]
-            return [w[0] for col in cols for w in col]
-        except Exception:
-            return None
-
-    def _focus_client(self, si):
-        """슬롯 번호의 클라이언트 창을 포그라운드로 — 클릭 없이도 방향키가 그 클라로 가게."""
-        hs = self._client_hwnds_by_slot()
-        if not hs or si >= len(hs):
-            return False
-        try:
-            import win32gui, ctypes
-            u = ctypes.windll.user32
-            u.keybd_event(0x12, 0, 0, 0); u.keybd_event(0x12, 0, 2, 0)  # ALT 탭핑 — 포커스 전환 제한 해제
-            win32gui.SetForegroundWindow(hs[si])
-            time.sleep(0.2)
-            return True
-        except Exception:
-            return False
-
     def _hold_arrow(self, word, sec, name):
         """방향키를 sec초 동안 눌러 이동 — 대각선(↖↗↙↘)은 두 키 동시 홀드.
         직전 클릭으로 포커스된 클라가 키를 받는다."""
@@ -1003,18 +966,11 @@ class IslandApp(tk.Tk):
                 move_set = MOVE_ONLY_INDICES.get(key, set())
                 # 클릭별 간격(gap_list) — 팝업의 'ㅡ' 위 칸에 적은 초, 비우면 기본
                 gl = slot.get("gap_list") or []
-                _focused = False   # 이 슬롯의 클라가 포커스됐는지 (클릭하면 자동 포커스)
                 for j, lbl in enumerate(_labels):
                     if self._stop_flag: break
                     d_ = dirs[j] if j < len(dirs) else None
                     if d_:
                         # 이 자리는 클릭 대신 방향키 이동 ([방향, 초] — 대각선 포함)
-                        if not _focused:
-                            # 아직 클릭한 적 없으면 슬롯의 클라 창을 자동 포커스
-                            if self._focus_client(si):
-                                _focused = True
-                            else:
-                                self._status.set(f"⚠ [{name}] 클라 창을 못 찾아 방향키가 안 갈 수 있음")
                         self._hold_arrow(d_[0], float(d_[1]), name)
                     elif coords[j]:
                         self._status.set(f"🏝 [{name}] {lbl}...")
@@ -1022,7 +978,6 @@ class IslandApp(tk.Tk):
                             pyautogui.moveTo(*coords[j])
                         else:
                             pyautogui.click(*coords[j])
-                        _focused = True
                     else:
                         continue
                     g = gl[j] if j < len(gl) else None
