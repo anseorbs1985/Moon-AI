@@ -911,7 +911,7 @@ class IslandApp(tk.Tk):
                 d_ = dirs[ci] if ci < len(dirs) else None
                 cn = slot.get("click_names") or []
                 lbl = (cn[ci] if ci < len(cn) and cn[ci] else labels_for(key)[ci])
-                time.sleep(1.0)
+                time.sleep(0.3)
                 if d_ and d_[0] == "⇩":
                     if not c:
                         self._status.set(f"{lbl}: ⇩는 좌표 등록이 필요합니다"); return
@@ -932,10 +932,8 @@ class IslandApp(tk.Tk):
                 self._status.set(f"✔ [{name}] {lbl} 테스트 완료")
             except Exception as e:
                 self._status.set(f"테스트 오류: {e}")
-            finally:
-                self.after(0, self.deiconify)
+        # 단일 좌표 테스트는 금방 끝나므로 창을 최소화하지 않고 그대로 실행
         self._stop_flag = False
-        self.iconify()
         threading.Thread(target=run, daemon=True).start()
 
     def _del_click(self, key, idx, ci):
