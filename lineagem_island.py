@@ -56,8 +56,11 @@ except Exception:
     _PRECISE_OK = False
 
 
+_EXT_SCANS = {0x48, 0x50, 0x4B, 0x4D}   # 방향키 스캔코드 (확장키 플래그 필요)
+
 def _send_scan_key(scan_codes, down):
-    """SendInput 스캔코드 방식 키 입력 — 게임(DirectInput)도 인식한다."""
+    """SendInput 스캔코드 방식 키 입력 — 게임(DirectInput)도 인식한다.
+    WASD 등 일반키는 확장 플래그 없이, 방향키는 확장 플래그로 보낸다."""
     import ctypes
     KEYEVENTF_EXTENDEDKEY = 0x0001
     KEYEVENTF_KEYUP       = 0x0002
@@ -81,11 +84,13 @@ def _send_scan_key(scan_codes, down):
         _anonymous_ = ("u",)
         _fields_ = [("type", ctypes.c_ulong), ("u", _IU)]
 
-    flags = KEYEVENTF_SCANCODE | KEYEVENTF_EXTENDEDKEY
-    if not down:
-        flags |= KEYEVENTF_KEYUP
     arr = (INPUT * len(scan_codes))()
     for i, sc in enumerate(scan_codes):
+        flags = KEYEVENTF_SCANCODE
+        if sc in _EXT_SCANS:
+            flags |= KEYEVENTF_EXTENDEDKEY
+        if not down:
+            flags |= KEYEVENTF_KEYUP
         arr[i].type = 1  # INPUT_KEYBOARD
         arr[i].ki = KEYBDINPUT(0, sc, flags, 0, None)
     ctypes.windll.user32.SendInput(len(arr), arr, ctypes.sizeof(INPUT))
@@ -1097,10 +1102,12 @@ class IslandApp(tk.Tk):
             for n in (3, 2, 1):
                 set_iv(f"⏺ {n}초 후 녹화 시작 — 준비하세요")
                 time.sleep(1)
-            set_iv("🔴 녹화 중! 마우스 클릭·드래그, 방향키가 기록됩니다 — ESC로 종료")
+            set_iv("🔴 녹화 중! 마우스 클릭·드래그, WASD·방향키가 기록됩니다 — ESC로 종료")
             events = []
             t0 = time.time()
-            ARROWS = {0x25: 1, 0x26: 1, 0x27: 1, 0x28: 1}
+            # 기록 대상 키: 방향키 + WASD (이 게임 이동키)
+            ARROWS = {0x25: 1, 0x26: 1, 0x27: 1, 0x28: 1,
+                      0x57: 1, 0x41: 1, 0x53: 1, 0x44: 1}
             prev_btn = False
             prev_keys = {vk: False for vk in ARROWS}
             last_mm = 0.0
@@ -1158,8 +1165,9 @@ class IslandApp(tk.Tk):
         threading.Thread(target=rec, daemon=True).start()
 
     def _play_events(self, events, name):
-        """녹화 재생 — 저장된 타이밍 그대로 마우스/방향키 입력."""
-        SCAN = {0x26: 0x48, 0x28: 0x50, 0x25: 0x4B, 0x27: 0x4D}
+        """녹화 재생 — 저장된 타이밍 그대로 마우스/이동키(WASD·방향키) 입력."""
+        SCAN = {0x26: 0x48, 0x28: 0x50, 0x25: 0x4B, 0x27: 0x4D,
+                0x57: 0x11, 0x41: 0x1E, 0x53: 0x1F, 0x44: 0x20}
         self._status.set(f"▶ [{name}] 녹화 재생 중... ({(events[-1][0] if events else 0):.1f}초)")
         t0 = time.time()
         held = set()
@@ -1188,13 +1196,14 @@ class IslandApp(tk.Tk):
     def _hold_arrow(self, word, sec, name):
         """방향키를 sec초 동안 눌러 이동 — 대각선(↖↗↙↘)은 두 키 동시 홀드.
         스캔코드 SendInput 방식이라 게임(DirectInput)도 인식. 직전 클릭으로 포커스된 클라가 받는다."""
-        UPS, DNS, LFS, RTS = 0x48, 0x50, 0x4B, 0x4D   # 방향키 스캔코드
-        SCS = {"상": [UPS], "위": [UPS], "↑": [UPS],
-               "하": [DNS], "아": [DNS], "↓": [DNS],
-               "좌": [LFS], "왼": [LFS], "←": [LFS],
-               "우": [RTS], "오": [RTS], "→": [RTS],
-               "↖": [UPS, LFS], "↗": [UPS, RTS],
-               "↙": [DNS, LFS], "↘": [DNS, RTS]}
+        # 이 게임은 WASD로만 이동 — 방향 선택을 WASD 스캔코드로 보낸다
+        W, A, S, D = 0x11, 0x1E, 0x1F, 0x20
+        SCS = {"상": [W], "위": [W], "↑": [W],
+               "하": [S], "아": [S], "↓": [S],
+               "좌": [A], "왼": [A], "←": [A],
+               "우": [D], "오": [D], "→": [D],
+               "↖": [W, A], "↗": [W, D],
+               "↙": [S, A], "↘": [S, D]}
         scs = SCS.get(word) or SCS.get(word[0])
         if not scs or sec <= 0:
             return
