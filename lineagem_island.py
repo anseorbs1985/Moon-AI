@@ -708,13 +708,14 @@ class IslandApp(tk.Tk):
         coords = slot.get("coords", [])
         if not (any(coords) or any(d for d in (slot.get("dirs") or []) if d)):
             self._status.set(f"#{idx+1:02d} 복사할 좌표가 없습니다"); return
-        # 좌표 + 사이 시간(gap_list) + 방향/⇩(dirs) + 이름표까지 전부 복사
+        # 좌표 + 사이 시간(gap_list) + 방향/⇩(dirs) + 이름표 + 녹화(recs)까지 전부 복사
         self._slot_clip = {"key": key, "src": idx,
                            "coords": copy.deepcopy(coords),
                            "gap_list": copy.deepcopy(slot.get("gap_list") or []),
                            "dirs": copy.deepcopy(slot.get("dirs") or []),
-                           "click_names": copy.deepcopy(slot.get("click_names") or [])}
-        self._status.set(f"📋 #{idx+1:02d} 좌표 {sum(1 for c in coords if c)}개 + 시간·방향·이름 복사됨 — 원하는 슬롯의 [붙임]을 누르세요")
+                           "click_names": copy.deepcopy(slot.get("click_names") or []),
+                           "recs": copy.deepcopy(slot.get("recs") or {})}
+        self._status.set(f"📋 #{idx+1:02d} 좌표 {sum(1 for c in coords if c)}개 + 시간·방향·이름·녹화 복사됨 — 원하는 슬롯의 [붙임]을 누르세요")
 
     def _slot_paste(self, key, idx):
         """복사한 좌표 붙여넣기 — 클라이언트 창 위치 자동보정 (인형탐험과 동일)."""
@@ -740,6 +741,21 @@ class IslandApp(tk.Tk):
         self.cfg[key][idx]["gap_list"]    = copy.deepcopy(clip.get("gap_list") or [])
         self.cfg[key][idx]["dirs"]        = copy.deepcopy(clip.get("dirs") or [])
         self.cfg[key][idx]["click_names"] = copy.deepcopy(clip.get("click_names") or [])
+        # 녹화도 붙여넣기 — 마우스 이벤트 좌표는 클라 위치 차이만큼 보정
+        recs = copy.deepcopy(clip.get("recs") or {})
+        if src != idx:
+            try:
+                rects = self._client_rects_by_slot()
+                if rects:
+                    rdx = rects[idx][0] - rects[src][0]
+                    rdy = rects[idx][1] - rects[src][1]
+                    for ev_list in recs.values():
+                        for ev in ev_list:
+                            if ev[1] in ("md", "mu", "mm"):
+                                ev[2] += rdx; ev[3] += rdy
+            except Exception:
+                pass
+        self.cfg[key][idx]["recs"] = recs
         save_cfg(self.cfg)
         self._refresh(key)
         self._status.set(f"✔ #{idx+1:02d} 붙여넣기 완료 (시간·방향·이름 포함){note}")
@@ -836,6 +852,7 @@ class IslandApp(tk.Tk):
         self.cfg[key][idx]["gap_list"]    = copy.deepcopy(prev.get("gap_list") or [])
         self.cfg[key][idx]["dirs"]        = copy.deepcopy(prev.get("dirs") or [])
         self.cfg[key][idx]["click_names"] = copy.deepcopy(prev.get("click_names") or [])
+        self.cfg[key][idx]["recs"]        = copy.deepcopy(prev.get("recs") or {})
         save_cfg(self.cfg)
         self._refresh(key)
         self._status.set(f"✔ #{idx+1} ← #{idx} 좌표·시간·방향·이름 복사 완료")
