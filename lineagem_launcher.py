@@ -628,7 +628,7 @@ class App(tk.Tk):
         self._click_stop     = False
         self._hunt_stop      = False
         self._sched_any_stop = False
-        self._mail_on      = True
+        self._mail_on      = bool(self.cfg.get("mail_on", False))   # 우편 스케줄 — 기본 꺼짐(사용자 요청), 토글로 켜면 유지
         self._mail_triggered_date = None
         self._past_triggered_date = None
         self._purple_triggered_date = None
@@ -859,8 +859,10 @@ class App(tk.Tk):
 
         # 9시 클릭 스케줄러
         tk.Frame(btn_row, width=10).pack(side="left")
-        self.btn_mail = tk.Button(btn_row, text="🕘 23:30~23:50 클릭  ON",
-            font=("맑은 고딕", 9, "bold"), bg="#27ae60", fg="white",
+        self.btn_mail = tk.Button(btn_row,
+            text="🕘 23:30~23:50 클릭  " + ("ON" if self._mail_on else "OFF"),
+            font=("맑은 고딕", 9, "bold"),
+            bg="#27ae60" if self._mail_on else "#7f8c8d", fg="white",
             activebackground="#5d6d7e", width=13, height=2,
             command=self._toggle_mail)
         self.btn_mail.pack(side="left")
@@ -6239,10 +6241,12 @@ class App(tk.Tk):
         if not has:
             messagebox.showwarning("등록 필요", "먼저 우편함 좌표를 등록해주세요."); return
         self._mail_on = not self._mail_on
+        self.cfg["mail_on"] = self._mail_on   # 재시작해도 상태 유지
+        save_cfg(self.cfg)
         if self._mail_on:
             self._mail_triggered_date = None
             self.btn_mail.config(text="🕘 23:30~23:50 클릭  ON", bg="#27ae60")
-            self.status.set("우편 클릭 ON — 밤 10:30~11:30 랜덤 실행")
+            self.status.set("우편 클릭 ON — 밤 23:30~23:50 랜덤 실행")
         else:
             self.btn_mail.config(text="🕘 23:30~23:50 클릭  OFF", bg="#7f8c8d")
             self.status.set("우편 클릭 OFF")
