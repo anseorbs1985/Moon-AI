@@ -5,20 +5,39 @@ except: pass
 # 기존 인스턴스 종료 후 단일 실행
 import subprocess, sys, os as _os
 _my_pid = str(_os.getpid())
-# 단독 슬롯 모드(인자 있음)에서는 기존 인스턴스를 죽이지 않음
-if len(sys.argv) <= 1:
-    try:
-        out = subprocess.check_output(
-            'wmic process where "name=\'pythonw.exe\'" get processid,commandline /format:csv',
-            shell=True, stderr=subprocess.DEVNULL).decode(errors="ignore")
-        for line in out.splitlines():
-            if "lineagem_island" in line.lower():
-                parts = line.strip().split(",")
-                pid = parts[-1].strip()
-                if pid and pid != _my_pid:
-                    subprocess.call(f"taskkill /F /PID {pid}", shell=True, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
+
+def _island_cmd_arg(cmdline):
+    """명령줄에서 lineagem_island.py 바로 뒤 인자(컬럼 번호) 추출 — 없으면 None."""
+    toks = cmdline.split()
+    for i, t in enumerate(toks):
+        if t.lower().rstrip('"').endswith("lineagem_island.py"):
+            if i + 1 < len(toks) and not toks[i + 1].startswith("--"):
+                return toks[i + 1].strip('"')
+            return None
+    return None
+
+try:
+    out = subprocess.check_output(
+        'wmic process where "name=\'pythonw.exe\'" get processid,commandline /format:csv',
+        shell=True, stderr=subprocess.DEVNULL).decode(errors="ignore")
+    _my_arg = sys.argv[1] if len(sys.argv) > 1 else None
+    for line in out.splitlines():
+        if "lineagem_island" not in line.lower():
+            continue
+        parts = line.strip().split(",")
+        pid = parts[-1].strip()
+        if not pid or pid == _my_pid:
+            continue
+        if _my_arg is None:
+            # 전체 실행기: 기존 전부 종료 (기존 동작)
+            subprocess.call(f"taskkill /F /PID {pid}", shell=True, stderr=subprocess.DEVNULL)
+        else:
+            # 단독 컬럼 모드: '같은 컬럼'으로 떠 있는 창만 종료 → 중복 방지, 다른 컬럼은 공존
+            cl = ",".join(parts[1:-1])
+            if _island_cmd_arg(cl) == _my_arg:
+                subprocess.call(f"taskkill /F /PID {pid}", shell=True, stderr=subprocess.DEVNULL)
+except Exception:
+    pass
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
 except Exception:
