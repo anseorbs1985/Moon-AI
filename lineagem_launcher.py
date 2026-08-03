@@ -2439,6 +2439,35 @@ class App(tk.Tk):
                                rereg_fn=rereg, save_fn=_save)
 
     @staticmethod
+    def _send_scan_key_cp(scan, down):
+        # 게임 클라이언트는 가상키(vk) 입력을 무시하므로 스캔코드 SendInput으로 키 전송
+        import ctypes
+        PUL = ctypes.c_void_p
+        class KEYBDINPUT(ctypes.Structure):
+            _fields_ = [("wVk", ctypes.c_ushort), ("wScan", ctypes.c_ushort),
+                        ("dwFlags", ctypes.c_ulong), ("time", ctypes.c_ulong),
+                        ("dwExtraInfo", PUL)]
+        class MOUSEINPUT(ctypes.Structure):
+            _fields_ = [("dx", ctypes.c_long), ("dy", ctypes.c_long),
+                        ("mouseData", ctypes.c_ulong), ("dwFlags", ctypes.c_ulong),
+                        ("time", ctypes.c_ulong), ("dwExtraInfo", PUL)]
+        class _IN(ctypes.Union):
+            _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT)]
+        class INPUT(ctypes.Structure):
+            _fields_ = [("type", ctypes.c_ulong), ("u", _IN)]
+        flags = 0x0008 | (0 if down else 0x0002)   # SCANCODE (+KEYUP)
+        inp = INPUT(type=1)
+        inp.u.ki = KEYBDINPUT(0, scan, flags, 0, None)
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+
+    def _paste_ctrl_v(self):
+        # Ctrl(0x1D)+V(0x2F) 스캔코드 순서대로 누르고 떼기
+        self._send_scan_key_cp(0x1D, True);  time.sleep(0.06)
+        self._send_scan_key_cp(0x2F, True);  time.sleep(0.06)
+        self._send_scan_key_cp(0x2F, False); time.sleep(0.04)
+        self._send_scan_key_cp(0x1D, False)
+
+    @staticmethod
     def _set_clipboard_text(text):
         # 실행 스레드에서도 안전한 Win32 클립보드 쓰기 (tk 클립보드는 메인스레드 전용)
         import ctypes
@@ -2507,9 +2536,9 @@ class App(tk.Tk):
                     self.status.set(f"{icon} [{name}] 클릭{j+1}...")
                     pyautogui.click(*coords[j])
                     if fkey == "coupon" and j == 4:
-                        # 클릭5 = 글 입력칸 — 클릭한 뒤 등록해둔 글 붙여넣기(Ctrl+V)
-                        time.sleep(random.uniform(0.4, 0.7))
-                        pyautogui.hotkey("ctrl", "v")
+                        # 클릭5 = 글 입력칸 — 클릭한 뒤 등록해둔 글 붙여넣기(스캔코드 Ctrl+V)
+                        time.sleep(random.uniform(0.5, 0.8))
+                        self._paste_ctrl_v()
                         self.status.set(f"{icon} [{name}] 클릭5 글 붙여넣기 완료")
                     if n < len(order) - 1:
                         time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
