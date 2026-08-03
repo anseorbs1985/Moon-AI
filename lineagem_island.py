@@ -627,13 +627,13 @@ class IslandApp(tk.Tk):
                       width=1, pady=0,
                       command=lambda k=key, x=idx, c=j: self._test_click(k, x, c)
                       ).pack(side="left", padx=(1, 0))
-            # 녹화 버튼 — 클릭과 별개. 녹화가 저장돼 있으면 빨간 ● 표시, 누르면 (재)녹화
+            # 녹화 버튼 — 좌표 버튼과 같은 크기, 녹화가 저장돼 있으면 빨간 ●
             _has_rec = bool((slot.get("recs") or {}).get(str(j)))
-            rb = tk.Button(brow, text="●" if _has_rec else "⏺",
-                           font=("맑은 고딕", 7, "bold"), width=1, pady=0,
+            rb = tk.Button(cc, text="●" if _has_rec else "⏺",
+                           font=("맑은 고딕", 8), width=4, pady=2,
                            fg="white", bg="#c0392b" if _has_rec else "#7f8c8d",
                            command=lambda k=key, x=idx, c=j: self._start_record(k, x, c))
-            rb.pack(side="left", padx=(1, 0))
+            rb.pack()
             self._pop.setdefault("rec_btns", []).append(rb)
             # [방향][초] 선택 — 방향을 고르면 이 자리는 클릭 대신 방향키 이동
             drow = tk.Frame(cc); drow.pack()
