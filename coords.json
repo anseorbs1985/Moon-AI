@@ -19039,8 +19039,8 @@
     1356
   ],
   "claude_win_pos": [
-    748,
-    304
+    623,
+    472
   ],
   "seq2_on": false,
   "purple_popup_color": [
@@ -19185,5 +19185,35 @@
     527,
     197
   ],
-  "past_skip_date": "2026-08-02"
+  "past_skip_date": "2026-08-02",
+  "float_memo_ons": [
+    true,
+    true,
+    true,
+    false
+  ],
+  "float_memo_positions": [
+    [
+      742,
+      336
+    ],
+    [
+      2064,
+      21
+    ],
+    [
+      56,
+      972
+    ],
+    [
+      660,
+      90
+    ]
+  ],
+  "float_memo_texts": [
+    "혈레이드 대장",
+    "혈레이드 대장",
+    "혈레이드 대장",
+    ""
+  ]
 }
