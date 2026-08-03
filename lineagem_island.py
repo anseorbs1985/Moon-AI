@@ -302,10 +302,10 @@ class IslandApp(tk.Tk):
         if _is_forgotten:
             try:
                 cur = float(self.tk.call("tk", "scaling"))
-                self.tk.call("tk", "scaling", cur * 1.45)   # 글씨 확대 — 셀에 맞게 크게
+                self.tk.call("tk", "scaling", cur * 1.15)   # 666px 폭에 4열이 맞는 배율
             except Exception:
                 pass
-            self.geometry(f"1050x{int(sh * 0.75)}+{ox}+{oy}")   # 가로 1.25배 (세로 그대로)
+            self.geometry("666x1026+76+43")   # 사용자가 맞춰둔 크기/위치 고정
         elif focus_idx is not None:
             self.geometry(f"500x{sh * 2 // 3}+{ox}+{oy}")
         else:
@@ -522,9 +522,9 @@ class IslandApp(tk.Tk):
             _nm = (self.cfg.get(key, [{}] * SLOTS)[i].get("name") or "").strip()
             nvv = tk.StringVar(value="" if _nm == "미등록" else _nm)
             self._cell_name_vars[key].append(nvv)
-            ne = tk.Entry(cell, textvariable=nvv, font=("맑은 고딕", 7), width=10,
+            ne = tk.Entry(cell, textvariable=nvv, font=("맑은 고딕", 7), width=4,
                           justify="center", relief="flat", bg="#f2f2f2", fg="#2c3e50")
-            ne.pack(pady=(1, 0))
+            ne.pack(pady=(1, 0), fill="x")   # 셀 폭에 맞춤
             def _sv_name(e=None, k=key, x=i, v=nvv):
                 self.cfg[k][x]["name"] = v.get().strip() or "미등록"
                 save_cfg(self.cfg)
