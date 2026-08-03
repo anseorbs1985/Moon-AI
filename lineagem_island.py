@@ -458,19 +458,7 @@ class IslandApp(tk.Tk):
             self.cfg[key][idx]["name"] = nv.get().strip() or "미등록"
             save_cfg(self.cfg)
         ent.bind("<FocusOut>", _sv); ent.bind("<Return>", _sv)
-        # 이동 스텝 (방향키 홀드) — 예: "하3 우1.5" = ↓3초, →1.5초. 클릭이 모두 끝난 뒤 실행
-        mrow = tk.Frame(win); mrow.pack(pady=(0, 2))
-        tk.Label(mrow, text="이동:", font=("맑은 고딕", 8, "bold")).pack(side="left")
-        mvv = tk.StringVar(value=slot.get("moves", ""))
-        me = tk.Entry(mrow, textvariable=mvv, font=("맑은 고딕", 9), width=20)
-        me.pack(side="left", padx=(2, 4))
-        tk.Label(mrow, text="예: 하3 우1.5 (방향+초, 클릭 후 실행)",
-                 font=("맑은 고딕", 7), fg="#888").pack(side="left")
-        def _smv(e=None):
-            self.cfg[key][idx]["moves"] = mvv.get().strip()
-            save_cfg(self.cfg)
-        me.bind("<FocusOut>", _smv); me.bind("<Return>", _smv)
-        tk.Label(win, text=f"'ㅡ' 위 칸 = 그 클릭 뒤 동작: 숫자=대기 초, 하3=↓3초 이동, 조합 가능 \"2 하3\" (비우면 기본 {CLICK_INTERVAL}초)",
+        tk.Label(win, text=f"버튼 아래 [방향][초] = 그 자리에서 클릭 대신 방향키 이동  |  'ㅡ' 위 칸 = 클릭 뒤 대기 초 (비우면 {CLICK_INTERVAL}초)",
                  font=("맑은 고딕", 7), fg="#888").pack()
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         _n_clicks = clicks_for(key)
@@ -488,6 +476,26 @@ class IslandApp(tk.Tk):
                 out.append(s if s else None)   # 문자열 그대로 저장 (숫자·이동 조합)
             self.cfg[key][idx]["gap_list"] = out
             save_cfg(self.cfg)
+        # 클릭 대신 방향키 이동으로 쓸 자리 (dirs[j] = [방향, 초] 또는 None)
+        dirs = list(slot.get("dirs") or [])
+        while len(dirs) < _n_clicks:
+            dirs.append(None)
+        DIRS = ["ㅡ", "↑", "↓", "←", "→"]
+        dir_vars, sec_vars = [], []
+        def _save_dirs(*a):
+            out = []
+            for dv, sv2 in zip(dir_vars, sec_vars):
+                d_ = dv.get()
+                if d_ not in ("↑", "↓", "←", "→"):
+                    out.append(None)
+                else:
+                    try:
+                        s_ = float(sv2.get())
+                    except Exception:
+                        s_ = 1.0
+                    out.append([d_, s_])
+            self.cfg[key][idx]["dirs"] = out
+            save_cfg(self.cfg)
         for j in range(_n_clicks):
             cc = tk.Frame(grid); cc.grid(row=j // 6, column=(j % 6) * 2, padx=2, pady=4)
             tk.Label(cc, text=_labels[j], font=("맑은 고딕", 7), fg="#555").pack()
@@ -498,6 +506,19 @@ class IslandApp(tk.Tk):
                           bg=d["color"] if on else "#7f8c8d", fg="white",
                           command=lambda k=key, x=idx, c=j: self._reg(k, x, c))
             b.pack(); self._pop["btns"].append(b)
+            # [방향][초] 선택 — 방향을 고르면 이 자리는 클릭 대신 방향키 이동
+            drow = tk.Frame(cc); drow.pack()
+            cur = dirs[j]
+            dv = tk.StringVar(value=(cur[0] if cur else "ㅡ"))
+            sv2 = tk.StringVar(value=(f"{cur[1]:g}" if cur else "1"))
+            dir_vars.append(dv); sec_vars.append(sv2)
+            om = tk.OptionMenu(drow, dv, *DIRS, command=lambda *_: _save_dirs())
+            om.config(font=("맑은 고딕", 7), width=1, pady=0, highlightthickness=0)
+            om.pack(side="left")
+            om2 = tk.OptionMenu(drow, sv2, *[str(i) for i in range(1, 11)],
+                                command=lambda *_: _save_dirs())
+            om2.config(font=("맑은 고딕", 7), width=1, pady=0, highlightthickness=0)
+            om2.pack(side="left")
             if j < _n_clicks - 1:
                 # 클릭 사이 간격: ㅡ 위에 초 입력 (비우면 기본)
                 gc = tk.Frame(grid); gc.grid(row=j // 6, column=(j % 6) * 2 + 1)
@@ -891,7 +912,8 @@ class IslandApp(tk.Tk):
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
             else:
                 targets = [(i, s) for i, s in enumerate(slots)
-                           if s.get("enabled", True) and any(c for c in s.get("coords", []))]
+                           if s.get("enabled", True)
+                           and (any(c for c in s.get("coords", [])) or any(s.get("dirs") or []))]
             d = next(x for x in DUNGEONS if x["key"] == key)
             stop_fn   = lambda: self._stop_flag
             status_fn = lambda m: self.after(0, lambda m=m: self._status.set(m))
@@ -903,29 +925,33 @@ class IslandApp(tk.Tk):
                 coords = slot.get("coords", [None]*len(_labels))
                 while len(coords) < len(_labels):
                     coords.append(None)
-                if not any(coords): continue
+                dirs = slot.get("dirs") or []
+                if not any(coords) and not any(dirs): continue
                 move_set = MOVE_ONLY_INDICES.get(key, set())
                 # 클릭별 간격(gap_list) — 팝업의 'ㅡ' 위 칸에 적은 초, 비우면 기본
                 gl = slot.get("gap_list") or []
+                ARROW2WORD = {"↑": "상", "↓": "하", "←": "좌", "→": "우"}
                 for j, lbl in enumerate(_labels):
                     if self._stop_flag: break
-                    if not coords[j]: continue
-                    self._status.set(f"🏝 [{name}] {lbl}...")
-                    if j in move_set:
-                        pyautogui.moveTo(*coords[j])
+                    d_ = dirs[j] if j < len(dirs) else None
+                    if d_:
+                        # 이 자리는 클릭 대신 방향키 이동 ([방향, 초])
+                        self._hold_arrow(ARROW2WORD.get(d_[0], d_[0]), float(d_[1]), name)
+                    elif coords[j]:
+                        self._status.set(f"🏝 [{name}] {lbl}...")
+                        if j in move_set:
+                            pyautogui.moveTo(*coords[j])
+                        else:
+                            pyautogui.click(*coords[j])
                     else:
-                        pyautogui.click(*coords[j])
+                        continue
                     g = gl[j] if j < len(gl) else None
                     if g is None or g == "":
                         time.sleep(CLICK_INTERVAL)
                     elif isinstance(g, (int, float)):
                         time.sleep(float(g))
                     else:
-                        self._do_gap_spec(str(g), name)   # "2 하3" 같은 조합 해석
-                # 이동 스텝 — 방향키를 지정 초만큼 눌러 캐릭터 이동 (예: "하3 우1.5")
-                mv = (slot.get("moves") or "").strip()
-                if mv and not self._stop_flag:
-                    self._do_moves(mv, name)
+                        self._do_gap_spec(str(g), name)   # 숫자/이동 조합도 그대로 지원
                 self._add_count(si)
                 if self._stop_flag: break
                 time.sleep(5)
