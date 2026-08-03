@@ -480,13 +480,13 @@ class IslandApp(tk.Tk):
         dirs = list(slot.get("dirs") or [])
         while len(dirs) < _n_clicks:
             dirs.append(None)
-        DIRS = ["ㅡ", "↑", "↓", "←", "→"]
+        DIRS = ["ㅡ", "↑", "↓", "←", "→", "↖", "↗", "↙", "↘"]
         dir_vars, sec_vars = [], []
         def _save_dirs(*a):
             out = []
             for dv, sv2 in zip(dir_vars, sec_vars):
                 d_ = dv.get()
-                if d_ not in ("↑", "↓", "←", "→"):
+                if d_ not in ("↑", "↓", "←", "→", "↖", "↗", "↙", "↘"):
                     out.append(None)
                 else:
                     try:
@@ -851,24 +851,32 @@ class IslandApp(tk.Tk):
         threading.Thread(target=self._run, args=(key,), daemon=True).start()
 
     def _hold_arrow(self, word, sec, name):
-        """방향키 하나를 sec초 동안 눌러 이동 — 직전 클릭으로 포커스된 클라가 받는다."""
+        """방향키를 sec초 동안 눌러 이동 — 대각선(↖↗↙↘)은 두 키 동시 홀드.
+        직전 클릭으로 포커스된 클라가 키를 받는다."""
         import ctypes
         u = ctypes.windll.user32
-        VK = {"상": 0x26, "위": 0x26, "하": 0x28, "아": 0x28,
-              "좌": 0x25, "왼": 0x25, "우": 0x27, "오": 0x27}
-        vk = VK.get(word[0])
-        if not vk or sec <= 0:
+        UPK, DNK, LFK, RTK = 0x26, 0x28, 0x25, 0x27
+        VKS = {"상": [UPK], "위": [UPK], "↑": [UPK],
+               "하": [DNK], "아": [DNK], "↓": [DNK],
+               "좌": [LFK], "왼": [LFK], "←": [LFK],
+               "우": [RTK], "오": [RTK], "→": [RTK],
+               "↖": [UPK, LFK], "↗": [UPK, RTK],
+               "↙": [DNK, LFK], "↘": [DNK, RTK]}
+        vks = VKS.get(word) or VKS.get(word[0])
+        if not vks or sec <= 0:
             return
         self._status.set(f"🏃 [{name}] {word} {sec}초 이동...")
         EXT = 0x0001; UP = 0x0002
-        u.keybd_event(vk, 0, EXT, 0)
+        for vk in vks:
+            u.keybd_event(vk, 0, EXT, 0)
         t0 = time.time()
         try:
             while time.time() - t0 < sec:
                 if self._stop_flag: break
                 time.sleep(0.05)
         finally:
-            u.keybd_event(vk, 0, EXT | UP, 0)
+            for vk in vks:
+                u.keybd_event(vk, 0, EXT | UP, 0)
         time.sleep(0.15)
 
     def _do_moves(self, spec, name):
@@ -930,13 +938,12 @@ class IslandApp(tk.Tk):
                 move_set = MOVE_ONLY_INDICES.get(key, set())
                 # 클릭별 간격(gap_list) — 팝업의 'ㅡ' 위 칸에 적은 초, 비우면 기본
                 gl = slot.get("gap_list") or []
-                ARROW2WORD = {"↑": "상", "↓": "하", "←": "좌", "→": "우"}
                 for j, lbl in enumerate(_labels):
                     if self._stop_flag: break
                     d_ = dirs[j] if j < len(dirs) else None
                     if d_:
-                        # 이 자리는 클릭 대신 방향키 이동 ([방향, 초])
-                        self._hold_arrow(ARROW2WORD.get(d_[0], d_[0]), float(d_[1]), name)
+                        # 이 자리는 클릭 대신 방향키 이동 ([방향, 초] — 대각선 포함)
+                        self._hold_arrow(d_[0], float(d_[1]), name)
                     elif coords[j]:
                         self._status.set(f"🏝 [{name}] {lbl}...")
                         if j in move_set:
