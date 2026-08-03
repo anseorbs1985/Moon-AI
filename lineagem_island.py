@@ -510,11 +510,25 @@ class IslandApp(tk.Tk):
             self._en_btns = {}
         self._cnt_vars[key] = []
         self._en_btns[key] = []
+        if not hasattr(self, "_cell_name_vars"):
+            self._cell_name_vars = {}
+        self._cell_name_vars[key] = []
         wg = tk.Frame(parent); wg.pack(padx=2, pady=2)
         for i in range(SLOTS):
             r, c = i % 4, i // 4
             cell = tk.Frame(wg, bd=1, relief="groove", padx=2, pady=1)
             cell.grid(row=r, column=c, padx=2, pady=2, sticky="n")
+            # 슬롯 이름 — 직접 입력, 팝업의 이름과 연동
+            _nm = (self.cfg.get(key, [{}] * SLOTS)[i].get("name") or "").strip()
+            nvv = tk.StringVar(value="" if _nm == "미등록" else _nm)
+            self._cell_name_vars[key].append(nvv)
+            ne = tk.Entry(cell, textvariable=nvv, font=("맑은 고딕", 7), width=10,
+                          justify="center", relief="flat", bg="#f2f2f2", fg="#2c3e50")
+            ne.pack(pady=(1, 0))
+            def _sv_name(e=None, k=key, x=i, v=nvv):
+                self.cfg[k][x]["name"] = v.get().strip() or "미등록"
+                save_cfg(self.cfg)
+            ne.bind("<FocusOut>", _sv_name); ne.bind("<Return>", _sv_name)
             head = tk.Frame(cell); head.pack()
             tk.Label(head, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"),
                      fg="#555").pack(side="left")
@@ -794,6 +808,16 @@ class IslandApp(tk.Tk):
             if i >= len(slots): break
             coords = slots[i].get("coords", [])
             sv.set(f"{sum(1 for c in coords if c)}/{clicks_for(key)}")
+        # 슬롯 이름 표시 동기화 (팝업에서 바꾼 이름 반영)
+        for i, v in enumerate(getattr(self, "_cell_name_vars", {}).get(key, [])):
+            if i >= len(slots): break
+            try:
+                nm = (slots[i].get("name") or "").strip()
+                nm = "" if nm == "미등록" else nm
+                if v.get() != nm:
+                    v.set(nm)
+            except Exception:
+                pass
         # ON/OFF 토글 표시
         for i, eb in enumerate(getattr(self, "_en_btns", {}).get(key, [])):
             if i >= len(slots): break
