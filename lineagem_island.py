@@ -649,11 +649,17 @@ class IslandApp(tk.Tk):
     def _slot_copy(self, key, idx):
         """슬롯 좌표 복사 — 원하는 슬롯에서 [붙임]으로 붙여넣기 (인형탐험과 동일)."""
         import copy
-        coords = self.cfg[key][idx].get("coords", [])
-        if not any(coords):
+        slot = self.cfg[key][idx]
+        coords = slot.get("coords", [])
+        if not (any(coords) or any(d for d in (slot.get("dirs") or []) if d)):
             self._status.set(f"#{idx+1:02d} 복사할 좌표가 없습니다"); return
-        self._slot_clip = {"key": key, "src": idx, "coords": copy.deepcopy(coords)}
-        self._status.set(f"📋 #{idx+1:02d} 좌표 {sum(1 for c in coords if c)}개 복사됨 — 원하는 슬롯의 [붙임]을 누르세요")
+        # 좌표 + 사이 시간(gap_list) + 방향/⇩(dirs) + 이름표까지 전부 복사
+        self._slot_clip = {"key": key, "src": idx,
+                           "coords": copy.deepcopy(coords),
+                           "gap_list": copy.deepcopy(slot.get("gap_list") or []),
+                           "dirs": copy.deepcopy(slot.get("dirs") or []),
+                           "click_names": copy.deepcopy(slot.get("click_names") or [])}
+        self._status.set(f"📋 #{idx+1:02d} 좌표 {sum(1 for c in coords if c)}개 + 시간·방향·이름 복사됨 — 원하는 슬롯의 [붙임]을 누르세요")
 
     def _slot_paste(self, key, idx):
         """복사한 좌표 붙여넣기 — 클라이언트 창 위치 자동보정 (인형탐험과 동일)."""
@@ -675,9 +681,13 @@ class IslandApp(tk.Tk):
             else:
                 note = " — ⚠ 클라이언트 16개 감지 실패, 원본 위치 그대로"
         self.cfg[key][idx]["coords"] = shifted
+        # 사이 시간·방향·이름표도 그대로 붙여넣기
+        self.cfg[key][idx]["gap_list"]    = copy.deepcopy(clip.get("gap_list") or [])
+        self.cfg[key][idx]["dirs"]        = copy.deepcopy(clip.get("dirs") or [])
+        self.cfg[key][idx]["click_names"] = copy.deepcopy(clip.get("click_names") or [])
         save_cfg(self.cfg)
         self._refresh(key)
-        self._status.set(f"✔ #{idx+1:02d} 붙여넣기 완료{note}")
+        self._status.set(f"✔ #{idx+1:02d} 붙여넣기 완료 (시간·방향·이름 포함){note}")
 
     def _toggle_enable(self, key, idx):
         """슬롯 ON/OFF — OFF 슬롯은 대표(전체) 실행에서 건너뜀 (개별 ▶은 그대로 실행)."""
@@ -761,15 +771,19 @@ class IslandApp(tk.Tk):
 
     def _copy_from_above(self, key, idx):
         if idx == 0: return
-        src = self.cfg[key][idx - 1].get("coords", [])
+        prev = self.cfg[key][idx - 1]
+        src = prev.get("coords", [])
         if not any(src):
             self._status.set(f"#{idx:02d} 위에 복사할 좌표가 없습니다")
             return
         import copy
-        self.cfg[key][idx]["coords"] = copy.deepcopy(src)
+        self.cfg[key][idx]["coords"]      = copy.deepcopy(src)
+        self.cfg[key][idx]["gap_list"]    = copy.deepcopy(prev.get("gap_list") or [])
+        self.cfg[key][idx]["dirs"]        = copy.deepcopy(prev.get("dirs") or [])
+        self.cfg[key][idx]["click_names"] = copy.deepcopy(prev.get("click_names") or [])
         save_cfg(self.cfg)
         self._refresh(key)
-        self._status.set(f"✔ #{idx+1} ← #{idx} 좌표 복사 완료")
+        self._status.set(f"✔ #{idx+1} ← #{idx} 좌표·시간·방향·이름 복사 완료")
         coords = self.cfg[key][idx].get("coords", [])
         dots = [(c[0], c[1], n+1, n) for n, c in enumerate(coords) if c and len(c) >= 2]
         if dots:
