@@ -51,8 +51,44 @@ import pyautogui
 try:
     from precise_click import install as _install_precise_click
     _install_precise_click(pyautogui)   # 마우스가 움직여도 지정 좌표에 정확히 클릭
+    _PRECISE_OK = True
 except Exception:
-    pass
+    _PRECISE_OK = False
+
+
+def _send_scan_key(scan_codes, down):
+    """SendInput 스캔코드 방식 키 입력 — 게임(DirectInput)도 인식한다."""
+    import ctypes
+    KEYEVENTF_EXTENDEDKEY = 0x0001
+    KEYEVENTF_KEYUP       = 0x0002
+    KEYEVENTF_SCANCODE    = 0x0008
+    ULONG_PTR = ctypes.POINTER(ctypes.c_ulong)
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [("wVk", ctypes.c_ushort), ("wScan", ctypes.c_ushort),
+                    ("dwFlags", ctypes.c_ulong), ("time", ctypes.c_ulong),
+                    ("dwExtraInfo", ULONG_PTR)]
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [("dx", ctypes.c_long), ("dy", ctypes.c_long),
+                    ("mouseData", ctypes.c_ulong), ("dwFlags", ctypes.c_ulong),
+                    ("time", ctypes.c_ulong), ("dwExtraInfo", ULONG_PTR)]
+
+    class _IU(ctypes.Union):
+        _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT)]
+
+    class INPUT(ctypes.Structure):
+        _anonymous_ = ("u",)
+        _fields_ = [("type", ctypes.c_ulong), ("u", _IU)]
+
+    flags = KEYEVENTF_SCANCODE | KEYEVENTF_EXTENDEDKEY
+    if not down:
+        flags |= KEYEVENTF_KEYUP
+    arr = (INPUT * len(scan_codes))()
+    for i, sc in enumerate(scan_codes):
+        arr[i].type = 1  # INPUT_KEYBOARD
+        arr[i].ki = KEYBDINPUT(0, sc, flags, 0, None)
+    ctypes.windll.user32.SendInput(len(arr), arr, ctypes.sizeof(INPUT))
 
 MOUSE_IDLE_SEC = 5.0  # 마우스 정지 후 재개까지 대기 시간
 
@@ -439,6 +475,8 @@ class IslandApp(tk.Tk):
                   command=self._stop, state="disabled")
         stop_btn.pack(fill="x", padx=4, pady=(0,2))
         self._stop_btns[key] = stop_btn
+        if not _PRECISE_OK:
+            self._status.set("⚠ 정밀클릭 미적용 — 마우스를 움직이면 클릭이 어긋날 수 있음 (precise_click.py 확인 필요)")
 
         tk.Button(parent, text="👁 전체 좌표 보기",
                   font=("맑은 고딕", 8), bg="#566573", fg="white",
@@ -1007,31 +1045,29 @@ class IslandApp(tk.Tk):
 
     def _hold_arrow(self, word, sec, name):
         """방향키를 sec초 동안 눌러 이동 — 대각선(↖↗↙↘)은 두 키 동시 홀드.
-        직전 클릭으로 포커스된 클라가 키를 받는다."""
-        import ctypes
-        u = ctypes.windll.user32
-        UPK, DNK, LFK, RTK = 0x26, 0x28, 0x25, 0x27
-        VKS = {"상": [UPK], "위": [UPK], "↑": [UPK],
-               "하": [DNK], "아": [DNK], "↓": [DNK],
-               "좌": [LFK], "왼": [LFK], "←": [LFK],
-               "우": [RTK], "오": [RTK], "→": [RTK],
-               "↖": [UPK, LFK], "↗": [UPK, RTK],
-               "↙": [DNK, LFK], "↘": [DNK, RTK]}
-        vks = VKS.get(word) or VKS.get(word[0])
-        if not vks or sec <= 0:
+        스캔코드 SendInput 방식이라 게임(DirectInput)도 인식. 직전 클릭으로 포커스된 클라가 받는다."""
+        UPS, DNS, LFS, RTS = 0x48, 0x50, 0x4B, 0x4D   # 방향키 스캔코드
+        SCS = {"상": [UPS], "위": [UPS], "↑": [UPS],
+               "하": [DNS], "아": [DNS], "↓": [DNS],
+               "좌": [LFS], "왼": [LFS], "←": [LFS],
+               "우": [RTS], "오": [RTS], "→": [RTS],
+               "↖": [UPS, LFS], "↗": [UPS, RTS],
+               "↙": [DNS, LFS], "↘": [DNS, RTS]}
+        scs = SCS.get(word) or SCS.get(word[0])
+        if not scs or sec <= 0:
             return
         self._status.set(f"🏃 [{name}] {word} {sec}초 이동...")
-        EXT = 0x0001; UP = 0x0002
-        for vk in vks:
-            u.keybd_event(vk, 0, EXT, 0)
+        _send_scan_key(scs, True)
         t0 = time.time()
         try:
+            # 홀드 유지 — 일부 게임은 반복 입력을 봐야 계속 걷기 때문에 0.4초마다 다시 눌러줌
             while time.time() - t0 < sec:
                 if self._stop_flag: break
-                time.sleep(0.05)
+                time.sleep(0.4)
+                if time.time() - t0 < sec and not self._stop_flag:
+                    _send_scan_key(scs, True)
         finally:
-            for vk in vks:
-                u.keybd_event(vk, 0, EXT | UP, 0)
+            _send_scan_key(scs, False)
         time.sleep(0.15)
 
     def _do_moves(self, spec, name):
