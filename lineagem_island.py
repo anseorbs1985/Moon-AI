@@ -371,6 +371,38 @@ class IslandApp(tk.Tk):
             c.update_idletasks()
             c.yview_moveto(1.0)
 
+    # 창을 숨기거나 최소화할 때 슬롯 팝업도 같이 숨기고, 복원할 때 같이 되살린다
+    # (좌표 등록/테스트 중 팝업이 화면을 가리지 않게)
+    def _pop_win(self):
+        pop = getattr(self, "_pop", {}) or {}
+        w = pop.get("win")
+        return w if (w and w.winfo_exists()) else None
+
+    def withdraw(self):
+        try:
+            w = self._pop_win()
+            if w: w.withdraw()
+        except Exception:
+            pass
+        super().withdraw()
+
+    def iconify(self):
+        try:
+            w = self._pop_win()
+            if w: w.withdraw()
+        except Exception:
+            pass
+        super().iconify()
+
+    def deiconify(self):
+        super().deiconify()
+        try:
+            w = self._pop_win()
+            if w:
+                w.deiconify(); w.lift()
+        except Exception:
+            pass
+
     def _build_col(self, parent, d):
         key   = d["key"]
         color = d["color"]
