@@ -296,7 +296,17 @@ class IslandApp(tk.Tk):
         sh = self.winfo_screenheight()
         ox = int(sw * 0.03)
         oy = int(sh * 0.03)
-        if focus_idx is not None:
+        # 잊혀진섬 단독 창은 2배 크기 + 글씨도 비례해서 확대
+        _is_forgotten = (focus_idx is not None
+                         and DUNGEONS[focus_idx]["key"] == "월요일_잊혀진섬")
+        if _is_forgotten:
+            try:
+                cur = float(self.tk.call("tk", "scaling"))
+                self.tk.call("tk", "scaling", cur * 1.8)   # 글씨/위젯 확대
+            except Exception:
+                pass
+            self.geometry(f"1000x{min(sh - 80, int(sh * 0.92))}+{ox}+{oy}")
+        elif focus_idx is not None:
             self.geometry(f"500x{sh * 2 // 3}+{ox}+{oy}")
         else:
             self.geometry(f"{int(1380*1.3)}x{sh * 2 // 3}+{ox}+{oy}")
@@ -1100,16 +1110,23 @@ class IslandApp(tk.Tk):
         except Exception:
             pass
 
+    @staticmethod
+    def _repeat_delay(h):
+        """반복 주기(초) — 매번 랜덤 여유를 더해 실행 시각이 겹치지 않게.
+        1h→1:01~1:07, 2h→2:02~2:07, 3h→3:02~3:06, 4h→4:02~4:07 랜덤."""
+        extra = {1: (1, 7), 2: (2, 7), 3: (2, 6), 4: (2, 7)}.get(h, (1, 7))
+        return h * 3600 + random.uniform(extra[0], extra[1]) * 60
+
     def _set_repeat(self, key, idx, val):
-        """슬롯 반복 타이머 설정 — ⏰없음/1h/2h/3h/4h."""
+        """슬롯 반복 타이머 설정 — ⏰없음/1h/2h/3h/4h (매 실행 랜덤 여유분)."""
         h = {"⏰없음": 0, "⏰1h": 1, "⏰2h": 2, "⏰3h": 3, "⏰4h": 4}.get(val, 0)
         self.cfg[key][idx]["repeat_h"] = h
         save_cfg(self.cfg)
         if not hasattr(self, "_repeat_next"):
             self._repeat_next = {}
         if h:
-            self._repeat_next[(key, idx)] = time.time() + h * 3600
-            self._status.set(f"⏰ #{idx+1}: {h}시간마다 자동 재실행 (실행기가 켜져 있는 동안)")
+            self._repeat_next[(key, idx)] = time.time() + self._repeat_delay(h)
+            self._status.set(f"⏰ #{idx+1}: 약 {h}시간마다(+랜덤 몇 분) 자동 재실행 — 실행기가 켜져 있는 동안")
         else:
             self._repeat_next.pop((key, idx), None)
             self._status.set(f"#{idx+1}: 반복 끔")
@@ -1129,12 +1146,12 @@ class IslandApp(tk.Tk):
                         continue
                     nxt = self._repeat_next.get((key, i))
                     if nxt is None:
-                        self._repeat_next[(key, i)] = now + h * 3600
+                        self._repeat_next[(key, i)] = now + self._repeat_delay(h)
                     elif now >= nxt:
                         if getattr(self, "_slot_running", False):
                             continue   # 다른 실행 중 — 다음 틱에 재시도
-                        self._repeat_next[(key, i)] = now + h * 3600
-                        self._status.set(f"⏰ #{i+1} {h}시간 반복 — 자동 실행")
+                        self._repeat_next[(key, i)] = now + self._repeat_delay(h)
+                        self._status.set(f"⏰ #{i+1} {h}시간 반복(+랜덤) — 자동 실행")
                         self._test(key, i)
         except Exception:
             pass
