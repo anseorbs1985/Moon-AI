@@ -302,10 +302,10 @@ class IslandApp(tk.Tk):
         if _is_forgotten:
             try:
                 cur = float(self.tk.call("tk", "scaling"))
-                self.tk.call("tk", "scaling", cur * 1.8)   # 글씨/위젯 확대
+                self.tk.call("tk", "scaling", cur * 1.26)   # 글씨/위젯 확대 (1.8의 70%)
             except Exception:
                 pass
-            self.geometry(f"1000x{min(sh - 80, int(sh * 0.92))}+{ox}+{oy}")
+            self.geometry(f"700x{int(sh * 0.75)}+{ox}+{oy}")
         elif focus_idx is not None:
             self.geometry(f"500x{sh * 2 // 3}+{ox}+{oy}")
         else:
