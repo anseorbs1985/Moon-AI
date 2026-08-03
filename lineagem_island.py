@@ -71,7 +71,7 @@ CLICK_INTERVAL = 2.0  # 클릭 간격(초) — 현재 2초
 CLICK_LABELS = ["클릭1", "클릭2", "추가", "클릭3", "클릭4", "클릭5"]
 
 # 던전별 좌표 개수 (기본 6개, 예외만 지정)
-CLICKS_BY_KEY = {"월요일_잊혀진섬": 25}
+CLICKS_BY_KEY = {"월요일_잊혀진섬": 27}
 
 def clicks_for(key):
     return CLICKS_BY_KEY.get(key, CLICKS)
@@ -459,7 +459,7 @@ class IslandApp(tk.Tk):
             self.cfg[key][idx]["name"] = nv.get().strip() or "미등록"
             save_cfg(self.cfg)
         ent.bind("<FocusOut>", _sv); ent.bind("<Return>", _sv)
-        tk.Label(win, text=f"버튼 아래 [방향][초] = 그 자리에서 클릭 대신 방향키 이동  |  'ㅡ' 위 칸 = 클릭 뒤 대기 초 (비우면 {CLICK_INTERVAL}초)",
+        tk.Label(win, text=f"[방향][초]: ↑↓←→↖↗↙↘=방향키 이동(초) / ⇩=그 좌표 짧게 누르고 아래로 끌기(숫자=거리 1살짝~10많이)  |  'ㅡ' 칸=클릭 뒤 대기 초(비우면 {CLICK_INTERVAL})",
                  font=("맑은 고딕", 7), fg="#888").pack()
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         _n_clicks = clicks_for(key)
@@ -481,13 +481,13 @@ class IslandApp(tk.Tk):
         dirs = list(slot.get("dirs") or [])
         while len(dirs) < _n_clicks:
             dirs.append(None)
-        DIRS = ["ㅡ", "↑", "↓", "←", "→", "↖", "↗", "↙", "↘"]
+        DIRS = ["ㅡ", "↑", "↓", "←", "→", "↖", "↗", "↙", "↘", "⇩"]   # ⇩ = 좌표 짧게 누르고 아래로 끌기(스크롤)
         dir_vars, sec_vars = [], []
         def _save_dirs(*a):
             out = []
             for dv, sv2 in zip(dir_vars, sec_vars):
                 d_ = dv.get()
-                if d_ not in ("↑", "↓", "←", "→", "↖", "↗", "↙", "↘"):
+                if d_ not in ("↑", "↓", "←", "→", "↖", "↗", "↙", "↘", "⇩"):
                     out.append(None)
                 else:
                     try:
@@ -969,7 +969,21 @@ class IslandApp(tk.Tk):
                 for j, lbl in enumerate(_labels):
                     if self._stop_flag: break
                     d_ = dirs[j] if j < len(dirs) else None
-                    if d_:
+                    if d_ and d_[0] == "⇩":
+                        # 등록한 좌표를 짧게 누르고 아래로 살짝 끌어내리기 (스크롤)
+                        if not coords[j]:
+                            continue   # ⇩는 좌표 등록이 필요
+                        dist = max(30, int(float(d_[1]) * 30))   # 1=30px(살짝) ~ 10=300px
+                        sx, sy = coords[j]
+                        self._status.set(f"🖱 [{name}] {lbl} 끌어내리기 {dist}px...")
+                        pyautogui.mouseDown(sx, sy)
+                        time.sleep(0.08)
+                        _steps = 6
+                        for _st in range(1, _steps + 1):
+                            pyautogui.moveTo(sx, sy + int(dist * _st / _steps))
+                            time.sleep(0.02)
+                        pyautogui.mouseUp(sx, sy + dist)
+                    elif d_:
                         # 이 자리는 클릭 대신 방향키 이동 ([방향, 초] — 대각선 포함)
                         self._hold_arrow(d_[0], float(d_[1]), name)
                     elif coords[j]:
