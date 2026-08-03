@@ -793,6 +793,12 @@ class App(tk.Tk):
         tk.Label(self, text="리니지M 자동 실행",
                  font=("맑은 고딕", 13, "bold"), fg="#c8a951").pack(pady=(10, 2))
 
+        # 혈레이드 — 클라 위 메모를 5분 동안만 맨 위로 (평소엔 안 올라옴)
+        boost_row = tk.Frame(self); boost_row.pack(fill="x")
+        self._boost_btn = tk.Button(boost_row, text="🔥 혈레이드", font=("맑은 고딕", 8, "bold"),
+                                    bg="#c0392b", fg="white", activebackground="#922b21",
+                                    width=10, command=self._memo_boost)
+        self._boost_btn.pack(side="left", padx=(30, 0), pady=(2, 0))
         # 전환할 계정 수 위: 맨뒤로 동그라미 버튼 (세로선은 TJ성공!!과 자동 정렬)
         back_row = tk.Frame(self); back_row.pack(fill="x")
         self._back_circle = tk.Canvas(back_row, width=46, height=46, highlightthickness=0,
@@ -2774,24 +2780,22 @@ class App(tk.Tk):
         except Exception:
             return False
 
+    def _memo_boost(self):
+        """[🔥 혈레이드] — 클라 위 메모를 5분 동안만 맨 위로 표시, 이후 자동으로 뒤로."""
+        self._memo_boost_until = time.time() + 300
+        self.status.set("🔥 혈레이드 — 메모를 5분 동안 맨 위로 띄웁니다")
+
     def _memo_raise_over_lineage(self):
-        """리니지M 클라가 맨 앞이면 메모를 '일반 z순서 맨 위'로만 올린다 (topmost 아님).
-        → 브라우저 등 다른 앱을 클릭하면 그 앱이 메모 위로 정상적으로 올라온다."""
-        fg = self._memo_fg_is_lineage()
+        """평소엔 메모를 위로 올리지 않는다 (거슬리지 않게).
+        [🔥 혈레이드]를 누르면 5분 동안만 항상 위로 표시."""
+        boost = time.time() < getattr(self, "_memo_boost_until", 0)
         for i, (win, var) in list(getattr(self, "_memo_wins", {}).items()):
             try:
                 if not win.winfo_exists():
                     continue
-                win.attributes("-topmost", False)   # 항상위 금지
-                if fg:
-                    try:
-                        import win32gui, win32con
-                        hwnd = win32gui.GetParent(win.winfo_id()) or win.winfo_id()
-                        win32gui.SetWindowPos(hwnd, win32con.HWND_TOP, 0, 0, 0, 0,
-                                              win32con.SWP_NOMOVE | win32con.SWP_NOSIZE |
-                                              win32con.SWP_NOACTIVATE)
-                    except Exception:
-                        win.lift()
+                win.attributes("-topmost", bool(boost))
+                if boost:
+                    win.lift()
             except Exception:
                 pass
 
@@ -2886,6 +2890,10 @@ class App(tk.Tk):
                 bx = self._tjcol.winfo_rootx() - self.winfo_rootx()
                 if 0 <= bx < 800:
                     self._back_circle.pack_configure(padx=(bx, 0))
+                    try:
+                        self._boost_btn.pack_configure(padx=(bx, 0))
+                    except Exception:
+                        pass
             except Exception:
                 pass
         except Exception:
