@@ -9632,7 +9632,7 @@ class CoordOverlay(tk.Toplevel):
             label = f"매일매일 스케줄 #{app._reg_sched_slot_idx+1} [클릭] 위치"
         elif mode == "dgn2":
             _f, _s, _c = app._reg_dgn2
-            _t = {"dollchk": "인형확인용", "relic": "성물확인용"}[_f]
+            _t = app._dgn2_info(_f)[1]
             label = f"{_t} #{_s+1} [클릭{_c+1}] 위치"
         elif mode == "item":
             _ci = app._reg_item_click_idx
