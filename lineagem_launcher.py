@@ -3564,6 +3564,13 @@ class App(tk.Tk):
         for w in self._sec_row.winfo_children():
             w.destroy()
 
+        # ★ 과거섬 하루 패스 버튼 — 누르면 다음 새벽 실행 건너뜀, 다시 누르면 취소, 다음날 자동 재개
+        self._past_skip_btn = tk.Button(self._sec_row, text="★",
+            font=("맑은 고딕", 14, "bold"), width=3, height=1,
+            command=self._toggle_past_skip)
+        self._past_skip_btn.pack(side="left", padx=(0, 4))
+        self._refresh_past_skip_btn()
+
         fixed = [
             ("⚙ 좌표 등록", "#2c3e50", self._open_settings_win,                         None,      None),
             ("귀환주문서",   "#c0392b", lambda: self._open_past_slot(4),                 "#922b21", lambda: self._run_island_slot(4)),
@@ -6274,6 +6281,42 @@ class App(tk.Tk):
                 h, m = divmod(int(diff.total_seconds()) // 60, 60)
                 self.status.set(f"🕘 우편 클릭 대기 중... (약 {h}시간 {m}분 후 23:30~23:50 실행)")
         self.after(10000, self._mail_scheduler_tick)
+
+    def _next_past_run_date(self):
+        """다음 과거섬 스케줄 실행 날짜 — 오늘 5:25 전이면 오늘, 지났으면 내일."""
+        import datetime
+        now = datetime.datetime.now()
+        d = now.date()
+        if now.hour > 5 or (now.hour == 5 and now.minute > 25):
+            d += datetime.timedelta(days=1)
+        return d
+
+    def _toggle_past_skip(self):
+        """★ 버튼 — 다음 과거섬 새벽 실행을 하루 건너뜀 (다시 누르면 취소, 다음날 자동 재개)."""
+        target = self._next_past_run_date()
+        tstr = target.strftime("%Y-%m-%d")
+        if str(self.cfg.get("past_skip_date") or "") == tstr:
+            self.cfg["past_skip_date"] = ""
+            save_cfg(self.cfg)
+            self.status.set("★ 과거섬 패스 취소 — 예정대로 실행합니다")
+        else:
+            self.cfg["past_skip_date"] = tstr
+            save_cfg(self.cfg)
+            self.status.set(f"★ 과거섬 {target.month}/{target.day} 새벽 실행 건너뜀 — 그 다음날 자동 재개")
+        self._refresh_past_skip_btn()
+
+    def _refresh_past_skip_btn(self):
+        btn = getattr(self, "_past_skip_btn", None)
+        if not btn:
+            return
+        try:
+            armed = (str(self.cfg.get("past_skip_date") or "")
+                     == self._next_past_run_date().strftime("%Y-%m-%d"))
+            btn.config(bg="#c0392b" if armed else "#dfe3e6",
+                       fg="white" if armed else "#c0392b",
+                       activebackground="#922b21" if armed else "#cfd4d8")
+        except Exception:
+            pass
 
     def _past_scheduler_tick(self):
         import datetime
