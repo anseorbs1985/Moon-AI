@@ -529,6 +529,10 @@ class IslandApp(tk.Tk):
             tk.Button(brow, text="×", font=("맑은 고딕", 7, "bold"), fg="red", width=1, pady=0,
                       command=lambda k=key, x=idx, c=j: self._del_click(k, x, c)
                       ).pack(side="left", padx=(1, 0))
+            tk.Button(brow, text="▶", font=("맑은 고딕", 7), fg="white", bg="#1e8449",
+                      width=1, pady=0,
+                      command=lambda k=key, x=idx, c=j: self._test_click(k, x, c)
+                      ).pack(side="left", padx=(1, 0))
             # [방향][초] 선택 — 방향을 고르면 이 자리는 클릭 대신 방향키 이동
             drow = tk.Frame(cc); drow.pack()
             cur = dirs[j]
@@ -843,6 +847,45 @@ class IslandApp(tk.Tk):
             return
         self.withdraw()
         self.after(1000, lambda: _IslandPreviewOverlay(self, key, None, dots))
+
+    def _test_click(self, key, idx, ci):
+        """좌표 하나만 단독 테스트 — 그 자리의 동작(클릭/방향이동/⇩끌기)을 1회 실행."""
+        def run():
+            try:
+                slot = self.cfg[key][idx]
+                name = slot.get("name", f"#{idx+1}")
+                coords = slot.get("coords", [])
+                dirs = slot.get("dirs") or []
+                c = coords[ci] if ci < len(coords) else None
+                d_ = dirs[ci] if ci < len(dirs) else None
+                cn = slot.get("click_names") or []
+                lbl = (cn[ci] if ci < len(cn) and cn[ci] else labels_for(key)[ci])
+                time.sleep(1.0)
+                if d_ and d_[0] == "⇩":
+                    if not c:
+                        self._status.set(f"{lbl}: ⇩는 좌표 등록이 필요합니다"); return
+                    dist = max(30, int(float(d_[1]) * 30))
+                    sx, sy = c
+                    self._status.set(f"🖱 [{name}] {lbl} 끌어내리기 {dist}px 테스트...")
+                    pyautogui.mouseDown(sx, sy); time.sleep(0.08)
+                    for st in range(1, 7):
+                        pyautogui.moveTo(sx, sy + int(dist * st / 6)); time.sleep(0.02)
+                    pyautogui.mouseUp(sx, sy + dist)
+                elif d_:
+                    self._hold_arrow(d_[0], float(d_[1]), name)
+                elif c:
+                    self._status.set(f"🏝 [{name}] {lbl} 클릭 테스트...")
+                    pyautogui.click(*c)
+                else:
+                    self._status.set(f"{lbl}: 등록된 좌표/동작이 없습니다"); return
+                self._status.set(f"✔ [{name}] {lbl} 테스트 완료")
+            except Exception as e:
+                self._status.set(f"테스트 오류: {e}")
+            finally:
+                self.after(0, self.deiconify)
+        self._stop_flag = False
+        self.iconify()
+        threading.Thread(target=run, daemon=True).start()
 
     def _del_click(self, key, idx, ci):
         """좌표 하나만 삭제 — 실행 때 그 자리는 건너뛰고 다음 좌표부터 진행."""
