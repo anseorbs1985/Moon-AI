@@ -302,10 +302,10 @@ class IslandApp(tk.Tk):
         if _is_forgotten:
             try:
                 cur = float(self.tk.call("tk", "scaling"))
-                self.tk.call("tk", "scaling", cur * 1.63)   # 세로에 꽉 차는 배율 (글씨 크게)
+                self.tk.call("tk", "scaling", cur * 1.14)   # 30% 축소 배율
             except Exception:
                 pass
-            self._fixed_geometry = "980x1129+76+43"   # 가로 3cm 추가 확장 — 자동맞춤 무시
+            self._fixed_geometry = "686x790+76+43"   # 이전 크기의 70%
             self.geometry(self._fixed_geometry)
         elif focus_idx is not None:
             self.geometry(f"500x{sh * 2 // 3}+{ox}+{oy}")
