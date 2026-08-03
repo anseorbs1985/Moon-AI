@@ -470,7 +470,7 @@ class IslandApp(tk.Tk):
             self.cfg[key][idx]["moves"] = mvv.get().strip()
             save_cfg(self.cfg)
         me.bind("<FocusOut>", _smv); me.bind("<Return>", _smv)
-        tk.Label(win, text=f"클릭 사이 'ㅡ' 위 칸 = 그 클릭 뒤 대기 초 (비우면 기본 {CLICK_INTERVAL}초)",
+        tk.Label(win, text=f"'ㅡ' 위 칸 = 그 클릭 뒤 동작: 숫자=대기 초, 하3=↓3초 이동, 조합 가능 \"2 하3\" (비우면 기본 {CLICK_INTERVAL}초)",
                  font=("맑은 고딕", 7), fg="#888").pack()
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         _n_clicks = clicks_for(key)
@@ -485,13 +485,7 @@ class IslandApp(tk.Tk):
             out = []
             for v in gap_vars:
                 s = v.get().strip().replace("초", "")
-                if not s:
-                    out.append(None)
-                else:
-                    try:
-                        out.append(float(s))
-                    except Exception:
-                        out.append(None)
+                out.append(s if s else None)   # 문자열 그대로 저장 (숫자·이동 조합)
             self.cfg[key][idx]["gap_list"] = out
             save_cfg(self.cfg)
         for j in range(_n_clicks):
@@ -507,9 +501,11 @@ class IslandApp(tk.Tk):
             if j < _n_clicks - 1:
                 # 클릭 사이 간격: ㅡ 위에 초 입력 (비우면 기본)
                 gc = tk.Frame(grid); gc.grid(row=j // 6, column=(j % 6) * 2 + 1)
-                v = tk.StringVar(value="" if gl[j] is None else f"{gl[j]:g}")
+                _gv = gl[j]
+                v = tk.StringVar(value="" if _gv is None else
+                                 (f"{_gv:g}" if isinstance(_gv, (int, float)) else str(_gv)))
                 gap_vars.append(v)
-                en = tk.Entry(gc, textvariable=v, width=4, justify="center",
+                en = tk.Entry(gc, textvariable=v, width=6, justify="center",
                               font=("맑은 고딕", 8))
                 en.pack()
                 tk.Label(gc, text="ㅡ", font=("맑은 고딕", 8, "bold"), fg="#888").pack()
@@ -833,29 +829,52 @@ class IslandApp(tk.Tk):
         self._minimize_claude()
         threading.Thread(target=self._run, args=(key,), daemon=True).start()
 
-    def _do_moves(self, spec, name):
-        """'하3 우1.5 상2 좌0.5' — 방향키를 지정 초만큼 눌러 이동.
-        직전 클릭으로 포커스된 클라이언트가 키를 받는다."""
-        import re, ctypes
+    def _hold_arrow(self, word, sec, name):
+        """방향키 하나를 sec초 동안 눌러 이동 — 직전 클릭으로 포커스된 클라가 받는다."""
+        import ctypes
         u = ctypes.windll.user32
         VK = {"상": 0x26, "위": 0x26, "하": 0x28, "아": 0x28,
               "좌": 0x25, "왼": 0x25, "우": 0x27, "오": 0x27}
+        vk = VK.get(word[0])
+        if not vk or sec <= 0:
+            return
+        self._status.set(f"🏃 [{name}] {word} {sec}초 이동...")
         EXT = 0x0001; UP = 0x0002
+        u.keybd_event(vk, 0, EXT, 0)
+        t0 = time.time()
+        try:
+            while time.time() - t0 < sec:
+                if self._stop_flag: break
+                time.sleep(0.05)
+        finally:
+            u.keybd_event(vk, 0, EXT | UP, 0)
+        time.sleep(0.15)
+
+    def _do_moves(self, spec, name):
+        """'하3 우1.5 상2 좌0.5' — 방향키를 순서대로 지정 초만큼 눌러 이동."""
+        import re
         for m in re.finditer(r"(상|위|하|아래|좌|왼쪽?|우|오른쪽?)\s*:?\s*([0-9]+(?:\.[0-9]+)?)", spec):
             if self._stop_flag: break
+            self._hold_arrow(m.group(1), float(m.group(2)), name)
+
+    def _do_gap_spec(self, spec, name):
+        """클릭 사이 'ㅡ' 칸 해석 — 숫자=대기 초, 방향+숫자=방향키 이동, 적힌 순서대로.
+        예: "2 하3" = 2초 대기 후 ↓3초 이동. 해석할 게 없으면 기본 간격."""
+        import re
+        acted = False
+        for m in re.finditer(r"(상|위|하|아래|좌|왼쪽?|우|오른쪽?)?\s*:?\s*([0-9]+(?:\.[0-9]+)?)", spec):
+            if self._stop_flag: break
             word, sec = m.group(1), float(m.group(2))
-            vk = VK.get(word[0])
-            if not vk or sec <= 0: continue
-            self._status.set(f"🏃 [{name}] {word} {sec}초 이동...")
-            u.keybd_event(vk, 0, EXT, 0)
-            t0 = time.time()
-            try:
+            acted = True
+            if word:
+                self._hold_arrow(word, sec, name)
+            else:
+                t0 = time.time()
                 while time.time() - t0 < sec:
                     if self._stop_flag: break
                     time.sleep(0.05)
-            finally:
-                u.keybd_event(vk, 0, EXT | UP, 0)
-            time.sleep(0.15)
+        if not acted:
+            time.sleep(CLICK_INTERVAL)
 
     def _stop(self):
         self._stop_flag = True
@@ -896,10 +915,13 @@ class IslandApp(tk.Tk):
                         pyautogui.moveTo(*coords[j])
                     else:
                         pyautogui.click(*coords[j])
-                    g = CLICK_INTERVAL
-                    if j < len(gl) and isinstance(gl[j], (int, float)):
-                        g = float(gl[j])
-                    time.sleep(g)
+                    g = gl[j] if j < len(gl) else None
+                    if g is None or g == "":
+                        time.sleep(CLICK_INTERVAL)
+                    elif isinstance(g, (int, float)):
+                        time.sleep(float(g))
+                    else:
+                        self._do_gap_spec(str(g), name)   # "2 하3" 같은 조합 해석
                 # 이동 스텝 — 방향키를 지정 초만큼 눌러 캐릭터 이동 (예: "하3 우1.5")
                 mv = (slot.get("moves") or "").strip()
                 if mv and not self._stop_flag:
