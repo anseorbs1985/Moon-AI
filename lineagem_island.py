@@ -1426,14 +1426,15 @@ class IslandApp(tk.Tk):
             if word:
                 self._hold_arrow(word, sec, name)
             else:
+                sec *= random.uniform(1.10, 1.25)   # 대기 시간 10~25% 랜덤 증가
                 if b is not None:
-                    self._status.set(f"⏱ [{name}] {sec:.1f}초 대기 (랜덤 {m.group(2)}~{b})...")
+                    self._status.set(f"⏱ [{name}] {sec:.1f}초 대기 (랜덤 {m.group(2)}~{b} +α)...")
                 t0 = time.time()
                 while time.time() - t0 < sec:
                     if self._stop_flag: break
                     time.sleep(0.05)
         if not acted:
-            time.sleep(CLICK_INTERVAL)
+            time.sleep(CLICK_INTERVAL * random.uniform(1.10, 1.25))
 
     def _stop(self):
         self._stop_flag = True
@@ -1460,9 +1461,9 @@ class IslandApp(tk.Tk):
             for ti, (si, slot) in enumerate(targets):
                 if self._stop_flag: break
                 if ti > 0:
-                    # 슬롯 사이 간격 — 2~7초 랜덤
-                    _sg = random.uniform(2, 7)
-                    self._status.set(f"⏱ 다음 슬롯까지 {_sg:.1f}초 (랜덤 2~7)...")
+                    # 슬롯 사이 간격 — 7~13초 랜덤
+                    _sg = random.uniform(7, 13)
+                    self._status.set(f"⏱ 다음 슬롯까지 {_sg:.1f}초 (랜덤 7~13)...")
                     _t0 = time.time()
                     while time.time() - _t0 < _sg:
                         if self._stop_flag: break
@@ -1522,12 +1523,13 @@ class IslandApp(tk.Tk):
                     if not did:
                         continue
                     g = gl[j] if j < len(gl) else None
+                    _mult = random.uniform(1.10, 1.25)   # 좌표 간 간격 10~25% 랜덤 증가
                     if g is None or g == "":
-                        time.sleep(CLICK_INTERVAL)
+                        time.sleep(CLICK_INTERVAL * _mult)
                     elif isinstance(g, (int, float)):
-                        time.sleep(float(g))
+                        time.sleep(float(g) * _mult)
                     else:
-                        self._do_gap_spec(str(g), name)   # 숫자/이동 조합도 그대로 지원
+                        self._do_gap_spec(str(g), name)   # 대기 토큰에 10~25% 증가 적용됨
                 self._add_count(si)
                 if self._stop_flag: break
                 time.sleep(5)
