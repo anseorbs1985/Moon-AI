@@ -980,6 +980,9 @@ class IslandApp(tk.Tk):
                 rec = (slot.get("recs") or {}).get(str(ci))
                 if d_ and d_[0] == "⏺":
                     d_ = None
+                # 방향 이동/녹화 테스트는 키 입력이라 그 슬롯의 클라를 먼저 포커스
+                if (d_ and d_[0] != "⇩") or rec:
+                    self._focus_client_for_slot(idx)
                 if rec and not (d_ or c):
                     self._play_events(rec, name)
                     self._status.set(f"✔ [{name}] {lbl} 녹화 재생 완료"); return
@@ -1067,6 +1070,35 @@ class IslandApp(tk.Tk):
         self.iconify()
         self._minimize_claude()
         threading.Thread(target=self._run, args=(key,), daemon=True).start()
+
+    def _focus_client_for_slot(self, si):
+        """슬롯 번호(화면 배치 01~16 열우선)의 클라 창을 포커스 — 키 입력이 게임으로 가게."""
+        try:
+            import win32gui, ctypes
+            wins = []
+            def cb(h, _):
+                if win32gui.IsWindowVisible(h) and not win32gui.IsIconic(h):
+                    t = win32gui.GetWindowText(h)
+                    if t.startswith("리니지M l"):
+                        l, tp, r, b = win32gui.GetWindowRect(h)
+                        if r - l > 100 and b - tp > 100:
+                            wins.append((h, l, tp))
+                return True
+            win32gui.EnumWindows(cb, None)
+            if len(wins) != 16:
+                return False
+            wins.sort(key=lambda w: w[1])
+            cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[2]) for i in range(4)]
+            hs = [w[0] for col in cols for w in col]
+            if si >= len(hs):
+                return False
+            u = ctypes.windll.user32
+            u.keybd_event(0x12, 0, 0, 0); u.keybd_event(0x12, 0, 2, 0)   # ALT 탭핑
+            win32gui.SetForegroundWindow(hs[si])
+            time.sleep(0.3)
+            return True
+        except Exception:
+            return False
 
     # ── 녹화/재생 (⏺) — 사용자의 마우스·방향키 입력을 그대로 담았다가 재생 ──
     def _start_record(self, key, idx, ci):
