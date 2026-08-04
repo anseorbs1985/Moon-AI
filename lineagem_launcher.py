@@ -200,6 +200,7 @@ DEFAULT_CFG = {
     "seq_on":       False,              # 연속 클릭 단축키 활성화 상태 (재시작 유지)
     "seq_min":      SEQ_MIN,
     "seq_max":      SEQ_MAX,
+    "dollcrack_on": False,              # 인형까기 — F1 = 마우스 위치 연속 10클릭 후 ESC (재시작 유지)
     "wdoff_slots":  [None]*WDOFF_SLOTS, # 주말던전 끄기 좌표 (각 [x,y] 또는 None)
     "wdoff_hotkey": None,
     "wdoff_on":     False,
@@ -651,6 +652,8 @@ class App(tk.Tk):
         self._win_lock     = WindowSizeLock()
         self._hp_stop      = False
         self._seq_on       = bool(self.cfg.get("seq_on", False))
+        self._dollcrack_on = bool(self.cfg.get("dollcrack_on", False))
+        self._dollcrack_running = False
         self._seq_running  = False
         self._wdoff_on     = bool(self.cfg.get("wdoff_on", False))
         self._wdoff_running = False
@@ -687,6 +690,7 @@ class App(tk.Tk):
         # (자동 업데이트는 사용자 요청으로 비활성 — 업데이트는 🔄 버튼으로 수동 실행)
         self.after(1000, self._purple_check_tick)
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
+        threading.Thread(target=self._dollcrack_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._wdoff_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._item_hotkey_loop, daemon=True).start()
@@ -3791,6 +3795,14 @@ class App(tk.Tk):
             else:
                 tk.Frame(grp, height=30).pack(side="top")
 
+        # 🧸 인형까기 — ON이면 F1 = 마우스 위치 연속 10클릭(0.1~0.2초) 후 ESC
+        grp = tk.Frame(self._sec_row); grp.pack(side="left", padx=2)
+        self._dollcrack_btn = tk.Button(grp, font=("맑은 고딕", 9, "bold"),
+                                        width=9, height=2, command=self._toggle_dollcrack)
+        self._dollcrack_btn.pack(side="top")
+        tk.Label(grp, text="F1=10클릭+ESC", font=("맑은 고딕", 7), fg="#666").pack(side="top")
+        self._refresh_dollcrack_btn()
+
         # 구분선
         tk.Frame(self._sec_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=4)
 
@@ -4684,6 +4696,64 @@ class App(tk.Tk):
             if down and not prev and not getattr(self, "_seq_running", False):
                 threading.Thread(target=self._run_seq, daemon=True).start()
             prev = down
+
+    # ── 🧸 인형까기 — F1 = 현재 마우스 위치 연속 10클릭(0.1~0.2초) 후 ESC ──
+    def _dollcrack_hotkey_loop(self):
+        """전역 F1 감시 — 인형까기 ON이면 F1 순간의 마우스 위치를 연속 클릭."""
+        import ctypes
+        prev = False
+        while True:
+            time.sleep(0.03)
+            if not getattr(self, "_dollcrack_on", False):
+                prev = False
+                continue
+            try:
+                down = bool(ctypes.windll.user32.GetAsyncKeyState(0x70) & 0x8000)   # F1
+            except Exception:
+                prev = False
+                continue
+            if down and not prev and not getattr(self, "_dollcrack_running", False):
+                threading.Thread(target=self._run_dollcrack, daemon=True).start()
+            prev = down
+
+    def _run_dollcrack(self):
+        self._dollcrack_running = True
+        try:
+            import ctypes
+            class _PT(ctypes.Structure):
+                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+            pt = _PT()
+            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+            for t in range(10):
+                self.status.set(f"🧸 인형까기 클릭 {t+1}/10...")
+                pyautogui.click(pt.x, pt.y)
+                if t < 9:
+                    time.sleep(random.uniform(0.1, 0.2))
+            time.sleep(0.25)
+            self._send_key_input_cp(0x01, 0x0008)           # ESC down (스캔코드)
+            time.sleep(0.08)
+            self._send_key_input_cp(0x01, 0x0008 | 0x0002)  # ESC up
+            self.status.set("✔ 🧸 인형까기 — 10클릭 + ESC 완료")
+        except Exception as e:
+            self.status.set(f"인형까기 오류: {e}")
+        finally:
+            self._dollcrack_running = False
+
+    def _toggle_dollcrack(self):
+        self._dollcrack_on = not getattr(self, "_dollcrack_on", False)
+        self.cfg["dollcrack_on"] = self._dollcrack_on   # 재시작해도 유지
+        save_cfg(self.cfg)
+        self._refresh_dollcrack_btn()
+        self.status.set("🧸 인형까기 ON — F1 누르면 그 자리 연속 10클릭 + ESC"
+                        if self._dollcrack_on else "🧸 인형까기 OFF")
+
+    def _refresh_dollcrack_btn(self):
+        b = getattr(self, "_dollcrack_btn", None)
+        if not b or not b.winfo_exists(): return
+        if getattr(self, "_dollcrack_on", False):
+            b.config(text="🧸 인형까기\nON", bg="#27ae60", fg="white")
+        else:
+            b.config(text="🧸 인형까기\nOFF", bg="#7f8c8d", fg="white")
 
     # ── 주말던전 끄기 (연속클릭과 동일 — 별도 좌표/단축키/ON·OFF) ──
     def _open_wdoff_win(self):
