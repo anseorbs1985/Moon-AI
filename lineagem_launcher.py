@@ -947,14 +947,22 @@ class App(tk.Tk):
         upd.create_text(39, 52, text="업데이트", fill="white", font=("맑은 고딕", 9, "bold"))
         upd.bind("<Button-1>", lambda e: self._run_updater())
 
-        # 업데이트 오른쪽: 🎟 쿠폰등록 네모 버튼 (변신확인용 방식 — 좌표9개, 클릭5에서 글 붙여넣기)
-        tk.Button(btn_row, text="🎟 쿠폰\n등록", font=("맑은 고딕", 10, "bold"),
+        # 업데이트 오른쪽: 🎟 쿠폰등록 (위=창 열기, 아래=▶ 바로 실행)
+        cg = tk.Frame(btn_row); cg.pack(side="left", padx=(6, 0))
+        tk.Button(cg, text="🎟 쿠폰\n등록", font=("맑은 고딕", 10, "bold"),
                   bg="#1f618d", fg="white", activebackground="#154360",
-                  width=7, height=3, command=self._open_coupon_win).pack(side="left", padx=(6, 0))
-        # 쿠폰등록 오른쪽: 🛒 이벤트상점 (변신확인용 방식 — 좌표3개)
-        tk.Button(btn_row, text="🛒 이벤트\n상점", font=("맑은 고딕", 10, "bold"),
+                  width=7, height=2, command=self._open_coupon_win).pack(side="top")
+        tk.Button(cg, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#154360", fg="white", width=9, height=1, pady=2,
+                  command=lambda: self._start_dgn2("coupon")).pack(side="top", pady=(1, 0))
+        # 쿠폰등록 오른쪽: 🛒 이벤트상점 (위=창 열기, 아래=▶ 바로 실행)
+        eg = tk.Frame(btn_row); eg.pack(side="left", padx=(6, 0))
+        tk.Button(eg, text="🛒 이벤트\n상점", font=("맑은 고딕", 10, "bold"),
                   bg="#0e6655", fg="white", activebackground="#0b5345",
-                  width=7, height=3, command=self._open_eventshop_win).pack(side="left", padx=(6, 0))
+                  width=7, height=2, command=self._open_eventshop_win).pack(side="top")
+        tk.Button(eg, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#0b5345", fg="white", width=9, height=1, pady=2,
+                  command=lambda: self._start_dgn2("eventshop")).pack(side="top", pady=(1, 0))
         # TJ성공!! 좌측 끝 정렬용 가변 여백 (행이 가운데 정렬이라 오른쪽을 늘려 왼쪽으로 밀기)
         self._btnrow_pad = tk.Frame(btn_row, width=0, height=1)
         self._btnrow_pad.pack(side="left")
