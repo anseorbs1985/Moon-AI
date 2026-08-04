@@ -4793,24 +4793,25 @@ class App(tk.Tk):
                 while n < 15 and _f1_down():
                     self._click_cursor_cp()   # 커서 이동 없이 그 자리 클릭
                     n += 1
-                    # 초반 7클릭은 폭발적으로(따따따따!), 나머지 8클릭은 게임이
-                    # 밀린 클릭을 소화할 시간을 줘서 사이클 끝엔 쌓임이 없게
-                    time.sleep(0.012 if n <= 7 else 0.05)
+                    time.sleep(0.02)          # 15클릭 전부 빠르게 몰아치기 (~0.3초)
                 if n < 15:
                     break   # 도중에 뗌 → ESC 없이 종료
-                # 15클릭 완료 → ESC 누르고 다음 사이클
-                time.sleep(0.15)
+                # 게임이 클릭 15개를 전부 소화하고 결과창이 뜬 뒤에만 ESC —
+                # 정리 시간이 짧으면 ESC가 엉뚱한 타이밍에 눌려 '취소 두 번' 느낌이 남
+                time.sleep(0.55)
                 self._send_key_input_cp(0x01, 0x0008)           # ESC down (스캔코드)
                 time.sleep(0.08)
                 self._send_key_input_cp(0x01, 0x0008 | 0x0002)  # ESC up
                 cycles += 1
                 self.status.set(f"🧸 인형까기 {cycles}회째 반복 중... (F1 떼면 멈춤)")
-                # ESC 직후 손 떼는 타이밍 여유 — 잠깐 기다렸다가 두 번 확인해서
-                # 떼는 중이면 다음 사이클을 시작하지 않는다 (ESC 두 번 느낌 방지)
-                time.sleep(0.35)
+                # ESC 후 화면 정리 + 손 떼는 타이밍 이중 확인 — 떼는 중이면
+                # 다음 사이클을 시작하지 않는다 (불필요한 클릭·ESC 방지)
+                time.sleep(0.45)
                 if not _f1_down():
                     break
                 time.sleep(0.15)
+                if not _f1_down():
+                    break
             self.status.set(f"✔ 🧸 인형까기 멈춤 — [15클릭+ESC] {cycles}회 반복")
         except Exception as e:
             self.status.set(f"인형까기 오류: {e}")
