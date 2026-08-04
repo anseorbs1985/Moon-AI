@@ -4734,7 +4734,9 @@ class App(tk.Tk):
                     ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
                     pyautogui.click(pt.x, pt.y)
                     n += 1
-                    time.sleep(0.01)   # 간격 거의 없음 — 순간 연사 (게임이 인식할 최소한만)
+                    # 게임이 실시간으로 소화 가능한 속도 — 더 빠르면 클릭이 게임에 쌓여서
+                    # F1을 떼도 밀린 클릭이 계속 실행되는 문제가 생김
+                    time.sleep(0.04)
                 if n < 15:
                     break   # 도중에 뗌 → ESC 없이 종료
                 # 15클릭 완료 → ESC 누르고 다음 사이클
