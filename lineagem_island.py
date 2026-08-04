@@ -1380,7 +1380,7 @@ class IslandApp(tk.Tk):
             for n in (3, 2, 1):
                 set_iv(f"⏺ {n}초 후 녹화 시작 — 준비하세요")
                 time.sleep(1)
-            set_iv("🔴 녹화 중! 마우스 클릭·드래그, WASD·방향키가 기록됩니다 — ESC로 종료")
+            set_iv("🔴 녹화 중! (최대 5분) 마우스 클릭·드래그, WASD·방향키 기록 — ESC로 종료")
             events = []
             t0 = time.time()
             # 기록 대상 키: 방향키 + WASD (이 게임 이동키)
@@ -1390,7 +1390,7 @@ class IslandApp(tk.Tk):
             prev_keys = {vk: False for vk in ARROWS}
             last_mm = 0.0
             pt = wintypes.POINT()
-            while time.time() - t0 < 60:
+            while time.time() - t0 < 300:   # 최대 5분 (예전 60초 → 연장)
                 if u.GetAsyncKeyState(0x1B) & 0x8000:   # ESC
                     break
                 t = round(time.time() - t0, 3)
