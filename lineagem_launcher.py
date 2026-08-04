@@ -117,6 +117,7 @@ DUNGEON_SLOTS  = 16
 DUNGEON_CLICKS = 5
 DUNGEON_HOVER  = 1.5
 COUPON_CLICKS  = 9     # 쿠폰등록 — 슬롯당 좌표 9개 (클릭5에서 글 붙여넣기)
+EVENTSHOP_CLICKS = 3   # 이벤트상점 — 슬롯당 좌표 3개
 COUPON_SLOT_GAP = 3.0  # 쿠폰등록 슬롯 간 기본 간격(초) — 슬롯마다 ×1.02~1.18 랜덤
 PAST_SLOTS     = 16
 PAST_CLICKS    = 3
@@ -191,8 +192,9 @@ DEFAULT_CFG = {
     "item_on":      False,              # 아이템정리 단축키 활성화 상태 (재시작 유지)
     "dollchk_slots": None,              # 인형확인용 — 처음 로드 때 변신확인용 복사
     "relic_slots":   None,              # 성물확인용 — 처음 로드 때 변신확인용 복사
-    "coupon_slots":  None,              # 쿠폰등록 — 16슬롯 × 좌표7 (변신확인용 방식)
+    "coupon_slots":  None,              # 쿠폰등록 — 16슬롯 × 좌표9 (변신확인용 방식)
     "coupon_text":   "",                # 쿠폰등록 클릭5에서 붙여넣을 글
+    "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
     "seq_slots":    [None]*SEQ_SLOTS,   # 연속 클릭 좌표 (각 [x,y] 또는 None)
@@ -424,18 +426,19 @@ def load_cfg():
                 while len(n2) < 16:
                     n2.append({"name": "미등록", "coords": [None] * DUNGEON_CLICKS})
                 cfg[_k2] = n2[:16]
-        # coupon_slots (쿠폰등록) — 16슬롯 × 좌표 7
-        nc = []
-        for s in (cfg.get("coupon_slots") or []):
-            if isinstance(s, dict):
-                c = s.get("coords", [None] * COUPON_CLICKS)
-                while len(c) < COUPON_CLICKS: c.append(None)
-                nc.append({"name": s.get("name", "미등록"), "coords": c[:COUPON_CLICKS]})
-            else:
-                nc.append({"name": "미등록", "coords": [None] * COUPON_CLICKS})
-        while len(nc) < 16:
-            nc.append({"name": "미등록", "coords": [None] * COUPON_CLICKS})
-        cfg["coupon_slots"] = nc[:16]
+        # coupon_slots(쿠폰등록 ×9)·eventshop_slots(이벤트상점 ×3) — 16슬롯 정규화
+        for _k3, _n3 in (("coupon_slots", COUPON_CLICKS), ("eventshop_slots", EVENTSHOP_CLICKS)):
+            nc = []
+            for s in (cfg.get(_k3) or []):
+                if isinstance(s, dict):
+                    c = s.get("coords", [None] * _n3)
+                    while len(c) < _n3: c.append(None)
+                    nc.append({"name": s.get("name", "미등록"), "coords": c[:_n3]})
+                else:
+                    nc.append({"name": "미등록", "coords": [None] * _n3})
+            while len(nc) < 16:
+                nc.append({"name": "미등록", "coords": [None] * _n3})
+            cfg[_k3] = nc[:16]
         # tj_slots (TJ성공!!) — 16슬롯 × 좌표 3
         nt = []
         for s in (cfg.get("tj_slots") or []):
@@ -665,6 +668,7 @@ class App(tk.Tk):
         self._dollchk_stop = False
         self._relic_stop   = False
         self._coupon_stop  = False
+        self._eventshop_stop = False
         self._tj_stop      = False
         self._task_queue   = []   # 연속으로 누른 실행/재측정 순차 실행 대기열
         self._build_ui()
@@ -938,10 +942,14 @@ class App(tk.Tk):
         upd.create_text(39, 52, text="업데이트", fill="white", font=("맑은 고딕", 9, "bold"))
         upd.bind("<Button-1>", lambda e: self._run_updater())
 
-        # 업데이트 오른쪽: 🎟 쿠폰등록 네모 버튼 (변신확인용 방식 — 좌표7개, 클릭5에서 글 붙여넣기)
+        # 업데이트 오른쪽: 🎟 쿠폰등록 네모 버튼 (변신확인용 방식 — 좌표9개, 클릭5에서 글 붙여넣기)
         tk.Button(btn_row, text="🎟 쿠폰\n등록", font=("맑은 고딕", 10, "bold"),
                   bg="#1f618d", fg="white", activebackground="#154360",
                   width=7, height=3, command=self._open_coupon_win).pack(side="left", padx=(6, 0))
+        # 쿠폰등록 오른쪽: 🛒 이벤트상점 (변신확인용 방식 — 좌표3개)
+        tk.Button(btn_row, text="🛒 이벤트\n상점", font=("맑은 고딕", 10, "bold"),
+                  bg="#0e6655", fg="white", activebackground="#0b5345",
+                  width=7, height=3, command=self._open_eventshop_win).pack(side="left", padx=(6, 0))
         # TJ성공!! 좌측 끝 정렬용 가변 여백 (행이 가운데 정렬이라 오른쪽을 늘려 왼쪽으로 밀기)
         self._btnrow_pad = tk.Frame(btn_row, width=0, height=1)
         self._btnrow_pad.pack(side="left")
@@ -2345,11 +2353,16 @@ class App(tk.Tk):
     def _dgn2_info(self, fkey):
         return {"dollchk": ("dollchk_slots", "인형확인용", "🧸"),
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
-                "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟")}[fkey]
+                "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
+                "eventshop": ("eventshop_slots", "이벤트상점", "🛒")}[fkey]
 
     def _open_coupon_win(self):
         self._open_section_win("_coupon_win", "🎟 쿠폰등록",
                                lambda p: self._build_dgn2("coupon", p), w=470, h=640, pinnable=True)
+
+    def _open_eventshop_win(self):
+        self._open_section_win("_eventshop_win", "🛒 이벤트상점",
+                               lambda p: self._build_dgn2("eventshop", p), w=470, h=600, pinnable=True)
 
     def _open_dollchk_win(self):
         self._open_section_win("_dollchk_win", "🧸 인형확인용",
@@ -5488,6 +5501,11 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("coupon", i),
                             prev=lambda i: self._preview_dgn2("coupon", i),
                             delete=lambda i: self._del_dgn2("coupon", i)),
+            "eventshop": dict(title="이벤트상점", key="eventshop_slots", clicks=EVENTSHOP_CLICKS, color="#0e6655",
+                            reg=lambda s, c: self._reg_dgn2_click("eventshop", s, c),
+                            test=lambda i: self._test_dgn2("eventshop", i),
+                            prev=lambda i: self._preview_dgn2("eventshop", i),
+                            delete=lambda i: self._del_dgn2("eventshop", i)),
             "tj":      dict(title="TJ성공!!", key="tj_slots",       clicks=TJ_CLICKS,      color="#ad1457",
                             reg=self._reg_tj_click,      test=self._test_tj,      prev=self._preview_tj,      delete=self._del_tj),
         }
@@ -8326,6 +8344,7 @@ class App(tk.Tk):
         self._dollchk_stop   = True
         self._relic_stop     = True
         self._coupon_stop    = True
+        self._eventshop_stop = True
         self._tj_stop        = True
         self._reroll_running = False  # 오림의일기장도 정지
         self._busy_task      = None   # 잠금 해제
