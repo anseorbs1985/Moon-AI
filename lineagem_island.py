@@ -515,12 +515,19 @@ class IslandApp(tk.Tk):
                   command=lambda k=key: self._start(k)
                   ).pack(fill="x", padx=4, pady=(6,2))
 
-        stop_btn = tk.Button(parent, text="■ 멈춤",
+        srow = tk.Frame(parent); srow.pack(fill="x", padx=4, pady=(0,2))
+        stop_btn = tk.Button(srow, text="■ 멈춤",
                   font=("맑은 고딕", 9, "bold"), bg="#c0392b", fg="white",
                   activebackground="#922b21", height=1,
                   command=self._stop, state="disabled")
-        stop_btn.pack(fill="x", padx=4, pady=(0,2))
+        stop_btn.pack(side="left", fill="x", expand=True)
         self._stop_btns[key] = stop_btn
+        # 멈춤 절반 실행 버튼 — + 골라놨으면 그것만 순서대로, 아니면 전체 실행
+        tk.Button(srow, text="▶ 실행",
+                  font=("맑은 고딕", 9, "bold"), bg="#1e8449", fg="white",
+                  activebackground="#145a32", height=1,
+                  command=lambda k=key: self._start(k)
+                  ).pack(side="left", fill="x", expand=True, padx=(2, 0))
         if not _PRECISE_OK:
             self._status.set("⚠ 정밀클릭 미적용 — 마우스를 움직이면 클릭이 어긋날 수 있음 (precise_click.py 확인 필요)")
 
