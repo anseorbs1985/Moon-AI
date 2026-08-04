@@ -2613,7 +2613,11 @@ class App(tk.Tk):
                             self._coupon_log(f"붙여넣기 오류: {e!r}")
                             self.status.set(f"{icon} 붙여넣기 오류: {e}")
                     if n < len(order) - 1:
-                        time.sleep((random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX)) * c_mult)
+                        if fkey == "eventshop" and j == 0:
+                            # 이벤트상점: 클릭1 → 4초 기다렸다가 클릭2 (전 슬롯 공통)
+                            time.sleep(random.uniform(4.0, 4.4))
+                        else:
+                            time.sleep((random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX)) * c_mult)
                 if fkey == "coupon":
                     self._coupon_log(f"슬롯 [{name}] 끝 (클릭간격 배수 {c_mult:.2f})")
                     # 슬롯 간 간격 — 기본 3초의 +2%~18% 랜덤 (마지막 슬롯 뒤엔 생략)
