@@ -512,6 +512,30 @@ def main():
                             or os.path.getsize(sp_) != os.path.getsize(dp_)):
                         shutil.copy2(sp_, dp_); n += 1
                         log(f"   데이터 갱신: {d}/{fn}")
+            # 🛟 좌표 파일이 없거나 비어 있으면 자동 백업에서 즉시 복구
+            # (좌표는 머신별 데이터 — 어떤 경우에도 빈 상태로 두지 않는다)
+            try:
+                bdir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI", "backups")
+                bfns = sorted(os.listdir(bdir), reverse=True) if os.path.isdir(bdir) else []
+                for f in ("coords.json", "island_coords.json"):
+                    dst = os.path.join(DESK, f)
+                    if os.path.exists(dst) and os.path.getsize(dst) > 200:
+                        continue
+                    picked = None
+                    for tag in ("_desk_", "_repo_"):   # 이 컴퓨터(desk) 백업 우선
+                        for fn in bfns:
+                            if fn.endswith(f"{tag}{f}"):
+                                p_ = os.path.join(bdir, fn)
+                                if os.path.getsize(p_) > 200:
+                                    picked = p_; break
+                        if picked: break
+                    if picked:
+                        shutil.copy2(picked, dst); n += 1
+                        log(f"   🛟 {f} 없음/비어있음 → 백업에서 자동 복구 ✔ ({os.path.basename(picked)})")
+                    elif not os.path.exists(dst):
+                        log(f"   ⚠ {f} 없음 — 백업도 못 찾음, 클로드에게 '좌표 복구해줘'라고 요청하세요")
+            except Exception as e:
+                log(f"   ⚠ 좌표 자동복구 확인 실패: {e}")
             log(f"   복사 {n}개 완료")
             copy_err = None
             break
