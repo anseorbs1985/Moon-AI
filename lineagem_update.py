@@ -137,8 +137,10 @@ DESK = os.path.dirname(HERE) if os.path.basename(HERE).lower() == "moon-ai" else
 CODE_FILES = ["lineagem_launcher.py", "lineagem_ocr.py", "lineagem_island.py",
               "lineagem_dungeon.py", "lineagem_watchdog.py", "precise_click.py",
               "open_launcher.pyw", "lineagem_update.py", "moon.ico"]
-# 다야 측정값/좌표(daya_counts·history·regions)는 머신별 데이터 — 업데이트로 절대 덮어쓰지 않음
-DATA_FILES = ["coords.json", "island_coords.json", "island_counts.json"]
+# 좌표(coords.json·island_coords.json)는 2026-08-04부터 머신별 데이터 — 저장소에 없고
+# 업데이트가 절대 건드리지 않는다 (각 컴퓨터의 로컬 좌표가 그 컴퓨터의 원본).
+# 다야 측정값/좌표(daya_counts·history·regions)도 머신별 — 업데이트로 절대 덮어쓰지 않음
+DATA_FILES = ["island_counts.json"]
 DATA_DIRS  = ["reroll_templates"]
 
 root = tk.Tk(); root.title("🔄 리니지M 업데이트")
