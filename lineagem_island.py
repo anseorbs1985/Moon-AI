@@ -346,6 +346,8 @@ class IslandApp(tk.Tk):
         self._slot_canvases = []
         self._plus_btns = {d["key"]: [] for d in DUNGEONS}   # 슬롯별 + 선택 버튼
         self._sel_order = {d["key"]: [] for d in DUNGEONS}   # +로 고른 슬롯 (누른 순서)
+        self._rep_vars  = {d["key"]: [] for d in DUNGEONS}   # ⏰ 드롭다운 표시 변수
+        self._repeat_left = {}                               # (key,idx) → 남은 반복 횟수
 
         self._auto_run = len(sys.argv) > 2 and sys.argv[2] == "--run"
 
@@ -603,14 +605,23 @@ class IslandApp(tk.Tk):
                       command=lambda k=key, x=i: self._slot_copy(k, x)).pack(side="left", padx=(0, 1))
             tk.Button(r4, text="붙임", font=("맑은 고딕", 6), bg="#8e44ad", fg="white", width=3,
                       command=lambda k=key, x=i: self._slot_paste(k, x)).pack(side="left")
-            # 반복 타이머 — N시간마다 이 슬롯 자동 재실행 (실행기 켜져 있는 동안)
+            # 반복 타이머 — N시간마다 자동 재실행 + 옆에 반복 횟수(1~8회) 제한
             _rh = self.cfg.get(key, [{}]*SLOTS)[i].get("repeat_h") or 0
+            _rn = self.cfg.get(key, [{}]*SLOTS)[i].get("repeat_n") or 8
+            r5 = tk.Frame(cell); r5.pack(pady=(1, 0))
             rv = tk.StringVar(value=f"⏰{_rh}h" if _rh else "⏰없음")
-            rom = tk.OptionMenu(cell, rv, "⏰없음", "⏰1h", "⏰2h", "⏰3h", "⏰4h",
+            rom = tk.OptionMenu(r5, rv, "⏰없음", "⏰1h", "⏰2h", "⏰3h", "⏰4h",
                                 command=lambda val, k=key, x=i: self._set_repeat(k, x, val))
-            rom.config(font=("맑은 고딕", 6), width=5, pady=0, highlightthickness=0,
+            rom.config(font=("맑은 고딕", 6), width=4, pady=0, highlightthickness=0,
                        bg="#34495e", fg="white", activebackground="#2c3e50")
-            rom.pack(pady=(1, 0))
+            rom.pack(side="left")
+            self._rep_vars[key].append(rv)
+            nv = tk.StringVar(value=f"{_rn}회")
+            nom = tk.OptionMenu(r5, nv, *[f"{x}회" for x in range(1, 9)],
+                                command=lambda val, k=key, x=i: self._set_repeat_n(k, x, val))
+            nom.config(font=("맑은 고딕", 6), width=3, pady=0, highlightthickness=0,
+                       bg="#7d6608", fg="white", activebackground="#5c4a06")
+            nom.pack(side="left", padx=(1, 0))
 
         self._refresh(key)
 
@@ -1205,10 +1216,24 @@ class IslandApp(tk.Tk):
             self._repeat_next = {}
         if h:
             self._repeat_next[(key, idx)] = time.time() + self._repeat_delay(h)
-            self._status.set(f"⏰ #{idx+1}: 약 {h}시간마다(+랜덤 몇 분) 자동 재실행 — 실행기가 켜져 있는 동안")
+            n = self.cfg[key][idx].get("repeat_n") or 8
+            self._repeat_left[(key, idx)] = n
+            self._status.set(f"⏰ #{idx+1}: 약 {h}시간마다 자동 재실행 × {n}회 — 실행기가 켜져 있는 동안")
         else:
             self._repeat_next.pop((key, idx), None)
+            self._repeat_left.pop((key, idx), None)
             self._status.set(f"#{idx+1}: 반복 끔")
+
+    def _set_repeat_n(self, key, idx, val):
+        """슬롯 반복 횟수 제한 — 1~8회 (다 채우면 반복 자동 종료)."""
+        try:
+            n = int(str(val).replace("회", ""))
+        except Exception:
+            n = 8
+        self.cfg[key][idx]["repeat_n"] = n
+        save_cfg(self.cfg)
+        self._repeat_left[(key, idx)] = n   # 남은 횟수도 새로 시작
+        self._status.set(f"#{idx+1}: 반복 횟수 {n}회로 설정")
 
     def _repeat_tick(self):
         """15초마다 반복 타이머 확인 — 시간이 되면 그 슬롯을 자동 실행."""
@@ -1229,8 +1254,25 @@ class IslandApp(tk.Tk):
                     elif now >= nxt:
                         if getattr(self, "_slot_running", False):
                             continue   # 다른 실행 중 — 다음 틱에 재시도
-                        self._repeat_next[(key, i)] = now + self._repeat_delay(h)
-                        self._status.set(f"⏰ #{i+1} {h}시간 반복(+랜덤) — 자동 실행")
+                        left = self._repeat_left.get((key, i))
+                        if left is None:
+                            left = s.get("repeat_n") or 8
+                        left -= 1
+                        if left <= 0:
+                            # 횟수 소진 — 반복 자동 종료 (⏰ 표시도 없음으로)
+                            self._repeat_left.pop((key, i), None)
+                            self._repeat_next.pop((key, i), None)
+                            self.cfg[key][i]["repeat_h"] = 0
+                            save_cfg(self.cfg)
+                            try:
+                                self._rep_vars[key][i].set("⏰없음")
+                            except Exception:
+                                pass
+                            self._status.set(f"⏰ #{i+1} 반복 {s.get('repeat_n') or 8}회 완료 — 마지막 실행 후 종료")
+                        else:
+                            self._repeat_left[(key, i)] = left
+                            self._repeat_next[(key, i)] = now + self._repeat_delay(h)
+                            self._status.set(f"⏰ #{i+1} {h}시간 반복 자동 실행 (남은 {left}회)")
                         self._test(key, i)
         except Exception:
             pass

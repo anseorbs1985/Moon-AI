@@ -988,6 +988,7 @@ class App(tk.Tk):
         # ── 배열창 재배치(슬롯별 그리드) + 다야 수량 ──
         tk.Frame(self, height=1, bg="#ccc").pack(fill="x", padx=10, pady=(4,2))
         front_row = tk.Frame(self); front_row.pack(pady=4, anchor="n")
+        self._front_row = front_row   # 정렬 보정용 (일반던전충전 열 ← TJ 좌측 라인)
 
         # 배열창 재배치 왼쪽: (1행) 일반던전충전+실행  (2행) 인형탐험+실행 — 각 버튼 옆에 실행
         dc_col = tk.Frame(front_row); dc_col.pack(side="left", padx=(4,8), anchor="n")
@@ -3082,8 +3083,8 @@ class App(tk.Tk):
         self._did_initial_fit = True   # normal 상태에서 실제로 맞췄을 때만 완료 표시
 
     def _align_tj_to_dc(self, _tries=0):
-        """TJ성공!!·맨뒤로·혈레이드·★과거섬패스를 일반던전충전 좌측 라인에 맞춤.
-        (행들이 가운데 정렬이라 여백을 조절하며 맞을 때까지 반복 보정.)
+        """TJ성공!! 좌측 라인이 기준 — 일반던전충전 열·맨뒤로·혈레이드·★과거섬패스를
+        전부 TJ 좌측에 맞춤. (여백을 조절하며 맞을 때까지 반복 보정.)
         최소화 상태에선 좌표가 쓰레기값이라 절대 계산하지 않는다."""
         try:
             if self.state() != "normal":
@@ -3092,12 +3093,22 @@ class App(tk.Tk):
                 return
             self.update_idletasks()
             need_more = False
-            # 1) TJ성공!! ← 일반던전충전
-            dx = self._tjcol.winfo_rootx() - self._dc_open_btn.winfo_rootx()
-            if 2 < abs(dx) < 400:
-                w = max(0, min(250, self._btnrow_pad.winfo_reqwidth() + 2 * dx))
-                self._btnrow_pad.config(width=w)
-                need_more = True
+            # 1) 일반던전충전 열(front_row) ← TJ성공!! 좌측 라인
+            #    (TJ가 기준 — 실행 버튼들이 클라이언트에 가리지 않게 왼쪽으로 당김)
+            try:
+                tj_bx = self._tjcol.winfo_rootx() - self.winfo_rootx()
+                dxf = self._dc_open_btn.winfo_rootx() - self._tjcol.winfo_rootx()
+                if getattr(self, "_frontrow_padx", None) is None:
+                    if 0 <= tj_bx < 800:
+                        self._frontrow_padx = max(0, tj_bx)
+                        self._front_row.pack_configure(anchor="w", padx=(self._frontrow_padx, 0))
+                        need_more = True
+                elif 2 < abs(dxf) < 900:
+                    self._frontrow_padx = max(0, self._frontrow_padx - dxf)
+                    self._front_row.pack_configure(padx=(self._frontrow_padx, 0))
+                    need_more = True
+            except Exception:
+                pass
             # 2) 맨뒤로/혈레이드/제자리 ← TJ성공!! 좌측 라인에 일렬로
             try:
                 bx = self._tjcol.winfo_rootx() - self.winfo_rootx()
