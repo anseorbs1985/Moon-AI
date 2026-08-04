@@ -3800,7 +3800,7 @@ class App(tk.Tk):
         self._dollcrack_btn = tk.Button(grp, font=("맑은 고딕", 9, "bold"),
                                         width=9, height=2, command=self._toggle_dollcrack)
         self._dollcrack_btn.pack(side="top")
-        tk.Label(grp, text="F1=10클릭+ESC", font=("맑은 고딕", 7), fg="#666").pack(side="top")
+        tk.Label(grp, text="F1꾹=따따따+ESC", font=("맑은 고딕", 7), fg="#666").pack(side="top")
         self._refresh_dollcrack_btn()
 
         # 구분선
@@ -4717,23 +4717,27 @@ class App(tk.Tk):
             prev = down
 
     def _run_dollcrack(self):
+        # F1을 누르고 있는 동안 '지금 커서가 있는 자리'를 따따따 연속클릭.
+        # F1을 떼거나 15번을 채우면 멈추고 ESC.
         self._dollcrack_running = True
         try:
             import ctypes
             class _PT(ctypes.Structure):
                 _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
             pt = _PT()
-            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-            for t in range(10):
-                self.status.set(f"🧸 인형까기 클릭 {t+1}/10...")
+            n = 0
+            while n < 15:
+                if not (ctypes.windll.user32.GetAsyncKeyState(0x70) & 0x8000):
+                    break   # F1 뗌 → 즉시 종료
+                ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
                 pyautogui.click(pt.x, pt.y)
-                if t < 9:
-                    time.sleep(random.uniform(0.1, 0.2))
-            time.sleep(0.25)
+                n += 1
+                time.sleep(random.uniform(0.03, 0.06))
+            time.sleep(0.15)
             self._send_key_input_cp(0x01, 0x0008)           # ESC down (스캔코드)
             time.sleep(0.08)
             self._send_key_input_cp(0x01, 0x0008 | 0x0002)  # ESC up
-            self.status.set("✔ 🧸 인형까기 — 10클릭 + ESC 완료")
+            self.status.set(f"✔ 🧸 인형까기 — {n}클릭 + ESC 완료")
         except Exception as e:
             self.status.set(f"인형까기 오류: {e}")
         finally:
