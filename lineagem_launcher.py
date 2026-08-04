@@ -4744,23 +4744,43 @@ class App(tk.Tk):
                 threading.Thread(target=self._run_dollcrack, daemon=True).start()
             prev = down
 
+    @staticmethod
+    def _click_cursor_cp():
+        # 커서를 옮기지 않고 '지금 커서 자리'에서 좌클릭만 (LEFTDOWN/UP) —
+        # 좌표를 읽고 다시 찍는 방식은 DPI 오차가 누적돼 포인터가 흘러내림
+        import ctypes
+        PUL = ctypes.c_void_p
+        class MOUSEINPUT(ctypes.Structure):
+            _fields_ = [("dx", ctypes.c_long), ("dy", ctypes.c_long),
+                        ("mouseData", ctypes.c_ulong), ("dwFlags", ctypes.c_ulong),
+                        ("time", ctypes.c_ulong), ("dwExtraInfo", PUL)]
+        class KEYBDINPUT(ctypes.Structure):
+            _fields_ = [("wVk", ctypes.c_ushort), ("wScan", ctypes.c_ushort),
+                        ("dwFlags", ctypes.c_ulong), ("time", ctypes.c_ulong),
+                        ("dwExtraInfo", PUL)]
+        class _IN(ctypes.Union):
+            _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT)]
+        class INPUT(ctypes.Structure):
+            _fields_ = [("type", ctypes.c_ulong), ("u", _IN)]
+        for flag in (0x0002, 0x0004):   # LEFTDOWN → LEFTUP
+            inp = INPUT(type=0)
+            inp.u.mi = MOUSEINPUT(0, 0, 0, flag, 0, None)
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+            time.sleep(0.008)
+
     def _run_dollcrack(self):
         # F1을 누르고 있는 동안 [커서 자리 15클릭 → ESC] 사이클을 계속 반복.
         # F1을 떼면 그 즉시 멈춤 (뗄 때는 ESC 안 누름).
         self._dollcrack_running = True
         try:
             import ctypes
-            class _PT(ctypes.Structure):
-                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-            pt = _PT()
             def _f1_down():
                 return bool(ctypes.windll.user32.GetAsyncKeyState(0x70) & 0x8000)
             cycles = 0
             while _f1_down():
                 n = 0
                 while n < 15 and _f1_down():
-                    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-                    pyautogui.click(pt.x, pt.y)
+                    self._click_cursor_cp()   # 커서 이동 없이 그 자리 클릭
                     n += 1
                     # 초반 7클릭은 폭발적으로(따따따따!), 나머지 8클릭은 게임이
                     # 밀린 클릭을 소화할 시간을 줘서 사이클 끝엔 쌓임이 없게
