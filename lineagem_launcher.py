@@ -3849,7 +3849,10 @@ class App(tk.Tk):
         self._dollcrack_btn = tk.Button(grp, font=("맑은 고딕", 9, "bold"),
                                         width=9, height=2, command=self._toggle_dollcrack)
         self._dollcrack_btn.pack(side="top")
-        tk.Label(grp, text="F1꾹=따따따+ESC", font=("맑은 고딕", 7), fg="#666").pack(side="top")
+        # 우클릭 = 단축키 변경 (게임이 그 키에 반응해 화면이 밀릴 때)
+        self._dollcrack_btn.bind("<Button-3>", lambda e: self._assign_dollcrack_hotkey())
+        self._dollcrack_key_lbl = tk.Label(grp, font=("맑은 고딕", 7), fg="#666")
+        self._dollcrack_key_lbl.pack(side="top")
         self._refresh_dollcrack_btn()
 
         # 구분선
@@ -4773,7 +4776,8 @@ class App(tk.Tk):
                 try:
                     if nCode >= 0 and getattr(self, "_dollcrack_on", False):
                         ks = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-                        if ks.vkCode == 0x70 and not (ks.flags & 0x10):   # 물리 F1만
+                        _hk = int(self.cfg.get("dollcrack_hotkey") or 0x70)
+                        if ks.vkCode == _hk and not (ks.flags & 0x10):   # 물리 단축키만
                             if wParam in (0x100, 0x104):      # KEYDOWN
                                 if not self._f1_phys_down:
                                     self._f1_phys_down = True
@@ -4805,7 +4809,8 @@ class App(tk.Tk):
                 prev = False
                 continue
             try:
-                down = bool(ctypes.windll.user32.GetAsyncKeyState(0x70) & 0x8000)   # F1
+                _hk = int(self.cfg.get("dollcrack_hotkey") or 0x70)
+                down = bool(ctypes.windll.user32.GetAsyncKeyState(_hk) & 0x8000)
             except Exception:
                 prev = False
                 continue
@@ -4846,10 +4851,11 @@ class App(tk.Tk):
         try:
             import ctypes
             u32 = ctypes.windll.user32
+            _hk = int(self.cfg.get("dollcrack_hotkey") or 0x70)
             def _f1_down():
                 if getattr(self, "_f1_hook", None):
                     return bool(getattr(self, "_f1_phys_down", False))
-                return bool(u32.GetAsyncKeyState(0x70) & 0x8000)
+                return bool(u32.GetAsyncKeyState(_hk) & 0x8000)
             class _PT(ctypes.Structure):
                 _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
             pt = _PT()
@@ -4875,6 +4881,33 @@ class App(tk.Tk):
         finally:
             self._dollcrack_running = False
 
+    def _assign_dollcrack_hotkey(self):
+        """인형까기 단축키 변경 — 게임이 F1에 반응해 화면이 밀리면 다른 키로."""
+        self.status.set("🧸 인형까기: 5초 안에 사용할 키를 누르세요 (ESC=취소)")
+        def _cap():
+            import ctypes
+            time.sleep(0.3)
+            end = time.time() + 5
+            captured = None
+            while time.time() < end:
+                for vk in range(0x08, 0xFF):
+                    if vk in (0x01, 0x02, 0x04):
+                        continue
+                    if ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000:
+                        captured = vk; break
+                if captured is not None:
+                    break
+                time.sleep(0.02)
+            if captured is None or captured == 0x1B:
+                self.after(0, lambda: self.status.set("인형까기 단축키 변경 취소"))
+                return
+            self.cfg["dollcrack_hotkey"] = captured
+            save_cfg(self.cfg)
+            name = self._vk_name(captured)
+            self.after(0, lambda: [self._refresh_dollcrack_btn(),
+                                   self.status.set(f"✔ 인형까기 단축키: {name}")])
+        threading.Thread(target=_cap, daemon=True).start()
+
     def _toggle_dollcrack(self):
         self._dollcrack_on = not getattr(self, "_dollcrack_on", False)
         self.cfg["dollcrack_on"] = self._dollcrack_on   # 재시작해도 유지
@@ -4886,6 +4919,10 @@ class App(tk.Tk):
     def _refresh_dollcrack_btn(self):
         b = getattr(self, "_dollcrack_btn", None)
         if not b or not b.winfo_exists(): return
+        lb = getattr(self, "_dollcrack_key_lbl", None)
+        if lb and lb.winfo_exists():
+            kn = self._vk_name(int(self.cfg.get("dollcrack_hotkey") or 0x70))
+            lb.config(text=f"{kn}꾹=따따따 (우클릭=키변경)")
         if getattr(self, "_dollcrack_on", False):
             b.config(text="🧸 인형까기\nON", bg="#27ae60", fg="white")
         else:
