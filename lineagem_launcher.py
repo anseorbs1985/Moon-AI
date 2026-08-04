@@ -4734,7 +4734,7 @@ class App(tk.Tk):
                     ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
                     pyautogui.click(pt.x, pt.y)
                     n += 1
-                    time.sleep(random.uniform(0.03, 0.06))
+                    time.sleep(0.01)   # 간격 거의 없음 — 순간 연사 (게임이 인식할 최소한만)
                 if n < 15:
                     break   # 도중에 뗌 → ESC 없이 종료
                 # 15클릭 완료 → ESC 누르고 다음 사이클
