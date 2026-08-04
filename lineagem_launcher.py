@@ -4854,21 +4854,16 @@ class App(tk.Tk):
                 _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
             pt = _PT()
             u32.GetCursorPos(ctypes.byref(pt))
-            ax, ay = pt.x, pt.y   # F1 누른 자리 = 기준점
+            ax, ay = pt.x, pt.y   # F1 누른 순간의 자리 — 이 좌표만 계속 클릭 (처음 방식)
             n = 0
             while _f1_down():
-                # 커서 흘러내림 방지 — 기준점에서 살짝 밀렸으면 원위치로 되돌리고 클릭.
-                # 사용자가 일부러 크게(25px 이상) 옮겼으면 그 자리를 새 기준점으로.
-                u32.GetCursorPos(ctypes.byref(pt))
-                if abs(pt.x - ax) > 25 or abs(pt.y - ay) > 25:
-                    ax, ay = pt.x, pt.y
-                elif pt.x != ax or pt.y != ay:
-                    u32.SetCursorPos(ax, ay)
-                self._click_cursor_cp()   # 커서 이동 없이 그 자리 클릭
+                # 이동+누름+뗌이 한 동작(SendInput 원자적)이라 클릭 도중 커서가
+                # 움직일 수 없음 → 드래그 스크롤/흘러내림 원천 차단
+                pyautogui.click(ax, ay)
                 n += 1
                 if n % 10 == 0:
                     self.status.set(f"🧸 인형까기 클릭 {n}... (떼면 ESC 1번)")
-                time.sleep(0.04)
+                time.sleep(0.06)
             if n:
                 time.sleep(0.5)   # 밀린 클릭 소화 + 결과창 뜬 뒤에
                 self._send_key_input_cp(0x01, 0x0008)           # ESC down (스캔코드)
