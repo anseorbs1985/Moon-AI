@@ -4717,27 +4717,35 @@ class App(tk.Tk):
             prev = down
 
     def _run_dollcrack(self):
-        # F1을 누르고 있는 동안 '지금 커서가 있는 자리'를 따따따 연속클릭.
-        # F1을 떼거나 15번을 채우면 멈추고 ESC.
+        # F1을 누르고 있는 동안 [커서 자리 15클릭 → ESC] 사이클을 계속 반복.
+        # F1을 떼면 그 즉시 멈춤 (뗄 때는 ESC 안 누름).
         self._dollcrack_running = True
         try:
             import ctypes
             class _PT(ctypes.Structure):
                 _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
             pt = _PT()
-            n = 0
-            while n < 15:
-                if not (ctypes.windll.user32.GetAsyncKeyState(0x70) & 0x8000):
-                    break   # F1 뗌 → 즉시 종료
-                ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-                pyautogui.click(pt.x, pt.y)
-                n += 1
-                time.sleep(random.uniform(0.03, 0.06))
-            time.sleep(0.15)
-            self._send_key_input_cp(0x01, 0x0008)           # ESC down (스캔코드)
-            time.sleep(0.08)
-            self._send_key_input_cp(0x01, 0x0008 | 0x0002)  # ESC up
-            self.status.set(f"✔ 🧸 인형까기 — {n}클릭 + ESC 완료")
+            def _f1_down():
+                return bool(ctypes.windll.user32.GetAsyncKeyState(0x70) & 0x8000)
+            cycles = 0
+            while _f1_down():
+                n = 0
+                while n < 15 and _f1_down():
+                    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+                    pyautogui.click(pt.x, pt.y)
+                    n += 1
+                    time.sleep(random.uniform(0.03, 0.06))
+                if n < 15:
+                    break   # 도중에 뗌 → ESC 없이 종료
+                # 15클릭 완료 → ESC 누르고 다음 사이클
+                time.sleep(0.15)
+                self._send_key_input_cp(0x01, 0x0008)           # ESC down (스캔코드)
+                time.sleep(0.08)
+                self._send_key_input_cp(0x01, 0x0008 | 0x0002)  # ESC up
+                cycles += 1
+                self.status.set(f"🧸 인형까기 {cycles}회째 반복 중... (F1 떼면 멈춤)")
+                time.sleep(0.2)
+            self.status.set(f"✔ 🧸 인형까기 멈춤 — [15클릭+ESC] {cycles}회 반복")
         except Exception as e:
             self.status.set(f"인형까기 오류: {e}")
         finally:
