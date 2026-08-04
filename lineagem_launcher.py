@@ -1145,6 +1145,10 @@ class App(tk.Tk):
             win.geometry(f"{w}x{h}")
         win.resizable(True, True)
         setattr(self, attr, win)
+        # 실행 시 _minimize_all이 빠뜨리지 않게 모든 섹션 창을 자동 등록
+        if not hasattr(self, "_section_attrs"):
+            self._section_attrs = set()
+        self._section_attrs.add(attr)
         # 서브창: 3분간 조작 없으면 자동으로 닫고 메인런처 복원
         win._last_active = time.time()
         def _bump(e=None, w=win): w._last_active = time.time()
@@ -7623,12 +7627,21 @@ class App(tk.Tk):
         self.after(5000, self._hide_layout_preview)
 
     def _section_wins(self):
-        attrs = ["_settings_win","_hunt_win","_mail_win","_past_win2",
+        # 고정 목록 + 열릴 때 자동 등록된 창 전부 (새 기능 창이 빠지지 않게)
+        attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_dollchk_win","_relic_win","_tj_win"]
-        return [getattr(self, a) for a in attrs
+                 "_dollchk_win","_relic_win","_tj_win","_coupon_win",
+                 "_eventshop_win","_reroll_win","_verify_win"}
+        attrs |= getattr(self, "_section_attrs", set())
+        wins = [getattr(self, a) for a in attrs
                 if getattr(self, a, None) and getattr(self, a).winfo_exists()]
+        # 슬롯 좌표 등록 팝업(항상위 Toplevel)도 실행 중엔 최소화 대상
+        for st in getattr(self, "_grid_state", {}).values():
+            p = st.get("pop")
+            if p and p.winfo_exists():
+                wins.append(p)
+        return wins
 
     def _minimize_all(self):
         # 원칙: 메인런처는 최소화하지 않고 '맨 뒤'로만 보낸다 (서브창·클로드는 최소화)
