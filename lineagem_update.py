@@ -512,28 +512,34 @@ def main():
                             or os.path.getsize(sp_) != os.path.getsize(dp_)):
                         shutil.copy2(sp_, dp_); n += 1
                         log(f"   데이터 갱신: {d}/{fn}")
-            # 🛟 좌표 파일이 없거나 비어 있으면 자동 백업에서 즉시 복구
-            # (좌표는 머신별 데이터 — 어떤 경우에도 빈 상태로 두지 않는다)
+            # 🛟 좌표 파일이 없거나 비어 있으면 자동 복구
+            #    1순위: 이 컴퓨터의 자동 백업  2순위: 저장소(메인) 좌표
+            #    좌표가 멀쩡한 컴퓨터는 절대 건드리지 않는다 (머신별 원본 유지)
             try:
                 bdir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI", "backups")
                 bfns = sorted(os.listdir(bdir), reverse=True) if os.path.isdir(bdir) else []
                 for f in ("coords.json", "island_coords.json"):
                     dst = os.path.join(DESK, f)
-                    if os.path.exists(dst) and os.path.getsize(dst) > 200:
+                    if os.path.exists(dst) and os.path.getsize(dst) > 2000:
+                        log(f"   {f}: 로컬 좌표 정상 — 그대로 유지")
                         continue
                     picked = None
                     for tag in ("_desk_", "_repo_"):   # 이 컴퓨터(desk) 백업 우선
                         for fn in bfns:
                             if fn.endswith(f"{tag}{f}"):
                                 p_ = os.path.join(bdir, fn)
-                                if os.path.getsize(p_) > 200:
+                                if os.path.getsize(p_) > 2000:
                                     picked = p_; break
                         if picked: break
+                    src_repo = os.path.join(REPO, f)
                     if picked:
                         shutil.copy2(picked, dst); n += 1
-                        log(f"   🛟 {f} 없음/비어있음 → 백업에서 자동 복구 ✔ ({os.path.basename(picked)})")
-                    elif not os.path.exists(dst):
-                        log(f"   ⚠ {f} 없음 — 백업도 못 찾음, 클로드에게 '좌표 복구해줘'라고 요청하세요")
+                        log(f"   🛟 {f} 유실 → 이 컴퓨터 백업에서 복구 ✔ ({os.path.basename(picked)})")
+                    elif os.path.exists(src_repo) and os.path.getsize(src_repo) > 2000:
+                        shutil.copy2(src_repo, dst); n += 1
+                        log(f"   🛟 {f} 유실 → 메인 좌표로 복구 ✔ (좌표 {_count_coords(dst)}개)")
+                    else:
+                        log(f"   ⚠ {f} 유실 — 복구본을 못 찾음, 클로드에게 '좌표 복구해줘'라고 요청하세요")
             except Exception as e:
                 log(f"   ⚠ 좌표 자동복구 확인 실패: {e}")
             log(f"   복사 {n}개 완료")
