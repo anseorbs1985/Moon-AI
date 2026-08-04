@@ -1582,9 +1582,11 @@ class IslandApp(tk.Tk):
                 # 클릭별 간격(gap_list) — 팝업의 'ㅡ' 위 칸에 적은 초, 비우면 기본
                 gl = slot.get("gap_list") or []
                 recs = slot.get("recs") or {}
-                # 녹화가 없는 슬롯만 간격 10~20% 추가 완화 —
-                # 녹화가 있으면 재생 시작 시점이 밀려 화면이 어긋나므로 원래 속도 유지
-                _slow = 1.0 if any(recs.values()) else random.uniform(1.10, 1.20)
+                # 간격 10~20% 추가 완화 — 오만의탑·악몽의섬은 항상 적용(사용자 지정),
+                # 나머지는 녹화 없는 슬롯만 (녹화가 있으면 재생 시점이 밀려 화면이 어긋남)
+                _slow_always = key in ("수금_오만의탑", "토요일_악몽의섬")
+                _slow = (random.uniform(1.10, 1.20)
+                         if (_slow_always or not any(recs.values())) else 1.0)
                 for j, lbl in enumerate(_labels):
                     if self._stop_flag: break
                     d_ = dirs[j] if j < len(dirs) else None
