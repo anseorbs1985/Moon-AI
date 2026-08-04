@@ -1556,13 +1556,18 @@ class IslandApp(tk.Tk):
             self._slot_running = False
             for btn in self._stop_btns.values():
                 btn.config(state="disabled")
-            def _restore():
-                self.attributes("-topmost", True)
-                self.deiconify()
-                self.lift()
-                self.focus_force()
-                self.after(3000, lambda: self.attributes("-topmost", False))
-            self.after(0, _restore)
+            if getattr(self, "_auto_run", False):
+                # 런처 ▶ 자동 실행 모드: 완료 후 창을 띄우지 않고 스스로 종료 —
+                # 런처가 종료를 감지하고 대기열의 다음 던전을 이어서 실행한다
+                self.after(500, self.destroy)
+            else:
+                def _restore():
+                    self.attributes("-topmost", True)
+                    self.deiconify()
+                    self.lift()
+                    self.focus_force()
+                    self.after(3000, lambda: self.attributes("-topmost", False))
+                self.after(0, _restore)
 
 
 class _IslandGroupMoveOverlay(tk.Toplevel):

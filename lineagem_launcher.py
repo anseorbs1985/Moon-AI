@@ -796,6 +796,10 @@ class App(tk.Tk):
     def _watch_island(self, proc):
         proc.wait()
         self._island_proc = None
+        # 대기열에 다음 작업이 남아 있으면 창 복원을 건너뛴다 —
+        # 복원한 창이 다음 실행의 클릭을 가리는 문제 방지 (전부 끝난 뒤에만 복원)
+        if getattr(self, "_task_queue", None):
+            return
         if not (self._pass_win and self._pass_win.winfo_exists()):
             self.after(0, self._restore_back)
         self._restore_claude()
