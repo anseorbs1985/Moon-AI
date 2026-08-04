@@ -695,6 +695,7 @@ class App(tk.Tk):
         # (자동 업데이트는 사용자 요청으로 비활성 — 업데이트는 🔄 버튼으로 수동 실행)
         self.after(1000, self._purple_check_tick)
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
+        self._install_f1_hook()   # 인형까기 F1 가로채기 (게임에 F1 전달 차단)
         threading.Thread(target=self._dollcrack_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._wdoff_hotkey_loop, daemon=True).start()
@@ -4745,13 +4746,61 @@ class App(tk.Tk):
                 threading.Thread(target=self._run_seq, daemon=True).start()
             prev = down
 
-    # ── 🧸 인형까기 — F1 = 현재 마우스 위치 연속 10클릭(0.1~0.2초) 후 ESC ──
+    # ── 🧸 인형까기 — F1 꾹 = 커서 자리 연속 클릭, 떼면 ESC 1번 ──
+    def _install_f1_hook(self):
+        """저수준 키보드 훅 — 인형까기 ON일 때 물리 F1을 가로채 게임에 전달하지 않는다.
+        (게임이 F1에 반응해 커서를 끌고 가는 것을 원천 차단; 시작/정지도 훅이 담당)"""
+        try:
+            import ctypes
+            from ctypes import wintypes
+            u32 = ctypes.windll.user32
+            self._f1_phys_down = False
+            CMPFUNC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int,
+                                         wintypes.WPARAM, wintypes.LPARAM)
+            u32.SetWindowsHookExW.argtypes = [ctypes.c_int, CMPFUNC,
+                                              ctypes.c_void_p, wintypes.DWORD]
+            u32.SetWindowsHookExW.restype = ctypes.c_void_p
+            u32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                           wintypes.WPARAM, wintypes.LPARAM]
+            u32.CallNextHookEx.restype = ctypes.c_long
+
+            class KBDLLHOOKSTRUCT(ctypes.Structure):
+                _fields_ = [("vkCode", wintypes.DWORD), ("scanCode", wintypes.DWORD),
+                            ("flags", wintypes.DWORD), ("time", wintypes.DWORD),
+                            ("dwExtraInfo", ctypes.c_void_p)]
+
+            def _cb(nCode, wParam, lParam):
+                try:
+                    if nCode >= 0 and getattr(self, "_dollcrack_on", False):
+                        ks = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+                        if ks.vkCode == 0x70 and not (ks.flags & 0x10):   # 물리 F1만
+                            if wParam in (0x100, 0x104):      # KEYDOWN
+                                if not self._f1_phys_down:
+                                    self._f1_phys_down = True
+                                    if not getattr(self, "_dollcrack_running", False):
+                                        threading.Thread(target=self._run_dollcrack,
+                                                         daemon=True).start()
+                            elif wParam in (0x101, 0x105):    # KEYUP
+                                self._f1_phys_down = False
+                            return 1   # 게임/다른 앱에 F1 전달 안 함
+                except Exception:
+                    pass
+                return u32.CallNextHookEx(None, nCode, wParam, lParam)
+
+            self._f1_hook_cb = CMPFUNC(_cb)   # GC 방지용 참조 유지
+            self._f1_hook = u32.SetWindowsHookExW(13, self._f1_hook_cb, None, 0)
+        except Exception:
+            self._f1_hook = None
+
     def _dollcrack_hotkey_loop(self):
-        """전역 F1 감시 — 인형까기 ON이면 F1 순간의 마우스 위치를 연속 클릭."""
+        """전역 F1 감시(폴링) — 훅 설치에 실패한 경우에만 사용하는 예비 경로."""
         import ctypes
         prev = False
         while True:
             time.sleep(0.03)
+            if getattr(self, "_f1_hook", None):
+                prev = False
+                continue   # 훅이 살아 있으면 훅이 시작을 담당
             if not getattr(self, "_dollcrack_on", False):
                 prev = False
                 continue
@@ -4798,6 +4847,8 @@ class App(tk.Tk):
             import ctypes
             u32 = ctypes.windll.user32
             def _f1_down():
+                if getattr(self, "_f1_hook", None):
+                    return bool(getattr(self, "_f1_phys_down", False))
                 return bool(u32.GetAsyncKeyState(0x70) & 0x8000)
             class _PT(ctypes.Structure):
                 _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
