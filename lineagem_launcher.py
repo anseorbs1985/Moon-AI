@@ -8912,10 +8912,13 @@ class _HuntGroupMoveOverlay(tk.Toplevel):
     def _on_drag(self, e):
         if not self._drag:
             return
+        # 3px 미만 미세 끌림 무시 — 클릭할 때 좌표가 1~2px 밀려 저장되는 사고 방지
+        if not self._moved:
+            if abs(e.x - self._last[0]) <= 3 and abs(e.y - self._last[1]) <= 3:
+                return
+            self._moved = True
         dx = e.x - self._last[0]
         dy = e.y - self._last[1]
-        if abs(dx) > 1 or abs(dy) > 1:
-            self._moved = True
         self._last = (e.x, e.y)
         for d in self._dots:
             d[0] += dx; d[1] += dy
@@ -8996,8 +8999,11 @@ class _DungeonGroupMoveOverlay(tk.Toplevel):
 
     def _on_drag(self, e):
         if not self._drag: return
+        # 3px 미만 미세 끌림 무시 — 클릭할 때 좌표가 1~2px 밀려 저장되는 사고 방지
+        if not self._moved:
+            if abs(e.x - self._last[0]) <= 3 and abs(e.y - self._last[1]) <= 3: return
+            self._moved = True
         dx = e.x - self._last[0]; dy = e.y - self._last[1]
-        if abs(dx) > 1 or abs(dy) > 1: self._moved = True
         self._last = (e.x, e.y)
         for d in self._dots: d[0] += dx; d[1] += dy
         self._draw()
@@ -9065,8 +9071,11 @@ class _PastChainMoveOverlay(tk.Toplevel):
 
     def _on_drag(self, e):
         if not self._drag: return
+        # 3px 미만 미세 끌림 무시 — 클릭할 때 좌표가 1~2px 밀려 저장되는 사고 방지
+        if not self._moved:
+            if abs(e.x - self._last[0]) <= 3 and abs(e.y - self._last[1]) <= 3: return
+            self._moved = True
         dx = e.x - self._last[0]; dy = e.y - self._last[1]
-        if abs(dx) > 1 or abs(dy) > 1: self._moved = True
         self._last = (e.x, e.y)
         for d in self._dots: d[0] += dx; d[1] += dy
         self._draw()
@@ -9142,8 +9151,11 @@ class _PastGroupMoveOverlay(tk.Toplevel):
 
     def _on_drag(self, e):
         if not self._drag: return
+        # 3px 미만 미세 끌림 무시 — 클릭할 때 좌표가 1~2px 밀려 저장되는 사고 방지
+        if not self._moved:
+            if abs(e.x - self._last[0]) <= 3 and abs(e.y - self._last[1]) <= 3: return
+            self._moved = True
         dx = e.x - self._last[0]; dy = e.y - self._last[1]
-        if abs(dx) > 1 or abs(dy) > 1: self._moved = True
         self._last = (e.x, e.y)
         for d in self._dots: d[0] += dx; d[1] += dy
         self._draw()
@@ -9211,8 +9223,11 @@ class _SchedGroupMoveOverlay(tk.Toplevel):
 
     def _on_drag(self, e):
         if not self._drag: return
+        # 3px 미만 미세 끌림 무시 — 클릭할 때 좌표가 1~2px 밀려 저장되는 사고 방지
+        if not self._moved:
+            if abs(e.x - self._last[0]) <= 3 and abs(e.y - self._last[1]) <= 3: return
+            self._moved = True
         dx = e.x - self._last[0]; dy = e.y - self._last[1]
-        if abs(dx) > 1 or abs(dy) > 1: self._moved = True
         self._last = (e.x, e.y)
         for d in self._dots: d[0] += dx; d[1] += dy
         self._draw()
@@ -9276,8 +9291,11 @@ class _SlotGroupMoveOverlay(tk.Toplevel):
 
     def _on_drag(self, e):
         if not self._drag: return
+        # 3px 미만 미세 끌림 무시 — 클릭할 때 좌표가 1~2px 밀려 저장되는 사고 방지
+        if not self._moved:
+            if abs(e.x - self._last[0]) <= 3 and abs(e.y - self._last[1]) <= 3: return
+            self._moved = True
         dx = e.x - self._last[0]; dy = e.y - self._last[1]
-        if abs(dx) > 1 or abs(dy) > 1: self._moved = True
         self._last = (e.x, e.y)
         for d in self._dots: d[0] += dx; d[1] += dy
         self._draw()
@@ -9353,8 +9371,11 @@ class _MailGroupMoveOverlay(tk.Toplevel):
 
     def _on_drag(self, e):
         if not self._drag: return
+        # 3px 미만 미세 끌림 무시 — 클릭할 때 좌표가 1~2px 밀려 저장되는 사고 방지
+        if not self._moved:
+            if abs(e.x - self._last[0]) <= 3 and abs(e.y - self._last[1]) <= 3: return
+            self._moved = True
         dx = e.x - self._last[0]; dy = e.y - self._last[1]
-        if abs(dx) > 1 or abs(dy) > 1: self._moved = True
         self._last = (e.x, e.y)
         for d in self._dots: d[0] += dx; d[1] += dy
         self._draw()
@@ -9485,10 +9506,13 @@ class _DotPreviewOverlay(tk.Toplevel):
         self._draw()
 
     def _on_drag(self, e):
+        # 3px 미만 미세 끌림 무시 — 클릭할 때 좌표가 1~2px 밀려 저장되는 사고 방지
+        if not self._moved:
+            if abs(e.x - self._last[0]) <= 3 and abs(e.y - self._last[1]) <= 3:
+                return
+            self._moved = True
         dx = e.x - self._last[0]
         dy = e.y - self._last[1]
-        if abs(dx) > 1 or abs(dy) > 1:
-            self._moved = True
         self._last = (e.x, e.y)
         if self._drag is not None:
             self._dots[self._drag][0] += dx
