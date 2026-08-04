@@ -344,6 +344,8 @@ class IslandApp(tk.Tk):
         self._click_vars = {d["key"]: [] for d in DUNGEONS}
         self._click_btns = {d["key"]: [] for d in DUNGEONS}
         self._slot_canvases = []
+        self._plus_btns = {d["key"]: [] for d in DUNGEONS}   # 슬롯별 + 선택 버튼
+        self._sel_order = {d["key"]: [] for d in DUNGEONS}   # +로 고른 슬롯 (누른 순서)
 
         self._auto_run = len(sys.argv) > 2 and sys.argv[2] == "--run"
 
@@ -578,6 +580,11 @@ class IslandApp(tk.Tk):
                       bg=color, fg="white", width=7,
                       command=lambda k=key, x=i: self._open_slot_pop(k, x)).pack(pady=(1, 0), fill="x")
             r3 = tk.Frame(cell); r3.pack(pady=(1, 0))
+            pb = tk.Button(r3, text="+", font=("맑은 고딕", 6, "bold"), width=2,
+                           bg="#dfe3e6", fg="#e67e22",
+                           command=lambda k=key, x=i: self._toggle_sel(k, x))
+            pb.pack(side="left", padx=(0, 1))
+            self._plus_btns[key].append(pb)
             tk.Button(r3, text="▶", font=("맑은 고딕", 6), fg="white", bg=color, width=2,
                       command=lambda k=key, x=i: self._test(k, x)).pack(side="left", padx=(0, 1))
             tk.Button(r3, text="👁", font=("맑은 고딕", 6), width=2,
@@ -1228,13 +1235,38 @@ class IslandApp(tk.Tk):
         threading.Thread(target=self._run, args=(key, idx), daemon=True).start()
 
     def _start(self, key):
+        # +로 고른 슬롯이 있으면 그것만 누른 순서대로, 없으면 전체 실행
+        sel = list(self._sel_order.get(key, []))
         self._stop_flag  = False
         self._active_key = key
         for k, btn in self._stop_btns.items():
             btn.config(state="normal" if k == key else "disabled")
         self.iconify()
         self._minimize_claude()
-        threading.Thread(target=self._run, args=(key,), daemon=True).start()
+        threading.Thread(target=self._run, args=(key,),
+                         kwargs={"sel_list": sel or None}, daemon=True).start()
+
+    # ── + 선택: 누르면 담기(누른 순서 번호 표시), 다시 누르면 빼기 ──
+    def _toggle_sel(self, key, idx):
+        sel = self._sel_order.setdefault(key, [])
+        if idx in sel:
+            sel.remove(idx)
+        else:
+            sel.append(idx)
+        self._refresh_sel(key)
+        n = len(sel)
+        self._status.set(f"＋ {n}개 선택됨 — 실행 누르면 순서대로 실행" if n else "＋ 선택 없음 — 실행 누르면 전체 실행")
+
+    def _refresh_sel(self, key):
+        sel = self._sel_order.get(key, [])
+        for i, b in enumerate(self._plus_btns.get(key, [])):
+            try:
+                if i in sel:
+                    b.config(text=str(sel.index(i) + 1), bg="#e67e22", fg="white")
+                else:
+                    b.config(text="+", bg="#dfe3e6", fg="#e67e22")
+            except Exception:
+                pass
 
     def _focus_client_for_slot(self, si):
         """슬롯 번호(화면 배치 01~16 열우선)의 클라 창을 포커스 — 키 입력이 게임으로 가게."""
@@ -1458,13 +1490,16 @@ class IslandApp(tk.Tk):
         for btn in self._stop_btns.values():
             btn.config(state="disabled")
 
-    def _run(self, key, slot_idx=None):
+    def _run(self, key, slot_idx=None, sel_list=None):
         self._slot_running = True
         try:
             self._status.set("2초 후 실행 시작...")
             time.sleep(2)
             slots = self.cfg.get(key, [])
-            if slot_idx is not None:
+            if sel_list:
+                # +로 고른 슬롯만, 누른 순서 그대로 (셔플 없음)
+                targets = [(i, slots[i]) for i in sel_list if i < len(slots)]
+            elif slot_idx is not None:
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
             else:
                 targets = [(i, s) for i, s in enumerate(slots)
@@ -1556,6 +1591,10 @@ class IslandApp(tk.Tk):
             self._slot_running = False
             for btn in self._stop_btns.values():
                 btn.config(state="disabled")
+            if sel_list:
+                # 선택 실행 끝 — 담아둔 + 선택 비우고 버튼 원상복구
+                self._sel_order[key] = []
+                self.after(0, lambda: self._refresh_sel(key))
             if getattr(self, "_auto_run", False):
                 # 런처 ▶ 자동 실행 모드: 완료 후 창을 띄우지 않고 스스로 종료 —
                 # 런처가 종료를 감지하고 대기열의 다음 던전을 이어서 실행한다
