@@ -1623,7 +1623,8 @@ class IslandApp(tk.Tk):
                     if not did:
                         continue
                     g = gl[j] if j < len(gl) else None
-                    _mult = random.uniform(1.10, 1.25)   # 좌표 간 간격 10~25% 랜덤 증가
+                    # 좌표 간 간격 랜덤 증가 — 2026-08-05 전체 10~20% 추가 완화
+                    _mult = random.uniform(1.21, 1.50)
                     if g is None or g == "":
                         time.sleep(CLICK_INTERVAL * _mult)
                     elif isinstance(g, (int, float)):

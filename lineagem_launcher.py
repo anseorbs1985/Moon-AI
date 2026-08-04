@@ -126,8 +126,8 @@ SCHED_SLOTS        = 16
 SCHED_CLICKS       = 3
 ITEM_SWIPE_DIST    = 250   # 아이템정리 클릭3: 누른 채 위로 쓸어올리는 거리(px) — 클라이언트 창 안에 있어야 함
 TJ_CLICKS          = 3     # TJ성공!! 슬롯당 좌표 수
-TJ_MIN             = 0.7   # TJ성공!! 좌표 간 클릭 간격(초) — 0.7~1.2 랜덤
-TJ_MAX             = 1.2
+TJ_MIN             = 0.77  # TJ성공!! 좌표 간 클릭 간격(초) — 10~20% 완화(0.7~1.2 → 0.77~1.44)
+TJ_MAX             = 1.44
 TJ_SLOT_MIN        = 0.7   # TJ성공!! 슬롯 간 간격(초) — 0.7~2.3 랜덤
 TJ_SLOT_MAX        = 2.3
 ITEM_SWIPE_COUNT   = 1     # 같은 자리에서 쓸어올리기 반복 횟수
@@ -141,8 +141,8 @@ PASS_SLOT_MAX      = 8.0
 PASS_LABELS        = [f"클릭{j+1}" for j in range(PASS_CLICKS)]
 DUNGEON_INTERVAL = 2.0 # 클릭 사이 간격(초)
 SEQ_SLOTS      = 16    # 연속 클릭 슬롯 수 (고정)
-SEQ_MIN        = 0.48  # 연속 클릭 슬롯간 최소 간격(초)
-SEQ_MAX        = 0.96  # 연속 클릭 슬롯간 최대 간격(초)
+SEQ_MIN        = 0.53  # 연속 클릭 슬롯간 최소 간격(초) — 10~20% 완화
+SEQ_MAX        = 1.15  # 연속 클릭 슬롯간 최대 간격(초)
 WDOFF_SLOTS    = 16    # 주말던전 끄기 슬롯 수 (연속클릭과 동일 구조)
 WDOFF_MIN      = 0.48  # 주말던전 끄기 슬롯간 최소 간격(초)
 WDOFF_MAX      = 0.96
@@ -161,8 +161,10 @@ DOLL_LEAD_MIN  = 0.5   # 슬롯의 '첫 클릭 전' 여유(바로 클릭하지 �
 DOLL_LEAD_MAX  = 1.0
 DOLL_SLOT_MIN  = 2.0   # 슬롯 간 간격(초) — 2~4초 랜덤
 DOLL_SLOT_MAX  = 4.0
-EXTRA_GAP_MIN  = 0.9   # 씹힘 방지용 추가 좌표간 간격 (사냥·전체실행·인형탐험 제외 전 기능)
-EXTRA_GAP_MAX  = 1.6
+# 씹힘 방지용 추가 좌표간 간격 (사냥·전체실행·인형탐험 제외 전 기능)
+# 2026-08-05: 너무 빠른 느낌이라 전체 10~20% 완화 (0.9~1.6 → 0.99~1.92)
+EXTRA_GAP_MIN  = 0.99
+EXTRA_GAP_MAX  = 1.92
 
 DEFAULT_CFG = {
     "lineagem":    None,
