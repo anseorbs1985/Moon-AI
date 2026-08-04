@@ -200,7 +200,7 @@ DEFAULT_CFG = {
     "seq_on":       False,              # 연속 클릭 단축키 활성화 상태 (재시작 유지)
     "seq_min":      SEQ_MIN,
     "seq_max":      SEQ_MAX,
-    "dollcrack_on": False,              # 인형까기 — F1 = 마우스 위치 연속 10클릭 후 ESC (재시작 유지)
+    "dollcrack_on": True,               # 인형까기 — 기본 ON, F1 꾹 = 커서 위치 따따따 후 ESC (재시작 유지)
     "wdoff_slots":  [None]*WDOFF_SLOTS, # 주말던전 끄기 좌표 (각 [x,y] 또는 None)
     "wdoff_hotkey": None,
     "wdoff_on":     False,
