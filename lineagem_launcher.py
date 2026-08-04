@@ -619,7 +619,8 @@ class App(tk.Tk):
         self.resizable(True, True)
         self.bind("<Map>", self._on_main_map)
         self.bind("<Unmap>", self._on_main_unmap)   # 런처 최소화 시 클로드도 같이 내림
-        self.bind("<FocusIn>", self._bring_to_front)
+        # (FocusIn→앞으로 올리기 바인딩 제거 — 다른 창이 실행되며 최소화될 때
+        #  윈도우가 포커스만 넘겨줘도 런처가 튀어나오던 문제. 직접 클릭 시에만 올라옴)
         self.after(150, self._fit_main_height)
         # 유휴(2분 무조작) 시 메인런처 자동 최소화 — 조작 감지용
         self._last_activity = time.time()
