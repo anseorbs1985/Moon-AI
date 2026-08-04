@@ -4734,9 +4734,9 @@ class App(tk.Tk):
                     ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
                     pyautogui.click(pt.x, pt.y)
                     n += 1
-                    # 게임이 실시간으로 소화 가능한 속도 — 더 빠르면 클릭이 게임에 쌓여서
-                    # F1을 떼도 밀린 클릭이 계속 실행되는 문제가 생김
-                    time.sleep(0.04)
+                    # 초반 7클릭은 폭발적으로(따따따따!), 나머지 8클릭은 게임이
+                    # 밀린 클릭을 소화할 시간을 줘서 사이클 끝엔 쌓임이 없게
+                    time.sleep(0.012 if n <= 7 else 0.05)
                 if n < 15:
                     break   # 도중에 뗌 → ESC 없이 종료
                 # 15클릭 완료 → ESC 누르고 다음 사이클
