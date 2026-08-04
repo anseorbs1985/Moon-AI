@@ -1623,8 +1623,10 @@ class IslandApp(tk.Tk):
                     if not did:
                         continue
                     g = gl[j] if j < len(gl) else None
-                    # 좌표 간 간격 랜덤 증가 — 2026-08-05 전체 10~20% 추가 완화
-                    _mult = random.uniform(1.21, 1.50)
+                    # 좌표 간 간격 10~25% 랜덤 증가 (원래 값 유지)
+                    # ※ 녹화(recs)가 들어간 슬롯은 녹화 시작 시점이 밀리면 화면이
+                    #   어긋나므로 섬/던전 실행기는 추가 완화를 적용하지 않는다.
+                    _mult = random.uniform(1.10, 1.25)
                     if g is None or g == "":
                         time.sleep(CLICK_INTERVAL * _mult)
                     elif isinstance(g, (int, float)):
