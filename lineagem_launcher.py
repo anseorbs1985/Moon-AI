@@ -4751,13 +4751,18 @@ class App(tk.Tk):
 
     # ── 🧸 인형까기 — F1 꾹 = 커서 자리 연속 클릭, 떼면 ESC 1번 ──
     def _install_f1_hook(self):
-        """저수준 키보드 훅 — 인형까기 ON일 때 물리 F1을 가로채 게임에 전달하지 않는다.
-        (게임이 F1에 반응해 커서를 끌고 가는 것을 원천 차단; 시작/정지도 훅이 담당)"""
+        """저수준 키보드 훅을 '전용 스레드'에서 돌린다.
+        메인 스레드에 걸면 런처가 잠깐 바쁠 때 윈도우가 훅을 건너뛰거나 해제해서
+        (LowLevelHooksTimeout) F1이 게임으로 새어나가 화면이 밀린다."""
+        self._f1_phys_down = False
+        self._f1_hook = None
+        threading.Thread(target=self._f1_hook_thread, daemon=True).start()
+
+    def _f1_hook_thread(self):
         try:
             import ctypes
             from ctypes import wintypes
             u32 = ctypes.windll.user32
-            self._f1_phys_down = False
             CMPFUNC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int,
                                          wintypes.WPARAM, wintypes.LPARAM)
             u32.SetWindowsHookExW.argtypes = [ctypes.c_int, CMPFUNC,
@@ -4793,6 +4798,17 @@ class App(tk.Tk):
 
             self._f1_hook_cb = CMPFUNC(_cb)   # GC 방지용 참조 유지
             self._f1_hook = u32.SetWindowsHookExW(13, self._f1_hook_cb, None, 0)
+            if not self._f1_hook:
+                return   # 설치 실패 → 폴링 예비 경로가 담당
+            # 전용 메시지 펌프 — 훅 콜백이 여기서 처리된다 (메인 스레드 부하와 무관).
+            # 윈도우가 훅을 해제해버리면 다시 설치해 계속 살아 있게 한다.
+            msg = wintypes.MSG()
+            while True:
+                r = u32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                if r == 0 or r == -1:
+                    break
+                u32.TranslateMessage(ctypes.byref(msg))
+                u32.DispatchMessageW(ctypes.byref(msg))
         except Exception:
             self._f1_hook = None
 
