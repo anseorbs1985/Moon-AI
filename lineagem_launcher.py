@@ -4774,7 +4774,12 @@ class App(tk.Tk):
                 self._send_key_input_cp(0x01, 0x0008 | 0x0002)  # ESC up
                 cycles += 1
                 self.status.set(f"🧸 인형까기 {cycles}회째 반복 중... (F1 떼면 멈춤)")
-                time.sleep(0.2)
+                # ESC 직후 손 떼는 타이밍 여유 — 잠깐 기다렸다가 두 번 확인해서
+                # 떼는 중이면 다음 사이클을 시작하지 않는다 (ESC 두 번 느낌 방지)
+                time.sleep(0.35)
+                if not _f1_down():
+                    break
+                time.sleep(0.15)
             self.status.set(f"✔ 🧸 인형까기 멈춤 — [15클릭+ESC] {cycles}회 반복")
         except Exception as e:
             self.status.set(f"인형까기 오류: {e}")
