@@ -4789,39 +4789,28 @@ class App(tk.Tk):
             time.sleep(0.008)
 
     def _run_dollcrack(self):
-        # F1을 누르고 있는 동안 [커서 자리 15클릭 → ESC] 사이클을 계속 반복.
-        # F1을 떼면 그 즉시 멈춤 (뗄 때는 ESC 안 누름).
+        # F1을 누르는 동안: 커서 자리 연속 클릭만 (따따따 — ESC는 절대 안 나감).
+        # F1을 떼면: 게임이 클릭을 소화한 뒤 ESC 딱 1번 (결과창 닫기).
+        # 중간 ESC 자동 반복은 결과창이 없는 타이밍에 눌려 화면을 뒤로 보내는
+        # 사고가 잦아서 폐지 — ESC는 오직 뗄 때 1번만.
         self._dollcrack_running = True
         try:
             import ctypes
             def _f1_down():
                 return bool(ctypes.windll.user32.GetAsyncKeyState(0x70) & 0x8000)
-            cycles = 0
+            n = 0
             while _f1_down():
-                n = 0
-                while n < 15 and _f1_down():
-                    self._click_cursor_cp()   # 커서 이동 없이 그 자리 클릭
-                    n += 1
-                    time.sleep(0.02)          # 15클릭 전부 빠르게 몰아치기 (~0.3초)
-                if n < 15:
-                    break   # 도중에 뗌 → ESC 없이 종료
-                # 게임이 클릭 15개를 전부 소화하고 결과창이 뜬 뒤에만 ESC —
-                # 정리 시간이 짧으면 ESC가 엉뚱한 타이밍에 눌려 '취소 두 번' 느낌이 남
-                time.sleep(0.55)
+                self._click_cursor_cp()   # 커서 이동 없이 그 자리 클릭
+                n += 1
+                if n % 10 == 0:
+                    self.status.set(f"🧸 인형까기 클릭 {n}... (떼면 ESC 1번)")
+                time.sleep(0.04)
+            if n:
+                time.sleep(0.5)   # 밀린 클릭 소화 + 결과창 뜬 뒤에
                 self._send_key_input_cp(0x01, 0x0008)           # ESC down (스캔코드)
                 time.sleep(0.08)
                 self._send_key_input_cp(0x01, 0x0008 | 0x0002)  # ESC up
-                cycles += 1
-                self.status.set(f"🧸 인형까기 {cycles}회째 반복 중... (F1 떼면 멈춤)")
-                # ESC 후 화면 정리 + 손 떼는 타이밍 이중 확인 — 떼는 중이면
-                # 다음 사이클을 시작하지 않는다 (불필요한 클릭·ESC 방지)
-                time.sleep(0.45)
-                if not _f1_down():
-                    break
-                time.sleep(0.15)
-                if not _f1_down():
-                    break
-            self.status.set(f"✔ 🧸 인형까기 멈춤 — [15클릭+ESC] {cycles}회 반복")
+                self.status.set(f"✔ 🧸 인형까기 — 클릭 {n}번 + ESC 1번")
         except Exception as e:
             self.status.set(f"인형까기 오류: {e}")
         finally:
