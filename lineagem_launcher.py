@@ -4796,10 +4796,23 @@ class App(tk.Tk):
         self._dollcrack_running = True
         try:
             import ctypes
+            u32 = ctypes.windll.user32
             def _f1_down():
-                return bool(ctypes.windll.user32.GetAsyncKeyState(0x70) & 0x8000)
+                return bool(u32.GetAsyncKeyState(0x70) & 0x8000)
+            class _PT(ctypes.Structure):
+                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+            pt = _PT()
+            u32.GetCursorPos(ctypes.byref(pt))
+            ax, ay = pt.x, pt.y   # F1 누른 자리 = 기준점
             n = 0
             while _f1_down():
+                # 커서 흘러내림 방지 — 기준점에서 살짝 밀렸으면 원위치로 되돌리고 클릭.
+                # 사용자가 일부러 크게(25px 이상) 옮겼으면 그 자리를 새 기준점으로.
+                u32.GetCursorPos(ctypes.byref(pt))
+                if abs(pt.x - ax) > 25 or abs(pt.y - ay) > 25:
+                    ax, ay = pt.x, pt.y
+                elif pt.x != ax or pt.y != ay:
+                    u32.SetCursorPos(ax, ay)
                 self._click_cursor_cp()   # 커서 이동 없이 그 자리 클릭
                 n += 1
                 if n % 10 == 0:
