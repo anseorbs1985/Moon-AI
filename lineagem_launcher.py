@@ -748,7 +748,19 @@ class App(tk.Tk):
         self.after(300000, self._auto_update_tick)   # 5분 간격
 
     # ── 좌표 저장 / 복구 (이 컴퓨터 전용 스냅샷) ──────────────────────
-    _COORD_FILES = ("coords.json", "island_coords.json")
+    # 런처 폴더(BASE)에 있는 설정 파일들
+    _COORD_FILES = ("coords.json", "island_coords.json", "local_config.json",
+                    "accounts.json", "daya_regions.json")
+    # %LOCALAPPDATA%\MoonAI 에 있는 설정 파일들 (다야 OCR 영역·프로필 인식영역)
+    _LOCAL_SAVE_FILES = ("daya_regions.json", "profile_ref_region.json")
+    # 좌표 개수 검증 대상 (나머지는 있으면 그대로 저장/복구)
+    _COORD_CRITICAL = ("coords.json", "island_coords.json")
+
+    @staticmethod
+    def _local_data_dir():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        os.makedirs(d, exist_ok=True)
+        return d
 
     @staticmethod
     def _coord_save_dir():
@@ -796,19 +808,24 @@ class App(tk.Tk):
         빈/깨진 좌표는 저장하지 않는다 (복구본이 오염되면 복구 자체가 무의미)."""
         import datetime, shutil
         try:
-            # 1) 저장 전 검증 — 파일이 열리고 좌표가 실제로 들어 있어야 함
+            # 1) 저장 전 검증 — 좌표 파일은 실제로 좌표가 들어 있어야 함
+            #    (설정 파일들: 다야 OCR 영역·계정·머신설정도 함께 저장)
             checked = []
             for f in self._COORD_FILES:
                 src = os.path.join(BASE, f)
                 if not os.path.exists(src):
                     continue
                 cnt = self._count_coords_in(src)
-                if cnt <= 0:
+                if f in self._COORD_CRITICAL and cnt <= 0:
                     messagebox.showwarning(
                         "좌표 저장", f"{f} 에 등록된 좌표가 없습니다.\n"
                         f"비어 있는 상태를 저장하면 복구가 무의미해져서 저장을 중단합니다.")
                     return
                 checked.append((f, src, cnt))
+            for f in self._LOCAL_SAVE_FILES:      # %LOCALAPPDATA%\MoonAI 쪽 설정
+                src = os.path.join(self._local_data_dir(), f)
+                if os.path.exists(src):
+                    checked.append(("local__" + f, src, 0))
             if not checked:
                 messagebox.showwarning("좌표 저장", "저장할 좌표 파일이 없습니다.")
                 return
@@ -835,11 +852,13 @@ class App(tk.Tk):
                 try: os.remove(os.path.join(gdir, fn))
                 except Exception: pass
             info = {"time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "coords": total, "files": [f for f, _, _ in checked]}
+                    "coords": total, "files": [f for f, _, _ in checked],
+                    "n_files": len(checked)}
             with open(os.path.join(d, "info.json"), "w", encoding="utf-8") as f:
                 json.dump(info, f, ensure_ascii=False, indent=2)
             self._refresh_coord_save_lbl()
-            self.status.set(f"💾 좌표 저장 완료 — {info['time']} (좌표 {total}개). 문제 생기면 [♻ 좌표복구]")
+            self.status.set(f"💾 저장 완료 — {info['time']} (좌표 {total}개 / 파일 {len(checked)}개: "
+                            f"좌표·다야OCR영역·계정·머신설정). 문제 생기면 [♻ 좌표복구]")
         except Exception as e:
             messagebox.showerror("좌표 저장", f"저장 실패: {e}\n\n다시 시도해주세요.")
 
@@ -854,24 +873,28 @@ class App(tk.Tk):
             self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 끝난 뒤 복구하세요"); return
         if not messagebox.askyesno(
                 "좌표 복구",
-                f"저장 시점: {info['time']}  (좌표 {info.get('coords', 0)}개)\n\n"
-                f"지금 좌표를 이 시점으로 되돌립니다.\n"
+                f"저장 시점: {info['time']}  (좌표 {info.get('coords', 0)}개 / "
+                f"파일 {info.get('n_files', len(info.get('files', [])))}개)\n\n"
+                f"좌표 + 다야 OCR 영역 + 계정·머신설정을 이 시점으로 되돌립니다.\n"
                 f"(되돌리기 직전 현재 좌표도 자동 백업됩니다)\n\n진행할까요?", default="no"):
             return
         d = self._coord_save_dir()
         # 0) 저장본 유효성 확인 — 깨졌으면 history의 최근 정상본으로 자동 대체
+        #    (좌표 파일만 개수 검증, 설정 파일은 있으면 그대로 복구)
         sources = {}
         gdir = os.path.join(d, "history")
         gfns = sorted(os.listdir(gdir), reverse=True) if os.path.isdir(gdir) else []
-        for f in self._COORD_FILES:
+        _all = list(self._COORD_FILES) + ["local__" + f for f in self._LOCAL_SAVE_FILES]
+        for f in _all:
+            need_coords = f in self._COORD_CRITICAL
             cand = os.path.join(d, f)
-            if os.path.exists(cand) and self._count_coords_in(cand) > 0:
+            if os.path.exists(cand) and (not need_coords or self._count_coords_in(cand) > 0):
                 sources[f] = cand
                 continue
             for fn in gfns:                      # 세대 보관본에서 최근 정상본 찾기
                 if fn.endswith(f"_{f}"):
                     p2 = os.path.join(gdir, fn)
-                    if self._count_coords_in(p2) > 0:
+                    if not need_coords or self._count_coords_in(p2) > 0:
                         sources[f] = p2
                         break
         if not sources:
@@ -890,6 +913,11 @@ class App(tk.Tk):
                 if os.path.exists(cur):
                     try: shutil.copy2(cur, os.path.join(bdir, f"{stamp}_before_restore_{f}"))
                     except Exception: pass
+            for f in self._LOCAL_SAVE_FILES:
+                cur = os.path.join(self._local_data_dir(), f)
+                if os.path.exists(cur):
+                    try: shutil.copy2(cur, os.path.join(bdir, f"{stamp}_before_restore_local_{f}"))
+                    except Exception: pass
             # 2) 실행 중인 섬/던전·OCR 종료 (옛 좌표를 다시 저장해버리는 것 방지)
             try:
                 _sp.Popen(["powershell", "-NoProfile", "-Command",
@@ -903,7 +931,11 @@ class App(tk.Tk):
             # 3) 복사 — 실패하면 최대 3번까지 재시도 (파일 점유 대비), 복사 후 검증
             done, failed = [], []
             for f, src in sources.items():
-                dst = os.path.join(BASE, f)
+                # local__ 접두사가 붙은 것은 %LOCALAPPDATA%\MoonAI 로 되돌린다
+                if f.startswith("local__"):
+                    dst = os.path.join(self._local_data_dir(), f[len("local__"):])
+                else:
+                    dst = os.path.join(BASE, f)
                 ok = False
                 for _try in range(3):
                     try:
