@@ -534,7 +534,7 @@ class IslandApp(tk.Tk):
             self._status.set("⚠ 정밀클릭 미적용 — 마우스를 움직이면 클릭이 어긋날 수 있음 (precise_click.py 확인 필요)")
 
         tk.Button(parent, text="👁 전체 좌표 보기",
-                  font=("맑은 고딕", 8), bg="#566573", fg="white",
+                  font=("맑은 고딕", 11, "bold"), bg="#566573", fg="white", height=2,
                   command=lambda k=key: self._preview_all(k)
                   ).pack(fill="x", padx=4, pady=(0,2))
 
@@ -596,7 +596,8 @@ class IslandApp(tk.Tk):
             self._plus_btns[key].append(pb)
             tk.Button(r3, text="▶", font=("맑은 고딕", 6), fg="white", bg=color, width=2,
                       command=lambda k=key, x=i: self._test(k, x)).pack(side="left", padx=(0, 1))
-            tk.Button(r3, text="👁", font=("맑은 고딕", 6), width=2,
+            tk.Button(r3, text="👁", font=("맑은 고딕", 9, "bold"), width=3,
+                      bg="#566573", fg="white",
                       command=lambda k=key, x=i: self._preview(k, x)).pack(side="left", padx=(0, 1))
             tk.Button(r3, text="×", font=("맑은 고딕", 6), fg="red", width=2,
                       command=lambda k=key, x=i: self._del(k, x)).pack(side="left")
