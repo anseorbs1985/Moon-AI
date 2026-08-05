@@ -3,6 +3,189 @@
     {
       "name": "미등록",
       "coords": [
+        [
+          458,
+          156
+        ],
+        [
+          480,
+          305
+        ],
+        [
+          481,
+          78
+        ],
+        [
+          368,
+          133
+        ],
+        [
+          41,
+          229
+        ],
+        [
+          121,
+          180
+        ],
+        [
+          293,
+          285
+        ],
+        [
+          480,
+          78
+        ],
+        [
+          401,
+          156
+        ],
+        [
+          70,
+          193
+        ],
+        [
+          385,
+          309
+        ],
+        [
+          78,
+          180
+        ],
+        [
+          288,
+          307
+        ],
+        [
+          448,
+          311
+        ],
+        [
+          295,
+          287
+        ],
+        [
+          481,
+          76
+        ],
+        [
+          368,
+          305
+        ],
+        [
+          395,
+          303
+        ],
+        [
+          481,
+          78
+        ],
+        [
+          480,
+          217
+        ],
+        [
+          256,
+          97
+        ],
+        [
+          181,
+          225
+        ],
+        [
+          308,
+          205
+        ],
+        [
+          408,
+          246
+        ],
+        [
+          480,
+          76
+        ],
+        [
+          478,
+          78
+        ],
+        null,
+        null,
+        null
+      ],
+      "gap_list": [
+        "2~4",
+        "10~16",
+        "3~5",
+        "2~4",
+        "2~4",
+        "2~4",
+        "12~18",
+        "2~4",
+        "2~4",
+        "2~4",
+        "2~4",
+        "2~4",
+        "2~4",
+        "1.2~3",
+        "2~4",
+        "2~4",
+        "0.5~1",
+        "1~2",
+        "2~4",
+        "2~4",
+        "0.5~1",
+        "0",
+        "2~4",
+        "1~2",
+        null,
+        null,
+        null,
+        null
+      ],
+      "dirs": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        [
+          "⇩",
+          1.0
+        ],
+        [
+          "⇩",
+          1.0
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "click_names": [],
+      "recs": {},
+      "enabled": true,
+      "repeat_h": 0
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        null,
+        null,
+        null,
         null,
         null,
         null,
@@ -55,6 +238,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -91,6 +277,9 @@
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null
       ],
       "gap_list": [
@@ -118,6 +307,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -154,6 +346,9 @@
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null
       ],
       "gap_list": [
@@ -181,6 +376,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -217,6 +415,9 @@
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null
       ],
       "gap_list": [
@@ -244,6 +445,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -280,6 +484,9 @@
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null
       ],
       "gap_list": [
@@ -307,6 +514,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -343,6 +553,9 @@
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null
       ],
       "gap_list": [
@@ -370,6 +583,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -406,6 +622,9 @@
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null
       ],
       "gap_list": [
@@ -433,6 +652,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -469,6 +691,9 @@
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null
       ],
       "gap_list": [
@@ -496,6 +721,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -532,6 +760,9 @@
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null
       ],
       "gap_list": [
@@ -559,6 +790,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -595,6 +829,9 @@
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null
       ],
       "gap_list": [
@@ -622,6 +859,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -658,6 +898,9 @@
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null
       ],
       "gap_list": [
@@ -685,6 +928,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -721,6 +967,9 @@
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null
       ],
       "gap_list": [
@@ -748,6 +997,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -784,6 +1036,9 @@
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null
       ],
       "gap_list": [
@@ -811,6 +1066,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -847,6 +1105,9 @@
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null
       ],
       "gap_list": [
@@ -874,6 +1135,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
@@ -910,66 +1174,6 @@
         null,
         null,
         null,
-        null
-      ],
-      "gap_list": [
-        "2~4",
-        "10~16",
-        "3~5",
-        "2~4",
-        "2~4",
-        "2~4",
-        "12~18",
-        "2~4",
-        "2~4",
-        "2~4",
-        "2~4",
-        "2~4",
-        "2~4",
-        "1.2~3",
-        "2~4",
-        "2~4",
-        "2~4",
-        "2~4",
-        "2~4",
-        "2~4",
-        "0.5~1",
-        "0",
-        "2~4",
-        "1~2",
-        null
-      ],
-      "dirs": [],
-      "click_names": [],
-      "recs": {},
-      "enabled": true,
-      "repeat_h": 0
-    },
-    {
-      "name": "미등록",
-      "coords": [
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
         null,
         null,
         null,
@@ -1000,6 +1204,9 @@
         "0",
         "2~4",
         "1~2",
+        null,
+        null,
+        null,
         null
       ],
       "dirs": [],
