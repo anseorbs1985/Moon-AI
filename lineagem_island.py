@@ -1667,7 +1667,7 @@ class IslandApp(tk.Tk):
 
 class _IslandGroupMoveOverlay(tk.Toplevel):
     """복사한 슬롯 좌표 전체를 그룹 드래그로 이동 후 저장"""
-    R = 10
+    R = 5
 
     def __init__(self, app, key, slot_idx, dots, on_close=None):
         super().__init__()
@@ -1714,7 +1714,7 @@ class _IslandGroupMoveOverlay(tk.Toplevel):
         for x, y, num, _ in self._dots:
             cv.create_oval(x-r, y-r, x+r, y+r, fill=color, outline="white", width=2)
             cv.create_text(x, y, text=str(num), fill="white",
-                           font=("맑은 고딕", 8, "bold"))
+                           font=("맑은 고딕", 6, "bold"))
 
     def _on_press(self, e):
         if e.y < 36: return
@@ -1821,7 +1821,7 @@ class _IslandPreviewOverlay(tk.Toplevel):
     """스크린샷 배경 + 개별 드래그 수정 미리보기
     dots: [(x, y, num, coord_idx), ...]
     """
-    R = 10
+    R = 5
 
     def __init__(self, app, key, slot_idx, dots):
         super().__init__()
@@ -1865,7 +1865,7 @@ class _IslandPreviewOverlay(tk.Toplevel):
         for x, y, num, _ in self._dots:
             cv.create_oval(x-r, y-r, x+r, y+r, fill="red", outline="white", width=2)
             cv.create_text(x, y, text=str(num), fill="white",
-                           font=("맑은 고딕", 8, "bold"))
+                           font=("맑은 고딕", 6, "bold"))
 
     def _hit(self, ex, ey):
         r = self.R + 6

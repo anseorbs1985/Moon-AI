@@ -3975,7 +3975,7 @@ class App(tk.Tk):
             try: win.activate(); win.maximize()
             except: pass
 
-    def _open_dot_preview(self, title, dots, rereg_fn, save_fn=None, dot_r=5):
+    def _open_dot_preview(self, title, dots, rereg_fn, save_fn=None, dot_r=3):
         self.withdraw()
         self.after(1000, lambda: _DotPreviewOverlay(self, title, dots, rereg_fn, save_fn, dot_r))
 
@@ -5305,7 +5305,7 @@ class App(tk.Tk):
                 self._wdoff_slot_vars[si].set(f"({nx},{ny})")
 
         self._open_dot_preview("주말던전 끄기 — 전체 좌표", dots,
-                               rereg_fn=rereg, save_fn=_save, dot_r=8)
+                               rereg_fn=rereg, save_fn=_save, dot_r=4)
 
     def _start_wdoff(self):
         threading.Thread(target=self._run_wdoff, daemon=True).start()
@@ -5848,7 +5848,7 @@ class App(tk.Tk):
             self.cfg["doll_slots"][idx]["coords"][dot_idx] = [nx, ny]
             save_cfg(self.cfg); self._refresh_doll_display()
             self.status.set(f"✔ 인형탐험 #{idx+1:02d} 좌표{dot_idx+1} 이동 저장: ({nx},{ny})")
-        self._open_dot_preview(f"인형탐험 #{idx+1:02d} {name}", dots, rereg_fn=rereg, save_fn=_save, dot_r=8)
+        self._open_dot_preview(f"인형탐험 #{idx+1:02d} {name}", dots, rereg_fn=rereg, save_fn=_save, dot_r=4)
 
     def _group_copy_doll_slot(self, idx):
         import copy
@@ -6136,7 +6136,7 @@ class App(tk.Tk):
             self._pa_save_job = self.after(300, _flush)
 
         self._open_dot_preview(f"{title} — 전체 좌표", dots,
-                               rereg_fn=rereg, save_fn=_save, dot_r=7)
+                               rereg_fn=rereg, save_fn=_save, dot_r=4)
 
     def _grid_preview_all(self, fkey):
         sp = self._grid_spec(fkey)
@@ -6165,7 +6165,7 @@ class App(tk.Tk):
             if vl and i < len(vl): vl[i].set(f"({nx},{ny})")
 
         self._open_dot_preview(f"{sp['title']} — 전체 좌표", dots,
-                               rereg_fn=rereg, save_fn=_save, dot_r=8)
+                               rereg_fn=rereg, save_fn=_save, dot_r=4)
 
     def _flat_spec(self, fkey):
         return {
@@ -6223,7 +6223,7 @@ class App(tk.Tk):
             vl = getattr(self, sp["vars_attr"], None)
             if vl and idx < len(vl): vl[idx].set(f"({nx},{ny})")
         self._open_dot_preview(f"{sp['title']} #{idx+1:02d}", [(c[0], c[1], idx + 1)],
-                               rereg_fn=rereg, save_fn=_save, dot_r=8)
+                               rereg_fn=rereg, save_fn=_save, dot_r=4)
 
     def _client_rects_by_slot(self):
         """리니지M 클라이언트 창 16개를 화면 배치(세로 열우선 01~16) 순서로 반환.
@@ -6909,7 +6909,7 @@ class App(tk.Tk):
             self.status.set(f"✔ 사냥 #{idx+1:02d} 클릭{dot_idx+1} 이동 저장: ({nx},{ny})")
 
         self._open_dot_preview(f"사냥 #{idx+1:02d} {name}", dots,
-                               rereg_fn=rereg, save_fn=_save, dot_r=8)
+                               rereg_fn=rereg, save_fn=_save, dot_r=4)
 
     def _group_copy_hunt_slot(self, idx):
         """위 슬롯 좌표 복사 후 그룹 드래그로 위치 조정"""
@@ -7495,7 +7495,7 @@ class App(tk.Tk):
             self.status.set(f"✔ 우편함 #{idx+1:02d} 클릭{dot_idx+1} 이동 저장: ({nx},{ny})")
 
         self._open_dot_preview(f"우편함 #{idx+1:02d} {name}", dots,
-                               rereg_fn=rereg, save_fn=_save, dot_r=8)
+                               rereg_fn=rereg, save_fn=_save, dot_r=4)
 
     def _group_copy_mail_slot(self, idx):
         import copy
@@ -7615,7 +7615,7 @@ class App(tk.Tk):
             self.status.set(f"✔ 던전 #{idx+1:02d} {LABELS_D[dot_idx]} 이동 저장: ({nx},{ny})")
 
         self._open_dot_preview(f"던전 #{idx+1:02d} {name}", dots,
-                               rereg_fn=rereg, save_fn=_save, dot_r=8)
+                               rereg_fn=rereg, save_fn=_save, dot_r=4)
 
     def _group_copy_dungeon_slot(self, idx):
         import copy
@@ -9205,7 +9205,7 @@ class App(tk.Tk):
 # ── 좌표 오버레이 ─────────────────────────────────────────────────────────
 class _HuntGroupMoveOverlay(tk.Toplevel):
     """사냥 슬롯 좌표 전체를 그룹으로 드래그해 이동 후 저장"""
-    R = 8
+    R = 4
 
     def __init__(self, app, slot_idx, dots):
         super().__init__()
@@ -9249,7 +9249,7 @@ class _HuntGroupMoveOverlay(tk.Toplevel):
         for x, y, num in self._dots:
             cv.create_oval(x-r, y-r, x+r, y+r, fill="red", outline="white", width=2)
             cv.create_text(x, y, text=str(num), fill="white",
-                           font=("맑은 고딕", 7, "bold"))
+                           font=("맑은 고딕", 5, "bold"))
 
     def _on_press(self, e):
         if e.y < 36:
@@ -9296,7 +9296,7 @@ class _HuntGroupMoveOverlay(tk.Toplevel):
 
 class _DungeonGroupMoveOverlay(tk.Toplevel):
     """던전 슬롯 좌표 전체를 그룹으로 드래그해 이동 후 저장"""
-    R = 8
+    R = 4
 
     def __init__(self, app, slot_idx, dots):
         super().__init__()
@@ -9340,7 +9340,7 @@ class _DungeonGroupMoveOverlay(tk.Toplevel):
         for x, y, num in self._dots:
             cv.create_oval(x-r, y-r, x+r, y+r, fill="#e67e22", outline="white", width=2)
             cv.create_text(x, y, text=str(num), fill="white",
-                           font=("맑은 고딕", 7, "bold"))
+                           font=("맑은 고딕", 5, "bold"))
 
     def _on_press(self, e):
         if e.y < 36: return
@@ -9378,7 +9378,7 @@ class _DungeonGroupMoveOverlay(tk.Toplevel):
 
 class _PastChainMoveOverlay(tk.Toplevel):
     """과거섬 #01→#04 순차 그룹 이동: 저장하면 자동으로 다음 슬롯으로 이어짐"""
-    R = 8
+    R = 4
 
     def __init__(self, app, slot_idx, dots, next_idx, end):
         super().__init__()
@@ -9412,7 +9412,7 @@ class _PastChainMoveOverlay(tk.Toplevel):
         r = self.R
         for x, y, num in self._dots:
             cv.create_oval(x-r, y-r, x+r, y+r, fill="#c0392b", outline="white", width=2)
-            cv.create_text(x, y, text=str(num), fill="white", font=("맑은 고딕", 7, "bold"))
+            cv.create_text(x, y, text=str(num), fill="white", font=("맑은 고딕", 5, "bold"))
 
     def _on_press(self, e):
         if e.y < 36: return
@@ -9457,7 +9457,7 @@ class _PastGroupMoveOverlay(tk.Toplevel):
     """과거섬 슬롯 좌표 전체를 그룹으로 드래그해 이동 후 저장
     dots: [(x, y, num, coord_idx), ...]  — coord_idx 가 실제 coords 배열 인덱스
     """
-    R = 8
+    R = 4
 
     def __init__(self, app, slot_idx, dots):
         super().__init__()
@@ -9492,7 +9492,7 @@ class _PastGroupMoveOverlay(tk.Toplevel):
         for d in self._dots:
             x, y, num = d[0], d[1], d[2]
             cv.create_oval(x-r, y-r, x+r, y+r, fill="#c0392b", outline="white", width=2)
-            cv.create_text(x, y, text=str(num), fill="white", font=("맑은 고딕", 7, "bold"))
+            cv.create_text(x, y, text=str(num), fill="white", font=("맑은 고딕", 5, "bold"))
 
     def _on_press(self, e):
         if e.y < 36: return
@@ -9530,7 +9530,7 @@ class _SchedGroupMoveOverlay(tk.Toplevel):
     """스케줄 슬롯 좌표 전체를 그룹으로 드래그해 이동 후 저장
     dots: [(x, y, num, coord_idx), ...]
     """
-    R = 8
+    R = 4
 
     def __init__(self, app, slot_idx, dots):
         super().__init__()
@@ -9564,7 +9564,7 @@ class _SchedGroupMoveOverlay(tk.Toplevel):
         for d in self._dots:
             x, y, num = d[0], d[1], d[2]
             cv.create_oval(x-r, y-r, x+r, y+r, fill="#16a085", outline="white", width=2)
-            cv.create_text(x, y, text=str(num), fill="white", font=("맑은 고딕", 7, "bold"))
+            cv.create_text(x, y, text=str(num), fill="white", font=("맑은 고딕", 5, "bold"))
 
     def _on_press(self, e):
         if e.y < 36: return
@@ -9600,7 +9600,7 @@ class _SchedGroupMoveOverlay(tk.Toplevel):
 
 class _SlotGroupMoveOverlay(tk.Toplevel):
     """클릭 슬롯 좌표 전체를 그룹으로 드래그해 이동 후 저장"""
-    R = 16
+    R = 8
 
     def __init__(self, app, slot_idx, dots):
         super().__init__()
@@ -9632,7 +9632,7 @@ class _SlotGroupMoveOverlay(tk.Toplevel):
         r = self.R
         for x, y, num in self._dots:
             cv.create_oval(x-r, y-r, x+r, y+r, fill="#2980b9", outline="white", width=2)
-            cv.create_text(x, y, text=str(num), fill="white", font=("맑은 고딕", 11, "bold"))
+            cv.create_text(x, y, text=str(num), fill="white", font=("맑은 고딕", 8, "bold"))
 
     def _on_press(self, e):
         if e.y < 36: return
@@ -9668,7 +9668,7 @@ class _SlotGroupMoveOverlay(tk.Toplevel):
 
 class _MailGroupMoveOverlay(tk.Toplevel):
     """우편함 슬롯 좌표 전체를 그룹으로 드래그해 이동 후 저장"""
-    R = 8
+    R = 4
 
     def __init__(self, app, slot_idx, dots):
         super().__init__()
@@ -9712,7 +9712,7 @@ class _MailGroupMoveOverlay(tk.Toplevel):
         for x, y, num in self._dots:
             cv.create_oval(x-r, y-r, x+r, y+r, fill="#8e44ad", outline="white", width=2)
             cv.create_text(x, y, text=str(num), fill="white",
-                           font=("맑은 고딕", 7, "bold"))
+                           font=("맑은 고딕", 5, "bold"))
 
     def _on_press(self, e):
         if e.y < 36: return
@@ -9752,9 +9752,9 @@ class _DotPreviewOverlay(tk.Toplevel):
     save_fn(dot_idx, new_x, new_y): 점 이동 시 호출
     rereg_fn: ✏ 재등록 버튼 콜백
     """
-    R = 5
+    R = 3
 
-    def __init__(self, app, title, dots, rereg_fn, save_fn=None, dot_r=5):
+    def __init__(self, app, title, dots, rereg_fn, save_fn=None, dot_r=3):
         super().__init__()
         self.R        = dot_r
         self.app      = app
@@ -9830,7 +9830,7 @@ class _DotPreviewOverlay(tk.Toplevel):
             outline = "yellow" if i == self._sel else "white"
             cv.create_oval(x-r, y-r, x+r, y+r, fill="red", outline=outline, width=2)
             cv.create_text(x, y, text=str(num), fill="white",
-                           font=("맑은 고딕", 7, "bold"))
+                           font=("맑은 고딕", 5, "bold"))
 
     def _hit(self, ex, ey):
         r = self.R + 6
@@ -9904,7 +9904,7 @@ class _DotPreviewOverlay(tk.Toplevel):
 
 class _DotPreviewOverlayNav(_DotPreviewOverlay):
     """그룹 이동(이전/다음) 버튼이 추가된 미리보기 오버레이."""
-    def __init__(self, app, title, dots, rereg_fn, save_fn, prev_fn, next_fn, dot_r=5):
+    def __init__(self, app, title, dots, rereg_fn, save_fn, prev_fn, next_fn, dot_r=3):
         self._prev_fn = prev_fn
         self._next_fn = next_fn
         super().__init__(app, title, dots, rereg_fn, save_fn, dot_r)
