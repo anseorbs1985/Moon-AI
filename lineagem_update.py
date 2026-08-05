@@ -137,10 +137,11 @@ DESK = os.path.dirname(HERE) if os.path.basename(HERE).lower() == "moon-ai" else
 CODE_FILES = ["lineagem_launcher.py", "lineagem_ocr.py", "lineagem_island.py",
               "lineagem_dungeon.py", "lineagem_watchdog.py", "precise_click.py",
               "open_launcher.pyw", "lineagem_update.py", "moon.ico"]
-# 좌표(coords.json·island_coords.json)는 2026-08-04부터 머신별 데이터 — 저장소에 없고
-# 업데이트가 절대 건드리지 않는다 (각 컴퓨터의 로컬 좌표가 그 컴퓨터의 원본).
-# 다야 측정값/좌표(daya_counts·history·regions)도 머신별 — 업데이트로 절대 덮어쓰지 않음
-DATA_FILES = ["island_counts.json"]
+# 2026-08-05: 업데이트(🔄) 한 번으로 좌표까지 받게 복귀 — 메인이 올린 좌표를
+# 메인이 아닌 컴퓨터가 통째로 받는다. 덮어쓰기 전 자동 백업 + 런처의 [♻ 좌표복구]로
+# 자기가 저장해둔 좌표로 언제든 되돌릴 수 있음.
+# 다야 측정값(daya_counts·history)은 머신별 — 업데이트로 절대 덮어쓰지 않음
+DATA_FILES = ["coords.json", "island_coords.json", "island_counts.json"]
 DATA_DIRS  = ["reroll_templates"]
 
 root = tk.Tk(); root.title("🔄 리니지M 업데이트")
@@ -471,6 +472,16 @@ def main():
                             continue
                 except Exception:
                     pass                       # 로컬에 없거나 비교 실패 → 반영 진행
+                # 덮어쓰기 직전 현재 좌표를 따로 백업 (되돌리고 싶을 때 대비)
+                if f in MERGE_FILES and os.path.exists(dst):
+                    try:
+                        import datetime as _dt
+                        _bd = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI", "backups")
+                        os.makedirs(_bd, exist_ok=True)
+                        _st = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        shutil.copy2(dst, os.path.join(_bd, f"{_st}_before_update_{f}"))
+                    except Exception:
+                        pass
                 shutil.copy2(s, dst); n += 1
                 # 복사 검증 — 메인과 바이트 단위로 일치하는지 확인
                 try:
@@ -480,6 +491,8 @@ def main():
                     ok = False
                 if ok:
                     log(f"   좌표 동기화: {f} — 메인과 100% 일치 확인 ✔ (좌표 {_count_coords(dst)}개)")
+                    if f in MERGE_FILES:
+                        log(f"      (이전 좌표는 백업됨 — 되돌리려면 런처 [♻ 좌표복구])")
                 else:
                     log(f"   ⚠ {f} 복사 검증 실패 — 업데이트를 한 번 더 실행해주세요")
             # 다야 OCR 캡처영역(daya_regions.json)도 메인과 동일하게 동기화
