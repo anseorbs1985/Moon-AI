@@ -792,27 +792,60 @@ class App(tk.Tk):
         lb.config(text=(f"저장 {info['time'][5:16]}" if info else "저장본 없음"))
 
     def _save_coord_snapshot(self):
-        """지금 좌표를 이 컴퓨터에 저장 — 나중에 [♻ 좌표복구]로 이 시점으로 되돌림."""
+        """지금 좌표를 이 컴퓨터에 저장 — 나중에 [♻ 좌표복구]로 이 시점으로 되돌림.
+        빈/깨진 좌표는 저장하지 않는다 (복구본이 오염되면 복구 자체가 무의미)."""
         import datetime, shutil
         try:
-            d = self._coord_save_dir()
-            n = 0
+            # 1) 저장 전 검증 — 파일이 열리고 좌표가 실제로 들어 있어야 함
+            checked = []
             for f in self._COORD_FILES:
                 src = os.path.join(BASE, f)
-                if os.path.exists(src):
-                    shutil.copy2(src, os.path.join(d, f))
-                    n += self._count_coords_in(src)
-            info = {"time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "coords": n}
+                if not os.path.exists(src):
+                    continue
+                cnt = self._count_coords_in(src)
+                if cnt <= 0:
+                    messagebox.showwarning(
+                        "좌표 저장", f"{f} 에 등록된 좌표가 없습니다.\n"
+                        f"비어 있는 상태를 저장하면 복구가 무의미해져서 저장을 중단합니다.")
+                    return
+                checked.append((f, src, cnt))
+            if not checked:
+                messagebox.showwarning("좌표 저장", "저장할 좌표 파일이 없습니다.")
+                return
+            d = self._coord_save_dir()
+            total = 0
+            # 2) 임시로 쓴 뒤 교체 — 저장 도중 꺼져도 기존 저장본이 깨지지 않게
+            for f, src, cnt in checked:
+                dst = os.path.join(d, f)
+                tmp = dst + ".tmp"
+                shutil.copy2(src, tmp)
+                with open(tmp, "rb") as fa, open(src, "rb") as fb:
+                    if fa.read() != fb.read():
+                        raise IOError(f"{f} 저장 검증 실패")
+                os.replace(tmp, dst)
+                total += cnt
+            # 3) 세대 보관 — 최근 20개까지 따로 남겨둠(저장본이 손상돼도 되살릴 수 있게)
+            stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            gdir = os.path.join(d, "history")
+            os.makedirs(gdir, exist_ok=True)
+            for f, src, cnt in checked:
+                shutil.copy2(src, os.path.join(gdir, f"{stamp}_{f}"))
+            gfns = sorted(os.listdir(gdir))
+            for fn in gfns[:-40]:
+                try: os.remove(os.path.join(gdir, fn))
+                except Exception: pass
+            info = {"time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "coords": total, "files": [f for f, _, _ in checked]}
             with open(os.path.join(d, "info.json"), "w", encoding="utf-8") as f:
                 json.dump(info, f, ensure_ascii=False, indent=2)
             self._refresh_coord_save_lbl()
-            self.status.set(f"💾 좌표 저장 완료 — {info['time']} (좌표 {n}개). 문제 생기면 [♻ 좌표복구]")
+            self.status.set(f"💾 좌표 저장 완료 — {info['time']} (좌표 {total}개). 문제 생기면 [♻ 좌표복구]")
         except Exception as e:
-            self.status.set(f"좌표 저장 실패: {e}")
+            messagebox.showerror("좌표 저장", f"저장 실패: {e}\n\n다시 시도해주세요.")
 
     def _restore_coord_snapshot(self):
         """마지막으로 저장한 좌표로 되돌리고 런처를 재시작한다."""
-        import shutil, subprocess as _sp, datetime
+        import shutil, subprocess as _sp, datetime, sys
         info = self._coord_save_info()
         if not info:
             messagebox.showinfo("좌표 복구", "저장된 좌표가 없습니다.\n먼저 [💾 좌표저장]을 눌러주세요.")
@@ -825,37 +858,87 @@ class App(tk.Tk):
                 f"지금 좌표를 이 시점으로 되돌립니다.\n"
                 f"(되돌리기 직전 현재 좌표도 자동 백업됩니다)\n\n진행할까요?", default="no"):
             return
+        d = self._coord_save_dir()
+        # 0) 저장본 유효성 확인 — 깨졌으면 history의 최근 정상본으로 자동 대체
+        sources = {}
+        gdir = os.path.join(d, "history")
+        gfns = sorted(os.listdir(gdir), reverse=True) if os.path.isdir(gdir) else []
+        for f in self._COORD_FILES:
+            cand = os.path.join(d, f)
+            if os.path.exists(cand) and self._count_coords_in(cand) > 0:
+                sources[f] = cand
+                continue
+            for fn in gfns:                      # 세대 보관본에서 최근 정상본 찾기
+                if fn.endswith(f"_{f}"):
+                    p2 = os.path.join(gdir, fn)
+                    if self._count_coords_in(p2) > 0:
+                        sources[f] = p2
+                        break
+        if not sources:
+            messagebox.showerror("좌표 복구",
+                "저장본이 손상되어 복구할 수 없습니다.\n"
+                "클로드에게 '좌표 복구해줘'라고 요청하세요\n"
+                "(%LOCALAPPDATA%\\MoonAI\\backups 의 자동 백업으로 되살릴 수 있습니다).")
+            return
         try:
-            d = self._coord_save_dir()
-            # 되돌리기 직전 현재 상태도 백업 (복구를 취소하고 싶을 때 대비)
+            # 1) 되돌리기 직전 현재 상태도 백업 (복구를 취소하고 싶을 때 대비)
             bdir = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI", "backups")
             os.makedirs(bdir, exist_ok=True)
             stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             for f in self._COORD_FILES:
                 cur = os.path.join(BASE, f)
                 if os.path.exists(cur):
-                    shutil.copy2(cur, os.path.join(bdir, f"{stamp}_before_restore_{f}"))
-            # 실행 중인 섬/던전·OCR 종료 (옛 좌표를 다시 저장해버리는 것 방지)
-            _sp.Popen(["powershell", "-NoProfile", "-Command",
-                "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' OR Name='python.exe'\" | "
-                "Where-Object { $_.CommandLine -match 'lineagem_island|lineagem_ocr|lineagem_dungeon' } | "
-                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
-                creationflags=0x08000000)
+                    try: shutil.copy2(cur, os.path.join(bdir, f"{stamp}_before_restore_{f}"))
+                    except Exception: pass
+            # 2) 실행 중인 섬/던전·OCR 종료 (옛 좌표를 다시 저장해버리는 것 방지)
+            try:
+                _sp.Popen(["powershell", "-NoProfile", "-Command",
+                    "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' OR Name='python.exe'\" | "
+                    "Where-Object { $_.CommandLine -match 'lineagem_island|lineagem_ocr|lineagem_dungeon' } | "
+                    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+                    creationflags=0x08000000)
+            except Exception:
+                pass
             time.sleep(1.0)
-            n = 0
-            for f in self._COORD_FILES:
-                src = os.path.join(d, f)
-                if os.path.exists(src):
-                    shutil.copy2(src, os.path.join(BASE, f))
-                    n += 1
-            self.status.set(f"♻ 좌표 복구 완료 ({n}개 파일) — 런처를 다시 시작합니다...")
-            # 런처는 메모리에 옛 좌표를 들고 있으므로 반드시 재시작
+            # 3) 복사 — 실패하면 최대 3번까지 재시도 (파일 점유 대비), 복사 후 검증
+            done, failed = [], []
+            for f, src in sources.items():
+                dst = os.path.join(BASE, f)
+                ok = False
+                for _try in range(3):
+                    try:
+                        shutil.copy2(src, dst)
+                        with open(src, "rb") as fa, open(dst, "rb") as fb:
+                            ok = fa.read() == fb.read()
+                    except Exception:
+                        ok = False
+                    if ok:
+                        break
+                    time.sleep(0.7)
+                (done if ok else failed).append(f)
+            if failed:
+                messagebox.showerror("좌표 복구",
+                    f"복구 실패: {', '.join(failed)}\n\n"
+                    f"런처를 종료한 뒤 다시 시도하거나, 클로드에게 '좌표 복구해줘'라고 요청하세요.")
+                if not done:
+                    return
+            self.status.set(f"♻ 좌표 복구 완료 ({len(done)}개 파일) — 런처를 다시 시작합니다...")
+            # 4) 재시작 — 워치독 실행 후 살아나지 않으면 직접 실행까지 폴백
+            _exe = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+            if not os.path.exists(_exe):
+                _exe = sys.executable
+            _lp = os.path.join(BASE, "lineagem_launcher.py")
             _sp.Popen(["powershell", "-NoProfile", "-Command",
-                       "Start-Sleep -Seconds 2; Start-ScheduledTask 'LineageM_Watchdog'"],
+                       "Start-Sleep -Seconds 2; Start-ScheduledTask 'LineageM_Watchdog'; "
+                       "Start-Sleep -Seconds 8; "
+                       "$p = Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe'\" | "
+                       "Where-Object { $_.CommandLine -match 'lineagem_launcher' }; "
+                       f"if (-not $p) {{ Start-Process '{_exe}' -ArgumentList '{_lp}' }}"],
                       creationflags=0x08000000)
             self.after(600, lambda: os._exit(0))
         except Exception as e:
-            messagebox.showerror("좌표 복구", f"복구 실패: {e}")
+            messagebox.showerror("좌표 복구",
+                f"복구 중 오류: {e}\n\n클로드에게 '좌표 복구해줘'라고 요청하세요.")
 
     def _run_updater(self):
         """🔄 업데이트 동그라미 — git pull + 파일 복사 + 런처 재시작을 별도 프로그램으로 실행."""
