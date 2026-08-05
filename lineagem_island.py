@@ -534,7 +534,7 @@ class IslandApp(tk.Tk):
             self._status.set("⚠ 정밀클릭 미적용 — 마우스를 움직이면 클릭이 어긋날 수 있음 (precise_click.py 확인 필요)")
 
         tk.Button(parent, text="👁 전체 좌표 보기",
-                  font=("맑은 고딕", 11, "bold"), bg="#566573", fg="white", height=2,
+                  font=("맑은 고딕", 8), bg="#566573", fg="white",
                   command=lambda k=key: self._preview_all(k)
                   ).pack(fill="x", padx=4, pady=(0,2))
 
@@ -589,22 +589,22 @@ class IslandApp(tk.Tk):
                       bg=color, fg="white", width=7,
                       command=lambda k=key, x=i: self._open_slot_pop(k, x)).pack(pady=(1, 0), fill="x")
             r3 = tk.Frame(cell); r3.pack(pady=(1, 0))
-            pb = tk.Button(r3, text="+", font=("맑은 고딕", 6, "bold"), width=2,
+            pb = tk.Button(r3, text="+", font=("맑은 고딕", 7, "bold"), width=2,
                            bg="#dfe3e6", fg="#e67e22",
                            command=lambda k=key, x=i: self._toggle_sel(k, x))
             pb.pack(side="left", padx=(0, 1))
             self._plus_btns[key].append(pb)
-            tk.Button(r3, text="▶", font=("맑은 고딕", 6), fg="white", bg=color, width=2,
+            tk.Button(r3, text="▶", font=("맑은 고딕", 7), fg="white", bg=color, width=2,
                       command=lambda k=key, x=i: self._test(k, x)).pack(side="left", padx=(0, 1))
-            tk.Button(r3, text="👁", font=("맑은 고딕", 9, "bold"), width=3,
+            tk.Button(r3, text="👁", font=("맑은 고딕", 7), width=2,
                       bg="#566573", fg="white",
                       command=lambda k=key, x=i: self._preview(k, x)).pack(side="left", padx=(0, 1))
-            tk.Button(r3, text="×", font=("맑은 고딕", 6), fg="red", width=2,
+            tk.Button(r3, text="×", font=("맑은 고딕", 7), fg="red", width=2,
                       command=lambda k=key, x=i: self._del(k, x)).pack(side="left")
             r4 = tk.Frame(cell); r4.pack(pady=(1, 0))
-            tk.Button(r4, text="복사", font=("맑은 고딕", 6), bg="#2980b9", fg="white", width=3,
+            tk.Button(r4, text="복사", font=("맑은 고딕", 7), bg="#2980b9", fg="white", width=2,
                       command=lambda k=key, x=i: self._slot_copy(k, x)).pack(side="left", padx=(0, 1))
-            tk.Button(r4, text="붙임", font=("맑은 고딕", 6), bg="#8e44ad", fg="white", width=3,
+            tk.Button(r4, text="붙임", font=("맑은 고딕", 7), bg="#8e44ad", fg="white", width=2,
                       command=lambda k=key, x=i: self._slot_paste(k, x)).pack(side="left")
             # 반복 타이머 — N시간마다 자동 재실행 + 옆에 반복 횟수(1~8회) 제한
             _rh = self.cfg.get(key, [{}]*SLOTS)[i].get("repeat_h") or 0
