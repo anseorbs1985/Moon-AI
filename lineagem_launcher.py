@@ -747,6 +747,116 @@ class App(tk.Tk):
         threading.Thread(target=_check, daemon=True).start()
         self.after(300000, self._auto_update_tick)   # 5분 간격
 
+    # ── 좌표 저장 / 복구 (이 컴퓨터 전용 스냅샷) ──────────────────────
+    _COORD_FILES = ("coords.json", "island_coords.json")
+
+    @staticmethod
+    def _coord_save_dir():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI", "usersave")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    @staticmethod
+    def _count_coords_in(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            n = 0
+            for v in data.values():
+                if not isinstance(v, list):
+                    continue
+                for s in v:
+                    if isinstance(s, dict):
+                        n += sum(1 for c in s.get("coords", []) if c)
+                    elif isinstance(s, list) and any(s):
+                        n += sum(1 for c in s if c)
+            return n
+        except Exception:
+            return 0
+
+    def _coord_save_info(self):
+        """저장본 시각·좌표 수 — 없으면 None."""
+        d = self._coord_save_dir()
+        meta = os.path.join(d, "info.json")
+        try:
+            with open(meta, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def _refresh_coord_save_lbl(self):
+        lb = getattr(self, "_coord_save_lbl", None)
+        if not lb or not lb.winfo_exists():
+            return
+        info = self._coord_save_info()
+        lb.config(text=(f"저장 {info['time'][5:16]}" if info else "저장본 없음"))
+
+    def _save_coord_snapshot(self):
+        """지금 좌표를 이 컴퓨터에 저장 — 나중에 [♻ 좌표복구]로 이 시점으로 되돌림."""
+        import datetime, shutil
+        try:
+            d = self._coord_save_dir()
+            n = 0
+            for f in self._COORD_FILES:
+                src = os.path.join(BASE, f)
+                if os.path.exists(src):
+                    shutil.copy2(src, os.path.join(d, f))
+                    n += self._count_coords_in(src)
+            info = {"time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "coords": n}
+            with open(os.path.join(d, "info.json"), "w", encoding="utf-8") as f:
+                json.dump(info, f, ensure_ascii=False, indent=2)
+            self._refresh_coord_save_lbl()
+            self.status.set(f"💾 좌표 저장 완료 — {info['time']} (좌표 {n}개). 문제 생기면 [♻ 좌표복구]")
+        except Exception as e:
+            self.status.set(f"좌표 저장 실패: {e}")
+
+    def _restore_coord_snapshot(self):
+        """마지막으로 저장한 좌표로 되돌리고 런처를 재시작한다."""
+        import shutil, subprocess as _sp, datetime
+        info = self._coord_save_info()
+        if not info:
+            messagebox.showinfo("좌표 복구", "저장된 좌표가 없습니다.\n먼저 [💾 좌표저장]을 눌러주세요.")
+            return
+        if self._is_busy():
+            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 끝난 뒤 복구하세요"); return
+        if not messagebox.askyesno(
+                "좌표 복구",
+                f"저장 시점: {info['time']}  (좌표 {info.get('coords', 0)}개)\n\n"
+                f"지금 좌표를 이 시점으로 되돌립니다.\n"
+                f"(되돌리기 직전 현재 좌표도 자동 백업됩니다)\n\n진행할까요?", default="no"):
+            return
+        try:
+            d = self._coord_save_dir()
+            # 되돌리기 직전 현재 상태도 백업 (복구를 취소하고 싶을 때 대비)
+            bdir = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI", "backups")
+            os.makedirs(bdir, exist_ok=True)
+            stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            for f in self._COORD_FILES:
+                cur = os.path.join(BASE, f)
+                if os.path.exists(cur):
+                    shutil.copy2(cur, os.path.join(bdir, f"{stamp}_before_restore_{f}"))
+            # 실행 중인 섬/던전·OCR 종료 (옛 좌표를 다시 저장해버리는 것 방지)
+            _sp.Popen(["powershell", "-NoProfile", "-Command",
+                "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' OR Name='python.exe'\" | "
+                "Where-Object { $_.CommandLine -match 'lineagem_island|lineagem_ocr|lineagem_dungeon' } | "
+                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+                creationflags=0x08000000)
+            time.sleep(1.0)
+            n = 0
+            for f in self._COORD_FILES:
+                src = os.path.join(d, f)
+                if os.path.exists(src):
+                    shutil.copy2(src, os.path.join(BASE, f))
+                    n += 1
+            self.status.set(f"♻ 좌표 복구 완료 ({n}개 파일) — 런처를 다시 시작합니다...")
+            # 런처는 메모리에 옛 좌표를 들고 있으므로 반드시 재시작
+            _sp.Popen(["powershell", "-NoProfile", "-Command",
+                       "Start-Sleep -Seconds 2; Start-ScheduledTask 'LineageM_Watchdog'"],
+                      creationflags=0x08000000)
+            self.after(600, lambda: os._exit(0))
+        except Exception as e:
+            messagebox.showerror("좌표 복구", f"복구 실패: {e}")
+
     def _run_updater(self):
         """🔄 업데이트 동그라미 — git pull + 파일 복사 + 런처 재시작을 별도 프로그램으로 실행."""
         if self._is_busy():
@@ -949,6 +1059,19 @@ class App(tk.Tk):
         upd.create_text(39, 29, text="🔄", font=("맑은 고딕", 13))
         upd.create_text(39, 52, text="업데이트", fill="white", font=("맑은 고딕", 9, "bold"))
         upd.bind("<Button-1>", lambda e: self._run_updater())
+
+        # 업데이트 오른쪽: 좌표 저장/복구 (이 컴퓨터 전용 — 내가 저장한 시점으로 되돌리기)
+        sv = tk.Frame(btn_row); sv.pack(side="left", padx=(6, 0))
+        tk.Button(sv, text="💾 좌표\n저장", font=("맑은 고딕", 9, "bold"),
+                  bg="#1e8449", fg="white", activebackground="#145a32",
+                  width=7, height=2, command=self._save_coord_snapshot).pack(side="top")
+        self._coord_save_lbl = tk.Label(sv, font=("맑은 고딕", 6), fg="#666")
+        self._coord_save_lbl.pack(side="top")
+        tk.Button(sv, text="♻ 좌표복구", font=("맑은 고딕", 8, "bold"),
+                  bg="#7d3c98", fg="white", activebackground="#5b2c6f",
+                  width=9, height=1, pady=2,
+                  command=self._restore_coord_snapshot).pack(side="top", pady=(1, 0))
+        self._refresh_coord_save_lbl()
 
         # 업데이트 오른쪽: 🎟 쿠폰등록 (위=창 열기, 아래=▶ 바로 실행)
         cg = tk.Frame(btn_row); cg.pack(side="left", padx=(6, 0))
