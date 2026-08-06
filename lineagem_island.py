@@ -805,6 +805,7 @@ class IslandApp(tk.Tk):
             self._status.set(f"#{idx+1:02d} 복사할 좌표가 없습니다"); return
         # 좌표 + 사이 시간(gap_list) + 방향/⇩(dirs) + 이름표 + 녹화(recs)까지 전부 복사
         self._slot_clip = {"key": key, "src": idx,
+                           "name": slot.get("name", "미등록"),
                            "coords": copy.deepcopy(coords),
                            "gap_list": copy.deepcopy(slot.get("gap_list") or []),
                            "dirs": copy.deepcopy(slot.get("dirs") or []),
@@ -832,6 +833,10 @@ class IslandApp(tk.Tk):
             else:
                 note = " — ⚠ 클라이언트 16개 감지 실패, 원본 위치 그대로"
         self.cfg[key][idx]["coords"] = shifted
+        # 슬롯 이름(위에 적은 글씨)도 함께 붙여넣기
+        _nm = clip.get("name")
+        if _nm and _nm != "미등록":
+            self.cfg[key][idx]["name"] = _nm
         # 사이 시간·방향·이름표도 그대로 붙여넣기
         self.cfg[key][idx]["gap_list"]    = copy.deepcopy(clip.get("gap_list") or [])
         self.cfg[key][idx]["dirs"]        = copy.deepcopy(clip.get("dirs") or [])
@@ -954,6 +959,9 @@ class IslandApp(tk.Tk):
             return
         import copy
         self.cfg[key][idx]["coords"]      = copy.deepcopy(src)
+        _pn = (prev.get("name") or "").strip()
+        if _pn and _pn != "미등록":
+            self.cfg[key][idx]["name"]    = _pn      # 위 슬롯 이름도 함께 복사
         self.cfg[key][idx]["gap_list"]    = copy.deepcopy(prev.get("gap_list") or [])
         self.cfg[key][idx]["dirs"]        = copy.deepcopy(prev.get("dirs") or [])
         self.cfg[key][idx]["click_names"] = copy.deepcopy(prev.get("click_names") or [])
@@ -1600,6 +1608,50 @@ class IslandApp(tk.Tk):
         except Exception:
             return CLICK_INTERVAL
 
+    def _sim_total(self, state, total, pace):
+        """실제 클릭 없이 스케줄만 돌려 예상 소요시간(초)을 계산."""
+        prog = {si: {"j": 0, "due": st["due"] - min(x["due"] for x in state.values()),
+                     "sp": st["sp"], "slot": st["slot"]} for si, st in state.items()}
+        t = 0.0
+        guard = 0
+        while guard < 20000:
+            guard += 1
+            alive = [si for si, p in prog.items() if p["j"] < total]
+            if not alive:
+                break
+            ready = [si for si in alive if prog[si]["due"] <= t]
+            if not ready:
+                t = min(prog[si]["due"] for si in alive)
+                continue
+            si = ready[0]
+            p  = prog[si]; j = p["j"]
+            cs = p["slot"].get("coords", [])
+            did = j < len(cs) and cs[j]
+            p["j"] = j + 1
+            if did:
+                gl = p["slot"].get("gap_list") or []
+                p["due"] = t + self._gap_seconds(gl[j] if j < len(gl) else None) * p["sp"] * pace * 1.05
+                t += 0.425          # 클릭 사이 평균 텀
+            else:
+                p["due"] = t
+        return t
+
+    def _calc_pace(self, state, total, target_sec):
+        """목표 시간에 맞는 배속을 이분 탐색으로 찾는다 (최소 배속 1.0 = 등록한 간격 그대로)."""
+        try:
+            lo, hi = 1.0, 8.0
+            if self._sim_total(state, total, lo) >= target_sec:
+                return lo                      # 그냥 둬도 목표보다 오래 걸림
+            for _ in range(18):
+                mid = (lo + hi) / 2
+                if self._sim_total(state, total, mid) < target_sec:
+                    lo = mid
+                else:
+                    hi = mid
+            return round((lo + hi) / 2, 2)
+        except Exception:
+            return 1.0
+
     def _run_wave(self, key, targets):
         """랜덤 번갈아 실행 — 슬롯마다 자기 시간표를 따로 돌리고,
         지금 할 차례가 된 슬롯 중에서 무작위로 하나씩 눌러준다.
@@ -1614,8 +1666,13 @@ class IslandApp(tk.Tk):
         state = {}
         for si, slot in targets:
             state[si] = {"slot": slot, "j": 0,
-                         "due": now + random.uniform(0, 3.0),      # 시작 시점도 흩뿌림
+                         "due": now + random.uniform(0, 6.0),      # 시작 시점도 흩뿌림
                          "sp": random.uniform(1.10, 1.20)}         # 이 슬롯 전체 10~20% 완화
+        # 목표 소요시간 4:00~4:30 랜덤 — 실행 전에 내부 시뮬레이션으로 배속을 맞춘다
+        target_sec = random.uniform(240, 270)
+        pace = self._calc_pace(state, total, target_sec)
+        self._status.set(f"🎲 랜덤 번갈아 실행 — 목표 {int(target_sec//60)}분 {int(target_sec%60)}초 "
+                         f"(배속 ×{pace:.2f})")
         total = len(labels)
         done_cnt = 0
         while not self._stop_flag:
@@ -1643,7 +1700,8 @@ class IslandApp(tk.Tk):
                 done_cnt += 1
                 gl = st["slot"].get("gap_list") or []
                 g  = gl[j] if j < len(gl) else None
-                st["due"] = time.time() + self._gap_seconds(g) * st["sp"] * random.uniform(1.0, 1.10)
+                st["due"] = (time.time() + self._gap_seconds(g) * st["sp"] * pace
+                             * random.uniform(1.0, 1.10))
             else:
                 st["due"] = time.time()        # 빈 자리는 기다리지 않고 바로 다음으로
             # 마우스는 하나 — 클릭끼리 최소 간격을 둬서 씹힘 방지
