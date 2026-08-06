@@ -1175,7 +1175,25 @@ class App(tk.Tk):
         upd.create_text(39, 52, text="업데이트", fill="white", font=("맑은 고딕", 9, "bold"))
         upd.bind("<Button-1>", lambda e: self._run_updater())
 
-        # 업데이트 오른쪽: 좌표 저장/복구 (이 컴퓨터 전용 — 내가 저장한 시점으로 되돌리기)
+        # 업데이트 오른쪽: 🛒 이벤트상점 (위=창 열기, 아래=▶ 바로 실행)
+        eg = tk.Frame(btn_row); eg.pack(side="left", padx=(6, 0))
+        tk.Button(eg, text="🛒 이벤트\n상점", font=("맑은 고딕", 10, "bold"),
+                  bg="#0e6655", fg="white", activebackground="#0b5345",
+                  width=7, height=2, command=self._open_eventshop_win).pack(side="top")
+        tk.Button(eg, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#0b5345", fg="white", width=9, height=1, pady=2,
+                  command=lambda: self._start_dgn2("eventshop")).pack(side="top", pady=(1, 0))
+
+        # 🎟 쿠폰등록 (위=창 열기, 아래=▶ 바로 실행)
+        cg = tk.Frame(btn_row); cg.pack(side="left", padx=(6, 0))
+        tk.Button(cg, text="🎟 쿠폰\n등록", font=("맑은 고딕", 10, "bold"),
+                  bg="#1f618d", fg="white", activebackground="#154360",
+                  width=7, height=2, command=self._open_coupon_win).pack(side="top")
+        tk.Button(cg, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#154360", fg="white", width=9, height=1, pady=2,
+                  command=lambda: self._start_dgn2("coupon")).pack(side="top", pady=(1, 0))
+
+        # 맨 오른쪽: 좌표 저장/복구 (이 컴퓨터 전용 — 내가 저장한 시점으로 되돌리기)
         sv = tk.Frame(btn_row); sv.pack(side="left", padx=(6, 0))
         tk.Button(sv, text="💾 좌표\n저장", font=("맑은 고딕", 9, "bold"),
                   bg="#1e8449", fg="white", activebackground="#145a32",
@@ -1187,23 +1205,6 @@ class App(tk.Tk):
                   width=9, height=1, pady=2,
                   command=self._restore_coord_snapshot).pack(side="top", pady=(1, 0))
         self._refresh_coord_save_lbl()
-
-        # 업데이트 오른쪽: 🎟 쿠폰등록 (위=창 열기, 아래=▶ 바로 실행)
-        cg = tk.Frame(btn_row); cg.pack(side="left", padx=(6, 0))
-        tk.Button(cg, text="🎟 쿠폰\n등록", font=("맑은 고딕", 10, "bold"),
-                  bg="#1f618d", fg="white", activebackground="#154360",
-                  width=7, height=2, command=self._open_coupon_win).pack(side="top")
-        tk.Button(cg, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
-                  bg="#154360", fg="white", width=9, height=1, pady=2,
-                  command=lambda: self._start_dgn2("coupon")).pack(side="top", pady=(1, 0))
-        # 쿠폰등록 오른쪽: 🛒 이벤트상점 (위=창 열기, 아래=▶ 바로 실행)
-        eg = tk.Frame(btn_row); eg.pack(side="left", padx=(6, 0))
-        tk.Button(eg, text="🛒 이벤트\n상점", font=("맑은 고딕", 10, "bold"),
-                  bg="#0e6655", fg="white", activebackground="#0b5345",
-                  width=7, height=2, command=self._open_eventshop_win).pack(side="top")
-        tk.Button(eg, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
-                  bg="#0b5345", fg="white", width=9, height=1, pady=2,
-                  command=lambda: self._start_dgn2("eventshop")).pack(side="top", pady=(1, 0))
         # TJ성공!! 좌측 끝 정렬용 가변 여백 (행이 가운데 정렬이라 오른쪽을 늘려 왼쪽으로 밀기)
         self._btnrow_pad = tk.Frame(btn_row, width=0, height=1)
         self._btnrow_pad.pack(side="left")
