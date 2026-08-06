@@ -1540,6 +1540,89 @@ class IslandApp(tk.Tk):
         for btn in self._stop_btns.values():
             btn.config(state="disabled")
 
+    # ── 웨이브(번갈아) 실행 — 클릭1을 전 슬롯에 쫙 → 클릭2 쫙 … (과거섬식) ──
+    WAVE_KEYS = ("수금_오만의탑", "토요일_악몽의섬")
+
+    def _do_one_click(self, key, si, slot, j, lbl, move_set, tag=""):
+        """슬롯의 j번째 자리 1개 실행 (드래그/방향키/클릭/녹화). 실행했으면 True."""
+        name   = slot.get("name", f"#{si+1}")
+        coords = slot.get("coords", [])
+        dirs   = slot.get("dirs") or []
+        recs   = slot.get("recs") or {}
+        d_ = dirs[j] if j < len(dirs) else None
+        if d_ and d_[0] == "⏺":
+            d_ = None
+        c = coords[j] if j < len(coords) else None
+        rec = recs.get(str(j))
+        did = False
+        if d_ and d_[0] == "⇩":
+            if c:
+                dist = max(30, int(float(d_[1]) * 30))
+                sx, sy = c
+                self._status.set(f"🖱 [{name}] {lbl} 끌어내리기 {dist}px...{tag}")
+                pyautogui.mouseDown(sx, sy)
+                time.sleep(0.08)
+                for _st in range(1, 7):
+                    pyautogui.moveTo(sx, sy + int(dist * _st / 6))
+                    time.sleep(0.02)
+                pyautogui.mouseUp(sx, sy + dist)
+                did = True
+        elif d_:
+            self._hold_arrow(d_[0], float(d_[1]), name)
+            did = True
+        elif c:
+            _cn = slot.get("click_names") or []
+            _disp = _cn[j] if (j < len(_cn) and _cn[j]) else lbl
+            self._status.set(f"🏝 [{name}] {_disp}{tag}")
+            if j in move_set:
+                pyautogui.moveTo(*c)
+            else:
+                pyautogui.click(*c)
+            did = True
+        if rec and not self._stop_flag:
+            self._play_events(rec, name)
+            did = True
+        return did
+
+    def _run_wave(self, key, targets):
+        """번갈아 실행 — 같은 번호의 클릭을 전 슬롯에 돌리고 다음 번호로 넘어간다.
+        슬롯이 대기하는 시간에 다른 슬롯을 눌러서 전체 시간이 크게 줄어든다."""
+        labels    = labels_for(key)
+        move_set  = MOVE_ONLY_INDICES.get(key, set())
+        stop_fn   = lambda: self._stop_flag
+        status_fn = lambda m: self.after(0, lambda m=m: self._status.set(m))
+        for j, lbl in enumerate(labels):
+            if self._stop_flag: break
+            wave = list(targets)
+            random.shuffle(wave)          # 웨이브마다 슬롯 순서 랜덤
+            done_any = False
+            for k, (si, slot) in enumerate(wave):
+                if self._stop_flag: break
+                if not wait_mouse_idle(stop_fn, status_fn): return
+                if self._do_one_click(key, si, slot, j, lbl, move_set,
+                                      tag=f"  ({k+1}/{len(wave)})"):
+                    done_any = True
+                if k < len(wave) - 1:
+                    time.sleep(random.uniform(0.5, 1.1))   # 슬롯 사이 짧은 텀
+            if not done_any:
+                continue
+            if self._stop_flag: break
+            # 웨이브 간 간격 — 이 번호에 적어둔 시간(gap_list) 사용, 10~20% 완화 적용
+            g = None
+            for si, slot in wave:
+                gl = slot.get("gap_list") or []
+                if j < len(gl) and gl[j] not in (None, ""):
+                    g = gl[j]; break
+            _mult = random.uniform(1.10, 1.25) * random.uniform(1.10, 1.20)
+            if g is None or g == "":
+                time.sleep(CLICK_INTERVAL * _mult)
+            elif isinstance(g, (int, float)):
+                time.sleep(float(g) * _mult)
+            else:
+                self._do_gap_spec(str(g), f"웨이브 {lbl}")
+        for si, _s in targets:
+            self._add_count(si)
+
     def _run(self, key, slot_idx=None, sel_list=None):
         self._slot_running = True
         try:
@@ -1559,6 +1642,12 @@ class IslandApp(tk.Tk):
             d = next(x for x in DUNGEONS if x["key"] == key)
             stop_fn   = lambda: self._stop_flag
             status_fn = lambda m: self.after(0, lambda m=m: self._status.set(m))
+            # 오만의탑·악몽의섬: 슬롯 하나씩이 아니라 번갈아(웨이브) 실행
+            if key in self.WAVE_KEYS and slot_idx is None and len(targets) > 1:
+                self._status.set(f"🌊 번갈아 실행 — {len(targets)}개 슬롯을 클릭 순서대로 돌립니다")
+                self._run_wave(key, targets)
+                self._status.set("✔ 실행 완료!" if not self._stop_flag else "멈춤")
+                return
             for ti, (si, slot) in enumerate(targets):
                 if self._stop_flag: break
                 if ti > 0:
