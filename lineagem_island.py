@@ -1584,42 +1584,70 @@ class IslandApp(tk.Tk):
             did = True
         return did
 
+    @staticmethod
+    def _gap_seconds(g):
+        """gap_list 값을 초로 — 숫자면 그 값, '8~10'이면 그 범위 랜덤, 비면 기본."""
+        if g is None or g == "":
+            return CLICK_INTERVAL
+        if isinstance(g, (int, float)):
+            return float(g)
+        t = str(g).strip()
+        try:
+            if "~" in t:
+                a, b = t.split("~")
+                return random.uniform(float(a), float(b))
+            return float(t)
+        except Exception:
+            return CLICK_INTERVAL
+
     def _run_wave(self, key, targets):
-        """번갈아 실행 — 같은 번호의 클릭을 전 슬롯에 돌리고 다음 번호로 넘어간다.
-        슬롯이 대기하는 시간에 다른 슬롯을 눌러서 전체 시간이 크게 줄어든다."""
+        """랜덤 번갈아 실행 — 슬롯마다 자기 시간표를 따로 돌리고,
+        지금 할 차례가 된 슬롯 중에서 무작위로 하나씩 눌러준다.
+        (1번을 두어 번 누르다 11번을 한 번 누르는 식 — 정해진 순서 없음)
+        각 대기 시간은 슬롯마다 10~20% 랜덤으로 다르게 흐른다."""
         labels    = labels_for(key)
         move_set  = MOVE_ONLY_INDICES.get(key, set())
         stop_fn   = lambda: self._stop_flag
         status_fn = lambda m: self.after(0, lambda m=m: self._status.set(m))
-        for j, lbl in enumerate(labels):
-            if self._stop_flag: break
-            wave = list(targets)
-            random.shuffle(wave)          # 웨이브마다 슬롯 순서 랜덤
-            done_any = False
-            for k, (si, slot) in enumerate(wave):
-                if self._stop_flag: break
-                if not wait_mouse_idle(stop_fn, status_fn): return
-                if self._do_one_click(key, si, slot, j, lbl, move_set,
-                                      tag=f"  ({k+1}/{len(wave)})"):
-                    done_any = True
-                if k < len(wave) - 1:
-                    time.sleep(random.uniform(0.5, 1.1))   # 슬롯 사이 짧은 텀
-            if not done_any:
+        now = time.time()
+        # 슬롯별 진행 상태: [다음에 할 클릭 번호, 언제 할 차례인지, 슬롯 고유 속도]
+        state = {}
+        for si, slot in targets:
+            state[si] = {"slot": slot, "j": 0,
+                         "due": now + random.uniform(0, 3.0),      # 시작 시점도 흩뿌림
+                         "sp": random.uniform(1.10, 1.20)}         # 이 슬롯 전체 10~20% 완화
+        total = len(labels)
+        done_cnt = 0
+        while not self._stop_flag:
+            alive = [si for si, st in state.items() if st["j"] < total]
+            if not alive:
+                break
+            now = time.time()
+            ready = [si for si in alive if state[si]["due"] <= now]
+            if not ready:
+                nxt = min(state[si]["due"] for si in alive)
+                w = max(0.05, min(nxt - now, 1.0))
+                self._status.set(f"⏱ 다음 차례까지 {max(0, nxt - now):.1f}초  "
+                                 f"(진행 {done_cnt}회 / 남은 슬롯 {len(alive)}개)")
+                time.sleep(w)
                 continue
+            si = random.choice(ready)          # 차례가 된 것 중 무작위 선택
+            st = state[si]
+            j  = st["j"]
+            if not wait_mouse_idle(stop_fn, status_fn): return
             if self._stop_flag: break
-            # 웨이브 간 간격 — 이 번호에 적어둔 시간(gap_list) 사용, 10~20% 완화 적용
-            g = None
-            for si, slot in wave:
-                gl = slot.get("gap_list") or []
-                if j < len(gl) and gl[j] not in (None, ""):
-                    g = gl[j]; break
-            _mult = random.uniform(1.10, 1.25) * random.uniform(1.10, 1.20)
-            if g is None or g == "":
-                time.sleep(CLICK_INTERVAL * _mult)
-            elif isinstance(g, (int, float)):
-                time.sleep(float(g) * _mult)
+            did = self._do_one_click(key, si, st["slot"], j, labels[j], move_set,
+                                     tag=f"  (#{si+1:02d} {j+1}/{total})")
+            st["j"] = j + 1
+            if did:
+                done_cnt += 1
+                gl = st["slot"].get("gap_list") or []
+                g  = gl[j] if j < len(gl) else None
+                st["due"] = time.time() + self._gap_seconds(g) * st["sp"] * random.uniform(1.0, 1.10)
             else:
-                self._do_gap_spec(str(g), f"웨이브 {lbl}")
+                st["due"] = time.time()        # 빈 자리는 기다리지 않고 바로 다음으로
+            # 마우스는 하나 — 클릭끼리 최소 간격을 둬서 씹힘 방지
+            time.sleep(random.uniform(0.25, 0.6))
         for si, _s in targets:
             self._add_count(si)
 
