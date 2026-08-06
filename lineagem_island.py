@@ -572,9 +572,14 @@ class IslandApp(tk.Tk):
                           justify="center", relief="flat", bg="#f2f2f2", fg="#2c3e50")
             ne.pack(pady=(1, 0), fill="x")   # 셀 폭에 맞춤
             def _sv_name(e=None, k=key, x=i, v=nvv):
+                # 붙여넣기 직후 늦게 도착한 FocusOut이 새 이름을 옛 값으로 덮어쓰지 않게
+                if time.time() - getattr(self, "_paste_ts", 0) < 1.0:
+                    return
                 self.cfg[k][x]["name"] = v.get().strip() or "미등록"
                 save_cfg(self.cfg)
             ne.bind("<FocusOut>", _sv_name); ne.bind("<Return>", _sv_name)
+            # 타이핑할 때마다 즉시 저장 — Enter를 안 눌러도 복사에 반영되게
+            nvv.trace_add("write", lambda *_a, f=_sv_name: f())
             head = tk.Frame(cell); head.pack()
             tk.Label(head, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"),
                      fg="#555").pack(side="left")
@@ -832,11 +837,16 @@ class IslandApp(tk.Tk):
                 note = f" — 클라이언트 위치 자동보정 ({dx:+},{dy:+})"
             else:
                 note = " — ⚠ 클라이언트 16개 감지 실패, 원본 위치 그대로"
+        self._paste_ts = time.time()   # 늦게 오는 이름칸 FocusOut 저장 차단
         self.cfg[key][idx]["coords"] = shifted
         # 슬롯 이름(위에 적은 글씨)도 함께 붙여넣기
         _nm = clip.get("name")
         if _nm and _nm != "미등록":
             self.cfg[key][idx]["name"] = _nm
+            try:                       # 화면의 이름칸도 즉시 갱신
+                self._cell_name_vars[key][idx].set(_nm)
+            except Exception:
+                pass
         # 사이 시간·방향·이름표도 그대로 붙여넣기
         self.cfg[key][idx]["gap_list"]    = copy.deepcopy(clip.get("gap_list") or [])
         self.cfg[key][idx]["dirs"]        = copy.deepcopy(clip.get("dirs") or [])
@@ -858,6 +868,18 @@ class IslandApp(tk.Tk):
         self.cfg[key][idx]["recs"] = recs
         save_cfg(self.cfg)
         self._refresh(key)
+        # 늦게 도착하는 FocusOut이 이름을 되돌렸을 수 있으니 잠시 뒤 한 번 더 확정
+        def _fix_name(k=key, x=idx, nm=_nm):
+            if not nm or nm == "미등록":
+                return
+            if self.cfg[k][x].get("name") != nm:
+                self.cfg[k][x]["name"] = nm
+                save_cfg(self.cfg)
+            try:
+                self._cell_name_vars[k][x].set(nm)
+            except Exception:
+                pass
+        self.after(300, _fix_name)
         self._status.set(f"✔ #{idx+1:02d} 붙여넣기 완료 (시간·방향·이름 포함){note}")
 
     def _toggle_enable(self, key, idx):
