@@ -5148,7 +5148,7 @@ class App(tk.Tk):
         prev = False
         while True:
             time.sleep(0.03)
-            vk = self.cfg.get("slp_hotkey") or 0x10
+            vk = self.cfg.get("slp_hotkey") or 0x7B
             if not getattr(self, "_slp_on", False):
                 prev = False
                 continue
