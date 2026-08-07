@@ -352,6 +352,13 @@ class IslandApp(tk.Tk):
         self._auto_run = len(sys.argv) > 2 and sys.argv[2] == "--run"
 
         self._build_ui()
+        # 조작 감지 — 3분 무조작이면 메인런처 앞(클라 뒤)으로 물러남
+        self._last_active = time.time()
+        def _bump(e=None):
+            self._last_active = time.time()
+        for _sq in ("<Button>", "<Key>", "<Motion>"):
+            self.bind_all(_sq, _bump, add="+")
+        self.after(30000, self._idle_back_tick)
         self._repeat_next = {}
         self.after(15000, self._repeat_tick)   # 슬롯별 반복 타이머 (1~4시간)
         self.after(300, self._scroll_all_to_bottom)
@@ -1319,6 +1326,39 @@ class IslandApp(tk.Tk):
         self._minimize_claude()
         threading.Thread(target=self._run, args=(key, idx), daemon=True).start()
 
+    def _send_behind_main(self):
+        """이 창을 '메인런처 바로 앞'에 배치 — 리니지M 클라이언트 뒤, 메인런처 위.
+        최소화하지 않으므로 개별 실행을 이어서 누르기 편하다."""
+        try:
+            import win32gui, win32con
+            self.update_idletasks()
+            me = self.winfo_id()
+            try:
+                me = win32gui.GetParent(me) or me      # 실제 최상위 창 핸들
+            except Exception:
+                pass
+            main = win32gui.FindWindow(None, "리니지M 자동 실행")
+            flags = (win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
+            if main:
+                # 메인런처를 맨 뒤로 내리고, 그 바로 위(앞)에 이 창을 놓는다
+                win32gui.SetWindowPos(main, win32con.HWND_BOTTOM, 0, 0, 0, 0, flags)
+                win32gui.SetWindowPos(me, main, 0, 0, 0, 0, flags)
+            else:
+                win32gui.SetWindowPos(me, win32con.HWND_BOTTOM, 0, 0, 0, 0, flags)
+        except Exception:
+            pass
+
+    def _idle_back_tick(self):
+        """3분 넘게 조작이 없으면 스스로 메인런처 앞(=클라 뒤)으로 물러난다."""
+        try:
+            if (not getattr(self, "_slot_running", False)
+                    and time.time() - getattr(self, "_last_active", 0) > 180
+                    and self.state() == "normal"):
+                self._send_behind_main()
+        except Exception:
+            pass
+        self.after(30000, self._idle_back_tick)
+
     def _start(self, key):
         # +로 고른 슬롯이 있으면 그것만 누른 순서대로, 없으면 전체 실행
         sel = list(self._sel_order.get(key, []))
@@ -1329,7 +1369,8 @@ class IslandApp(tk.Tk):
         if getattr(self, "_auto_run", False):
             self.withdraw()      # 런처 ▶ 실행: 창 없이 바로 (작업표시줄에도 안 뜸)
         else:
-            self.iconify()
+            # 직접 연 창: 최소화하지 않고 '메인런처 바로 앞(클라 뒤)'으로 물러난다
+            self._send_behind_main()
         self._minimize_claude()
         threading.Thread(target=self._run, args=(key,),
                          kwargs={"sel_list": sel or None}, daemon=True).start()
@@ -1638,15 +1679,24 @@ class IslandApp(tk.Tk):
         except Exception:
             return CLICK_INTERVAL
 
-    def _sim_total(self, state, total, pace):
-        """실제 클릭 없이 스케줄만 돌려 예상 소요시간(초)을 계산."""
+    def _sim_total(self, state, total, pace, lanes=4):
+        """실제 클릭 없이 스케줄만 돌려 예상 소요시간(초)을 계산 (동시 lanes개 제한 포함)."""
         prog = {si: {"j": 0, "due": st["due"] - min(x["due"] for x in state.values()),
                      "sp": st["sp"], "slot": st["slot"]} for si, st in state.items()}
+        order   = list(prog.keys())
+        active  = order[:lanes]
+        waiting = order[lanes:]
         t = 0.0
         guard = 0
-        while guard < 20000:
+        while guard < 40000:
             guard += 1
-            alive = [si for si, p in prog.items() if p["j"] < total]
+            for si in [x for x in active if prog[x]["j"] >= total]:
+                active.remove(si)
+                if waiting:
+                    nx = waiting.pop(0)
+                    prog[nx]["due"] = t + 1.2
+                    active.append(nx)
+            alive = [si for si in active if prog[si]["j"] < total]
             if not alive:
                 break
             ready = [si for si in alive if prog[si]["due"] <= t]
@@ -1661,7 +1711,7 @@ class IslandApp(tk.Tk):
             if did:
                 gl = p["slot"].get("gap_list") or []
                 p["due"] = t + self._gap_seconds(gl[j] if j < len(gl) else None) * p["sp"] * pace * 1.05
-                t += 0.425          # 클릭 사이 평균 텀
+                t += 0.65           # 클릭 사이 평균 텀 (0.4~0.9)
             else:
                 p["due"] = t
         return t
@@ -1699,14 +1749,30 @@ class IslandApp(tk.Tk):
                          "due": now + random.uniform(0, 6.0),      # 시작 시점도 흩뿌림
                          "sp": random.uniform(1.10, 1.20)}         # 이 슬롯 전체 10~20% 완화
         total = len(labels)
-        # 목표 소요시간 4:00~4:30 랜덤 — 실행 전에 내부 시뮬레이션으로 배속을 맞춘다
-        target_sec = random.uniform(360, 405)   # 4:00~4:30 → 50% 여유 (6:00~6:45)
+        # 목표 소요시간 랜덤 — 실행 전에 내부 시뮬레이션으로 배속을 맞춘다
+        target_sec = random.uniform(360, 405)   # 6:00~6:45
         pace = self._calc_pace(state, total, target_sec)
-        self._status.set(f"🎲 랜덤 번갈아 실행 — 목표 {int(target_sec//60)}분 {int(target_sec%60)}초 "
-                         f"(배속 ×{pace:.2f})")
+        # 동시에 진행할 슬롯 수 제한 — 한 번에 4개만 돌리고, 하나가 끝나면 다음 슬롯 투입
+        LANES = 4
+        order = [si for si, _s in targets]
+        random.shuffle(order)
+        active = order[:LANES]
+        waiting = order[LANES:]
+        self._status.set(f"🎲 랜덤 실행 — 동시 {LANES}슬롯씩 (목표 "
+                         f"{int(target_sec//60)}분 {int(target_sec%60)}초, 배속 ×{pace:.2f})")
         done_cnt = 0
         while not self._stop_flag:
-            alive = [si for si, st in state.items() if st["j"] < total]
+            # 끝난 슬롯 자리에 대기 중인 슬롯을 채워 넣는다
+            fin = [si for si in active if state[si]["j"] >= total]
+            for si in fin:
+                active.remove(si)
+                if waiting:
+                    nx = waiting.pop(0)
+                    state[nx]["due"] = time.time() + random.uniform(0.5, 2.0)
+                    active.append(nx)
+                    self._status.set(f"➡ #{si+1:02d} 완료 — #{nx+1:02d} 투입 "
+                                     f"(진행 {done_cnt}회 / 남은 {len(waiting)}슬롯)")
+            alive = [si for si in active if state[si]["j"] < total]
             if not alive:
                 break
             now = time.time()
@@ -1861,12 +1927,11 @@ class IslandApp(tk.Tk):
                 # 런처가 종료를 감지하고 대기열의 다음 던전을 이어서 실행한다
                 self.after(500, self.destroy)
             else:
+                # 끝나도 앞으로 튀어나오지 않고 '메인런처 바로 앞(클라 뒤)'에 대기 —
+                # 개별 실행을 이어서 누르려면 작업표시줄/클릭으로 올리면 된다
                 def _restore():
-                    self.attributes("-topmost", True)
                     self.deiconify()
-                    self.lift()
-                    self.focus_force()
-                    self.after(3000, lambda: self.attributes("-topmost", False))
+                    self._send_behind_main()
                 self.after(0, _restore)
 
 
