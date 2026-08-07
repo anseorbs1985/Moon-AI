@@ -1166,16 +1166,7 @@ class App(tk.Tk):
                   bg="#a04000", fg="white", activebackground="#7a3000",
                   width=11, height=3, command=self._open_reroll_win).pack(side="left")
 
-        # 오림의 일기장 오른쪽: 빨간 동그라미 업데이트 버튼 (git pull + 재시작)
-        upd = tk.Canvas(btn_row, width=78, height=78, highlightthickness=0,
-                        bg=self.cget("bg"), cursor="hand2")
-        upd.pack(side="left", padx=(6, 0))
-        upd.create_oval(3, 3, 75, 75, fill="#c0392b", outline="#7b241c", width=3)
-        upd.create_text(39, 29, text="🔄", font=("맑은 고딕", 13))
-        upd.create_text(39, 52, text="업데이트", fill="white", font=("맑은 고딕", 9, "bold"))
-        upd.bind("<Button-1>", lambda e: self._run_updater())
-
-        # 업데이트 오른쪽: 🛒 이벤트상점 (위=창 열기, 아래=▶ 바로 실행)
+        # 오림의 일기장 오른쪽: 🛒 이벤트상점 (위=창 열기, 아래=▶ 바로 실행)
         eg = tk.Frame(btn_row); eg.pack(side="left", padx=(6, 0))
         tk.Button(eg, text="🛒 이벤트\n상점", font=("맑은 고딕", 10, "bold"),
                   bg="#0e6655", fg="white", activebackground="#0b5345",
@@ -1192,6 +1183,15 @@ class App(tk.Tk):
         tk.Button(cg, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
                   bg="#154360", fg="white", width=9, height=1, pady=2,
                   command=lambda: self._start_dgn2("coupon")).pack(side="top", pady=(1, 0))
+
+        # 쿠폰등록과 좌표저장 사이: 빨간 동그라미 업데이트 버튼 (git pull + 재시작)
+        upd = tk.Canvas(btn_row, width=78, height=78, highlightthickness=0,
+                        bg=self.cget("bg"), cursor="hand2")
+        upd.pack(side="left", padx=(6, 0))
+        upd.create_oval(3, 3, 75, 75, fill="#c0392b", outline="#7b241c", width=3)
+        upd.create_text(39, 29, text="🔄", font=("맑은 고딕", 13))
+        upd.create_text(39, 52, text="업데이트", fill="white", font=("맑은 고딕", 9, "bold"))
+        upd.bind("<Button-1>", lambda e: self._run_updater())
 
         # 맨 오른쪽: 좌표 저장/복구 (이 컴퓨터 전용 — 내가 저장한 시점으로 되돌리기)
         sv = tk.Frame(btn_row); sv.pack(side="left", padx=(6, 0))
