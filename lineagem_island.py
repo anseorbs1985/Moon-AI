@@ -1764,7 +1764,7 @@ class IslandApp(tk.Tk):
         state = {}
         for si, slot in targets:
             state[si] = {"slot": slot, "j": 0,
-                         "due": now + random.uniform(0, 6.0),      # 시작 시점도 흩뿌림
+                         "due": now + random.uniform(0, 20.0),     # 시작 시점 넓게 흩뿌림
                          "sp": random.uniform(1.10, 1.20)}         # 이 슬롯 전체 10~20% 완화
         total = len(labels)
         # 목표 소요시간 랜덤 — 실행 전에 내부 시뮬레이션으로 배속을 맞춘다
@@ -1785,8 +1785,8 @@ class IslandApp(tk.Tk):
             for si in fin:
                 active.remove(si)
                 if waiting:
-                    nx = waiting.pop(0)
-                    state[nx]["due"] = time.time() + random.uniform(0.5, 2.0)
+                    nx = waiting.pop(random.randrange(len(waiting)))   # 투입 순서도 랜덤
+                    state[nx]["due"] = time.time() + random.uniform(0.5, 4.0)
                     active.append(nx)
                     self._status.set(f"➡ #{si+1:02d} 완료 — #{nx+1:02d} 투입 "
                                      f"(진행 {done_cnt}회 / 남은 {len(waiting)}슬롯)")
@@ -1814,8 +1814,10 @@ class IslandApp(tk.Tk):
                 done_cnt += 1
                 gl = st["slot"].get("gap_list") or []
                 g  = gl[j] if j < len(gl) else None
+                # 매 클릭마다 큰 편차(0.7~1.7배) — 슬롯마다 시간이 제각각 흘러
+                # 어떤 슬롯은 연달아 두세 번, 어떤 슬롯은 한참 쉬었다 눌린다
                 st["due"] = (time.time() + self._gap_seconds(g) * st["sp"] * pace
-                             * random.uniform(1.0, 1.10))
+                             * random.uniform(0.55, 1.5))
             else:
                 st["due"] = time.time()        # 빈 자리는 기다리지 않고 바로 다음으로
             # 마우스는 하나 — 클릭끼리 최소 간격을 둬서 씹힘 방지
