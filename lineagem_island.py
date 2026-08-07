@@ -1690,12 +1690,12 @@ class IslandApp(tk.Tk):
             state[si] = {"slot": slot, "j": 0,
                          "due": now + random.uniform(0, 6.0),      # 시작 시점도 흩뿌림
                          "sp": random.uniform(1.10, 1.20)}         # 이 슬롯 전체 10~20% 완화
+        total = len(labels)
         # 목표 소요시간 4:00~4:30 랜덤 — 실행 전에 내부 시뮬레이션으로 배속을 맞춘다
         target_sec = random.uniform(240, 270)
         pace = self._calc_pace(state, total, target_sec)
         self._status.set(f"🎲 랜덤 번갈아 실행 — 목표 {int(target_sec//60)}분 {int(target_sec%60)}초 "
                          f"(배속 ×{pace:.2f})")
-        total = len(labels)
         done_cnt = 0
         while not self._stop_flag:
             alive = [si for si, st in state.items() if st["j"] < total]
