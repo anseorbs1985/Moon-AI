@@ -204,6 +204,11 @@ DEFAULT_CFG = {
     "seq_on":       False,              # 연속 클릭 단축키 활성화 상태 (재시작 유지)
     "seq_min":      SEQ_MIN,
     "seq_max":      SEQ_MAX,
+    "slp_slots":    [None]*SEQ_SLOTS,   # 절전모드 좌표 (연속클릭과 동일 구조)
+    "slp_hotkey":   0x10,               # 기본 Shift
+    "slp_on":       True,               # 기본 ON
+    "slp_min":      SEQ_MIN,
+    "slp_max":      SEQ_MAX,
     "dollcrack_on": True,               # 인형까기 — 기본 ON, F1 꾹 = 커서 위치 따따따 후 ESC (재시작 유지)
     "wdoff_slots":  [None]*WDOFF_SLOTS, # 주말던전 끄기 좌표 (각 [x,y] 또는 None)
     "wdoff_hotkey": None,
@@ -402,6 +407,13 @@ def load_cfg():
         while len(sq) < SEQ_SLOTS:
             sq.append(None)
         cfg["seq_slots"] = sq[:SEQ_SLOTS]
+        # slp_slots (절전모드 — 연속클릭과 동일 구조)
+        sl = cfg.get("slp_slots", [])
+        if not isinstance(sl, list):
+            sl = []
+        while len(sl) < SEQ_SLOTS:
+            sl.append(None)
+        cfg["slp_slots"] = sl[:SEQ_SLOTS]
         # dungeon_slots (변신확인용 — 좌표 5개로 패딩, 예전 3개짜리 호환)
         dgs = cfg.get("dungeon_slots", [])
         for s in dgs:
@@ -658,6 +670,8 @@ class App(tk.Tk):
         self._win_lock     = WindowSizeLock()
         self._hp_stop      = False
         self._seq_on       = bool(self.cfg.get("seq_on", False))
+        self._slp_on       = bool(self.cfg.get("slp_on", True))
+        self._slp_running  = False
         self._dollcrack_on = bool(self.cfg.get("dollcrack_on", False))
         self._dollcrack_running = False
         self._seq_running  = False
@@ -697,6 +711,7 @@ class App(tk.Tk):
         # (자동 업데이트는 사용자 요청으로 비활성 — 업데이트는 🔄 버튼으로 수동 실행)
         self.after(1000, self._purple_check_tick)
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
+        threading.Thread(target=self._slp_hotkey_loop, daemon=True).start()
         self._install_f1_hook()   # 인형까기 F1 가로채기 (게임에 F1 전달 차단)
         threading.Thread(target=self._dollcrack_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
@@ -4071,7 +4086,8 @@ class App(tk.Tk):
             ("주말던전끄기", "#5d6d7e", self._open_wdoff_win,    "#34495e", self._start_wdoff),
             ("🏹 사냥",      "#27ae60", self._open_hunt_win,     "#1e8449", self._start_hunt),
             ("💰 다야OCR",   "#27ae60", self._open_ocr,          "#1e8449", self._open_ocr_scan),
-            ("🔗 연속클릭",  "#7d3c98", self._open_seq_win,      "#5b2c6f", self._start_seq),
+            ("🔆 절전해제",  "#7d3c98", self._open_seq_win,      "#5b2c6f", self._start_seq),
+            ("🌙 절전모드",  "#1f618d", self._open_slp_win,      "#154360", self._start_slp),
         ]
         for text, color, cmd, run_color, run_cmd in fixed:
             grp = tk.Frame(self._sec_row); grp.pack(side="left", padx=2)
@@ -4776,7 +4792,7 @@ class App(tk.Tk):
 
     # ── 연속 클릭 (별도 기능): 단축키/버튼으로 16개 좌표를 순서대로 1회씩 클릭 ──
     def _open_seq_win(self):
-        self._open_section_win("_seq_win", "🔗 연속 클릭", self._build_seq, w=500, h=580)
+        self._open_section_win("_seq_win", "🔆 절전해제", self._build_seq, w=500, h=580)
 
     def _vk_name(self, vk):
         if not vk:
@@ -4801,7 +4817,7 @@ class App(tk.Tk):
     def _build_seq(self, parent):
         seq = self.cfg.get("seq_slots") or [None] * SEQ_SLOTS
 
-        tk.Label(parent, text="연속 클릭 — 단축키를 누르면 순서대로 1회씩",
+        tk.Label(parent, text="절전해제 — 단축키를 누르면 순서대로 1회씩",
                  font=("맑은 고딕", 9, "bold"), fg="#5b2c6f").pack(pady=(6, 2))
 
         top = tk.Frame(parent); top.pack(pady=2)
@@ -4848,9 +4864,9 @@ class App(tk.Tk):
         save_cfg(self.cfg)
         self._refresh_seq_toggle()
         if self._seq_on:
-            self.status.set(f"연속클릭 ON — {self._vk_name(self.cfg.get('seq_hotkey'))} 누르면 실행")
+            self.status.set(f"절전해제 ON — {self._vk_name(self.cfg.get('seq_hotkey'))} 누르면 실행")
         else:
-            self.status.set("연속클릭 OFF")
+            self.status.set("절전해제 OFF")
 
     def _save_seq_interval(self):
         try:
@@ -4867,7 +4883,7 @@ class App(tk.Tk):
 
     def _reg_seq_coord(self, idx):
         self._seq_reg_idx = idx
-        self.status.set(f"3초 후 연속클릭 #{idx+1} 위치를 클릭하세요!")
+        self.status.set(f"3초 후 절전해제 #{idx+1} 위치를 클릭하세요!")
         self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
                                    CoordOverlay(self, mode="seq")])
 
@@ -4880,7 +4896,7 @@ class App(tk.Tk):
         save_cfg(self.cfg)
         if hasattr(self, "_seq_slot_vars") and self._seq_reg_idx < len(self._seq_slot_vars):
             self._seq_slot_vars[self._seq_reg_idx].set(f"({x},{y})")
-        self.status.set(f"✔ 연속클릭 #{self._seq_reg_idx+1} 등록: ({x},{y})")
+        self.status.set(f"✔ 절전해제 #{self._seq_reg_idx+1} 등록: ({x},{y})")
         self.deiconify()
 
     def _del_seq_coord(self, idx):
@@ -4891,7 +4907,7 @@ class App(tk.Tk):
             save_cfg(self.cfg)
         if hasattr(self, "_seq_slot_vars") and idx < len(self._seq_slot_vars):
             self._seq_slot_vars[idx].set("미등록")
-        self.status.set(f"연속클릭 #{idx+1} 삭제")
+        self.status.set(f"절전해제 #{idx+1} 삭제")
 
     def _seq_hide(self):
         """연속클릭 실행 전, 리니지M 외 창(서브창/메인런처/클로드)을 최소화. 메인스레드에서 호출."""
@@ -4910,7 +4926,7 @@ class App(tk.Tk):
         seq = self.cfg.get("seq_slots") or []
         coords = [c for c in seq if c]
         if not coords:
-            self.after(0, lambda: self.status.set("연속클릭: 등록된 좌표가 없습니다"))
+            self.after(0, lambda: self.status.set("절전해제: 등록된 좌표가 없습니다"))
             return
         if not self._try_busy_or_queue("연속클릭", self._start_seq):
             return
@@ -4926,13 +4942,13 @@ class App(tk.Tk):
             random.shuffle(coords)   # 매 실행마다 클릭 순서 무작위
             n = len(coords)
             for i, (x, y) in enumerate(coords):
-                self.after(0, lambda a=i: self.status.set(f"🔗 연속클릭 {a+1}/{n} (랜덤 순서)..."))
+                self.after(0, lambda a=i: self.status.set(f"🔆 절전해제 {a+1}/{n} (랜덤 순서)..."))
                 pyautogui.click(x, y)
                 if i < n - 1:
                     time.sleep(random.uniform(mn, mx))   # 슬롯간 간격 (설정값 그대로, 추가 간격 없음)
-            self.after(0, lambda: self.status.set(f"✔ 연속클릭 완료 ({n}개)"))
+            self.after(0, lambda: self.status.set(f"✔ 절전해제 완료 ({n}개)"))
         except Exception as e:
-            self.after(0, lambda err=e: self.status.set(f"연속클릭 오류: {err}"))
+            self.after(0, lambda err=e: self.status.set(f"절전해제 오류: {err}"))
         finally:
             self._seq_running = False
             self._clear_busy("연속클릭")
@@ -4970,6 +4986,180 @@ class App(tk.Tk):
                 self.status.set(f"✔ 단축키 지정: {name}")
             self.after(0, _upd)
         threading.Thread(target=_cap, daemon=True).start()
+
+    # ── 🌙 절전모드 (절전해제와 동일 구조 — 별도 좌표/단축키/ON·OFF, 기본 Shift·ON) ──
+    def _open_slp_win(self):
+        self._open_section_win("_slp_win", "🌙 절전모드", self._build_slp, w=500, h=580)
+
+    def _slp_hotkey_label(self):
+        return f"단축키: {self._vk_name(self.cfg.get('slp_hotkey'))}"
+
+    def _build_slp(self, parent):
+        tk.Label(parent, text="절전모드 — 단축키를 누르면 순서대로 1회씩",
+                 font=("맑은 고딕", 9, "bold"), fg="#154360").pack(pady=(6, 2))
+        top = tk.Frame(parent); top.pack(pady=2)
+        self._slp_toggle_btn = tk.Button(top, text="OFF", font=("맑은 고딕", 9, "bold"),
+                                         bg="#7f8c8d", fg="white", width=6,
+                                         command=self._toggle_slp)
+        self._slp_toggle_btn.pack(side="left", padx=(0, 3))
+        tk.Button(top, text="▶ 실행", font=("맑은 고딕", 9, "bold"),
+                  bg="#27ae60", fg="white", width=6,
+                  command=self._start_slp).pack(side="left", padx=3)
+        tk.Button(top, text="⌨ 단축키", font=("맑은 고딕", 8),
+                  bg="#2c3e50", fg="white",
+                  command=self._assign_slp_hotkey).pack(side="left", padx=3)
+        tk.Button(top, text="👁 전체보기", font=("맑은 고딕", 8),
+                  bg="#566573", fg="white",
+                  command=lambda: self._flat_preview_all("slp")).pack(side="left", padx=3)
+        self._slp_hotkey_var = tk.StringVar(value=self._slp_hotkey_label())
+        tk.Label(parent, textvariable=self._slp_hotkey_var,
+                 font=("맑은 고딕", 8), fg="#154360").pack()
+        int_row = tk.Frame(parent); int_row.pack(pady=2)
+        tk.Label(int_row, text="간격(초)", font=("맑은 고딕", 8)).pack(side="left")
+        self._slp_min_var = tk.StringVar(value=str(self.cfg.get("slp_min", SEQ_MIN)))
+        self._slp_max_var = tk.StringVar(value=str(self.cfg.get("slp_max", SEQ_MAX)))
+        tk.Entry(int_row, textvariable=self._slp_min_var, width=4).pack(side="left", padx=2)
+        tk.Label(int_row, text="~").pack(side="left")
+        tk.Entry(int_row, textvariable=self._slp_max_var, width=4).pack(side="left", padx=2)
+        tk.Button(int_row, text="저장", font=("맑은 고딕", 7),
+                  command=self._save_slp_interval).pack(side="left", padx=3)
+        tk.Frame(parent, height=1, bg="#ccc").pack(fill="x", padx=8, pady=3)
+        self._build_flat_grid(parent, "slp")
+        self._refresh_slp_toggle()
+
+    def _refresh_slp_toggle(self):
+        if hasattr(self, "_slp_toggle_btn") and self._slp_toggle_btn.winfo_exists():
+            on = getattr(self, "_slp_on", False)
+            self._slp_toggle_btn.config(text="ON" if on else "OFF",
+                                        bg="#27ae60" if on else "#7f8c8d")
+
+    def _toggle_slp(self):
+        self._slp_on = not getattr(self, "_slp_on", False)
+        self.cfg["slp_on"] = self._slp_on
+        save_cfg(self.cfg)
+        self._refresh_slp_toggle()
+        self.status.set(f"절전모드 ON — {self._vk_name(self.cfg.get('slp_hotkey'))} 누르면 실행"
+                        if self._slp_on else "절전모드 OFF")
+
+    def _save_slp_interval(self):
+        try:
+            mn = float(self._slp_min_var.get()); mx = float(self._slp_max_var.get())
+            if mx < mn: mn, mx = mx, mn
+            self.cfg["slp_min"] = mn; self.cfg["slp_max"] = mx
+            save_cfg(self.cfg)
+            self.status.set(f"✔ 절전모드 간격 저장: {mn}~{mx}초")
+        except ValueError:
+            self.status.set("간격은 숫자로 입력하세요")
+
+    def _reg_slp_coord(self, idx):
+        self._slp_reg_idx = idx
+        self.status.set(f"3초 후 절전모드 #{idx+1} 위치를 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                   CoordOverlay(self, mode="slp")])
+
+    def on_slp_coord(self, x, y):
+        slp = self.cfg.get("slp_slots") or [None] * SEQ_SLOTS
+        while len(slp) < SEQ_SLOTS:
+            slp.append(None)
+        slp[self._slp_reg_idx] = [x, y]
+        self.cfg["slp_slots"] = slp
+        save_cfg(self.cfg)
+        if hasattr(self, "_slp_slot_vars") and self._slp_reg_idx < len(self._slp_slot_vars):
+            self._slp_slot_vars[self._slp_reg_idx].set(f"({x},{y})")
+        self.status.set(f"✔ 절전모드 #{self._slp_reg_idx+1} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _del_slp_coord(self, idx):
+        slp = self.cfg.get("slp_slots") or [None] * SEQ_SLOTS
+        if idx < len(slp):
+            slp[idx] = None
+            self.cfg["slp_slots"] = slp
+            save_cfg(self.cfg)
+        if hasattr(self, "_slp_slot_vars") and idx < len(self._slp_slot_vars):
+            self._slp_slot_vars[idx].set("미등록")
+        self.status.set(f"절전모드 #{idx+1} 삭제")
+
+    def _start_slp(self):
+        threading.Thread(target=self._run_slp, daemon=True).start()
+
+    def _run_slp(self):
+        if getattr(self, "_slp_running", False):
+            return
+        coords = [c for c in (self.cfg.get("slp_slots") or []) if c]
+        if not coords:
+            self.after(0, lambda: self.status.set("절전모드: 등록된 좌표가 없습니다"))
+            return
+        if not self._try_busy_or_queue("절전모드", self._start_slp):
+            return
+        self._slp_running = True
+        try:
+            self.after(0, self._seq_hide)
+            time.sleep(0.5)
+            mn = float(self.cfg.get("slp_min", SEQ_MIN))
+            mx = float(self.cfg.get("slp_max", SEQ_MAX))
+            if mx < mn: mn, mx = mx, mn
+            random.shuffle(coords)
+            n = len(coords)
+            for i, (x, y) in enumerate(coords):
+                self.after(0, lambda a=i: self.status.set(f"🌙 절전모드 {a+1}/{n} (랜덤 순서)..."))
+                pyautogui.click(x, y)
+                if i < n - 1:
+                    time.sleep(random.uniform(mn, mx))
+            self.after(0, lambda: self.status.set(f"✔ 절전모드 완료 ({n}개)"))
+        except Exception as e:
+            self.after(0, lambda err=e: self.status.set(f"절전모드 오류: {err}"))
+        finally:
+            self._slp_running = False
+            self._clear_busy("절전모드")
+            self.after(0, self._restore_back)
+
+    def _assign_slp_hotkey(self):
+        self.status.set("절전모드에 쓸 키를 누르세요... (5초 안에, ESC=취소)")
+        def _cap():
+            import ctypes
+            time.sleep(0.3)
+            end = time.time() + 5
+            captured = None
+            while time.time() < end:
+                for vk in range(0x08, 0xFF):
+                    if vk in (0x01, 0x02, 0x04):
+                        continue
+                    if ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000:
+                        captured = vk; break
+                if captured is not None:
+                    break
+                time.sleep(0.02)
+            if captured is None or captured == 0x1B:
+                self.after(0, lambda: self.status.set("절전모드 단축키 지정 취소"))
+                return
+            self.cfg["slp_hotkey"] = captured
+            save_cfg(self.cfg)
+            name = self._vk_name(captured)
+            def _upd():
+                if hasattr(self, "_slp_hotkey_var"):
+                    self._slp_hotkey_var.set(f"단축키: {name}")
+                self.status.set(f"✔ 절전모드 단축키 지정: {name}")
+            self.after(0, _upd)
+        threading.Thread(target=_cap, daemon=True).start()
+
+    def _slp_hotkey_loop(self):
+        """전역 단축키 감시 — 절전모드 ON 상태에서 지정키(기본 Shift)가 눌리면 실행."""
+        import ctypes
+        prev = False
+        while True:
+            time.sleep(0.03)
+            vk = self.cfg.get("slp_hotkey") or 0x10
+            if not getattr(self, "_slp_on", False):
+                prev = False
+                continue
+            try:
+                down = bool(ctypes.windll.user32.GetAsyncKeyState(int(vk)) & 0x8000)
+            except Exception:
+                prev = False
+                continue
+            if down and not prev and not getattr(self, "_slp_running", False):
+                threading.Thread(target=self._run_slp, daemon=True).start()
+            prev = down
 
     def _seq_hotkey_loop(self):
         """전역 단축키 감시 — ON 상태에서 지정키가 눌리면 연속 클릭 실행."""
@@ -6076,6 +6266,7 @@ class App(tk.Tk):
         """좌표 1개짜리 기능용 4×4 그리드. 셀=[번호][좌표버튼=등록] [×|복사|붙임|👁]."""
         cfgs = {
             "seq":   dict(key="seq_slots",   color="#7d3c98", reg=self._reg_seq_coord,   dele=self._del_seq_coord,   vars_attr="_seq_slot_vars"),
+            "slp":   dict(key="slp_slots",   color="#1f618d", reg=self._reg_slp_coord,   dele=self._del_slp_coord,   vars_attr="_slp_slot_vars"),
             "wdoff": dict(key="wdoff_slots", color="#5d6d7e", reg=self._reg_wdoff_coord, dele=self._del_wdoff_coord, vars_attr="_wdoff_slot_vars"),
         }
         sp = cfgs[fkey]
@@ -6170,7 +6361,8 @@ class App(tk.Tk):
 
     def _flat_spec(self, fkey):
         return {
-            "seq":   dict(title="연속클릭",     key="seq_slots",   reg=self._reg_seq_coord,   dele=self._del_seq_coord,   vars_attr="_seq_slot_vars"),
+            "seq":   dict(title="절전해제",     key="seq_slots",   reg=self._reg_seq_coord,   dele=self._del_seq_coord,   vars_attr="_seq_slot_vars"),
+            "slp":   dict(title="절전모드",     key="slp_slots",   reg=self._reg_slp_coord,   dele=self._del_slp_coord,   vars_attr="_slp_slot_vars"),
             "wdoff": dict(title="주말던전끄기", key="wdoff_slots", reg=self._reg_wdoff_coord, dele=self._del_wdoff_coord, vars_attr="_wdoff_slot_vars"),
         }[fkey]
 
@@ -10304,6 +10496,8 @@ class CoordOverlay(tk.Toplevel):
             _ci = app._reg_item_click_idx
             _w  = "쓸어올리기 시작점" if _ci == 2 else f"클릭{_ci+1}"
             label = f"아이템정리 #{app._reg_item_slot_idx+1} [{_w}] 위치"
+        elif mode == "slp":
+            label = f"절전모드 #{app._slp_reg_idx+1} 위치"
         elif mode == "seq":
             label = f"연속클릭 #{app._seq_reg_idx+1} 위치"
         elif mode == "tj":
@@ -10344,6 +10538,7 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "item":      self.app.on_item_coord(x, y)
         elif self.mode == "tj":        self.app.on_tj_coord(x, y)
         elif self.mode == "seq":       self.app.on_seq_coord(x, y)
+        elif self.mode == "slp":       self.app.on_slp_coord(x, y)
         elif self.mode == "dc":        self.app.on_dc_coord(x, y)
         elif self.mode == "doll":      self.app.on_doll_coord(x, y)
         elif self.mode == "wdoff":     self.app.on_wdoff_coord(x, y)
