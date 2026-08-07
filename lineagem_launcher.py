@@ -8061,32 +8061,22 @@ class App(tk.Tk):
         self._minimize_claude()
 
     def _islands_behind_front(self):
-        """섬/던전 실행기 창들을 '메인런처 바로 앞(클라이언트 뒤)'에 배치."""
+        """섬/던전 실행기 창들을 '메인런처 바로 앞(클라이언트 뒤)'에 배치.
+        창 제목으로 즉시 찾는다 — 프로세스 조회(PowerShell)는 2초씩 걸려 쓰지 않는다."""
         try:
-            import win32gui, win32con, win32process
+            import win32gui, win32con
             main = win32gui.FindWindow(None, "리니지M 자동 실행")
             if not main:
-                return
-            # 섬/던전 실행기 프로세스 ID 수집
-            import subprocess as _sp
-            out = _sp.check_output(
-                ["powershell", "-NoProfile", "-Command",
-                 "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' OR Name='python.exe'\" | "
-                 "Where-Object { $_.CommandLine -match 'lineagem_island' } | "
-                 "ForEach-Object { $_.ProcessId }"],
-                creationflags=0x08000000, stderr=_sp.DEVNULL).decode(errors="ignore")
-            pids = {int(x) for x in out.split() if x.strip().isdigit()}
-            if not pids:
                 return
             flags = (win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
             def _cb(hwnd, _):
                 try:
                     if not win32gui.IsWindowVisible(hwnd):
                         return True
-                    _t, pid = win32process.GetWindowThreadProcessId(hwnd)
-                    if pid in pids:
-                        l, t, r, b = win32gui.GetWindowRect(hwnd)
-                        if r - l > 200 and b - t > 200:      # 실제 실행기 창만
+                    t = win32gui.GetWindowText(hwnd)
+                    if t.startswith("🏝") or "섬/던전 실행기" in t:
+                        l, tp, r, b = win32gui.GetWindowRect(hwnd)
+                        if r - l > 200 and b - tp > 200:      # 실제 실행기 창만
                             win32gui.SetWindowPos(hwnd, main, 0, 0, 0, 0, flags)
                 except Exception:
                     pass
