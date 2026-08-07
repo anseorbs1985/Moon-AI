@@ -365,8 +365,9 @@ class IslandApp(tk.Tk):
         self.after(80, self._fit_width)
         if self._auto_run and self._focus_idx is not None:
             # 런처 ▶ 실행: 창을 아예 띄우지 않고 바로 실행 (과거섬처럼)
+            # 창을 띄우되 바로 '메인런처 앞(클라 뒤)'으로 보낸다
             try:
-                self.withdraw()
+                self.after(200, self._send_behind_main)
             except Exception:
                 pass
             key = self._dungeons_to_show[0]["key"]
@@ -1366,11 +1367,8 @@ class IslandApp(tk.Tk):
         self._active_key = key
         for k, btn in self._stop_btns.items():
             btn.config(state="normal" if k == key else "disabled")
-        if getattr(self, "_auto_run", False):
-            self.withdraw()      # 런처 ▶ 실행: 창 없이 바로 (작업표시줄에도 안 뜸)
-        else:
-            # 직접 연 창: 최소화하지 않고 '메인런처 바로 앞(클라 뒤)'으로 물러난다
-            self._send_behind_main()
+        # 창은 켜두되 '메인런처 바로 앞(클라 뒤)'으로 물러난다 (최소화 안 함)
+        self._send_behind_main()
         self._minimize_claude()
         threading.Thread(target=self._run, args=(key,),
                          kwargs={"sel_list": sel or None}, daemon=True).start()
@@ -1711,7 +1709,7 @@ class IslandApp(tk.Tk):
             if did:
                 gl = p["slot"].get("gap_list") or []
                 p["due"] = t + self._gap_seconds(gl[j] if j < len(gl) else None) * p["sp"] * pace * 1.05
-                t += 0.65           # 클릭 사이 평균 텀 (0.4~0.9)
+                t += 0.455          # 클릭 사이 평균 텀 (0.28~0.63)
             else:
                 p["due"] = t
         return t
@@ -1750,7 +1748,7 @@ class IslandApp(tk.Tk):
                          "sp": random.uniform(1.10, 1.20)}         # 이 슬롯 전체 10~20% 완화
         total = len(labels)
         # 목표 소요시간 랜덤 — 실행 전에 내부 시뮬레이션으로 배속을 맞춘다
-        target_sec = random.uniform(360, 405)   # 6:00~6:45
+        target_sec = random.uniform(252, 284)   # 30% 단축 (4:12~4:44)
         pace = self._calc_pace(state, total, target_sec)
         # 동시에 진행할 슬롯 수 제한 — 한 번에 4개만 돌리고, 하나가 끝나면 다음 슬롯 투입
         LANES = 4
@@ -1801,7 +1799,7 @@ class IslandApp(tk.Tk):
             else:
                 st["due"] = time.time()        # 빈 자리는 기다리지 않고 바로 다음으로
             # 마우스는 하나 — 클릭끼리 최소 간격을 둬서 씹힘 방지
-            time.sleep(random.uniform(0.4, 0.9))    # 클릭 사이 텀 50% 여유
+            time.sleep(random.uniform(0.28, 0.63))  # 클릭 사이 텀 (30% 단축)
         for si, _s in targets:
             self._add_count(si)
 
@@ -1901,7 +1899,7 @@ class IslandApp(tk.Tk):
                         continue
                     g = gl[j] if j < len(gl) else None
                     # 좌표 간 간격 10~25% 랜덤 증가 (× 녹화 없는 슬롯은 _slow 추가 완화)
-                    _mult = random.uniform(1.10, 1.25) * _slow * 1.5   # 전체 50% 여유
+                    _mult = random.uniform(1.10, 1.25) * _slow * 1.05  # 전체 30% 단축
                     if g is None or g == "":
                         time.sleep(CLICK_INTERVAL * _mult)
                     elif isinstance(g, (int, float)):

@@ -112,7 +112,7 @@ CLICK_SLOT_INTERVAL  = 3.5   # 클릭 슬롯 간 간격(초, #01→#02)
 CLICK_INTERVAL = CLICK_SLOT_INTERVAL  # 하위 호환
 MAIL_SLOTS     = 16
 MAIL_CLICKS    = 6
-MAIL_INTERVAL  = 1.6   # 우편함 클릭 간격(초)
+MAIL_INTERVAL  = 1.12   # 우편함 클릭 간격(초)
 DUNGEON_SLOTS  = 16
 DUNGEON_CLICKS = 5
 DUNGEON_HOVER  = 1.5
@@ -121,13 +121,13 @@ EVENTSHOP_CLICKS = 3   # 이벤트상점 — 슬롯당 좌표 3개
 COUPON_SLOT_GAP = 3.0  # 쿠폰등록 슬롯 간 기본 간격(초) — 슬롯마다 ×1.02~1.18 랜덤
 PAST_SLOTS     = 16
 PAST_CLICKS    = 3
-PAST_INTERVAL  = 4.0   # 과거의말하는섬 클릭 간격(초)
+PAST_INTERVAL  = 2.8   # 과거의말하는섬 클릭 간격(초)
 SCHED_SLOTS        = 16
 SCHED_CLICKS       = 3
 ITEM_SWIPE_DIST    = 250   # 아이템정리 클릭3: 누른 채 위로 쓸어올리는 거리(px) — 클라이언트 창 안에 있어야 함
 TJ_CLICKS          = 3     # TJ성공!! 슬롯당 좌표 수
-TJ_MIN             = 1.16  # TJ성공!! 좌표 간 클릭 간격(초) — 10~20% 완화(0.7~1.2 → 0.77~1.44)
-TJ_MAX             = 2.16
+TJ_MIN             = 0.81  # TJ성공!! 좌표 간 클릭 간격(초) — 10~20% 완화(0.7~1.2 → 0.77~1.44)
+TJ_MAX             = 1.51
 TJ_SLOT_MIN        = 0.7   # TJ성공!! 슬롯 간 간격(초) — 0.7~2.3 랜덤
 TJ_SLOT_MAX        = 2.3
 ITEM_SWIPE_COUNT   = 1     # 같은 자리에서 쓸어올리기 반복 횟수
@@ -163,8 +163,8 @@ DOLL_SLOT_MIN  = 2.0   # 슬롯 간 간격(초) — 2~4초 랜덤
 DOLL_SLOT_MAX  = 4.0
 # 씹힘 방지용 추가 좌표간 간격 (사냥·전체실행·인형탐험 제외 전 기능)
 # 2026-08-05: 너무 빠른 느낌이라 전체 10~20% 완화 (0.9~1.6 → 0.99~1.92)
-EXTRA_GAP_MIN  = 1.49
-EXTRA_GAP_MAX  = 2.88
+EXTRA_GAP_MIN  = 1.04
+EXTRA_GAP_MAX  = 2.02
 
 DEFAULT_CFG = {
     "lineagem":    None,
