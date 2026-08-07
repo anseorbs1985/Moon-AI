@@ -322,7 +322,8 @@ class IslandApp(tk.Tk):
                 self.tk.call("tk", "scaling", cur * 1.14)   # 30% 축소 배율
             except Exception:
                 pass
-            self._fixed_geometry = "686x790+76+43"   # 이전 크기의 70%
+            # 사용자가 맞춰놓은 크기·위치로 고정 (2026-08-07 확정)
+            self._fixed_geometry = "702x909+550+367"
             self.geometry(self._fixed_geometry)
         elif focus_idx is not None:
             self.geometry(f"500x{sh * 2 // 3}+{ox}+{oy}")
@@ -1709,7 +1710,7 @@ class IslandApp(tk.Tk):
             if did:
                 gl = p["slot"].get("gap_list") or []
                 p["due"] = t + self._gap_seconds(gl[j] if j < len(gl) else None) * p["sp"] * pace * 1.05
-                t += 0.455          # 클릭 사이 평균 텀 (0.28~0.63)
+                t += 0.525          # 클릭 사이 평균 텀 (0.35~0.7)
             else:
                 p["due"] = t
         return t
@@ -1799,7 +1800,7 @@ class IslandApp(tk.Tk):
             else:
                 st["due"] = time.time()        # 빈 자리는 기다리지 않고 바로 다음으로
             # 마우스는 하나 — 클릭끼리 최소 간격을 둬서 씹힘 방지
-            time.sleep(random.uniform(0.28, 0.63))  # 클릭 사이 텀 (30% 단축)
+            time.sleep(random.uniform(0.35, 0.7))   # 클릭 사이 텀 (창 전환 여유)
         for si, _s in targets:
             self._add_count(si)
 

@@ -8054,9 +8054,46 @@ class App(tk.Tk):
             pass
 
     def _back_and_claude(self):
-        """[⬇ 맨뒤로] 버튼 — 런처는 맨 뒤로, 클로드 창은 최소화."""
+        """[⬇ 맨뒤로] 버튼 — 런처는 맨 뒤로, 섬/던전 실행기는 그 바로 앞,
+        클로드 창은 최소화. (실행기는 최소화하지 않아 바로 쓸 수 있다)"""
         self._send_to_back()
+        self._islands_behind_front()
         self._minimize_claude()
+
+    def _islands_behind_front(self):
+        """섬/던전 실행기 창들을 '메인런처 바로 앞(클라이언트 뒤)'에 배치."""
+        try:
+            import win32gui, win32con, win32process
+            main = win32gui.FindWindow(None, "리니지M 자동 실행")
+            if not main:
+                return
+            # 섬/던전 실행기 프로세스 ID 수집
+            import subprocess as _sp
+            out = _sp.check_output(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' OR Name='python.exe'\" | "
+                 "Where-Object { $_.CommandLine -match 'lineagem_island' } | "
+                 "ForEach-Object { $_.ProcessId }"],
+                creationflags=0x08000000, stderr=_sp.DEVNULL).decode(errors="ignore")
+            pids = {int(x) for x in out.split() if x.strip().isdigit()}
+            if not pids:
+                return
+            flags = (win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
+            def _cb(hwnd, _):
+                try:
+                    if not win32gui.IsWindowVisible(hwnd):
+                        return True
+                    _t, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    if pid in pids:
+                        l, t, r, b = win32gui.GetWindowRect(hwnd)
+                        if r - l > 200 and b - t > 200:      # 실제 실행기 창만
+                            win32gui.SetWindowPos(hwnd, main, 0, 0, 0, 0, flags)
+                except Exception:
+                    pass
+                return True
+            win32gui.EnumWindows(_cb, None)
+        except Exception:
+            pass
 
     def _send_to_back(self):
         """창을 최소화하지 않고 z순서 맨 뒤로 (리니지M 클라이언트 뒤)."""
