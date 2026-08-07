@@ -685,6 +685,7 @@ class IslandApp(tk.Tk):
                 out.append(s if s else None)   # 문자열 그대로 저장 (숫자·이동 조합)
             self.cfg[key][idx]["gap_list"] = out
             save_cfg(self.cfg)
+        self._pop["save_gaps"] = _save_gaps
         # 클릭칸 이름표 — 캐릭/용도별로 구분할 수 있게 직접 수정 가능 (슬롯마다 저장)
         cn = list(slot.get("click_names") or [])
         while len(cn) < _n_clicks:
@@ -697,6 +698,7 @@ class IslandApp(tk.Tk):
                 out.append(None if (not s or s == _labels[i2]) else s)
             self.cfg[key][idx]["click_names"] = out
             save_cfg(self.cfg)
+        self._pop["save_names"] = _save_click_names
         # 클릭 대신 방향키 이동으로 쓸 자리 (dirs[j] = [방향, 초] 또는 None)
         dirs = list(slot.get("dirs") or [])
         while len(dirs) < _n_clicks:
@@ -815,9 +817,25 @@ class IslandApp(tk.Tk):
         except Exception:
             return None
 
+    def _commit_pending_edits(self, key=None, idx=None):
+        """열려 있는 좌표 팝업의 미저장 편집(간격·이름표)을 즉시 반영.
+        Entry는 FocusOut 때만 저장돼서, 고치자마자 [복사]를 누르면 옛 값이 복사된다."""
+        p = getattr(self, "_pop", {}) or {}
+        w = p.get("win")
+        if not (w and w.winfo_exists()):
+            return
+        if key is not None and (p.get("key") != key or p.get("slot") != idx):
+            return
+        for fn_key in ("save_gaps", "save_names"):
+            fn = p.get(fn_key)
+            if callable(fn):
+                try: fn()
+                except Exception: pass
+
     def _slot_copy(self, key, idx):
         """슬롯 좌표 복사 — 원하는 슬롯에서 [붙임]으로 붙여넣기 (인형탐험과 동일)."""
         import copy
+        self._commit_pending_edits(key, idx)   # 팝업에서 방금 고친 값까지 반영
         slot = self.cfg[key][idx]
         coords = slot.get("coords", [])
         if not (any(coords) or any(d for d in (slot.get("dirs") or []) if d)):
@@ -835,6 +853,7 @@ class IslandApp(tk.Tk):
     def _slot_paste(self, key, idx):
         """복사한 좌표 붙여넣기 — 클라이언트 창 위치 자동보정 (인형탐험과 동일)."""
         import copy
+        self._commit_pending_edits()      # 열린 팝업의 미저장 편집 먼저 확정
         clip = getattr(self, "_slot_clip", None)
         if not clip or clip.get("key") != key:
             self._status.set("먼저 이 던전의 슬롯에서 [복사]를 누르세요"); return
