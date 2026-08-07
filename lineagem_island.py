@@ -357,6 +357,11 @@ class IslandApp(tk.Tk):
         self.after(300, self._scroll_all_to_bottom)
         self.after(80, self._fit_width)
         if self._auto_run and self._focus_idx is not None:
+            # 런처 ▶ 실행: 창을 아예 띄우지 않고 바로 실행 (과거섬처럼)
+            try:
+                self.withdraw()
+            except Exception:
+                pass
             key = self._dungeons_to_show[0]["key"]
             self.after(500, lambda: self._start(key))
 
@@ -1321,7 +1326,10 @@ class IslandApp(tk.Tk):
         self._active_key = key
         for k, btn in self._stop_btns.items():
             btn.config(state="normal" if k == key else "disabled")
-        self.iconify()
+        if getattr(self, "_auto_run", False):
+            self.withdraw()      # 런처 ▶ 실행: 창 없이 바로 (작업표시줄에도 안 뜸)
+        else:
+            self.iconify()
         self._minimize_claude()
         threading.Thread(target=self._run, args=(key,),
                          kwargs={"sel_list": sel or None}, daemon=True).start()
