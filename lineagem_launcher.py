@@ -4894,12 +4894,23 @@ class App(tk.Tk):
         self.status.set(f"절전해제 #{idx+1} 삭제")
 
     def _seq_hide(self):
-        """연속클릭 실행 전, 리니지M 외 창(서브창/메인런처/클로드)을 최소화. 메인스레드에서 호출."""
+        """단축키 실행 전 창 정리 — 메인런처를 '즉시' 맨 뒤로 보낸 뒤 서브창을 정리한다.
+        (서브창을 먼저 최소화하면 포커스가 메인런처로 넘어와 잠깐 앞으로 튀어나온다)"""
+        self._quiet_restore = True          # 이 동안엔 어떤 이유로도 앞으로 올리지 않음
+        self._send_to_back()                # ① 먼저 뒤로
         try:
-            self._minimize_all()   # 서브창 + 클로드 최소화, 메인은 맨 뒤로
+            for w in self._section_wins():  # ② 서브창 정리
+                try: w.iconify()
+                except Exception: pass
+            self._minimize_claude()
         except Exception:
             pass
-        self._send_to_back()       # 한 번 더 확실히 맨 뒤로
+        self._send_to_back()                # ③ 다시 뒤로 (포커스 이동 상쇄)
+        # 늦게 도착하는 포커스 이벤트까지 눌러두기
+        self.after(120, self._send_to_back)
+        self.after(350, self._send_to_back)
+        self.after(600, lambda: (self._send_to_back(),
+                                 setattr(self, "_quiet_restore", False)))
 
     def _start_seq(self):
         threading.Thread(target=self._run_seq, daemon=True).start()
@@ -4912,13 +4923,14 @@ class App(tk.Tk):
         if not coords:
             self.after(0, lambda: self.status.set("절전해제: 등록된 좌표가 없습니다"))
             return
-        if not self._try_busy_or_queue("연속클릭", self._start_seq):
+        # 단축키 실행은 대기열에 넣지 않는다 (나중에 저절로 이어서 도는 것 방지)
+        if not self._try_busy("절전해제"):
             return
         self._seq_running = True
         try:
             # 클릭 좌표를 런처/연속클릭 창이 가리지 않도록 확실히 최소화 후 실행
             self.after(0, self._seq_hide)
-            time.sleep(0.5)
+            time.sleep(0.15)
             mn = float(self.cfg.get("seq_min", SEQ_MIN))
             mx = float(self.cfg.get("seq_max", SEQ_MAX))
             if mx < mn:
@@ -4935,7 +4947,7 @@ class App(tk.Tk):
             self.after(0, lambda err=e: self.status.set(f"절전해제 오류: {err}"))
         finally:
             self._seq_running = False
-            self._clear_busy("연속클릭")
+            self._clear_busy("절전해제")
             self.after(0, self._restore_back)   # 완료 후 런처/서브창 복원
 
     def _assign_seq_hotkey(self):
@@ -5073,12 +5085,12 @@ class App(tk.Tk):
         if not coords:
             self.after(0, lambda: self.status.set("절전모드: 등록된 좌표가 없습니다"))
             return
-        if not self._try_busy_or_queue("절전모드", self._start_slp):
+        if not self._try_busy("절전모드"):
             return
         self._slp_running = True
         try:
             self.after(0, self._seq_hide)
-            time.sleep(0.5)
+            time.sleep(0.15)
             mn = float(self.cfg.get("slp_min", SEQ_MIN))
             mx = float(self.cfg.get("slp_max", SEQ_MAX))
             if mx < mn: mn, mx = mx, mn
@@ -5523,7 +5535,7 @@ class App(tk.Tk):
         try:
             # 클릭 좌표를 런처/창이 가리지 않도록 최소화 후 실행(연속클릭과 동일)
             self.after(0, self._seq_hide)
-            time.sleep(0.5)
+            time.sleep(0.15)
             mn = float(self.cfg.get("dc_min", DC_MIN))
             mx = float(self.cfg.get("dc_max", DC_MAX))
             if mx < mn:
