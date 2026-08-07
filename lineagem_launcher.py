@@ -1360,7 +1360,7 @@ class App(tk.Tk):
 
         # 귀환주문서 우측: 섬/던전 4종을 2×2로 (클라이언트 사이에서 잘 보이게)
         tk.Frame(front_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(8,8))
-        isl_col = tk.Frame(front_row); isl_col.pack(side="left", anchor="n")
+        isl_col = tk.Frame(front_row); isl_col.pack(side="left", anchor="n", padx=(19, 0))
         tk.Label(isl_col, text="🏝 섬/던전", font=("맑은 고딕", 9, "bold"),
                  fg="#2c3e50").pack(anchor="w", pady=(0, 3))
         isl_grid = tk.Frame(isl_col); isl_grid.pack()
