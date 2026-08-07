@@ -1700,7 +1700,7 @@ class IslandApp(tk.Tk):
                          "sp": random.uniform(1.10, 1.20)}         # 이 슬롯 전체 10~20% 완화
         total = len(labels)
         # 목표 소요시간 4:00~4:30 랜덤 — 실행 전에 내부 시뮬레이션으로 배속을 맞춘다
-        target_sec = random.uniform(240, 270)
+        target_sec = random.uniform(360, 405)   # 4:00~4:30 → 50% 여유 (6:00~6:45)
         pace = self._calc_pace(state, total, target_sec)
         self._status.set(f"🎲 랜덤 번갈아 실행 — 목표 {int(target_sec//60)}분 {int(target_sec%60)}초 "
                          f"(배속 ×{pace:.2f})")
@@ -1735,7 +1735,7 @@ class IslandApp(tk.Tk):
             else:
                 st["due"] = time.time()        # 빈 자리는 기다리지 않고 바로 다음으로
             # 마우스는 하나 — 클릭끼리 최소 간격을 둬서 씹힘 방지
-            time.sleep(random.uniform(0.25, 0.6))
+            time.sleep(random.uniform(0.4, 0.9))    # 클릭 사이 텀 50% 여유
         for si, _s in targets:
             self._add_count(si)
 
@@ -1835,7 +1835,7 @@ class IslandApp(tk.Tk):
                         continue
                     g = gl[j] if j < len(gl) else None
                     # 좌표 간 간격 10~25% 랜덤 증가 (× 녹화 없는 슬롯은 _slow 추가 완화)
-                    _mult = random.uniform(1.10, 1.25) * _slow
+                    _mult = random.uniform(1.10, 1.25) * _slow * 1.5   # 전체 50% 여유
                     if g is None or g == "":
                         time.sleep(CLICK_INTERVAL * _mult)
                     elif isinstance(g, (int, float)):
