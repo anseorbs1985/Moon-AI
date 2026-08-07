@@ -205,7 +205,7 @@ DEFAULT_CFG = {
     "seq_min":      SEQ_MIN,
     "seq_max":      SEQ_MAX,
     "slp_slots":    [None]*SEQ_SLOTS,   # 절전모드 좌표 (연속클릭과 동일 구조)
-    "slp_hotkey":   0x10,               # 기본 Shift
+    "slp_hotkey":   0x7B,               # 기본 F12
     "slp_on":       True,               # 기본 ON
     "slp_min":      SEQ_MIN,
     "slp_max":      SEQ_MAX,

@@ -20090,5 +20090,7 @@
     "혈레이드 대장",
     ""
   ],
-  "dollcrack_hotkey": 112
+  "dollcrack_hotkey": 112,
+  "slp_hotkey": 123,
+  "slp_on": true
 }
