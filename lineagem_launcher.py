@@ -1367,8 +1367,9 @@ class App(tk.Tk):
         _ISLAND_NAMES  = ["오만의탑", "악몽의섬", "잊혀진섬", "에카"]
         _ISLAND_COLORS = ["#8e44ad", "#2471a3", "#16a085", "#d35400"]
         for i, label in enumerate(_ISLAND_NAMES):
+            # 세로 일렬 (오만의탑 → 악몽의섬 → 잊혀진섬 → 에카)
             cell = tk.Frame(isl_grid)
-            cell.grid(row=i // 2, column=i % 2, padx=3, pady=3, sticky="n")
+            cell.grid(row=i, column=0, padx=3, pady=2, sticky="n")
             tk.Button(cell, text=label, font=("맑은 고딕", 10, "bold"),
                       bg=_ISLAND_COLORS[i], fg="white", width=10, height=2,
                       command=lambda x=i: self._open_past_slot(x)).pack(side="top")
