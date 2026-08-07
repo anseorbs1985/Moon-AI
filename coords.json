@@ -5266,7 +5266,6 @@
   "seq_on": true,
   "seq_min": 0.53,
   "seq_max": 1.15,
-  "dollcrack_on": true,
   "wdoff_slots": [
     [
       327,
@@ -20090,7 +20089,6 @@
     "혈레이드 대장",
     ""
   ],
-  "dollcrack_hotkey": 112,
   "slp_hotkey": 123,
   "slp_on": true
 }

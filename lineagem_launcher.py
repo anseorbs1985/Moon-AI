@@ -209,7 +209,6 @@ DEFAULT_CFG = {
     "slp_on":       True,               # 기본 ON
     "slp_min":      SEQ_MIN,
     "slp_max":      SEQ_MAX,
-    "dollcrack_on": True,               # 인형까기 — 기본 ON, F1 꾹 = 커서 위치 따따따 후 ESC (재시작 유지)
     "wdoff_slots":  [None]*WDOFF_SLOTS, # 주말던전 끄기 좌표 (각 [x,y] 또는 None)
     "wdoff_hotkey": None,
     "wdoff_on":     False,
@@ -672,8 +671,6 @@ class App(tk.Tk):
         self._seq_on       = bool(self.cfg.get("seq_on", False))
         self._slp_on       = bool(self.cfg.get("slp_on", True))
         self._slp_running  = False
-        self._dollcrack_on = bool(self.cfg.get("dollcrack_on", False))
-        self._dollcrack_running = False
         self._seq_running  = False
         self._wdoff_on     = bool(self.cfg.get("wdoff_on", False))
         self._wdoff_running = False
@@ -712,8 +709,6 @@ class App(tk.Tk):
         self.after(1000, self._purple_check_tick)
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._slp_hotkey_loop, daemon=True).start()
-        self._install_f1_hook()   # 인형까기 F1 가로채기 (게임에 F1 전달 차단)
-        threading.Thread(target=self._dollcrack_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._wdoff_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._item_hotkey_loop, daemon=True).start()
@@ -4101,17 +4096,6 @@ class App(tk.Tk):
             else:
                 tk.Frame(grp, height=30).pack(side="top")
 
-        # 🧸 인형까기 — ON이면 F1 = 마우스 위치 연속 10클릭(0.1~0.2초) 후 ESC
-        grp = tk.Frame(self._sec_row); grp.pack(side="left", padx=2)
-        self._dollcrack_btn = tk.Button(grp, font=("맑은 고딕", 9, "bold"),
-                                        width=9, height=2, command=self._toggle_dollcrack)
-        self._dollcrack_btn.pack(side="top")
-        # 우클릭 = 단축키 변경 (게임이 그 키에 반응해 화면이 밀릴 때)
-        self._dollcrack_btn.bind("<Button-3>", lambda e: self._assign_dollcrack_hotkey())
-        self._dollcrack_key_lbl = tk.Label(grp, font=("맑은 고딕", 7), fg="#666")
-        self._dollcrack_key_lbl.pack(side="top")
-        self._refresh_dollcrack_btn()
-
         # 구분선
         tk.Frame(self._sec_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=4)
 
@@ -5180,202 +5164,7 @@ class App(tk.Tk):
                 threading.Thread(target=self._run_seq, daemon=True).start()
             prev = down
 
-    # ── 🧸 인형까기 — F1 꾹 = 커서 자리 연속 클릭, 떼면 ESC 1번 ──
-    def _install_f1_hook(self):
-        """저수준 키보드 훅을 '전용 스레드'에서 돌린다.
-        메인 스레드에 걸면 런처가 잠깐 바쁠 때 윈도우가 훅을 건너뛰거나 해제해서
-        (LowLevelHooksTimeout) F1이 게임으로 새어나가 화면이 밀린다."""
-        self._f1_phys_down = False
-        self._f1_hook = None
-        threading.Thread(target=self._f1_hook_thread, daemon=True).start()
-
-    def _f1_hook_thread(self):
-        try:
-            import ctypes
-            from ctypes import wintypes
-            u32 = ctypes.windll.user32
-            CMPFUNC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int,
-                                         wintypes.WPARAM, wintypes.LPARAM)
-            u32.SetWindowsHookExW.argtypes = [ctypes.c_int, CMPFUNC,
-                                              ctypes.c_void_p, wintypes.DWORD]
-            u32.SetWindowsHookExW.restype = ctypes.c_void_p
-            u32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int,
-                                           wintypes.WPARAM, wintypes.LPARAM]
-            u32.CallNextHookEx.restype = ctypes.c_long
-
-            class KBDLLHOOKSTRUCT(ctypes.Structure):
-                _fields_ = [("vkCode", wintypes.DWORD), ("scanCode", wintypes.DWORD),
-                            ("flags", wintypes.DWORD), ("time", wintypes.DWORD),
-                            ("dwExtraInfo", ctypes.c_void_p)]
-
-            def _cb(nCode, wParam, lParam):
-                try:
-                    if nCode >= 0 and getattr(self, "_dollcrack_on", False):
-                        ks = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-                        _hk = int(self.cfg.get("dollcrack_hotkey") or 0x70)
-                        if ks.vkCode == _hk and not (ks.flags & 0x10):   # 물리 단축키만
-                            if wParam in (0x100, 0x104):      # KEYDOWN
-                                if not self._f1_phys_down:
-                                    self._f1_phys_down = True
-                                    if not getattr(self, "_dollcrack_running", False):
-                                        threading.Thread(target=self._run_dollcrack,
-                                                         daemon=True).start()
-                            elif wParam in (0x101, 0x105):    # KEYUP
-                                self._f1_phys_down = False
-                            return 1   # 게임/다른 앱에 F1 전달 안 함
-                except Exception:
-                    pass
-                return u32.CallNextHookEx(None, nCode, wParam, lParam)
-
-            self._f1_hook_cb = CMPFUNC(_cb)   # GC 방지용 참조 유지
-            self._f1_hook = u32.SetWindowsHookExW(13, self._f1_hook_cb, None, 0)
-            if not self._f1_hook:
-                return   # 설치 실패 → 폴링 예비 경로가 담당
-            # 전용 메시지 펌프 — 훅 콜백이 여기서 처리된다 (메인 스레드 부하와 무관).
-            # 윈도우가 훅을 해제해버리면 다시 설치해 계속 살아 있게 한다.
-            msg = wintypes.MSG()
-            while True:
-                r = u32.GetMessageW(ctypes.byref(msg), None, 0, 0)
-                if r == 0 or r == -1:
-                    break
-                u32.TranslateMessage(ctypes.byref(msg))
-                u32.DispatchMessageW(ctypes.byref(msg))
-        except Exception:
-            self._f1_hook = None
-
-    def _dollcrack_hotkey_loop(self):
-        """전역 F1 감시(폴링) — 훅 설치에 실패한 경우에만 사용하는 예비 경로."""
-        import ctypes
-        prev = False
-        while True:
-            time.sleep(0.03)
-            if getattr(self, "_f1_hook", None):
-                prev = False
-                continue   # 훅이 살아 있으면 훅이 시작을 담당
-            if not getattr(self, "_dollcrack_on", False):
-                prev = False
-                continue
-            try:
-                _hk = int(self.cfg.get("dollcrack_hotkey") or 0x70)
-                down = bool(ctypes.windll.user32.GetAsyncKeyState(_hk) & 0x8000)
-            except Exception:
-                prev = False
-                continue
-            if down and not prev and not getattr(self, "_dollcrack_running", False):
-                threading.Thread(target=self._run_dollcrack, daemon=True).start()
-            prev = down
-
     @staticmethod
-    def _click_cursor_cp():
-        # 커서를 옮기지 않고 '지금 커서 자리'에서 좌클릭만 (LEFTDOWN/UP) —
-        # 좌표를 읽고 다시 찍는 방식은 DPI 오차가 누적돼 포인터가 흘러내림
-        import ctypes
-        PUL = ctypes.c_void_p
-        class MOUSEINPUT(ctypes.Structure):
-            _fields_ = [("dx", ctypes.c_long), ("dy", ctypes.c_long),
-                        ("mouseData", ctypes.c_ulong), ("dwFlags", ctypes.c_ulong),
-                        ("time", ctypes.c_ulong), ("dwExtraInfo", PUL)]
-        class KEYBDINPUT(ctypes.Structure):
-            _fields_ = [("wVk", ctypes.c_ushort), ("wScan", ctypes.c_ushort),
-                        ("dwFlags", ctypes.c_ulong), ("time", ctypes.c_ulong),
-                        ("dwExtraInfo", PUL)]
-        class _IN(ctypes.Union):
-            _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT)]
-        class INPUT(ctypes.Structure):
-            _fields_ = [("type", ctypes.c_ulong), ("u", _IN)]
-        for flag in (0x0002, 0x0004):   # LEFTDOWN → LEFTUP
-            inp = INPUT(type=0)
-            inp.u.mi = MOUSEINPUT(0, 0, 0, flag, 0, None)
-            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
-            time.sleep(0.008)
-
-    def _run_dollcrack(self):
-        # F1을 누르는 동안: 커서 자리 연속 클릭만 (따따따 — ESC는 절대 안 나감).
-        # F1을 떼면: 게임이 클릭을 소화한 뒤 ESC 딱 1번 (결과창 닫기).
-        # 중간 ESC 자동 반복은 결과창이 없는 타이밍에 눌려 화면을 뒤로 보내는
-        # 사고가 잦아서 폐지 — ESC는 오직 뗄 때 1번만.
-        self._dollcrack_running = True
-        try:
-            import ctypes
-            u32 = ctypes.windll.user32
-            _hk = int(self.cfg.get("dollcrack_hotkey") or 0x70)
-            def _f1_down():
-                if getattr(self, "_f1_hook", None):
-                    return bool(getattr(self, "_f1_phys_down", False))
-                return bool(u32.GetAsyncKeyState(_hk) & 0x8000)
-            class _PT(ctypes.Structure):
-                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-            pt = _PT()
-            u32.GetCursorPos(ctypes.byref(pt))
-            ax, ay = pt.x, pt.y   # F1 누른 순간의 자리 — 이 좌표만 계속 클릭 (처음 방식)
-            n = 0
-            while _f1_down():
-                # 이동+누름+뗌이 한 동작(SendInput 원자적)이라 클릭 도중 커서가
-                # 움직일 수 없음 → 드래그 스크롤/흘러내림 원천 차단
-                pyautogui.click(ax, ay)
-                n += 1
-                if n % 10 == 0:
-                    self.status.set(f"🧸 인형까기 클릭 {n}... (떼면 ESC 1번)")
-                time.sleep(0.06)
-            if n:
-                time.sleep(0.5)   # 밀린 클릭 소화 + 결과창 뜬 뒤에
-                self._send_key_input_cp(0x01, 0x0008)           # ESC down (스캔코드)
-                time.sleep(0.08)
-                self._send_key_input_cp(0x01, 0x0008 | 0x0002)  # ESC up
-                self.status.set(f"✔ 🧸 인형까기 — 클릭 {n}번 + ESC 1번")
-        except Exception as e:
-            self.status.set(f"인형까기 오류: {e}")
-        finally:
-            self._dollcrack_running = False
-
-    def _assign_dollcrack_hotkey(self):
-        """인형까기 단축키 변경 — 게임이 F1에 반응해 화면이 밀리면 다른 키로."""
-        self.status.set("🧸 인형까기: 5초 안에 사용할 키를 누르세요 (ESC=취소)")
-        def _cap():
-            import ctypes
-            time.sleep(0.3)
-            end = time.time() + 5
-            captured = None
-            while time.time() < end:
-                for vk in range(0x08, 0xFF):
-                    if vk in (0x01, 0x02, 0x04):
-                        continue
-                    if ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000:
-                        captured = vk; break
-                if captured is not None:
-                    break
-                time.sleep(0.02)
-            if captured is None or captured == 0x1B:
-                self.after(0, lambda: self.status.set("인형까기 단축키 변경 취소"))
-                return
-            self.cfg["dollcrack_hotkey"] = captured
-            save_cfg(self.cfg)
-            name = self._vk_name(captured)
-            self.after(0, lambda: [self._refresh_dollcrack_btn(),
-                                   self.status.set(f"✔ 인형까기 단축키: {name}")])
-        threading.Thread(target=_cap, daemon=True).start()
-
-    def _toggle_dollcrack(self):
-        self._dollcrack_on = not getattr(self, "_dollcrack_on", False)
-        self.cfg["dollcrack_on"] = self._dollcrack_on   # 재시작해도 유지
-        save_cfg(self.cfg)
-        self._refresh_dollcrack_btn()
-        self.status.set("🧸 인형까기 ON — F1 누르면 그 자리 연속 10클릭 + ESC"
-                        if self._dollcrack_on else "🧸 인형까기 OFF")
-
-    def _refresh_dollcrack_btn(self):
-        b = getattr(self, "_dollcrack_btn", None)
-        if not b or not b.winfo_exists(): return
-        lb = getattr(self, "_dollcrack_key_lbl", None)
-        if lb and lb.winfo_exists():
-            kn = self._vk_name(int(self.cfg.get("dollcrack_hotkey") or 0x70))
-            lb.config(text=f"{kn}꾹=따따따 (우클릭=키변경)")
-        if getattr(self, "_dollcrack_on", False):
-            b.config(text="🧸 인형까기\nON", bg="#27ae60", fg="white")
-        else:
-            b.config(text="🧸 인형까기\nOFF", bg="#7f8c8d", fg="white")
-
-    # ── 주말던전 끄기 (연속클릭과 동일 — 별도 좌표/단축키/ON·OFF) ──
     def _open_wdoff_win(self):
         self._open_section_win("_wdoff_win", "🚪 주말던전 끄기", self._build_wdoff, w=500, h=580)
 
