@@ -5713,6 +5713,225 @@ class App(tk.Tk):
         self._doll_pop_win = None
         self._refresh_doll_display()
 
+    # ── 인형탐험 프리셋 P1~P4 — 번호별 [그대로/삭제/위치변경]을 저장해두고 슬롯에 적용 ──
+    DOLL_PRESET_NAMES = ["전부다!!", "인형,성물!!", "인형!!", "성물!!"]
+
+    def _doll_presets(self):
+        lst = self.cfg.setdefault("_doll_presets", [])
+        names = self.DOLL_PRESET_NAMES
+        if len(lst) != len(names):
+            new = []
+            for i, nm in enumerate(names):
+                old = lst[i] if i < len(lst) else {}
+                new.append({"name": nm, "items": old.get("items", {}),
+                            "src": old.get("src", 1), "abs": old.get("abs", False)})
+            lst = new
+            self.cfg["_doll_presets"] = lst
+        return lst
+
+    def _doll_preset_color(self, pi):
+        return ("#1e8449", "#2471a3", "#b9770e", "#7d3c98")[pi % 4]
+
+    def _apply_doll_preset(self, idx, pi):
+        """이 슬롯의 지정 번호만 삭제/이동 (나머지 좌표는 그대로)."""
+        pr = self._doll_presets()[pi]
+        items = pr.get("items") or {}
+        if not items:
+            self.status.set(f"[{pr['name']}] 에 저장된 내용이 없습니다 — [⚙ 프리셋 설정]에서 만들어주세요")
+            return
+        slot = self.cfg["doll_slots"][idx]
+        cs = slot.setdefault("coords", [])
+        while len(cs) < DOLL_CLICKS: cs.append(None)
+        rects = self._client_rects_by_slot()
+        dels, movs = [], []
+        for k2, it in items.items():
+            j = int(k2)
+            if j >= DOLL_CLICKS: continue
+            if it.get("act") == "del":
+                cs[j] = None; dels.append(j + 1)
+            else:
+                rel = it.get("rel") or [0, 0]
+                if rects and not pr.get("abs"):
+                    cs[j] = [rel[0] + rects[idx][0], rel[1] + rects[idx][1]]
+                else:
+                    cs[j] = [rel[0], rel[1]]
+                movs.append(j + 1)
+        slot["name"] = pr.get("name") or f"P{pi+1}"
+        save_cfg(self.cfg)
+        self._refresh_doll_display()
+        if getattr(self, "_doll_pop_win", None) and self._doll_pop_win.winfo_exists() \
+           and getattr(self, "_doll_pop_slot", None) == idx:
+            self.after(50, lambda: self._open_doll_slot(idx))
+        self.status.set(f"✔ 인형탐험 #{idx+1:02d} [{slot['name']}] 적용 — "
+                        f"삭제 {sorted(dels) or '없음'} / 이동 {sorted(movs) or '없음'}")
+
+    def _build_doll_preset_row(self, parent, idx):
+        """슬롯 팝업용 프리셋 버튼 줄."""
+        box = tk.LabelFrame(parent, text="프리셋 (누르면 이 슬롯에 적용)",
+                            font=("맑은 고딕", 8), fg="#7d6608", padx=4, pady=3)
+        box.pack(fill="x", padx=10, pady=(4, 2))
+        self._doll_preset_btns = []
+        row = tk.Frame(box); row.pack(fill="x")
+        for pi, pr in enumerate(self._doll_presets()):
+            b = tk.Button(row, text=pr.get("name") or f"P{pi+1}",
+                          font=("맑은 고딕", 9, "bold"), width=10, pady=2,
+                          bg=self._doll_preset_color(pi), fg="white",
+                          command=lambda x=idx, q=pi: self._apply_doll_preset(x, q))
+            b.pack(side="left", padx=3)
+            self._doll_preset_btns.append(b)
+        tk.Button(box, text="⚙ 프리셋 설정", font=("맑은 고딕", 8, "bold"),
+                  bg="#7d6608", fg="white",
+                  command=self._open_doll_preset_win).pack(fill="x", pady=(3, 0))
+        return box
+
+    def _open_doll_preset_win(self):
+        """인형탐험 프리셋 편집 — 좌표 1~18번을 보여주고 번호별로 그대로/삭제/위치변경."""
+        old = getattr(self, "_doll_pw_win", None)
+        if old and old.winfo_exists():
+            try: old.destroy()
+            except Exception: pass
+        win = tk.Toplevel(self); self._doll_pw_win = win
+        win.title("⚙ 인형탐험 프리셋 편집")
+        win.attributes("-topmost", True)
+        self._doll_pw = {"pi": 0, "items": {}, "cells": [], "name": tk.StringVar(),
+                         "src": tk.StringVar(value="1")}
+        top = tk.Frame(win); top.pack(fill="x", padx=10, pady=(10, 4))
+        self._doll_pw["tabs"] = []
+        for pi, pr in enumerate(self._doll_presets()):
+            b = tk.Button(top, text=pr.get("name") or f"P{pi+1}",
+                          font=("맑은 고딕", 9, "bold"), width=10,
+                          bg=self._doll_preset_color(pi), fg="white",
+                          command=lambda x=pi: self._doll_preset_load(x))
+            b.pack(side="left", padx=2)
+            self._doll_pw["tabs"].append(b)
+        tk.Label(top, text="이름", font=("맑은 고딕", 9, "bold")).pack(side="left", padx=(10, 2))
+        tk.Entry(top, textvariable=self._doll_pw["name"], font=("맑은 고딕", 10),
+                 width=14).pack(side="left")
+        tk.Label(top, text="기준슬롯", font=("맑은 고딕", 9)).pack(side="left", padx=(8, 2))
+        tk.Spinbox(top, from_=1, to=DOLL_SLOTS, textvariable=self._doll_pw["src"],
+                   width=3, font=("맑은 고딕", 9)).pack(side="left")
+        _h = ("번호칸을 누르면 [그대로 ↔ 삭제] 전환,  [위치찍기]를 누르면 그 번호를 바꿀 자리를 화면에서 찍습니다." +
+              chr(10) + "저장 후 슬롯 좌표 팝업에서 프리셋 버튼을 누르면 그 번호들만 바뀝니다.")
+        tk.Label(win, text=_h, font=("맑은 고딕", 8), fg="#555",
+                 justify="left").pack(anchor="w", padx=10)
+        lg = tk.Frame(win); lg.pack(anchor="w", padx=10, pady=(2, 0))
+        tk.Label(lg, text=" 그대로 ", font=("맑은 고딕", 8), bg="#dfe3e6").pack(side="left")
+        tk.Label(lg, text=" ✖ 삭제 ", font=("맑은 고딕", 8), bg="#c0392b", fg="white").pack(side="left", padx=4)
+        tk.Label(lg, text=" 📍 위치변경 ", font=("맑은 고딕", 8), bg="#f39c12", fg="black").pack(side="left")
+        grid = tk.Frame(win); grid.pack(padx=10, pady=6)
+        for jx in range(DOLL_CLICKS):
+            cell = tk.Frame(grid, bd=1, relief="groove", padx=2, pady=1)
+            cell.grid(row=jx // 6, column=jx % 6, padx=3, pady=3, sticky="n")
+            tk.Label(cell, text=str(jx + 1), font=("맑은 고딕", 8, "bold"), fg="#555").pack()
+            sb = tk.Button(cell, text="그대로", font=("맑은 고딕", 8), width=8,
+                           bg="#dfe3e6", command=lambda x=jx: self._doll_preset_toggle(x))
+            sb.pack(pady=(1, 0))
+            pb = tk.Button(cell, text="위치찍기", font=("맑은 고딕", 8), width=8,
+                           bg="#95a5a6", fg="white",
+                           command=lambda x=jx: self._doll_preset_pick(x))
+            pb.pack(pady=(1, 0))
+            self._doll_pw["cells"].append({"state": sb, "pick": pb})
+        bot = tk.Frame(win); bot.pack(pady=(2, 10))
+        tk.Button(bot, text="💾 저장", font=("맑은 고딕", 10, "bold"), bg="#1e8449",
+                  fg="white", width=10, command=self._doll_preset_store).pack(side="left", padx=4)
+        tk.Button(bot, text="↺ 전부 그대로", font=("맑은 고딕", 9), bg="#7f8c8d", fg="white",
+                  command=self._doll_preset_clear).pack(side="left", padx=4)
+        tk.Button(bot, text="닫기", font=("맑은 고딕", 9), command=win.destroy).pack(side="left", padx=4)
+        self._doll_preset_load(0)
+
+    def _doll_preset_load(self, pi):
+        pw = self._doll_pw
+        pr = self._doll_presets()[pi]
+        pw["pi"] = pi
+        pw["items"] = {k: dict(v) for k, v in (pr.get("items") or {}).items()}
+        pw["name"].set(pr.get("name", ""))
+        pw["src"].set(str(pr.get("src", 1)))
+        for x, b in enumerate(pw["tabs"]):
+            b.config(relief="sunken" if x == pi else "raised", bd=4 if x == pi else 1)
+        self._doll_preset_refresh()
+
+    def _doll_preset_refresh(self):
+        for jx, c in enumerate(self._doll_pw["cells"]):
+            it = self._doll_pw["items"].get(str(jx))
+            if not it:
+                c["state"].config(text="그대로", bg="#dfe3e6", fg="black")
+                c["pick"].config(text="위치찍기", bg="#95a5a6", fg="white", relief="raised", bd=1)
+            elif it.get("act") == "del":
+                c["state"].config(text="✖ 삭제", bg="#c0392b", fg="white")
+                c["pick"].config(text="위치찍기", bg="#95a5a6", fg="white", relief="raised", bd=1)
+            else:
+                rel = it.get("rel") or [0, 0]
+                c["state"].config(text="📍 위치변경", bg="#f39c12", fg="black")
+                c["pick"].config(text="✔ " + str(rel[0]) + "," + str(rel[1]),
+                                 bg="#f1c40f", fg="black", relief="sunken", bd=3)
+
+    def _doll_preset_toggle(self, jx):
+        pw = self._doll_pw
+        if not pw["items"].get(str(jx)):
+            pw["items"][str(jx)] = {"act": "del"}
+        else:
+            pw["items"].pop(str(jx), None)
+        self._doll_preset_refresh()
+
+    def _doll_preset_pick(self, jx):
+        try:
+            base = int(self._doll_pw["src"].get()) - 1
+        except Exception:
+            base = 0
+        self._doll_pick = {"jx": jx, "base": base}
+        self.status.set(f"📍 클릭 {jx+1} 번을 바꿀 위치를 3초 후 화면에서 클릭하세요")
+        self.after(1500, lambda: CoordOverlay(self, mode="dollpreset"))
+
+    def on_dollpreset_coord(self, x, y):
+        pm = getattr(self, "_doll_pick", None) or {}
+        self._doll_pick = None
+        jx, base = pm.get("jx", 0), pm.get("base", 0)
+        rects = self._client_rects_by_slot()
+        hit = None
+        if rects:
+            for si, (l, t, r, b_) in enumerate(rects):
+                if l <= x <= r and t <= y <= b_:
+                    hit = si; break
+            if hit is not None:
+                base = hit
+                try: self._doll_pw["src"].set(str(base + 1))
+                except Exception: pass
+            rel = [x - rects[base][0], y - rects[base][1]]
+            self._doll_pw["abs"] = False
+        else:
+            rel = [x, y]
+            self._doll_pw["abs"] = True
+        self._doll_pw["items"][str(jx)] = {"act": "mov", "rel": rel}
+        self._doll_preset_refresh()
+        try:
+            w = getattr(self, "_doll_pw_win", None)
+            if w and w.winfo_exists(): w.deiconify(); w.lift()
+        except Exception:
+            pass
+        self.status.set(f"✔ 클릭 {jx+1} 번 위치 지정: ({x},{y})")
+
+    def _doll_preset_clear(self):
+        self._doll_pw["items"] = {}
+        self._doll_preset_refresh()
+        self.status.set("전부 그대로로 되돌림 — [💾 저장]을 눌러야 반영됩니다")
+
+    def _doll_preset_store(self):
+        pw = self._doll_pw; pi = pw["pi"]
+        try: src = int(pw["src"].get())
+        except Exception: src = 1
+        pres = self._doll_presets()
+        pres[pi] = {"name": pw["name"].get().strip() or self.DOLL_PRESET_NAMES[pi],
+                    "src": src, "abs": bool(pw.get("abs")),
+                    "items": {k: dict(v) for k, v in pw["items"].items()}}
+        self.cfg["_doll_presets"] = pres
+        save_cfg(self.cfg)
+        for x, b in enumerate(pw["tabs"]):
+            try: b.config(text=pres[x].get("name") or f"P{x+1}")
+            except Exception: pass
+        dels = sorted(int(k) + 1 for k, v in pw["items"].items() if v.get("act") == "del")
+        movs = sorted(int(k) + 1 for k, v in pw["items"].items() if v.get("act") == "mov")
+        self.status.set(f"💾 [{pres[pi]['name']}] 저장 — 삭제 {dels or '없음'} / 이동 {movs or '없음'}")
+
     def _open_doll_slot(self, idx):
         """슬롯 하나의 18좌표 등록 팝업 (셀의 '좌표 x/18' 클릭 시)."""
         if getattr(self, "_doll_pop_win", None) and self._doll_pop_win.winfo_exists():
@@ -5728,6 +5947,7 @@ class App(tk.Tk):
         self._doll_pop_name = nv
         ent = tk.Entry(top, textvariable=nv, font=("맑은 고딕", 9), width=14)
         ent.pack(side="left", padx=6)
+        self._build_doll_preset_row(win, idx)   # 프리셋 P1~P4
         ent.bind("<FocusOut>", lambda e: self._save_doll_pop_name())
         ent.bind("<Return>",   lambda e: self._save_doll_pop_name())
 
@@ -10348,6 +10568,8 @@ class CoordOverlay(tk.Toplevel):
             label = f"TJ성공!! #{app._reg_tj_slot_idx+1} [좌표{app._reg_tj_click_idx+1}] 위치"
         elif mode == "dc":
             label = f"일반던전충전 #{app._dc_reg_idx+1} 위치"
+        elif mode == "dollpreset":
+            label = f"인형탐험 프리셋 — 클릭 {getattr(app, '_doll_pick', {}).get('jx', 0)+1} 번 위치"
         elif mode == "doll":
             label = f"인형탐험 #{app._doll_reg_idx+1} 좌표{app._doll_reg_step+1} 위치"
         elif mode == "wdoff":
@@ -10385,6 +10607,7 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "slp":       self.app.on_slp_coord(x, y)
         elif self.mode == "dc":        self.app.on_dc_coord(x, y)
         elif self.mode == "doll":      self.app.on_doll_coord(x, y)
+        elif self.mode == "dollpreset": self.app.on_dollpreset_coord(x, y)
         elif self.mode == "wdoff":     self.app.on_wdoff_coord(x, y)
         else:                          self.app.on_coord(x, y)
 
