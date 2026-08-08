@@ -993,9 +993,22 @@ class IslandApp(tk.Tk):
         self._preset_pick = None
         jx, base = pm.get("jx", 0), pm.get("base", 0)
         rects = self._client_rects_by_slot()
+        hit = None
         if rects:
+            # 찍은 지점이 실제로 어느 클라이언트 안인지 자동 인식 —
+            # '기준슬롯' 번호와 다른 창을 찍어도 좌표가 밀리지 않게
+            for si, (l, t, r, b_) in enumerate(rects):
+                if l <= x <= r and t <= y <= b_:
+                    hit = si
+                    break
+            if hit is not None:
+                base = hit
             rel = [x - rects[base][0], y - rects[base][1]]
             self._pw["abs"] = False
+            try:
+                self._pw["src"].set(str(base + 1))       # 인식된 슬롯을 기준으로 표시
+            except Exception:
+                pass
         else:
             rel = [x, y]
             self._pw["abs"] = True
@@ -1008,6 +1021,7 @@ class IslandApp(tk.Tk):
         except Exception:
             pass
         self._status.set("클릭 " + str(jx + 1) + " 번 위치 지정: (" + str(x) + "," + str(y) + ")"
+                         + ("  [클라 #" + str(base + 1) + " 자동 인식]" if hit is not None else "")
                          + "  — 이어서 다른 번호도 지정하세요")
 
     def _preset_clear(self):
