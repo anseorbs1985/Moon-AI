@@ -4138,7 +4138,7 @@ class App(tk.Tk):
         # 가운데 제목
         center = tk.Frame(body, bg=DARK); center.pack(expand=True)
         tk.Label(center, text="⚔", font=("맑은 고딕", 15), bg=DARK, fg=GOLD2).pack(side="left", padx=(0, 8))
-        tk.Label(center, text="리니지M 자동 실행", font=("맑은 고딕", 18, "bold"),
+        tk.Label(center, text="대균아!!  열심히 살자!!  화이팅!", font=("맑은 고딕", 18, "bold"),
                  bg=DARK, fg=GOLD).pack(side="left")
         tk.Label(center, text="⚔", font=("맑은 고딕", 15), bg=DARK, fg=GOLD2).pack(side="left", padx=(8, 0))
         tk.Frame(wrap, height=2, bg=GOLD2).pack(fill="x")         # 아래 골드 라인
@@ -4925,6 +4925,10 @@ class App(tk.Tk):
         except Exception:
             pass
         self._send_to_back()                # ③ 다시 뒤로 (포커스 이동 상쇄)
+        try:
+            self.iconify()                  # ④ 실행 중엔 아예 최소화
+        except Exception:
+            pass
         # 늦게 도착하는 포커스 이벤트까지 눌러두기
         self.after(120, self._send_to_back)
         self.after(350, self._send_to_back)
@@ -8048,10 +8052,15 @@ class App(tk.Tk):
         return wins
 
     def _minimize_all(self):
-        # 원칙: 메인런처는 최소화하지 않고 '맨 뒤'로만 보낸다 (서브창·클로드는 최소화)
+        # 실행 중에는 메인런처도 최소화한다 (2026-08-07 사용자 지시 — 화면에 남아 있으면
+        # 실수로 클릭할 수 있어서). 완료 후엔 _restore_back이 '맨 뒤'로만 되살린다.
         for w in self._section_wins():
             w.iconify()
         self._send_to_back()
+        try:
+            self.iconify()
+        except Exception:
+            pass
         self._minimize_claude()
 
     def _go_home(self):
