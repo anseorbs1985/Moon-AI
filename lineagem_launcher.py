@@ -4971,7 +4971,7 @@ class App(tk.Tk):
         finally:
             self._seq_running = False
             self._clear_busy("절전해제")
-            self.after(0, self._restore_back)   # 완료 후 런처/서브창 복원
+            self.after(0, self._restore_back_quiet)   # 앞으로 띄우지 않고 바로 맨 뒤로
 
     def _assign_seq_hotkey(self):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
@@ -5130,7 +5130,7 @@ class App(tk.Tk):
         finally:
             self._slp_running = False
             self._clear_busy("절전모드")
-            self.after(0, self._restore_back)
+            self.after(0, self._restore_back_quiet)   # 앞으로 띄우지 않고 바로 맨 뒤로
 
     def _assign_slp_hotkey(self):
         self.status.set("절전모드에 쓸 키를 누르세요... (5초 안에, ESC=취소)")
@@ -8121,6 +8121,24 @@ class App(tk.Tk):
                                       win32con.SWP_NOACTIVATE)
         except Exception:
             pass
+
+    def _restore_back_quiet(self):
+        """절전해제(F11)·절전모드(F12) 전용 — 앞으로 띄우지 않고 곧바로 맨 뒤로 되살린다."""
+        try:
+            if getattr(self, "_back_after_id", None):
+                self.after_cancel(self._back_after_id)
+                self._back_after_id = None
+        except Exception:
+            pass
+        self._quiet_restore = True          # <Map>/포커스 핸들러의 '앞으로 올리기' 억제
+        try:
+            self.deiconify()
+        except Exception:
+            pass
+        self._send_to_back()
+        self.after(200, self._send_to_back)
+        self.after(600, self._send_to_back)
+        self.after(1500, lambda: setattr(self, "_quiet_restore", False))
 
     def _restore_back(self):
         """작업 완료 후 복원 — 결과를 볼 수 있게 1분간 앞으로 띄웠다가 자동으로 맨 뒤로.
