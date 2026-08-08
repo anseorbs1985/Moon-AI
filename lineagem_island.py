@@ -1078,11 +1078,18 @@ class IslandApp(tk.Tk):
                 else:
                     cs[j] = [rel[0], rel[1]]
                 movs.append(j + 1)
+        # 어떤 프리셋을 적용했는지 슬롯 이름에 남긴다 (미등록 → 프리셋 이름)
+        nm = pr.get("name") or ("P" + str(pi + 1))
+        self._paste_ts = time.time()      # 늦게 오는 이름칸 저장이 덮어쓰지 않게
+        slot["name"] = nm
+        try:
+            self._cell_name_vars[key][idx].set(nm)
+        except Exception:
+            pass
         save_cfg(self.cfg)
         self._refresh(key)
         if self._pop.get("win") and self._pop["win"].winfo_exists() and self._pop.get("slot") == idx:
             self.after(50, lambda: self._open_slot_pop(key, idx))
-        nm = pr.get("name") or ("P" + str(pi + 1))
         self._status.set("#" + str(idx + 1) + " " + nm + " 적용 — 삭제 " +
                          str(sorted(dels) or "없음") + " / 이동 " + str(sorted(movs) or "없음"))
 
