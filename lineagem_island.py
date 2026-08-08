@@ -894,10 +894,23 @@ class IslandApp(tk.Tk):
         nm = (pr.get("name") or "").strip() or ("P" + str(pi + 1))
         return (fl + " " + nm).strip()
 
+    @staticmethod
+    def _preset_color(name):
+        """이름으로 색 배정 — 기본=진회색, 주홍이=보라 계열, 빨갱이=빨강 계열
+        (48% < 82% 순으로 점점 밝게)."""
+        nm = (name or "").strip()
+        if "빨갱이" in nm:
+            if "82" in nm: return "#e74c3c"
+            if "48" in nm: return "#c0392b"
+            return "#7b241c"
+        if "주홍" in nm:
+            if "82" in nm: return "#9b59b6"
+            if "48" in nm: return "#7d3c98"
+            return "#5b2c6f"
+        return "#2c3e50"            # 기본!! 등
+
     def _build_preset_rows(self, parent, key, idx):
         """프리셋 버튼을 층별 박스로 묶어 배치 — 층 제목 아래에 버튼들(많으면 2줄)."""
-        _PC = ("#5b2c6f", "#7d3c98", "#9b59b6", "#8e44ad", "#6c3483",
-               "#7b241c", "#c0392b", "#e74c3c", "#d35400", "#a04000")
         wrap = tk.Frame(parent)
         wrap.pack(fill="x", padx=10, pady=(4, 2))
         if not hasattr(self, "_preset_btns"):
@@ -918,7 +931,8 @@ class IslandApp(tk.Tk):
                 _b = tk.Button(rows[k2 // per] if rows else box,
                                text=self._preset_short(key, pi),
                                font=("맑은 고딕", 8, "bold"), width=9,
-                               bg=_PC[k2 % len(_PC)], fg="white", pady=2,
+                               bg=self._preset_color(self._preset_short(key, pi)),
+                               fg="white", pady=2,
                                command=lambda k=key, x=idx, q=pi: self._apply_preset(k, x, q))
                 _b.pack(side="left", padx=2, pady=1)
                 self._preset_btns[key].append(_b)
@@ -960,6 +974,7 @@ class IslandApp(tk.Tk):
                 b = tk.Button(_rows[_k // _per] if _rows else _box,
                               text=self._preset_short(key, _pi),
                               font=("맑은 고딕", 8, "bold"), width=9, pady=2,
+                              bg=self._preset_color(self._preset_short(key, _pi)), fg="white",
                               command=lambda x=_pi: self._preset_load(x))
                 b.pack(side="left", padx=2, pady=1)
                 self._pw["tabs"].append(b)
@@ -1007,8 +1022,11 @@ class IslandApp(tk.Tk):
         pw["name"].set(pr.get("name", ""))
         pw["src"].set(str(pr.get("src", 1)))
         for x, b in enumerate(pw["tabs"]):
-            b.config(bg="#5b2c6f" if x == pi else "#dfe3e6",
-                     fg="white" if x == pi else "black")
+            base = self._preset_color(self._preset_short(key, x))
+            b.config(bg=base, fg="white",
+                     relief="sunken" if x == pi else "raised",
+                     bd=4 if x == pi else 1,
+                     highlightbackground="#f1c40f")
         self._preset_refresh_cells()
 
     def _preset_refresh_cells(self):
