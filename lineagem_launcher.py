@@ -8123,7 +8123,7 @@ class App(tk.Tk):
             pass
 
     def _restore_back_quiet(self):
-        """절전해제(F11)·절전모드(F12) 전용 — 앞으로 띄우지 않고 곧바로 맨 뒤로 되살린다."""
+        """완료 후 복원 — 앞으로 띄우지 않고 곧바로 맨 뒤로 되살린다 (모든 실행 공통)."""
         try:
             if getattr(self, "_back_after_id", None):
                 self.after_cancel(self._back_after_id)
@@ -8141,33 +8141,10 @@ class App(tk.Tk):
         self.after(1500, lambda: setattr(self, "_quiet_restore", False))
 
     def _restore_back(self):
-        """작업 완료 후 복원 — 결과를 볼 수 있게 1분간 앞으로 띄웠다가 자동으로 맨 뒤로.
-        (2026-08-07 사용자 지시. 이후에도 클라이언트를 가리지 않게 뒤로 물러난다)"""
-        self._quiet_restore = False
-        try:
-            self.deiconify()
-            self.lift()
-            import win32gui, win32con
-            hwnd = win32gui.FindWindow(None, "리니지M 자동 실행")
-            if hwnd:
-                win32gui.SetWindowPos(hwnd, win32con.HWND_TOP, 0, 0, 0, 0,
-                                      win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
-        except Exception:
-            pass
-        # 같은 작업이 연달아 끝나도 타이머가 겹치지 않게 하나만 유지
-        try:
-            if getattr(self, "_back_after_id", None):
-                self.after_cancel(self._back_after_id)
-        except Exception:
-            pass
-
-        def _go_back():
-            self._back_after_id = None
-            self._quiet_restore = True          # 내려가는 동안 '앞으로 올리기' 억제
-            self._send_to_back()
-            self.after(300, self._send_to_back)
-            self.after(1500, lambda: setattr(self, "_quiet_restore", False))
-        self._back_after_id = self.after(60000, _go_back)   # 1분 뒤 맨 뒤로
+        """모든 작업 완료 후 복원 — 앞으로 띄우지 않고 곧바로 '맨 뒤'로 되살린다.
+        (2026-08-07 사용자 지시: 완료 후 창이 앞으로 나오지 않게 통일.
+         결과는 나중에 런처를 직접 열어 상태줄에서 확인)"""
+        self._restore_back_quiet()
 
     def _restore_all(self):
         self.deiconify()
