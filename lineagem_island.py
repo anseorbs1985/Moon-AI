@@ -855,6 +855,9 @@ class IslandApp(tk.Tk):
     PRESET_DEFAULT = [("", ["주홍이 기본!", "주홍이 48%", "주홍이 82%",
                             "빨갱이 기본!", "빨갱이 48%", "빨갱이 82%"])]
 
+    # 층이 달라도 이름이 같으면 함께 저장할 클릭 번호 (0-based) — 오만의탑 12·13번
+    PRESET_SYNC_CLICKS = {"수금_오만의탑": (11, 12)}
+
     def _preset_layout(self, key):
         return self.PRESET_LAYOUT.get(key, self.PRESET_DEFAULT)
 
@@ -1124,13 +1127,31 @@ class IslandApp(tk.Tk):
                     "name": pw["name"].get().strip(), "src": src,
                     "abs": bool(pw.get("abs")),
                     "items": {k2: dict(v) for k2, v in pw["items"].items()}}
+        # 같은 이름의 다른 층 프리셋에도 공유 클릭(12·13번)을 함께 저장
+        sync = self.PRESET_SYNC_CLICKS.get(key, ())
+        synced = []
+        if sync:
+            me = pres[pi]
+            for oi, other in enumerate(pres):
+                if oi == pi or (other.get("name") or "") != (me.get("name") or ""):
+                    continue
+                oit = other.setdefault("items", {})
+                for j in sync:
+                    if str(j) in me["items"]:
+                        oit[str(j)] = dict(me["items"][str(j)])
+                    else:
+                        oit.pop(str(j), None)
+                synced.append(other.get("floor") or ("P" + str(oi + 1)))
         self.cfg["_presets"][key] = pres
         save_cfg(self.cfg)
         self._refresh_preset_btns(key)
         dels = sorted(int(k2) + 1 for k2, v in pw["items"].items() if v.get("act") == "del")
         movs = sorted(int(k2) + 1 for k2, v in pw["items"].items() if v.get("act") == "mov")
-        self._status.set("P" + str(pi + 1) + " 저장 — 삭제 " + str(dels or "없음") +
-                         " / 이동 " + str(movs or "없음"))
+        msg = ("저장 — 삭제 " + str(dels or "없음") + " / 이동 " + str(movs or "없음"))
+        if synced:
+            msg += ("   [클릭 " + ",".join(str(j + 1) for j in sync) +
+                    "번을 " + " ".join(synced) + " '" + (pres[pi].get("name") or "") + "'에도 같이 저장]")
+        self._status.set(msg)
 
     def _refresh_preset_btns(self, key):
         for pi, b in enumerate(getattr(self, "_preset_btns", {}).get(key, [])):
