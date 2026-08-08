@@ -808,275 +808,118 @@ class IslandApp(tk.Tk):
                 en.pack()
                 tk.Label(gc, text="ㅡ", font=("맑은 고딕", 8, "bold"), fg="#888").pack()
                 en.bind("<FocusOut>", _save_gaps); en.bind("<Return>", _save_gaps)
-        # ── 프리셋 P1~P5 — 누르면 이 슬롯에 '삭제 번호 + 이동 번호'가 한 번에 적용 ──
-        pf = tk.LabelFrame(win, text="프리셋 (누르면 이 슬롯에 적용)",
-                           font=("맑은 고딕", 8), fg="#7d6608", padx=4, pady=3)
-        pf.pack(fill="x", padx=10, pady=(6, 0))
-        prow = tk.Frame(pf); prow.pack(fill="x")
-        if not hasattr(self, "_preset_btns"):
-            self._preset_btns = {}
-        self._preset_btns[key] = []
-        for pi in range(5):
-            b = tk.Button(prow, text=self._preset_label(key, pi),
-                          font=("맑은 고딕", 8, "bold"), bg="#5b2c6f", fg="white",
-                          width=11, wraplength=90,
-                          command=lambda k=key, x=idx, q=pi: self._apply_preset(k, x, q))
-            b.pack(side="left", padx=2, fill="x", expand=True)
-            self._preset_btns[key].append(b)
-        tk.Button(pf, text="⚙ 프리셋 설정", font=("맑은 고딕", 7), bg="#7d6608", fg="white",
-                  command=lambda k=key: self._open_preset_win(k)).pack(fill="x", pady=(3, 0))
-
-        bot = tk.Frame(win); bot.pack(pady=(4, 10))
-        tk.Button(bot, text="▶ 이 슬롯 테스트", font=("맑은 고딕", 8, "bold"),
-                  bg="#1e8449", fg="white",
-                  command=lambda: self._test(key, idx)).pack(side="left", padx=3)
-        if idx > 0:
-            tk.Button(bot, text="↑ 윗슬롯 복사", font=("맑은 고딕", 8), bg="#7d6608", fg="white",
-                      command=lambda: self._copy_from_above(key, idx)).pack(side="left", padx=3)
-        tk.Button(bot, text="👁 미리보기", font=("맑은 고딕", 8), bg="#566573", fg="white",
-                  command=lambda: self._preview(key, idx)).pack(side="left", padx=3)
-        tk.Button(bot, text="× 전체삭제", font=("맑은 고딕", 8), fg="white", bg="#c0392b",
-                  command=lambda: self._del(key, idx)).pack(side="left", padx=3)
-        tk.Button(bot, text="닫기", font=("맑은 고딕", 8), command=win.destroy).pack(side="left", padx=3)
-
-    def _client_rects_by_slot(self):
-        """리니지M 클라이언트 창 16개를 화면 배치(세로 열우선 01~16) 순서로 반환.
-        16개가 정확히 안 보이면 None (보정 불가) — 인형탐험과 동일 방식."""
-        try:
-            import win32gui
-            wins = []
-            def cb(h, _):
-                if win32gui.IsWindowVisible(h) and not win32gui.IsIconic(h):
-                    t = win32gui.GetWindowText(h)
-                    if t.startswith("리니지M l"):
-                        l, tp, r, b = win32gui.GetWindowRect(h)
-                        if r - l > 100 and b - tp > 100:
-                            wins.append((l, tp, r, b))
-                return True
-            win32gui.EnumWindows(cb, None)
-            if len(wins) != 16:
-                return None
-            wins.sort(key=lambda w: w[0])                     # x(열) 정렬
-            cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
-            return [w for col in cols for w in col]           # 01~16 (열 우선)
-        except Exception:
-            return None
-
-    # ── 번호 지정 일괄 적용 (지정한 클릭 번호만 전 슬롯에 복사 / 삭제) ──
-    @staticmethod
-    def _parse_nums(text, maxn):
-        """'3,7,12-14' → [2,6,11,12,13] (0부터 시작하는 인덱스)."""
-        out = []
-        for tok in str(text).replace(" ", "").split(","):
-            if not tok:
-                continue
-            try:
-                if "-" in tok:
-                    a, b = tok.split("-")
-                    for n in range(int(a), int(b) + 1):
-                        if 1 <= n <= maxn: out.append(n - 1)
-                else:
-                    n = int(tok)
-                    if 1 <= n <= maxn: out.append(n - 1)
-            except Exception:
-                continue
-        return sorted(set(out))
-
-    def _nums_apply(self, key):
-        """기준 슬롯의 '지정한 번호' 좌표·간격·방향·이름·녹화를 다른 슬롯 전부에 적용."""
-        import copy
-        self._commit_pending_edits()
-        ui = self._numsel.get(key) or {}
-        idxs = self._parse_nums(ui.get("nums").get() if ui.get("nums") else "", clicks_for(key))
-        if not idxs:
-            self._status.set("번호를 먼저 적어주세요 (예: 3,7,12-14)"); return
-        try:
-            src = int(ui["src"].get()) - 1
-        except Exception:
-            src = 0
-        slots = self.cfg[key]
-        rects = self._client_rects_by_slot()
-        done = 0
-        for t, slot in enumerate(slots):
-            if t == src:
-                continue
-            dx = dy = 0
-            if rects:
-                dx = rects[t][0] - rects[src][0]
-                dy = rects[t][1] - rects[src][1]
-            for j in idxs:
-                # 좌표 (클라이언트 위치 보정)
-                sc = (slots[src].get("coords") or [])
-                c = sc[j] if j < len(sc) else None
-                cs = slot.setdefault("coords", [])
-                while len(cs) <= j: cs.append(None)
-                cs[j] = [c[0] + dx, c[1] + dy] if c else None
-                # 간격·방향·이름표
-                for fld, n_ in (("gap_list", clicks_for(key) - 1),
-                                ("dirs", clicks_for(key)),
-                                ("click_names", clicks_for(key))):
-                    sl = list(slots[src].get(fld) or [])
-                    tl = list(slot.get(fld) or [])
-                    while len(sl) <= j: sl.append(None)
-                    while len(tl) <= j: tl.append(None)
-                    if j < n_:
-                        tl[j] = copy.deepcopy(sl[j])
-                    slot[fld] = tl
-                # 녹화 (마우스 좌표 보정)
-                srec = (slots[src].get("recs") or {}).get(str(j))
-                trec = slot.setdefault("recs", {})
-                if srec:
-                    ev = copy.deepcopy(srec)
-                    if dx or dy:
-                        for e in ev:
-                            if e[1] in ("md", "mu", "mm"):
-                                e[2] += dx; e[3] += dy
-                    trec[str(j)] = ev
-                else:
-                    trec.pop(str(j), None)
-            done += 1
-        save_cfg(self.cfg)
-        self._refresh(key)
-        note = "" if rects else " (⚠ 클라 16개 감지 실패 — 위치 보정 없음)"
-        self._status.set(f"✔ 클릭 {[i+1 for i in idxs]} 번을 #{src+1:02d} 기준으로 {done}개 슬롯에 적용{note}")
-
-    def _nums_delete(self, key):
-        """지정한 번호의 좌표·방향·녹화를 전 슬롯에서 삭제 (간격 시간은 유지)."""
-        ui = self._numsel.get(key) or {}
-        idxs = self._parse_nums(ui.get("nums").get() if ui.get("nums") else "", clicks_for(key))
-        if not idxs:
-            self._status.set("삭제할 번호를 적어주세요 (예: 23,24)"); return
-        _msg = ("클릭 " + str([i + 1 for i in idxs]) +
-                " 번을 이 던전의 16슬롯 전부에서 삭제할까요?" +
-                chr(10) + "(간격 시간은 그대로 둡니다)")
-        if not messagebox.askyesno("번호 삭제", _msg, default="no"):
-            return
-        for slot in self.cfg[key]:
-            cs = slot.get("coords") or []
-            ds = slot.get("dirs") or []
-            rc = slot.get("recs") or {}
-            for j in idxs:
-                if j < len(cs): cs[j] = None
-                if j < len(ds): ds[j] = None
-                rc.pop(str(j), None)
-            slot["coords"] = cs; slot["dirs"] = ds; slot["recs"] = rc
-        save_cfg(self.cfg)
-        self._refresh(key)
-        self._status.set(f"✔ 클릭 {[i+1 for i in idxs]} 번 — 전 슬롯에서 삭제 완료")
-
-    # ── 프리셋 P1~P5 — 이름을 붙여두고, 슬롯 팝업에서 한 번에 적용 ──
-    #    프리셋 = {name, dels:[번호], mods:{번호: [클라 기준 상대x, 상대y]}}
+        # ── 프리셋 P1~P5 — 좌표 목록에서 번호별로 [그대로/삭제/위치변경]을 골라 저장 ──
     def _presets(self, key):
         allp = self.cfg.setdefault("_presets", {})
         lst = allp.setdefault(key, [])
         while len(lst) < 5:
-            lst.append({"name": "", "dels": "", "mods": {}})
+            lst.append({"name": "", "items": {}, "src": 1})
+        for pr in lst:                     # 예전 형식(dels/mods) 자동 변환
+            if "items" not in pr:
+                items = {}
+                for n in self._parse_nums(pr.get("dels", ""), clicks_for(key)):
+                    items[str(n)] = {"act": "del"}
+                for k2, rel in (pr.get("mods") or {}).items():
+                    items[str(k2)] = {"act": "mov", "rel": list(rel)}
+                pr["items"] = items
         return lst
 
     def _preset_label(self, key, pi):
         pr = self._presets(key)[pi]
-        return pr.get("name") or f"P{pi+1}"
+        n = len(pr.get("items") or {})
+        nm = pr.get("name") or ("P" + str(pi + 1))
+        return (nm + chr(10) + "(" + str(n) + "개)") if n else nm
 
     def _open_preset_win(self, key):
-        """프리셋 관리 창 — 이름 / 삭제할 번호 / 이동할 번호(기준 슬롯에서 가져옴)."""
+        """프리셋 편집 — 좌표 1~N번을 전부 보여주고 번호별로 그대로/삭제/위치변경 선택."""
         old = getattr(self, "_preset_win", None)
         if old and old.winfo_exists():
             try: old.destroy()
             except Exception: pass
         d = next(x for x in DUNGEONS if x["key"] == key)
         win = tk.Toplevel(self); self._preset_win = win
-        win.title(f"⚙ 프리셋 설정 — {d['label'].replace(chr(10), ' ')}")
+        win.title("프리셋 편집 — " + d["label"].replace(chr(10), " "))
         win.attributes("-topmost", True)
-        _help = ("① 이름·삭제번호·이동번호를 적고 [📍 좌표찍기] → 번호마다 바꿀 위치를 화면에서 클릭" + chr(10) +
-                 "② 슬롯 좌표 팝업에서 이 버튼을 누르면 그 슬롯의 해당 번호만 바뀝니다 (나머지는 그대로)")
-        tk.Label(win, text=_help, font=("맑은 고딕", 8), fg="#555",
-                 justify="left").pack(anchor="w", padx=10, pady=(8, 4))
-        body = tk.Frame(win); body.pack(padx=10, pady=4)
-        hdr = ("", "이름", "삭제번호", "이동번호", "기준", "", "")
-        for c, t in enumerate(hdr):
-            tk.Label(body, text=t, font=("맑은 고딕", 8, "bold"), fg="#7d6608").grid(row=0, column=c, padx=2)
-        rows = []
-        pres = self._presets(key)
+        self._pw = {"key": key, "pi": 0, "items": {}, "cells": [],
+                    "name": tk.StringVar(), "src": tk.StringVar(value="1")}
+        top = tk.Frame(win); top.pack(fill="x", padx=10, pady=(10, 4))
+        self._pw["tabs"] = []
         for pi in range(5):
-            pr = pres[pi]
-            tk.Label(body, text=f"P{pi+1}", font=("맑은 고딕", 9, "bold")).grid(row=pi+1, column=0, padx=2, pady=2)
-            nv = tk.StringVar(value=pr.get("name", ""))
-            tk.Entry(body, textvariable=nv, width=14, font=("맑은 고딕", 9)).grid(row=pi+1, column=1, padx=2)
-            dv = tk.StringVar(value=pr.get("dels", ""))
-            tk.Entry(body, textvariable=dv, width=12, font=("맑은 고딕", 9)).grid(row=pi+1, column=2, padx=2)
-            mv = tk.StringVar(value=",".join(str(int(k2)+1) for k2 in sorted((pr.get("mods") or {}),
-                                                                            key=lambda x: int(x))))
-            tk.Entry(body, textvariable=mv, width=12, font=("맑은 고딕", 9)).grid(row=pi+1, column=3, padx=2)
-            sv = tk.StringVar(value=str(pr.get("src", 1)))
-            tk.Spinbox(body, from_=1, to=SLOTS, textvariable=sv, width=3,
-                       font=("맑은 고딕", 9)).grid(row=pi+1, column=4, padx=2)
-            tk.Button(body, text="📍 좌표찍기", font=("맑은 고딕", 8, "bold"), bg="#2980b9", fg="white",
-                      command=lambda k=key, x=pi: self._preset_pick_start(k, x, rows[x])
-                      ).grid(row=pi+1, column=5, padx=3)
-            tk.Button(body, text="💾 저장", font=("맑은 고딕", 8), bg="#1e8449", fg="white",
-                      command=lambda k=key, x=pi: self._preset_save(k, x, rows[x])
-                      ).grid(row=pi+1, column=6, padx=3)
-            rows.append({"name": nv, "dels": dv, "mods": mv, "src": sv})
-        tk.Label(win, text="예) 삭제번호 23,24   이동번호 5,12-14   기준 = 그 위치가 맞춰진 슬롯 번호",
-                 font=("맑은 고딕", 8), fg="#888").pack(anchor="w", padx=10, pady=(2, 8))
-        tk.Button(win, text="닫기", font=("맑은 고딕", 9), command=win.destroy).pack(pady=(0, 10))
+            b = tk.Button(top, text="P" + str(pi + 1), font=("맑은 고딕", 9, "bold"), width=5,
+                          command=lambda x=pi: self._preset_load(x))
+            b.pack(side="left", padx=2)
+            self._pw["tabs"].append(b)
+        tk.Label(top, text="이름", font=("맑은 고딕", 9, "bold")).pack(side="left", padx=(12, 2))
+        tk.Entry(top, textvariable=self._pw["name"], font=("맑은 고딕", 10), width=16).pack(side="left")
+        tk.Label(top, text="기준슬롯", font=("맑은 고딕", 9)).pack(side="left", padx=(10, 2))
+        tk.Spinbox(top, from_=1, to=SLOTS, textvariable=self._pw["src"], width=3,
+                   font=("맑은 고딕", 9)).pack(side="left")
+        _h = ("번호칸을 누르면 [그대로 ↔ 삭제] 전환,  [위치]를 누르면 그 번호를 바꿀 자리를 화면에서 찍습니다." +
+              chr(10) + "저장 후 슬롯 좌표 팝업에서 그 프리셋 버튼을 누르면 그 번호들만 바뀝니다 (나머지는 그대로).")
+        tk.Label(win, text=_h, font=("맑은 고딕", 8), fg="#555",
+                 justify="left").pack(anchor="w", padx=10)
+        grid = tk.Frame(win); grid.pack(padx=10, pady=6)
+        for jx in range(clicks_for(key)):
+            cell = tk.Frame(grid, bd=1, relief="groove", padx=2, pady=1)
+            cell.grid(row=jx // 6, column=jx % 6, padx=3, pady=3, sticky="n")
+            tk.Label(cell, text=str(jx + 1), font=("맑은 고딕", 8, "bold"), fg="#555").pack()
+            sb = tk.Button(cell, text="그대로", font=("맑은 고딕", 8), width=8,
+                           bg="#dfe3e6", command=lambda x=jx: self._preset_toggle(x))
+            sb.pack(pady=(1, 0))
+            pb = tk.Button(cell, text="위치", font=("맑은 고딕", 8), width=8,
+                           bg="#2980b9", fg="white",
+                           command=lambda x=jx: self._preset_pick_one(x))
+            pb.pack(pady=(1, 0))
+            self._pw["cells"].append({"state": sb, "pick": pb})
+        bot = tk.Frame(win); bot.pack(pady=(2, 10))
+        tk.Button(bot, text="저장", font=("맑은 고딕", 10, "bold"), bg="#1e8449", fg="white",
+                  width=10, command=self._preset_store).pack(side="left", padx=4)
+        tk.Button(bot, text="전부 그대로", font=("맑은 고딕", 9), bg="#7f8c8d", fg="white",
+                  command=self._preset_clear).pack(side="left", padx=4)
+        tk.Button(bot, text="닫기", font=("맑은 고딕", 9), command=win.destroy).pack(side="left", padx=4)
+        self._preset_load(0)
 
-    def _preset_save(self, key, pi, row):
-        """프리셋 저장 — 이동번호는 '기준 슬롯'의 현재 좌표를 클라 기준 상대값으로 기억."""
-        self._commit_pending_edits()
-        nclk = clicks_for(key)
-        dels = row["dels"].get().strip()
-        mod_idx = self._parse_nums(row["mods"].get(), nclk)
-        try:
-            src = int(row["src"].get()) - 1
-        except Exception:
-            src = 0
-        rects = self._client_rects_by_slot()
-        mods, miss = {}, []
-        s_slot = self.cfg[key][src]
-        for j in mod_idx:
-            cs = s_slot.get("coords") or []
-            c = cs[j] if j < len(cs) else None
-            if not c:
-                miss.append(j + 1); continue
-            if rects:
-                ox, oy = rects[src][0], rects[src][1]
-                mods[str(j)] = [c[0] - ox, c[1] - oy]      # 클라 기준 상대 좌표
+    def _preset_load(self, pi):
+        pw = self._pw; key = pw["key"]
+        pr = self._presets(key)[pi]
+        pw["pi"] = pi
+        pw["items"] = {k2: dict(v) for k2, v in (pr.get("items") or {}).items()}
+        pw["name"].set(pr.get("name", ""))
+        pw["src"].set(str(pr.get("src", 1)))
+        for x, b in enumerate(pw["tabs"]):
+            b.config(bg="#5b2c6f" if x == pi else "#dfe3e6",
+                     fg="white" if x == pi else "black")
+        self._preset_refresh_cells()
+
+    def _preset_refresh_cells(self):
+        pw = self._pw
+        for jx, c in enumerate(pw["cells"]):
+            it = pw["items"].get(str(jx))
+            if not it:
+                c["state"].config(text="그대로", bg="#dfe3e6", fg="black")
+            elif it.get("act") == "del":
+                c["state"].config(text="삭제", bg="#c0392b", fg="white")
             else:
-                mods[str(j)] = [c[0], c[1]]                # 보정 불가 — 절대값
-        pres = self._presets(key)
-        pres[pi] = {"name": row["name"].get().strip(), "dels": dels,
-                    "mods": mods, "src": src + 1, "abs": not bool(rects)}
-        self.cfg["_presets"][key] = pres
-        save_cfg(self.cfg)
-        self._refresh_preset_btns(key)
-        note = f" (좌표 없는 번호 {miss} 는 제외)" if miss else ""
-        self._status.set(f"💾 P{pi+1} '{pres[pi]['name'] or ''}' 저장 — 삭제 {dels or '없음'} / "
-                         f"이동 {[int(k2)+1 for k2 in mods]}{note}")
+                c["state"].config(text="이동 지정", bg="#2980b9", fg="white")
 
-    def _preset_pick_start(self, key, pi, row):
-        """프리셋의 '이동 번호'들을 화면에서 직접 찍어 등록 — 번호마다 순서대로 클릭."""
-        nclk = clicks_for(key)
-        nums = self._parse_nums(row["mods"].get(), nclk)
-        if not nums:
-            self._status.set("먼저 '이동번호'를 적어주세요 (예: 5,12-14)"); return
+    def _preset_toggle(self, jx):
+        pw = self._pw
+        if not pw["items"].get(str(jx)):
+            pw["items"][str(jx)] = {"act": "del"}
+        else:
+            pw["items"].pop(str(jx), None)
+        self._preset_refresh_cells()
+
+    def _preset_pick_one(self, jx):
+        """이 번호를 바꿀 위치를 화면에서 직접 찍는다 (기준 슬롯 클라 기준으로 저장)."""
+        pw = self._pw
         try:
-            base = int(row["src"].get()) - 1
+            base = int(pw["src"].get()) - 1
         except Exception:
             base = 0
-        self._preset_pick = {"key": key, "pi": pi, "row": row, "nums": nums,
-                             "at": 0, "base": base, "got": {}}
-        self._preset_pick_next()
-
-    def _preset_pick_next(self):
-        pm = self._preset_pick
-        if not pm:
-            return
-        if pm["at"] >= len(pm["nums"]):
-            self._preset_pick_finish(); return
-        j = pm["nums"][pm["at"]]
-        self._status.set(f"📍 [{pm['at']+1}/{len(pm['nums'])}] 클릭 {j+1} 번을 바꿀 위치를 "
-                         f"3초 후 화면에서 클릭하세요 (기준 슬롯 #{pm['base']+1:02d})")
+        self._preset_pick = {"jx": jx, "base": base}
+        self._status.set("클릭 " + str(jx + 1) + " 번을 바꿀 위치를 3초 후 화면에서 클릭하세요"
+                         + " (기준 슬롯 #" + str(base + 1) + ")")
         try:
             w = getattr(self, "_preset_win", None)
             if w and w.winfo_exists(): w.withdraw()
@@ -1085,41 +928,48 @@ class IslandApp(tk.Tk):
         self.after(3000, self._open_overlay)
 
     def _preset_pick_done(self, x, y):
-        pm = self._preset_pick
-        j = pm["nums"][pm["at"]]
-        pm["got"][str(j)] = [x, y]
-        pm["at"] += 1
-        self._status.set(f"✔ 클릭 {j+1} 번 → ({x},{y})")
-        self.after(400, self._preset_pick_next)
-
-    def _preset_pick_finish(self):
-        """찍은 좌표들을 기준 슬롯의 클라 위치 기준 상대좌표로 저장."""
         pm = self._preset_pick or {}
         self._preset_pick = None
-        key, pi, row = pm["key"], pm["pi"], pm["row"]
+        jx, base = pm.get("jx", 0), pm.get("base", 0)
         rects = self._client_rects_by_slot()
-        base = pm["base"]
-        mods = {}
-        for k2, xy in pm["got"].items():
-            if rects:
-                mods[k2] = [xy[0] - rects[base][0], xy[1] - rects[base][1]]
-            else:
-                mods[k2] = [xy[0], xy[1]]
-        pres = self._presets(key)
-        pres[pi] = {"name": row["name"].get().strip(), "dels": row["dels"].get().strip(),
-                    "mods": mods, "src": base + 1, "abs": not bool(rects)}
-        self.cfg["_presets"][key] = pres
-        save_cfg(self.cfg)
-        self._refresh_preset_btns(key)
+        if rects:
+            rel = [x - rects[base][0], y - rects[base][1]]
+            self._pw["abs"] = False
+        else:
+            rel = [x, y]
+            self._pw["abs"] = True
+        self._pw["items"][str(jx)] = {"act": "mov", "rel": rel}
+        self._preset_refresh_cells()
         try:
             w = getattr(self, "_preset_win", None)
             if w and w.winfo_exists():
                 w.deiconify(); w.lift()
         except Exception:
             pass
-        note = "" if rects else " (⚠ 클라 16개 감지 실패 — 위치 보정 없이 절대좌표로 저장)"
-        self._status.set(f"💾 P{pi+1} '{pres[pi]['name'] or ''}' 저장 — "
-                         f"이동 {[int(k2)+1 for k2 in mods]} 찍은 위치로{note}")
+        self._status.set("클릭 " + str(jx + 1) + " 번 위치 지정: (" + str(x) + "," + str(y) + ")")
+
+    def _preset_clear(self):
+        self._pw["items"] = {}
+        self._preset_refresh_cells()
+        self._status.set("전부 그대로로 되돌림 — [저장]을 눌러야 반영됩니다")
+
+    def _preset_store(self):
+        pw = self._pw; key = pw["key"]; pi = pw["pi"]
+        try:
+            src = int(pw["src"].get())
+        except Exception:
+            src = 1
+        pres = self._presets(key)
+        pres[pi] = {"name": pw["name"].get().strip(), "src": src,
+                    "abs": bool(pw.get("abs")),
+                    "items": {k2: dict(v) for k2, v in pw["items"].items()}}
+        self.cfg["_presets"][key] = pres
+        save_cfg(self.cfg)
+        self._refresh_preset_btns(key)
+        dels = sorted(int(k2) + 1 for k2, v in pw["items"].items() if v.get("act") == "del")
+        movs = sorted(int(k2) + 1 for k2, v in pw["items"].items() if v.get("act") == "mov")
+        self._status.set("P" + str(pi + 1) + " 저장 — 삭제 " + str(dels or "없음") +
+                         " / 이동 " + str(movs or "없음"))
 
     def _refresh_preset_btns(self, key):
         for pi, b in enumerate(getattr(self, "_preset_btns", {}).get(key, [])):
@@ -1130,42 +980,42 @@ class IslandApp(tk.Tk):
                 pass
 
     def _apply_preset(self, key, idx, pi):
-        """슬롯 팝업의 P버튼 — 이 슬롯에 프리셋 적용 (삭제 + 이동)."""
+        """슬롯 팝업의 프리셋 버튼 — 이 슬롯의 해당 번호만 삭제/이동 (나머지는 그대로)."""
         pr = self._presets(key)[pi]
-        nclk = clicks_for(key)
-        dels = self._parse_nums(pr.get("dels", ""), nclk)
-        mods = pr.get("mods") or {}
-        if not dels and not mods:
-            self._status.set(f"P{pi+1}에 저장된 내용이 없습니다 — [⚙ 프리셋 설정]에서 먼저 저장하세요")
+        items = pr.get("items") or {}
+        if not items:
+            self._status.set("P" + str(pi + 1) + "에 저장된 내용이 없습니다 — 프리셋 설정에서 만들어주세요")
             return
+        nclk = clicks_for(key)
         slot = self.cfg[key][idx]
         cs = slot.setdefault("coords", [])
         while len(cs) < nclk: cs.append(None)
         ds = slot.setdefault("dirs", [])
         rc = slot.setdefault("recs", {})
-        # 1) 삭제
-        for j in dels:
-            cs[j] = None
-            if j < len(ds): ds[j] = None
-            rc.pop(str(j), None)
-        # 2) 이동 (클라 기준 상대 → 이 슬롯 클라 위치에 맞춰 절대 좌표로)
         rects = self._client_rects_by_slot()
-        moved = []
-        for k2, rel in mods.items():
+        dels, movs = [], []
+        for k2, it in items.items():
             j = int(k2)
             if j >= nclk: continue
-            if rects and not pr.get("abs"):
-                ox, oy = rects[idx][0], rects[idx][1]
-                cs[j] = [rel[0] + ox, rel[1] + oy]
+            if it.get("act") == "del":
+                cs[j] = None
+                if j < len(ds): ds[j] = None
+                rc.pop(str(j), None)
+                dels.append(j + 1)
             else:
-                cs[j] = [rel[0], rel[1]]
-            moved.append(j + 1)
+                rel = it.get("rel") or [0, 0]
+                if rects and not pr.get("abs"):
+                    cs[j] = [rel[0] + rects[idx][0], rel[1] + rects[idx][1]]
+                else:
+                    cs[j] = [rel[0], rel[1]]
+                movs.append(j + 1)
         save_cfg(self.cfg)
         self._refresh(key)
         if self._pop.get("win") and self._pop["win"].winfo_exists() and self._pop.get("slot") == idx:
-            self.after(50, lambda: self._open_slot_pop(key, idx))   # 팝업 표시 갱신
-        nm = pr.get("name") or f"P{pi+1}"
-        self._status.set(f"✔ #{idx+1:02d} '{nm}' 적용 — 삭제 {[i+1 for i in dels] or '없음'} / 이동 {moved or '없음'}")
+            self.after(50, lambda: self._open_slot_pop(key, idx))
+        nm = pr.get("name") or ("P" + str(pi + 1))
+        self._status.set("#" + str(idx + 1) + " " + nm + " 적용 — 삭제 " +
+                         str(sorted(dels) or "없음") + " / 이동 " + str(sorted(movs) or "없음"))
 
     def _commit_pending_edits(self, key=None, idx=None):
         """열려 있는 좌표 팝업의 미저장 편집(간격·이름표)을 즉시 반영.
