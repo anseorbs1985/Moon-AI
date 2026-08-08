@@ -1358,26 +1358,6 @@ class App(tk.Tk):
         return_col = tk.Frame(front_row); return_col.pack(side="left", anchor="n")
         self._build_return_grid(return_col)
 
-        # 귀환주문서 우측: 섬/던전 4종을 2×2로 (클라이언트 사이에서 잘 보이게)
-        tk.Frame(front_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(8,8))
-        isl_col = tk.Frame(front_row); isl_col.pack(side="left", anchor="n", padx=(24, 0))
-        tk.Label(isl_col, text="🏝 섬/던전", font=("맑은 고딕", 9, "bold"),
-                 fg="#2c3e50").pack(anchor="w", pady=(0, 3))
-        isl_grid = tk.Frame(isl_col); isl_grid.pack()
-        _ISLAND_NAMES  = ["오만의탑", "악몽의섬", "잊혀진섬", "에카"]
-        _ISLAND_COLORS = ["#8e44ad", "#2471a3", "#16a085", "#d35400"]
-        for i, label in enumerate(_ISLAND_NAMES):
-            # 세로 일렬 (오만의탑 → 악몽의섬 → 잊혀진섬 → 에카)
-            cell = tk.Frame(isl_grid)
-            cell.grid(row=i, column=0, padx=3, pady=2, sticky="n")
-            tk.Button(cell, text=label, font=("맑은 고딕", 10, "bold"),
-                      bg=_ISLAND_COLORS[i], fg="white", width=10, height=2,
-                      command=lambda x=i: self._open_past_slot(x)).pack(side="top")
-            tk.Button(cell, text="▶ 실행", font=("맑은 고딕", 9, "bold"),
-                      bg=_ISLAND_COLORS[i], fg="white", width=10, height=1, pady=4,
-                      command=lambda x=i: self._run_island_slot(x)
-                      ).pack(side="top", pady=(1, 0))
-
         # 서브창 핸들 초기화
         self._settings_win = None
         self._hunt_win     = None
@@ -4118,6 +4098,19 @@ class App(tk.Tk):
 
         # 구분선
         tk.Frame(self._sec_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=4)
+
+        # 과거섬 슬롯 4개 고정 (이름 하드코딩) — 위=창 열기, 아래=▶ 실행
+        _ISLAND_NAMES  = ["오만의탑", "악몽의섬", "잊혀진섬", "에카"]
+        _ISLAND_COLORS = ["#8e44ad", "#2471a3", "#16a085", "#d35400"]
+        for i, label in enumerate(_ISLAND_NAMES):
+            grp = tk.Frame(self._sec_row); grp.pack(side="left", padx=2)
+            tk.Button(grp, text=label, font=("맑은 고딕", 9, "bold"),
+                      bg=_ISLAND_COLORS[i], fg="white", width=9, height=2,
+                      command=lambda x=i: self._open_past_slot(x)).pack(side="top")
+            tk.Button(grp, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
+                      bg=_ISLAND_COLORS[i], fg="white", width=9, height=1, pady=5,
+                      command=lambda x=i: self._run_island_slot(x)
+                      ).pack(side="top", pady=(1, 0))
 
         # ★ 정렬용 가변 여백 (오른쪽을 늘려 행 전체를 왼쪽으로 밀기)
         self._secrow_pad = tk.Frame(self._sec_row, width=getattr(self, "_secrow_pad_w", 0), height=1)
