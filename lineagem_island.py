@@ -649,23 +649,6 @@ class IslandApp(tk.Tk):
             # 타이핑할 때마다 즉시 저장 — Enter를 안 눌러도 복사에 반영되게
             nvv.trace_add("write", lambda *_a, f=_sv_name: f())
             # 프리셋 P1~P5 — 이 슬롯에 바로 적용 (이름칸 바로 아래)
-            pr_box = tk.Frame(cell); pr_box.pack(fill="x", pady=(1, 0))
-            if not hasattr(self, "_cell_preset_btns"):
-                self._cell_preset_btns = {}
-            self._cell_preset_btns.setdefault(key, [])
-            _row_btns = []
-            _prow1 = tk.Frame(pr_box); _prow1.pack(fill="x")
-            _prow2 = tk.Frame(pr_box); _prow2.pack(fill="x")
-            _PC = ("#5b2c6f", "#7d3c98", "#9b59b6", "#7b241c", "#c0392b", "#e74c3c")
-            for _pi in range(6):
-                _b = tk.Button(_prow1 if _pi < 3 else _prow2,
-                               text=self._preset_short(key, _pi),
-                               font=("맑은 고딕", 6, "bold"), width=6, pady=0,
-                               bg=_PC[_pi], fg="white",
-                               command=lambda k=key, x=i, q=_pi: self._apply_preset(k, x, q))
-                _b.pack(side="left", expand=True, fill="x", padx=1, pady=1)
-                _row_btns.append(_b)
-            self._cell_preset_btns[key].append(_row_btns)
             head = tk.Frame(cell); head.pack()
             tk.Label(head, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"),
                      fg="#555").pack(side="left")
@@ -739,13 +722,22 @@ class IslandApp(tk.Tk):
             self.cfg[key][idx]["name"] = nv.get().strip() or "미등록"
             save_cfg(self.cfg)
         ent.bind("<FocusOut>", _sv); ent.bind("<Return>", _sv)
+        # 프리셋 6개 — 이름칸 오른쪽에 일렬로 (누르면 이 슬롯에 바로 적용)
+        _PC = ("#5b2c6f", "#7d3c98", "#9b59b6", "#7b241c", "#c0392b", "#e74c3c")
+        if not hasattr(self, "_preset_btns"):
+            self._preset_btns = {}
+        self._preset_btns[key] = []
+        for _pi in range(6):
+            _b = tk.Button(top, text=self._preset_short(key, _pi),
+                           font=("맑은 고딕", 8, "bold"), bg=_PC[_pi], fg="white",
+                           padx=4, pady=1,
+                           command=lambda k=key, x=idx, q=_pi: self._apply_preset(k, x, q))
+            _b.pack(side="left", padx=2)
+            self._preset_btns[key].append(_b)
+        tk.Button(top, text="⚙", font=("맑은 고딕", 8, "bold"), bg="#7d6608", fg="white",
+                  padx=3, command=lambda k=key: self._open_preset_win(k)).pack(side="left", padx=(4, 0))
         tk.Label(win, text=f"버튼: [✔등록][×삭제][▶테스트][⏺녹화 — 3초 뒤 녹화, ESC 종료, 저장되면 빨간 ●]  |  [방향]: 이동·⇩끌어내리기  |  'ㅡ'=대기 초(8~10=랜덤, 비우면 {CLICK_INTERVAL})",
                  font=("맑은 고딕", 7), fg="#888").pack()
-        lg = tk.Frame(win); lg.pack(anchor="w", padx=10, pady=(2, 0))
-        tk.Label(lg, text=" 그대로 ", font=("맑은 고딕", 8), bg="#dfe3e6").pack(side="left")
-        tk.Label(lg, text=" ✖ 삭제 ", font=("맑은 고딕", 8), bg="#c0392b", fg="white").pack(side="left", padx=4)
-        tk.Label(lg, text=" 📍 위치변경 ", font=("맑은 고딕", 8), bg="#1e8449", fg="white").pack(side="left")
-        tk.Label(lg, text="  (아래 칸에 지정한 좌표가 표시됩니다)", font=("맑은 고딕", 8), fg="#888").pack(side="left")
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         _n_clicks = clicks_for(key)
         _labels   = labels_for(key)
@@ -913,6 +905,11 @@ class IslandApp(tk.Tk):
               chr(10) + "저장 후 슬롯 좌표 팝업에서 그 프리셋 버튼을 누르면 그 번호들만 바뀝니다 (나머지는 그대로).")
         tk.Label(win, text=_h, font=("맑은 고딕", 8), fg="#555",
                  justify="left").pack(anchor="w", padx=10)
+        lg = tk.Frame(win); lg.pack(anchor="w", padx=10, pady=(2, 0))
+        tk.Label(lg, text=" 그대로 ", font=("맑은 고딕", 8), bg="#dfe3e6").pack(side="left")
+        tk.Label(lg, text=" ✖ 삭제 ", font=("맑은 고딕", 8), bg="#c0392b", fg="white").pack(side="left", padx=4)
+        tk.Label(lg, text=" 📍 위치변경 ", font=("맑은 고딕", 8), bg="#1e8449", fg="white").pack(side="left")
+        tk.Label(lg, text="  (아래 칸에 찍은 좌표가 표시됩니다)", font=("맑은 고딕", 8), fg="#888").pack(side="left")
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         for jx in range(clicks_for(key)):
             cell = tk.Frame(grid, bd=1, relief="groove", padx=2, pady=1)
