@@ -348,6 +348,7 @@ class IslandApp(tk.Tk):
         self._plus_btns = {d["key"]: [] for d in DUNGEONS}   # 슬롯별 + 선택 버튼
         self._sel_order = {d["key"]: [] for d in DUNGEONS}   # +로 고른 슬롯 (누른 순서)
         self._rep_vars  = {d["key"]: [] for d in DUNGEONS}   # ⏰ 드롭다운 표시 변수
+        self._numsel    = {}                                 # 번호 지정 일괄 입력칸
         self._repeat_left = {}                               # (key,idx) → 남은 반복 횟수
 
         self._auto_run = len(sys.argv) > 2 and sys.argv[2] == "--run"
@@ -551,6 +552,39 @@ class IslandApp(tk.Tk):
                   font=("맑은 고딕", 8), bg="#566573", fg="white",
                   command=lambda k=key: self._preview_all(k)
                   ).pack(fill="x", padx=4, pady=(0,2))
+
+        # ── 번호 지정 일괄 적용 — 지정한 클릭 번호만 전 슬롯에 복사/삭제 ──
+        nb = tk.LabelFrame(parent, text="번호 지정 일괄 (예: 3,7,12-14)",
+                           font=("맑은 고딕", 7), fg="#7d6608", padx=3, pady=2)
+        nb.pack(fill="x", padx=4, pady=(0, 3))
+        r1 = tk.Frame(nb); r1.pack(fill="x")
+        tk.Label(r1, text="번호", font=("맑은 고딕", 7)).pack(side="left")
+        nv = tk.StringVar(value="")
+        tk.Entry(r1, textvariable=nv, font=("맑은 고딕", 8), width=12).pack(side="left", padx=2)
+        tk.Label(r1, text="기준", font=("맑은 고딕", 7)).pack(side="left", padx=(4, 0))
+        sv = tk.StringVar(value="1")
+        tk.Spinbox(r1, from_=1, to=SLOTS, textvariable=sv, width=3,
+                   font=("맑은 고딕", 8)).pack(side="left", padx=2)
+        self._numsel[key] = {"nums": nv, "src": sv}
+        r2 = tk.Frame(nb); r2.pack(fill="x", pady=(2, 0))
+        tk.Button(r2, text="📋 전 슬롯에 적용", font=("맑은 고딕", 7, "bold"),
+                  bg="#2980b9", fg="white",
+                  command=lambda k=key: self._nums_apply(k)).pack(side="left", fill="x", expand=True)
+        tk.Button(r2, text="× 번호 삭제", font=("맑은 고딕", 7, "bold"),
+                  bg="#c0392b", fg="white",
+                  command=lambda k=key: self._nums_delete(k)).pack(side="left", fill="x",
+                                                                   expand=True, padx=(3, 0))
+        r3 = tk.Frame(nb); r3.pack(fill="x", pady=(2, 0))
+        tk.Label(r3, text="저장", font=("맑은 고딕", 7), fg="#888").pack(side="left")
+        for pi in range(3):
+            tk.Button(r3, text=f"P{pi+1}", font=("맑은 고딕", 7), width=3,
+                      bg="#dfe3e6",
+                      command=lambda k=key, x=pi: self._nums_preset(k, x)
+                      ).pack(side="left", padx=1)
+        tk.Label(r3, text="(우클릭=저장)", font=("맑은 고딕", 6), fg="#aaa").pack(side="left", padx=(3, 0))
+        for w in r3.winfo_children():
+            if isinstance(w, tk.Button):
+                w.bind("<Button-3>", lambda e, k=key, b=w: self._nums_preset_save(k, b["text"]))
 
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
 
@@ -816,6 +850,131 @@ class IslandApp(tk.Tk):
             return [w for col in cols for w in col]           # 01~16 (열 우선)
         except Exception:
             return None
+
+    # ── 번호 지정 일괄 적용 (지정한 클릭 번호만 전 슬롯에 복사 / 삭제) ──
+    @staticmethod
+    def _parse_nums(text, maxn):
+        """'3,7,12-14' → [2,6,11,12,13] (0부터 시작하는 인덱스)."""
+        out = []
+        for tok in str(text).replace(" ", "").split(","):
+            if not tok:
+                continue
+            try:
+                if "-" in tok:
+                    a, b = tok.split("-")
+                    for n in range(int(a), int(b) + 1):
+                        if 1 <= n <= maxn: out.append(n - 1)
+                else:
+                    n = int(tok)
+                    if 1 <= n <= maxn: out.append(n - 1)
+            except Exception:
+                continue
+        return sorted(set(out))
+
+    def _nums_apply(self, key):
+        """기준 슬롯의 '지정한 번호' 좌표·간격·방향·이름·녹화를 다른 슬롯 전부에 적용."""
+        import copy
+        self._commit_pending_edits()
+        ui = self._numsel.get(key) or {}
+        idxs = self._parse_nums(ui.get("nums").get() if ui.get("nums") else "", clicks_for(key))
+        if not idxs:
+            self._status.set("번호를 먼저 적어주세요 (예: 3,7,12-14)"); return
+        try:
+            src = int(ui["src"].get()) - 1
+        except Exception:
+            src = 0
+        slots = self.cfg[key]
+        rects = self._client_rects_by_slot()
+        done = 0
+        for t, slot in enumerate(slots):
+            if t == src:
+                continue
+            dx = dy = 0
+            if rects:
+                dx = rects[t][0] - rects[src][0]
+                dy = rects[t][1] - rects[src][1]
+            for j in idxs:
+                # 좌표 (클라이언트 위치 보정)
+                sc = (slots[src].get("coords") or [])
+                c = sc[j] if j < len(sc) else None
+                cs = slot.setdefault("coords", [])
+                while len(cs) <= j: cs.append(None)
+                cs[j] = [c[0] + dx, c[1] + dy] if c else None
+                # 간격·방향·이름표
+                for fld, n_ in (("gap_list", clicks_for(key) - 1),
+                                ("dirs", clicks_for(key)),
+                                ("click_names", clicks_for(key))):
+                    sl = list(slots[src].get(fld) or [])
+                    tl = list(slot.get(fld) or [])
+                    while len(sl) <= j: sl.append(None)
+                    while len(tl) <= j: tl.append(None)
+                    if j < n_:
+                        tl[j] = copy.deepcopy(sl[j])
+                    slot[fld] = tl
+                # 녹화 (마우스 좌표 보정)
+                srec = (slots[src].get("recs") or {}).get(str(j))
+                trec = slot.setdefault("recs", {})
+                if srec:
+                    ev = copy.deepcopy(srec)
+                    if dx or dy:
+                        for e in ev:
+                            if e[1] in ("md", "mu", "mm"):
+                                e[2] += dx; e[3] += dy
+                    trec[str(j)] = ev
+                else:
+                    trec.pop(str(j), None)
+            done += 1
+        save_cfg(self.cfg)
+        self._refresh(key)
+        note = "" if rects else " (⚠ 클라 16개 감지 실패 — 위치 보정 없음)"
+        self._status.set(f"✔ 클릭 {[i+1 for i in idxs]} 번을 #{src+1:02d} 기준으로 {done}개 슬롯에 적용{note}")
+
+    def _nums_delete(self, key):
+        """지정한 번호의 좌표·방향·녹화를 전 슬롯에서 삭제 (간격 시간은 유지)."""
+        ui = self._numsel.get(key) or {}
+        idxs = self._parse_nums(ui.get("nums").get() if ui.get("nums") else "", clicks_for(key))
+        if not idxs:
+            self._status.set("삭제할 번호를 적어주세요 (예: 23,24)"); return
+        _msg = ("클릭 " + str([i + 1 for i in idxs]) +
+                " 번을 이 던전의 16슬롯 전부에서 삭제할까요?" +
+                chr(10) + "(간격 시간은 그대로 둡니다)")
+        if not messagebox.askyesno("번호 삭제", _msg, default="no"):
+            return
+        for slot in self.cfg[key]:
+            cs = slot.get("coords") or []
+            ds = slot.get("dirs") or []
+            rc = slot.get("recs") or {}
+            for j in idxs:
+                if j < len(cs): cs[j] = None
+                if j < len(ds): ds[j] = None
+                rc.pop(str(j), None)
+            slot["coords"] = cs; slot["dirs"] = ds; slot["recs"] = rc
+        save_cfg(self.cfg)
+        self._refresh(key)
+        self._status.set(f"✔ 클릭 {[i+1 for i in idxs]} 번 — 전 슬롯에서 삭제 완료")
+
+    def _nums_preset(self, key, pi):
+        """P1~P3 — 저장해둔 번호 목록 불러오기."""
+        pre = (self.cfg.get("_num_presets") or {}).get(str(pi), "")
+        ui = self._numsel.get(key) or {}
+        if not pre:
+            self._status.set(f"P{pi+1}에 저장된 번호가 없습니다 (번호 적고 우클릭 = 저장)"); return
+        ui["nums"].set(pre)
+        self._status.set(f"P{pi+1} 불러옴: {pre}")
+
+    def _nums_preset_save(self, key, label):
+        """P버튼 우클릭 — 지금 적은 번호를 그 자리에 저장."""
+        try:
+            pi = int(str(label).replace("P", "")) - 1
+        except Exception:
+            return
+        ui = self._numsel.get(key) or {}
+        val = ui["nums"].get().strip() if ui.get("nums") else ""
+        pres = dict(self.cfg.get("_num_presets") or {})
+        pres[str(pi)] = val
+        self.cfg["_num_presets"] = pres
+        save_cfg(self.cfg)
+        self._status.set(f"💾 P{pi+1}에 저장: {val or '(비움)'}")
 
     def _commit_pending_edits(self, key=None, idx=None):
         """열려 있는 좌표 팝업의 미저장 편집(간격·이름표)을 즉시 반영.
