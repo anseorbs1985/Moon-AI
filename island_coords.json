@@ -17806,6 +17806,13 @@
       },
       {
         "floor": "",
+        "name": "빨갱이 48%",
+        "src": 1,
+        "abs": false,
+        "items": {}
+      },
+      {
+        "floor": "",
         "name": "빨갱이 82%",
         "src": 1,
         "abs": false,
@@ -17833,20 +17840,6 @@
         "src": 1,
         "abs": false,
         "items": {}
-      },
-      {
-        "floor": "",
-        "name": "빨갱이 48%",
-        "src": 1,
-        "abs": false,
-        "items": {
-          "11": {
-            "act": "del"
-          },
-          "12": {
-            "act": "del"
-          }
-        }
       },
       {
         "floor": "",
