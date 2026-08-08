@@ -987,12 +987,12 @@ class IslandApp(tk.Tk):
         win = tk.Toplevel(self); self._preset_win = win
         win.title(f"⚙ 프리셋 설정 — {d['label'].replace(chr(10), ' ')}")
         win.attributes("-topmost", True)
-        _help = ("슬롯 좌표 팝업에서 이 버튼을 누르면 그 슬롯에 바로 적용됩니다." + chr(10) +
-                 "· 삭제번호: 그 번호 좌표를 지움    · 이동번호: 기준 슬롯의 그 번호 위치로 옮김")
+        _help = ("① 이름·삭제번호·이동번호를 적고 [📍 좌표찍기] → 번호마다 바꿀 위치를 화면에서 클릭" + chr(10) +
+                 "② 슬롯 좌표 팝업에서 이 버튼을 누르면 그 슬롯의 해당 번호만 바뀝니다 (나머지는 그대로)")
         tk.Label(win, text=_help, font=("맑은 고딕", 8), fg="#555",
                  justify="left").pack(anchor="w", padx=10, pady=(8, 4))
         body = tk.Frame(win); body.pack(padx=10, pady=4)
-        hdr = ("", "이름", "삭제번호", "이동번호", "기준", "")
+        hdr = ("", "이름", "삭제번호", "이동번호", "기준", "", "")
         for c, t in enumerate(hdr):
             tk.Label(body, text=t, font=("맑은 고딕", 8, "bold"), fg="#7d6608").grid(row=0, column=c, padx=2)
         rows = []
@@ -1010,9 +1010,12 @@ class IslandApp(tk.Tk):
             sv = tk.StringVar(value=str(pr.get("src", 1)))
             tk.Spinbox(body, from_=1, to=SLOTS, textvariable=sv, width=3,
                        font=("맑은 고딕", 9)).grid(row=pi+1, column=4, padx=2)
-            tk.Button(body, text="💾 저장", font=("맑은 고딕", 8, "bold"), bg="#1e8449", fg="white",
-                      command=lambda k=key, x=pi: self._preset_save(k, x, rows[x])
+            tk.Button(body, text="📍 좌표찍기", font=("맑은 고딕", 8, "bold"), bg="#2980b9", fg="white",
+                      command=lambda k=key, x=pi: self._preset_pick_start(k, x, rows[x])
                       ).grid(row=pi+1, column=5, padx=3)
+            tk.Button(body, text="💾 저장", font=("맑은 고딕", 8), bg="#1e8449", fg="white",
+                      command=lambda k=key, x=pi: self._preset_save(k, x, rows[x])
+                      ).grid(row=pi+1, column=6, padx=3)
             rows.append({"name": nv, "dels": dv, "mods": mv, "src": sv})
         tk.Label(win, text="예) 삭제번호 23,24   이동번호 5,12-14   기준 = 그 위치가 맞춰진 슬롯 번호",
                  font=("맑은 고딕", 8), fg="#888").pack(anchor="w", padx=10, pady=(2, 8))
@@ -1050,6 +1053,73 @@ class IslandApp(tk.Tk):
         note = f" (좌표 없는 번호 {miss} 는 제외)" if miss else ""
         self._status.set(f"💾 P{pi+1} '{pres[pi]['name'] or ''}' 저장 — 삭제 {dels or '없음'} / "
                          f"이동 {[int(k2)+1 for k2 in mods]}{note}")
+
+    def _preset_pick_start(self, key, pi, row):
+        """프리셋의 '이동 번호'들을 화면에서 직접 찍어 등록 — 번호마다 순서대로 클릭."""
+        nclk = clicks_for(key)
+        nums = self._parse_nums(row["mods"].get(), nclk)
+        if not nums:
+            self._status.set("먼저 '이동번호'를 적어주세요 (예: 5,12-14)"); return
+        try:
+            base = int(row["src"].get()) - 1
+        except Exception:
+            base = 0
+        self._preset_pick = {"key": key, "pi": pi, "row": row, "nums": nums,
+                             "at": 0, "base": base, "got": {}}
+        self._preset_pick_next()
+
+    def _preset_pick_next(self):
+        pm = self._preset_pick
+        if not pm:
+            return
+        if pm["at"] >= len(pm["nums"]):
+            self._preset_pick_finish(); return
+        j = pm["nums"][pm["at"]]
+        self._status.set(f"📍 [{pm['at']+1}/{len(pm['nums'])}] 클릭 {j+1} 번을 바꿀 위치를 "
+                         f"3초 후 화면에서 클릭하세요 (기준 슬롯 #{pm['base']+1:02d})")
+        try:
+            w = getattr(self, "_preset_win", None)
+            if w and w.winfo_exists(): w.withdraw()
+        except Exception:
+            pass
+        self.after(3000, self._open_overlay)
+
+    def _preset_pick_done(self, x, y):
+        pm = self._preset_pick
+        j = pm["nums"][pm["at"]]
+        pm["got"][str(j)] = [x, y]
+        pm["at"] += 1
+        self._status.set(f"✔ 클릭 {j+1} 번 → ({x},{y})")
+        self.after(400, self._preset_pick_next)
+
+    def _preset_pick_finish(self):
+        """찍은 좌표들을 기준 슬롯의 클라 위치 기준 상대좌표로 저장."""
+        pm = self._preset_pick or {}
+        self._preset_pick = None
+        key, pi, row = pm["key"], pm["pi"], pm["row"]
+        rects = self._client_rects_by_slot()
+        base = pm["base"]
+        mods = {}
+        for k2, xy in pm["got"].items():
+            if rects:
+                mods[k2] = [xy[0] - rects[base][0], xy[1] - rects[base][1]]
+            else:
+                mods[k2] = [xy[0], xy[1]]
+        pres = self._presets(key)
+        pres[pi] = {"name": row["name"].get().strip(), "dels": row["dels"].get().strip(),
+                    "mods": mods, "src": base + 1, "abs": not bool(rects)}
+        self.cfg["_presets"][key] = pres
+        save_cfg(self.cfg)
+        self._refresh_preset_btns(key)
+        try:
+            w = getattr(self, "_preset_win", None)
+            if w and w.winfo_exists():
+                w.deiconify(); w.lift()
+        except Exception:
+            pass
+        note = "" if rects else " (⚠ 클라 16개 감지 실패 — 위치 보정 없이 절대좌표로 저장)"
+        self._status.set(f"💾 P{pi+1} '{pres[pi]['name'] or ''}' 저장 — "
+                         f"이동 {[int(k2)+1 for k2 in mods]} 찍은 위치로{note}")
 
     def _refresh_preset_btns(self, key):
         for pi, b in enumerate(getattr(self, "_preset_btns", {}).get(key, [])):
@@ -1268,6 +1338,14 @@ class IslandApp(tk.Tk):
         self.after(200, lambda: CoordOverlay(self))
 
     def on_coord(self, x, y):
+        # 프리셋 좌표 찍기 모드 — 슬롯 좌표가 아니라 프리셋에 저장
+        pm = getattr(self, "_preset_pick", None)
+        if pm:
+            try:
+                self._preset_pick_done(x, y)
+            finally:
+                self.deiconify()
+            return
         try:
             key = self._reg_key
             si  = self._reg_slot_idx
