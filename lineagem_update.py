@@ -141,7 +141,9 @@ CODE_FILES = ["lineagem_launcher.py", "lineagem_ocr.py", "lineagem_island.py",
 # 메인이 아닌 컴퓨터가 통째로 받는다. 덮어쓰기 전 자동 백업 + 런처의 [♻ 좌표복구]로
 # 자기가 저장해둔 좌표로 언제든 되돌릴 수 있음.
 # 다야 측정값(daya_counts·history)은 머신별 — 업데이트로 절대 덮어쓰지 않음
-DATA_FILES = ["coords.json", "island_coords.json", "island_counts.json"]
+# 2026-08-09: 로컬은 섬/던전 좌표(island_coords.json)만 받는다.
+# coords.json(메인런처 좌표)은 컴퓨터마다 달라서 동기화하지 않음.
+DATA_FILES = ["island_coords.json", "island_counts.json"]
 DATA_DIRS  = ["reroll_templates"]
 
 root = tk.Tk(); root.title("🔄 리니지M 업데이트")
@@ -383,7 +385,7 @@ def main():
         log(f"저장소: {REPO}")
         _bn = backup_coords()
         log(f"0) 좌표 자동 백업 {_bn}개 (LOCALAPPDATA\\MoonAI\\backups)")
-        MERGE_FILES = ("coords.json", "island_coords.json")   # 좌표 파일 (메인이 원본)
+        MERGE_FILES = ("island_coords.json",)   # 동기화 대상 좌표 (메인이 원본)
         # 좌표 동기화 정책: 좌표는 모든 컴퓨터가 동일하고 메인이 유일한 원본.
         # 메인이 아닌 컴퓨터는 병합 없이 '통째로' 원격(메인) 버전으로 맞춘다.
         is_main = False
