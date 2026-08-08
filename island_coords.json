@@ -277,7 +277,10 @@
           295,
           603
         ],
-        null,
+        [
+          326,
+          629
+        ],
         [
           481,
           392
@@ -17085,6 +17088,9 @@
           },
           "12": {
             "act": "del"
+          },
+          "22": {
+            "act": "del"
           }
         }
       },
@@ -17098,6 +17104,9 @@
             "act": "del"
           },
           "12": {
+            "act": "del"
+          },
+          "22": {
             "act": "del"
           }
         }
@@ -17113,6 +17122,9 @@
           },
           "12": {
             "act": "del"
+          },
+          "22": {
+            "act": "del"
           }
         }
       },
@@ -17127,6 +17139,9 @@
           },
           "12": {
             "act": "del"
+          },
+          "22": {
+            "act": "del"
           }
         }
       },
@@ -17141,6 +17156,9 @@
           },
           "12": {
             "act": "del"
+          },
+          "22": {
+            "act": "del"
           }
         }
       },
@@ -17155,6 +17173,9 @@
           },
           "12": {
             "act": "del"
+          },
+          "22": {
+            "act": "del"
           }
         }
       },
@@ -17163,63 +17184,99 @@
         "name": "기본!!",
         "src": 1,
         "abs": false,
-        "items": {}
+        "items": {
+          "22": {
+            "act": "del"
+          }
+        }
       },
       {
         "floor": "6층",
         "name": "주홍이 48%",
         "src": 1,
         "abs": false,
-        "items": {}
+        "items": {
+          "22": {
+            "act": "del"
+          }
+        }
       },
       {
         "floor": "6층",
         "name": "주홍이 82%",
         "src": 1,
         "abs": false,
-        "items": {}
+        "items": {
+          "22": {
+            "act": "del"
+          }
+        }
       },
       {
         "floor": "7층",
         "name": "기본!!",
         "src": 1,
         "abs": false,
-        "items": {}
+        "items": {
+          "22": {
+            "act": "del"
+          }
+        }
       },
       {
         "floor": "7층",
         "name": "주홍이 48%",
         "src": 1,
         "abs": false,
-        "items": {}
+        "items": {
+          "22": {
+            "act": "del"
+          }
+        }
       },
       {
         "floor": "7층",
         "name": "주홍이 82%",
         "src": 1,
         "abs": false,
-        "items": {}
+        "items": {
+          "22": {
+            "act": "del"
+          }
+        }
       },
       {
         "floor": "8층",
         "name": "기본!!",
         "src": 1,
         "abs": false,
-        "items": {}
+        "items": {
+          "22": {
+            "act": "del"
+          }
+        }
       },
       {
         "floor": "8층",
         "name": "주홍이 48%",
         "src": 1,
         "abs": false,
-        "items": {}
+        "items": {
+          "22": {
+            "act": "del"
+          }
+        }
       },
       {
         "floor": "8층",
         "name": "주홍이 82%",
         "src": 1,
         "abs": false,
-        "items": {}
+        "items": {
+          "22": {
+            "act": "del"
+          }
+        }
       }
     ],
     "토요일_악몽의섬": [
