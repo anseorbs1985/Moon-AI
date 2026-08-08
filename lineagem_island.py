@@ -895,30 +895,35 @@ class IslandApp(tk.Tk):
         return (fl + " " + nm).strip()
 
     def _build_preset_rows(self, parent, key, idx):
-        """프리셋 버튼을 층별 줄로 배치 — parent 안에 프레임을 만들어 붙인다."""
+        """프리셋 버튼을 층별 박스로 묶어 배치 — 층 제목 아래에 버튼들(많으면 2줄)."""
         _PC = ("#5b2c6f", "#7d3c98", "#9b59b6", "#8e44ad", "#6c3483",
                "#7b241c", "#c0392b", "#e74c3c", "#d35400", "#a04000")
-        box = tk.Frame(parent, bd=1, relief="groove")
-        box.pack(fill="x", padx=10, pady=(4, 2))
+        wrap = tk.Frame(parent)
+        wrap.pack(fill="x", padx=10, pady=(4, 2))
         if not hasattr(self, "_preset_btns"):
             self._preset_btns = {}
         self._preset_btns[key] = []
         pi = 0
         for fl, names in self._preset_layout(key):
-            row = tk.Frame(box); row.pack(fill="x", pady=1)
-            if fl:
-                tk.Label(row, text=fl, font=("맑은 고딕", 9, "bold"), fg="#7d6608",
-                         width=4).pack(side="left", padx=(4, 2))
+            box = tk.LabelFrame(wrap, text=(fl or "프리셋"),
+                                font=("맑은 고딕", 9, "bold"), fg="#7d6608",
+                                padx=4, pady=3, bd=2, relief="groove")
+            box.pack(side="left", padx=4, pady=2, anchor="n")
+            per = 3 if len(names) > 3 else len(names)   # 3개 넘으면 2줄로
+            rows = []
+            for r in range((len(names) + per - 1) // max(per, 1)):
+                _r = tk.Frame(box); _r.pack(fill="x")
+                rows.append(_r)
             for k2, _nm in enumerate(names):
-                _b = tk.Button(row, text=self._preset_short(key, pi),
-                               font=("맑은 고딕", 8, "bold"),
-                               bg=_PC[k2 % len(_PC)], fg="white", padx=4, pady=1,
+                _b = tk.Button(rows[k2 // per] if rows else box,
+                               text=self._preset_short(key, pi),
+                               font=("맑은 고딕", 8, "bold"), width=9,
+                               bg=_PC[k2 % len(_PC)], fg="white", pady=2,
                                command=lambda k=key, x=idx, q=pi: self._apply_preset(k, x, q))
-                _b.pack(side="left", padx=2)
+                _b.pack(side="left", padx=2, pady=1)
                 self._preset_btns[key].append(_b)
                 pi += 1
-        return box
-
+        return wrap
     def _preset_label(self, key, pi):
         pr = self._presets(key)[pi]
         n = len(pr.get("items") or {})
@@ -942,15 +947,21 @@ class IslandApp(tk.Tk):
         tabbox = tk.Frame(win); tabbox.pack(fill="x", padx=10)
         _pi = 0
         for fl, names in self._preset_layout(key):
-            trow = tk.Frame(tabbox); trow.pack(fill="x", pady=1)
-            if fl:
-                tk.Label(trow, text=fl, font=("맑은 고딕", 9, "bold"), fg="#7d6608",
-                         width=4).pack(side="left")
-            for _nm in names:
-                b = tk.Button(trow, text=self._preset_short(key, _pi),
-                              font=("맑은 고딕", 8, "bold"),
+            _box = tk.LabelFrame(tabbox, text=(fl or "프리셋"),
+                                 font=("맑은 고딕", 9, "bold"), fg="#7d6608",
+                                 padx=4, pady=3, bd=2, relief="groove")
+            _box.pack(side="left", padx=4, pady=2, anchor="n")
+            _per = 3 if len(names) > 3 else len(names)
+            _rows = []
+            for _r in range((len(names) + _per - 1) // max(_per, 1)):
+                _f = tk.Frame(_box); _f.pack(fill="x")
+                _rows.append(_f)
+            for _k, _nm in enumerate(names):
+                b = tk.Button(_rows[_k // _per] if _rows else _box,
+                              text=self._preset_short(key, _pi),
+                              font=("맑은 고딕", 8, "bold"), width=9, pady=2,
                               command=lambda x=_pi: self._preset_load(x))
-                b.pack(side="left", padx=2)
+                b.pack(side="left", padx=2, pady=1)
                 self._pw["tabs"].append(b)
                 _pi += 1
         tk.Label(top, text="이름", font=("맑은 고딕", 9, "bold")).pack(side="left", padx=(12, 2))
