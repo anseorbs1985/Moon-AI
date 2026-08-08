@@ -1060,33 +1060,38 @@ class App(tk.Tk):
         # ── 상단 배너: 다크+골드 그라데이션 (리니지M 느낌) ──
         self._build_banner()
 
-        # 혈레이드 — 클라 위 메모를 5분 동안만 맨 위로 (평소엔 안 올라옴) — 동그라미 버튼
-        boost_row = tk.Frame(self); boost_row.pack(fill="x")
-        self._boost_btn = tk.Canvas(boost_row, width=46, height=46, highlightthickness=0,
+        # 혈레이드 · 제자리 (나란히) / 그 아래 맨뒤로 (두 버튼 폭만큼 길게)
+        BTN, GAP, LEFT = 46, 6, 30
+        WIDE = BTN * 2 + GAP                      # 맨뒤로 가로 길이 = 혈레이드~제자리 끝
+        top_row = tk.Frame(self); top_row.pack(fill="x")
+        self._boost_btn = tk.Canvas(top_row, width=BTN, height=BTN, highlightthickness=0,
                                     bg=self.cget("bg"), cursor="hand2")
-        self._boost_btn.pack(side="left", padx=(30, 0), pady=(2, 0))
-        self._boost_btn.create_oval(2, 2, 44, 44, fill="#c0392b", outline="#7b241c", width=2)
-        self._boost_btn.create_text(23, 23, text="🔥 혈\n레이드", fill="white",
+        self._boost_btn.pack(side="left", padx=(LEFT, 0), pady=(2, 0))
+        self._boost_btn.create_oval(2, 2, BTN - 2, BTN - 2, fill="#c0392b",
+                                    outline="#7b241c", width=2)
+        self._boost_btn.create_text(BTN // 2, BTN // 2, text="🔥 혈\n레이드", fill="white",
                                     font=("맑은 고딕", 7, "bold"), justify="center")
         self._boost_btn.bind("<Button-1>", lambda e: self._memo_boost())
-        # 전환할 계정 수 위: 맨뒤로 동그라미 버튼 (세로선은 TJ성공!!과 자동 정렬)
-        back_row = tk.Frame(self); back_row.pack(fill="x")
-        self._back_circle = tk.Canvas(back_row, width=46, height=46, highlightthickness=0,
-                                      bg=self.cget("bg"), cursor="hand2")
-        self._back_circle.pack(side="left", padx=(30, 0))
-        self._back_circle.create_oval(2, 2, 44, 44, fill="#5d6d7e", outline="#34495e", width=2)
-        self._back_circle.create_text(23, 23, text="⬇ 맨\n뒤로", fill="white",
-                                      font=("맑은 고딕", 7, "bold"), justify="center")
-        # "break" 반환으로 '클릭=앞으로' 핸들러(_raise_on_click)가 도로 올리는 것 차단
-        self._back_circle.bind("<Button-1>", lambda e: (self._back_and_claude() or "break"))
-        # 제자리 동그라미 — 옮겨 쓰다가 누르면 고정 위치로 복귀
-        home_c = tk.Canvas(back_row, width=46, height=46, highlightthickness=0,
+        # 제자리 — 혈레이드 바로 옆
+        home_c = tk.Canvas(top_row, width=BTN, height=BTN, highlightthickness=0,
                            bg=self.cget("bg"), cursor="hand2")
-        home_c.pack(side="left", padx=(6, 0))
-        home_c.create_oval(2, 2, 44, 44, fill="#117864", outline="#0b4f42", width=2)
-        home_c.create_text(23, 23, text="📍 제\n자리", fill="white",
+        home_c.pack(side="left", padx=(GAP, 0), pady=(2, 0))
+        home_c.create_oval(2, 2, BTN - 2, BTN - 2, fill="#117864",
+                           outline="#0b4f42", width=2)
+        home_c.create_text(BTN // 2, BTN // 2, text="📍 제\n자리", fill="white",
                            font=("맑은 고딕", 7, "bold"), justify="center")
         home_c.bind("<Button-1>", lambda e: self._go_home())
+        # 맨뒤로 — 위 두 버튼 폭에 맞춘 긴 버튼 (좌·우 끝 정렬)
+        back_row = tk.Frame(self); back_row.pack(fill="x")
+        self._back_circle = tk.Canvas(back_row, width=WIDE, height=34, highlightthickness=0,
+                                      bg=self.cget("bg"), cursor="hand2")
+        self._back_circle.pack(side="left", padx=(LEFT, 0), pady=(3, 0))
+        self._back_circle.create_rectangle(2, 2, WIDE - 2, 32, fill="#5d6d7e",
+                                           outline="#34495e", width=2)
+        self._back_circle.create_text(WIDE // 2, 17, text="⬇ 맨뒤로", fill="white",
+                                      font=("맑은 고딕", 9, "bold"))
+        # "break" 반환으로 '클릭=앞으로' 핸들러(_raise_on_click)가 도로 올리는 것 차단
+        self._back_circle.bind("<Button-1>", lambda e: (self._back_and_claude() or "break"))
 
         # 계정 수
         row_acc = tk.Frame(self); row_acc.pack(fill="x", padx=16, pady=2)
