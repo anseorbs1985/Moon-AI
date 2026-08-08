@@ -1009,9 +1009,13 @@ class IslandApp(tk.Tk):
             cell = tk.Frame(grid, bd=1, relief="groove", padx=2, pady=1)
             cell.grid(row=jx // 6, column=jx % 6, padx=3, pady=3, sticky="n")
             tk.Label(cell, text=str(jx + 1), font=("맑은 고딕", 8, "bold"), fg="#555").pack()
-            sb = tk.Button(cell, text="그대로", font=("맑은 고딕", 8), width=8,
+            srow = tk.Frame(cell); srow.pack(pady=(1, 0))
+            sb = tk.Button(srow, text="그대로", font=("맑은 고딕", 8), width=8,
                            bg="#dfe3e6", command=lambda x=jx: self._preset_toggle(x))
-            sb.pack(pady=(1, 0))
+            sb.pack(side="left")
+            tk.Button(srow, text="👁", font=("맑은 고딕", 8), width=2,
+                      bg="#566573", fg="white",
+                      command=lambda x=jx: self._preset_preview(x)).pack(side="left", padx=(2, 0))
             pb = tk.Button(cell, text="위치", font=("맑은 고딕", 8), width=8,
                            bg="#2980b9", fg="white",
                            command=lambda x=jx: self._preset_pick_one(x))
@@ -1057,6 +1061,34 @@ class IslandApp(tk.Tk):
                 c["state"].config(text="📍 위치변경", bg="#f39c12", fg="black")
                 c["pick"].config(text="✔ " + str(rel[0]) + "," + str(rel[1]),
                                  bg="#f1c40f", fg="black", relief="sunken", bd=3)
+
+    def _preset_preview(self, jx):
+        """이 번호가 어디를 클릭하는지 점으로 보여준다.
+        위치변경이 지정돼 있으면 그 자리, 아니면 기준 슬롯의 현재 좌표."""
+        pw = self._pw
+        key = pw["key"]
+        try:
+            base = int(pw["src"].get()) - 1
+        except Exception:
+            base = 0
+        it = pw["items"].get(str(jx))
+        rects = self._client_rects_by_slot()
+        pos = None
+        if it and it.get("act") == "mov":
+            rel = it.get("rel") or [0, 0]
+            pos = ([rel[0] + rects[base][0], rel[1] + rects[base][1]]
+                   if (rects and not pw.get("abs")) else list(rel))
+            src_txt = "프리셋 지정 위치"
+        else:
+            cs = self.cfg[key][base].get("coords", [])
+            pos = cs[jx] if jx < len(cs) else None
+            src_txt = "기준 슬롯 #" + str(base + 1) + " 현재 좌표"
+        if not pos:
+            self._status.set("클릭 " + str(jx + 1) + "번: 보여줄 좌표가 없습니다 (" + src_txt + " 없음)")
+            return
+        self._status.set("👁 클릭 " + str(jx + 1) + "번 — " + src_txt +
+                         " (" + str(pos[0]) + "," + str(pos[1]) + ")")
+        _PresetDotOverlay(self, jx + 1, pos, src_txt)
 
     def _preset_toggle(self, jx):
         pw = self._pw
@@ -2396,6 +2428,35 @@ class IslandApp(tk.Tk):
                     self.deiconify()
                     self._send_behind_main()
                 self.after(0, _restore)
+
+
+class _PresetDotOverlay(tk.Toplevel):
+    """프리셋 번호 미리보기 — 반투명 화면에 점 하나 표시, 아무 키/클릭으로 닫기."""
+
+    def __init__(self, app, num, pos, note=""):
+        super().__init__()
+        self.app = app
+        self.overrideredirect(True)
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.geometry(str(sw) + "x" + str(sh) + "+0+0")
+        self.attributes("-alpha", 0.35)
+        self.attributes("-topmost", True)
+        self.configure(bg="black")
+        cv = tk.Canvas(self, bg="black", highlightthickness=0)
+        cv.pack(fill="both", expand=True)
+        cv.create_text(sw // 2, 40,
+                       text="클릭 " + str(num) + "번 위치  (" + note + ")  —  아무 곳이나 클릭하면 닫힘",
+                       fill="white", font=("맑은 고딕", 13))
+        x, y = int(pos[0]), int(pos[1])
+        for r, col in ((26, "#f1c40f"), (16, "#e67e22"), (6, "#e74c3c")):
+            cv.create_oval(x - r, y - r, x + r, y + r, outline=col, width=2)
+        cv.create_line(x - 40, y, x + 40, y, fill="#f1c40f")
+        cv.create_line(x, y - 40, x, y + 40, fill="#f1c40f")
+        cv.create_text(x, y - 34, text=str(num), fill="white", font=("맑은 고딕", 11, "bold"))
+        for w in (self, cv):
+            w.bind("<Button-1>", lambda e: self.destroy())
+            w.bind("<Escape>", lambda e: self.destroy())
+        self.after(6000, lambda: self.winfo_exists() and self.destroy())
 
 
 class _IslandGroupMoveOverlay(tk.Toplevel):
