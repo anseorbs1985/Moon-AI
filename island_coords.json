@@ -16765,7 +16765,7 @@
   "_presets": {
     "수금_오만의탑": [
       {
-        "name": "12·13 빼고 전부",
+        "name": "P1",
         "src": 1,
         "abs": false,
         "items": {
@@ -16778,29 +16778,61 @@
         }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P2",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P3",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P4",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P5",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       }
     ],
     "토요일_악몽의섬": [
       {
-        "name": "12·13 빼고 전부",
+        "name": "P1",
         "src": 1,
         "abs": false,
         "items": {
@@ -16813,29 +16845,61 @@
         }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P2",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P3",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P4",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P5",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       }
     ],
     "월요일_잊혀진섬": [
       {
-        "name": "12·13 빼고 전부",
+        "name": "P1",
         "src": 1,
         "abs": false,
         "items": {
@@ -16848,29 +16912,61 @@
         }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P2",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P3",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P4",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P5",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       }
     ],
     "화요일_에카": [
       {
-        "name": "12·13 빼고 전부",
+        "name": "P1",
         "src": 1,
         "abs": false,
         "items": {
@@ -16883,24 +16979,56 @@
         }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P2",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P3",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P4",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       },
       {
-        "name": "",
-        "items": {},
-        "src": 1
+        "name": "P5",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
       }
     ]
   }
