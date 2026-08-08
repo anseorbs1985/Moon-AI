@@ -5691,10 +5691,24 @@ class App(tk.Tk):
         wg = tk.Frame(parent); wg.pack(padx=6, pady=4)
         self._doll_enable_btns = []
         self._doll_coord_sv    = []
+        self._doll_name_vars   = []
         for idx in range(DOLL_SLOTS):
             r, c = idx % 4, idx // 4
             cell = tk.Frame(wg, bd=1, relief="groove", padx=3, pady=2)
             cell.grid(row=r, column=c, padx=5, pady=4)
+            # 슬롯 이름 — 프리셋을 적용하면 그 이름이 자동으로 들어온다
+            _nm = (self.cfg["doll_slots"][idx].get("name") or "").strip()
+            nvv = tk.StringVar(value="" if _nm == "미등록" else _nm)
+            self._doll_name_vars.append(nvv)
+            ne = tk.Entry(cell, textvariable=nvv, font=("맑은 고딕", 7), width=10,
+                          justify="center", relief="flat", bg="#f2f2f2", fg="#2c3e50")
+            ne.pack(pady=(1, 0), fill="x")
+            def _sv_dname(*_a, x=idx, v=nvv):
+                if time.time() - getattr(self, "_doll_preset_ts", 0) < 1.0:
+                    return                       # 프리셋 적용 직후 덮어쓰기 방지
+                self.cfg["doll_slots"][x]["name"] = v.get().strip() or "미등록"
+                save_cfg(self.cfg)
+            nvv.trace_add("write", _sv_dname)
             top = tk.Frame(cell); top.pack()
             tk.Label(top, text=f"{idx+1:02d}", font=("맑은 고딕", 9, "bold"), fg="#555").pack(side="left")
             en = self.cfg["doll_slots"][idx].get("enabled", True)
@@ -5766,6 +5780,11 @@ class App(tk.Tk):
                     cs[j] = [rel[0], rel[1]]
                 movs.append(j + 1)
         slot["name"] = pr.get("name") or f"P{pi+1}"
+        self._doll_preset_ts = time.time()      # 이름칸 자동저장이 덮어쓰지 않게
+        try:
+            self._doll_name_vars[idx].set(slot["name"])
+        except Exception:
+            pass
         save_cfg(self.cfg)
         self._refresh_doll_display()
         if getattr(self, "_doll_pop_win", None) and self._doll_pop_win.winfo_exists() \
@@ -6036,6 +6055,14 @@ class App(tk.Tk):
                                                  bg="#27ae60" if en else "#95a5a6")
                 reg = sum(1 for c in s.get("coords", []) if c)
                 self._doll_coord_sv[i].set(f"좌표 {reg}/{DOLL_CLICKS}")
+                try:
+                    nm = (s.get("name") or "").strip()
+                    nm = "" if nm == "미등록" else nm
+                    if i < len(getattr(self, "_doll_name_vars", [])) \
+                       and self._doll_name_vars[i].get() != nm:
+                        self._doll_name_vars[i].set(nm)
+                except Exception:
+                    pass
         # 열린 좌표 등록 팝업의 18버튼 갱신
         pw = getattr(self, "_doll_pop_win", None)
         if pw and pw.winfo_exists():
