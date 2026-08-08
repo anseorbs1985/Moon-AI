@@ -648,6 +648,19 @@ class IslandApp(tk.Tk):
             ne.bind("<FocusOut>", _sv_name); ne.bind("<Return>", _sv_name)
             # 타이핑할 때마다 즉시 저장 — Enter를 안 눌러도 복사에 반영되게
             nvv.trace_add("write", lambda *_a, f=_sv_name: f())
+            # 프리셋 P1~P5 — 이 슬롯에 바로 적용 (이름칸 바로 아래)
+            pr_row = tk.Frame(cell); pr_row.pack(fill="x", pady=(1, 0))
+            if not hasattr(self, "_cell_preset_btns"):
+                self._cell_preset_btns = {}
+            self._cell_preset_btns.setdefault(key, [])
+            _row_btns = []
+            for _pi in range(5):
+                _b = tk.Button(pr_row, text="P" + str(_pi + 1), font=("맑은 고딕", 6, "bold"),
+                               width=2, pady=0, bg="#5b2c6f", fg="white",
+                               command=lambda k=key, x=i, q=_pi: self._apply_preset(k, x, q))
+                _b.pack(side="left", expand=True, fill="x", padx=1)
+                _row_btns.append(_b)
+            self._cell_preset_btns[key].append(_row_btns)
             head = tk.Frame(cell); head.pack()
             tk.Label(head, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"),
                      fg="#555").pack(side="left")
