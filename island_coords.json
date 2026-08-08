@@ -17806,13 +17806,6 @@
       },
       {
         "floor": "",
-        "name": "빨갱이 48%",
-        "src": 1,
-        "abs": false,
-        "items": {}
-      },
-      {
-        "floor": "",
         "name": "빨갱이 82%",
         "src": 1,
         "abs": false,
@@ -17835,58 +17828,14 @@
     ],
     "화요일_에카": [
       {
-        "name": "주홍이 기본!",
+        "floor": "",
+        "name": "기본!!",
         "src": 1,
         "abs": false,
-        "items": {
-          "11": {
-            "act": "del"
-          },
-          "12": {
-            "act": "del"
-          }
-        }
+        "items": {}
       },
       {
-        "name": "주홍이 48%",
-        "src": 1,
-        "abs": false,
-        "items": {
-          "11": {
-            "act": "del"
-          },
-          "12": {
-            "act": "del"
-          }
-        }
-      },
-      {
-        "name": "주홍이 82%",
-        "src": 1,
-        "abs": false,
-        "items": {
-          "11": {
-            "act": "del"
-          },
-          "12": {
-            "act": "del"
-          }
-        }
-      },
-      {
-        "name": "빨갱이 기본!",
-        "src": 1,
-        "abs": false,
-        "items": {
-          "11": {
-            "act": "del"
-          },
-          "12": {
-            "act": "del"
-          }
-        }
-      },
-      {
+        "floor": "",
         "name": "빨갱이 48%",
         "src": 1,
         "abs": false,
@@ -17900,7 +17849,36 @@
         }
       },
       {
+        "floor": "",
         "name": "빨갱이 82%",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
+      },
+      {
+        "floor": "",
+        "name": "주홍이 48%",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
+      },
+      {
+        "floor": "",
+        "name": "주홍이 82%",
         "src": 1,
         "abs": false,
         "items": {
