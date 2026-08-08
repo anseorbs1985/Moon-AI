@@ -3418,10 +3418,10 @@
         null,
         null,
         null,
-        null,
-        null,
-        null,
-        null,
+        "물약",
+        "자동주문",
+        "주홍이클릭",
+        "48%",
         null,
         null,
         null,
@@ -16761,5 +16761,147 @@
       "scroll_coord": null,
       "gap_list": []
     }
-  ]
+  ],
+  "_presets": {
+    "수금_오만의탑": [
+      {
+        "name": "12·13 빼고 전부",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      }
+    ],
+    "토요일_악몽의섬": [
+      {
+        "name": "12·13 빼고 전부",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      }
+    ],
+    "월요일_잊혀진섬": [
+      {
+        "name": "12·13 빼고 전부",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      }
+    ],
+    "화요일_에카": [
+      {
+        "name": "12·13 빼고 전부",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      },
+      {
+        "name": "",
+        "items": {},
+        "src": 1
+      }
+    ]
+  }
 }
