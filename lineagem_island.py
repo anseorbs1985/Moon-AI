@@ -724,20 +724,11 @@ class IslandApp(tk.Tk):
             self.cfg[key][idx]["name"] = nv.get().strip() or "미등록"
             save_cfg(self.cfg)
         ent.bind("<FocusOut>", _sv); ent.bind("<Return>", _sv)
-        # 프리셋 6개 — 이름칸 오른쪽에 일렬로 (누르면 이 슬롯에 바로 적용)
-        _PC = ("#5b2c6f", "#7d3c98", "#9b59b6", "#7b241c", "#c0392b", "#e74c3c")
-        if not hasattr(self, "_preset_btns"):
-            self._preset_btns = {}
-        self._preset_btns[key] = []
-        for _pi in range(6):
-            _b = tk.Button(top, text=self._preset_short(key, _pi),
-                           font=("맑은 고딕", 8, "bold"), bg=_PC[_pi], fg="white",
-                           padx=4, pady=1,
-                           command=lambda k=key, x=idx, q=_pi: self._apply_preset(k, x, q))
-            _b.pack(side="left", padx=2)
-            self._preset_btns[key].append(_b)
-        tk.Button(top, text="⚙", font=("맑은 고딕", 8, "bold"), bg="#7d6608", fg="white",
-                  padx=3, command=lambda k=key: self._open_preset_win(k)).pack(side="left", padx=(4, 0))
+        tk.Button(top, text="⚙ 프리셋 설정", font=("맑은 고딕", 8, "bold"),
+                  bg="#7d6608", fg="white", padx=4,
+                  command=lambda k=key: self._open_preset_win(k)).pack(side="left", padx=(8, 0))
+        # 프리셋 — 층별로 줄을 나눠 배치 (누르면 이 슬롯에 바로 적용)
+        self._build_preset_rows(win, key, idx)
         tk.Label(win, text=f"버튼: [✔등록][×삭제][▶테스트][⏺녹화 — 3초 뒤 녹화, ESC 종료, 저장되면 빨간 ●]  |  [방향]: 이동·⇩끌어내리기  |  'ㅡ'=대기 초(8~10=랜덤, 비우면 {CLICK_INTERVAL})",
                  font=("맑은 고딕", 7), fg="#888").pack()
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
@@ -853,11 +844,33 @@ class IslandApp(tk.Tk):
                 tk.Label(gc, text="ㅡ", font=("맑은 고딕", 8, "bold"), fg="#888").pack()
                 en.bind("<FocusOut>", _save_gaps); en.bind("<Return>", _save_gaps)
     # ── 프리셋 P1~P5 — 좌표 목록에서 번호별로 [그대로/삭제/위치변경]을 골라 저장 ──
+    # 던전별 기본 프리셋 구성 — (층, [이름들])
+    PRESET_LAYOUT = {
+        "수금_오만의탑": [("3층", ["기본!!"]),
+                          ("5층", ["기본!!", "빨갱이 48%", "빨갱이 82%", "주홍이 48%", "주홍이 82%"]),
+                          ("6층", ["기본!!", "주홍이 48%", "주홍이 82%"]),
+                          ("7층", ["기본!!", "주홍이 48%", "주홍이 82%"]),
+                          ("8층", ["기본!!", "주홍이 48%", "주홍이 82%"])],
+    }
+    PRESET_DEFAULT = [("", ["주홍이 기본!", "주홍이 48%", "주홍이 82%",
+                            "빨갱이 기본!", "빨갱이 48%", "빨갱이 82%"])]
+
+    def _preset_layout(self, key):
+        return self.PRESET_LAYOUT.get(key, self.PRESET_DEFAULT)
+
     def _presets(self, key):
         allp = self.cfg.setdefault("_presets", {})
         lst = allp.setdefault(key, [])
-        while len(lst) < 6:
-            lst.append({"name": "", "items": {}, "src": 1})
+        want = [(fl, nm) for fl, names in self._preset_layout(key) for nm in names]
+        # 구성이 바뀌었으면(개수/층 정보 없음) 이름·층만 맞춰서 채운다 (설정값은 유지)
+        if len(lst) != len(want) or any("floor" not in x for x in lst):
+            new = []
+            for i, (fl, nm) in enumerate(want):
+                old = lst[i] if i < len(lst) else {}
+                new.append({"floor": fl, "name": nm, "src": old.get("src", 1),
+                            "abs": old.get("abs", False), "items": old.get("items", {})})
+            lst = new
+            allp[key] = lst
         for pr in lst:                     # 예전 형식(dels/mods) 자동 변환
             if "items" not in pr:
                 items = {}
@@ -869,9 +882,42 @@ class IslandApp(tk.Tk):
         return lst
 
     def _preset_short(self, key, pi):
-        """슬롯 셀 버튼용 이름 (없으면 P번호)."""
-        nm = (self._presets(key)[pi].get("name") or "").strip()
+        """버튼용 이름 (없으면 P번호)."""
+        pr = self._presets(key)[pi]
+        nm = (pr.get("name") or "").strip()
         return nm if nm else ("P" + str(pi + 1))
+
+    def _preset_full(self, key, pi):
+        """층 + 이름 (슬롯 이름으로 기록할 때 사용)."""
+        pr = self._presets(key)[pi]
+        fl = (pr.get("floor") or "").strip()
+        nm = (pr.get("name") or "").strip() or ("P" + str(pi + 1))
+        return (fl + " " + nm).strip()
+
+    def _build_preset_rows(self, parent, key, idx):
+        """프리셋 버튼을 층별 줄로 배치 — parent 안에 프레임을 만들어 붙인다."""
+        _PC = ("#5b2c6f", "#7d3c98", "#9b59b6", "#8e44ad", "#6c3483",
+               "#7b241c", "#c0392b", "#e74c3c", "#d35400", "#a04000")
+        box = tk.Frame(parent, bd=1, relief="groove")
+        box.pack(fill="x", padx=10, pady=(4, 2))
+        if not hasattr(self, "_preset_btns"):
+            self._preset_btns = {}
+        self._preset_btns[key] = []
+        pi = 0
+        for fl, names in self._preset_layout(key):
+            row = tk.Frame(box); row.pack(fill="x", pady=1)
+            if fl:
+                tk.Label(row, text=fl, font=("맑은 고딕", 9, "bold"), fg="#7d6608",
+                         width=4).pack(side="left", padx=(4, 2))
+            for k2, _nm in enumerate(names):
+                _b = tk.Button(row, text=self._preset_short(key, pi),
+                               font=("맑은 고딕", 8, "bold"),
+                               bg=_PC[k2 % len(_PC)], fg="white", padx=4, pady=1,
+                               command=lambda k=key, x=idx, q=pi: self._apply_preset(k, x, q))
+                _b.pack(side="left", padx=2)
+                self._preset_btns[key].append(_b)
+                pi += 1
+        return box
 
     def _preset_label(self, key, pi):
         pr = self._presets(key)[pi]
@@ -893,11 +939,20 @@ class IslandApp(tk.Tk):
                     "name": tk.StringVar(), "src": tk.StringVar(value="1")}
         top = tk.Frame(win); top.pack(fill="x", padx=10, pady=(10, 4))
         self._pw["tabs"] = []
-        for pi in range(6):
-            b = tk.Button(top, text="P" + str(pi + 1), font=("맑은 고딕", 9, "bold"), width=5,
-                          command=lambda x=pi: self._preset_load(x))
-            b.pack(side="left", padx=2)
-            self._pw["tabs"].append(b)
+        tabbox = tk.Frame(win); tabbox.pack(fill="x", padx=10)
+        _pi = 0
+        for fl, names in self._preset_layout(key):
+            trow = tk.Frame(tabbox); trow.pack(fill="x", pady=1)
+            if fl:
+                tk.Label(trow, text=fl, font=("맑은 고딕", 9, "bold"), fg="#7d6608",
+                         width=4).pack(side="left")
+            for _nm in names:
+                b = tk.Button(trow, text=self._preset_short(key, _pi),
+                              font=("맑은 고딕", 8, "bold"),
+                              command=lambda x=_pi: self._preset_load(x))
+                b.pack(side="left", padx=2)
+                self._pw["tabs"].append(b)
+                _pi += 1
         tk.Label(top, text="이름", font=("맑은 고딕", 9, "bold")).pack(side="left", padx=(12, 2))
         tk.Entry(top, textvariable=self._pw["name"], font=("맑은 고딕", 10), width=16).pack(side="left")
         tk.Label(top, text="기준슬롯", font=("맑은 고딕", 9)).pack(side="left", padx=(10, 2))
@@ -1036,7 +1091,8 @@ class IslandApp(tk.Tk):
         except Exception:
             src = 1
         pres = self._presets(key)
-        pres[pi] = {"name": pw["name"].get().strip(), "src": src,
+        pres[pi] = {"floor": pres[pi].get("floor", ""),
+                    "name": pw["name"].get().strip(), "src": src,
                     "abs": bool(pw.get("abs")),
                     "items": {k2: dict(v) for k2, v in pw["items"].items()}}
         self.cfg["_presets"][key] = pres
@@ -1093,7 +1149,7 @@ class IslandApp(tk.Tk):
                     cs[j] = [rel[0], rel[1]]
                 movs.append(j + 1)
         # 어떤 프리셋을 적용했는지 슬롯 이름에 남긴다 (미등록 → 프리셋 이름)
-        nm = pr.get("name") or ("P" + str(pi + 1))
+        nm = self._preset_full(key, pi)
         self._paste_ts = time.time()      # 늦게 오는 이름칸 저장이 덮어쓰지 않게
         slot["name"] = nm
         try:
