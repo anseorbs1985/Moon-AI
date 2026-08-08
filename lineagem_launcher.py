@@ -706,7 +706,7 @@ class App(tk.Tk):
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
         self.after(2000, self._queue_tick)               # 실행 대기열 순차 처리
         # (자동 업데이트는 사용자 요청으로 비활성 — 업데이트는 🔄 버튼으로 수동 실행)
-        self.after(1000, self._purple_check_tick)
+        # (2026-08-07 사용자 지시) 새벽 4시 퍼플 자동 확인·전환 사용 안 함 — 틱 미실행
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._slp_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
@@ -7082,7 +7082,9 @@ class App(tk.Tk):
         self.after(30000, self._past_scheduler_tick)
 
     def _purple_check_tick(self):
-        """매일 새벽 4시에 한 번 퍼플이 지정 계정인지 확인 → 아니면 전환 후 최소화"""
+        """(사용 안 함) 새벽 4시 퍼플 자동 확인·전환 — 2026-08-07 사용자 지시로 비활성.
+        되살리려면 __init__의 after(1000, self._purple_check_tick) 등록을 복원할 것."""
+        return
         import threading, datetime
         now = datetime.datetime.now()
         today = now.date()
