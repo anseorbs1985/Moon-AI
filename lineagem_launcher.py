@@ -1057,9 +1057,8 @@ class App(tk.Tk):
 
     # ── UI 빌드 ────────────────────────────────────────────────────────
     def _build_ui(self):
-        # 제목
-        tk.Label(self, text="리니지M 자동 실행",
-                 font=("맑은 고딕", 13, "bold"), fg="#c8a951").pack(pady=(10, 2))
+        # ── 상단 배너: 다크+골드 그라데이션 (리니지M 느낌) ──
+        self._build_banner()
 
         # 혈레이드 — 클라 위 메모를 5분 동안만 맨 위로 (평소엔 안 올라옴) — 동그라미 버튼
         boost_row = tk.Frame(self); boost_row.pack(fill="x")
@@ -4120,6 +4119,31 @@ class App(tk.Tk):
 
     def _fit_width_to_sec_row(self):
         self._fit_main_height()
+
+    def _build_banner(self):
+        """상단 배너 — 다크 + 골드 (리니지M 느낌). 위젯 기반이라 항상 표시된다."""
+        DARK, GOLD, GOLD2 = "#141210", "#e6c66a", "#8a6d2f"
+        wrap = tk.Frame(self, bg=DARK)
+        wrap.pack(fill="x", pady=(0, 3))
+        tk.Frame(wrap, height=2, bg=GOLD).pack(fill="x")          # 위 골드 라인
+        body = tk.Frame(wrap, bg=DARK); body.pack(fill="x", pady=3)
+        # 좌측 문양
+        tk.Label(body, text="◆", font=("맑은 고딕", 10), bg=DARK, fg=GOLD2).pack(side="left", padx=(14, 2))
+        tk.Label(body, text="🌙", font=("맑은 고딕", 15), bg=DARK, fg=GOLD).pack(side="left")
+        tk.Label(body, text="◆", font=("맑은 고딕", 10), bg=DARK, fg=GOLD2).pack(side="left", padx=2)
+        # 우측 문양
+        tk.Label(body, text="◆", font=("맑은 고딕", 10), bg=DARK, fg=GOLD2).pack(side="right", padx=(2, 14))
+        tk.Label(body, text="🌙", font=("맑은 고딕", 15), bg=DARK, fg=GOLD).pack(side="right")
+        tk.Label(body, text="◆", font=("맑은 고딕", 10), bg=DARK, fg=GOLD2).pack(side="right", padx=2)
+        # 가운데 제목
+        center = tk.Frame(body, bg=DARK); center.pack(expand=True)
+        tk.Label(center, text="⚔", font=("맑은 고딕", 15), bg=DARK, fg=GOLD2).pack(side="left", padx=(0, 8))
+        tk.Label(center, text="리니지M 자동 실행", font=("맑은 고딕", 18, "bold"),
+                 bg=DARK, fg=GOLD).pack(side="left")
+        tk.Label(center, text="⚔", font=("맑은 고딕", 15), bg=DARK, fg=GOLD2).pack(side="left", padx=(8, 0))
+        tk.Frame(wrap, height=2, bg=GOLD2).pack(fill="x")         # 아래 골드 라인
+        # 상태 표시줄 색도 배너와 어울리게 (아래에서 만들어지므로 여기선 색만 기억)
+        self._theme = {"dark": DARK, "gold": GOLD, "gold2": GOLD2}
 
     def _build_slot_quick_btns(self):
         """메인 런처 다야 옆 섬/던전 슬롯 빠른 실행 버튼 (재호출로 갱신)."""
@@ -8714,30 +8738,25 @@ class App(tk.Tk):
         self._task_queue.insert(0, (label, fn))
 
     def _enqueue(self, label, fn):
-        """다른 작업 실행 중 → 대기열에 추가 (같은 라벨 중복 방지). 어느 스레드에서든 호출 가능.
-        지금 돌고 있는 작업이 화면을 클릭 중이므로, 열린 창들이 가리지 않게 즉시 전부 최소화."""
-        self.after(0, self._minimize_all)
-        if any(l == label for l, _ in self._task_queue):
-            self.after(0, lambda: self.status.set(f"⏳ '{label}' 이미 대기열에 있음 (대기 {len(self._task_queue)}개)"))
-            return
-        self._task_queue.append((label, fn))
-        n = len(self._task_queue)
+        """대기열 폐지(2026-08-07) — 다른 작업 중이면 쌓아두지 않고 안내만 한다.
+        끝난 뒤 사용자가 직접 다시 누르는 방식."""
         self.after(0, lambda: self.status.set(
-            f"⏳ '{self._busy_label()}' 실행 중 — '{label}' 대기열 추가 (대기 {n}개)"))
+            f"⚠ '{self._busy_label()}' 실행 중 — '{label}'은(는) 실행 안 함 (끝난 뒤 다시 눌러주세요)"))
 
     def _queue_tick(self):
-        """1.5초마다 대기열 확인 — 한가해지면 다음 작업을 순서대로 실행."""
+        """1.5초마다 확인 — 스케줄(과거섬 등 자동 예약)만 한가해질 때 이어서 실행한다.
+        사용자가 누른 실행은 대기열에 쌓지 않으므로 여기서 처리할 것이 없다."""
         try:
             if self._task_queue and not self._is_busy():
                 label, fn = self._task_queue.pop(0)
-                self.status.set(f"▶ 대기열 실행: {label} (남은 {len(self._task_queue)}개)")
+                self.status.set(f"▶ 예약 작업 실행: {label}")
                 fn()
         except Exception:
             pass
         self.after(1500, self._queue_tick)
 
     def _try_busy_or_queue(self, name, retry_fn, label=None):
-        """busy면 대기열에 넣고 False, 아니면 잠금 획득."""
+        """busy면 안내만 하고 False (대기열 폐지 — 끝난 뒤 직접 다시 누르기)."""
         if self._is_busy(exclude=name):
             self._enqueue(label or name, retry_fn)
             return False
