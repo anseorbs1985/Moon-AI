@@ -201,7 +201,9 @@ def save_cfg(cfg):
             disk = json.load(f)
     except Exception:
         disk = {}
-    keys = SAVE_KEYS if SAVE_KEYS else list(cfg.keys())
+    keys = list(SAVE_KEYS) if SAVE_KEYS else list(cfg.keys())
+    # 던전 데이터가 아닌 설정 키(_presets 등)는 어느 창에서 바꿔도 항상 저장한다
+    keys += [k for k in cfg if k.startswith("_") and k not in keys]
     for k in keys:
         if k in cfg:
             disk[k] = cfg[k]
@@ -850,7 +852,7 @@ class IslandApp(tk.Tk):
                 en.pack()
                 tk.Label(gc, text="ㅡ", font=("맑은 고딕", 8, "bold"), fg="#888").pack()
                 en.bind("<FocusOut>", _save_gaps); en.bind("<Return>", _save_gaps)
-        # ── 프리셋 P1~P5 — 좌표 목록에서 번호별로 [그대로/삭제/위치변경]을 골라 저장 ──
+    # ── 프리셋 P1~P5 — 좌표 목록에서 번호별로 [그대로/삭제/위치변경]을 골라 저장 ──
     def _presets(self, key):
         allp = self.cfg.setdefault("_presets", {})
         lst = allp.setdefault(key, [])
@@ -1096,6 +1098,29 @@ class IslandApp(tk.Tk):
             if callable(fn):
                 try: fn()
                 except Exception: pass
+
+    def _client_rects_by_slot(self):
+        """리니지M 클라이언트 창 16개를 화면 배치(세로 열우선 01~16) 순서로 반환.
+        16개가 정확히 안 보이면 None (위치 보정 불가)."""
+        try:
+            import win32gui
+            wins = []
+            def cb(h, _):
+                if win32gui.IsWindowVisible(h) and not win32gui.IsIconic(h):
+                    t = win32gui.GetWindowText(h)
+                    if t.startswith("리니지M l"):
+                        l, tp, r, b = win32gui.GetWindowRect(h)
+                        if r - l > 100 and b - tp > 100:
+                            wins.append((l, tp, r, b))
+                return True
+            win32gui.EnumWindows(cb, None)
+            if len(wins) != 16:
+                return None
+            wins.sort(key=lambda w: w[0])                     # x(열) 정렬
+            cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
+            return [w for col in cols for w in col]           # 01~16 (열 우선)
+        except Exception:
+            return None
 
     def _slot_copy(self, key, idx):
         """슬롯 좌표 복사 — 원하는 슬롯에서 [붙임]으로 붙여넣기 (인형탐험과 동일)."""
