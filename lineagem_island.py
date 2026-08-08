@@ -947,12 +947,7 @@ class IslandApp(tk.Tk):
         self._preset_pick = {"jx": jx, "base": base}
         self._status.set("클릭 " + str(jx + 1) + " 번을 바꿀 위치를 3초 후 화면에서 클릭하세요"
                          + " (기준 슬롯 #" + str(base + 1) + ")")
-        try:
-            w = getattr(self, "_preset_win", None)
-            if w and w.winfo_exists(): w.withdraw()
-        except Exception:
-            pass
-        self.after(3000, self._open_overlay)
+        self.after(1200, self._open_overlay)   # 창은 그대로 두고 바로 찍기
 
     def _preset_pick_done(self, x, y):
         pm = self._preset_pick or {}
@@ -970,10 +965,11 @@ class IslandApp(tk.Tk):
         try:
             w = getattr(self, "_preset_win", None)
             if w and w.winfo_exists():
-                w.deiconify(); w.lift()
+                w.deiconify(); w.lift(); w.attributes("-topmost", True)
         except Exception:
             pass
-        self._status.set("클릭 " + str(jx + 1) + " 번 위치 지정: (" + str(x) + "," + str(y) + ")")
+        self._status.set("클릭 " + str(jx + 1) + " 번 위치 지정: (" + str(x) + "," + str(y) + ")"
+                         + "  — 이어서 다른 번호도 지정하세요")
 
     def _preset_clear(self):
         self._pw["items"] = {}
@@ -1211,6 +1207,10 @@ class IslandApp(tk.Tk):
         self.after(3000, self._open_overlay)
 
     def _open_overlay(self):
+        # 프리셋 좌표 찍기 중에는 창을 숨기지 않는다 (편집을 계속 이어서 하도록)
+        if getattr(self, "_preset_pick", None):
+            CoordOverlay(self)
+            return
         self.withdraw()
         self.after(200, lambda: CoordOverlay(self))
 
@@ -1218,10 +1218,7 @@ class IslandApp(tk.Tk):
         # 프리셋 좌표 찍기 모드 — 슬롯 좌표가 아니라 프리셋에 저장
         pm = getattr(self, "_preset_pick", None)
         if pm:
-            try:
-                self._preset_pick_done(x, y)
-            finally:
-                self.deiconify()
+            self._preset_pick_done(x, y)   # 창을 숨기지 않았으므로 복원도 불필요
             return
         try:
             key = self._reg_key
