@@ -558,6 +558,22 @@ def main():
             except Exception as e:
                 log(f"   ⚠ 좌표 자동복구 확인 실패: {e}")
             log(f"   복사 {n}개 완료")
+            # 업데이트 횟수 누적 (머신별 — local_config.json)
+            try:
+                _lp = os.path.join(DESK, "local_config.json")
+                try:
+                    with open(_lp, encoding="utf-8") as _f:
+                        _lc = json.load(_f)
+                except Exception:
+                    _lc = {}
+                _lc["update_count"] = int(_lc.get("update_count", 0)) + 1
+                import datetime as _dt2
+                _lc["update_last"] = _dt2.datetime.now().strftime("%m-%d %H:%M")
+                with open(_lp, "w", encoding="utf-8") as _f:
+                    json.dump(_lc, _f, ensure_ascii=False, indent=2)
+                log(f"   업데이트 누적 {_lc['update_count']}회")
+            except Exception as _e:
+                log(f"   ⚠ 업데이트 횟수 기록 실패: {_e}")
             copy_err = None
             break
           except Exception as e:

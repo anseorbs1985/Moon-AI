@@ -1060,6 +1060,15 @@ class App(tk.Tk):
         # ── 상단 배너: 다크+골드 그라데이션 (리니지M 느낌) ──
         self._build_banner()
 
+        # 업데이트 누적 횟수 (이 컴퓨터 기준) — 맨 왼쪽 위
+        _uc = load_local()
+        self._upd_count_var = tk.StringVar(
+            value="🔄 업데이트 " + str(int(_uc.get("update_count", 0))) + "회"
+                  + ("  (" + str(_uc.get("update_last")) + ")" if _uc.get("update_last") else ""))
+        _ur = tk.Frame(self); _ur.pack(fill="x")
+        tk.Label(_ur, textvariable=self._upd_count_var, font=("맑은 고딕", 8, "bold"),
+                 fg="#8a6d2f").pack(side="left", padx=(14, 0), pady=(2, 0))
+
         # 혈레이드 · 제자리 (나란히) / 그 아래 맨뒤로 (두 버튼 폭만큼 길게)
         BTN, GAP, LEFT = 46, 6, 30
         WIDE = BTN * 2 + GAP                      # 맨뒤로 가로 길이 = 혈레이드~제자리 끝
