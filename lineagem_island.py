@@ -723,6 +723,11 @@ class IslandApp(tk.Tk):
         ent.bind("<FocusOut>", _sv); ent.bind("<Return>", _sv)
         tk.Label(win, text=f"버튼: [✔등록][×삭제][▶테스트][⏺녹화 — 3초 뒤 녹화, ESC 종료, 저장되면 빨간 ●]  |  [방향]: 이동·⇩끌어내리기  |  'ㅡ'=대기 초(8~10=랜덤, 비우면 {CLICK_INTERVAL})",
                  font=("맑은 고딕", 7), fg="#888").pack()
+        lg = tk.Frame(win); lg.pack(anchor="w", padx=10, pady=(2, 0))
+        tk.Label(lg, text=" 그대로 ", font=("맑은 고딕", 8), bg="#dfe3e6").pack(side="left")
+        tk.Label(lg, text=" ✖ 삭제 ", font=("맑은 고딕", 8), bg="#c0392b", fg="white").pack(side="left", padx=4)
+        tk.Label(lg, text=" 📍 위치변경 ", font=("맑은 고딕", 8), bg="#1e8449", fg="white").pack(side="left")
+        tk.Label(lg, text="  (아래 칸에 지정한 좌표가 표시됩니다)", font=("맑은 고딕", 8), fg="#888").pack(side="left")
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         _n_clicks = clicks_for(key)
         _labels   = labels_for(key)
@@ -922,19 +927,29 @@ class IslandApp(tk.Tk):
         pw = self._pw
         for jx, c in enumerate(pw["cells"]):
             it = pw["items"].get(str(jx))
-            if not it:
+            if not it:                                   # 그대로 — 아무것도 안 함
                 c["state"].config(text="그대로", bg="#dfe3e6", fg="black")
-            elif it.get("act") == "del":
-                c["state"].config(text="삭제", bg="#c0392b", fg="white")
-            else:
-                c["state"].config(text="이동 지정", bg="#2980b9", fg="white")
+                c["pick"].config(text="위치", bg="#2980b9", fg="white")
+            elif it.get("act") == "del":                 # 삭제 — 빨강
+                c["state"].config(text="✖ 삭제", bg="#c0392b", fg="white")
+                c["pick"].config(text="위치", bg="#2980b9", fg="white")
+            else:                                        # 위치 지정 — 초록 + 좌표 표시
+                rel = it.get("rel") or [0, 0]
+                c["state"].config(text="📍 위치변경", bg="#1e8449", fg="white")
+                c["pick"].config(text=str(rel[0]) + "," + str(rel[1]),
+                                 bg="#145a32", fg="#e6ffe6")
 
     def _preset_toggle(self, jx):
         pw = self._pw
-        if not pw["items"].get(str(jx)):
+        cur = pw["items"].get(str(jx))
+        if not cur:
             pw["items"][str(jx)] = {"act": "del"}
+            self._status.set("클릭 " + str(jx + 1) + " 번 → 삭제")
         else:
+            act = cur.get("act")
             pw["items"].pop(str(jx), None)
+            self._status.set("클릭 " + str(jx + 1) + " 번 → 그대로"
+                             + (" (지정한 위치 해제됨)" if act == "mov" else ""))
         self._preset_refresh_cells()
 
     def _preset_pick_one(self, jx):
