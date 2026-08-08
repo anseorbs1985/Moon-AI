@@ -216,7 +216,7 @@ class CoordOverlay(tk.Toplevel):
         self.overrideredirect(True)
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        self.geometry(f"{sw}x{sh}+0+0")
+        self.geometry(str(sw) + "x" + str(sh) + "+0+0")
         self.attributes("-alpha", 0.3)
         self.attributes("-topmost", True)
         self.lift()
@@ -224,20 +224,47 @@ class CoordOverlay(tk.Toplevel):
         self.configure(bg="black")
         c = tk.Canvas(self, bg="black", highlightthickness=0)
         c.pack(fill="both", expand=True)
-        si  = app._reg_slot_idx
-        ci  = app._reg_click_idx
-        key = app._reg_key
-        name = app.cfg[key][si].get("name", f"#{si+1}")
-        lbl = f"[{name}]  {labels_for(key)[ci]} 위치를 클릭하세요   (ESC: 취소)"
-        c.create_text(sw//2, 60, text=lbl, fill="white", font=("맑은 고딕", 14))
+        # 안내문 — 프리셋 좌표 찍기 모드도 지원하고, 실패해도 오버레이가 죽지 않게
+        lbl = "위치를 클릭하세요   (ESC: 취소)"
+        try:
+            pm = getattr(app, "_preset_pick", None)
+            if pm:
+                lbl = ("프리셋 — 클릭 " + str(pm.get("jx", 0) + 1) +
+                       " 번을 바꿀 위치를 클릭하세요   (ESC: 취소)")
+            else:
+                si  = app._reg_slot_idx
+                ci  = app._reg_click_idx
+                key = app._reg_key
+                name = app.cfg[key][si].get("name", "#" + str(si + 1))
+                lbl = "[" + str(name) + "]  " + labels_for(key)[ci] + " 위치를 클릭하세요   (ESC: 취소)"
+        except Exception:
+            pass
+        c.create_text(sw // 2, 60, text=lbl, fill="white", font=("맑은 고딕", 14))
         c.bind("<ButtonPress-1>", self._on_click)
-        self.bind("<Escape>", lambda e: [self.destroy(), app.deiconify()])
+        self.bind("<ButtonPress-1>", self._on_click)      # 캔버스 밖 클릭도 처리
+        for w in (self, c):
+            w.bind("<Escape>", self._cancel)
+
+    def _cancel(self, _e=None):
+        try: self.destroy()
+        except Exception: pass
+        app = self.app
+        try:
+            if getattr(app, "_preset_pick", None):
+                app._preset_pick = None
+                w = getattr(app, "_preset_win", None)
+                if w and w.winfo_exists():
+                    w.deiconify(); w.lift()
+                app._status.set("좌표 찍기 취소")
+        except Exception:
+            pass
+        try: app.deiconify()
+        except Exception: pass
 
     def _on_click(self, e):
-        x, y = e.x, e.y
+        x, y = e.x_root, e.y_root
         self.destroy(); self.update_idletasks()
         self.app.on_coord(x, y)
-
 
 class MoveOverlay(tk.Toplevel):
     def __init__(self, app, step):
