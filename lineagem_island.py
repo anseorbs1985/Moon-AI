@@ -649,16 +649,21 @@ class IslandApp(tk.Tk):
             # 타이핑할 때마다 즉시 저장 — Enter를 안 눌러도 복사에 반영되게
             nvv.trace_add("write", lambda *_a, f=_sv_name: f())
             # 프리셋 P1~P5 — 이 슬롯에 바로 적용 (이름칸 바로 아래)
-            pr_row = tk.Frame(cell); pr_row.pack(fill="x", pady=(1, 0))
+            pr_box = tk.Frame(cell); pr_box.pack(fill="x", pady=(1, 0))
             if not hasattr(self, "_cell_preset_btns"):
                 self._cell_preset_btns = {}
             self._cell_preset_btns.setdefault(key, [])
             _row_btns = []
-            for _pi in range(5):
-                _b = tk.Button(pr_row, text="P" + str(_pi + 1), font=("맑은 고딕", 6, "bold"),
-                               width=2, pady=0, bg="#5b2c6f", fg="white",
+            _prow1 = tk.Frame(pr_box); _prow1.pack(fill="x")
+            _prow2 = tk.Frame(pr_box); _prow2.pack(fill="x")
+            _PC = ("#5b2c6f", "#7d3c98", "#9b59b6", "#7b241c", "#c0392b", "#e74c3c")
+            for _pi in range(6):
+                _b = tk.Button(_prow1 if _pi < 3 else _prow2,
+                               text=self._preset_short(key, _pi),
+                               font=("맑은 고딕", 6, "bold"), width=6, pady=0,
+                               bg=_PC[_pi], fg="white",
                                command=lambda k=key, x=i, q=_pi: self._apply_preset(k, x, q))
-                _b.pack(side="left", expand=True, fill="x", padx=1)
+                _b.pack(side="left", expand=True, fill="x", padx=1, pady=1)
                 _row_btns.append(_b)
             self._cell_preset_btns[key].append(_row_btns)
             head = tk.Frame(cell); head.pack()
@@ -857,7 +862,7 @@ class IslandApp(tk.Tk):
     def _presets(self, key):
         allp = self.cfg.setdefault("_presets", {})
         lst = allp.setdefault(key, [])
-        while len(lst) < 5:
+        while len(lst) < 6:
             lst.append({"name": "", "items": {}, "src": 1})
         for pr in lst:                     # 예전 형식(dels/mods) 자동 변환
             if "items" not in pr:
@@ -868,6 +873,11 @@ class IslandApp(tk.Tk):
                     items[str(k2)] = {"act": "mov", "rel": list(rel)}
                 pr["items"] = items
         return lst
+
+    def _preset_short(self, key, pi):
+        """슬롯 셀 버튼용 이름 (없으면 P번호)."""
+        nm = (self._presets(key)[pi].get("name") or "").strip()
+        return nm if nm else ("P" + str(pi + 1))
 
     def _preset_label(self, key, pi):
         pr = self._presets(key)[pi]
@@ -889,7 +899,7 @@ class IslandApp(tk.Tk):
                     "name": tk.StringVar(), "src": tk.StringVar(value="1")}
         top = tk.Frame(win); top.pack(fill="x", padx=10, pady=(10, 4))
         self._pw["tabs"] = []
-        for pi in range(5):
+        for pi in range(6):
             b = tk.Button(top, text="P" + str(pi + 1), font=("맑은 고딕", 9, "bold"), width=5,
                           command=lambda x=pi: self._preset_load(x))
             b.pack(side="left", padx=2)
@@ -1029,6 +1039,13 @@ class IslandApp(tk.Tk):
                     b.config(text=self._preset_label(key, pi))
             except Exception:
                 pass
+        for row in getattr(self, "_cell_preset_btns", {}).get(key, []):
+            for pi, b in enumerate(row):
+                try:
+                    if b.winfo_exists():
+                        b.config(text=self._preset_short(key, pi))
+                except Exception:
+                    pass
 
     def _apply_preset(self, key, idx, pi):
         """슬롯 팝업의 프리셋 버튼 — 이 슬롯의 해당 번호만 삭제/이동 (나머지는 그대로)."""

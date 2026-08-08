@@ -16765,7 +16765,7 @@
   "_presets": {
     "수금_오만의탑": [
       {
-        "name": "P1",
+        "name": "주홍이 기본!",
         "src": 1,
         "abs": false,
         "items": {
@@ -16778,7 +16778,7 @@
         }
       },
       {
-        "name": "P2",
+        "name": "주홍이 48%",
         "src": 1,
         "abs": false,
         "items": {
@@ -16791,7 +16791,7 @@
         }
       },
       {
-        "name": "P3",
+        "name": "주홍이 82%",
         "src": 1,
         "abs": false,
         "items": {
@@ -16804,7 +16804,7 @@
         }
       },
       {
-        "name": "P4",
+        "name": "빨갱이 기본!",
         "src": 1,
         "abs": false,
         "items": {
@@ -16817,7 +16817,20 @@
         }
       },
       {
-        "name": "P5",
+        "name": "빨갱이 48%",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
+      },
+      {
+        "name": "빨갱이 82%",
         "src": 1,
         "abs": false,
         "items": {
@@ -16832,7 +16845,7 @@
     ],
     "토요일_악몽의섬": [
       {
-        "name": "P1",
+        "name": "주홍이 기본!",
         "src": 1,
         "abs": false,
         "items": {
@@ -16845,7 +16858,7 @@
         }
       },
       {
-        "name": "P2",
+        "name": "주홍이 48%",
         "src": 1,
         "abs": false,
         "items": {
@@ -16858,7 +16871,7 @@
         }
       },
       {
-        "name": "P3",
+        "name": "주홍이 82%",
         "src": 1,
         "abs": false,
         "items": {
@@ -16871,7 +16884,7 @@
         }
       },
       {
-        "name": "P4",
+        "name": "빨갱이 기본!",
         "src": 1,
         "abs": false,
         "items": {
@@ -16884,7 +16897,20 @@
         }
       },
       {
-        "name": "P5",
+        "name": "빨갱이 48%",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
+      },
+      {
+        "name": "빨갱이 82%",
         "src": 1,
         "abs": false,
         "items": {
@@ -16899,7 +16925,7 @@
     ],
     "월요일_잊혀진섬": [
       {
-        "name": "P1",
+        "name": "주홍이 기본!",
         "src": 1,
         "abs": false,
         "items": {
@@ -16912,7 +16938,7 @@
         }
       },
       {
-        "name": "P2",
+        "name": "주홍이 48%",
         "src": 1,
         "abs": false,
         "items": {
@@ -16925,7 +16951,7 @@
         }
       },
       {
-        "name": "P3",
+        "name": "주홍이 82%",
         "src": 1,
         "abs": false,
         "items": {
@@ -16938,7 +16964,7 @@
         }
       },
       {
-        "name": "P4",
+        "name": "빨갱이 기본!",
         "src": 1,
         "abs": false,
         "items": {
@@ -16951,7 +16977,20 @@
         }
       },
       {
-        "name": "P5",
+        "name": "빨갱이 48%",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
+      },
+      {
+        "name": "빨갱이 82%",
         "src": 1,
         "abs": false,
         "items": {
@@ -16966,7 +17005,7 @@
     ],
     "화요일_에카": [
       {
-        "name": "P1",
+        "name": "주홍이 기본!",
         "src": 1,
         "abs": false,
         "items": {
@@ -16979,7 +17018,7 @@
         }
       },
       {
-        "name": "P2",
+        "name": "주홍이 48%",
         "src": 1,
         "abs": false,
         "items": {
@@ -16992,7 +17031,7 @@
         }
       },
       {
-        "name": "P3",
+        "name": "주홍이 82%",
         "src": 1,
         "abs": false,
         "items": {
@@ -17005,7 +17044,7 @@
         }
       },
       {
-        "name": "P4",
+        "name": "빨갱이 기본!",
         "src": 1,
         "abs": false,
         "items": {
@@ -17018,7 +17057,20 @@
         }
       },
       {
-        "name": "P5",
+        "name": "빨갱이 48%",
+        "src": 1,
+        "abs": false,
+        "items": {
+          "11": {
+            "act": "del"
+          },
+          "12": {
+            "act": "del"
+          }
+        }
+      },
+      {
+        "name": "빨갱이 82%",
         "src": 1,
         "abs": false,
         "items": {
