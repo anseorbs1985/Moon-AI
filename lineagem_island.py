@@ -851,8 +851,10 @@ class IslandApp(tk.Tk):
                           ("6층", ["기본!!", "주홍이 48%", "주홍이 82%"]),
                           ("7층", ["기본!!", "주홍이 48%", "주홍이 82%"]),
                           ("8층", ["기본!!", "주홍이 48%", "주홍이 82%"])],
-        "월요일_잊혀진섬": [("", ["기본!!", "빨갱이 48%", "빨갱이 82%",
-                                  "주홍이 48%", "주홍이 82%"])],
+        "월요일_잊혀진섬": [("서쪽", ["기본!!", "빨갱이 48%", "빨갱이 82%",
+                                      "주홍이 48%", "주홍이 82%"]),
+                             ("북쪽", ["기본!!", "빨갱이 48%", "빨갱이 82%",
+                                      "주홍이 48%", "주홍이 82%"])],
         "화요일_에카":     [("", ["기본!!", "빨갱이 82%",
                                   "주홍이 48%", "주홍이 82%"])],
     }
@@ -861,6 +863,8 @@ class IslandApp(tk.Tk):
 
     # 층이 달라도 이름이 같으면 함께 저장할 클릭 번호 (0-based) — 오만의탑 12·13번
     PRESET_SYNC_CLICKS = {"수금_오만의탑": (11, 12)}
+    # 이름이 같으면 '모든 클릭 설정'을 함께 저장하는 던전 (잊혀진섬 서쪽↔북쪽)
+    PRESET_SYNC_ALL = ("월요일_잊혀진섬",)
 
     def _preset_layout(self, key):
         return self.PRESET_LAYOUT.get(key, self.PRESET_DEFAULT)
@@ -1133,18 +1137,24 @@ class IslandApp(tk.Tk):
                     "items": {k2: dict(v) for k2, v in pw["items"].items()}}
         # 같은 이름의 다른 층 프리셋에도 공유 클릭(12·13번)을 함께 저장
         sync = self.PRESET_SYNC_CLICKS.get(key, ())
+        sync_all = key in self.PRESET_SYNC_ALL
         synced = []
-        if sync:
+        if sync or sync_all:
             me = pres[pi]
             for oi, other in enumerate(pres):
                 if oi == pi or (other.get("name") or "") != (me.get("name") or ""):
                     continue
-                oit = other.setdefault("items", {})
-                for j in sync:
-                    if str(j) in me["items"]:
-                        oit[str(j)] = dict(me["items"][str(j)])
-                    else:
-                        oit.pop(str(j), None)
+                if sync_all:                    # 전체 설정을 그대로 복사
+                    other["items"] = {k3: dict(v3) for k3, v3 in me["items"].items()}
+                    other["abs"] = me.get("abs", False)
+                    other["src"] = me.get("src", 1)
+                else:
+                    oit = other.setdefault("items", {})
+                    for j in sync:
+                        if str(j) in me["items"]:
+                            oit[str(j)] = dict(me["items"][str(j)])
+                        else:
+                            oit.pop(str(j), None)
                 synced.append(other.get("floor") or ("P" + str(oi + 1)))
         self.cfg["_presets"][key] = pres
         save_cfg(self.cfg)
@@ -1153,8 +1163,9 @@ class IslandApp(tk.Tk):
         movs = sorted(int(k2) + 1 for k2, v in pw["items"].items() if v.get("act") == "mov")
         msg = ("저장 — 삭제 " + str(dels or "없음") + " / 이동 " + str(movs or "없음"))
         if synced:
-            msg += ("   [클릭 " + ",".join(str(j + 1) for j in sync) +
-                    "번을 " + " ".join(synced) + " '" + (pres[pi].get("name") or "") + "'에도 같이 저장]")
+            what = "전체 설정" if sync_all else ("클릭 " + ",".join(str(j + 1) for j in sync) + "번")
+            msg += ("   [" + what + "을 " + " ".join(synced) + " '" +
+                    (pres[pi].get("name") or "") + "'에도 같이 저장]")
         self._status.set(msg)
 
     def _refresh_preset_btns(self, key):

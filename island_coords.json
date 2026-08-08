@@ -17798,35 +17798,70 @@
     ],
     "월요일_잊혀진섬": [
       {
-        "floor": "",
+        "floor": "서쪽",
         "name": "기본!!",
         "src": 1,
         "abs": false,
         "items": {}
       },
       {
-        "floor": "",
+        "floor": "서쪽",
         "name": "빨갱이 48%",
         "src": 1,
         "abs": false,
         "items": {}
       },
       {
-        "floor": "",
+        "floor": "서쪽",
         "name": "빨갱이 82%",
         "src": 1,
         "abs": false,
         "items": {}
       },
       {
-        "floor": "",
+        "floor": "서쪽",
         "name": "주홍이 48%",
         "src": 1,
         "abs": false,
         "items": {}
       },
       {
-        "floor": "",
+        "floor": "서쪽",
+        "name": "주홍이 82%",
+        "src": 1,
+        "abs": false,
+        "items": {}
+      },
+      {
+        "floor": "북쪽",
+        "name": "기본!!",
+        "src": 1,
+        "abs": false,
+        "items": {}
+      },
+      {
+        "floor": "북쪽",
+        "name": "빨갱이 48%",
+        "src": 1,
+        "abs": false,
+        "items": {}
+      },
+      {
+        "floor": "북쪽",
+        "name": "빨갱이 82%",
+        "src": 1,
+        "abs": false,
+        "items": {}
+      },
+      {
+        "floor": "북쪽",
+        "name": "주홍이 48%",
+        "src": 1,
+        "abs": false,
+        "items": {}
+      },
+      {
+        "floor": "북쪽",
         "name": "주홍이 82%",
         "src": 1,
         "abs": false,
