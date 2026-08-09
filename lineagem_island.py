@@ -2370,6 +2370,10 @@ class IslandApp(tk.Tk):
                            if s.get("enabled", True)
                            and (any(c for c in s.get("coords", [])) or any(s.get("dirs") or []))]
                 random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
+                if key == "카매사오기":
+                    # (2026-08-09) 카매사오기는 02~04 슬롯이 항상 마지막에 실행돼야 한다.
+                    # (앞 슬롯들이 먼저 끝나야 이 슬롯들이 할 일이 생김)
+                    targets.sort(key=lambda t: 1 if t[0] in (1, 2, 3) else 0)
             d = next(x for x in DUNGEONS if x["key"] == key)
             stop_fn   = lambda: self._stop_flag
             status_fn = lambda m: self.after(0, lambda m=m: self._status.set(m))
@@ -2410,6 +2414,10 @@ class IslandApp(tk.Tk):
                          if (_slow_always or not any(recs.values())) else 1.0)
                 for j, lbl in enumerate(_labels):
                     if self._stop_flag: break
+                    if key == "카매사오기":
+                        # 사용자가 마우스를 쓰는 중이면 클릭이 엉뚱한 곳에 들어가거나 씹힌다 →
+                        # 마우스가 멈출 때까지 기다렸다가 누른다 (웨이브 실행과 동일한 보호)
+                        if not wait_mouse_idle(stop_fn, status_fn): break
                     d_ = dirs[j] if j < len(dirs) else None
                     if d_ and d_[0] == "⏺":   # 구버전 데이터 호환 — 이제 녹화는 별도 버튼
                         d_ = None
