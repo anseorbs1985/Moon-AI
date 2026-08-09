@@ -1064,7 +1064,9 @@ class IslandApp(tk.Tk):
         tk.Label(lg, text=" 그대로 ", font=("맑은 고딕", 8), bg="#dfe3e6").pack(side="left")
         tk.Label(lg, text=" ✖ 삭제 ", font=("맑은 고딕", 8), bg="#c0392b", fg="white").pack(side="left", padx=4)
         tk.Label(lg, text=" 📍 위치변경 ", font=("맑은 고딕", 8), bg="#f39c12", fg="black").pack(side="left")
-        tk.Label(lg, text="  (아래 칸에 찍은 좌표가 표시됩니다)", font=("맑은 고딕", 8), fg="#888").pack(side="left")
+        tk.Label(lg, text=" ⏺ 녹화 ", font=("맑은 고딕", 8), bg="#8e44ad", fg="white").pack(side="left", padx=4)
+        tk.Label(lg, text="  (아래 칸에 찍은 좌표·녹화 길이가 표시됩니다)",
+                 font=("맑은 고딕", 8), fg="#888").pack(side="left")
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         for jx in range(clicks_for(key)):
             cell = tk.Frame(grid, bd=1, relief="groove", padx=2, pady=1)
@@ -1081,7 +1083,11 @@ class IslandApp(tk.Tk):
                            bg="#2980b9", fg="white",
                            command=lambda x=jx: self._preset_pick_one(x))
             pb.pack(pady=(1, 0))
-            self._pw["cells"].append({"state": sb, "pick": pb})
+            rb = tk.Button(cell, text="⏺ 녹화", font=("맑은 고딕", 8), width=8,
+                           bg="#7f8c8d", fg="white",
+                           command=lambda x=jx: self._preset_record(x))
+            rb.pack(pady=(1, 0))
+            self._pw["cells"].append({"state": sb, "pick": pb, "rec": rb})
         bot = tk.Frame(win); bot.pack(pady=(2, 10))
         tk.Button(bot, text="저장", font=("맑은 고딕", 10, "bold"), bg="#1e8449", fg="white",
                   width=10, command=self._preset_store).pack(side="left", padx=4)
@@ -1117,11 +1123,46 @@ class IslandApp(tk.Tk):
                 c["state"].config(text="✖ 삭제", bg="#c0392b", fg="white")
                 c["pick"].config(text="위치찍기", bg="#95a5a6", fg="white",
                                  relief="raised", bd=1)
+            elif it.get("act") == "rec":                 # 녹화 — 보라
+                ev = it.get("ev") or []
+                dur = ev[-1][0] if ev else 0
+                c["state"].config(text="⏺ 녹화", bg="#8e44ad", fg="white")
+                c["pick"].config(text="녹화 사용", bg="#95a5a6", fg="white",
+                                 relief="raised", bd=1)
             else:                                        # 위치 지정 — 노랑/주황 (한눈에 구분)
                 rel = it.get("rel") or [0, 0]
                 c["state"].config(text="📍 위치변경", bg="#f39c12", fg="black")
                 c["pick"].config(text="✔ " + str(rel[0]) + "," + str(rel[1]),
                                  bg="#f1c40f", fg="black", relief="sunken", bd=3)
+            rbtn = c.get("rec")
+            if rbtn is not None:
+                if it and it.get("act") == "rec":
+                    ev = it.get("ev") or []
+                    dur = ev[-1][0] if ev else 0
+                    rbtn.config(text="● " + format(dur, ".1f") + "초", bg="#8e44ad")
+                else:
+                    rbtn.config(text="⏺ 녹화", bg="#7f8c8d")
+
+    def _preset_record(self, jx):
+        """프리셋 칸에 동영상(녹화)을 담는다 — 적용하면 그 슬롯의 그 번호가 녹화로 바뀐다."""
+        pw = self._pw
+        try:
+            base = int(pw["src"].get()) - 1
+        except Exception:
+            base = 0
+        self._status.set("⏺ 프리셋 클릭 " + str(jx + 1) + "번 녹화 — 3초 후 시작, ESC로 종료")
+        self._start_record(pw["key"], base, jx,
+                           sink=lambda ev, x=jx: self._preset_rec_done(x, ev))
+
+    def _preset_rec_done(self, jx, ev):
+        pw = getattr(self, "_pw", None)
+        if not pw:
+            return
+        pw["items"][str(jx)] = {"act": "rec", "ev": ev}
+        self._preset_refresh_cells()
+        dur = ev[-1][0] if ev else 0
+        self._status.set("✔ 프리셋 클릭 " + str(jx + 1) + "번에 녹화 저장 (" +
+                         format(dur, ".1f") + "초, 동작 " + str(len(ev)) + "개) — [저장]을 눌러야 반영됩니다")
 
     def _preset_preview(self, jx):
         """이 번호가 어디를 클릭하는지 점으로 보여준다.
@@ -1304,6 +1345,13 @@ class IslandApp(tk.Tk):
                 if _r:
                     slot.setdefault("recs_off", {})[str(j)] = _r
                 dels.append(j + 1)
+            elif it.get("act") == "rec":
+                # 이 번호는 좌표 대신 '동영상(녹화)'을 쓴다
+                cs[j] = None
+                if j < len(ds): ds[j] = None
+                rc[str(j)] = list(it.get("ev") or [])
+                (slot.get("recs_off") or {}).pop(str(j), None)
+                movs.append(j + 1)
             else:
                 rel = it.get("rel") or [0, 0]
                 if rects and not pr.get("abs"):
@@ -2090,7 +2138,7 @@ class IslandApp(tk.Tk):
             return False
 
     # ── 녹화/재생 (⏺) — 사용자의 마우스·방향키 입력을 그대로 담았다가 재생 ──
-    def _start_record(self, key, idx, ci):
+    def _start_record(self, key, idx, ci, sink=None):
         """⏺ 버튼: 3초 뒤부터 마우스(클릭·드래그)와 방향키를 녹화, ESC로 종료.
         녹화 중에는 화면 상단에 빨간 표시줄이 떠서 상태를 보여준다."""
         # 항상 위 녹화 표시줄 — 창을 숨겨도 이건 보임
@@ -2163,6 +2211,10 @@ class IslandApp(tk.Tk):
                 # 빈 녹화는 저장하지 않음 — 헷갈림 방지
                 self.after(0, self.deiconify)
                 self._status.set("⚠ 녹화된 동작이 없어 저장 안 함 — 녹화 중에 마우스 클릭·드래그나 방향키를 써야 기록됩니다")
+                return
+            if sink is not None:          # 프리셋 칸에 담기 (슬롯은 건드리지 않음)
+                self.after(0, self.deiconify)
+                self.after(0, lambda e=events: sink(e))
                 return
             slot = self.cfg[key][idx]
             recs = slot.get("recs") or {}
