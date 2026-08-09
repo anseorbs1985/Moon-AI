@@ -2390,9 +2390,10 @@ class IslandApp(tk.Tk):
         total = len(labels)
         # 목표 소요시간 랜덤 — 실행 전에 내부 시뮬레이션으로 배속을 맞춘다
         target_sec = random.uniform(252, 284) * slow_factor()   # 전체 12~17% 지연 (약 4:42~5:32)
-        pace = self._calc_pace(state, total, target_sec, lanes=lanes or 4)
+        pace = self._calc_pace(state, total, target_sec, lanes=lanes or 3)
         # 동시에 진행할 슬롯 수 제한 — 하나가 끝나면 다음 슬롯 투입
-        LANES = lanes or 4
+        # (2026-08-09) 처음 전체 실행은 3개씩, ⏰ 반복 실행은 2개씩(--lanes 2)
+        LANES = lanes or 3
         order = [si for si, _s in targets]
         if not keep_order:
             random.shuffle(order)      # 평소(전체 실행)는 순서 랜덤
@@ -2483,7 +2484,7 @@ class IslandApp(tk.Tk):
             if key in self.WAVE_KEYS and slot_idx is None and len(targets) > 1:
                 _ln = getattr(self, "_auto_lanes", None)
                 self._status.set(f"🌊 번갈아 실행 — {len(targets)}개 슬롯 "
-                                 f"(동시 {_ln or 4}개씩)")
+                                 f"(동시 {_ln or 3}개씩)")
                 # 반복 실행(--lanes 지정)은 슬롯 번호 순서 그대로 2개씩 —
                 # 동시에 도는 창이 적을수록 클릭이 안전하다
                 self._run_wave(key, targets, lanes=_ln,
