@@ -6156,9 +6156,18 @@ class App(tk.Tk):
             pass
         save_cfg(self.cfg)
         self._refresh_doll_display()
+        # (2026-08-09) 팝업을 껐다 켜지 않고 그 자리에서 표시만 갱신
         if getattr(self, "_doll_pop_win", None) and self._doll_pop_win.winfo_exists() \
            and getattr(self, "_doll_pop_slot", None) == idx:
-            self.after(50, lambda: self._open_doll_slot(idx))
+            try:
+                for j2, cv in enumerate(getattr(self, "_doll_pop_vars", []) or []):
+                    on = j2 < len(cs) and cs[j2]
+                    cv.set("✔" if on else "✗")
+                    self._doll_pop_btns[j2].config(bg="#27ae60" if on else "#7f8c8d")
+                if getattr(self, "_doll_pop_name", None) is not None:
+                    self._doll_pop_name.set(slot["name"])
+            except Exception:
+                pass
         self.status.set(f"✔ 인형탐험 #{idx+1:02d} [{slot['name']}] 적용 — "
                         f"삭제 {sorted(dels) or '없음'} / 이동 {sorted(movs) or '없음'}")
 
