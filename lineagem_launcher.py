@@ -1160,7 +1160,7 @@ class App(tk.Tk):
         self.btn_start.pack(side="left", padx=(0, 4))
         # 멈춤 버튼이 아래 줄로 옮겨간 자리 — 오른쪽 버튼들(업데이트·좌표저장)이
         # 예전 위치를 그대로 지키도록 같은 폭의 빈칸을 둔다
-        tk.Frame(btn_row, width=85).pack(side="left")
+        tk.Frame(btn_row, width=99).pack(side="left")
 
         # 9시 클릭 스케줄러
         tk.Frame(btn_row, width=10).pack(side="left")
@@ -6815,6 +6815,31 @@ class App(tk.Tk):
             save_cfg(self.cfg); self._refresh_doll_display()
             self.status.set(f"✔ 인형탐험 #{idx+1:02d} 좌표{dot_idx+1} 이동 저장: ({nx},{ny})")
         self._open_dot_preview(f"인형탐험 #{idx+1:02d} {name}", dots, rereg_fn=rereg, save_fn=_save, dot_r=4)
+
+    def _group_copy_fish_slot(self, idx):
+        import copy
+        src = self.cfg["fish_slots"][idx-1].get("coords", [])
+        if not any(src):
+            self.status.set(f"#{idx:02d} 위에 복사할 좌표가 없습니다"); return
+        self.cfg["fish_slots"][idx]["coords"] = copy.deepcopy(src)
+        _pn = (self.cfg["fish_slots"][idx-1].get("name") or "").strip()
+        if _pn and _pn != "미등록":
+            self.cfg["fish_slots"][idx]["name"] = _pn
+            self._fish_preset_ts = time.time()
+            try: self._fish_name_vars[idx].set(_pn)
+            except Exception: pass
+        save_cfg(self.cfg); self._refresh_fish_display()
+        self.status.set(f"✔ #{idx:02d} → #{idx+1:02d} 좌표·이름 복사 완료")
+
+    def _group_copy_fish(self):
+        import copy
+        src = self.cfg["fish_slots"][0].get("coords", [])
+        if not any(src):
+            self.status.set("#01 슬롯에 복사할 좌표가 없습니다"); return
+        for i in range(1, FISH_SLOTS):
+            self.cfg["fish_slots"][i]["coords"] = copy.deepcopy(src)
+        save_cfg(self.cfg); self._refresh_fish_display()
+        self.status.set(f"✔ #01 좌표 → #02~#{FISH_SLOTS:02d} 전체 복사 완료")
 
     def _group_copy_doll_slot(self, idx):
         import copy
