@@ -6161,8 +6161,14 @@ class App(tk.Tk):
         if not any(src):
             self.status.set(f"#{idx:02d} 위에 복사할 좌표가 없습니다"); return
         self.cfg["doll_slots"][idx]["coords"] = copy.deepcopy(src)
+        _pn = (self.cfg["doll_slots"][idx-1].get("name") or "").strip()
+        if _pn and _pn != "미등록":
+            self.cfg["doll_slots"][idx]["name"] = _pn
+            self._doll_preset_ts = time.time()
+            try: self._doll_name_vars[idx].set(_pn)
+            except Exception: pass
         save_cfg(self.cfg); self._refresh_doll_display()
-        self.status.set(f"✔ #{idx:02d} → #{idx+1:02d} 좌표 복사 완료")
+        self.status.set(f"✔ #{idx:02d} → #{idx+1:02d} 좌표·이름 복사 완료")
 
     def _group_copy_doll(self):
         import copy
@@ -6563,6 +6569,7 @@ class App(tk.Tk):
             self.status.set(f"#{idx+1:02d} 복사할 좌표가 없습니다"); return
         self._doll_clipboard = copy.deepcopy(coords)
         self._doll_clip_src  = idx   # 붙여넣기 때 클라이언트 위치 자동보정 기준
+        self._doll_clip_name = (self.cfg["doll_slots"][idx].get("name") or "").strip()
         reg = sum(1 for c in coords if c)
         self.status.set(f"📋 #{idx+1:02d} 좌표 {reg}개 복사됨 — 원하는 슬롯의 [붙임]을 누르세요")
 
@@ -6588,9 +6595,19 @@ class App(tk.Tk):
             else:
                 note = " — ⚠ 클라이언트 16개 감지 실패, 원본 위치 그대로"
         self.cfg["doll_slots"][idx]["coords"] = shifted
+        # 슬롯 이름(제목)도 함께 붙여넣기
+        _nm = getattr(self, "_doll_clip_name", "")
+        if _nm and _nm != "미등록":
+            self.cfg["doll_slots"][idx]["name"] = _nm
+            self._doll_preset_ts = time.time()      # 이름칸 자동저장이 되돌리지 않게
+            try:
+                self._doll_name_vars[idx].set(_nm)
+            except Exception:
+                pass
         save_cfg(self.cfg); self._refresh_doll_display()
         reg = sum(1 for c in shifted if c)
-        self.status.set(f"✔ #{idx+1:02d}에 붙여넣기 완료 ({reg}/{DOLL_CLICKS}){note}")
+        self.status.set(f"✔ #{idx+1:02d}에 붙여넣기 완료 ({reg}/{DOLL_CLICKS})"
+                        + (f" · 이름 '{_nm}'" if _nm and _nm != "미등록" else "") + note)
 
     def _doll_wait(self, sec):
         end = time.time() + sec
