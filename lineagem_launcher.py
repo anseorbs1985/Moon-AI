@@ -9551,7 +9551,13 @@ class App(tk.Tk):
 
     def _start_pause(self):
         """(2026-08-09) 실행 버튼을 눌러도 곧바로 클릭하지 않고 1~2초 뜸을 들인다.
-        바로 눌리면 어색하고, 창이 아직 정리되기 전에 클릭이 들어갈 수도 있어서."""
+        바로 눌리면 어색하고, 창이 아직 정리되기 전에 클릭이 들어갈 수도 있어서.
+        + 스케줄·반복으로 저절로 시작될 때 클로드나 런처가 앞에 떠 있으면 클릭을
+          가리므로, 무엇이 됐든 먼저 내리고(최소화·맨뒤로) 나서 시작한다."""
+        try:
+            self.after(0, self._minimize_all)   # 런처·서브창·클로드 전부 내림
+        except Exception:
+            pass
         now = time.time()
         if now - getattr(self, "_last_start_pause", 0) < 5:
             return                      # 단독실행→본체처럼 겹쳐 불릴 땐 한 번만 쉰다
