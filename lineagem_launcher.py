@@ -695,6 +695,7 @@ class App(tk.Tk):
         self._item_on      = bool(self.cfg.get("item_on", False))
         self._item_stop    = False
         self._dollchk_stop = False
+        self._fish_stop = False
         self._relic_stop   = False
         self._coupon_stop  = False
         self._eventshop_stop = False
@@ -1324,7 +1325,7 @@ class App(tk.Tk):
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
             command=self._start_item).pack(side="left", padx=(2,0))
-        # 아이템정리 아래(이 줄 끝): 🎣 낚시녹임 — 인형탐험과 동일 구조
+        # 아이템정리 아래(이 줄 끝): 🎣 낚시녹임 — 변신확인용과 동일 구조(dgn2)
         r5 = tk.Frame(dc_col); r5.pack(anchor="n", pady=(4,0))
         tk.Button(r5, text="🎣 낚시" + chr(10) + "녹임",
             font=("맑은 고딕", 9, "bold"), bg="#1a5276", fg="white",
@@ -1333,7 +1334,7 @@ class App(tk.Tk):
         tk.Button(r5, text="▶" + chr(10) + "실행",
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
-            command=self._start_fish).pack(side="left", padx=(2,0))
+            command=lambda: self._start_dgn2("fish")).pack(side="left", padx=(2,0))
 
         # 확인용 3종 묶음: 변신확인용 / 인형확인용 / 성물확인용 (세로로 한 곳에)
         chk_col = tk.Frame(front_row); chk_col.pack(side="left", padx=(4,8), anchor="n")
@@ -2903,7 +2904,8 @@ class App(tk.Tk):
         return {"dollchk": ("dollchk_slots", "인형확인용", "🧸"),
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
-                "eventshop": ("eventshop_slots", "이벤트상점", "🛒")}[fkey]
+                "eventshop": ("eventshop_slots", "이벤트상점", "🛒"),
+                "fish":    ("fish_slots",    "낚시녹임",   "🎣")}[fkey]
 
     def _open_coupon_win(self):
         self._open_section_win("_coupon_win", "🎟 쿠폰등록",
@@ -2916,6 +2918,10 @@ class App(tk.Tk):
     def _open_dollchk_win(self):
         self._open_section_win("_dollchk_win", "🧸 인형확인용",
                                lambda p: self._build_dgn2("dollchk", p), w=470, h=600, pinnable=True)
+
+    def _open_fish_win(self):
+        self._open_section_win("_fish_win", "🎣 낚시녹임",
+                               lambda p: self._build_dgn2("fish", p), w=470, h=600, pinnable=True)
 
     def _open_relic_win(self):
         self._open_section_win("_relic_win", "🗿 성물확인용",
@@ -5946,353 +5952,6 @@ class App(tk.Tk):
             prev = down
 
     # ── 인형 탐험 (16슬롯 × 18좌표, 슬롯별 순차 클릭) ──
-    def _open_fish_win(self):
-        self._open_section_win("_fish_win", "🎣 낚시녹임", self._build_fish, w=440, h=440)
-
-    def _build_fish(self, parent):
-        tk.Label(parent, text=f"낚시녹임  (슬롯당 {FISH_CLICKS}좌표 순차 클릭)",
-                 font=("맑은 고딕", 9, "bold"), fg="#b9770e").pack(anchor="w", padx=4, pady=(4,2))
-
-        hr = tk.Frame(parent); hr.pack(pady=3)
-        self.btn_fish_run = tk.Button(hr, text="▶  낚시녹임 실행",
-            font=("맑은 고딕", 9, "bold"), bg="#b9770e", fg="white",
-            activebackground="#8a5809", width=15, height=2, command=self._start_fish)
-        self.btn_fish_run.pack(side="left", padx=(0, 3))
-        self.btn_fish_stop = tk.Button(hr, text="■ 멈춤",
-            font=("맑은 고딕", 8, "bold"), bg="#c0392b", fg="white",
-            activebackground="#922b21", width=6, height=2,
-            command=lambda: setattr(self, "_fish_stop", True) or self.status.set("낚시녹임 멈추는 중..."),
-            state="disabled")
-        self.btn_fish_stop.pack(side="left")
-        tk.Button(hr, text="🔀 그룹복사 (#01→전체)",
-            font=("맑은 고딕", 8), bg="#8e44ad", fg="white", width=18,
-            command=self._group_copy_fish).pack(side="left", padx=(8,0))
-        tk.Button(hr, text="👁 전체보기", font=("맑은 고딕", 8),
-                  bg="#566573", fg="white",
-                  command=lambda: self._slots_preview_all(
-                      "낚시녹임", "fish_slots", self._preview_fish,
-                      self._refresh_fish_display)).pack(side="left", padx=(6, 0))
-
-        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=6, pady=3)
-
-        # 4×4 세로(열 우선) 그리드 — 01~04 첫 열, 05~08 둘째 열, …
-        wg = tk.Frame(parent); wg.pack(padx=6, pady=4)
-        self._fish_enable_btns = []
-        self._fish_coord_sv    = []
-        self._fish_name_vars   = []
-        self._fish_name_ents   = []
-        for idx in range(FISH_SLOTS):
-            r, c = idx % 4, idx // 4
-            cell = tk.Frame(wg, bd=1, relief="groove", padx=3, pady=2)
-            cell.grid(row=r, column=c, padx=5, pady=4)
-            # 슬롯 이름 — 프리셋을 적용하면 그 이름이 자동으로 들어온다
-            _nm = (self.cfg["fish_slots"][idx].get("name") or "").strip()
-            nvv = tk.StringVar(value="" if _nm == "미등록" else _nm)
-            self._fish_name_vars.append(nvv)
-            ne = tk.Entry(cell, textvariable=nvv, font=("맑은 고딕", 8, "bold"), width=10,
-                          justify="center", relief="flat", bg="#f2f2f2",
-                          fg=self._name_color(_nm))
-            self._fish_name_ents.append(ne)
-            ne.pack(pady=(1, 0), fill="x")
-            def _sv_dname(*_a, x=idx, v=nvv):
-                if time.time() - getattr(self, "_fish_preset_ts", 0) < 1.0:
-                    return                       # 프리셋 적용 직후 덮어쓰기 방지
-                self.cfg["fish_slots"][x]["name"] = v.get().strip() or "미등록"
-                save_cfg(self.cfg)
-            nvv.trace_add("write", _sv_dname)
-            top = tk.Frame(cell); top.pack()
-            tk.Label(top, text=f"{idx+1:02d}", font=("맑은 고딕", 9, "bold"), fg="#555").pack(side="left")
-            en = self.cfg["fish_slots"][idx].get("enabled", True)
-            eb = tk.Button(top, text="ON" if en else "OFF", font=("맑은 고딕", 7, "bold"), width=4,
-                           bg="#27ae60" if en else "#95a5a6", fg="white", pady=0,
-                           command=lambda x=idx: self._toggle_fish_enable(x))
-            eb.pack(side="left", padx=(4,0))
-            self._fish_enable_btns.append(eb)
-            reg = sum(1 for cc in self.cfg["fish_slots"][idx].get("coords", []) if cc)
-            sv = tk.StringVar(value=f"좌표 {reg}/{FISH_CLICKS}")
-            self._fish_coord_sv.append(sv)
-            tk.Button(cell, textvariable=sv, font=("맑은 고딕", 8, "bold"),
-                      bg="#b9770e", fg="white", width=10,
-                      command=lambda x=idx: self._open_fish_slot(x)).pack(pady=(3,0))
-            tk.Button(cell, text="▶ 테스트", font=("맑은 고딕", 7), bg="#27ae60", fg="white", width=10,
-                      command=lambda x=idx: self._test_fish(x)).pack(pady=(2,1))
-            cprow = tk.Frame(cell); cprow.pack(pady=(0,1))
-            tk.Button(cprow, text="복사", font=("맑은 고딕", 6), bg="#2980b9", fg="white", width=3,
-                      command=lambda x=idx: self._copy_fish_slot(x)).pack(side="left", padx=(0,2))
-            tk.Button(cprow, text="붙임", font=("맑은 고딕", 6), bg="#8e44ad", fg="white", width=3,
-                      command=lambda x=idx: self._paste_fish_slot(x)).pack(side="left", padx=(0,2))
-            tk.Button(cprow, text="👁", font=("맑은 고딕", 6), bg="#566573", fg="white", width=2,
-                      command=lambda x=idx: self._preview_fish(x)).pack(side="left")
-
-        self._fish_pop_win = None
-        self._refresh_fish_display()
-
-    # ── 낚시녹임 프리셋 P1~P4 — 번호별 [그대로/삭제/위치변경]을 저장해두고 슬롯에 적용 ──
-    DOLL_PRESET_NAMES = ["전부다!!", "인형,성물!!", "인형!!", "성물!!"]
-
-    @staticmethod
-    def _open_fish_slot(self, idx):
-        """슬롯 하나의 18좌표 등록 팝업 (셀의 '좌표 x/18' 클릭 시)."""
-        if getattr(self, "_fish_pop_win", None) and self._fish_pop_win.winfo_exists():
-            try: self._fish_pop_win.destroy()
-            except Exception: pass
-        win = tk.Toplevel(self); self._fish_pop_win = win; self._fish_pop_slot = idx
-        win.title(f"🎣 낚시녹임 #{idx+1:02d} 좌표 등록")
-        win.attributes("-topmost", True)
-
-        top = tk.Frame(win); top.pack(fill="x", padx=10, pady=(10,4))
-        tk.Label(top, text=f"#{idx+1:02d}  이름", font=("맑은 고딕", 9, "bold")).pack(side="left")
-        nv = tk.StringVar(value=self.cfg["fish_slots"][idx].get("name", "미등록"))
-        self._fish_pop_name = nv
-        ent = tk.Entry(top, textvariable=nv, font=("맑은 고딕", 9), width=14)
-        ent.pack(side="left", padx=6)
-        ent.bind("<FocusOut>", lambda e: self._save_fish_pop_name())
-        ent.bind("<Return>",   lambda e: self._save_fish_pop_name())
-
-        grid = tk.Frame(win); grid.pack(padx=10, pady=6)
-        self._fish_pop_vars = []; self._fish_pop_btns = []
-        coords = self.cfg["fish_slots"][idx].get("coords", [None]*FISH_CLICKS)
-        for j in range(FISH_CLICKS):
-            cc = tk.Frame(grid); cc.grid(row=j//6, column=j%6, padx=4, pady=4)
-            tk.Label(cc, text=f"{j+1}", font=("맑은 고딕", 7), fg="#555").pack()
-            on = j < len(coords) and coords[j]
-            cv = tk.StringVar(value="✔" if on else "✗")
-            self._fish_pop_vars.append(cv)
-            b = tk.Button(cc, textvariable=cv, font=("맑은 고딕", 8), width=4, pady=2,
-                          bg="#27ae60" if on else "#7f8c8d", fg="white",
-                          command=lambda x=idx, c=j: self._reg_fish_click(x, c))
-            b.pack(); self._fish_pop_btns.append(b)
-
-        bot = tk.Frame(win); bot.pack(pady=(4,10))
-        tk.Button(bot, text="👁 미리보기", font=("맑은 고딕", 8), bg="#566573", fg="white",
-                  command=lambda: self._preview_fish(idx)).pack(side="left", padx=3)
-        if idx > 0:
-            tk.Button(bot, text="↑ 윗슬롯 복사", font=("맑은 고딕", 8), bg="#8e44ad", fg="white",
-                      command=lambda: self._group_copy_fish_slot(idx)).pack(side="left", padx=3)
-        tk.Button(bot, text="× 전체삭제", font=("맑은 고딕", 8), fg="white", bg="#c0392b",
-                  command=lambda: self._del_fish(idx)).pack(side="left", padx=3)
-        tk.Button(bot, text="닫기", font=("맑은 고딕", 8),
-                  command=win.destroy).pack(side="left", padx=3)
-
-    def _toggle_fish_enable(self, idx):
-        cur = self.cfg["fish_slots"][idx].get("enabled", True)
-        self.cfg["fish_slots"][idx]["enabled"] = not cur
-        save_cfg(self.cfg)
-        self._refresh_fish_display()
-
-    def _refresh_fish_display(self):
-        # 그리드 셀 (ON/OFF + 좌표 개수)
-        if getattr(self, "_fish_enable_btns", None):
-            for i in range(FISH_SLOTS):
-                s = self.cfg["fish_slots"][i]
-                en = s.get("enabled", True)
-                self._fish_enable_btns[i].config(text="ON" if en else "OFF",
-                                                 bg="#27ae60" if en else "#95a5a6")
-                reg = sum(1 for c in s.get("coords", []) if c)
-                self._fish_coord_sv[i].set(f"좌표 {reg}/{FISH_CLICKS}")
-                try:
-                    nm = (s.get("name") or "").strip()
-                    nm = "" if nm == "미등록" else nm
-                    if i < len(getattr(self, "_fish_name_vars", [])) \
-                       and self._fish_name_vars[i].get() != nm:
-                        self._fish_name_vars[i].set(nm)
-                    _es = getattr(self, "_fish_name_ents", [])
-                    if i < len(_es) and _es[i].winfo_exists():
-                        _es[i].config(fg=self._name_color(nm))
-                except Exception:
-                    pass
-        # 열린 좌표 등록 팝업의 18버튼 갱신
-        pw = getattr(self, "_fish_pop_win", None)
-        if pw and pw.winfo_exists():
-            i = self._fish_pop_slot
-            coords = self.cfg["fish_slots"][i].get("coords", [None]*FISH_CLICKS)
-            for j in range(FISH_CLICKS):
-                on = j < len(coords) and coords[j]
-                self._fish_pop_vars[j].set("✔" if on else "✗")
-                self._fish_pop_btns[j].config(bg="#27ae60" if on else "#7f8c8d")
-
-    def _reg_fish_click(self, slot_idx, click_idx):
-        self._save_fish_pop_name()
-        self._fish_reg_idx  = slot_idx
-        self._fish_reg_step = click_idx
-        name = self.cfg["fish_slots"][slot_idx].get("name", f"#{slot_idx+1}")
-        self.status.set(f"3초 후 [{name}] 좌표{click_idx+1} 위치 클릭하세요!")
-        def _go():
-            pw = getattr(self, "_fish_pop_win", None)
-            if pw and pw.winfo_exists():
-                try: pw.withdraw()   # 팝업이 타깃 가리지 않게 잠시 숨김
-                except Exception: pass
-            self.withdraw(); time.sleep(0.2); CoordOverlay(self, mode="fish")
-        self.after(3000, _go)
-
-    def on_fish_coord(self, x, y):
-        idx, step = self._fish_reg_idx, self._fish_reg_step
-        coords = self.cfg["fish_slots"][idx].get("coords", [None]*FISH_CLICKS)
-        while len(coords) < FISH_CLICKS: coords.append(None)
-        coords[step] = [x, y]
-        self.cfg["fish_slots"][idx]["coords"] = coords
-        save_cfg(self.cfg); self._refresh_fish_display()
-        self.status.set(f"✔ 낚시녹임 #{idx+1} 좌표{step+1} 등록: ({x},{y})")
-        self.deiconify()
-        pw = getattr(self, "_fish_pop_win", None)   # 등록 팝업 다시 보이기
-        if pw and pw.winfo_exists():
-            try: pw.deiconify(); pw.lift()
-            except Exception: pass
-
-    def _del_fish(self, idx):
-        if not messagebox.askyesno("슬롯 삭제", f"낚시녹임 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
-            return
-        self.cfg["fish_slots"][idx]["coords"] = [None]*FISH_CLICKS
-        save_cfg(self.cfg); self._refresh_fish_display()
-
-    def _test_fish(self, idx):
-        h = self.cfg["fish_slots"][idx]
-        coords = [c for c in h.get("coords", []) if c]
-        if not coords:
-            messagebox.showwarning("등록 필요", f"#{idx+1} 슬롯에 등록된 좌표가 없습니다."); return
-        # 슬롯별 실행도 잠금+대기열 — 연속으로 눌러두면 한 슬롯 완료 후 다음 슬롯 실행
-        busy_name = f"낚시녹임 #{idx+1:02d}"
-        if not self._try_busy_or_queue(busy_name, lambda: self._test_fish(idx)): return
-        self._fish_stop = False
-        name = h.get("name", f"#{idx+1}")
-        self._minimize_all()
-        def run():
-            try:
-                _clicked = 0
-                for j, c in enumerate(h.get("coords", [])):
-                    if not c: continue
-                    if getattr(self, "_fish_stop", False): break
-                    if _clicked == 0:
-                        time.sleep(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))  # 첫 클릭 전 여유
-                    self.status.set(f"[{name}] 좌표{j+1} 실행...")
-                    pyautogui.click(*c)
-                    _clicked += 1
-                    time.sleep(random.uniform(DOLL_MIN, DOLL_MAX))  # 좌표 간 간격
-                self.status.set(f"✔ [{name}] 슬롯 완료!")
-            except Exception as e:
-                self.status.set(f"오류: {e}")
-            finally:
-                self._clear_busy(busy_name)   # 잠금 해제 → 대기열의 다음 슬롯이 이어서 실행
-                self.deiconify()
-        threading.Thread(target=run, daemon=True).start()
-
-    def _preview_fish(self, idx):
-        coords = self.cfg["fish_slots"][idx].get("coords", [])
-        dots = [(c[0], c[1], n+1) for n, c in enumerate(coords) if c and len(c) >= 2]
-        if not dots:
-            self.status.set(f"#{idx+1:02d} 등록된 좌표가 없습니다"); return
-        name = self.cfg["fish_slots"][idx].get("name", f"#{idx+1:02d}")
-        def rereg(dot_idx):
-            self._fish_reg_idx  = idx
-            self._fish_reg_step = dot_idx
-            self.deiconify()
-            self.after(200, lambda: CoordOverlay(self, mode="fish"))
-        def _save(dot_idx, nx, ny):
-            self.cfg["fish_slots"][idx]["coords"][dot_idx] = [nx, ny]
-            save_cfg(self.cfg); self._refresh_fish_display()
-            self.status.set(f"✔ 낚시녹임 #{idx+1:02d} 좌표{dot_idx+1} 이동 저장: ({nx},{ny})")
-        self._open_dot_preview(f"낚시녹임 #{idx+1:02d} {name}", dots, rereg_fn=rereg, save_fn=_save, dot_r=4)
-
-    def _copy_fish_slot(self, idx):
-        """슬롯 좌표를 클립보드에 복사 — 원하는 슬롯에서 [붙임]으로 붙여넣기."""
-        import copy
-        coords = self.cfg["fish_slots"][idx].get("coords", [])
-        if not any(coords):
-            self.status.set(f"#{idx+1:02d} 복사할 좌표가 없습니다"); return
-        self._fish_clipboard = copy.deepcopy(coords)
-        self._fish_clip_src  = idx   # 붙여넣기 때 클라이언트 위치 자동보정 기준
-        self._fish_clip_name = (self.cfg["fish_slots"][idx].get("name") or "").strip()
-        reg = sum(1 for c in coords if c)
-        self.status.set(f"📋 #{idx+1:02d} 좌표 {reg}개 복사됨 — 원하는 슬롯의 [붙임]을 누르세요")
-
-    def _paste_fish_slot(self, idx):
-        """클립보드 좌표를 이 슬롯에 붙여넣기 — 클라이언트 창 위치를 감지해
-        원본 슬롯→대상 슬롯 위치 차이만큼 좌표를 자동 이동시킨다."""
-        import copy
-        clip = getattr(self, "_fish_clipboard", None)
-        if not clip:
-            self.status.set("먼저 [복사]로 슬롯 좌표를 복사하세요"); return
-        shifted = copy.deepcopy(clip)
-        src = getattr(self, "_fish_clip_src", None)
-        note = ""
-        if src is not None and src != idx:
-            rects = self._client_rects_by_slot()
-            if rects:
-                dx = rects[idx][0] - rects[src][0]
-                dy = rects[idx][1] - rects[src][1]
-                for c in shifted:
-                    if c:
-                        c[0] += dx; c[1] += dy
-                note = f" — 클라이언트 위치 자동보정 ({dx:+},{dy:+})"
-            else:
-                note = " — ⚠ 클라이언트 16개 감지 실패, 원본 위치 그대로"
-        self.cfg["fish_slots"][idx]["coords"] = shifted
-        # 슬롯 이름(제목)도 함께 붙여넣기
-        _nm = getattr(self, "_fish_clip_name", "")
-        if _nm and _nm != "미등록":
-            self.cfg["fish_slots"][idx]["name"] = _nm
-            self._fish_preset_ts = time.time()      # 이름칸 자동저장이 되돌리지 않게
-            try:
-                self._fish_name_vars[idx].set(_nm)
-            except Exception:
-                pass
-        save_cfg(self.cfg); self._refresh_fish_display()
-        reg = sum(1 for c in shifted if c)
-        self.status.set(f"✔ #{idx+1:02d}에 붙여넣기 완료 ({reg}/{FISH_CLICKS})"
-                        + (f" · 이름 '{_nm}'" if _nm and _nm != "미등록" else "") + note)
-
-    def _start_fish(self):
-        active = [h for h in self.cfg.get("fish_slots", [])
-                  if h.get("enabled", True) and any(c for c in h.get("coords", []))]
-        if not active:
-            messagebox.showwarning("등록 필요", "실행할(ON) 낚시녹임 좌표가 없습니다."); return
-        if not self._try_busy_or_queue("낚시녹임", self._start_fish): return
-        self._fish_stop = False
-        self._set_btn("btn_fish_run", state="disabled")
-        self._set_btn("btn_fish_stop", state="normal")
-        self._minimize_all()
-        threading.Thread(target=self._run_task, args=("낚시녹임", self._run_fish_standalone), daemon=True).start()
-
-    def _run_fish_standalone(self):
-        self._run_fish()
-        self._set_btn("btn_fish_run", state="normal", bg="#b9770e", text="▶  낚시녹임 실행")
-        self._set_btn("btn_fish_stop", state="disabled")
-        self._fish_stop = False
-        self.after(0, self._restore_back)
-
-    def _run_fish(self):
-        self._start_pause()
-        try:
-            slots = list(enumerate(self.cfg.get("fish_slots", [])))
-            active = [(i, h) for i, h in slots
-                      if h.get("enabled", True) and any(c for c in h.get("coords", []))]
-            random.shuffle(active)   # 슬롯 실행 순서 매번 랜덤
-            for si, (i, h) in enumerate(active):
-                if getattr(self, "_fish_stop", False): self.status.set("낚시녹임 멈춤"); return
-                name = h.get("name", f"#{i+1}")
-                coords = h.get("coords", [])
-                _clicked = 0   # 이 슬롯에서 실제로 클릭한 횟수
-                for j, coord in enumerate(coords):
-                    if not coord: continue
-                    if getattr(self, "_fish_stop", False): self.status.set("낚시녹임 멈춤"); return
-                    if _clicked == 0:
-                        # 첫 클릭 '전' 여유 — 바로 클릭하지 않음 (0.5~1초)
-                        if not self._fish_wait(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX)):
-                            self.status.set("낚시녹임 멈춤"); return
-                    self.status.set(f"🎣 [{name}] 좌표 {j+1}/{FISH_CLICKS}...")
-                    pyautogui.click(*coord)
-                    _clicked += 1
-                    if j < len(coords) - 1:
-                        if not self._fish_wait(random.uniform(DOLL_MIN, DOLL_MAX)):
-                            self.status.set("낚시녹임 멈춤"); return
-                if si < len(active) - 1:
-                    if not self._fish_wait(random.uniform(DOLL_SLOT_MIN, DOLL_SLOT_MAX)):
-                        self.status.set("낚시녹임 멈춤"); return
-            self.status.set(f"✔ 낚시녹임 완료! ({len(active)}개 슬롯)")
-        except Exception as e:
-            self.status.set(f"낚시녹임 오류: {e}")
-
-    # ── 클로드 앱 최소화 (좌표 겹침 방지 + 야간 자동 최소화) ──
     def _open_doll_win(self):
         self._open_section_win("_doll_win", "🧸 인형 탐험", self._build_doll, w=440, h=440)
 
@@ -6691,19 +6350,6 @@ class App(tk.Tk):
         tk.Button(bot, text="닫기", font=("맑은 고딕", 8),
                   command=win.destroy).pack(side="left", padx=3)
 
-    def _save_fish_pop_name(self):
-        i = getattr(self, "_fish_pop_slot", None)
-        if i is not None and getattr(self, "_fish_pop_name", None) is not None:
-            self.cfg["fish_slots"][i]["name"] = self._fish_pop_name.get().strip() or "미등록"
-            save_cfg(self.cfg)
-
-    def _fish_wait(self, sec):
-        end = time.time() + sec
-        while time.time() < end:
-            if getattr(self, "_fish_stop", False): return False
-            time.sleep(0.05)
-        return True
-
     def _save_doll_pop_name(self):
         i = getattr(self, "_doll_pop_slot", None)
         if i is not None and getattr(self, "_doll_pop_name", None) is not None:
@@ -6829,31 +6475,6 @@ class App(tk.Tk):
             self.status.set(f"✔ 인형탐험 #{idx+1:02d} 좌표{dot_idx+1} 이동 저장: ({nx},{ny})")
         self._open_dot_preview(f"인형탐험 #{idx+1:02d} {name}", dots, rereg_fn=rereg, save_fn=_save, dot_r=4)
 
-    def _group_copy_fish_slot(self, idx):
-        import copy
-        src = self.cfg["fish_slots"][idx-1].get("coords", [])
-        if not any(src):
-            self.status.set(f"#{idx:02d} 위에 복사할 좌표가 없습니다"); return
-        self.cfg["fish_slots"][idx]["coords"] = copy.deepcopy(src)
-        _pn = (self.cfg["fish_slots"][idx-1].get("name") or "").strip()
-        if _pn and _pn != "미등록":
-            self.cfg["fish_slots"][idx]["name"] = _pn
-            self._fish_preset_ts = time.time()
-            try: self._fish_name_vars[idx].set(_pn)
-            except Exception: pass
-        save_cfg(self.cfg); self._refresh_fish_display()
-        self.status.set(f"✔ #{idx:02d} → #{idx+1:02d} 좌표·이름 복사 완료")
-
-    def _group_copy_fish(self):
-        import copy
-        src = self.cfg["fish_slots"][0].get("coords", [])
-        if not any(src):
-            self.status.set("#01 슬롯에 복사할 좌표가 없습니다"); return
-        for i in range(1, FISH_SLOTS):
-            self.cfg["fish_slots"][i]["coords"] = copy.deepcopy(src)
-        save_cfg(self.cfg); self._refresh_fish_display()
-        self.status.set(f"✔ #01 좌표 → #02~#{FISH_SLOTS:02d} 전체 복사 완료")
-
     def _group_copy_doll_slot(self, idx):
         import copy
         src = self.cfg["doll_slots"][idx-1].get("coords", [])
@@ -6918,6 +6539,11 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("eventshop", i),
                             prev=lambda i: self._preview_dgn2("eventshop", i),
                             delete=lambda i: self._del_dgn2("eventshop", i)),
+            "fish":    dict(title="낚시녹임",  key="fish_slots",    clicks=FISH_CLICKS,    color="#1a5276",
+                            reg=lambda s, c: self._reg_dgn2_click("fish", s, c),
+                            test=lambda i: self._test_dgn2("fish", i),
+                            prev=lambda i: self._preview_dgn2("fish", i),
+                            delete=lambda i: self._del_dgn2("fish", i)),
             "tj":      dict(title="TJ성공!!", key="tj_slots",       clicks=TJ_CLICKS,      color="#ad1457",
                             reg=self._reg_tj_click,      test=self._test_tj,      prev=self._preview_tj,      delete=self._del_tj),
         }
@@ -9089,7 +8715,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_dollchk_win","_relic_win","_tj_win","_coupon_win",
+                 "_dollchk_win","_relic_win","_tj_win","_coupon_win","_fish_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs
@@ -9903,6 +9529,7 @@ class App(tk.Tk):
         self._relic_stop     = True
         self._coupon_stop    = True
         self._eventshop_stop = True
+        self._fish_stop      = True
         self._tj_stop        = True
         self._reroll_running = False  # 오림의일기장도 정지
         self._busy_task      = None   # 잠금 해제
@@ -11477,8 +11104,6 @@ class CoordOverlay(tk.Toplevel):
             label = f"인형탐험 프리셋 — 클릭 {getattr(app, '_doll_pick', {}).get('jx', 0)+1} 번 위치"
         elif mode == "doll":
             label = f"인형탐험 #{app._doll_reg_idx+1} 좌표{app._doll_reg_step+1} 위치"
-        elif mode == "fish":
-            label = f"낚시녹임 #{getattr(app, '_fish_reg_idx', 0)+1} 좌표{getattr(app, '_fish_reg_step', 0)+1} 위치"
         elif mode == "wdoff":
             label = f"주말던전끄기 #{app._wdoff_reg_idx+1} 위치"
         else:
@@ -11514,7 +11139,6 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "slp":       self.app.on_slp_coord(x, y)
         elif self.mode == "dc":        self.app.on_dc_coord(x, y)
         elif self.mode == "doll":      self.app.on_doll_coord(x, y)
-        elif self.mode == "fish":      self.app.on_fish_coord(x, y)
         elif self.mode == "dollpreset": self.app.on_dollpreset_coord(x, y)
         elif self.mode == "wdoff":     self.app.on_wdoff_coord(x, y)
         else:                          self.app.on_coord(x, y)
