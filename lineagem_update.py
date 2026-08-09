@@ -146,6 +146,21 @@ CODE_FILES = ["lineagem_launcher.py", "lineagem_ocr.py", "lineagem_island.py",
 DATA_FILES = ["coords.json", "island_coords.json", "island_counts.json"]
 DATA_DIRS  = ["reroll_templates"]
 
+
+def _all_code_files():
+    """저장소에 있는 코드 파일 전부 — 목록(CODE_FILES)에 안 적혀서 빠지는 일 방지.
+    새 .py/.pyw 파일이 추가돼도 업데이트가 자동으로 같이 받아온다."""
+    files = list(CODE_FILES)
+    try:
+        for f in sorted(os.listdir(REPO)):
+            if f in files:
+                continue
+            if f.lower().endswith((".py", ".pyw")):
+                files.append(f)
+    except Exception:
+        pass
+    return files
+
 root = tk.Tk(); root.title("🔄 리니지M 업데이트")
 root.geometry("470x320+420+320")
 root.attributes("-topmost", True)
@@ -491,10 +506,30 @@ def main():
           try:
             log("4) 파일 복사..." if _copy_try == 1 else "4) 파일 복사 재시도...")
             n = 0
-            for f in CODE_FILES:                      # 코드는 항상 동기화
+            code_fail = []
+            for f in _all_code_files():               # 코드는 항상 동기화 (저장소 전체)
                 s = os.path.join(REPO, f)
-                if os.path.exists(s):
-                    shutil.copy2(s, os.path.join(DESK, f)); n += 1
+                if not os.path.exists(s):
+                    continue
+                dst = os.path.join(DESK, f)
+                okc = False
+                for _t in (1, 2, 3):                  # 파일이 잠겨 있을 수 있어 3회까지 재시도
+                    try:
+                        shutil.copy2(s, dst)
+                        with open(s, "rb") as fa, open(dst, "rb") as fb:
+                            okc = fa.read() == fb.read()   # 바이트 단위 검증
+                    except Exception:
+                        okc = False
+                    if okc:
+                        break
+                    time.sleep(0.6)
+                if okc:
+                    n += 1
+                else:
+                    code_fail.append(f)
+            if code_fail:
+                log("   ⚠ 코드 복사 실패: " + ", ".join(code_fail))
+                raise RuntimeError("코드 복사 실패: " + ", ".join(code_fail))
             # 데이터(좌표): 병합 없음 — 메인이 아니면 원격(메인) 버전으로 통째로 동기화.
             # 메인 컴퓨터는 자기(바탕화면) 좌표가 원본이므로 절대 덮어쓰지 않음.
             for f in DATA_FILES:

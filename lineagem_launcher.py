@@ -9847,40 +9847,43 @@ class App(tk.Tk):
                             except Exception: pass
                         break
 
-                    # ① 지정 계정으로 전환
-                    self.status.set("지정 계정으로 전환 중...")
-                    try: _dbg.write(f"[SWITCH] 전환 시작 profile={self.cfg.get('profile_btn')} google={self.cfg.get('google_acc')} confirm={self.cfg.get('confirm_btn')}\n"); _dbg.flush()
-                    except Exception: pass
-                    if self.cfg.get("profile_btn"):
-                        pyautogui.click(*self.cfg["profile_btn"])
-                        try: _dbg.write("[SWITCH] profile_btn 클릭\n"); _dbg.flush()
+                    # ①② (2026-08-09) 지정 계정으로 전환 → 아이디 확인 → 다르면 재전환
+                    #     4시 퍼플 자동전환을 폐지했기 때문에, 전체 자동 실행 마지막에
+                    #     "처음 로그인해 두었던 아이디(지정계정)"로 확실히 되돌려 놓는다.
+                    #     예전엔 전환을 1번만 하고 실패해도 그냥 넘어갔다 → 최대 2번까지 재시도.
+                    _matched3, _oid3, _r3 = False, "", 0.0
+                    for _try in range(1, 3):
+                        self.status.set(f"지정 계정으로 전환 중... ({_try}/2)")
+                        try: _dbg.write(f"[SWITCH] 전환 {_try}/2 시작" + chr(10)); _dbg.flush()
                         except Exception: pass
-                        if not self._wait(2): self.status.set("멈춤"); return
-                    if self.cfg.get("google_acc"):
-                        pyautogui.click(*self.cfg["google_acc"])
-                        try: _dbg.write("[SWITCH] google_acc 클릭\n"); _dbg.flush()
-                        except Exception: pass
-                        if not self._wait(2): self.status.set("멈춤"); return
-                    if self.cfg.get("confirm_btn"):
-                        pyautogui.click(*self.cfg["confirm_btn"])
-                        try: _dbg.write("[SWITCH] confirm_btn 클릭 → 로딩 10초\n"); _dbg.flush()
-                        except Exception: pass
-                        # 계정 전환 후 로딩(약 8초)이 끝나야 리니지M 좌측버튼이 생성됨
-                        self.status.set("계정 전환 로딩 대기 중... (약 10초)")
-                        if not self._wait(10): self.status.set("멈춤"); return
+                        if self.cfg.get("profile_btn"):
+                            pyautogui.click(*self.cfg["profile_btn"])
+                            if not self._wait(2): self.status.set("멈춤"); return
+                        if self.cfg.get("google_acc"):
+                            pyautogui.click(*self.cfg["google_acc"])
+                            if not self._wait(2): self.status.set("멈춤"); return
+                        if self.cfg.get("confirm_btn"):
+                            pyautogui.click(*self.cfg["confirm_btn"])
+                            self.status.set("계정 전환 로딩 대기 중... (약 10초)")
+                            if not self._wait(10): self.status.set("멈춤"); return
 
-                    # ② 게임 창 활성화 → 리니지M 좌측버튼으로 아이디 표시 → 지정계정 확인
-                    self.status.set("지정계정 확인 중...")
-                    try: win.activate()
-                    except Exception: pass
-                    if not self._wait(1): self.status.set("멈춤"); return
-                    if self.cfg.get("profile_reveal_btn"):
-                        pyautogui.click(*self.cfg["profile_reveal_btn"])
-                        if not self._wait(3): self.status.set("멈춤"); return
-                    _matched3, _oid3, _r3 = self._is_target_account()
-                    self.status.set(f"아이디 '{_oid3}' (일치율 {int(_r3*100)}%)")
-                    try: _dbg.write(f"[SWITCH] 아이디 확인: '{_oid3}' 일치율 {int(_r3*100)}% matched={_matched3}\n"); _dbg.flush()
-                    except Exception: pass
+                        # 게임 창 활성화 → 리니지M 좌측버튼으로 아이디 표시 → 지정계정 확인
+                        self.status.set("지정계정 확인 중...")
+                        try: win.activate()
+                        except Exception: pass
+                        if not self._wait(1): self.status.set("멈춤"); return
+                        if self.cfg.get("profile_reveal_btn"):
+                            pyautogui.click(*self.cfg["profile_reveal_btn"])
+                            if not self._wait(3): self.status.set("멈춤"); return
+                        _matched3, _oid3, _r3 = self._is_target_account()
+                        self.status.set(f"아이디 '{_oid3}' (일치율 {int(_r3*100)}%)")
+                        try: _dbg.write(f"[SWITCH] {_try}/2 아이디 확인: '{_oid3}' "
+                                        f"일치율 {int(_r3*100)}% matched={_matched3}" + chr(10)); _dbg.flush()
+                        except Exception: pass
+                        if _matched3:
+                            break
+                        if self._stop_flag: self.status.set("멈춤"); return
+
 
                     # ③ 퍼플 최소화 — 확인 성공/실패와 무관하게 항상 최소화
                     #    (다음 좌표 클릭이 퍼플 위에서 눌리지 않도록 반드시 최소화)
