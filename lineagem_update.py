@@ -149,68 +149,6 @@ DATA_FILES = ["island_counts.json"]
 DATA_DIRS  = ["reroll_templates"]
 
 
-# 런처 [💾 좌표저장]이 쓰는 파일 목록 — 자동 저장도 똑같이 맞춘다
-_SAVE_FILES     = ("coords.json", "island_coords.json", "local_config.json",
-                   "accounts.json", "daya_regions.json")
-_SAVE_LOCAL     = ("daya_regions.json", "profile_ref_region.json")
-_SAVE_CRITICAL  = ("coords.json", "island_coords.json")
-
-
-def autosave_coords(log):
-    """업데이트 직전에 지금 좌표를 [♻ 좌표복구]가 읽는 자리(usersave)에 자동 저장한다.
-    사용자가 [💾 좌표저장]을 깜빡해도, 업데이트 후 [♻ 좌표복구] 한 번이면
-    '업데이트 하기 직전 좌표'로 되돌아갈 수 있게 하기 위한 안전장치.
-    (빈/깨진 좌표는 저장하지 않는다 — 기존 저장본을 오염시키면 복구가 무의미)"""
-    import datetime
-    try:
-        local = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
-        d = os.path.join(local, "usersave")
-        os.makedirs(d, exist_ok=True)
-        checked, total = [], 0
-        for f in _SAVE_FILES:
-            src = os.path.join(DESK, f)
-            if not os.path.exists(src):
-                continue
-            cnt = _count_coords(src)
-            if f in _SAVE_CRITICAL and cnt <= 0:
-                log(f"   ⚠ {f} 에 좌표가 없어 자동 저장을 건너뜁니다 (기존 저장본 유지)")
-                return
-            checked.append((f, src, max(cnt, 0)))
-        for f in _SAVE_LOCAL:
-            src = os.path.join(local, f)
-            if os.path.exists(src):
-                checked.append(("local__" + f, src, 0))
-        if not checked:
-            log("   저장할 좌표 파일이 없어 자동 저장을 건너뜁니다")
-            return
-        for f, src, cnt in checked:                 # 임시파일 → 검증 → 교체
-            dst = os.path.join(d, f)
-            tmp = dst + ".tmp"
-            shutil.copy2(src, tmp)
-            with open(tmp, "rb") as fa, open(src, "rb") as fb:
-                if fa.read() != fb.read():
-                    raise IOError(f"{f} 저장 검증 실패")
-            os.replace(tmp, dst)
-            total += cnt
-        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        gdir = os.path.join(d, "history")           # 세대 보관 — 수동 저장본도 여기 남아 있다
-        os.makedirs(gdir, exist_ok=True)
-        for f, src, cnt in checked:
-            shutil.copy2(src, os.path.join(gdir, f"{stamp}_{f}"))
-        for fn in sorted(os.listdir(gdir))[:-40]:
-            try: os.remove(os.path.join(gdir, fn))
-            except Exception: pass
-        info = {"time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "coords": total, "files": [f for f, _, _ in checked],
-                "n_files": len(checked), "auto": True, "by": "업데이트"}
-        with open(os.path.join(d, "info.json"), "w", encoding="utf-8") as fp:
-            json.dump(info, fp, ensure_ascii=False, indent=2)
-        log(f"   💾 업데이트 전 좌표 자동 저장 완료 (좌표 {total}개 / 파일 {len(checked)}개)")
-        log("      → 업데이트 후 문제가 생기면 런처 [♻ 좌표복구] 한 번이면 이 시점으로 돌아갑니다")
-    except Exception as e:
-        log(f"   ⚠ 업데이트 전 좌표 자동 저장 실패: {e} (업데이트는 계속 진행합니다)")
-
-
 def sync_times(log):
     """좌표는 그대로 두고 '클릭 간격(gap_list)'만 메인 것으로 맞춘다.
     share_times.json 에 적힌 던전만 대상 (컴퓨터마다 좌표 위치가 다르기 때문)."""
@@ -663,10 +601,6 @@ def main():
         time.sleep(1.2)
 
         # 복사가 실패해도 런처는 반드시 다시 띄운다(꺼진 채로 방치 금지) → 오류는 잡아두고 뒤에서 보고
-        # 3-1) 덮어쓰기 전에 지금 좌표를 [♻ 좌표복구] 자리에 자동 저장
-        log("3-1) 업데이트 전 좌표 자동 저장...")
-        autosave_coords(log)
-
         copy_err = None
         for _copy_try in (1, 2):
           try:
