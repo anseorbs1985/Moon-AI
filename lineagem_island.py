@@ -621,6 +621,9 @@ class IslandApp(tk.Tk):
         if not hasattr(self, "_cell_name_vars"):
             self._cell_name_vars = {}
         self._cell_name_vars[key] = []
+        if not hasattr(self, "_cell_name_ents"):
+            self._cell_name_ents = {}
+        self._cell_name_ents[key] = []
         _stretch = bool(getattr(self, "_fixed_geometry", None))
         wg = tk.Frame(parent)
         if _stretch:
@@ -638,8 +641,10 @@ class IslandApp(tk.Tk):
             _nm = (self.cfg.get(key, [{}] * SLOTS)[i].get("name") or "").strip()
             nvv = tk.StringVar(value="" if _nm == "미등록" else _nm)
             self._cell_name_vars[key].append(nvv)
-            ne = tk.Entry(cell, textvariable=nvv, font=("맑은 고딕", 7), width=4,
-                          justify="center", relief="flat", bg="#f2f2f2", fg="#2c3e50")
+            ne = tk.Entry(cell, textvariable=nvv, font=("맑은 고딕", 8, "bold"), width=4,
+                          justify="center", relief="flat", bg="#f2f2f2",
+                          fg=self._preset_color(_nm))
+            self._cell_name_ents.setdefault(key, []).append(ne)
             ne.pack(pady=(1, 0), fill="x")   # 셀 폭에 맞춤
             def _sv_name(e=None, k=key, x=i, v=nvv):
                 # 붙여넣기 직후 늦게 도착한 FocusOut이 새 이름을 옛 값으로 덮어쓰지 않게
@@ -910,7 +915,9 @@ class IslandApp(tk.Tk):
         """이름으로 색 배정 — 기본=진회색, 주홍이=보라 계열, 빨갱이=빨강 계열
         (48% < 82% 순으로 점점 밝게)."""
         nm = (name or "").strip()
-        if "빨갱이" in nm:
+        if not nm:
+            return "#2c3e50"
+        if "빨갱이" in nm or "빨갱" in nm:
             if "82" in nm: return "#e74c3c"
             if "48" in nm: return "#c0392b"
             return "#7b241c"
@@ -1403,6 +1410,9 @@ class IslandApp(tk.Tk):
                 nm = "" if nm == "미등록" else nm
                 if v.get() != nm:
                     v.set(nm)
+                ents = getattr(self, "_cell_name_ents", {}).get(key, [])
+                if i < len(ents) and ents[i].winfo_exists():
+                    ents[i].config(fg=self._preset_color(nm))
             except Exception:
                 pass
         # ON/OFF 토글 표시

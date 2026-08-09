@@ -5693,6 +5693,7 @@ class App(tk.Tk):
         self._doll_enable_btns = []
         self._doll_coord_sv    = []
         self._doll_name_vars   = []
+        self._doll_name_ents   = []
         for idx in range(DOLL_SLOTS):
             r, c = idx % 4, idx // 4
             cell = tk.Frame(wg, bd=1, relief="groove", padx=3, pady=2)
@@ -5701,8 +5702,10 @@ class App(tk.Tk):
             _nm = (self.cfg["doll_slots"][idx].get("name") or "").strip()
             nvv = tk.StringVar(value="" if _nm == "미등록" else _nm)
             self._doll_name_vars.append(nvv)
-            ne = tk.Entry(cell, textvariable=nvv, font=("맑은 고딕", 7), width=10,
-                          justify="center", relief="flat", bg="#f2f2f2", fg="#2c3e50")
+            ne = tk.Entry(cell, textvariable=nvv, font=("맑은 고딕", 8, "bold"), width=10,
+                          justify="center", relief="flat", bg="#f2f2f2",
+                          fg=self._name_color(_nm))
+            self._doll_name_ents.append(ne)
             ne.pack(pady=(1, 0), fill="x")
             def _sv_dname(*_a, x=idx, v=nvv):
                 if time.time() - getattr(self, "_doll_preset_ts", 0) < 1.0:
@@ -5739,6 +5742,26 @@ class App(tk.Tk):
 
     # ── 인형탐험 프리셋 P1~P4 — 번호별 [그대로/삭제/위치변경]을 저장해두고 슬롯에 적용 ──
     DOLL_PRESET_NAMES = ["전부다!!", "인형,성물!!", "인형!!", "성물!!"]
+
+    @staticmethod
+    def _name_color(name):
+        """슬롯 이름(프리셋 이름)별 색 — 한눈에 구분되게."""
+        nm = (name or "").strip()
+        if not nm:
+            return "#2c3e50"
+        if "전부" in nm:
+            return "#1e8449"          # 초록
+        if "인형" in nm and "성물" in nm:
+            return "#2471a3"          # 파랑
+        if "인형" in nm:
+            return "#b9770e"          # 주황
+        if "성물" in nm:
+            return "#7d3c98"          # 보라
+        if "빨갱" in nm:
+            return "#c0392b"
+        if "주홍" in nm:
+            return "#7d3c98"
+        return "#2c3e50"
 
     def _doll_presets(self):
         lst = self.cfg.setdefault("_doll_presets", [])
@@ -6062,6 +6085,9 @@ class App(tk.Tk):
                     if i < len(getattr(self, "_doll_name_vars", [])) \
                        and self._doll_name_vars[i].get() != nm:
                         self._doll_name_vars[i].set(nm)
+                    _es = getattr(self, "_doll_name_ents", [])
+                    if i < len(_es) and _es[i].winfo_exists():
+                        _es[i].config(fg=self._name_color(nm))
                 except Exception:
                     pass
         # 열린 좌표 등록 팝업의 18버튼 갱신
