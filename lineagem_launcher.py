@@ -6691,6 +6691,19 @@ class App(tk.Tk):
         tk.Button(bot, text="닫기", font=("맑은 고딕", 8),
                   command=win.destroy).pack(side="left", padx=3)
 
+    def _save_fish_pop_name(self):
+        i = getattr(self, "_fish_pop_slot", None)
+        if i is not None and getattr(self, "_fish_pop_name", None) is not None:
+            self.cfg["fish_slots"][i]["name"] = self._fish_pop_name.get().strip() or "미등록"
+            save_cfg(self.cfg)
+
+    def _fish_wait(self, sec):
+        end = time.time() + sec
+        while time.time() < end:
+            if getattr(self, "_fish_stop", False): return False
+            time.sleep(0.05)
+        return True
+
     def _save_doll_pop_name(self):
         i = getattr(self, "_doll_pop_slot", None)
         if i is not None and getattr(self, "_doll_pop_name", None) is not None:
