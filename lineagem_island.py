@@ -1316,6 +1316,15 @@ class IslandApp(tk.Tk):
                 movs.append(j + 1)
         # 어떤 프리셋을 적용했는지 슬롯 이름에 남긴다 (미등록 → 프리셋 이름)
         nm = self._preset_full(key, pi)
+        # '이동'(방향) 프리셋은 이름을 덮어쓰지 않고 뒤에 방향만 붙인다 —
+        # 주홍이 82% 를 고른 뒤 서쪽 ▶▶ 를 골라도 무엇을 쓰는 슬롯인지 남게.
+        if (pr.get("floor") or "").strip() == "이동":
+            base = (slot.get("name") or "").strip()
+            base = base.replace("이동 서쪽 ▶▶", "").replace("이동 북쪽 ◀◀", "")
+            base = base.replace("서쪽 ▶▶", "").replace("북쪽 ◀◀", "").strip()
+            if base in ("", "미등록"):
+                base = ""
+            nm = (base + " " + (pr.get("name") or "").strip()).strip()
         self._paste_ts = time.time()      # 늦게 오는 이름칸 저장이 덮어쓰지 않게
         slot["name"] = nm
         try:
