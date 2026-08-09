@@ -544,6 +544,29 @@ def main():
                             or os.path.getsize(sp_) != os.path.getsize(dp_)):
                         shutil.copy2(sp_, dp_); n += 1
                         log(f"   데이터 갱신: {d}/{fn}")
+            # 프리셋만 키 단위로 동기화 — coords.json 전체는 건드리지 않고
+            # 프리셋 정의(_doll_presets 등)만 메인 것으로 맞춘다 (좌표는 로컬 유지)
+            try:
+                _src = os.path.join(REPO, "coords.json")
+                _dst = os.path.join(DESK, "coords.json")
+                if os.path.exists(_src) and os.path.exists(_dst):
+                    with open(_src, encoding="utf-8") as _f:
+                        _rem = json.load(_f)
+                    with open(_dst, encoding="utf-8") as _f:
+                        _loc = json.load(_f)
+                    _keys = [k for k in _rem if k.startswith("_")]   # _doll_presets 등
+                    _ch = [k for k in _keys if _loc.get(k) != _rem[k]]
+                    if _ch:
+                        for k in _ch:
+                            _loc[k] = _rem[k]
+                        with open(_dst, "w", encoding="utf-8") as _f:
+                            json.dump(_loc, _f, ensure_ascii=False, indent=2)
+                        log(f"   프리셋 동기화: {', '.join(_ch)} — 메인 것으로 반영 ✔")
+                    else:
+                        log("   프리셋: 이미 메인과 동일")
+            except Exception as _e:
+                log(f"   ⚠ 프리셋 동기화 실패: {_e}")
+
             # 🛟 좌표 파일이 없거나 비어 있으면 자동 복구
             #    1순위: 이 컴퓨터의 자동 백업  2순위: 저장소(메인) 좌표
             #    좌표가 멀쩡한 컴퓨터는 절대 건드리지 않는다 (머신별 원본 유지)
