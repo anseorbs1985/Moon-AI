@@ -909,7 +909,7 @@ class IslandApp(tk.Tk):
                              ("북쪽", ["기본!!", "빨갱이 48%", "빨갱이 82%",
                                       "주홍이 48%", "주홍이 82%"]),
                              # 방향 선택용 — 뒤에 덧붙여야 기존 프리셋 순서가 안 밀린다
-                             ("이동", ["▶▶", "◀◀"])],
+                             ("이동", ["북 ◀◀", "북 ▶▶", "서 ▶▶"])],
         "화요일_에카":     [("", ["기본!!", "빨갱이 82%",
                                   "주홍이 48%", "주홍이 82%"])],
     }
@@ -920,6 +920,9 @@ class IslandApp(tk.Tk):
     PRESET_SYNC_CLICKS = {"수금_오만의탑": (11, 12)}
     # 이름이 같으면 '모든 클릭 설정'을 함께 저장하는 던전 (잊혀진섬 서쪽↔북쪽)
     PRESET_SYNC_ALL = ("월요일_잊혀진섬",)
+    # 녹화를 공유하는 프리셋 짝 — 한쪽에 녹화하면 다른 쪽에도 그대로 복사된다
+    # (북 ▶▶ 와 서 ▶▶ 는 같은 동작이라 한 번만 녹화하면 됨)
+    PRESET_REC_MIRROR = {"월요일_잊혀진섬": {"북 ▶▶": ["서 ▶▶"], "서 ▶▶": ["북 ▶▶"]}}
 
     def _preset_layout(self, key):
         return self.PRESET_LAYOUT.get(key, self.PRESET_DEFAULT)
@@ -1160,9 +1163,28 @@ class IslandApp(tk.Tk):
             return
         pw["items"][str(jx)] = {"act": "rec", "ev": ev}
         self._preset_refresh_cells()
+        # 같은 동작을 쓰는 짝 프리셋에도 그대로 복사 (북 ▶▶ ↔ 서 ▶▶)
+        mirrored = []
+        try:
+            key = pw["key"]
+            pres = self._presets(key)
+            me = (pres[pw["pi"]].get("name") or "").strip()
+            for tgt in (self.PRESET_REC_MIRROR.get(key, {}).get(me) or []):
+                for oi, other in enumerate(pres):
+                    if (other.get("name") or "").strip() != tgt or oi == pw["pi"]:
+                        continue
+                    it2 = other.setdefault("items", {})
+                    it2[str(jx)] = {"act": "rec", "ev": list(ev)}
+                    mirrored.append(tgt)
+            if mirrored:
+                save_cfg(self.cfg)
+        except Exception:
+            pass
         dur = ev[-1][0] if ev else 0
+        _mm = (" / " + ", ".join(mirrored) + " 에도 복사됨") if mirrored else ""
         self._status.set("✔ 프리셋 클릭 " + str(jx + 1) + "번에 녹화 저장 (" +
-                         format(dur, ".1f") + "초, 동작 " + str(len(ev)) + "개) — [저장]을 눌러야 반영됩니다")
+                         format(dur, ".1f") + "초, 동작 " + str(len(ev)) + "개)" + _mm +
+                         " — [저장]을 눌러야 반영됩니다")
 
     def _preset_preview(self, jx):
         """이 번호가 어디를 클릭하는지 점으로 보여준다.
@@ -1368,7 +1390,9 @@ class IslandApp(tk.Tk):
         # 주홍이 82% 를 고른 뒤 서쪽 ▶▶ 를 골라도 무엇을 쓰는 슬롯인지 남게.
         if (pr.get("floor") or "").strip() == "이동":
             base = (slot.get("name") or "").strip()
-            for _tag in ("이동 ▶▶", "이동 ◀◀", "서쪽 ▶▶", "북쪽 ◀◀", "▶▶", "◀◀"):
+            for _tag in ("이동 북 ◀◀", "이동 북 ▶▶", "이동 서 ▶▶",
+                         "북 ◀◀", "북 ▶▶", "서 ▶▶",
+                         "서쪽 ▶▶", "북쪽 ◀◀", "▶▶", "◀◀"):
                 base = base.replace(_tag, "")
             base = base.strip()
             if base in ("", "미등록"):
