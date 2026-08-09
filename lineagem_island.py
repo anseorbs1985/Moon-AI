@@ -1784,50 +1784,76 @@ class IslandApp(tk.Tk):
         self._repeat_left[(key, idx)] = n   # 남은 횟수도 새로 시작
         self._status.set(f"#{idx+1}: 반복 횟수 {n}회로 설정")
 
+    def _rlog(self, msg):
+        """반복 실행 기록 — 나중에 무슨 일이 있었는지 추적용."""
+        try:
+            import datetime as _dt
+            d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "repeat_log.txt"), "a", encoding="utf-8") as f:
+                f.write(f"[{_dt.datetime.now():%m-%d %H:%M:%S}] {msg}" + chr(10))
+        except Exception:
+            pass
+
     def _repeat_tick(self):
-        """15초마다 반복 타이머 확인 — 시간이 되면 그 슬롯을 자동 실행."""
+        """반복 타이머 — 시간이 된 슬롯을 '한 번에 하나씩' 순서대로 실행한다.
+        (예전엔 같은 틱에서 여러 슬롯을 동시에 띄워 클릭이 충돌하고 일부가 누락됐다)"""
+        nxt_ms = 15000
         try:
             if not hasattr(self, "_repeat_next"):
                 self._repeat_next = {}
             now = time.time()
+            due = []                       # 실행할 차례가 된 슬롯들
             for d in DUNGEONS:
                 key = d["key"]
                 for i, s in enumerate(self.cfg.get(key, [])):
                     h = s.get("repeat_h") or 0
                     if not h:
                         self._repeat_next.pop((key, i), None)
+                        self._repeat_left.pop((key, i), None)
                         continue
                     nxt = self._repeat_next.get((key, i))
                     if nxt is None:
                         self._repeat_next[(key, i)] = now + self._repeat_delay(h)
                     elif now >= nxt:
-                        if getattr(self, "_slot_running", False):
-                            continue   # 다른 실행 중 — 다음 틱에 재시도
-                        left = self._repeat_left.get((key, i))
-                        if left is None:
-                            left = s.get("repeat_n") or 8
-                        left -= 1
-                        if left <= 0:
-                            # 횟수 소진 — 반복 자동 종료 (⏰ 표시도 없음으로)
-                            self._repeat_left.pop((key, i), None)
-                            self._repeat_next.pop((key, i), None)
-                            self.cfg[key][i]["repeat_h"] = 0
-                            save_cfg(self.cfg)
-                            try:
-                                self._rep_vars[key][i].set("⏰없음")
-                            except Exception:
-                                pass
-                            self._status.set(f"⏰ #{i+1} 반복 {s.get('repeat_n') or 8}회 완료 — 마지막 실행 후 종료")
-                        else:
-                            self._repeat_left[(key, i)] = left
-                            self._repeat_next[(key, i)] = now + self._repeat_delay(h)
-                            self._status.set(f"⏰ #{i+1} {h}시간 반복 자동 실행 (남은 {left}회)")
-                        self._test(key, i)
-        except Exception:
-            pass
-        self.after(15000, self._repeat_tick)
-
+                        due.append((nxt, key, i, h, s))
+            if due:
+                # 실행 중이면 아무것도 시작하지 않고 짧게 재확인 (차례는 그대로 유지)
+                if getattr(self, "_slot_running", False) or getattr(self, "_repeat_busy", False):
+                    return
+                due.sort()                 # 가장 오래 밀린 것부터
+                _, key, i, h, s = due[0]
+                left = self._repeat_left.get((key, i))
+                if left is None:
+                    left = s.get("repeat_n") or 8
+                left -= 1
+                if left <= 0:
+                    self._repeat_left.pop((key, i), None)
+                    self._repeat_next.pop((key, i), None)
+                    self.cfg[key][i]["repeat_h"] = 0
+                    save_cfg(self.cfg)
+                    try:
+                        self._rep_vars[key][i].set("⏰없음")
+                    except Exception:
+                        pass
+                    self._status.set(f"⏰ #{i+1} 반복 {s.get('repeat_n') or 8}회 완료 — 마지막 실행")
+                    self._rlog(f"{key} #{i+1:02d} 마지막 회차 실행 (반복 종료)")
+                else:
+                    self._repeat_left[(key, i)] = left
+                    self._repeat_next[(key, i)] = time.time() + self._repeat_delay(h)
+                    self._status.set(f"⏰ #{i+1} {h}시간 반복 자동 실행 (남은 {left}회, "
+                                     f"대기 {len(due)-1}개)")
+                    self._rlog(f"{key} #{i+1:02d} 실행 (남은 {left}회, 대기 {len(due)-1}개)")
+                self._repeat_busy = True          # 스레드 시작 전에 먼저 잠금 (경합 방지)
+                self._test(key, i)
+                nxt_ms = 5000                      # 남은 대기분을 빨리 이어서
+            elif self._repeat_next:
+                nxt_ms = 15000
+        except Exception as e:
+            self._rlog(f"반복 오류: {e!r}")
+        self.after(nxt_ms, self._repeat_tick)
     def _test(self, key, idx):
+        self._slot_running = True          # 스레드가 뜨기 전에 먼저 잠가 중복 실행 차단
         self.iconify()
         self._minimize_claude()
         threading.Thread(target=self._run, args=(key, idx), daemon=True).start()
@@ -2421,6 +2447,7 @@ class IslandApp(tk.Tk):
             self._status.set(f"오류: {e}")
         finally:
             self._slot_running = False
+            self._repeat_busy = False
             for btn in self._stop_btns.values():
                 btn.config(state="disabled")
             if sel_list:
