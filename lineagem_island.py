@@ -409,7 +409,9 @@ class IslandApp(tk.Tk):
             self.bind_all(_sq, _bump, add="+")
         self.after(30000, self._idle_back_tick)
         self._repeat_next = {}
-        self.after(15000, self._repeat_tick)   # 슬롯별 반복 타이머 (1~4시간)
+        # (2026-08-09) 슬롯 반복(2시간 N회)은 이제 '메인런처'가 관리한다 —
+        # 이 창 안에서 돌리면 창을 닫는 순간 반복이 통째로 죽어버려서.
+        # 여기서는 타이머를 돌리지 않는다 (⏰ 설정값만 저장하는 역할).
         self.after(300, self._scroll_all_to_bottom)
         self.after(80, self._fit_width)
         if self._auto_run and self._focus_idx is not None:

@@ -721,6 +721,7 @@ class App(tk.Tk):
         self.after(1000, self._past_scheduler_tick)
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
         self.after(2000, self._queue_tick)               # 실행 대기열 순차 처리
+        self.after(20000, self._island_repeat_tick)      # 섬/던전 슬롯 반복(2h N회) 관리
         # (자동 업데이트는 사용자 요청으로 비활성 — 업데이트는 🔄 버튼으로 수동 실행)
         # (2026-08-07 사용자 지시) 새벽 4시 퍼플 자동 확인·전환 사용 안 함 — 틱 미실행
         threading.Thread(target=self._seq_hotkey_loop, daemon=True).start()
@@ -1554,6 +1555,134 @@ class App(tk.Tk):
         self._send_to_back()
         self._minimize_claude()
         proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(idx)])
+        threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
+
+    # ── 섬/던전 슬롯 반복(2시간 N회) — 메인런처가 관리 (2026-08-09) ─────
+    #    예전엔 섬/던전 실행기 창 안에서만 타이머가 돌아, 창을 닫으면 반복이
+    #    통째로 죽었다. 이제 런처가 시각을 파일에 기록하며 관리하므로
+    #    창을 껐다 켜도, 런처를 재시작해도 이어진다.
+    ISLAND_KEYS = ("수금_오만의탑", "토요일_악몽의섬", "월요일_잊혀진섬",
+                   "화요일_에카", "귀환주문서", "카매사오기")
+
+    def _rep_path(self):
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "island_repeat.json")
+
+    def _rep_load(self):
+        try:
+            with open(self._rep_path(), encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _rep_save(self, st):
+        try:
+            with open(self._rep_path(), "w", encoding="utf-8") as f:
+                json.dump(st, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _rep_log(self, msg):
+        try:
+            import datetime as _dt
+            d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "repeat_log.txt"), "a", encoding="utf-8") as f:
+                f.write(f"[{_dt.datetime.now():%m-%d %H:%M:%S}] {msg}" + chr(10))
+        except Exception:
+            pass
+
+    @staticmethod
+    def _rep_delay(h):
+        """반복 주기(초) — 섬/던전 실행기와 같은 규칙(2h면 2:02~2:07 랜덤)."""
+        extra = {1: (1, 7), 2: (2, 7), 3: (2, 6), 4: (2, 7)}.get(h, (1, 7))
+        return h * 3600 + random.uniform(extra[0], extra[1]) * 60
+
+    def _island_cfg(self):
+        try:
+            with open(os.path.join(BASE, "island_coords.json"), encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _rep_turn_off(self, key, idx):
+        """정해진 횟수를 다 채웠으면 섬/던전 설정의 ⏰도 꺼준다."""
+        try:
+            path = os.path.join(BASE, "island_coords.json")
+            with open(path, encoding="utf-8") as f:
+                cfg = json.load(f)
+            cfg[key][idx]["repeat_h"] = 0
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+        except Exception as e:
+            self._rep_log(f"⚠ {key} #{idx+1:02d} ⏰ 끄기 실패: {e!r}")
+
+    def _island_repeat_tick(self):
+        try:
+            self._island_repeat_check()
+        except Exception as e:
+            self._rep_log(f"⚠ 반복 관리 오류: {e!r}")
+        self.after(60000, self._island_repeat_tick)
+
+    def _island_repeat_check(self):
+        cfg = self._island_cfg()
+        st  = self._rep_load()
+        now = time.time()
+        changed = False
+        due = []
+        for di, key in enumerate(self.ISLAND_KEYS):
+            for i, slot in enumerate(cfg.get(key, [])):
+                if not isinstance(slot, dict):
+                    continue
+                h = slot.get("repeat_h") or 0
+                k = f"{key}|{i}"
+                if not h:
+                    if k in st:
+                        st.pop(k, None); changed = True
+                    continue
+                e = st.get(k)
+                if not e or e.get("h") != h:
+                    # 새로 켰거나 시간을 바꿨다 → 지금부터 다시 카운트
+                    st[k] = {"h": h, "left": slot.get("repeat_n") or 8,
+                             "next": now + self._rep_delay(h)}
+                    changed = True
+                    self._rep_log(f"{key} #{i+1:02d} 반복 등록 — {h}시간 "
+                                  f"{st[k]['left']}회 (첫 실행 약 {h}시간 뒤)")
+                elif now >= e.get("next", 0):
+                    due.append((e["next"], di, key, i, h))
+        if changed:
+            self._rep_save(st)
+        if not due:
+            return
+        if self._is_busy():          # 다른 작업 중이면 시각을 그대로 두고 다음 분에 재시도
+            self.status.set(f"⏰ 반복 {len(due)}개 대기 — '{self._busy_label()}' 끝난 뒤 실행")
+            return
+        due.sort()                    # 가장 오래 밀린 것부터 하나씩
+        _, di, key, i, h = due[0]
+        k = f"{key}|{i}"
+        e = st.get(k) or {}
+        e["left"] = int(e.get("left", 1)) - 1
+        if e["left"] <= 0:
+            st.pop(k, None)
+            self._rep_turn_off(key, i)
+            self._rep_log(f"{key} #{i+1:02d} 마지막 회차 실행 (반복 종료)")
+        else:
+            e["next"] = now + self._rep_delay(h)
+            st[k] = e
+            self._rep_log(f"{key} #{i+1:02d} 실행 (남은 {e['left']}회, 대기 {len(due)-1}개)")
+        self._rep_save(st)
+        self.status.set(f"⏰ {key} #{i+1:02d} 반복 자동 실행 (대기 {len(due)-1}개)")
+        self._run_island_repeat(di, i)
+
+    def _run_island_repeat(self, didx, sidx):
+        """반복 차례가 된 슬롯 하나만 섬/던전 실행기로 돌린다."""
+        self._minimize_all()
+        proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py"),
+                                 str(didx), "--run", "--slot", str(sidx + 1)])
+        self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
 
     def _run_island_slot(self, idx):
