@@ -909,7 +909,7 @@ class IslandApp(tk.Tk):
                              ("북쪽", ["기본!!", "빨갱이 48%", "빨갱이 82%",
                                       "주홍이 48%", "주홍이 82%"]),
                              # 방향 선택용 — 뒤에 덧붙여야 기존 프리셋 순서가 안 밀린다
-                             ("이동", ["서쪽 ▶▶", "북쪽 ◀◀"])],
+                             ("이동", ["▶▶", "◀◀"])],
         "화요일_에카":     [("", ["기본!!", "빨갱이 82%",
                                   "주홍이 48%", "주홍이 82%"])],
     }
@@ -967,10 +967,10 @@ class IslandApp(tk.Tk):
         nm = (name or "").strip()
         if not nm:
             return "#2c3e50"
-        if "서쪽" in nm:
-            return "#1a5276"          # 서쪽 — 진한 파랑
-        if "북쪽" in nm:
-            return "#117864"          # 북쪽 — 진한 초록
+        if "▶" in nm:
+            return "#1a5276"          # ▶▶ — 진한 파랑
+        if "◀" in nm:
+            return "#117864"          # ◀◀ — 진한 초록
         if "빨갱이" in nm or "빨갱" in nm:
             if "82" in nm: return "#e74c3c"
             if "48" in nm: return "#c0392b"
@@ -1320,8 +1320,9 @@ class IslandApp(tk.Tk):
         # 주홍이 82% 를 고른 뒤 서쪽 ▶▶ 를 골라도 무엇을 쓰는 슬롯인지 남게.
         if (pr.get("floor") or "").strip() == "이동":
             base = (slot.get("name") or "").strip()
-            base = base.replace("이동 서쪽 ▶▶", "").replace("이동 북쪽 ◀◀", "")
-            base = base.replace("서쪽 ▶▶", "").replace("북쪽 ◀◀", "").strip()
+            for _tag in ("이동 ▶▶", "이동 ◀◀", "서쪽 ▶▶", "북쪽 ◀◀", "▶▶", "◀◀"):
+                base = base.replace(_tag, "")
+            base = base.strip()
             if base in ("", "미등록"):
                 base = ""
             nm = (base + " " + (pr.get("name") or "").strip()).strip()
