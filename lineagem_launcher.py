@@ -701,6 +701,7 @@ class App(tk.Tk):
             pass
         self.after(600, self._align_tj_to_dc)   # TJ성공!! 좌측 끝 = 일반던전충전 좌측 끝
         self._sync_sched_click1()   # 스케줄 클릭1 = 과거섬 클릭1 (시작 시 1회 동기화)
+        self.after(4000, self._sync_prestart_tasks)   # 스케줄 10분 전 자동시작 작업 동기화
         self.after(1000, self._mail_scheduler_tick)
         self.after(1000, self._past_scheduler_tick)
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
@@ -7296,6 +7297,42 @@ class App(tk.Tk):
         else:
             self.btn_mail.config(text="🕘 23:30~23:50 클릭  OFF", bg="#7f8c8d")
             self.status.set("우편 클릭 OFF")
+        self._sync_prestart_tasks()      # 스케줄 켜짐/꺼짐에 맞춰 자동시작 작업 갱신
+
+    # ── 스케줄 10분 전 런처 자동 시작 (윈도우 예약 작업으로 등록) ──
+    #    켜져 있으면 워치독이 아무 일도 안 하므로 중복 실행 걱정 없음.
+    SCHED_TIMES = [("past", 5, 3, True),      # 과거섬 5:03 (항상)
+                   ("mail", 23, 30, "mail")]  # 우편함 23:30 (mail_on 일 때만)
+
+    def _sync_prestart_tasks(self):
+        """켜져 있는 스케줄마다 '시작 10분 전' 자동 시작 작업을 등록/해제한다."""
+        def _work():
+            import subprocess as _sp, sys as _sys
+            try:
+                exe = _sys.executable.replace("python.exe", "pythonw.exe")
+                wd = os.path.join(BASE, "lineagem_watchdog.py")
+                for tag, hh, mm, cond in self.SCHED_TIMES:
+                    on = bool(self.cfg.get("mail_on")) if cond == "mail" else bool(cond)
+                    name = "LineageM_Pre_" + tag
+                    tot = hh * 60 + mm - 10          # 10분 전
+                    if tot < 0:
+                        tot += 24 * 60
+                    tstr = "%02d:%02d" % (tot // 60, tot % 60)
+                    if not on:
+                        _sp.run(["schtasks", "/Delete", "/F", "/TN", name],
+                                capture_output=True, creationflags=0x08000000)
+                        continue
+                    q = _sp.run(["schtasks", "/Query", "/TN", name],
+                                capture_output=True, text=True, creationflags=0x08000000)
+                    if q.returncode == 0 and tstr in (q.stdout or ""):
+                        continue                      # 이미 같은 시각으로 등록됨
+                    _sp.run(["schtasks", "/Create", "/F", "/TN", name,
+                             "/SC", "DAILY", "/ST", tstr,
+                             "/TR", '"%s" "%s"' % (exe, wd)],
+                            capture_output=True, creationflags=0x08000000)
+            except Exception:
+                pass
+        threading.Thread(target=_work, daemon=True).start()
 
     def _mail_scheduler_tick(self):
         import datetime
