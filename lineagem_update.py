@@ -143,7 +143,9 @@ CODE_FILES = ["lineagem_launcher.py", "lineagem_ocr.py", "lineagem_island.py",
 # 다야 측정값(daya_counts·history)은 머신별 — 업데이트로 절대 덮어쓰지 않음
 # 2026-08-09: 로컬은 섬/던전 좌표(island_coords.json)만 받는다.
 # coords.json(메인런처 좌표)은 컴퓨터마다 달라서 동기화하지 않음.
-DATA_FILES = ["coords.json", "island_coords.json", "island_counts.json"]
+# 2026-08-09: 좌표는 컴퓨터마다 위치가 달라 더 이상 통째로 배포하지 않는다.
+#             대신 아래 sync_times()가 '클릭 간격(시간)'만 합쳐 넣는다.
+DATA_FILES = ["island_counts.json"]
 DATA_DIRS  = ["reroll_templates"]
 
 
@@ -207,6 +209,50 @@ def autosave_coords(log):
         log("      → 업데이트 후 문제가 생기면 런처 [♻ 좌표복구] 한 번이면 이 시점으로 돌아갑니다")
     except Exception as e:
         log(f"   ⚠ 업데이트 전 좌표 자동 저장 실패: {e} (업데이트는 계속 진행합니다)")
+
+
+def sync_times(log):
+    """좌표는 그대로 두고 '클릭 간격(gap_list)'만 메인 것으로 맞춘다.
+    share_times.json 에 적힌 던전만 대상 (컴퓨터마다 좌표 위치가 다르기 때문)."""
+    try:
+        man = os.path.join(REPO, "share_times.json")
+        if not os.path.exists(man):
+            return
+        with open(man, encoding="utf-8") as f:
+            keys = (json.load(f) or {}).get("keys") or []
+        if not keys:
+            return
+        src_p = os.path.join(REPO, "island_coords.json")
+        dst_p = os.path.join(DESK, "island_coords.json")
+        if not (os.path.exists(src_p) and os.path.exists(dst_p)):
+            log("   시간 동기화: 섬/던전 좌표 파일이 없어 건너뜁니다")
+            return
+        with open(src_p, encoding="utf-8") as f:
+            src = json.load(f)
+        with open(dst_p, encoding="utf-8") as f:
+            dst = json.load(f)
+        n = 0
+        for key in keys:
+            a, b = src.get(key), dst.get(key)
+            if not isinstance(a, list) or not isinstance(b, list):
+                continue
+            for i, s_slot in enumerate(a):
+                if i >= len(b) or not isinstance(s_slot, dict) or not isinstance(b[i], dict):
+                    continue
+                gl = s_slot.get("gap_list")
+                if gl is not None and b[i].get("gap_list") != gl:
+                    b[i]["gap_list"] = list(gl)      # 시간만 교체 — 좌표는 그대로
+                    n += 1
+        if not n:
+            log("   시간 동기화: 이미 메인과 같습니다")
+            return
+        tmp = dst_p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(dst, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, dst_p)
+        log(f"   ⏱ 클릭 간격(시간) 동기화: {', '.join(keys)} — 슬롯 {n}개 (좌표는 그대로)")
+    except Exception as e:
+        log(f"   ⚠ 시간 동기화 실패: {e}")
 
 
 def _all_code_files():
@@ -636,6 +682,8 @@ def main():
                         log(f"      (이전 좌표는 백업됨 — 되돌리려면 런처 [♻ 좌표복구])")
                 else:
                     log(f"   ⚠ {f} 복사 검증 실패 — 업데이트를 한 번 더 실행해주세요")
+            if not is_main:
+                sync_times(log)          # 좌표는 그대로, 시간만 메인과 맞춤
             # 다야 OCR 캡처영역(daya_regions.json)도 메인과 동일하게 동기화
             # (측정값 daya_counts/history는 머신별 데이터라 절대 건드리지 않음)
             try:
