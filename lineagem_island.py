@@ -1872,6 +1872,9 @@ class IslandApp(tk.Tk):
         self.after(nxt_ms, self._repeat_tick)
     def _test(self, key, idx):
         self._slot_running = True          # 스레드가 뜨기 전에 먼저 잠가 중복 실행 차단
+        # (2026-08-09) 슬롯 개별 실행에서도 메인런처를 맨 뒤로 내린다 —
+        # 예전엔 이 창만 최소화해서 메인런처가 앞에 그대로 남아 클릭을 가렸다
+        self._send_behind_main()
         self.iconify()
         self._minimize_claude()
         threading.Thread(target=self._run, args=(key, idx), daemon=True).start()
@@ -1881,17 +1884,19 @@ class IslandApp(tk.Tk):
         최소화하지 않으므로 개별 실행을 이어서 누르기 편하다."""
         try:
             import win32gui, win32con
+            main  = win32gui.FindWindow(None, "리니지M 자동 실행")
+            flags = (win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
+            if main:
+                # 메인런처를 먼저 맨 뒤로 (이 창 처리가 실패해도 메인은 확실히 내려간다)
+                win32gui.SetWindowPos(main, win32con.HWND_BOTTOM, 0, 0, 0, 0, flags)
             self.update_idletasks()
             me = self.winfo_id()
             try:
                 me = win32gui.GetParent(me) or me      # 실제 최상위 창 핸들
             except Exception:
                 pass
-            main = win32gui.FindWindow(None, "리니지M 자동 실행")
-            flags = (win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
             if main:
-                # 메인런처를 맨 뒤로 내리고, 그 바로 위(앞)에 이 창을 놓는다
-                win32gui.SetWindowPos(main, win32con.HWND_BOTTOM, 0, 0, 0, 0, flags)
+                # 메인런처 바로 위(앞)에 이 창을 놓는다
                 win32gui.SetWindowPos(me, main, 0, 0, 0, 0, flags)
             else:
                 win32gui.SetWindowPos(me, win32con.HWND_BOTTOM, 0, 0, 0, 0, flags)
