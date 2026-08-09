@@ -314,18 +314,14 @@ def _show_launcher():
 
 
 def ensure_keepalive():
-    """런처 상시 유지용 예약 작업(10분마다 워치독)이 없으면 자동 등록 — 모든 컴퓨터 공통."""
+    """(2026-08-09 사용자 지시) 10분마다 상시감시는 사용하지 않는다.
+    이미 등록돼 있으면 삭제하고, 새로 만들지 않는다. 자동 실행은 새벽 4:50만."""
     try:
         q = sh(["schtasks", "/Query", "/TN", "LineageM_KeepAlive"])
         if q.returncode == 0:
-            return
-        exe = sys.executable.replace("python.exe", "pythonw.exe")
-        wd = os.path.join(DESK, "lineagem_watchdog.py")
-        r = sh(["schtasks", "/Create", "/F", "/TN", "LineageM_KeepAlive",
-                "/SC", "MINUTE", "/MO", "10",
-                "/TR", f'"{exe}" "{wd}"'])
-        if r.returncode == 0:
-            log("   ✔ 런처 상시감시(KeepAlive, 10분마다) 예약 작업 등록")
+            r = sh(["schtasks", "/Delete", "/F", "/TN", "LineageM_KeepAlive"])
+            if r.returncode == 0:
+                log("   ✔ 10분마다 상시감시(KeepAlive) 예약 작업 삭제 — 새벽 4:50만 사용")
     except Exception:
         pass
 
