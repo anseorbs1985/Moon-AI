@@ -2351,6 +2351,8 @@ class IslandApp(tk.Tk):
                 st["due"] = time.time()        # 빈 자리는 기다리지 않고 바로 다음으로
             # 마우스는 하나 — 클릭끼리 최소 간격을 둬서 씹힘 방지
             time.sleep(random.uniform(0.35, 0.7))   # 클릭 사이 텀 (창 전환 여유)
+        if not self._stop_flag:
+            time.sleep(2)          # (2026-08-09) 마지막 클릭 후 2초 뒤 마무리
         for si, _s in targets:
             self._add_count(si)
 
@@ -2468,6 +2470,9 @@ class IslandApp(tk.Tk):
                 self._add_count(si)
                 if self._stop_flag: break
                 time.sleep(5)
+            if not self._stop_flag:
+                # (2026-08-09) 마지막 번호를 누르자마자 끝내지 않고 2초 뒤에 마무리
+                time.sleep(2)
             self._status.set("✔ 실행 완료!")
         except Exception as e:
             self._status.set(f"오류: {e}")

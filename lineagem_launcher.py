@@ -1985,6 +1985,7 @@ class App(tk.Tk):
                          args=("귀환주문서", self._run_return_worker, name, coords), daemon=True).start()
 
     def _run_return_worker(self, name, coords):
+        self._start_pause()
         CLICK_INTERVAL = 2.0   # island 실행 간격과 동일 (클릭 사이 대기)
         SETTLE_DELAY   = 0.7   # 좌표 이동 후 클릭 전 대기 (씹힘 방지)
         try:
@@ -2608,6 +2609,7 @@ class App(tk.Tk):
             target=self._run_task, args=("TJ성공", self._run_tj), daemon=True).start())
 
     def _run_tj(self, slot_idx=None):
+        self._start_pause()
         try:
             slots = self.cfg.get("tj_slots", [])
             if slot_idx is not None:
@@ -2861,6 +2863,7 @@ class App(tk.Tk):
             target=self._run_task, args=(title, lambda: self._run_dgn2(fkey)), daemon=True).start())
 
     def _run_dgn2(self, fkey, slot_idx=None):
+        self._start_pause()
         key, title, icon = self._dgn2_info(fkey)
         nclk = self._grid_spec(fkey)["clicks"]
         stop = f"_{fkey}_stop"
@@ -3580,6 +3583,7 @@ class App(tk.Tk):
         self.deiconify()
 
     def _run_pass(self, slot_idx=None):
+        self._start_pause()
         try:
             self.status.set("2초 후 패스권 실행...")
             self.after(0, self._minimize_all)
@@ -3923,6 +3927,7 @@ class App(tk.Tk):
         self.after(300, lambda: threading.Thread(target=self._run_task, args=("아이템정리", self._run_item), daemon=True).start())
 
     def _run_item(self, slot_idx=None):
+        self._start_pause()
         try:
             self.status.set("2초 후 아이템정리 실행...")
             self.after(0, self._send_to_back)
@@ -4980,6 +4985,7 @@ class App(tk.Tk):
         threading.Thread(target=self._run_seq, daemon=True).start()
 
     def _run_seq(self):
+        self._start_pause()
         if getattr(self, "_seq_running", False):
             return
         seq = self.cfg.get("seq_slots") or []
@@ -5143,6 +5149,7 @@ class App(tk.Tk):
         threading.Thread(target=self._run_slp, daemon=True).start()
 
     def _run_slp(self):
+        self._start_pause()
         if getattr(self, "_slp_running", False):
             return
         coords = [c for c in (self.cfg.get("slp_slots") or []) if c]
@@ -5367,6 +5374,7 @@ class App(tk.Tk):
         threading.Thread(target=self._run_wdoff, daemon=True).start()
 
     def _run_wdoff(self):
+        self._start_pause()
         if getattr(self, "_wdoff_running", False):
             return
         wd = self.cfg.get("wdoff_slots") or []
@@ -5586,6 +5594,7 @@ class App(tk.Tk):
         threading.Thread(target=self._run_dc, daemon=True).start()
 
     def _run_dc(self):
+        self._start_pause()
         if getattr(self, "_dc_running", False):
             return
         dc = self.cfg.get("dc_slots") or []
@@ -6000,6 +6009,7 @@ class App(tk.Tk):
         self.after(0, self._restore_back)
 
     def _run_fish(self):
+        self._start_pause()
         try:
             slots = list(enumerate(self.cfg.get("fish_slots", [])))
             active = [(i, h) for i, h in slots
@@ -7035,6 +7045,7 @@ class App(tk.Tk):
         self.after(0, self._restore_back)
 
     def _run_doll(self):
+        self._start_pause()
         try:
             slots = list(enumerate(self.cfg.get("doll_slots", [])))
             active = [(i, h) for i, h in slots
@@ -8169,6 +8180,7 @@ class App(tk.Tk):
 
     def _run_mail(self, slot_idx=None):
         """slot_idx 지정 시 해당 슬롯만, None이면 전체 16개 랜덤 순서 실행"""
+        self._start_pause()
         try:
             slots = self.cfg.get("mail_slots", [])
             if slot_idx is not None:
@@ -8294,6 +8306,7 @@ class App(tk.Tk):
         self.after(300, lambda: threading.Thread(target=self._run_task, args=("주말던전", self._run_dungeon), daemon=True).start())
 
     def _run_dungeon(self, slot_idx=None):
+        self._start_pause()
         try:
             slots = self.cfg.get("dungeon_slots", [])
             if slot_idx is not None:
@@ -8405,6 +8418,7 @@ class App(tk.Tk):
         self.after(300, lambda: threading.Thread(target=self._run_task, args=("과거섬", self._run_past), daemon=True).start())
 
     def _run_past(self, slot_idx=None):
+        self._start_pause()
         try:
             self.status.set("2초 후 과거의말하는섬 실행...")
             self.after(0, self._send_to_back)
@@ -8588,6 +8602,7 @@ class App(tk.Tk):
         self.after(300, lambda: threading.Thread(target=self._run_task, args=("스케줄", self._run_sched), daemon=True).start())
 
     def _run_sched(self, slot_idx=None):
+        self._start_pause()
         try:
             self._sync_sched_click1()   # 실행 직전 과거섬 클릭1 반영(항상 최신값으로 실행)
             self.status.set("2초 후 매일매일 스케줄 실행...")
@@ -8885,8 +8900,9 @@ class App(tk.Tk):
     def _restore_back(self):
         """모든 작업 완료 후 복원 — 앞으로 띄우지 않고 곧바로 '맨 뒤'로 되살린다.
         (2026-08-07 사용자 지시: 완료 후 창이 앞으로 나오지 않게 통일.
-         결과는 나중에 런처를 직접 열어 상태줄에서 확인)"""
-        self._restore_back_quiet()
+         결과는 나중에 런처를 직접 열어 상태줄에서 확인)
+        (2026-08-09) 마지막 좌표를 누르자마자 끝내지 않고 2초 뒤에 마무리한다."""
+        self.after(2000, self._restore_back_quiet)
 
     def _restore_all(self):
         self.deiconify()
@@ -9533,6 +9549,20 @@ class App(tk.Tk):
         if getattr(self, "_busy_task", None) == name:
             self._busy_task = None
 
+    def _start_pause(self):
+        """(2026-08-09) 실행 버튼을 눌러도 곧바로 클릭하지 않고 1~2초 뜸을 들인다.
+        바로 눌리면 어색하고, 창이 아직 정리되기 전에 클릭이 들어갈 수도 있어서."""
+        now = time.time()
+        if now - getattr(self, "_last_start_pause", 0) < 5:
+            return                      # 단독실행→본체처럼 겹쳐 불릴 땐 한 번만 쉰다
+        self._last_start_pause = now
+        _d = random.uniform(1.0, 2.0)
+        _t0 = now
+        while time.time() - _t0 < _d:
+            if getattr(self, "_stop_flag", False):
+                return
+            time.sleep(0.05)
+
     def _run_task(self, name, fn, *args):
         """작업 스레드 래퍼 — 끝나면 잠금 해제."""
         try:
@@ -9596,6 +9626,7 @@ class App(tk.Tk):
         self.deiconify()
 
     def _run_click(self):
+        self._start_pause()
         try:
             active = [(i, s) for i, s in enumerate(self.cfg.get("click_slots", []))
                       if s[0] and s[1]]
@@ -9639,6 +9670,7 @@ class App(tk.Tk):
         self.deiconify()
 
     def _run_hunt(self, limit=None):
+        self._start_pause()
         try:
             all_slots = list(enumerate(self.cfg.get("hunt_slots", [])))
             if limit is not None:
@@ -9712,6 +9744,7 @@ class App(tk.Tk):
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
+        self._start_pause()
         total = self.acc_count.get()
         self.after(0, self._minimize_all)
         try:
