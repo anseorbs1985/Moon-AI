@@ -1750,9 +1750,13 @@ class App(tk.Tk):
         """반복 차례가 된 슬롯들을 섬/던전 실행기로 돌린다.
         여러 개면 --slots 로 넘겨 웨이브(번갈아)로 한 번에 처리한다."""
         self._minimize_all()
-        arg = ("--slots", ",".join(str(i + 1) for i in sidxs)) if len(sidxs) > 1               else ("--slot", str(sidxs[0] + 1))
-        proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py"),
-                                 str(didx), "--run", arg[0], arg[1]])
+        cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(didx), "--run"]
+        if len(sidxs) > 1:
+            # 반복은 슬롯 번호 순서 그대로 '2개씩' — 동시에 도는 창을 줄여 더 안전하게
+            cmd += ["--slots", ",".join(str(i + 1) for i in sorted(sidxs)), "--lanes", "2"]
+        else:
+            cmd += ["--slot", str(sidxs[0] + 1)]
+        proc = subprocess.Popen(cmd)
         self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
 

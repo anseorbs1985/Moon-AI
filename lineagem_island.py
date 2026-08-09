@@ -391,6 +391,13 @@ class IslandApp(tk.Tk):
         self._repeat_left = {}                               # (key,idx) → 남은 반복 횟수
 
         self._auto_run = len(sys.argv) > 2 and sys.argv[2] == "--run"
+        # --lanes N : 웨이브에서 동시에 돌릴 슬롯 수 (반복은 2개씩 = 더 안전)
+        self._auto_lanes = None
+        if "--lanes" in sys.argv:
+            try:
+                self._auto_lanes = max(1, int(sys.argv[sys.argv.index("--lanes") + 1]))
+            except Exception:
+                self._auto_lanes = None
         # --slots 1,7,14 : 그 슬롯들만 웨이브(번갈아)로 한 번에 실행
         self._auto_slots = None
         if "--slots" in sys.argv:
@@ -2332,15 +2339,15 @@ class IslandApp(tk.Tk):
                 p["due"] = t
         return t
 
-    def _calc_pace(self, state, total, target_sec):
+    def _calc_pace(self, state, total, target_sec, lanes=4):
         """목표 시간에 맞는 배속을 이분 탐색으로 찾는다 (최소 배속 1.0 = 등록한 간격 그대로)."""
         try:
             lo, hi = 1.0, 8.0
-            if self._sim_total(state, total, lo) >= target_sec:
+            if self._sim_total(state, total, lo, lanes) >= target_sec:
                 return lo                      # 그냥 둬도 목표보다 오래 걸림
             for _ in range(18):
                 mid = (lo + hi) / 2
-                if self._sim_total(state, total, mid) < target_sec:
+                if self._sim_total(state, total, mid, lanes) < target_sec:
                     lo = mid
                 else:
                     hi = mid
@@ -2348,7 +2355,7 @@ class IslandApp(tk.Tk):
         except Exception:
             return 1.0
 
-    def _run_wave(self, key, targets):
+    def _run_wave(self, key, targets, lanes=None, keep_order=False):
         """랜덤 번갈아 실행 — 슬롯마다 자기 시간표를 따로 돌리고,
         지금 할 차례가 된 슬롯 중에서 무작위로 하나씩 눌러준다.
         (1번을 두어 번 누르다 11번을 한 번 누르는 식 — 정해진 순서 없음)
@@ -2367,11 +2374,12 @@ class IslandApp(tk.Tk):
         total = len(labels)
         # 목표 소요시간 랜덤 — 실행 전에 내부 시뮬레이션으로 배속을 맞춘다
         target_sec = random.uniform(252, 284) * slow_factor()   # 전체 12~17% 지연 (약 4:42~5:32)
-        pace = self._calc_pace(state, total, target_sec)
-        # 동시에 진행할 슬롯 수 제한 — 한 번에 4개만 돌리고, 하나가 끝나면 다음 슬롯 투입
-        LANES = 4
+        pace = self._calc_pace(state, total, target_sec, lanes=lanes or 4)
+        # 동시에 진행할 슬롯 수 제한 — 하나가 끝나면 다음 슬롯 투입
+        LANES = lanes or 4
         order = [si for si, _s in targets]
-        random.shuffle(order)
+        if not keep_order:
+            random.shuffle(order)      # 평소(전체 실행)는 순서 랜덤
         active = order[:LANES]
         waiting = order[LANES:]
         self._status.set(f"🎲 랜덤 실행 — 동시 {LANES}슬롯씩 (목표 "
@@ -2384,7 +2392,8 @@ class IslandApp(tk.Tk):
             for si in fin:
                 active.remove(si)
                 if waiting:
-                    nx = waiting.pop(random.randrange(len(waiting)))   # 투입 순서도 랜덤
+                    nx = (waiting.pop(0) if keep_order
+                          else waiting.pop(random.randrange(len(waiting))))
                     state[nx]["due"] = time.time() + random.uniform(0.5, 4.0)
                     active.append(nx)
                     self._status.set(f"➡ #{si+1:02d} 완료 — #{nx+1:02d} 투입 "
@@ -2456,8 +2465,13 @@ class IslandApp(tk.Tk):
             status_fn = lambda m: self.after(0, lambda m=m: self._status.set(m))
             # 오만의탑·악몽의섬: 슬롯 하나씩이 아니라 번갈아(웨이브) 실행
             if key in self.WAVE_KEYS and slot_idx is None and len(targets) > 1:
-                self._status.set(f"🌊 번갈아 실행 — {len(targets)}개 슬롯을 클릭 순서대로 돌립니다")
-                self._run_wave(key, targets)
+                _ln = getattr(self, "_auto_lanes", None)
+                self._status.set(f"🌊 번갈아 실행 — {len(targets)}개 슬롯 "
+                                 f"(동시 {_ln or 4}개씩)")
+                # 반복 실행(--lanes 지정)은 슬롯 번호 순서 그대로 2개씩 —
+                # 동시에 도는 창이 적을수록 클릭이 안전하다
+                self._run_wave(key, targets, lanes=_ln,
+                               keep_order=bool(_ln))
                 self._status.set("✔ 실행 완료!" if not self._stop_flag else "멈춤")
                 return
             for ti, (si, slot) in enumerate(targets):
