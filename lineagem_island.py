@@ -704,6 +704,11 @@ class IslandApp(tk.Tk):
             nom.config(font=("맑은 고딕", 6), width=3, pady=0, highlightthickness=0,
                        bg="#7d6608", fg="white", activebackground="#5c4a06")
             nom.pack(side="left", padx=(1, 0))
+            # 이 슬롯만 반복 중지 (2시간 6회 등) — 다른 슬롯·전체 실행에는 영향 없음
+            tk.Button(r5, text="■", font=("맑은 고딕", 6, "bold"), width=2, pady=0,
+                      bg="#c0392b", fg="white",
+                      command=lambda k=key, x=i: self._stop_repeat(k, x)
+                      ).pack(side="left", padx=(1, 0))
 
         self._refresh(key)
 
@@ -1794,6 +1799,19 @@ class IslandApp(tk.Tk):
                 f.write(f"[{_dt.datetime.now():%m-%d %H:%M:%S}] {msg}" + chr(10))
         except Exception:
             pass
+
+    def _stop_repeat(self, key, idx):
+        """이 슬롯의 반복(⏰)만 중지 — 예약된 다음 실행을 취소한다."""
+        self.cfg[key][idx]["repeat_h"] = 0
+        save_cfg(self.cfg)
+        self._repeat_next.pop((key, idx), None)
+        self._repeat_left.pop((key, idx), None)
+        try:
+            self._rep_vars[key][idx].set("⏰없음")
+        except Exception:
+            pass
+        self._status.set("■ #" + str(idx + 1) + " 반복 중지 — 이 슬롯은 더 이상 자동 실행되지 않습니다")
+        self._rlog(key + " #" + str(idx + 1) + " 반복 수동 중지")
 
     def _repeat_tick(self):
         """반복 타이머 — 시간이 된 슬롯을 '한 번에 하나씩' 순서대로 실행한다.
