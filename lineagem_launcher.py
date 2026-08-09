@@ -1618,34 +1618,61 @@ class App(tk.Tk):
         except Exception as e:
             self._rep_log(f"⚠ {key} #{idx+1:02d} ⏰ 끄기 실패: {e!r}")
 
-    def _rep_paused(self):
-        return bool(self._rep_load().get("_paused"))
+    def _rep_count(self):
+        return sum(1 for k in self._rep_load() if not k.startswith("_"))
 
-    def _set_rep_paused(self, on):
-        st = self._rep_load()
-        if on:
-            st["_paused"] = True
-        else:
-            st.pop("_paused", None)
-        self._rep_save(st)
+    def _rep_stop_all(self, quiet=False):
+        """⏰ 2시간 N회 반복을 전부 끈다 — 멈췄다 재개하는 개념은 없다.
+        예약 자체가 사라지므로 다시 하려면 섬/던전 실행기에서 ⏰를 다시 켜야 한다."""
+        n = self._rep_count()
+        if not n:
+            return 0
+        try:
+            path = os.path.join(BASE, "island_coords.json")
+            with open(path, encoding="utf-8") as f:
+                cfg = json.load(f)
+            for key in self.ISLAND_KEYS:
+                for slot in cfg.get(key, []):
+                    if isinstance(slot, dict) and slot.get("repeat_h"):
+                        slot["repeat_h"] = 0
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+        except Exception as e:
+            self._rep_log(f"⚠ 반복 종료 중 오류: {e!r}")
+        self._rep_save({})
+        self._rep_log(f"반복 종료 — {n}개 슬롯의 ⏰ 전부 꺼짐"
+                      + ("" if quiet else " (사용자)"))
         self._refresh_rep_btn()
+        return n
 
-    def _toggle_rep_pause(self):
-        on = not self._rep_paused()
-        self._set_rep_paused(on)
-        self._rep_log("반복 " + ("정지 (사용자)" if on else "재개 (사용자)"))
-        self.status.set("⏸ 2시간 반복 정지 — 다시 켜려면 [⏰ 반복] 버튼"
-                        if on else "▶ 2시간 반복 재개")
+    def _rep_stop_click(self):
+        n = self._rep_count()
+        if not n:
+            self.status.set("⏰ 켜져 있는 반복이 없습니다")
+            return
+        if not messagebox.askyesno(
+                "반복 종료",
+                f"⏰ 2시간 반복이 켜진 슬롯 {n}개를 전부 끕니다. 남은 횟수도 함께 "
+                f"사라지고, 다시 하려면 섬/던전 실행기에서 ⏰를 다시 켜야 합니다." + chr(10)
+                + chr(10) + "종료할까요?",
+                default="no"):
+            return
+        self._rep_stop_all()
+        self.status.set(f"⏰ 반복 종료 — {n}개 슬롯 전부 꺼짐")
 
     def _refresh_rep_btn(self):
         b = getattr(self, "btn_rep", None)
         if not b or not b.winfo_exists():
             return
-        off = self._rep_paused()
-        n = sum(1 for k in self._rep_load() if not k.startswith("_"))
-        b.config(text=("⏰ 반복" + chr(10) + ("OFF" if off else f"ON {n}")),
-                 bg="#7f8c8d" if off else "#27ae60",
-                 activebackground="#5d6d7e" if off else "#1e8449")
+        n = self._rep_count()
+        if n:
+            b.config(text="⏰ 반복" + chr(10) + f"종료 {n}",
+                     bg="#c0392b", activebackground="#922b21")
+        else:
+            b.config(text="⏰ 반복" + chr(10) + "없음",
+                     bg="#7f8c8d", activebackground="#5d6d7e")
 
     def _island_repeat_tick(self):
         try:
@@ -1656,8 +1683,6 @@ class App(tk.Tk):
 
     def _island_repeat_check(self):
         self._refresh_rep_btn()
-        if self._rep_paused():
-            return                      # ⏰ 반복 OFF — 시각은 그대로 두고 아무것도 시작 안 함
         cfg = self._island_cfg()
         st  = self._rep_load()
         now = time.time()
@@ -4313,7 +4338,7 @@ class App(tk.Tk):
         self.btn_rep = tk.Button(self._stop_col, text="⏰ 반복" + chr(10) + "ON",
             font=("맑은 고딕", 9, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=6, height=2,
-            command=self._toggle_rep_pause)
+            command=self._rep_stop_click)
         self.btn_rep.pack(side="left", padx=(3, 0))
         self.after(300, self._refresh_rep_btn)
 
@@ -9831,14 +9856,14 @@ class App(tk.Tk):
             pass
         self._ocr_proc = None
         self._island_proc = None
-        # ⏰ 2시간 N회 반복도 함께 정지 — 안 그러면 잠시 뒤 다음 슬롯이 또 시작된다.
-        # (예약·남은 횟수는 지우지 않는다 → [⏰ 반복] 버튼으로 언제든 이어서 재개)
+        # ⏰ 2시간 N회 반복도 함께 '종료' — 멈췄다 재개하는 개념은 없다.
+        # (안 끄면 잠시 뒤 다음 슬롯이 또 시작된다)
+        _n = 0
         try:
-            self._set_rep_paused(True)
-            self._rep_log("반복 정지 (전체멈춤)")
+            _n = self._rep_stop_all(quiet=True)
         except Exception:
             pass
-        self.status.set("멈추는 중... (⏰ 2시간 반복도 정지 — [⏰ 반복] 버튼으로 재개)")
+        self.status.set("전체 종료 중..." + (f" (⏰ 반복 {_n}개도 꺼짐)" if _n else ""))
 
     # ── 클릭 실행 ─────────────────────────────────────────────────────
     def _start_click(self):
