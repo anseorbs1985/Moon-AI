@@ -157,6 +157,16 @@ MOVE_ONLY_INDICES = {
     "카매사오기": {1},  # 클릭2는 이동만
 }
 
+# (2026-08-09) 좌표 클릭 사이 간격을 전체적으로 12~17% 늦춘다 —
+# 초반은 잘 되는데 뒤로 갈수록 클릭이 씹히는 것 같다는 사용자 피드백.
+SLOW_MIN, SLOW_MAX = 1.12, 1.17
+
+
+def slow_factor():
+    """클릭 간격에 곱할 배율 (12~17% 랜덤 지연)."""
+    return random.uniform(SLOW_MIN, SLOW_MAX)
+
+
 def today():
     return datetime.date.today().isoformat()
 
@@ -2155,7 +2165,7 @@ class IslandApp(tk.Tk):
             if word:
                 self._hold_arrow(word, sec, name)
             else:
-                sec *= random.uniform(1.10, 1.25)   # 대기 시간 10~25% 랜덤 증가
+                sec *= random.uniform(1.10, 1.25) * slow_factor()  # 10~25% 랜덤 + 전체 12~17% 지연
                 if b is not None:
                     self._status.set(f"⏱ [{name}] {sec:.1f}초 대기 (랜덤 {m.group(2)}~{b} +α)...")
                 t0 = time.time()
@@ -2163,7 +2173,7 @@ class IslandApp(tk.Tk):
                     if self._stop_flag: break
                     time.sleep(0.05)
         if not acted:
-            time.sleep(CLICK_INTERVAL * random.uniform(1.10, 1.25))
+            time.sleep(CLICK_INTERVAL * random.uniform(1.10, 1.25) * slow_factor())
 
     def _stop(self):
         self._stop_flag = True
@@ -2302,7 +2312,7 @@ class IslandApp(tk.Tk):
                          "sp": random.uniform(1.10, 1.20)}         # 이 슬롯 전체 10~20% 완화
         total = len(labels)
         # 목표 소요시간 랜덤 — 실행 전에 내부 시뮬레이션으로 배속을 맞춘다
-        target_sec = random.uniform(252, 284)   # 30% 단축 (4:12~4:44)
+        target_sec = random.uniform(252, 284) * slow_factor()   # 전체 12~17% 지연 (약 4:42~5:32)
         pace = self._calc_pace(state, total, target_sec)
         # 동시에 진행할 슬롯 수 제한 — 한 번에 4개만 돌리고, 하나가 끝나면 다음 슬롯 투입
         LANES = 4
@@ -2465,7 +2475,8 @@ class IslandApp(tk.Tk):
                         continue
                     g = gl[j] if j < len(gl) else None
                     # 좌표 간 간격 10~25% 랜덤 증가 (× 녹화 없는 슬롯은 _slow 추가 완화)
-                    _mult = random.uniform(1.10, 1.25) * _slow * 1.05  # 전체 30% 단축
+                    _mult = (random.uniform(1.10, 1.25) * _slow * 1.05
+                             * slow_factor())      # 전체 12~17% 추가 지연
                     if g is None or g == "":
                         time.sleep(CLICK_INTERVAL * _mult)
                     elif isinstance(g, (int, float)):
