@@ -1656,6 +1656,20 @@ class App(tk.Tk):
         self._rep_stop_all()
         self.status.set(f"⏰ 반복 종료 — {n}개 슬롯 전부 꺼짐")
 
+    def _refresh_stop_btn(self):
+        """실행 중이면 빨강, 멈출 게 없으면 회색 (⏰ 반복 버튼과 같은 규칙)."""
+        b = getattr(self, "btn_stop", None)
+        if not b or not b.winfo_exists():
+            return
+        try:
+            busy = self._is_busy()
+        except Exception:
+            busy = False
+        if busy:
+            b.config(bg="#c0392b", activebackground="#922b21")
+        else:
+            b.config(bg="#7f8c8d", activebackground="#5d6d7e")
+
     def _refresh_rep_btn(self):
         b = getattr(self, "btn_rep", None)
         if not b or not b.winfo_exists():
@@ -4335,8 +4349,8 @@ class App(tk.Tk):
         self._stop_col = tk.Frame(self._sec_row)
         self._stop_col.pack(side="left", padx=(getattr(self, "_star_pad", 0), 6))
         self.btn_stop = tk.Button(self._stop_col, text="■ 전체" + chr(10) + "멈춤",
-            font=("맑은 고딕", 9, "bold"), bg="#c0392b", fg="white",
-            activebackground="#922b21", width=6, height=2, command=self._stop)
+            font=("맑은 고딕", 9, "bold"), bg="#7f8c8d", fg="white",
+            activebackground="#5d6d7e", width=6, height=2, command=self._stop)
         self.btn_stop.pack(side="left")
         self.btn_rep = tk.Button(self._stop_col, text="⏰ 반복" + chr(10) + "ON",
             font=("맑은 고딕", 9, "bold"), bg="#27ae60", fg="white",
@@ -9776,7 +9790,13 @@ class App(tk.Tk):
 
     def _queue_tick(self):
         """1.5초마다 확인 — 스케줄(과거섬 등 자동 예약)만 한가해질 때 이어서 실행한다.
-        사용자가 누른 실행은 대기열에 쌓지 않으므로 여기서 처리할 것이 없다."""
+        사용자가 누른 실행은 대기열에 쌓지 않으므로 여기서 처리할 것이 없다.
+        (겸사겸사 [■ 전체멈춤]·[⏰ 반복] 버튼 색도 여기서 갱신한다)"""
+        try:
+            self._refresh_stop_btn()
+            self._refresh_rep_btn()
+        except Exception:
+            pass
         try:
             if self._task_queue and not self._is_busy():
                 label, fn = self._task_queue.pop(0)
@@ -10296,7 +10316,7 @@ class App(tk.Tk):
             self._running = False
             self._clear_busy("전체자동실행")
             self.btn_start.config(state="normal")
-            self.btn_stop.config(state="disabled")
+            self.btn_stop.config(state="normal")   # 항상 누를 수 있게 — 색으로만 상태 표시
             self._stop_flag = False
             self.after(0, self._restore_back)
 
