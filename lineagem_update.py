@@ -457,6 +457,27 @@ def main():
         else:
             log("2) 이미 최신입니다 — 코드 파일만 동기화합니다")
 
+        # 2-1) 업데이터 자신이 새 버전이면 — 새 업데이터로 갈아타고 이어서 진행한다.
+        #      (예전엔 다음 번 업데이트에야 새 로직이 적용돼 두 번 눌러야 했음)
+        try:
+            _me_repo = os.path.join(REPO, "lineagem_update.py")
+            _me_desk = os.path.join(DESK, "lineagem_update.py")
+            _relaunched = "--relaunched" in sys.argv
+            _differs = False
+            if os.path.exists(_me_repo) and os.path.exists(_me_desk):
+                with open(_me_repo, "rb") as _fa, open(_me_desk, "rb") as _fb:
+                    _differs = _fa.read() != _fb.read()
+            if _differs and not _relaunched:
+                log("2-1) 업데이트 프로그램이 새 버전 — 새 버전으로 갈아타고 계속합니다")
+                shutil.copy2(_me_repo, _me_desk)
+                _exe = sys.executable.replace("python.exe", "pythonw.exe")
+                subprocess.Popen([_exe, _me_desk, "--relaunched"],
+                                 creationflags=0x08000000)
+                root.after(300, root.destroy)
+                return
+        except Exception as _e:
+            log(f"   ⚠ 업데이터 자체 갱신 확인 실패: {_e}")
+
         log("3) 런처·실행기·OCR 전부 종료... (좌표를 되돌려 쓰는 프로세스 차단)")
         sh(["powershell", "-NoProfile", "-Command",
             "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' OR Name='python.exe'\" | "
