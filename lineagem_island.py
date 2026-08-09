@@ -2377,6 +2377,7 @@ class IslandApp(tk.Tk):
         self._status.set(f"🎲 랜덤 실행 — 동시 {LANES}슬롯씩 (목표 "
                          f"{int(target_sec//60)}분 {int(target_sec%60)}초, 배속 ×{pace:.2f})")
         done_cnt = 0
+        last_si  = None                # 직전에 클릭한 슬롯 (창 전환 여유 판단용)
         while not self._stop_flag:
             # 끝난 슬롯 자리에 대기 중인 슬롯을 채워 넣는다
             fin = [si for si in active if state[si]["j"] >= total]
@@ -2403,6 +2404,11 @@ class IslandApp(tk.Tk):
             si = random.choice(ready)          # 차례가 된 것 중 무작위 선택
             st = state[si]
             j  = st["j"]
+            # 다른 클라이언트로 넘어가는 클릭이면 창이 앞으로 올라올 시간을 더 준다 —
+            # 바로 누르면 첫 클릭이 '창 활성화'로만 먹히고 사라질 수 있다
+            if si != last_si:
+                time.sleep(random.uniform(0.6, 1.1))
+                last_si = si
             if not wait_mouse_idle(stop_fn, status_fn): return
             if self._stop_flag: break
             did = self._do_one_click(key, si, st["slot"], j, labels[j], move_set,
