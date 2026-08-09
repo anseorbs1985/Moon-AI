@@ -1163,6 +1163,13 @@ class App(tk.Tk):
             activebackground="#922b21", width=7, height=2,
             command=self._stop)
         self.btn_stop.pack(side="left")
+        # ⏰ 2시간 N회 반복 ON/OFF — 전체멈춤을 누르면 자동으로 OFF가 된다
+        self.btn_rep = tk.Button(btn_row, text="⏰ 반복" + chr(10) + "ON",
+                                 font=("맑은 고딕", 8, "bold"),
+                                 bg="#27ae60", fg="white", activebackground="#1e8449",
+                                 width=6, height=2, command=self._toggle_rep_pause)
+        self.btn_rep.pack(side="left", padx=(4, 0))
+        self.after(1200, self._refresh_rep_btn)
 
         # 9시 클릭 스케줄러
         tk.Frame(btn_row, width=10).pack(side="left")
@@ -1623,6 +1630,35 @@ class App(tk.Tk):
         except Exception as e:
             self._rep_log(f"⚠ {key} #{idx+1:02d} ⏰ 끄기 실패: {e!r}")
 
+    def _rep_paused(self):
+        return bool(self._rep_load().get("_paused"))
+
+    def _set_rep_paused(self, on):
+        st = self._rep_load()
+        if on:
+            st["_paused"] = True
+        else:
+            st.pop("_paused", None)
+        self._rep_save(st)
+        self._refresh_rep_btn()
+
+    def _toggle_rep_pause(self):
+        on = not self._rep_paused()
+        self._set_rep_paused(on)
+        self._rep_log("반복 " + ("정지 (사용자)" if on else "재개 (사용자)"))
+        self.status.set("⏸ 2시간 반복 정지 — 다시 켜려면 [⏰ 반복] 버튼"
+                        if on else "▶ 2시간 반복 재개")
+
+    def _refresh_rep_btn(self):
+        b = getattr(self, "btn_rep", None)
+        if not b or not b.winfo_exists():
+            return
+        off = self._rep_paused()
+        n = sum(1 for k in self._rep_load() if not k.startswith("_"))
+        b.config(text=("⏰ 반복" + chr(10) + ("OFF" if off else f"ON {n}")),
+                 bg="#7f8c8d" if off else "#27ae60",
+                 activebackground="#5d6d7e" if off else "#1e8449")
+
     def _island_repeat_tick(self):
         try:
             self._island_repeat_check()
@@ -1631,6 +1667,9 @@ class App(tk.Tk):
         self.after(60000, self._island_repeat_tick)
 
     def _island_repeat_check(self):
+        self._refresh_rep_btn()
+        if self._rep_paused():
+            return                      # ⏰ 반복 OFF — 시각은 그대로 두고 아무것도 시작 안 함
         cfg = self._island_cfg()
         st  = self._rep_load()
         now = time.time()
@@ -9763,7 +9802,14 @@ class App(tk.Tk):
             pass
         self._ocr_proc = None
         self._island_proc = None
-        self.status.set("멈추는 중...")
+        # ⏰ 2시간 N회 반복도 함께 정지 — 안 그러면 잠시 뒤 다음 슬롯이 또 시작된다.
+        # (예약·남은 횟수는 지우지 않는다 → [⏰ 반복] 버튼으로 언제든 이어서 재개)
+        try:
+            self._set_rep_paused(True)
+            self._rep_log("반복 정지 (전체멈춤)")
+        except Exception:
+            pass
+        self.status.set("멈추는 중... (⏰ 2시간 반복도 정지 — [⏰ 반복] 버튼으로 재개)")
 
     # ── 클릭 실행 ─────────────────────────────────────────────────────
     def _start_click(self):
