@@ -1158,18 +1158,6 @@ class App(tk.Tk):
             font=("맑은 고딕", 12, "bold"), bg="#c8a951", fg="white",
             activebackground="#a88930", width=15, height=2, command=self._start)
         self.btn_start.pack(side="left", padx=(0, 4))
-        self.btn_stop = tk.Button(btn_row, text="■ 전체멈춤",
-            font=("맑은 고딕", 10, "bold"), bg="#c0392b", fg="white",
-            activebackground="#922b21", width=7, height=2,
-            command=self._stop)
-        self.btn_stop.pack(side="left")
-        # ⏰ 2시간 N회 반복 ON/OFF — 전체멈춤을 누르면 자동으로 OFF가 된다
-        self.btn_rep = tk.Button(btn_row, text="⏰ 반복" + chr(10) + "ON",
-                                 font=("맑은 고딕", 8, "bold"),
-                                 bg="#27ae60", fg="white", activebackground="#1e8449",
-                                 width=6, height=2, command=self._toggle_rep_pause)
-        self.btn_rep.pack(side="left", padx=(4, 0))
-        self.after(1200, self._refresh_rep_btn)
 
         # 9시 클릭 스케줄러
         tk.Frame(btn_row, width=10).pack(side="left")
@@ -3627,20 +3615,21 @@ class App(tk.Tk):
                 pass
             # 3) ★ 과거섬 패스 ← 일반던전충전 좌측 라인 (맞을 때까지 반복)
             try:
-                dx2 = self._dc_open_btn.winfo_rootx() - self._past_skip_btn.winfo_rootx()
+                _left = getattr(self, "_stop_col", None) or self._past_skip_btn
+                dx2 = self._dc_open_btn.winfo_rootx() - _left.winfo_rootx()
                 if 2 < abs(dx2) < 900:
                     if dx2 > 0:
                         # 오른쪽으로 이동 — 별 버튼 왼쪽 여백 증가
                         pad = min(600, getattr(self, "_star_pad", 0) + dx2)
                         self._star_pad = pad
-                        self._past_skip_btn.pack_configure(padx=(pad, 4))
+                        _left.pack_configure(padx=(pad, 6))
                     else:
                         # 왼쪽으로 이동 — 행 오른쪽 여백을 늘려 행 전체를 왼쪽으로
                         cur_p = getattr(self, "_star_pad", 0)
                         if cur_p > 0:
                             take = min(cur_p, -dx2)
                             self._star_pad = cur_p - take
-                            self._past_skip_btn.pack_configure(padx=(self._star_pad, 4))
+                            _left.pack_configure(padx=(self._star_pad, 6))
                             dx2 += take
                         if dx2 < -2:
                             w2 = min(1200, getattr(self, "_secrow_pad_w", 0) + 2 * (-dx2))
@@ -4314,11 +4303,25 @@ class App(tk.Tk):
         for w in self._sec_row.winfo_children():
             w.destroy()
 
+        # ■ 전체멈춤 / ⏰ 반복 — 이 행의 맨 왼쪽 (일반던전충전 좌측 라인에 맞춤)
+        self._stop_col = tk.Frame(self._sec_row)
+        self._stop_col.pack(side="left", padx=(getattr(self, "_star_pad", 0), 6))
+        self.btn_stop = tk.Button(self._stop_col, text="■ 전체" + chr(10) + "멈춤",
+            font=("맑은 고딕", 9, "bold"), bg="#c0392b", fg="white",
+            activebackground="#922b21", width=6, height=2, command=self._stop)
+        self.btn_stop.pack(side="left")
+        self.btn_rep = tk.Button(self._stop_col, text="⏰ 반복" + chr(10) + "ON",
+            font=("맑은 고딕", 9, "bold"), bg="#27ae60", fg="white",
+            activebackground="#1e8449", width=6, height=2,
+            command=self._toggle_rep_pause)
+        self.btn_rep.pack(side="left", padx=(3, 0))
+        self.after(300, self._refresh_rep_btn)
+
         # ★ 과거섬 하루 패스 버튼 — 누르면 다음 새벽 실행 건너뜀, 다시 누르면 취소, 다음날 자동 재개
         self._past_skip_btn = tk.Button(self._sec_row, text="★ 과거섬\n패스!",
             font=("맑은 고딕", 9, "bold"), width=7, height=2,
             command=self._toggle_past_skip)
-        self._past_skip_btn.pack(side="left", padx=(getattr(self, "_star_pad", 0), 4))
+        self._past_skip_btn.pack(side="left", padx=(0, 4))
         self._refresh_past_skip_btn()
 
         fixed = [
