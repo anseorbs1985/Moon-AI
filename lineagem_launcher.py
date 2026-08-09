@@ -1128,6 +1128,11 @@ class App(tk.Tk):
 
         # 실행 / 멈춤
         btn_row = tk.Frame(self); btn_row.pack(pady=6)
+        # 💬 클로드 앞으로 — 제자리/맨뒤로 라인 쪽(맨 왼쪽), TJ성공!! 바로 왼쪽에 붙임
+        tk.Button(btn_row, text="💬 클로드", font=("맑은 고딕", 8, "bold"),
+                  bg="#c0392b", fg="white", activebackground="#7b241c",
+                  width=6, height=2,
+                  command=self._raise_claude).pack(side="left", padx=(0, 6), anchor="n")
         # TJ성공!! (동그라미 버튼) + 실행 — 계정관리 왼쪽
         tjcol = tk.Frame(btn_row); tjcol.pack(side="left", padx=(0, 47), anchor="n")
         self._tjcol = tjcol
@@ -1141,11 +1146,6 @@ class App(tk.Tk):
         tk.Button(tjcol, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
                   width=4, height=2, command=self._start_tj).pack(pady=(2, 0))
-        # 💬 클로드 앞으로 — TJ성공!!(왼쪽)과 계정관리 사이, 제자리 버튼 크기의 네모
-        tk.Button(btn_row, text="💬 클로드", font=("맑은 고딕", 8, "bold"),
-                  bg="#c0392b", fg="white", activebackground="#7b241c",
-                  width=6, height=2,
-                  command=self._raise_claude).pack(side="left", padx=(0, 6))
         tk.Button(btn_row, text="🔑 계정\n관리",
             font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
             activebackground="#0e6655", width=7, height=2,
