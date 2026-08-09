@@ -391,6 +391,15 @@ class IslandApp(tk.Tk):
         self._repeat_left = {}                               # (key,idx) → 남은 반복 횟수
 
         self._auto_run = len(sys.argv) > 2 and sys.argv[2] == "--run"
+        # --slots 1,7,14 : 그 슬롯들만 웨이브(번갈아)로 한 번에 실행
+        self._auto_slots = None
+        if "--slots" in sys.argv:
+            try:
+                raw = sys.argv[sys.argv.index("--slots") + 1]
+                self._auto_slots = [int(x) - 1 for x in raw.split(",") if x.strip()]
+                self._auto_run = True
+            except Exception:
+                self._auto_slots = None
         # --slot N : 그 슬롯 하나만 실행 (진단·테스트용)
         self._auto_slot = None
         if "--slot" in sys.argv:
@@ -423,7 +432,9 @@ class IslandApp(tk.Tk):
             except Exception:
                 pass
             key = self._dungeons_to_show[0]["key"]
-            if self._auto_slot is not None:
+            if self._auto_slots:
+                self.after(500, lambda: self._test_sel(key, self._auto_slots))
+            elif self._auto_slot is not None:
                 self.after(500, lambda: self._test(key, self._auto_slot))
             else:
                 self.after(500, lambda: self._start(key))
@@ -1913,6 +1924,15 @@ class IslandApp(tk.Tk):
         except Exception:
             pass
         self.after(1000, self._lock_tick)
+
+    def _test_sel(self, key, sel):
+        """고른 슬롯들을 웨이브(번갈아)로 한 번에 — 반복 차례가 여러 개일 때 쓴다."""
+        self._slot_running = True
+        self._send_behind_main()
+        self.iconify()
+        self._minimize_claude()
+        threading.Thread(target=self._run, args=(key,),
+                         kwargs={"sel_list": list(sel)}, daemon=True).start()
 
     def _test(self, key, idx):
         self._slot_running = True          # 스레드가 뜨기 전에 먼저 잠가 중복 실행 차단

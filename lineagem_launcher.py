@@ -1709,28 +1709,50 @@ class App(tk.Tk):
             self._rep_log(f"대기 — 직전 실행 후 {int(time.time()-_last)}초 (밀린 {len(due)}개)")
             return
         self._rep_last_start = time.time()
-        due.sort()                    # 가장 오래 밀린 것부터 하나씩
-        _, di, key, i, h = due[0]
-        k = f"{key}|{i}"
-        e = st.get(k) or {}
-        e["left"] = int(e.get("left", 1)) - 1
-        if e["left"] <= 0:
-            st.pop(k, None)
-            self._rep_turn_off(key, i)
-            self._rep_log(f"{key} #{i+1:02d} 마지막 회차 실행 (반복 종료)")
-        else:
-            e["next"] = now + self._rep_delay(h)
-            st[k] = e
-            self._rep_log(f"{key} #{i+1:02d} 실행 (남은 {e['left']}회, 대기 {len(due)-1}개)")
+        due.sort()                    # 가장 오래 밀린 것부터
+        _, di, key, _i0, _h0 = due[0]
+        # 같은 던전에서 '이미 차례 + 10분 안에 차례가 되는' 슬롯을 한 묶음으로 —
+        # 하나씩 돌리면 16슬롯에 40분 넘게 걸리지만, 웨이브(번갈아)면 5~6분이면 끝난다.
+        WINDOW = 600
+        batch = []
+        for kk, ee in st.items():
+            if kk.startswith("_"):
+                continue
+            bkey, bi = kk.rsplit("|", 1)
+            if bkey != key:
+                continue
+            if ee.get("next", 0) <= now + WINDOW:
+                batch.append((int(bi), ee, int(ee.get("h") or 2)))
+        batch.sort()
+        names = []
+        for bi, e, h in batch:
+            kk = f"{key}|{bi}"
+            e["left"] = int(e.get("left", 1)) - 1
+            if e["left"] <= 0:
+                st.pop(kk, None)
+                self._rep_turn_off(key, bi)
+                self._rep_log(f"{key} #{bi+1:02d} 마지막 회차 실행 (반복 종료)")
+            else:
+                e["next"] = now + self._rep_delay(h)
+                st[kk] = e
+                self._rep_log(f"{key} #{bi+1:02d} 실행 (남은 {e['left']}회)")
+            names.append(bi)
         self._rep_save(st)
-        self.status.set(f"⏰ {key} #{i+1:02d} 반복 자동 실행 (대기 {len(due)-1}개)")
-        self._run_island_repeat(di, i)
+        if len(names) > 1:
+            self._rep_log(f"{key} — {len(names)}슬롯 웨이브(번갈아) 묶음 실행: "
+                          + ",".join(str(x + 1) for x in names))
+            self.status.set(f"⏰ {key} {len(names)}슬롯 반복 자동 실행 (번갈아)")
+        else:
+            self.status.set(f"⏰ {key} #{names[0]+1:02d} 반복 자동 실행")
+        self._run_island_repeat(di, names)
 
-    def _run_island_repeat(self, didx, sidx):
-        """반복 차례가 된 슬롯 하나만 섬/던전 실행기로 돌린다."""
+    def _run_island_repeat(self, didx, sidxs):
+        """반복 차례가 된 슬롯들을 섬/던전 실행기로 돌린다.
+        여러 개면 --slots 로 넘겨 웨이브(번갈아)로 한 번에 처리한다."""
         self._minimize_all()
+        arg = ("--slots", ",".join(str(i + 1) for i in sidxs)) if len(sidxs) > 1               else ("--slot", str(sidxs[0] + 1))
         proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py"),
-                                 str(didx), "--run", "--slot", str(sidx + 1)])
+                                 str(didx), "--run", arg[0], arg[1]])
         self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
 
