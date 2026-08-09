@@ -391,6 +391,14 @@ class IslandApp(tk.Tk):
         self._repeat_left = {}                               # (key,idx) → 남은 반복 횟수
 
         self._auto_run = len(sys.argv) > 2 and sys.argv[2] == "--run"
+        # --slot N : 그 슬롯 하나만 실행 (진단·테스트용)
+        self._auto_slot = None
+        if "--slot" in sys.argv:
+            try:
+                self._auto_slot = int(sys.argv[sys.argv.index("--slot") + 1]) - 1
+                self._auto_run  = True
+            except Exception:
+                self._auto_slot = None
 
         self._build_ui()
         # 조작 감지 — 3분 무조작이면 메인런처 앞(클라 뒤)으로 물러남
@@ -412,7 +420,10 @@ class IslandApp(tk.Tk):
             except Exception:
                 pass
             key = self._dungeons_to_show[0]["key"]
-            self.after(500, lambda: self._start(key))
+            if self._auto_slot is not None:
+                self.after(500, lambda: self._test(key, self._auto_slot))
+            else:
+                self.after(500, lambda: self._start(key))
 
     def _fit_width(self):
         # 내용 크기에 맞게 가로+세로 모두 조정 (셀에 딱 맞춤 — 길쭉한 빈 공간 제거)
@@ -2473,6 +2484,7 @@ class IslandApp(tk.Tk):
                         did = True
                     if not did:
                         continue
+                    self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) 실행")
                     g = gl[j] if j < len(gl) else None
                     # 좌표 간 간격 10~25% 랜덤 증가 (× 녹화 없는 슬롯은 _slow 추가 완화)
                     _mult = (random.uniform(1.10, 1.25) * _slow * 1.05
