@@ -1158,6 +1158,9 @@ class App(tk.Tk):
             font=("맑은 고딕", 12, "bold"), bg="#c8a951", fg="white",
             activebackground="#a88930", width=15, height=2, command=self._start)
         self.btn_start.pack(side="left", padx=(0, 4))
+        # 멈춤 버튼이 아래 줄로 옮겨간 자리 — 오른쪽 버튼들(업데이트·좌표저장)이
+        # 예전 위치를 그대로 지키도록 같은 폭의 빈칸을 둔다
+        tk.Frame(btn_row, width=85).pack(side="left")
 
         # 9시 클릭 스케줄러
         tk.Frame(btn_row, width=10).pack(side="left")
