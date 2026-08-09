@@ -1291,7 +1291,12 @@ class IslandApp(tk.Tk):
             if it.get("act") == "del":
                 cs[j] = None
                 if j < len(ds): ds[j] = None
-                rc.pop(str(j), None)
+                # (2026-08-10) 녹화는 지우지 않고 '숨김 보관' 한다 —
+                # 프리셋 한 번에 녹화가 통째로 날아가던 사고 방지.
+                # 그 자리를 다시 쓰게 되면 아래에서 그대로 되살린다.
+                _r = rc.pop(str(j), None)
+                if _r:
+                    slot.setdefault("recs_off", {})[str(j)] = _r
                 dels.append(j + 1)
             else:
                 rel = it.get("rel") or [0, 0]
@@ -1299,6 +1304,9 @@ class IslandApp(tk.Tk):
                     cs[j] = [rel[0] + rects[idx][0], rel[1] + rects[idx][1]]
                 else:
                     cs[j] = [rel[0], rel[1]]
+                _b = (slot.get("recs_off") or {}).pop(str(j), None)
+                if _b and not rc.get(str(j)):
+                    rc[str(j)] = _b            # 숨겨둔 녹화 복원
                 movs.append(j + 1)
         # 어떤 프리셋을 적용했는지 슬롯 이름에 남긴다 (미등록 → 프리셋 이름)
         nm = self._preset_full(key, pi)
