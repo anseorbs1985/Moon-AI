@@ -255,6 +255,60 @@ def sync_times(log):
         log(f"   ⚠ 시간 동기화 실패: {e}")
 
 
+def sync_coord_keys(log):
+    """coords.json 중 '지정한 항목만' 메인 것으로 받는다 (share_coords.json 의 keys).
+    나머지 좌표는 로컬 것을 그대로 지킨다 — 컴퓨터마다 위치가 다르기 때문."""
+    try:
+        man = os.path.join(REPO, "share_coords.json")
+        if not os.path.exists(man):
+            return
+        with open(man, encoding="utf-8") as f:
+            keys = (json.load(f) or {}).get("keys") or []
+        if not keys:
+            return
+        src_p = os.path.join(REPO, "coords.json")
+        dst_p = os.path.join(DESK, "coords.json")
+        if not (os.path.exists(src_p) and os.path.exists(dst_p)):
+            log("   항목 좌표 동기화: coords.json 이 없어 건너뜁니다")
+            return
+        with open(src_p, encoding="utf-8") as f:
+            src = json.load(f)
+        with open(dst_p, encoding="utf-8") as f:
+            dst = json.load(f)
+        got = []
+        for k in keys:
+            v = src.get(k)
+            if v is None:
+                continue
+            if dst.get(k) != v:
+                dst[k] = v
+                got.append(f"{k}({_count_in(v)}좌표)")
+        if not got:
+            log("   항목 좌표 동기화: 이미 메인과 같습니다")
+            return
+        tmp = dst_p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(dst, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, dst_p)
+        log("   📍 지정 항목 좌표 받음: " + ", ".join(got) + " (나머지 좌표는 그대로)")
+    except Exception as e:
+        log(f"   ⚠ 항목 좌표 동기화 실패: {e}")
+
+
+def _count_in(v):
+    n = [0]
+    def walk(x):
+        if isinstance(x, list):
+            if len(x) == 2 and all(isinstance(y, (int, float)) for y in x):
+                n[0] += 1
+            else:
+                for y in x: walk(y)
+        elif isinstance(x, dict):
+            for y in x.values(): walk(y)
+    walk(v)
+    return n[0]
+
+
 def _all_code_files():
     """저장소에 있는 코드 파일 전부 — 목록(CODE_FILES)에 안 적혀서 빠지는 일 방지.
     새 .py/.pyw 파일이 추가돼도 업데이트가 자동으로 같이 받아온다."""
@@ -684,6 +738,7 @@ def main():
                     log(f"   ⚠ {f} 복사 검증 실패 — 업데이트를 한 번 더 실행해주세요")
             if not is_main:
                 sync_times(log)          # 좌표는 그대로, 시간만 메인과 맞춤
+                sync_coord_keys(log)     # 지정한 항목(낚시녹임 등)만 좌표도 받음
             # 다야 OCR 캡처영역(daya_regions.json)도 메인과 동일하게 동기화
             # (측정값 daya_counts/history는 머신별 데이터라 절대 건드리지 않음)
             try:
