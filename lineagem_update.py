@@ -330,6 +330,26 @@ def ensure_keepalive():
         pass
 
 
+def ensure_autostart_0450():
+    """새벽 4시 50분 자동 시작 예약 작업 — 그 시각에 런처가 꺼져 있으면 워치독이 되살린다.
+    (워치독은 이미 켜져 있으면 아무것도 하지 않으므로 중복 실행 걱정 없음)"""
+    try:
+        exe = sys.executable.replace("python.exe", "pythonw.exe")
+        wd = os.path.join(DESK, "lineagem_watchdog.py")
+        q = sh(["schtasks", "/Query", "/TN", "LineageM_AutoStart_0450"])
+        if q.returncode == 0:
+            return
+        r = sh(["schtasks", "/Create", "/F", "/TN", "LineageM_AutoStart_0450",
+                "/SC", "DAILY", "/ST", "04:50",
+                "/TR", f'"{exe}" "{wd}"'])
+        if r.returncode == 0:
+            log("   ✔ 새벽 4:50 자동 시작 예약 작업 등록 (꺼져 있으면 자동 실행)")
+        else:
+            log(f"   ⚠ 4:50 자동 시작 등록 실패: {(r.stderr or r.stdout or '').strip()[:60]}")
+    except Exception:
+        pass
+
+
 def ensure_shortcut_icon():
     """바탕화면 메인런처 바로가기 아이콘을 moon.ico로 통일 (모든 컴퓨터 공통)."""
     try:
@@ -354,6 +374,7 @@ def ensure_shortcut_icon():
 def finish(msg=""):
     """모든 종료 경로 공통: 런처 재시작 확인 → 창 띄워서 보여줌 → '5초 후 꺼짐' 알림 → 종료."""
     ensure_keepalive()               # 상시감시 예약 작업 보장 (없으면 등록)
+    ensure_autostart_0450()          # 새벽 4:50 자동 시작 보장 (없으면 등록)
     ensure_shortcut_icon()           # 바로가기 아이콘 통일 (moon.ico)
     ok = ensure_launcher()
     if ok:
