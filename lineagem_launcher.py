@@ -3105,6 +3105,54 @@ class App(tk.Tk):
         self.after(300, lambda: threading.Thread(
             target=self._run_task, args=(title, lambda: self._run_dgn2(fkey)), daemon=True).start())
 
+    def _run_dgn2_wave(self, fkey, targets, nclk, icon, stop, lanes=4, gap=(2.0, 4.0)):
+        """번갈아(웨이브) 실행 — 동시 lanes개 슬롯을 섞어가며 클릭 하나씩.
+        각 좌표 사이 간격은 slot마다 따로 흐르고 gap 범위에서 랜덤."""
+        state = {si: {"slot": sl, "j": 0, "due": time.time() + random.uniform(0, 6.0)}
+                 for si, sl in targets}
+        order = [si for si, _ in targets]
+        random.shuffle(order)
+        active, waiting = order[:lanes], order[lanes:]
+        last_si, done = None, 0
+        self.status.set(f"{icon} 번갈아 실행 — 동시 {lanes}슬롯 (좌표 간격 "
+                        f"{gap[0]:.0f}~{gap[1]:.0f}초)")
+        while not getattr(self, stop, False):
+            for si in [x for x in active if state[x]["j"] >= nclk]:
+                active.remove(si)
+                if waiting:
+                    nx = waiting.pop(0)
+                    state[nx]["due"] = time.time() + random.uniform(0.5, 3.0)
+                    active.append(nx)
+            alive = [si for si in active if state[si]["j"] < nclk]
+            if not alive:
+                break
+            now = time.time()
+            ready = [si for si in alive if state[si]["due"] <= now]
+            if not ready:
+                nxt = min(state[si]["due"] for si in alive)
+                time.sleep(max(0.05, min(nxt - now, 1.0)))
+                continue
+            si = random.choice(ready)
+            st = state[si]
+            j  = st["j"]
+            coords = st["slot"].get("coords", [])
+            st["j"] = j + 1
+            if j >= len(coords) or not coords[j]:
+                st["due"] = time.time()          # 빈 자리는 기다리지 않고 통과
+                continue
+            if si != last_si:
+                time.sleep(random.uniform(0.6, 1.1))   # 다른 창으로 넘어갈 여유
+                last_si = si
+            if not self._wait_mouse_idle(stop): return
+            if getattr(self, stop, False): break
+            name = st["slot"].get("name", f"#{si+1}")
+            self.status.set(f"{icon} [{name}] 클릭{j+1}/{nclk}  (남은 슬롯 {len(alive)})")
+            pyautogui.click(*coords[j])
+            done += 1
+            st["due"] = time.time() + random.uniform(*gap)
+            time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
+        self.status.set(f"{icon} 번갈아 실행 완료 — 클릭 {done}회")
+
     def _run_dgn2(self, fkey, slot_idx=None):
         self._start_pause()
         key, title, icon = self._dgn2_info(fkey)
@@ -3124,6 +3172,10 @@ class App(tk.Tk):
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
                 random.shuffle(targets)   # 슬롯 클릭 순서 매번 랜덤
+            if fkey == "fish" and slot_idx is None and len(targets) > 1:
+                # 낚시녹임은 번갈아(웨이브) 실행 — 동시 4슬롯, 좌표 간격 2~4초 랜덤
+                self._run_dgn2_wave(fkey, targets, nclk, icon, stop)
+                return
             for tn, (si, slot) in enumerate(targets):
                 if getattr(self, stop, False): break
                 name = slot.get("name", f"#{si+1}")
