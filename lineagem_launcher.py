@@ -1141,15 +1141,15 @@ class App(tk.Tk):
         tk.Button(tjcol, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
                   width=4, height=2, command=self._start_tj).pack(pady=(2, 0))
-        tk.Button(btn_row, text="🔑 계정\n관리",
-            font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
-            activebackground="#0e6655", width=7, height=2,
-            command=self._open_accounts_win).pack(side="left", padx=(0, 6))
         # 💬 클로드 앞으로 — TJ성공!!(왼쪽)과 계정관리 사이, 제자리 버튼 크기의 네모
         tk.Button(btn_row, text="💬 클로드", font=("맑은 고딕", 8, "bold"),
                   bg="#c0392b", fg="white", activebackground="#7b241c",
                   width=6, height=2,
                   command=self._raise_claude).pack(side="left", padx=(0, 6))
+        tk.Button(btn_row, text="🔑 계정\n관리",
+            font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
+            activebackground="#0e6655", width=7, height=2,
+            command=self._open_accounts_win).pack(side="left", padx=(0, 6))
         self.btn_start = tk.Button(btn_row, text="▶  전체 자동 실행",
             font=("맑은 고딕", 12, "bold"), bg="#c8a951", fg="white",
             activebackground="#a88930", width=15, height=2, command=self._start)
@@ -5861,7 +5861,7 @@ class App(tk.Tk):
             if pw and pw.winfo_exists():
                 try: pw.withdraw()   # 팝업이 타깃 가리지 않게 잠시 숨김
                 except Exception: pass
-            self.withdraw(); time.sleep(0.2); CoordOverlay(self, mode="doll")
+            self.withdraw(); time.sleep(0.2); CoordOverlay(self, mode="fish")
         self.after(3000, _go)
 
     def on_fish_coord(self, x, y):
@@ -5925,7 +5925,7 @@ class App(tk.Tk):
             self._fish_reg_idx  = idx
             self._fish_reg_step = dot_idx
             self.deiconify()
-            self.after(200, lambda: CoordOverlay(self, mode="doll"))
+            self.after(200, lambda: CoordOverlay(self, mode="fish"))
         def _save(dot_idx, nx, ny):
             self.cfg["fish_slots"][idx]["coords"][dot_idx] = [nx, ny]
             save_cfg(self.cfg); self._refresh_fish_display()
