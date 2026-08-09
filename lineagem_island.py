@@ -1935,18 +1935,16 @@ class IslandApp(tk.Tk):
     def _test_sel(self, key, sel):
         """고른 슬롯들을 웨이브(번갈아)로 한 번에 — 반복 차례가 여러 개일 때 쓴다."""
         self._slot_running = True
+        # (2026-08-09) 최소화하지 않는다 — 메인런처와 함께 '맨 뒤'로만 보낸다
         self._send_behind_main()
-        self.iconify()
         self._minimize_claude()
         threading.Thread(target=self._run, args=(key,),
                          kwargs={"sel_list": list(sel)}, daemon=True).start()
 
     def _test(self, key, idx):
         self._slot_running = True          # 스레드가 뜨기 전에 먼저 잠가 중복 실행 차단
-        # (2026-08-09) 슬롯 개별 실행에서도 메인런처를 맨 뒤로 내린다 —
-        # 예전엔 이 창만 최소화해서 메인런처가 앞에 그대로 남아 클릭을 가렸다
+        # (2026-08-09) 최소화하지 않는다 — 이 창도 메인런처도 '맨 뒤'로만 보낸다
         self._send_behind_main()
-        self.iconify()
         self._minimize_claude()
         threading.Thread(target=self._run, args=(key, idx), daemon=True).start()
 

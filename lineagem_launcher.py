@@ -1648,16 +1648,10 @@ class App(tk.Tk):
         return n
 
     def _rep_stop_click(self):
+        """[⏰ 반복] 버튼 — 묻지 않고 바로 끈다 (사용자 지시)."""
         n = self._rep_count()
         if not n:
             self.status.set("⏰ 켜져 있는 반복이 없습니다")
-            return
-        if not messagebox.askyesno(
-                "반복 종료",
-                f"⏰ 2시간 반복이 켜진 슬롯 {n}개를 전부 끕니다. 남은 횟수도 함께 "
-                f"사라지고, 다시 하려면 섬/던전 실행기에서 ⏰를 다시 켜야 합니다." + chr(10)
-                + chr(10) + "종료할까요?",
-                default="no"):
             return
         self._rep_stop_all()
         self.status.set(f"⏰ 반복 종료 — {n}개 슬롯 전부 꺼짐")
@@ -1762,7 +1756,7 @@ class App(tk.Tk):
     def _run_island_repeat(self, didx, sidxs):
         """반복 차례가 된 슬롯들을 섬/던전 실행기로 돌린다.
         여러 개면 --slots 로 넘겨 웨이브(번갈아)로 한 번에 처리한다."""
-        self._minimize_all()
+        self._island_step_back()
         cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(didx), "--run"]
         if len(sidxs) > 1:
             # 반복은 슬롯 번호 순서 그대로 '2개씩' — 동시에 도는 창을 줄여 더 안전하게
@@ -1773,11 +1767,20 @@ class App(tk.Tk):
         self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
 
+    def _island_step_back(self):
+        """섬/던전 실행 시작 — 최소화하지 말고 '맨 뒤'로만 물러난다 (2026-08-09 사용자 지시).
+        최소화하면 다시 꺼내기가 번거로워서, 메인런처도 섬 실행기도 맨 뒤로만 간다."""
+        for w in self._section_wins():
+            try: w.iconify()
+            except Exception: pass
+        self._send_to_back()
+        self._minimize_claude()
+
     def _run_island_slot(self, idx):
         """해당 던전 단독창 열고 자동 실행."""
         if self._is_busy():
             self._enqueue(f"섬/던전 #{idx+1:02d}", lambda: self._run_island_slot(idx)); return
-        self._minimize_all()
+        self._island_step_back()
         proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(idx), "--run"])
         self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
