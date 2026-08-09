@@ -412,6 +412,7 @@ class IslandApp(tk.Tk):
         # (2026-08-09) 슬롯 반복(2시간 N회)은 이제 '메인런처'가 관리한다 —
         # 이 창 안에서 돌리면 창을 닫는 순간 반복이 통째로 죽어버려서.
         # 여기서는 타이머를 돌리지 않는다 (⏰ 설정값만 저장하는 역할).
+        self.after(1000, self._lock_tick)      # 실행 중 잠금 파일 갱신
         self.after(300, self._scroll_all_to_bottom)
         self.after(80, self._fit_width)
         if self._auto_run and self._focus_idx is not None:
@@ -1893,6 +1894,26 @@ class IslandApp(tk.Tk):
         except Exception as e:
             self._rlog(f"반복 오류: {e!r}")
         self.after(nxt_ms, self._repeat_tick)
+    @staticmethod
+    def _lock_path():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "island_running.lock")
+
+    def _lock_tick(self):
+        """실행 중인 동안 1초마다 잠금 파일을 갱신 — 런처가 이걸 보고
+        '아직 돌고 있다'를 판단한다 (프로세스 핸들만 믿으면 놓치는 경우가 있어서)."""
+        try:
+            if getattr(self, "_slot_running", False):
+                with open(self._lock_path(), "w", encoding="utf-8") as f:
+                    f.write(f"{os.getpid()} {time.time():.0f}")
+            else:
+                try: os.remove(self._lock_path())
+                except FileNotFoundError: pass
+        except Exception:
+            pass
+        self.after(1000, self._lock_tick)
+
     def _test(self, key, idx):
         self._slot_running = True          # 스레드가 뜨기 전에 먼저 잠가 중복 실행 차단
         # (2026-08-09) 슬롯 개별 실행에서도 메인런처를 맨 뒤로 내린다 —

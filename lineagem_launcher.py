@@ -1051,7 +1051,10 @@ class App(tk.Tk):
 
     def _watch_island(self, proc):
         proc.wait()
-        self._island_proc = None
+        # 그 사이 다른 실행이 시작됐으면 그 핸들을 지우지 않는다
+        # (예전엔 무조건 None으로 지워서 '실행 중'인데도 한가한 줄 알고 겹쳐 실행됐다)
+        if getattr(self, "_island_proc", None) is proc:
+            self._island_proc = None
         # 대기열에 다음 작업이 남아 있으면 창 복원을 건너뛴다 —
         # 복원한 창이 다음 실행의 클릭을 가리는 문제 방지 (전부 끝난 뒤에만 복원)
         if getattr(self, "_task_queue", None):
@@ -1659,7 +1662,14 @@ class App(tk.Tk):
             return
         if self._is_busy():          # 다른 작업 중이면 시각을 그대로 두고 다음 분에 재시도
             self.status.set(f"⏰ 반복 {len(due)}개 대기 — '{self._busy_label()}' 끝난 뒤 실행")
+            self._rep_log(f"대기 — '{self._busy_label()}' 실행 중 (밀린 {len(due)}개)")
             return
+        # 앞 실행이 끝난 지 얼마 안 됐으면 조금 더 기다린다 (겹침 방지 안전장치)
+        _last = getattr(self, "_rep_last_start", 0)
+        if time.time() - _last < 150:
+            self._rep_log(f"대기 — 직전 실행 후 {int(time.time()-_last)}초 (밀린 {len(due)}개)")
+            return
+        self._rep_last_start = time.time()
         due.sort()                    # 가장 오래 밀린 것부터 하나씩
         _, di, key, i, h = due[0]
         k = f"{key}|{i}"
@@ -9609,7 +9619,21 @@ class App(tk.Tk):
         ip = getattr(self, "_island_proc", None)
         if ip is not None and ip.poll() is None:
             return True
+        if self._island_lock_alive():
+            return True
         return False
+
+    @staticmethod
+    def _island_lock_alive():
+        """섬/던전 실행기가 남기는 잠금 파일이 3초 안에 갱신됐으면 아직 돌고 있다."""
+        try:
+            p = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
+                             "island_running.lock")
+            with open(p, encoding="utf-8") as f:
+                _pid, ts = f.read().split()
+            return (time.time() - float(ts)) < 3.0
+        except Exception:
+            return False
 
     def _busy_label(self):
         bt = getattr(self, "_busy_task", None)
