@@ -3561,9 +3561,9 @@ class App(tk.Tk):
                            fg="#000000", bg="#fff59d", width=14, justify="center",
                            relief="solid", bd=2)
             ent.pack(ipady=5)   # 세로 약 1.3배 (내부 여백)
-            # 끄기는 '오른쪽 클릭'만 — ✕ 버튼은 실수로 눌릴 수 있어 두지 않는다
+            # 오른쪽 클릭 → [종료] 메뉴가 뜨고, 그걸 눌러야 꺼진다 (실수 방지)
             for _w in (ent, win):
-                _w.bind("<Button-3>", lambda e, ii=i: self._memo_off_one(ii))
+                _w.bind("<Button-3>", lambda e, ii=i: self._memo_menu(ii, e))
             win.geometry(f"+{int(pos[0])}+{int(pos[1])}")
             var.trace_add("write", lambda *a: self._memo_save_texts())
             ent.bind("<Control-Button-1>", lambda e, ww=win: setattr(ww, "_d", (e.x, e.y)))
@@ -3574,6 +3574,20 @@ class App(tk.Tk):
             ent.bind("<Control-ButtonRelease-1>", lambda e: self._memo_save_positions())
             ent.bind("<ButtonRelease-1>", lambda e: self._memo_save_positions())
             store[i] = (win, var)
+        except Exception:
+            pass
+
+    def _memo_menu(self, i, ev):
+        """메모 오른쪽 클릭 — [종료] 메뉴를 띄운다. 눌러야 실제로 꺼진다."""
+        try:
+            m = tk.Menu(self, tearoff=0, font=("맑은 고딕", 10))
+            m.add_command(label="✕  종료", command=lambda ii=i: self._memo_off_one(ii))
+            m.add_separator()
+            m.add_command(label="닫기")          # 아무것도 안 함 (취소용)
+            try:
+                m.tk_popup(ev.x_root, ev.y_root)
+            finally:
+                m.grab_release()
         except Exception:
             pass
 
