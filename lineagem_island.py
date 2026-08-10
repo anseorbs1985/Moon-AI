@@ -1406,25 +1406,13 @@ class IslandApp(tk.Tk):
             pass
         save_cfg(self.cfg)
         self._refresh(key)
-        # (2026-08-09) 팝업을 껐다 켜지 않고 '그 자리에서' 표시만 갱신 —
-        # 프리셋을 고를 때마다 창이 다시 뜨는 게 불편하다는 사용자 지시
+        # (2026-08-10) 프리셋을 고르면 적용하고 좌표등록 팝업을 닫는다 (사용자 지시)
         if self._pop.get("win") and self._pop["win"].winfo_exists()            and self._pop.get("slot") == idx and self._pop.get("key") == key:
             try:
-                d_ = next(x for x in DUNGEONS if x["key"] == key)
-                for j2, cv in enumerate(self._pop.get("vars") or []):
-                    on = j2 < len(cs) and cs[j2]
-                    cv.set("✔" if on else "✗")
-                    bt = (self._pop.get("btns") or [])[j2]
-                    bt.config(bg=d_["color"] if on else "#7f8c8d")
-                nv_ = self._pop.get("name_var")
-                if nv_ is not None:
-                    nv_.set(nm)
-                for j2, rb in enumerate(self._pop.get("rec_btns") or []):
-                    has = bool((slot.get("recs") or {}).get(str(j2)))
-                    rb.config(text="●" if has else "⏺",
-                              bg="#c0392b" if has else "#7f8c8d")
+                self._pop["win"].destroy()
             except Exception:
                 pass
+            self._pop = {}
         self._status.set("#" + str(idx + 1) + " " + nm + " 적용 — 삭제 " +
                          str(sorted(dels) or "없음") + " / 이동 " + str(sorted(movs) or "없음"))
 
