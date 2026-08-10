@@ -3513,6 +3513,26 @@ class App(tk.Tk):
                 self._potion_cells[i].config(text=name, bg=col)
             except Exception:
                 pass
+        # 결과를 파일로 남긴다 — 섬/던전 실행기 슬롯에 그대로 표시되고,
+        # 다시 측정하기 전까지 계속 유지된다
+        try:
+            import datetime as _dt
+            res = {"time": f"{_dt.datetime.now():%m-%d %H:%M}",
+                   "slots": {str(i + 1): ("빨강" if (i + 1) in reds else
+                                          "주황" if (i + 1) in oranges else "")
+                             for i in range(len(rects))}}
+            d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "potion_result.json"), "w", encoding="utf-8") as f:
+                json.dump(res, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        try:                       # 결과 창을 앞으로 올려 바로 보이게
+            w = getattr(self, "_potion_win", None)
+            if w and w.winfo_exists():
+                w.deiconify(); w.lift()
+        except Exception:
+            pass
         self.status.set(f"🧪 빨강 {len(reds)}개 {reds or ''} / 주황 {len(oranges)}개 {oranges or ''}")
 
     # ── 🔐 본인확인 도우미 (임시제한 해제 시 전화·이메일 붙여넣기 보조) ──────

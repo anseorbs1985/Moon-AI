@@ -390,6 +390,8 @@ class IslandApp(tk.Tk):
         self._numsel    = {}                                 # 번호 지정 일괄 입력칸
         self._repeat_left = {}                               # (key,idx) → 남은 반복 횟수
         self._paste_marks = {}                               # 붙여넣기 표시(⭕) 라벨
+        self._potion_lbls = {}                               # 🧪 물약색 표시 라벨
+        self._potion_mtime = 0
 
         self._auto_run = len(sys.argv) > 2 and sys.argv[2] == "--run"
         # --lanes N : 웨이브에서 동시에 돌릴 슬롯 수 (반복은 2개씩 = 더 안전)
@@ -430,6 +432,7 @@ class IslandApp(tk.Tk):
         # 이 창 안에서 돌리면 창을 닫는 순간 반복이 통째로 죽어버려서.
         # 여기서는 타이머를 돌리지 않는다 (⏰ 설정값만 저장하는 역할).
         self.after(1000, self._lock_tick)      # 실행 중 잠금 파일 갱신
+        self.after(800, self._potion_tick)     # 🧪 물약색 결과 표시
         self.after(300, self._scroll_all_to_bottom)
         self.after(80, self._fit_width)
         if self._auto_run and self._focus_idx is not None:
@@ -666,6 +669,7 @@ class IslandApp(tk.Tk):
         self._cnt_vars[key] = []
         self._en_btns[key] = []
         self._paste_marks[key] = []
+        self._potion_lbls[key] = []
         if not hasattr(self, "_cell_name_vars"):
             self._cell_name_vars = {}
         self._cell_name_vars[key] = []
@@ -705,6 +709,11 @@ class IslandApp(tk.Tk):
             nvv.trace_add("write", lambda *_a, f=_sv_name: f())
             # 프리셋 P1~P5 — 이 슬롯에 바로 적용 (이름칸 바로 아래)
             head = tk.Frame(cell); head.pack()
+            # 🧪 물약색 — 메인런처에서 확인한 결과를 슬롯 번호 왼쪽에 그대로 표시
+            pl = tk.Label(head, text="", font=("맑은 고딕", 7, "bold"),
+                          fg="white", bg=cell.cget("bg"), width=4, padx=1)
+            pl.pack(side="left", padx=(0, 2))
+            self._potion_lbls.setdefault(key, []).append(pl)
             tk.Label(head, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"),
                      fg="#555").pack(side="left")
             eb = tk.Button(head, text="ON", font=("맑은 고딕", 6, "bold"), width=3,
@@ -1467,6 +1476,44 @@ class IslandApp(tk.Tk):
             return [w for col in cols for w in col]           # 01~16 (열 우선)
         except Exception:
             return None
+
+    @staticmethod
+    def _potion_path():
+        return os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
+                            "potion_result.json")
+
+    def _potion_apply(self):
+        """메인런처 [🧪 물약색] 결과를 슬롯 번호 왼쪽에 표시.
+        다시 측정하기 전까지 그대로 유지된다 (파일로 남아 있음)."""
+        try:
+            with open(self._potion_path(), encoding="utf-8") as f:
+                res = (json.load(f) or {}).get("slots") or {}
+        except Exception:
+            res = {}
+        COL = {"빨강": ("빨강", "#c0392b"), "주황": ("주홍이", "#e67e22")}
+        for key, lbls in (self._potion_lbls or {}).items():
+            for i, lb in enumerate(lbls):
+                try:
+                    if not lb.winfo_exists():
+                        continue
+                    txt, col = COL.get(res.get(str(i + 1), ""), ("", None))
+                    if col:
+                        lb.config(text=txt, bg=col, fg="white")
+                    else:
+                        lb.config(text="", bg=lb.master.cget("bg"))
+                except Exception:
+                    pass
+
+    def _potion_tick(self):
+        """결과 파일이 새로 써지면 자동으로 표시를 갱신한다."""
+        try:
+            m = os.path.getmtime(self._potion_path())
+            if m != getattr(self, "_potion_mtime", 0):
+                self._potion_mtime = m
+                self._potion_apply()
+        except Exception:
+            pass
+        self.after(3000, self._potion_tick)
 
     def _toggle_paste_mark(self, key, idx):
         """⭕ 를 눌러 표시를 지우거나 다시 켠다 (내가 어디까지 했는지 체크용)."""
