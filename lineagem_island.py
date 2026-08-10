@@ -389,6 +389,7 @@ class IslandApp(tk.Tk):
         self._rep_vars  = {d["key"]: [] for d in DUNGEONS}   # ⏰ 드롭다운 표시 변수
         self._numsel    = {}                                 # 번호 지정 일괄 입력칸
         self._repeat_left = {}                               # (key,idx) → 남은 반복 횟수
+        self._paste_marks = {}                               # 붙여넣기 표시(⭕) 라벨
 
         self._auto_run = len(sys.argv) > 2 and sys.argv[2] == "--run"
         # --lanes N : 웨이브에서 동시에 돌릴 슬롯 수 (반복은 2개씩 = 더 안전)
@@ -619,6 +620,10 @@ class IslandApp(tk.Tk):
         if not _PRECISE_OK:
             self._status.set("⚠ 정밀클릭 미적용 — 마우스를 움직이면 클릭이 어긋날 수 있음 (precise_click.py 확인 필요)")
 
+        tk.Button(parent, text="⭕ 붙임표시 전부 지우기",
+                  font=("맑은 고딕", 8), bg="#a04000", fg="white",
+                  command=lambda k=key: self._clear_paste_marks(k)
+                  ).pack(fill="x", padx=4, pady=(0, 2))
         tk.Button(parent, text="👁 전체 좌표 보기",
                   font=("맑은 고딕", 8), bg="#566573", fg="white",
                   command=lambda k=key: self._preview_all(k)
@@ -660,6 +665,7 @@ class IslandApp(tk.Tk):
             self._en_btns = {}
         self._cnt_vars[key] = []
         self._en_btns[key] = []
+        self._paste_marks[key] = []
         if not hasattr(self, "_cell_name_vars"):
             self._cell_name_vars = {}
         self._cell_name_vars[key] = []
@@ -706,6 +712,12 @@ class IslandApp(tk.Tk):
                            command=lambda k=key, x=i: self._toggle_enable(k, x))
             eb.pack(side="left", padx=(3, 0))
             self._en_btns[key].append(eb)
+            # 붙여넣기 표시 — 이 슬롯에 [붙임]을 했으면 ⭕ 가 뜬다 (눌러서 지움)
+            pm = tk.Label(head, text="", font=("맑은 고딕", 9, "bold"),
+                          fg="#c0392b", cursor="hand2")
+            pm.pack(side="left", padx=(2, 0))
+            pm.bind("<Button-1>", lambda e, k=key, x=i: self._toggle_paste_mark(k, x))
+            self._paste_marks.setdefault(key, []).append(pm)
             sv = tk.StringVar(value=f"0/{clicks_for(key)}")
             self._cnt_vars[key].append(sv)
             tk.Button(cell, textvariable=sv, font=("맑은 고딕", 7, "bold"),
@@ -1456,6 +1468,25 @@ class IslandApp(tk.Tk):
         except Exception:
             return None
 
+    def _toggle_paste_mark(self, key, idx):
+        """⭕ 를 눌러 표시를 지우거나 다시 켠다 (내가 어디까지 했는지 체크용)."""
+        cur = bool(self.cfg[key][idx].get("pasted"))
+        self.cfg[key][idx]["pasted"] = not cur
+        save_cfg(self.cfg)
+        self._refresh(key)
+        self._status.set("#" + str(idx + 1) + " 붙여넣기 표시 " + ("지움" if cur else "켬"))
+
+    def _clear_paste_marks(self, key):
+        """이 던전의 ⭕ 표시를 전부 지운다."""
+        n = 0
+        for s_ in self.cfg.get(key, []):
+            if s_.get("pasted"):
+                s_["pasted"] = False
+                n += 1
+        save_cfg(self.cfg)
+        self._refresh(key)
+        self._status.set("⭕ 붙여넣기 표시 " + str(n) + "개 지움")
+
     def _slot_copy(self, key, idx):
         """슬롯 좌표 복사 — 원하는 슬롯에서 [붙임]으로 붙여넣기 (인형탐험과 동일)."""
         import copy
@@ -1523,6 +1554,7 @@ class IslandApp(tk.Tk):
             except Exception:
                 pass
         self.cfg[key][idx]["recs"] = recs
+        self.cfg[key][idx]["pasted"] = True     # 붙여넣기 표시(⭕)
         save_cfg(self.cfg)
         self._refresh(key)
         # 늦게 도착하는 FocusOut이 이름을 되돌렸을 수 있으니 잠시 뒤 한 번 더 확정
@@ -1564,6 +1596,14 @@ class IslandApp(tk.Tk):
                 ents = getattr(self, "_cell_name_ents", {}).get(key, [])
                 if i < len(ents) and ents[i].winfo_exists():
                     ents[i].config(fg=self._preset_color(nm))
+            except Exception:
+                pass
+        # 붙여넣기 표시(⭕)
+        for i, pm in enumerate(getattr(self, "_paste_marks", {}).get(key, [])):
+            if i >= len(slots): break
+            try:
+                if pm.winfo_exists():
+                    pm.config(text="⭕" if slots[i].get("pasted") else "")
             except Exception:
                 pass
         # ON/OFF 토글 표시
