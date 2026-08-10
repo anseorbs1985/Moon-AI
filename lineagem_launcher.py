@@ -3407,19 +3407,71 @@ class App(tk.Tk):
         self.status.set(f"✔ 물약 영역 등록 — 01번 기준 ({x-base[0]},{y-base[1]}) {w}x{h}")
 
     @staticmethod
-    def _potion_name(rgb):
-        """평균 색 → 빨강/주황/기타 판정."""
+    def _potion_name(px):
+        """영역 픽셀들 → 빨강/주황 판정.
+        평균을 내면 어두운 배경에 묻혀 전부 '어두움'이 되므로,
+        '색이 진한 픽셀'만 골라 그 중앙 색상(Hue)으로 판정한다."""
         import colorsys
-        r, g, b = [v / 255.0 for v in rgb]
-        h, sv, v = colorsys.rgb_to_hsv(r, g, b)
-        deg = h * 360
-        if v < 0.15 or sv < 0.25:
+        hues = []
+        for r, g, b in px:
+            h, sv, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+            if sv >= 0.35 and v >= 0.25:
+                hues.append(h * 360)
+        if len(hues) < max(3, len(px) * 0.01):
             return "어두움", "#7f8c8d"
-        if deg <= 12 or deg >= 345:
+        hues.sort()
+        deg = hues[len(hues) // 2]
+        if deg <= 14 or deg >= 345:
             return "빨강", "#c0392b"
-        if 13 <= deg <= 45:
+        if 15 <= deg <= 48:
             return "주황", "#e67e22"
         return f"{int(deg)}°", "#34495e"
+
+    @staticmethod
+    def _grab_client(hwnd, w, h):
+        """클라이언트 창을 직접 캡처 — 다른 창에 가려져 있어도 제대로 찍힌다."""
+        import win32gui, win32ui
+        from ctypes import windll
+        from PIL import Image
+        hdc = win32gui.GetWindowDC(hwnd)
+        mfc = win32ui.CreateDCFromHandle(hdc)
+        save = mfc.CreateCompatibleDC()
+        bmp = win32ui.CreateBitmap()
+        bmp.CreateCompatibleBitmap(mfc, w, h)
+        save.SelectObject(bmp)
+        windll.user32.PrintWindow(hwnd, save.GetSafeHdc(), 2)
+        info = bmp.GetInfo()
+        bits = bmp.GetBitmapBits(True)
+        im = Image.frombuffer("RGB", (info["bmWidth"], info["bmHeight"]),
+                              bits, "raw", "BGRX", 0, 1)
+        try:
+            win32gui.DeleteObject(bmp.GetHandle()); save.DeleteDC()
+            mfc.DeleteDC(); win32gui.ReleaseDC(hwnd, hdc)
+        except Exception:
+            pass
+        return im
+
+    def _client_hwnds_by_slot(self):
+        """슬롯 순서(01~16)로 (창핸들, 위치) — 화면 배치 세로 열우선."""
+        try:
+            import win32gui
+            wins = []
+            def cb(h, _):
+                if win32gui.IsWindowVisible(h) and not win32gui.IsIconic(h):
+                    t = win32gui.GetWindowText(h)
+                    if t.startswith("리니지M l"):
+                        l, tp, r, b = win32gui.GetWindowRect(h)
+                        if r - l > 100 and b - tp > 100:
+                            wins.append((l, tp, r, b, h))
+                return True
+            win32gui.EnumWindows(cb, None)
+            if len(wins) != 16:
+                return None
+            wins.sort(key=lambda w: w[0])
+            cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
+            return [w for col in cols for w in col]
+        except Exception:
+            return None
 
     def _potion_check(self):
         area = self.cfg.get("potion_area_rel")
@@ -3437,16 +3489,17 @@ class App(tk.Tk):
             self._open_potion_win()
             self.after(400, self._potion_check); return
         dx, dy, w, h = area
+        hw = self._client_hwnds_by_slot()
         reds, oranges = [], []
         for i, rc in enumerate(rects):
             try:
-                bx = (rc[0] + dx, rc[1] + dy, rc[0] + dx + w, rc[1] + dy + h)
-                im = ImageGrab.grab(bbox=bx).convert("RGB")
-                px = list(im.getdata())
-                n = len(px) or 1
-                avg = (sum(p[0] for p in px) // n, sum(p[1] for p in px) // n,
-                       sum(p[2] for p in px) // n)
-                name, col = self._potion_name(avg)
+                if hw:      # 창을 직접 캡처 — 다른 창에 가려져도 제대로 읽는다
+                    l, t, r, b, hwnd = hw[i]
+                    im = self._grab_client(hwnd, r - l, b - t).crop((dx, dy, dx + w, dy + h))
+                else:
+                    im = ImageGrab.grab(bbox=(rc[0] + dx, rc[1] + dy,
+                                              rc[0] + dx + w, rc[1] + dy + h)).convert("RGB")
+                name, col = self._potion_name(list(im.getdata()))
             except Exception:
                 name, col = "실패", "#7f8c8d"
             if name == "빨강": reds.append(i + 1)
