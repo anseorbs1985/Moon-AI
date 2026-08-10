@@ -3557,20 +3557,12 @@ class App(tk.Tk):
             win = tk.Toplevel(self)
             win.overrideredirect(True)          # 항상위 아님
             var = tk.StringVar(value=txt)
-            box = tk.Frame(win, bg="#fff59d", highlightthickness=2,
-                           highlightbackground="#000000")
-            box.pack()
-            ent = tk.Entry(box, textvariable=var, font=("맑은 고딕", 12, "bold"),
-                           fg="#000000", bg="#fff59d", width=13, justify="center",
-                           relief="flat", bd=0)
-            ent.pack(side="left", ipady=5)   # 세로 약 1.3배 (내부 여백)
-            # 메모 위에서 바로 끌 수 있는 ✕ (오른쪽 끝) — 글·위치는 그대로 남는다
-            tk.Label(box, text="✕", font=("맑은 고딕", 10, "bold"),
-                     fg="#7b241c", bg="#fff59d", cursor="hand2", padx=3
-                     ).pack(side="left", fill="y")
-            box.winfo_children()[-1].bind("<Button-1>", lambda e, ii=i: self._memo_off_one(ii))
-            # 메모 아무 곳이나 오른쪽 클릭해도 꺼진다
-            for _w in (ent, box, win):
+            ent = tk.Entry(win, textvariable=var, font=("맑은 고딕", 12, "bold"),
+                           fg="#000000", bg="#fff59d", width=14, justify="center",
+                           relief="solid", bd=2)
+            ent.pack(ipady=5)   # 세로 약 1.3배 (내부 여백)
+            # 끄기는 '오른쪽 클릭'만 — ✕ 버튼은 실수로 눌릴 수 있어 두지 않는다
+            for _w in (ent, win):
                 _w.bind("<Button-3>", lambda e, ii=i: self._memo_off_one(ii))
             win.geometry(f"+{int(pos[0])}+{int(pos[1])}")
             var.trace_add("write", lambda *a: self._memo_save_texts())
