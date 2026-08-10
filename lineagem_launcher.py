@@ -3411,8 +3411,46 @@ class App(tk.Tk):
             tk.Checkbutton(mrow, text=f"{i+1}", variable=v,
                            command=lambda ii=i: self._memo_toggle(ii),
                            font=("맑은 고딕", 8)).pack(side="left")
+        # 지금 상태(글·위치)는 그대로 두고 화면에서만 전부 끄기/켜기
+        self._memo_all_btn = tk.Button(mrow, text="전부 끄기", font=("맑은 고딕", 8, "bold"),
+                                       bg="#c0392b", fg="white", width=8,
+                                       command=self._memo_toggle_all)
+        self._memo_all_btn.pack(side="left", padx=(8, 0))
+        self._refresh_memo_all_btn()
         tk.Label(parent, text="(체크하면 노란 메모가 뜸 · 직접 입력 · Ctrl+드래그로 이동 · 리니지M이 앞에 있을 때만 그 위에 보임/항상위 아님)",
                  font=("맑은 고딕", 7), fg="#888").pack(anchor="w", padx=6)
+
+    def _refresh_memo_all_btn(self):
+        b = getattr(self, "_memo_all_btn", None)
+        if not b or not b.winfo_exists():
+            return
+        ons, _t, _p = self._memo_lists()
+        if any(ons):
+            b.config(text="전부 끄기", bg="#c0392b", activebackground="#922b21")
+        else:
+            b.config(text="전부 켜기", bg="#27ae60", activebackground="#1e8449")
+
+    def _memo_toggle_all(self):
+        """클라 위 메모를 지금 상태 그대로 두고 화면에서만 전부 끈다/켠다.
+        (글·위치는 저장돼 있으므로 다시 켜면 그대로 돌아온다)"""
+        ons, _t, _p = self._memo_lists()
+        turn_on = not any(ons)
+        if turn_on:
+            prev = list(self.cfg.get("float_memo_ons_bak") or [])
+            while len(prev) < 4: prev.append(True)
+            ons = [bool(x) for x in prev[:4]]
+            if not any(ons):
+                ons = [True] * 4
+        else:
+            self.cfg["float_memo_ons_bak"] = list(ons)   # 어떤 게 켜져 있었는지 기억
+            ons = [False] * 4
+        self.cfg["float_memo_ons"] = ons
+        save_cfg(self.cfg)
+        for i, v in enumerate(getattr(self, "_memo_on_vars", [])):
+            try: v.set(ons[i])
+            except Exception: pass
+        self._refresh_memo_all_btn()
+        self.status.set("📝 클라 위 메모 " + ("전부 켬 (이전 상태로)" if turn_on else "전부 끔 (글·위치는 그대로)"))
 
     def _memo_toggle(self, i):
         ons = list(self.cfg.get("float_memo_ons") or [])
@@ -3420,6 +3458,7 @@ class App(tk.Tk):
             ons.append(False)
         ons[i] = bool(self._memo_on_vars[i].get())
         self.cfg["float_memo_ons"] = ons; save_cfg(self.cfg)
+        self._refresh_memo_all_btn()
         self.status.set(f"📝 메모{i+1} " + ("켬" if ons[i] else "끔"))
 
     def _vf_pick_cell(self, idx):
