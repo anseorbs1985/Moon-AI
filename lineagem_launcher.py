@@ -3409,23 +3409,28 @@ class App(tk.Tk):
     @staticmethod
     def _potion_name(px):
         """영역 픽셀들 → 빨강/주황 판정.
-        평균을 내면 어두운 배경에 묻혀 전부 '어두움'이 되므로,
-        '색이 진한 픽셀'만 골라 그 중앙 색상(Hue)으로 판정한다."""
+        빨강 물약은 '순수 빨강(345~10°)' 픽셀이 뭉쳐 있고, 주황 물약은 그게 거의 없다.
+        (주황 물약도 20~35° 픽셀이 많아서 '중앙값'으로는 구분이 안 됐다 —
+         빨강 픽셀이 얼마나 있는지로 판정한다)"""
         import colorsys
-        hues = []
+        red = orange = strong = 0
         for r, g, b in px:
             h, sv, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
-            if sv >= 0.35 and v >= 0.25:
-                hues.append(h * 360)
-        if len(hues) < max(3, len(px) * 0.01):
+            if sv < 0.35 or v < 0.25:
+                continue
+            strong += 1
+            deg = h * 360
+            if deg >= 345 or deg <= 10:
+                red += 1
+            elif 11 <= deg <= 50:
+                orange += 1
+        if strong < 8:
             return "어두움", "#7f8c8d"
-        hues.sort()
-        deg = hues[len(hues) // 2]
-        if deg <= 14 or deg >= 345:
+        if red >= max(5, strong * 0.08):
             return "빨강", "#c0392b"
-        if 15 <= deg <= 48:
+        if orange >= max(5, strong * 0.08):
             return "주황", "#e67e22"
-        return f"{int(deg)}°", "#34495e"
+        return "기타", "#34495e"
 
     @staticmethod
     def _grab_client(hwnd, w, h):
