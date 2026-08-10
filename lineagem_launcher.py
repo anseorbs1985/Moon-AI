@@ -3527,7 +3527,10 @@ class App(tk.Tk):
             ent.bind("<Control-Button-1>", lambda e, ww=win: setattr(ww, "_d", (e.x, e.y)))
             ent.bind("<Control-B1-Motion>", lambda e, ww=win: ww.geometry(
                 f"+{ww.winfo_x()+e.x-getattr(ww,'_d',(0,0))[0]}+{ww.winfo_y()+e.y-getattr(ww,'_d',(0,0))[1]}"))
+            # 위치 저장 — Ctrl을 먼저 떼도 저장되게 두 경우 모두 잡는다
+            # (예전엔 Ctrl+뗌 조합에서만 저장돼, Ctrl을 먼저 놓으면 위치가 안 남았다)
             ent.bind("<Control-ButtonRelease-1>", lambda e: self._memo_save_positions())
+            ent.bind("<ButtonRelease-1>", lambda e: self._memo_save_positions())
             store[i] = (win, var)
         except Exception:
             pass
@@ -3536,6 +3539,15 @@ class App(tk.Tk):
         store = getattr(self, "_memo_wins", {}) or {}
         w = store.pop(i, None)
         if w:
+            # 숨기기 전에 지금 위치를 남긴다 — 다시 띄울 때 그 자리에 뜨게
+            try:
+                if w[0].winfo_exists():
+                    _o, _t, poss = self._memo_lists()
+                    poss[i] = [w[0].winfo_x(), w[0].winfo_y()]
+                    self.cfg["float_memo_positions"] = poss
+                    save_cfg(self.cfg)
+            except Exception:
+                pass
             try: w[0].destroy()
             except Exception: pass
 
