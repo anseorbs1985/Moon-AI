@@ -1459,9 +1459,20 @@ class IslandApp(tk.Tk):
             for l, t, r, b in wins:
                 if abs((r - l) - _mw) > _mw * 0.35 or abs((b - t) - _mh) > _mh * 0.35:
                     return None
+            # (2026-08-10) 4개씩 무작정 끊지 않고 'x가 비슷한 것끼리' 열로 묶는다 —
+            # 창 간격이 고르지 않거나 한 열이 밀려 있어도 슬롯 번호가 어긋나지 않게.
             wins.sort(key=lambda w: w[0])                     # x(열) 정렬
-            cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
-            return [w for col in cols for w in col]           # 01~16 (열 우선)
+            cols = []
+            tol = max(40, int(_mw * 0.25))
+            for w in wins:
+                if cols and abs(w[0] - cols[-1][0][0]) <= tol:
+                    cols[-1].append(w)
+                else:
+                    cols.append([w])
+            if len(cols) != 4 or any(len(c) != 4 for c in cols):
+                return None            # 4열×4행이 아니면 보정 불가로 본다
+            return [w for col in cols
+                    for w in sorted(col, key=lambda w: w[1])]  # 01~16 (열 우선)
         except Exception:
             return None
 
