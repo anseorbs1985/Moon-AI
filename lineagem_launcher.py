@@ -4530,6 +4530,7 @@ class App(tk.Tk):
             ("💰 다야OCR",   "#27ae60", self._open_ocr,          "#1e8449", self._open_ocr_scan),
             ("🔆 절전해제",  "#7d3c98", self._open_seq_win,      "#5b2c6f", self._start_seq),
             ("🌙 절전모드",  "#1f618d", self._open_slp_win,      "#154360", self._start_slp),
+            ("🧪 물약색",   "#8e44ad", self._open_potion_win,   "#6c3483", self._potion_check),
         ]
         for text, color, cmd, run_color, run_cmd in fixed:
             grp = tk.Frame(self._sec_row); grp.pack(side="left", padx=2)
