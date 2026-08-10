@@ -23,6 +23,12 @@
     1369,
     757
   ],
+  "potion_area_rel": [
+    106,
+    10,
+    25,
+    27
+  ],
   "profile_id_area": {
     "w": 84,
     "x": 2292,
@@ -20896,8 +20902,8 @@
     1356
   ],
   "claude_win_pos": [
-    815,
-    271
+    583,
+    287
   ],
   "seq2_on": false,
   "purple_popup_color": [
