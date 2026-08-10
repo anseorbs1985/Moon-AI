@@ -1336,6 +1336,14 @@ class App(tk.Tk):
             activebackground="#1e8449", width=4, height=2,
             command=lambda: self._start_dgn2("fish")).pack(side="left", padx=(2,0))
 
+        # 작업이 끝나면 여기에 큰 빨간 글씨로 '완료'가 1분간 뜬다
+        self._done_var = tk.StringVar(value="")
+        self._done_lbl = tk.Label(dc_col, textvariable=self._done_var,
+                                  font=("맑은 고딕", 16, "bold"), fg="#c0392b",
+                                  bg=self.cget("bg"), width=11, height=2,
+                                  anchor="center")
+        self._done_lbl.pack(anchor="n", pady=(3, 0))
+
         # 확인용 3종 묶음: 변신확인용 / 인형확인용 / 성물확인용 (세로로 한 곳에)
         chk_col = tk.Frame(front_row); chk_col.pack(side="left", padx=(4,8), anchor="n")
         for _t, _bg, _open, _run in (
@@ -8874,12 +8882,28 @@ class App(tk.Tk):
         self.after(600, self._send_to_back)
         self.after(1500, lambda: setattr(self, "_quiet_restore", False))
 
+    def _show_done(self, text="완료"):
+        """작업이 끝났음을 왼쪽 아래에 큰 빨간 글씨로 1분간 알린다."""
+        try:
+            if not hasattr(self, "_done_var"):
+                return
+            import datetime as _dt
+            self._done_var.set(text + chr(10) + f"{_dt.datetime.now():%H:%M}")
+            old = getattr(self, "_done_after", None)
+            if old:
+                try: self.after_cancel(old)
+                except Exception: pass
+            self._done_after = self.after(60000, lambda: self._done_var.set(""))
+        except Exception:
+            pass
+
     def _restore_back(self):
         """모든 작업 완료 후 복원 — 앞으로 띄우지 않고 곧바로 '맨 뒤'로 되살린다.
         (2026-08-07 사용자 지시: 완료 후 창이 앞으로 나오지 않게 통일.
          결과는 나중에 런처를 직접 열어 상태줄에서 확인)
         (2026-08-09) 마지막 좌표를 누르자마자 끝내지 않고 2초 뒤에 마무리한다."""
         self.after(2000, self._restore_back_quiet)
+        self.after(2000, self._show_done)          # 왼쪽 아래에 '완료' 1분 표시
 
     def _restore_all(self):
         self.deiconify()
