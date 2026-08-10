@@ -394,6 +394,7 @@ class IslandApp(tk.Tk):
         self._repeat_left = {}                               # (key,idx) → 남은 반복 횟수
         self._paste_marks = {}                               # 붙여넣기 표시(⭕) 라벨
         self._potion_lbls = {}                               # 🧪 물약색 표시 라벨
+        self._move_btns = {}                                 # ▶▶/◀◀ 방향 전환 버튼
         self._potion_mtime = 0
 
         self._auto_run = len(sys.argv) > 2 and sys.argv[2] == "--run"
@@ -696,6 +697,7 @@ class IslandApp(tk.Tk):
         self._en_btns[key] = []
         self._paste_marks[key] = []
         self._potion_lbls[key] = []
+        self._move_btns[key] = []
         if not hasattr(self, "_cell_name_vars"):
             self._cell_name_vars = {}
         self._cell_name_vars[key] = []
@@ -742,6 +744,13 @@ class IslandApp(tk.Tk):
             self._potion_lbls.setdefault(key, []).append(pl)
             tk.Label(head, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"),
                      fg="#555").pack(side="left")
+            # ▶▶/◀◀ 방향 — 눌러서 바로 바꾼다 (프리셋 창을 안 거쳐도 됨)
+            if any((fl or "").strip() == "이동" for fl, _n in self._preset_layout(key)):
+                mb = tk.Button(head, text="이동?", font=("맑은 고딕", 7, "bold"),
+                               width=4, pady=0, bg="#7f8c8d", fg="white",
+                               command=lambda k=key, x=i: self._cycle_move(k, x))
+                mb.pack(side="left", padx=(3, 0))
+                self._move_btns.setdefault(key, []).append(mb)
             eb = tk.Button(head, text="ON", font=("맑은 고딕", 6, "bold"), width=3,
                            bg="#27ae60", fg="white", pady=0,
                            command=lambda k=key, x=i: self._toggle_enable(k, x))
@@ -1541,6 +1550,48 @@ class IslandApp(tk.Tk):
             pass
         self.after(3000, self._potion_tick)
 
+    def _move_presets(self, key):
+        """'이동' 그룹 프리셋들의 (번호, 이름) 목록."""
+        out = []
+        for pi, pr in enumerate(self._presets(key)):
+            if (pr.get("floor") or "").strip() == "이동":
+                out.append((pi, (pr.get("name") or "").strip()))
+        return out
+
+    def _cycle_move(self, key, idx):
+        """슬롯의 방향을 눌러서 바꾼다 — 이동 프리셋을 순서대로 돌려가며 바로 적용."""
+        mv = self._move_presets(key)
+        if not mv:
+            self._status.set("이 던전에는 '이동' 프리셋이 없습니다"); return
+        cur = (self.cfg[key][idx].get("name") or "")
+        at = -1
+        for k, (pi, nm) in enumerate(mv):
+            if nm and nm in cur:
+                at = k
+        nxt = mv[(at + 1) % len(mv)][0]
+        self._apply_preset(key, idx, nxt)
+        self._refresh_move_btns(key)
+
+    def _refresh_move_btns(self, key):
+        """슬롯 이름에 붙은 방향을 버튼에 표시 (▶▶ 파랑 / ◀◀ 초록)."""
+        mv = self._move_presets(key)
+        for i, b in enumerate(self._move_btns.get(key, [])):
+            try:
+                if not b.winfo_exists():
+                    continue
+                nm = (self.cfg[key][i].get("name") or "") if i < len(self.cfg.get(key, [])) else ""
+                found = ""
+                for _pi, pn in mv:
+                    if pn and pn in nm:
+                        found = pn
+                if found:
+                    col = "#1a5276" if "▶" in found else "#117864"
+                    b.config(text=found, bg=col)
+                else:
+                    b.config(text="이동?", bg="#7f8c8d")
+            except Exception:
+                pass
+
     def _toggle_paste_mark(self, key, idx):
         """⭕ 를 눌러 표시를 지우거나 다시 켠다 (내가 어디까지 했는지 체크용)."""
         cur = bool(self.cfg[key][idx].get("pasted"))
@@ -1671,6 +1722,7 @@ class IslandApp(tk.Tk):
                     ents[i].config(fg=self._preset_color(nm))
             except Exception:
                 pass
+        self._refresh_move_btns(key)
         # 붙여넣기 표시(⭕)
         for i, pm in enumerate(getattr(self, "_paste_marks", {}).get(key, [])):
             if i >= len(slots): break
