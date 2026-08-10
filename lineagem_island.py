@@ -361,7 +361,7 @@ class IslandApp(tk.Tk):
                 self.tk.call("tk", "scaling", cur * 1.14)   # 30% 축소 배율
             except Exception:
                 pass
-            # (2026-08-10) 내용이 길어 계속 스크롤해야 해서 화면 높이에 맞춰 늘림
+            # (2026-08-10) 가로·위치는 고정, 높이는 _fit_width 가 내용에 맞춰 정한다
             _h, _y = self._work_height()
             self._fixed_geometry = f"702x{_h}+550+{_y}"
             self.geometry(self._fixed_geometry)
@@ -469,14 +469,22 @@ class IslandApp(tk.Tk):
         return h, max(0, top + 10)
 
     def _fit_width(self):
-        # 내용 크기에 맞게 가로+세로 모두 조정 (셀에 딱 맞춤 — 길쭉한 빈 공간 제거)
-        # 잊혀진섬 단독 창은 사용자 지정 크기 고정 — 자동 맞춤이 덮어쓰지 않음
-        if getattr(self, "_fixed_geometry", None):
-            self.geometry(self._fixed_geometry)
-            return
+        """내용 크기에 딱 맞춘다 — 아래 빈 공간도, 잘려서 스크롤할 일도 없게.
+        (2026-08-10) 화면 작업영역을 넘지 않는 선에서 '내용 높이'로 맞춘다."""
         self.update_idletasks()
+        max_h, top_y = self._work_height()
+        nh = min(self.winfo_reqheight() + 8, max_h)
+        fg = getattr(self, "_fixed_geometry", None)
+        if fg:                      # 잊혀진섬: 가로·위치는 지정값 유지, 높이만 내용에 맞춤
+            wpart, rest = fg.split("x", 1)
+            pos = rest[rest.index("+"):] if "+" in rest else ""
+            if pos:
+                _y = int(pos.split("+")[2])
+                if _y + nh > top_y + max_h:        # 화면 아래로 넘치면 위로 당김
+                    pos = "+" + pos.split("+")[1] + f"+{max(top_y, top_y + max_h - nh)}"
+            self.geometry(f"{wpart}x{nh}{pos}")
+            return
         nw = self.winfo_reqwidth() + 10
-        nh = self.winfo_reqheight() + 8
         self.geometry(f"{nw}x{nh}")
 
     def _build_ui(self):
