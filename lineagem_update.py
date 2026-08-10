@@ -193,6 +193,54 @@ def sync_times(log):
         log(f"   ⚠ 시간 동기화 실패: {e}")
 
 
+def sync_island_keys(log):
+    """island_coords.json 중 '지정한 던전만' 메인 것을 통째로 받는다
+    (share_island.json 의 keys). 좌표·간격·이름·녹화·프리셋까지 그 던전 것만 교체."""
+    try:
+        man = os.path.join(REPO, "share_island.json")
+        if not os.path.exists(man):
+            return
+        with open(man, encoding="utf-8") as f:
+            cfgm = json.load(f) or {}
+        keys = cfgm.get("keys") or []
+        with_presets = bool(cfgm.get("presets"))
+        if not keys:
+            return
+        src_p = os.path.join(REPO, "island_coords.json")
+        dst_p = os.path.join(DESK, "island_coords.json")
+        if not (os.path.exists(src_p) and os.path.exists(dst_p)):
+            log("   던전 동기화: island_coords.json 이 없어 건너뜁니다")
+            return
+        with open(src_p, encoding="utf-8") as f:
+            src = json.load(f)
+        with open(dst_p, encoding="utf-8") as f:
+            dst = json.load(f)
+        got = []
+        for k in keys:
+            v = src.get(k)
+            if v is None or dst.get(k) == v:
+                continue
+            dst[k] = v
+            got.append(f"{k}({_count_in(v)}좌표)")
+        if with_presets:
+            sp = (src.get("_presets") or {})
+            dp = dst.setdefault("_presets", {})
+            for k in keys:
+                if k in sp and dp.get(k) != sp[k]:
+                    dp[k] = sp[k]
+                    got.append(f"{k} 프리셋")
+        if not got:
+            log("   던전 동기화: 이미 메인과 같습니다")
+            return
+        tmp = dst_p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(dst, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, dst_p)
+        log("   🏝 지정 던전 받음: " + ", ".join(got) + " (다른 던전은 그대로)")
+    except Exception as e:
+        log(f"   ⚠ 던전 동기화 실패: {e}")
+
+
 def sync_coord_keys(log):
     """coords.json 중 '지정한 항목만' 메인 것으로 받는다 (share_coords.json 의 keys).
     나머지 좌표는 로컬 것을 그대로 지킨다 — 컴퓨터마다 위치가 다르기 때문."""
@@ -673,6 +721,7 @@ def main():
             if not is_main:
                 sync_times(log)          # 좌표는 그대로, 시간만 메인과 맞춤
                 sync_coord_keys(log)     # 지정한 항목(낚시녹임 등)만 좌표도 받음
+                sync_island_keys(log)    # 지정한 던전(잊혀진섬 등)은 통째로 받음
             # 다야 OCR 캡처영역(daya_regions.json)도 메인과 동일하게 동기화
             # (측정값 daya_counts/history는 머신별 데이터라 절대 건드리지 않음)
             try:
