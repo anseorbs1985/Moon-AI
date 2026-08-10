@@ -1450,6 +1450,15 @@ class IslandApp(tk.Tk):
             win32gui.EnumWindows(cb, None)
             if len(wins) != 16:
                 return None
+            # (2026-08-10) 클라이언트 하나가 '확대' 상태면 크기가 달라져서
+            # 4×4 격자 계산이 어긋난다 → 위치 보정을 포기(None)하고 사용자에게 알린다.
+            # (예전엔 그대로 계산해서 2번 자리에 3번을 붙여넣는 사고가 났다)
+            _ws = sorted(r - l for l, t, r, b in wins)
+            _hs = sorted(b - t for l, t, r, b in wins)
+            _mw, _mh = _ws[len(_ws) // 2], _hs[len(_hs) // 2]
+            for l, t, r, b in wins:
+                if abs((r - l) - _mw) > _mw * 0.35 or abs((b - t) - _mh) > _mh * 0.35:
+                    return None
             wins.sort(key=lambda w: w[0])                     # x(열) 정렬
             cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
             return [w for col in cols for w in col]           # 01~16 (열 우선)
@@ -1493,7 +1502,9 @@ class IslandApp(tk.Tk):
                         c[0] += dx; c[1] += dy
                 note = f" — 클라이언트 위치 자동보정 ({dx:+},{dy:+})"
             else:
-                note = " — ⚠ 클라이언트 16개 감지 실패, 원본 위치 그대로"
+                # 보정이 불가능하면 붙여넣지 않는다 — 엉뚱한 창에 좌표가 박히는 사고 방지
+                self._status.set("⚠ 위치 보정 불가 — 먼저 클라이언트 창 배치를 원래대로 돌린 뒤 다시 [붙임]을 눌러주세요 (창 하나가 확대돼 있거나 16개가 아닙니다)")
+                return
         self._paste_ts = time.time()   # 늦게 오는 이름칸 FocusOut 저장 차단
         self.cfg[key][idx]["coords"] = shifted
         # 슬롯 이름(위에 적은 글씨)도 함께 붙여넣기
