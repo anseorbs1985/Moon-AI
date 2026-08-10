@@ -7310,6 +7310,61 @@ class App(tk.Tk):
         self._doll_stop = False
         self.after(0, self._restore_back)
 
+    def _run_doll_wave(self, active, lanes=3):
+        """인형탐험 번갈아(웨이브) 실행 — 동시 3슬롯을 섞어가며 클릭 하나씩.
+        마우스가 하나라 '동시 클릭'은 애초에 불가능하고, 아래 두 가지로 겹침을 막는다.
+          · 클릭과 클릭 사이 최소 간격(0.35~0.7초)
+          · 다른 클라이언트로 넘어갈 때 창이 올라올 여유(0.6~1.1초)
+        각 슬롯의 좌표 간 간격(2~3초)은 그대로 지켜진다."""
+        state = {}
+        for i, h in active:
+            state[i] = {"slot": h, "j": 0,
+                        "coords": [c for c in h.get("coords", [])],
+                        "due": time.time() + random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX)
+                               + random.uniform(0, 3.0)}
+        order = [i for i, _h in active]
+        act, waiting = order[:lanes], order[lanes:]
+        last_si, done = None, 0
+        self.status.set(f"🧸 인형탐험 번갈아 실행 — 동시 {lanes}슬롯 ({len(active)}개)")
+        while not getattr(self, "_doll_stop", False):
+            for si in [x for x in act if state[x]["j"] >= len(state[x]["coords"])]:
+                act.remove(si)
+                if waiting:
+                    nx = waiting.pop(0)
+                    state[nx]["due"] = time.time() + random.uniform(DOLL_SLOT_MIN, DOLL_SLOT_MAX)
+                    act.append(nx)
+            alive = [x for x in act if state[x]["j"] < len(state[x]["coords"])]
+            if not alive:
+                break
+            now = time.time()
+            ready = [x for x in alive if state[x]["due"] <= now]
+            if not ready:
+                nxt = min(state[x]["due"] for x in alive)
+                time.sleep(max(0.05, min(nxt - now, 1.0)))
+                continue
+            si = random.choice(ready)
+            st = state[si]
+            j = st["j"]; st["j"] = j + 1
+            coord = st["coords"][j] if j < len(st["coords"]) else None
+            if not coord:
+                st["due"] = time.time()          # 빈 자리는 기다리지 않고 통과
+                continue
+            if si != last_si:
+                time.sleep(random.uniform(0.6, 1.1))   # 다른 창으로 넘어갈 여유
+                last_si = si
+            if getattr(self, "_doll_stop", False):
+                break
+            name = st["slot"].get("name", f"#{si+1}")
+            self.status.set(f"🧸 [{name}] 좌표 {j+1}/{len(st['coords'])} (남은 슬롯 {len(alive)})")
+            pyautogui.click(*coord)
+            done += 1
+            st["due"] = time.time() + random.uniform(DOLL_MIN, DOLL_MAX)
+            time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
+        if getattr(self, "_doll_stop", False):
+            self.status.set("인형탐험 멈춤")
+        else:
+            self.status.set(f"✔ 인형 탐험 완료! ({len(active)}개 슬롯 / 클릭 {done}회)")
+
     def _run_doll(self):
         self._start_pause()
         try:
@@ -7317,6 +7372,10 @@ class App(tk.Tk):
             active = [(i, h) for i, h in slots
                       if h.get("enabled", True) and any(c for c in h.get("coords", []))]
             random.shuffle(active)   # 슬롯 실행 순서 매번 랜덤
+            if len(active) > 1:
+                # (2026-08-10) 3슬롯씩 번갈아(웨이브) — 마우스는 하나뿐이라
+                # 동시에 눌리는 일은 없고, 클릭끼리 최소 간격을 둬서 겹침도 막는다
+                self._run_doll_wave(active); return
             for si, (i, h) in enumerate(active):
                 if getattr(self, "_doll_stop", False): self.status.set("인형탐험 멈춤"); return
                 name = h.get("name", f"#{i+1}")
