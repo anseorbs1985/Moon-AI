@@ -176,6 +176,7 @@ DEFAULT_CFG = {
     "google_acc":  None,
     "confirm_btn": None,
     "profile_target_id": "",
+    "potion_area_rel": None,            # 물약색 확인 영역 (01번 클라 기준 상대 [x,y,w,h])
     "profile_id_area": None,
     "profile_reveal_btn": None,
     "char_btns":   [],
@@ -3333,6 +3334,128 @@ class App(tk.Tk):
             self.status.set("💾 계정 자동저장됨")
         except Exception:
             pass
+
+    # ── 🧪 물약색 확인 — 16개 클라의 같은 자리 색을 한 번에 보고 빨강/주황 판정 ──
+    def _open_potion_win(self):
+        self._open_section_win("_potion_win", "🧪 물약색 확인",
+                               self._build_potion, w=470, h=430, pinnable=True)
+
+    def _build_potion(self, parent):
+        tk.Label(parent, text="🧪 물약색 확인  (16개 클라를 한 번에)",
+                 font=("맑은 고딕", 10, "bold"), fg="#6c3483").pack(anchor="w", padx=6, pady=(6, 2))
+        tk.Label(parent, text="① [영역 지정]으로 01번 클라의 물약 자리를 드래그해서 한 번만 등록\n"
+                              "② [확인]을 누르면 16개 클라의 같은 자리 색을 읽어 빨강/주황을 알려줍니다",
+                 font=("맑은 고딕", 8), fg="#555", justify="left").pack(anchor="w", padx=6)
+        row = tk.Frame(parent); row.pack(fill="x", padx=6, pady=6)
+        tk.Button(row, text="📷 영역 지정 (01번 기준)", font=("맑은 고딕", 9, "bold"),
+                  bg="#8e44ad", fg="white", command=self._reg_potion_area).pack(side="left")
+        tk.Button(row, text="🔍 확인", font=("맑은 고딕", 9, "bold"),
+                  bg="#6c3483", fg="white", width=8,
+                  command=self._potion_check).pack(side="left", padx=(6, 0))
+        self._potion_area_lbl = tk.Label(parent, text="", font=("맑은 고딕", 8), fg="#888")
+        self._potion_area_lbl.pack(anchor="w", padx=6)
+        self._refresh_potion_area_lbl()
+
+        grid = tk.Frame(parent); grid.pack(padx=6, pady=6)
+        self._potion_cells = []
+        for i in range(16):
+            r, c = i % 4, i // 4
+            cell = tk.Frame(grid, bd=1, relief="groove", padx=4, pady=3, width=96)
+            cell.grid(row=r, column=c, padx=4, pady=4, sticky="we")
+            tk.Label(cell, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"), fg="#555").pack()
+            lb = tk.Label(cell, text="—", font=("맑은 고딕", 12, "bold"),
+                          fg="white", bg="#bdc3c7", width=6)
+            lb.pack()
+            self._potion_cells.append(lb)
+
+    def _refresh_potion_area_lbl(self):
+        lb = getattr(self, "_potion_area_lbl", None)
+        if not lb or not lb.winfo_exists():
+            return
+        a = self.cfg.get("potion_area_rel")
+        lb.config(text=(f"등록된 영역: 01번 클라 기준 ({a[0]},{a[1]}) 크기 {a[2]}x{a[3]}"
+                        if a else "등록된 영역 없음 — [영역 지정]을 먼저 눌러주세요"))
+
+    def _reg_potion_area(self):
+        rects = self._client_rects_by_slot()
+        if not rects:
+            self.status.set("⚠ 리니지M 클라이언트 16개가 보이지 않습니다 (창을 모두 띄운 뒤 다시)")
+            return
+        self._potion_rects = rects
+        w = getattr(self, "_potion_win", None)
+        if w and w.winfo_exists():
+            try: w.withdraw()
+            except Exception: pass
+        self.withdraw()
+        self.after(200, lambda: _PotionAreaOverlay(self, self._on_potion_area))
+
+    def _on_potion_area(self, x, y, w, h):
+        self.deiconify()
+        pw = getattr(self, "_potion_win", None)
+        if pw and pw.winfo_exists():
+            try: pw.deiconify(); pw.lift()
+            except Exception: pass
+        if w < 3 or h < 3:
+            self.status.set("영역이 너무 작습니다 — 다시 드래그해주세요"); return
+        rects = getattr(self, "_potion_rects", None) or self._client_rects_by_slot()
+        if not rects:
+            self.status.set("⚠ 클라이언트 16개 감지 실패"); return
+        base = rects[0]
+        self.cfg["potion_area_rel"] = [x - base[0], y - base[1], w, h]
+        save_cfg(self.cfg)
+        self._refresh_potion_area_lbl()
+        self.status.set(f"✔ 물약 영역 등록 — 01번 기준 ({x-base[0]},{y-base[1]}) {w}x{h}")
+
+    @staticmethod
+    def _potion_name(rgb):
+        """평균 색 → 빨강/주황/기타 판정."""
+        import colorsys
+        r, g, b = [v / 255.0 for v in rgb]
+        h, sv, v = colorsys.rgb_to_hsv(r, g, b)
+        deg = h * 360
+        if v < 0.15 or sv < 0.25:
+            return "어두움", "#7f8c8d"
+        if deg <= 12 or deg >= 345:
+            return "빨강", "#c0392b"
+        if 13 <= deg <= 45:
+            return "주황", "#e67e22"
+        return f"{int(deg)}°", "#34495e"
+
+    def _potion_check(self):
+        area = self.cfg.get("potion_area_rel")
+        if not area:
+            self.status.set("먼저 [🧪 물약색] 창에서 [영역 지정]을 해주세요")
+            self._open_potion_win(); return
+        rects = self._client_rects_by_slot()
+        if not rects:
+            self.status.set("⚠ 리니지M 클라이언트 16개가 보이지 않습니다"); return
+        try:
+            from PIL import ImageGrab
+        except Exception as e:
+            self.status.set(f"⚠ 이미지 라이브러리 없음: {e}"); return
+        if not (getattr(self, "_potion_win", None) and self._potion_win.winfo_exists()):
+            self._open_potion_win()
+            self.after(400, self._potion_check); return
+        dx, dy, w, h = area
+        reds, oranges = [], []
+        for i, rc in enumerate(rects):
+            try:
+                bx = (rc[0] + dx, rc[1] + dy, rc[0] + dx + w, rc[1] + dy + h)
+                im = ImageGrab.grab(bbox=bx).convert("RGB")
+                px = list(im.getdata())
+                n = len(px) or 1
+                avg = (sum(p[0] for p in px) // n, sum(p[1] for p in px) // n,
+                       sum(p[2] for p in px) // n)
+                name, col = self._potion_name(avg)
+            except Exception:
+                name, col = "실패", "#7f8c8d"
+            if name == "빨강": reds.append(i + 1)
+            elif name == "주황": oranges.append(i + 1)
+            try:
+                self._potion_cells[i].config(text=name, bg=col)
+            except Exception:
+                pass
+        self.status.set(f"🧪 빨강 {len(reds)}개 {reds or ''} / 주황 {len(oranges)}개 {oranges or ''}")
 
     # ── 🔐 본인확인 도우미 (임시제한 해제 시 전화·이메일 붙여넣기 보조) ──────
     #    감지+계정확인+전화/이메일 클립보드 복사까지만. 붙여넣기·확인은 사람이.
@@ -11339,6 +11462,54 @@ class _RerollPointOverlay(tk.Toplevel):
         if self.app._reroll_win and self.app._reroll_win.winfo_exists():
             self.app._reroll_win.deiconify()
         self.app.status.set("좌표 등록 취소")
+
+
+class _PotionAreaOverlay(tk.Toplevel):
+    """물약색 확인용 영역 드래그 등록 (01번 클라 기준)."""
+    def __init__(self, app, on_pick):
+        super().__init__()
+        self.app = app; self.on_pick = on_pick
+        self.overrideredirect(True); self.attributes("-topmost", True)
+        self.attributes("-alpha", 0.35)
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.geometry(f"{sw}x{sh}+0+0"); self.configure(bg="black")
+        self._start = None; self._rect = None
+        tk.Label(self, text="01번 클라의 '물약 색이 보이는 자리'를 드래그하세요\nESC = 취소",
+                 font=("맑은 고딕", 18, "bold"), fg="white", bg="black",
+                 justify="center").place(relx=0.5, rely=0.5, anchor="center")
+        self._canvas = tk.Canvas(self, bg="black", highlightthickness=0)
+        self._canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        self._canvas.bind("<ButtonPress-1>", self._on_press)
+        self._canvas.bind("<B1-Motion>", self._on_drag)
+        self._canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", self._cancel)
+        self.focus_force()
+
+    def _on_press(self, e):
+        self._start = (e.x_root, e.y_root)
+        if self._rect: self._canvas.delete(self._rect)
+
+    def _on_drag(self, e):
+        if not self._start: return
+        if self._rect: self._canvas.delete(self._rect)
+        x0, y0 = self._start
+        self._rect = self._canvas.create_rectangle(x0, y0, e.x_root, e.y_root,
+                                                    outline="yellow", width=2)
+
+    def _on_release(self, e):
+        if not self._start: return
+        x0, y0 = self._start; x1, y1 = e.x_root, e.y_root
+        self.destroy()
+        self.app.after(150, lambda: self.on_pick(min(x0, x1), min(y0, y1),
+                                                 abs(x1 - x0), abs(y1 - y0)))
+
+    def _cancel(self, e=None):
+        self.destroy(); self.app.deiconify()
+        w = getattr(self.app, "_potion_win", None)
+        if w and w.winfo_exists():
+            try: w.deiconify()
+            except Exception: pass
+        self.app.status.set("물약 영역 등록 취소")
 
 
 class _RerollAreaOverlay(tk.Toplevel):
