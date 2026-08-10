@@ -904,11 +904,9 @@ class IslandApp(tk.Tk):
                           ("6층", ["기본!!", "주홍이 48%", "주홍이 82%"]),
                           ("7층", ["기본!!", "주홍이 48%", "주홍이 82%"]),
                           ("8층", ["기본!!", "주홍이 48%", "주홍이 82%"])],
-        "월요일_잊혀진섬": [("서쪽", ["기본!!", "빨갱이 48%", "빨갱이 82%",
+        # 서쪽·북쪽 좌표가 같아 '기본' 한 줄로 합침 + 방향(이동) 한 줄
+        "월요일_잊혀진섬": [("기본", ["기본!!", "빨갱이 48%", "빨갱이 82%",
                                       "주홍이 48%", "주홍이 82%"]),
-                             ("북쪽", ["기본!!", "빨갱이 48%", "빨갱이 82%",
-                                      "주홍이 48%", "주홍이 82%"]),
-                             # 방향 선택용 — 뒤에 덧붙여야 기존 프리셋 순서가 안 밀린다
                              ("이동", ["북 ◀◀", "북 ▶▶", "서 ▶▶"])],
         "화요일_에카":     [("", ["기본!!", "빨갱이 82%",
                                   "주홍이 48%", "주홍이 82%"])],
@@ -1406,8 +1404,12 @@ class IslandApp(tk.Tk):
             pass
         save_cfg(self.cfg)
         self._refresh(key)
-        # (2026-08-10) 프리셋을 고르면 적용하고 좌표등록 팝업을 닫는다 (사용자 지시)
-        if self._pop.get("win") and self._pop["win"].winfo_exists()            and self._pop.get("slot") == idx and self._pop.get("key") == key:
+        # (2026-08-10) 적용 후 좌표등록 팝업을 닫는다.
+        # 단 '이동'(방향) 그룹이 있는 던전은 기본 + 이동 두 개를 골라야 하므로,
+        # '이동'을 골랐을 때만 닫는다 (기본만 고르면 창을 열어둔다).
+        _floors = [fl for fl, _n in self._preset_layout(key)]
+        _close = ("이동" not in _floors) or (pr.get("floor") or "").strip() == "이동"
+        if _close and self._pop.get("win") and self._pop["win"].winfo_exists()            and self._pop.get("slot") == idx and self._pop.get("key") == key:
             try:
                 self._pop["win"].destroy()
             except Exception:
