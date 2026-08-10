@@ -361,13 +361,16 @@ class IslandApp(tk.Tk):
                 self.tk.call("tk", "scaling", cur * 1.14)   # 30% 축소 배율
             except Exception:
                 pass
-            # 사용자가 맞춰놓은 크기·위치로 고정 (2026-08-07 확정)
-            self._fixed_geometry = "702x909+550+367"
+            # (2026-08-10) 내용이 길어 계속 스크롤해야 해서 화면 높이에 맞춰 늘림
+            _h, _y = self._work_height()
+            self._fixed_geometry = f"702x{_h}+550+{_y}"
             self.geometry(self._fixed_geometry)
         elif focus_idx is not None:
-            self.geometry(f"500x{sh * 2 // 3}+{ox}+{oy}")
+            _h, _y = self._work_height()
+            self.geometry(f"500x{_h}+{ox}+{_y}")
         else:
-            self.geometry(f"{int(1380*1.3)}x{sh * 2 // 3}+{ox}+{oy}")
+            _h, _y = self._work_height()
+            self.geometry(f"{int(1380*1.3)}x{_h}+{ox}+{_y}")
         self.resizable(True, True)
 
         self.cfg    = load_cfg()
@@ -449,6 +452,21 @@ class IslandApp(tk.Tk):
                 self.after(500, lambda: self._test(key, self._auto_slot))
             else:
                 self.after(500, lambda: self._start(key))
+
+    @staticmethod
+    def _work_height():
+        """작업 표시줄을 뺀 화면 높이에 맞춘 창 높이와 위쪽 y — 스크롤을 줄이기 위해.
+        (2026-08-10) 예전엔 화면의 2/3만 써서 내용이 길면 계속 내려야 했다."""
+        try:
+            import ctypes
+            from ctypes import wintypes
+            rc = wintypes.RECT()
+            ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rc), 0)
+            top, bot = rc.top, rc.bottom
+        except Exception:
+            top, bot = 0, 900
+        h = max(700, (bot - top) - 40)
+        return h, max(0, top + 10)
 
     def _fit_width(self):
         # 내용 크기에 맞게 가로+세로 모두 조정 (셀에 딱 맞춤 — 길쭉한 빈 공간 제거)
