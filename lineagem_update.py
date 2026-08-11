@@ -722,6 +722,25 @@ def main():
                 sync_times(log)          # 좌표는 그대로, 시간만 메인과 맞춤
                 sync_coord_keys(log)     # 지정한 항목(낚시녹임 등)만 좌표도 받음
                 sync_island_keys(log)    # 지정한 던전(잊혀진섬 등)은 통째로 받음
+            # F11 경고 확인의 '기준 그림'(check_ref.png)도 메인 것을 받는다
+            # (영역 위치는 coords.json 의 check_area_rel 로 함께 옴)
+            try:
+                src_c = os.path.join(REPO, "check_ref.png")
+                if os.path.exists(src_c) and not is_main:
+                    ldir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
+                    os.makedirs(ldir, exist_ok=True)
+                    dst_c = os.path.join(ldir, "check_ref.png")
+                    same_c = False
+                    try:
+                        with open(src_c, "rb") as fa, open(dst_c, "rb") as fb:
+                            same_c = fa.read() == fb.read()
+                    except Exception:
+                        pass
+                    if not same_c:
+                        shutil.copy2(src_c, dst_c); n += 1
+                        log("   ⚠ 경고 확인 기준 그림 동기화: check_ref.png ✔")
+            except Exception as e:
+                log(f"   ⚠ 경고 기준 그림 동기화 실패: {e}")
             # 다야 OCR 캡처영역(daya_regions.json)도 메인과 동일하게 동기화
             # (측정값 daya_counts/history는 머신별 데이터라 절대 건드리지 않음)
             try:

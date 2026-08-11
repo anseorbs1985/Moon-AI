@@ -2,6 +2,7 @@
   "_설명": "업데이트 때 coords.json 중 '이 항목만' 메인 좌표를 받는다. 나머지 좌표는 로컬 것 유지.",
   "keys": [
     "fish_slots",
-    "potion_area_rel"
+    "potion_area_rel",
+    "check_area_rel"
   ]
 }
