@@ -203,8 +203,9 @@ def sync_island_keys(log):
         with open(man, encoding="utf-8") as f:
             cfgm = json.load(f) or {}
         keys = cfgm.get("keys") or []
+        only_p = cfgm.get("presets_only") or []      # 이 던전은 '프리셋만' 받는다
         with_presets = bool(cfgm.get("presets"))
-        if not keys:
+        if not keys and not only_p:
             return
         src_p = os.path.join(REPO, "island_coords.json")
         dst_p = os.path.join(DESK, "island_coords.json")
@@ -222,13 +223,12 @@ def sync_island_keys(log):
                 continue
             dst[k] = v
             got.append(f"{k}({_count_in(v)}좌표)")
-        if with_presets:
-            sp = (src.get("_presets") or {})
-            dp = dst.setdefault("_presets", {})
-            for k in keys:
-                if k in sp and dp.get(k) != sp[k]:
-                    dp[k] = sp[k]
-                    got.append(f"{k} 프리셋")
+        sp = (src.get("_presets") or {})
+        dp = dst.setdefault("_presets", {})
+        for k in (list(keys) if with_presets else []) + list(only_p):
+            if k in sp and dp.get(k) != sp[k]:
+                dp[k] = sp[k]
+                got.append(f"{k} 프리셋")
         if not got:
             log("   던전 동기화: 이미 메인과 같습니다")
             return

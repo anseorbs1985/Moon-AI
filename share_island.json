@@ -1,5 +1,8 @@
 {
-  "_설명": "업데이트 때 island_coords.json 중 '이 던전만' 메인 것을 통째로 받는다 (좌표·간격·이름·녹화). presets=true 면 그 던전 프리셋도 함께.",
-  "keys": ["월요일_잊혀진섬"],
-  "presets": true
+  "_설명": "keys=던전 통째로 / presets_only=그 던전의 프리셋만 받는다",
+  "keys": [],
+  "presets": true,
+  "presets_only": [
+    "화요일_에카"
+  ]
 }
