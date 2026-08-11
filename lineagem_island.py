@@ -439,6 +439,14 @@ class IslandApp(tk.Tk):
         self.after(800, self._potion_tick)     # 🧪 물약색 결과 표시
         self.after(300, self._scroll_all_to_bottom)
         self.after(80, self._fit_width)
+        # 창을 옮기거나 크기를 바꾸면 그 자리를 기억한다 (다음에 그 자리에 뜸)
+        self._winpos_last = None
+        def _on_cfg(e=None):
+            if getattr(self, "_winpos_after", None):
+                try: self.after_cancel(self._winpos_after)
+                except Exception: pass
+            self._winpos_after = self.after(600, self._winpos_save)
+        self.bind("<Configure>", _on_cfg, add="+")
         if self._auto_run and self._focus_idx is not None:
             # 런처 ▶ 실행: 창을 아예 띄우지 않고 바로 실행 (과거섬처럼)
             # 창을 띄우되 바로 '메인런처 앞(클라 뒤)'으로 보낸다
@@ -469,6 +477,55 @@ class IslandApp(tk.Tk):
         h = max(700, (bot - top) - 40)
         return h, max(0, top + 10)
 
+    def _winpos_key(self):
+        """창 종류별 키 — 던전 단독 창은 그 던전, 전체 창은 'all'."""
+        fi = getattr(self, "_focus_idx", None)
+        return f"col{fi}" if fi is not None else "all"
+
+    @staticmethod
+    def _winpos_path():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "island_win_pos.json")
+
+    def _winpos_load(self):
+        try:
+            with open(self._winpos_path(), encoding="utf-8") as f:
+                return (json.load(f) or {}).get(self._winpos_key())
+        except Exception:
+            return None
+
+    def _winpos_save(self, _e=None):
+        """창을 옮기거나 크기를 바꾸면 그 자리를 기억해둔다 (컴퓨터별 저장)."""
+        try:
+            if self.state() != "normal":
+                return
+            g = self.geometry()          # 'WxH+X+Y'
+            if getattr(self, "_winpos_last", None) == g:
+                return
+            self._winpos_last = g
+            try:
+                with open(self._winpos_path(), encoding="utf-8") as f:
+                    all_ = json.load(f) or {}
+            except Exception:
+                all_ = {}
+            all_[self._winpos_key()] = g
+            with open(self._winpos_path(), "w", encoding="utf-8") as f:
+                json.dump(all_, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _winpos_apply(self):
+        """저장해둔 자리로 되돌린다 — 없으면 그대로 둔다."""
+        g = self._winpos_load()
+        if not g:
+            return False
+        try:
+            self.geometry(g)
+            return True
+        except Exception:
+            return False
+
     def _fit_width(self):
         """내용 크기에 딱 맞춘다 — 아래 빈 공간도, 잘려서 스크롤할 일도 없게.
         (2026-08-10) 화면 작업영역을 넘지 않는 선에서 '내용 높이'로 맞춘다."""
@@ -484,9 +541,11 @@ class IslandApp(tk.Tk):
                 if _y + nh > top_y + max_h:        # 화면 아래로 넘치면 위로 당김
                     pos = "+" + pos.split("+")[1] + f"+{max(top_y, top_y + max_h - nh)}"
             self.geometry(f"{wpart}x{nh}{pos}")
+            self._winpos_apply()  # 저장해둔 자리가 있으면 그 자리로
             return
         nw = self.winfo_reqwidth() + 10
         self.geometry(f"{nw}x{nh}")
+        self._winpos_apply()      # 저장해둔 자리가 있으면 그 자리로
 
     def _build_ui(self):
         # 상단 타이틀
