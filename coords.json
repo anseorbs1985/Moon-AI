@@ -5276,8 +5276,8 @@
   ],
   "seq_hotkey": 122,
   "seq_on": true,
-  "seq_min": 0.53,
-  "seq_max": 1.15,
+  "seq_min": 0.37,
+  "seq_max": 0.81,
   "slp_slots": [
     [
       26,
@@ -5346,8 +5346,8 @@
   ],
   "slp_hotkey": 123,
   "slp_on": true,
-  "slp_min": 0.53,
-  "slp_max": 1.15,
+  "slp_min": 0.37,
+  "slp_max": 0.81,
   "wdoff_slots": [
     [
       327,
