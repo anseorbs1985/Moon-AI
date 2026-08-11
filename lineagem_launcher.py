@@ -176,7 +176,8 @@ DEFAULT_CFG = {
     "google_acc":  None,
     "confirm_btn": None,
     "profile_target_id": "",
-    "potion_area_rel": None,            # 물약색 확인 영역 (01번 클라 기준 상대 [x,y,w,h])
+    "potion_area_rel": None,
+    "check_area_rel": None,             # F11 때 확인할 경고 영역 (01번 클라 기준 [x,y,w,h])            # 물약색 확인 영역 (01번 클라 기준 상대 [x,y,w,h])
     "profile_id_area": None,
     "profile_reveal_btn": None,
     "char_btns":   [],
@@ -1344,6 +1345,15 @@ class App(tk.Tk):
                                   bg=self.cget("bg"), width=11, height=2,
                                   anchor="center")
         self._done_lbl.pack(anchor="n", pady=(3, 0))
+
+        # ⚠ 경고 목록 — F11 때 확인해서 뜬 것들. 내가 X를 누르기 전엔 안 사라진다
+        self._warn_box = tk.Frame(dc_col)
+        self._warn_box.pack(anchor="n", pady=(2, 0))
+        self._warn_hdr = tk.Label(self._warn_box, text="", font=("맑은 고딕", 9, "bold"),
+                                  fg="white", bg="#c0392b")
+        self._warn_rows = tk.Frame(self._warn_box)
+        self._warn_rows.pack(fill="x")
+        self.after(900, self._warn_refresh)
 
         # 확인용 3종 묶음: 변신확인용 / 인형확인용 / 성물확인용 (세로로 한 곳에)
         chk_col = tk.Frame(front_row); chk_col.pack(side="left", padx=(4,8), anchor="n")
@@ -3334,6 +3344,136 @@ class App(tk.Tk):
             self.status.set("💾 계정 자동저장됨")
         except Exception:
             pass
+
+    # ── ⚠ 경고 확인 (F11 때 지정 영역을 보고 '떠 있으면' 경고를 남긴다) ──────
+    @staticmethod
+    def _warn_dir():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _warn_load(self):
+        try:
+            with open(os.path.join(self._warn_dir(), "warns.json"), encoding="utf-8") as f:
+                return sorted({int(x) for x in (json.load(f) or {}).get("slots", [])})
+        except Exception:
+            return []
+
+    def _warn_save(self, slots):
+        try:
+            with open(os.path.join(self._warn_dir(), "warns.json"), "w", encoding="utf-8") as f:
+                json.dump({"slots": sorted(set(int(x) for x in slots))}, f)
+        except Exception:
+            pass
+
+    def _warn_add(self, slots):
+        cur = set(self._warn_load()) | set(slots)
+        self._warn_save(cur)
+        self._warn_refresh()
+
+    def _warn_remove(self, slot):
+        cur = set(self._warn_load()) - {int(slot)}
+        self._warn_save(cur)
+        self._warn_refresh()
+
+    def _warn_refresh(self):
+        box = getattr(self, "_warn_rows", None)
+        if not box or not box.winfo_exists():
+            return
+        for w in box.winfo_children():
+            w.destroy()
+        slots = self._warn_load()
+        hdr = getattr(self, "_warn_hdr", None)
+        if hdr and hdr.winfo_exists():
+            if slots:
+                hdr.config(text=f"⚠ 경고 {len(slots)}개")
+                hdr.pack(fill="x")
+            else:
+                hdr.pack_forget()
+        for si in slots:
+            row = tk.Frame(box); row.pack(fill="x", pady=1)
+            tk.Label(row, text=f"복구해야함 {si:02d}", font=("맑은 고딕", 9, "bold"),
+                     fg="white", bg="#c0392b", width=11, anchor="w",
+                     padx=3).pack(side="left")
+            tk.Button(row, text="✕", font=("맑은 고딕", 8, "bold"), width=2, pady=0,
+                      bg="#7f8c8d", fg="white",
+                      command=lambda x=si: self._warn_remove(x)).pack(side="left", padx=(2, 0))
+
+    def _reg_check_area(self):
+        """경고가 '떠 있는 상태'의 01번 클라 화면에서 그 자리를 드래그해 등록."""
+        rects = self._client_rects_by_slot()
+        if not rects:
+            self.status.set("⚠ 리니지M 클라이언트 16개가 보이지 않습니다"); return
+        self._check_rects = rects
+        w = getattr(self, "_seq_win", None)
+        if w and w.winfo_exists():
+            try: w.withdraw()
+            except Exception: pass
+        self.withdraw()
+        self.after(200, lambda: _PotionAreaOverlay(self, self._on_check_area))
+
+    def _on_check_area(self, x, y, w, h):
+        self.deiconify()
+        sw = getattr(self, "_seq_win", None)
+        if sw and sw.winfo_exists():
+            try: sw.deiconify(); sw.lift()
+            except Exception: pass
+        if w < 5 or h < 5:
+            self.status.set("영역이 너무 작습니다 — 다시 드래그해주세요"); return
+        rects = getattr(self, "_check_rects", None) or self._client_rects_by_slot()
+        hw = self._client_hwnds_by_slot()
+        if not rects or not hw:
+            self.status.set("⚠ 클라이언트 16개 감지 실패"); return
+        base = rects[0]
+        rel = [x - base[0], y - base[1], w, h]
+        self.cfg["check_area_rel"] = rel
+        save_cfg(self.cfg)
+        try:      # 지금 화면(=경고가 떠 있는 상태)을 '기준 그림'으로 저장
+            l, t, r, b, hwnd = hw[0]
+            im = self._grab_client(hwnd, r - l, b - t).crop(
+                (rel[0], rel[1], rel[0] + w, rel[1] + h))
+            im.save(os.path.join(self._warn_dir(), "check_ref.png"))
+            self.status.set(f"✔ 경고영역 등록 — 01번 기준 ({rel[0]},{rel[1]}) {w}x{h} "
+                            f"(지금 화면을 기준으로 저장)")
+        except Exception as e:
+            self.status.set(f"⚠ 기준 그림 저장 실패: {e}")
+
+    def _check_scan(self, quiet=False):
+        """지정 영역이 '기준 그림'과 같으면 그 슬롯에 경고를 남긴다 (F11 때 자동)."""
+        rel = self.cfg.get("check_area_rel")
+        ref_p = os.path.join(self._warn_dir(), "check_ref.png")
+        if not rel or not os.path.exists(ref_p):
+            if not quiet:
+                self.status.set("먼저 [🔆 절전해제] 창에서 [📷 경고영역 지정]을 해주세요")
+            return
+        hw = self._client_hwnds_by_slot()
+        if not hw:
+            if not quiet:
+                self.status.set("⚠ 리니지M 클라이언트 16개가 보이지 않습니다")
+            return
+        try:
+            from PIL import Image
+            ref = Image.open(ref_p).convert("L")
+        except Exception as e:
+            self.status.set(f"⚠ 기준 그림을 못 읽음: {e}"); return
+        dx, dy, w, h = rel
+        hit = []
+        for i, (l, t, r, b, hwnd) in enumerate(hw):
+            try:
+                im = self._grab_client(hwnd, r - l, b - t).crop(
+                    (dx, dy, dx + w, dy + h)).convert("L")
+                if im.size != ref.size:
+                    im = im.resize(ref.size)
+                a_ = list(im.getdata()); b_ = list(ref.getdata())
+                diff = sum(abs(p - q) for p, q in zip(a_, b_)) / max(1, len(a_))
+                if diff <= 18:            # 기준 그림과 거의 같다 = 그게 떠 있다
+                    hit.append(i + 1)
+            except Exception:
+                pass
+        if hit:
+            self._warn_add(hit)
+        self.status.set(f"⚠ 경고 확인 — 뜬 곳 {len(hit)}개 {hit or ''}"
+                        f" (남은 경고 {len(self._warn_load())}개)")
 
     # ── 🧪 물약색 확인 — 16개 클라의 같은 자리 색을 한 번에 보고 빨강/주황 판정 ──
     def _open_potion_win(self):
@@ -5470,6 +5610,18 @@ class App(tk.Tk):
     def _build_seq(self, parent):
         seq = self.cfg.get("seq_slots") or [None] * SEQ_SLOTS
 
+        _wr = tk.Frame(parent); _wr.pack(fill="x", padx=6, pady=(6, 0))
+        tk.Label(_wr, text="⚠ F11 때 확인할 경고영역:", font=("맑은 고딕", 8, "bold"),
+                 fg="#c0392b").pack(side="left")
+        tk.Button(_wr, text="📷 경고영역 지정", font=("맑은 고딕", 8, "bold"),
+                  bg="#c0392b", fg="white",
+                  command=self._reg_check_area).pack(side="left", padx=(4, 0))
+        tk.Button(_wr, text="🔍 지금 확인", font=("맑은 고딕", 8, "bold"),
+                  bg="#922b21", fg="white",
+                  command=self._check_scan).pack(side="left", padx=(4, 0))
+        tk.Label(parent, text="(경고가 떠 있는 01번 클라 화면에서 그 자리를 드래그해 등록 · "
+                              "F11을 누를 때마다 16개를 확인합니다)",
+                 font=("맑은 고딕", 7), fg="#888").pack(anchor="w", padx=6)
         tk.Label(parent, text="절전해제 — 단축키를 누르면 순서대로 1회씩",
                  font=("맑은 고딕", 9, "bold"), fg="#5b2c6f").pack(pady=(6, 2))
 
@@ -5623,6 +5775,11 @@ class App(tk.Tk):
             self._seq_running = False
             self._clear_busy("절전해제")
             self.after(0, self._restore_back_quiet)   # 앞으로 띄우지 않고 바로 맨 뒤로
+        # (2026-08-10) F11(절전해제) 끝나면 경고영역을 확인한다
+        try:
+            self.after(1200, lambda: self._check_scan(quiet=True))
+        except Exception:
+            pass
 
     def _assign_seq_hotkey(self):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
