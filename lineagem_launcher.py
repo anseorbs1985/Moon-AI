@@ -3451,18 +3451,17 @@ class App(tk.Tk):
 
     @staticmethod
     def _img_match(im, ref):
-        """두 흑백 이미지의 닮은 정도(0~1). 밝기 차이에 휘둘리지 않게 상관계수를 쓴다."""
+        """넓게 잘라온 그림(im) 안에서 기준 그림(ref)을 찾은 최고 점수(0~1).
+        클라마다 표시 위치가 몇 픽셀 다르기 때문에 '그 안에서 찾기'로 해야 잡힌다."""
         try:
             import cv2, numpy as np
             a = np.asarray(im, dtype="uint8")
             b = np.asarray(ref, dtype="uint8")
-            if a.shape != b.shape:
-                a = cv2.resize(a, (b.shape[1], b.shape[0]))
+            if a.shape[0] < b.shape[0] or a.shape[1] < b.shape[1]:
+                a = cv2.resize(a, (max(a.shape[1], b.shape[1]), max(a.shape[0], b.shape[0])))
             return float(cv2.matchTemplate(a, b, cv2.TM_CCOEFF_NORMED).max())
         except Exception:
-            a_ = list(im.getdata()); b_ = list(ref.getdata())
-            d = sum(abs(p - q) for p, q in zip(a_, b_)) / max(1, len(a_))
-            return max(0.0, 1.0 - d / 60.0)
+            return 0.0
 
     def _check_scan(self, quiet=False):
         """지정 영역이 '기준 그림'과 같으면 그 슬롯에 경고를 남긴다 (F11 때 자동)."""
@@ -3483,14 +3482,15 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"⚠ 기준 그림을 못 읽음: {e}"); return
         dx, dy, w, h = rel
+        M = 20        # 클라마다 몇 픽셀씩 어긋나므로 주변까지 넓게 훑는다
         hit = []
         for i, (l, t, r, b, hwnd) in enumerate(hw):
             try:
-                im = self._grab_client(hwnd, r - l, b - t).crop(
-                    (dx, dy, dx + w, dy + h)).convert("L")
-                if im.size != ref.size:
-                    im = im.resize(ref.size)
-                if self._img_match(im, ref) >= 0.85:   # 기준 그림과 닮았다 = 떠 있다
+                W, H = r - l, b - t
+                x0, y0 = max(0, dx - M), max(0, dy - M)
+                x1, y1 = min(W, dx + w + M), min(H, dy + h + M)
+                im = self._grab_client(hwnd, W, H).crop((x0, y0, x1, y1)).convert("L")
+                if self._img_match(im, ref) >= 0.60:   # 기준 그림이 그 안에 있다 = 떠 있다
                     hit.append(i + 1)
             except Exception:
                 pass
