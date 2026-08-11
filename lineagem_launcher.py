@@ -3527,23 +3527,30 @@ class App(tk.Tk):
         self.after(15000, self._check_watch_tick)
 
     def _check_watch_tick(self):
+        """15초마다 다시 봐서 목록을 화면과 맞춘다.
+        · 마크가 사라진 슬롯 → 경고 삭제
+        · 새로 뜬 슬롯      → 경고 추가 (F11 직후엔 없다가 뒤늦게 뜨는 것도 잡는다)"""
         try:
             if time.time() > getattr(self, "_check_watch_until", 0):
                 self._check_watch_on = False
+                self.status.set("⚠ 5분 확인 끝 — 남은 경고 "
+                                f"{len(self._warn_load())}개")
                 return
-            warned = set(self._warn_load())
-            if warned:
-                now_hit = self._check_hits()
-                if now_hit is not None:
-                    gone = sorted(warned - set(now_hit))
+            now_hit = self._check_hits()
+            if now_hit is not None:
+                before = set(self._warn_load())
+                gone = sorted(before - set(now_hit))
+                new_ = sorted(set(now_hit) - before)
+                if gone or new_:
+                    self._warn_save(now_hit)
+                    self._warn_refresh()
+                    msg = []
+                    if new_:
+                        msg.append(f"새로 뜸 {new_}")
                     if gone:
-                        for si in gone:
-                            self._warn_remove(si)
-                        self.status.set(f"✔ 복구 확인 — {gone} 경고 자동 삭제 "
-                                        f"(남은 경고 {len(self._warn_load())}개)")
-            else:
-                self._check_watch_on = False      # 지울 경고가 없으면 그만 본다
-                return
+                        msg.append(f"복구됨 {gone} 삭제")
+                    self.status.set("⚠ 확인 중 — " + " · ".join(msg) +
+                                    f" (남은 경고 {len(now_hit)}개)")
         except Exception:
             pass
         self.after(15000, self._check_watch_tick)
