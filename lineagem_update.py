@@ -722,6 +722,24 @@ def main():
                 sync_times(log)          # 좌표는 그대로, 시간만 메인과 맞춤
                 sync_coord_keys(log)     # 지정한 항목(낚시녹임 등)만 좌표도 받음
                 sync_island_keys(log)    # 지정한 던전(잊혀진섬 등)은 통째로 받음
+            # 섬/던전 창 위치(island_win_pos.json)도 메인 것을 받는다
+            try:
+                src_w = os.path.join(REPO, "island_win_pos.json")
+                if os.path.exists(src_w) and not is_main:
+                    ldir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
+                    os.makedirs(ldir, exist_ok=True)
+                    dst_w = os.path.join(ldir, "island_win_pos.json")
+                    same_w = False
+                    try:
+                        with open(src_w, "rb") as fa, open(dst_w, "rb") as fb:
+                            same_w = fa.read() == fb.read()
+                    except Exception:
+                        pass
+                    if not same_w:
+                        shutil.copy2(src_w, dst_w); n += 1
+                        log("   🪟 섬/던전 창 위치 동기화: island_win_pos.json ✔")
+            except Exception as e:
+                log(f"   ⚠ 창 위치 동기화 실패: {e}")
             # F11 경고 확인의 '기준 그림'(check_ref.png)도 메인 것을 받는다
             # (영역 위치는 coords.json 의 check_area_rel 로 함께 옴)
             try:

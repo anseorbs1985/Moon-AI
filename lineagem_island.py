@@ -526,10 +526,19 @@ class IslandApp(tk.Tk):
             m = _re.match(r"(\d+)x(\d+)([+-]\d+)([+-]\d+)", g)
             if not m:
                 self.geometry(g); return True
-            w, h, x, y = int(m.group(1)), int(m.group(2)), m.group(3), m.group(4)
+            w, h = int(m.group(1)), int(m.group(2))
+            x, y = int(m.group(3)), int(m.group(4))
             if min_h:
                 h = max(h, int(min_h))
-            self.geometry(f"{w}x{h}{x}{y}")
+            # 모니터가 작은 컴퓨터에서 화면 밖으로 나가지 않게 보정
+            try:
+                sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+                x = max(0, min(x, max(0, sw - 200)))
+                y = max(0, min(y, max(0, sh - 200)))
+                h = min(h, sh - y - 10)
+            except Exception:
+                pass
+            self.geometry(f"{w}x{h}+{x}+{y}")
             return True
         except Exception:
             return False
