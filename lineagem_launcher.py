@@ -3506,10 +3506,16 @@ class App(tk.Tk):
                 self.status.set("먼저 [🔆 절전해제] 창에서 [📷 경고영역 지정]을 해주세요 "
                                 "(또는 클라 16개가 보이지 않음)")
             return
-        if hit:
-            self._warn_add(hit)
-        self.status.set(f"⚠ 경고 확인 — 뜬 곳 {len(hit)}개 {hit or ''}"
-                        f" (남은 경고 {len(self._warn_load())}개) · 5분간 지켜봅니다")
+        # 마크가 있는 곳은 그대로 두고, 사라진 곳은 자동으로 지운다
+        # (내가 ✕ 로 지우지 않아도 다음 F11 때 알아서 정리됨)
+        before = set(self._warn_load())
+        gone = sorted(before - set(hit))
+        self._warn_save(hit)
+        self._warn_refresh()
+        _msg = f"⚠ 경고 확인 — 뜬 곳 {len(hit)}개 {hit or ''}"
+        if gone:
+            _msg += f" · 사라진 {gone} 자동 삭제"
+        self.status.set(_msg + " · 5분간 지켜봅니다")
         self._check_watch_start()
 
     def _check_watch_start(self, minutes=5):
