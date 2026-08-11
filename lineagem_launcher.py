@@ -3372,9 +3372,17 @@ class App(tk.Tk):
         self._warn_refresh()
 
     def _warn_remove(self, slot):
+        """경고 ✕ — 지우기만 하고 런처를 앞으로 올리지 않는다 (맨 뒤 유지)."""
         cur = set(self._warn_load()) - {int(slot)}
         self._warn_save(cur)
         self._warn_refresh()
+        # 클릭 때문에 창이 앞으로 나오지 않게 잠깐 '조용히' 상태로 두고 맨 뒤 유지
+        self._quiet_restore = True
+        try:
+            self._send_to_back()
+        except Exception:
+            pass
+        self.after(800, lambda: setattr(self, "_quiet_restore", False))
 
     def _warn_refresh(self):
         box = getattr(self, "_warn_rows", None)
