@@ -29,6 +29,12 @@
     25,
     27
   ],
+  "check_area_rel": [
+    313,
+    6,
+    36,
+    28
+  ],
   "profile_id_area": {
     "w": 84,
     "x": 2292,
@@ -20902,8 +20908,8 @@
     1356
   ],
   "claude_win_pos": [
-    583,
-    287
+    677,
+    301
   ],
   "seq2_on": false,
   "purple_popup_color": [

@@ -9402,7 +9402,7 @@ class App(tk.Tk):
         self.after(1500, lambda: setattr(self, "_quiet_restore", False))
 
     def _show_done(self, text="완료"):
-        """작업이 끝났음을 왼쪽 아래에 큰 빨간 글씨로 1분간 알린다."""
+        """작업이 끝났음을 왼쪽 아래에 큰 빨간 글씨로 1시간 동안 알린다."""
         try:
             if not hasattr(self, "_done_var"):
                 return
@@ -9412,7 +9412,7 @@ class App(tk.Tk):
             if old:
                 try: self.after_cancel(old)
                 except Exception: pass
-            self._done_after = self.after(60000, lambda: self._done_var.set(""))
+            self._done_after = self.after(3600000, lambda: self._done_var.set(""))   # 1시간 유지
         except Exception:
             pass
 
