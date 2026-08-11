@@ -3399,6 +3399,16 @@ class App(tk.Tk):
                       bg="#7f8c8d", fg="white",
                       command=lambda x=si: self._warn_remove(x)).pack(side="left", padx=(2, 0))
 
+    @staticmethod
+    def _rect_owner(rects, x, y):
+        """드래그한 지점이 몇 번 클라 안인지 찾는다 (없으면 0번).
+        (2026-08-10) 예전엔 무조건 01번 기준으로 계산해서, 다른 클라에서 드래그하면
+        영역이 화면 밖으로 나가 전부 오판정됐다."""
+        for i, (l, t, r, b) in enumerate(rects):
+            if l <= x <= r and t <= y <= b:
+                return i
+        return 0
+
     def _reg_check_area(self):
         """경고가 '떠 있는 상태'의 01번 클라 화면에서 그 자리를 드래그해 등록."""
         rects = self._client_rects_by_slot()
@@ -3424,19 +3434,35 @@ class App(tk.Tk):
         hw = self._client_hwnds_by_slot()
         if not rects or not hw:
             self.status.set("⚠ 클라이언트 16개 감지 실패"); return
-        base = rects[0]
+        oi = self._rect_owner(rects, x, y)      # 어느 클라에서 찍었는지 자동 인식
+        base = rects[oi]
         rel = [x - base[0], y - base[1], w, h]
         self.cfg["check_area_rel"] = rel
         save_cfg(self.cfg)
         try:      # 지금 화면(=경고가 떠 있는 상태)을 '기준 그림'으로 저장
-            l, t, r, b, hwnd = hw[0]
+            l, t, r, b, hwnd = hw[oi]
             im = self._grab_client(hwnd, r - l, b - t).crop(
                 (rel[0], rel[1], rel[0] + w, rel[1] + h))
             im.save(os.path.join(self._warn_dir(), "check_ref.png"))
-            self.status.set(f"✔ 경고영역 등록 — 01번 기준 ({rel[0]},{rel[1]}) {w}x{h} "
-                            f"(지금 화면을 기준으로 저장)")
+            self.status.set(f"✔ 경고영역 등록 — #{oi+1:02d} 클라 기준 "
+                            f"({rel[0]},{rel[1]}) {w}x{h} (지금 화면을 기준으로 저장)")
         except Exception as e:
             self.status.set(f"⚠ 기준 그림 저장 실패: {e}")
+
+    @staticmethod
+    def _img_match(im, ref):
+        """두 흑백 이미지의 닮은 정도(0~1). 밝기 차이에 휘둘리지 않게 상관계수를 쓴다."""
+        try:
+            import cv2, numpy as np
+            a = np.asarray(im, dtype="uint8")
+            b = np.asarray(ref, dtype="uint8")
+            if a.shape != b.shape:
+                a = cv2.resize(a, (b.shape[1], b.shape[0]))
+            return float(cv2.matchTemplate(a, b, cv2.TM_CCOEFF_NORMED).max())
+        except Exception:
+            a_ = list(im.getdata()); b_ = list(ref.getdata())
+            d = sum(abs(p - q) for p, q in zip(a_, b_)) / max(1, len(a_))
+            return max(0.0, 1.0 - d / 60.0)
 
     def _check_scan(self, quiet=False):
         """지정 영역이 '기준 그림'과 같으면 그 슬롯에 경고를 남긴다 (F11 때 자동)."""
@@ -3464,9 +3490,7 @@ class App(tk.Tk):
                     (dx, dy, dx + w, dy + h)).convert("L")
                 if im.size != ref.size:
                     im = im.resize(ref.size)
-                a_ = list(im.getdata()); b_ = list(ref.getdata())
-                diff = sum(abs(p - q) for p, q in zip(a_, b_)) / max(1, len(a_))
-                if diff <= 18:            # 기준 그림과 거의 같다 = 그게 떠 있다
+                if self._img_match(im, ref) >= 0.85:   # 기준 그림과 닮았다 = 떠 있다
                     hit.append(i + 1)
             except Exception:
                 pass
@@ -3540,11 +3564,13 @@ class App(tk.Tk):
         rects = getattr(self, "_potion_rects", None) or self._client_rects_by_slot()
         if not rects:
             self.status.set("⚠ 클라이언트 16개 감지 실패"); return
-        base = rects[0]
+        oi = self._rect_owner(rects, x, y)      # 어느 클라에서 찍었는지 자동 인식
+        base = rects[oi]
         self.cfg["potion_area_rel"] = [x - base[0], y - base[1], w, h]
         save_cfg(self.cfg)
         self._refresh_potion_area_lbl()
-        self.status.set(f"✔ 물약 영역 등록 — 01번 기준 ({x-base[0]},{y-base[1]}) {w}x{h}")
+        self.status.set(f"✔ 물약 영역 등록 — #{oi+1:02d} 클라 기준 "
+                        f"({x-base[0]},{y-base[1]}) {w}x{h}")
 
     @staticmethod
     def _potion_name(px):
