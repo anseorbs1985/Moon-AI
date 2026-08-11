@@ -3467,24 +3467,20 @@ class App(tk.Tk):
         except Exception:
             return 0.0
 
-    def _check_scan(self, quiet=False):
-        """지정 영역이 '기준 그림'과 같으면 그 슬롯에 경고를 남긴다 (F11 때 자동)."""
+    def _check_hits(self):
+        """지금 그 영역에 '기준 그림'이 보이는 슬롯 번호들 (없으면 None = 확인 불가)."""
         rel = self.cfg.get("check_area_rel")
         ref_p = os.path.join(self._warn_dir(), "check_ref.png")
         if not rel or not os.path.exists(ref_p):
-            if not quiet:
-                self.status.set("먼저 [🔆 절전해제] 창에서 [📷 경고영역 지정]을 해주세요")
-            return
+            return None
         hw = self._client_hwnds_by_slot()
         if not hw:
-            if not quiet:
-                self.status.set("⚠ 리니지M 클라이언트 16개가 보이지 않습니다")
-            return
+            return None
         try:
             from PIL import Image
             ref = Image.open(ref_p).convert("L")
-        except Exception as e:
-            self.status.set(f"⚠ 기준 그림을 못 읽음: {e}"); return
+        except Exception:
+            return None
         dx, dy, w, h = rel
         M = 20        # 클라마다 몇 픽셀씩 어긋나므로 주변까지 넓게 훑는다
         hit = []
@@ -3498,10 +3494,53 @@ class App(tk.Tk):
                     hit.append(i + 1)
             except Exception:
                 pass
+        return hit
+
+    def _check_scan(self, quiet=False):
+        """지정 영역에 마크가 보이면 경고를 남기고, 이후 5분간 지켜본다 (F11 때 자동).
+        지켜보는 동안 마크가 사라진 슬롯은 경고를 자동으로 지운다 —
+        내가 ✕로 지우는 것도 그대로 쓸 수 있다."""
+        hit = self._check_hits()
+        if hit is None:
+            if not quiet:
+                self.status.set("먼저 [🔆 절전해제] 창에서 [📷 경고영역 지정]을 해주세요 "
+                                "(또는 클라 16개가 보이지 않음)")
+            return
         if hit:
             self._warn_add(hit)
         self.status.set(f"⚠ 경고 확인 — 뜬 곳 {len(hit)}개 {hit or ''}"
-                        f" (남은 경고 {len(self._warn_load())}개)")
+                        f" (남은 경고 {len(self._warn_load())}개) · 5분간 지켜봅니다")
+        self._check_watch_start()
+
+    def _check_watch_start(self, minutes=5):
+        """5분 동안 15초마다 다시 봐서, 마크가 사라진 슬롯의 경고를 지운다."""
+        self._check_watch_until = time.time() + minutes * 60
+        if getattr(self, "_check_watch_on", False):
+            return                     # 이미 지켜보는 중이면 시간만 연장
+        self._check_watch_on = True
+        self.after(15000, self._check_watch_tick)
+
+    def _check_watch_tick(self):
+        try:
+            if time.time() > getattr(self, "_check_watch_until", 0):
+                self._check_watch_on = False
+                return
+            warned = set(self._warn_load())
+            if warned:
+                now_hit = self._check_hits()
+                if now_hit is not None:
+                    gone = sorted(warned - set(now_hit))
+                    if gone:
+                        for si in gone:
+                            self._warn_remove(si)
+                        self.status.set(f"✔ 복구 확인 — {gone} 경고 자동 삭제 "
+                                        f"(남은 경고 {len(self._warn_load())}개)")
+            else:
+                self._check_watch_on = False      # 지울 경고가 없으면 그만 본다
+                return
+        except Exception:
+            pass
+        self.after(15000, self._check_watch_tick)
 
     # ── 🧪 물약색 확인 — 16개 클라의 같은 자리 색을 한 번에 보고 빨강/주황 판정 ──
     def _open_potion_win(self):
