@@ -515,13 +515,21 @@ class IslandApp(tk.Tk):
         except Exception:
             pass
 
-    def _winpos_apply(self):
-        """저장해둔 자리로 되돌린다 — 없으면 그대로 둔다."""
+    def _winpos_apply(self, min_h=None):
+        """저장해둔 자리로 되돌린다 — 없으면 그대로 둔다.
+        높이는 '내용에 필요한 높이'보다 작아지지 않게 해서 잘리지 않도록 한다."""
         g = self._winpos_load()
         if not g:
             return False
         try:
-            self.geometry(g)
+            import re as _re
+            m = _re.match(r"(\d+)x(\d+)([+-]\d+)([+-]\d+)", g)
+            if not m:
+                self.geometry(g); return True
+            w, h, x, y = int(m.group(1)), int(m.group(2)), m.group(3), m.group(4)
+            if min_h:
+                h = max(h, int(min_h))
+            self.geometry(f"{w}x{h}{x}{y}")
             return True
         except Exception:
             return False
@@ -541,11 +549,11 @@ class IslandApp(tk.Tk):
                 if _y + nh > top_y + max_h:        # 화면 아래로 넘치면 위로 당김
                     pos = "+" + pos.split("+")[1] + f"+{max(top_y, top_y + max_h - nh)}"
             self.geometry(f"{wpart}x{nh}{pos}")
-            self._winpos_apply()  # 저장해둔 자리가 있으면 그 자리로
+            self._winpos_apply(nh)   # 저장해둔 자리로 (높이는 내용 우선)
             return
         nw = self.winfo_reqwidth() + 10
         self.geometry(f"{nw}x{nh}")
-        self._winpos_apply()      # 저장해둔 자리가 있으면 그 자리로
+        self._winpos_apply(nh)    # 저장해둔 자리로 (높이는 내용보다 작아지지 않게)
 
     def _build_ui(self):
         # 상단 타이틀
