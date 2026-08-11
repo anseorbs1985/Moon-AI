@@ -3383,13 +3383,9 @@ class App(tk.Tk):
         for w in box.winfo_children():
             w.destroy()
         slots = self._warn_load()
-        hdr = getattr(self, "_warn_hdr", None)
+        hdr = getattr(self, "_warn_hdr", None)   # 개수 표시는 쓰지 않는다 (사용자 지시)
         if hdr and hdr.winfo_exists():
-            if slots:
-                hdr.config(text=f"⚠ 경고 {len(slots)}개")
-                hdr.pack(fill="x")
-            else:
-                hdr.pack_forget()
+            hdr.pack_forget()
         for si in slots:
             row = tk.Frame(box); row.pack(fill="x", pady=1)
             tk.Label(row, text=f"복구해야함 {si:02d}", font=("맑은 고딕", 9, "bold"),
