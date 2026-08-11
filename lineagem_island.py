@@ -1151,6 +1151,9 @@ class IslandApp(tk.Tk):
                   width=10, command=self._preset_store).pack(side="left", padx=4)
         tk.Button(bot, text="전부 그대로", font=("맑은 고딕", 9), bg="#7f8c8d", fg="white",
                   command=self._preset_clear).pack(side="left", padx=4)
+        tk.Button(bot, text="↻ 쓰던 슬롯 전부 다시 적용", font=("맑은 고딕", 9, "bold"),
+                  bg="#b9770e", fg="white",
+                  command=self._preset_reapply).pack(side="left", padx=4)
         tk.Button(bot, text="닫기", font=("맑은 고딕", 9), command=win.destroy).pack(side="left", padx=4)
         self._preset_load(0)
 
@@ -1329,6 +1332,28 @@ class IslandApp(tk.Tk):
         self._status.set("클릭 " + str(jx + 1) + " 번 위치 지정: (" + str(x) + "," + str(y) + ")"
                          + ("  [클라 #" + str(base + 1) + " 자동 인식]" if hit is not None else "")
                          + "  — 이어서 다른 번호도 지정하세요")
+
+    def _preset_reapply(self):
+        """프리셋을 고쳐도 '이미 그 프리셋을 쓰던 슬롯'은 자동으로 안 바뀐다.
+        이 버튼을 누르면 이름에 그 프리셋이 들어간 슬롯을 찾아 전부 다시 적용한다."""
+        pw = self._pw
+        key, pi = pw["key"], pw["pi"]
+        self._preset_store()                       # 지금 편집 내용을 먼저 저장
+        nm = (self._presets(key)[pi].get("name") or "").strip()
+        if not nm:
+            self._status.set("프리셋 이름이 없어 어느 슬롯에 쓰였는지 찾을 수 없습니다"); return
+        hit = [i for i, sl in enumerate(self.cfg.get(key, []))
+               if nm and nm in (sl.get("name") or "")]
+        if not hit:
+            self._status.set("'" + nm + "' 를 쓰는 슬롯이 없습니다"); return
+        for i in hit:
+            keep = self.cfg[key][i].get("name")    # 이름(방향 표시 등)은 그대로 두고
+            self._apply_preset(key, i, pi)
+            self.cfg[key][i]["name"] = keep
+        save_cfg(self.cfg)
+        self._refresh(key)
+        self._status.set("↻ '" + nm + "' 다시 적용 — 슬롯 " +
+                         ", ".join(str(i + 1) for i in hit))
 
     def _preset_clear(self):
         self._pw["items"] = {}
