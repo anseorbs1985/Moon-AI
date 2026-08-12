@@ -156,7 +156,7 @@ DC_BURST_MAX   = 2.0
 FISH_SLOTS     = 16    # 낚시녹임 슬롯 수 (인형탐험과 동일 구조)
 FISH_CLICKS    = 18    # 낚시녹임 좌표 수
 CIRCUS_SLOTS   = 16    # 서커스이벤트 슬롯 수 (낚시녹임과 동일 구조)
-CIRCUS_CLICKS  = 8     # 서커스이벤트 좌표 수
+CIRCUS_CLICKS  = 9     # 서커스이벤트 좌표 수 (9번은 8번을 따라감)
 # 클릭 대신 '마우스 휠 올리기'를 할 자리 (던전키: {0부터 센 클릭번호})
 WHEEL_UP_INDICES = {"circus": {4}}     # 서커스이벤트 클릭5 = 휠 위로
 WHEEL_UP_NOTCH  = 3    # 한 번에 굴릴 칸 수
@@ -512,8 +512,11 @@ def load_cfg():
             _w = (s_.get("wheel_list") or []) if isinstance(s_, dict) else []
             while len(_g) < CIRCUS_CLICKS: _g.append(None)
             while len(_w) < CIRCUS_CLICKS: _w.append(0)
+            c = c[:CIRCUS_CLICKS]
+            if len(c) >= 9 and c[7]:
+                c[8] = list(c[7])        # 9번은 8번과 같은 자리 (자동 동기화)
             ncl.append({"name": s_.get("name", "미등록") if isinstance(s_, dict) else "미등록",
-                        "coords": c[:CIRCUS_CLICKS],
+                        "coords": c,
                         "gap_list": _g[:CIRCUS_CLICKS],      # 칸마다 다음 좌표까지 기다릴 초
                         "wheel_list": _w[:CIRCUS_CLICKS],    # 칸마다 휠 굴릴 칸수 (0=클릭)
                         "enabled": s_.get("enabled", True) if isinstance(s_, dict) else True})
@@ -3037,6 +3040,10 @@ class App(tk.Tk):
         fkey, si, ci = self._reg_dgn2
         key, title, _ = self._dgn2_info(fkey)
         self.cfg[key][si]["coords"][ci] = [x, y]
+        if fkey == "circus" and ci == 7:      # 9번은 8번을 따라간다
+            cs = self.cfg[key][si]["coords"]
+            while len(cs) < CIRCUS_CLICKS: cs.append(None)
+            cs[8] = [x, y]
         save_cfg(self.cfg); self._refresh_ui()
         self.status.set(f"✔ {title} #{si+1} [클릭{ci+1}] 등록: ({x},{y})")
         self.deiconify()
