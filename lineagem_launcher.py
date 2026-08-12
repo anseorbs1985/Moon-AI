@@ -756,6 +756,7 @@ class App(tk.Tk):
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
         self.after(2000, self._queue_tick)               # 실행 대기열 순차 처리
         self.after(3000, self._auto_back_tick)           # 다른 창을 클릭하면 런처를 바로 맨 뒤로
+        self.after(5000, self._purple_popup_tick)        # 퍼플 팝업이 뜨면 바로 닫기
         # 포커스를 잃는 순간에도 즉시 반응 (0.15초 확인보다 더 빠름)
         self.bind("<FocusOut>", self._auto_back_check, add="+")
         self.after(20000, self._island_repeat_tick)      # 섬/던전 슬롯 반복(2h N회) 관리
@@ -4403,6 +4404,35 @@ class App(tk.Tk):
                 self.after(150, lambda: self._align_tj_to_dc(_tries + 1))
         except Exception:
             pass
+
+    def _purple_popup_tick(self):
+        """(2026-08-11) 퍼플을 켜면 아래에 뜨는 팝업을 상시 감시해서 바로 닫는다.
+        · 다른 작업이 돌고 있으면 건드리지 않는다 (클릭 충돌 방지)
+        · 사용자가 마우스를 쓰는 중이면 다음 기회에 (커서를 뺏지 않게)"""
+        try:
+            det = self.cfg.get("purple_popup_detect")
+            col = self.cfg.get("purple_popup_color")
+            cls = self.cfg.get("purple_popup_close")
+            if det and col and cls and not self._is_busy():
+                from PIL import ImageGrab
+                x, y = int(det[0]), int(det[1])
+                px = ImageGrab.grab(bbox=(x, y, x + 1, y + 1)).convert("RGB").getpixel((0, 0))
+                if (abs(px[0] - col[0]) <= 30 and abs(px[1] - col[1]) <= 30
+                        and abs(px[2] - col[2]) <= 30):
+                    p0 = pyautogui.position()
+                    time.sleep(0.15)
+                    if pyautogui.position() == p0:      # 마우스가 멈춰 있을 때만
+                        back = pyautogui.position()
+                        chk = self.cfg.get("purple_popup_checkbox")
+                        if chk:
+                            pyautogui.click(*chk); time.sleep(0.35)
+                        pyautogui.click(*cls); time.sleep(0.2)
+                        try: pyautogui.moveTo(*back)    # 커서 원위치
+                        except Exception: pass
+                        self.status.set("✔ 퍼플 팝업 자동으로 닫음")
+        except Exception:
+            pass
+        self.after(2000, self._purple_popup_tick)
 
     def _auto_back_check(self, _e=None):
         """(2026-08-11) 메인런처 말고 다른 창(리니지M 클라·바탕화면 등)이 앞으로 오면
