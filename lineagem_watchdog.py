@@ -1,6 +1,6 @@
 """
 lineagem_watchdog.py
-7시간마다 실행 — 메인런처가 꺼져 있으면 켜고 최소화
+메인런처가 꺼져 있으면 켜고 '맨 뒤'로 보낸다 (최소화하지 않음)
 """
 import subprocess, sys, os, time
 import win32gui, win32con
@@ -33,12 +33,18 @@ def main():
     # 런처 실행
     subprocess.Popen([PYW, LAUNCHER])
 
-    # 창 뜰 때까지 대기 후 최소화
+    # 창이 뜨면 최소화하지 않고 '맨 뒤'로만 보낸다 (2026-08-11 사용자 지시)
+    # — 최소화하면 작업표시줄에서 다시 꺼내야 해서 불편하다
     for _ in range(30):
         time.sleep(1)
         hwnd = find_launcher_hwnd()
         if hwnd:
-            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+            try:
+                win32gui.SetWindowPos(hwnd, win32con.HWND_BOTTOM, 0, 0, 0, 0,
+                                      win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+                                      | win32con.SWP_NOACTIVATE)
+            except Exception:
+                pass
             break
 
 
