@@ -3329,6 +3329,7 @@ class App(tk.Tk):
         (버튼 위치가 틀어지거나 반응이 이상할 때 한 번 눌러 초기화)"""
         self.status.set("🔄 런처를 다시 시작합니다...")
         try:
+            import sys          # 이 파일은 sys 를 전역으로 import 하지 않는다
             pyw = sys.executable
             if pyw.lower().endswith("python.exe"):
                 pyw = pyw[:-10] + "pythonw.exe"
