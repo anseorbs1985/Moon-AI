@@ -508,11 +508,19 @@ def load_cfg():
         for s_ in cl:
             c = s_.get("coords", [None]*CIRCUS_CLICKS) if isinstance(s_, dict) else [None]*CIRCUS_CLICKS
             while len(c) < CIRCUS_CLICKS: c.append(None)
+            _g = (s_.get("gap_list") or []) if isinstance(s_, dict) else []
+            _w = (s_.get("wheel_list") or []) if isinstance(s_, dict) else []
+            while len(_g) < CIRCUS_CLICKS: _g.append(None)
+            while len(_w) < CIRCUS_CLICKS: _w.append(0)
             ncl.append({"name": s_.get("name", "미등록") if isinstance(s_, dict) else "미등록",
                         "coords": c[:CIRCUS_CLICKS],
+                        "gap_list": _g[:CIRCUS_CLICKS],      # 칸마다 다음 좌표까지 기다릴 초
+                        "wheel_list": _w[:CIRCUS_CLICKS],    # 칸마다 휠 굴릴 칸수 (0=클릭)
                         "enabled": s_.get("enabled", True) if isinstance(s_, dict) else True})
         while len(ncl) < CIRCUS_SLOTS:
-            ncl.append({"name": "미등록", "coords": [None]*CIRCUS_CLICKS, "enabled": True})
+            ncl.append({"name": "미등록", "coords": [None]*CIRCUS_CLICKS,
+                        "gap_list": [None]*CIRCUS_CLICKS,
+                        "wheel_list": [0]*CIRCUS_CLICKS, "enabled": True})
         cfg["circus_slots"] = ncl[:CIRCUS_SLOTS]
         # doll_slots (인형 탐험 16슬롯 × 18좌표)
         dl, ndl = cfg.get("doll_slots", []), []
@@ -3159,15 +3167,43 @@ class App(tk.Tk):
         self.after(300, lambda: threading.Thread(
             target=self._run_task, args=(title, lambda: self._run_dgn2(fkey)), daemon=True).start())
 
-    def _do_click_or_wheel(self, fkey, j, coord):
-        """그 자리가 '휠 올리기'로 지정돼 있으면 클릭 대신 휠을 위로 굴린다."""
-        if j in WHEEL_UP_INDICES.get(fkey, ()):
+    @staticmethod
+    def _slot_wheel(slot, j):
+        """이 칸에 지정된 휠 칸수 (0이면 그냥 클릭)."""
+        try:
+            wl = slot.get("wheel_list") or []
+            return int(wl[j]) if j < len(wl) and wl[j] else 0
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _slot_gap(slot, j, default=None):
+        """이 칸에 지정된 '다음 좌표까지 기다릴 초' — 없으면 None."""
+        try:
+            gl = slot.get("gap_list") or []
+            v = gl[j] if j < len(gl) else None
+            if v in (None, ""):
+                return default
+            t = str(v).strip()
+            if "~" in t:                      # '2~4' 처럼 범위도 허용
+                a_, b_ = t.split("~")
+                return random.uniform(float(a_), float(b_))
+            return float(t)
+        except Exception:
+            return default
+
+    def _do_click_or_wheel(self, fkey, j, coord, slot=None):
+        """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다."""
+        n = self._slot_wheel(slot, j) if slot else 0
+        if not n and j in WHEEL_UP_INDICES.get(fkey, ()):
+            n = WHEEL_UP_NOTCH                # 슬롯 설정이 없으면 기본값
+        if n:
             pyautogui.moveTo(*coord)
             time.sleep(0.08)
             for _ in range(WHEEL_UP_TIMES):
-                pyautogui.scroll(WHEEL_UP_NOTCH)     # 양수 = 위로
+                pyautogui.scroll(n)           # 양수 = 위로
                 time.sleep(random.uniform(0.12, 0.25))
-            return "휠▲"
+            return f"휠▲{n}"
         pyautogui.click(*coord)
         return "클릭"
 
@@ -3212,10 +3248,11 @@ class App(tk.Tk):
             if not self._wait_mouse_idle(stop): return
             if getattr(self, stop, False): break
             name = st["slot"].get("name", f"#{si+1}")
-            _act = self._do_click_or_wheel(fkey, j, coords[j])
+            _act = self._do_click_or_wheel(fkey, j, coords[j], st["slot"])
             self.status.set(f"{icon} [{name}] {_act}{j+1}/{nclk}  (남은 슬롯 {len(alive)})")
             done += 1
-            st["due"] = time.time() + random.uniform(*gap)
+            _g = self._slot_gap(st["slot"], j)          # 칸에 적어둔 초가 있으면 그걸로
+            st["due"] = time.time() + (_g if _g is not None else random.uniform(*gap))
             time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
         self.status.set(f"{icon} 번갈아 실행 완료 — 클릭 {done}회")
 
@@ -3261,7 +3298,7 @@ class App(tk.Tk):
                     if getattr(self, stop, False):
                         if fkey == "coupon": self._coupon_log(f"멈춤 플래그로 중단 (클릭{j+1} 직전)")
                         break
-                    _act = self._do_click_or_wheel(fkey, j, coords[j])
+                    _act = self._do_click_or_wheel(fkey, j, coords[j], slot)
                     self.status.set(f"{icon} [{name}] {_act}{j+1}...")
                     if fkey == "coupon":
                         self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
@@ -7234,6 +7271,7 @@ class App(tk.Tk):
                             prev=lambda i: self._preview_dgn2("eventshop", i),
                             delete=lambda i: self._del_dgn2("eventshop", i)),
             "circus":  dict(title="서커스이벤트", key="circus_slots", clicks=CIRCUS_CLICKS, color="#7d3c98",
+                            opts=True,        # 칸마다 간격(초)·휠칸수 직접 지정
                             reg=lambda s, c: self._reg_dgn2_click("circus", s, c),
                             test=lambda i: self._test_dgn2("circus", i),
                             prev=lambda i: self._preview_dgn2("circus", i),
@@ -7328,6 +7366,26 @@ class App(tk.Tk):
             b = tk.Button(cc, textvariable=cv, font=("맑은 고딕", 8), width=4, pady=2,
                           bg="#27ae60" if on else "#7f8c8d", fg="white", command=cmd)
             b.pack(); st["pop_btns"].append(b)
+            if sp.get("opts"):
+                # ㅡ 칸: 다음 좌표까지 기다릴 초 (비우면 기본), 아래는 휠 굴릴 칸수(0=클릭)
+                gl = slot.get("gap_list") or []
+                gv = tk.StringVar(value=(str(gl[j]) if j < len(gl) and gl[j] not in (None, "") else ""))
+                ge = tk.Entry(cc, textvariable=gv, font=("맑은 고딕", 7), width=4,
+                              justify="center", relief="solid", bd=1)
+                ge.pack(pady=(1, 0))
+                def _sv_gap(*_a, x=idx, c=j, v=gv, f=fkey):
+                    self._grid_set_list(f, x, "gap_list", c, v.get().strip())
+                gv.trace_add("write", _sv_gap)
+                wl = slot.get("wheel_list") or []
+                wv = tk.StringVar(value=(str(wl[j]) if j < len(wl) and wl[j] else "0"))
+                om = tk.OptionMenu(cc, wv, *[str(k) for k in range(10)])
+                om.config(font=("맑은 고딕", 7), width=1, pady=0, highlightthickness=0)
+                om.pack(pady=(1, 0))
+                def _sv_wheel(*_a, x=idx, c=j, v=wv, f=fkey):
+                    try: n = int(v.get())
+                    except Exception: n = 0
+                    self._grid_set_list(f, x, "wheel_list", c, n)
+                wv.trace_add("write", _sv_wheel)
         bot = tk.Frame(win); bot.pack(pady=(4, 10))
         if sp.get("assign"):
             tk.Button(bot, text="🖥 창 지정", font=("맑은 고딕", 8), bg="#8e44ad", fg="white",
@@ -7337,6 +7395,20 @@ class App(tk.Tk):
         tk.Button(bot, text="× 전체삭제", font=("맑은 고딕", 8), fg="white", bg="#c0392b",
                   command=lambda: sp["delete"](idx)).pack(side="left", padx=3)
         tk.Button(bot, text="닫기", font=("맑은 고딕", 8), command=win.destroy).pack(side="left", padx=3)
+
+    def _grid_set_list(self, fkey, idx, field, j, val):
+        """슬롯의 gap_list / wheel_list 같은 '칸별 값'을 저장한다."""
+        try:
+            sp = self._grid_spec(fkey)
+            slot = self.cfg[sp["key"]][idx]
+            lst = list(slot.get(field) or [])
+            while len(lst) < sp["clicks"]:
+                lst.append(None if field == "gap_list" else 0)
+            lst[j] = val
+            slot[field] = lst
+            save_cfg(self.cfg)
+        except Exception:
+            pass
 
     def _refresh_slot_grids(self, only=None):
         """그리드 셀(좌표 개수·ON/OFF)과 열린 등록 팝업(✔/✗) 갱신."""
