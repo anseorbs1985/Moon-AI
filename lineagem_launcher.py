@@ -724,6 +724,7 @@ class App(tk.Tk):
         self.after(1000, self._past_scheduler_tick)
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
         self.after(2000, self._queue_tick)               # 실행 대기열 순차 처리
+        self.after(3000, self._auto_back_tick)           # 다른 창을 클릭하면 런처를 바로 맨 뒤로
         self.after(20000, self._island_repeat_tick)      # 섬/던전 슬롯 반복(2h N회) 관리
         # (자동 업데이트는 사용자 요청으로 비활성 — 업데이트는 🔄 버튼으로 수동 실행)
         # (2026-08-07 사용자 지시) 새벽 4시 퍼플 자동 확인·전환 사용 안 함 — 틱 미실행
@@ -4260,6 +4261,25 @@ class App(tk.Tk):
                 self.after(150, lambda: self._align_tj_to_dc(_tries + 1))
         except Exception:
             pass
+
+    def _auto_back_tick(self):
+        """(2026-08-11) 메인런처 말고 다른 창(리니지M 클라·바탕화면 등)을 클릭하면
+        기다리지 않고 바로 '맨 뒤'로 보낸다 — 클라를 가리지 않게."""
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            fg = u.GetForegroundWindow()
+            pid = ctypes.c_ulong()
+            u.GetWindowThreadProcessId(fg, ctypes.byref(pid))
+            mine = (pid.value == os.getpid())
+            if mine:
+                self._auto_back_done = 0        # 내 창을 보고 있으면 그대로 둔다
+            elif self.state() == "normal" and fg and fg != getattr(self, "_auto_back_done", 0):
+                self._auto_back_done = fg       # 같은 창에 대해 한 번만
+                self._send_to_back()
+        except Exception:
+            pass
+        self.after(1200, self._auto_back_tick)
 
     def _raise_on_click(self, e=None):
         """메인런처 안 아무 곳(빈 곳 포함)이나 클릭하면 창을 앞으로 올린다."""
