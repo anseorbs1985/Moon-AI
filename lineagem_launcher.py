@@ -3198,10 +3198,16 @@ class App(tk.Tk):
         if not n and j in WHEEL_UP_INDICES.get(fkey, ()):
             n = WHEEL_UP_NOTCH                # 슬롯 설정이 없으면 기본값
         if n:
+            # pyautogui.scroll(n) 은 윈도우에서 n을 '휠 델타 원시값'으로 넘겨서
+            # 1칸(=120)의 1/120 밖에 안 굴러간다 → 직접 120단위로 보낸다
+            import ctypes
             pyautogui.moveTo(*coord)
             time.sleep(0.08)
             for _ in range(WHEEL_UP_TIMES):
-                pyautogui.scroll(n)           # 양수 = 위로
+                try:
+                    ctypes.windll.user32.mouse_event(0x0800, 0, 0, int(n) * 120, 0)
+                except Exception:
+                    pyautogui.scroll(int(n) * 120)
                 time.sleep(random.uniform(0.12, 0.25))
             return f"휠▲{n}"
         pyautogui.click(*coord)
