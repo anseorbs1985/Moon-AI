@@ -3325,24 +3325,40 @@ class App(tk.Tk):
         super().deiconify()
 
     def _restart_launcher(self):
-        """[🔄 런처재시작] — 런처를 껐다가 바로 다시 켠다.
+        """[🔄 런처재시작] — 런처를 확실히 껐다가 다시 켠다.
         (버튼 위치가 틀어지거나 반응이 이상할 때 한 번 눌러 초기화)"""
         self.status.set("🔄 런처를 다시 시작합니다...")
         try:
-            pyw = sys.executable.replace("python.exe", "pythonw.exe")
+            pyw = sys.executable
+            if pyw.lower().endswith("python.exe"):
+                pyw = pyw[:-10] + "pythonw.exe"
             me = os.path.join(BASE, "lineagem_launcher.py")
-            ps = ("Start-Sleep -Milliseconds 1500; "
+            # 이 프로세스가 죽은 뒤 확실히 다시 띄운다 —
+            # 20초 동안 지켜보며 안 떠 있으면 직접 실행 (워치독 실패해도 살아남)
+            ps = ("Start-Sleep -Milliseconds 1200; "
                   "schtasks /Run /TN 'LineageM_Watchdog' | Out-Null; "
-                  "Start-Sleep -Seconds 5; "
+                  "for ($i=0; $i -lt 20; $i++) { "
+                  "  Start-Sleep -Seconds 1; "
+                  "  $p = Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe'\" | "
+                  "       Where-Object { $_.CommandLine -like '*lineagem_launcher*' }; "
+                  "  if ($p) { break } "
+                  "}; "
                   "$p = Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe'\" | "
-                  "Where-Object { $_.CommandLine -like '*lineagem_launcher*' }; "
+                  "     Where-Object { $_.CommandLine -like '*lineagem_launcher*' }; "
                   f"if (-not $p) {{ Start-Process -FilePath '{pyw}' -ArgumentList '{me}' }}")
-            subprocess.Popen(["powershell", "-NoProfile", "-Command", ps],
-                             creationflags=0x08000000)
+            subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden",
+                              "-Command", ps], creationflags=0x08000000)
         except Exception as e:
             self.status.set(f"재시작 준비 실패: {e}")
             return
-        self.after(600, self.destroy)
+
+        def _bye():
+            try:
+                self.destroy()
+            except Exception:
+                pass
+            os._exit(0)          # tkinter 정리에서 막히지 않게 확실히 종료
+        self.after(600, _bye)
 
     def _raise_claude(self):
         import win32gui, win32con
