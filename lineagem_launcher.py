@@ -157,6 +157,10 @@ FISH_SLOTS     = 16    # 낚시녹임 슬롯 수 (인형탐험과 동일 구조)
 FISH_CLICKS    = 18    # 낚시녹임 좌표 수
 CIRCUS_SLOTS   = 16    # 서커스이벤트 슬롯 수 (낚시녹임과 동일 구조)
 CIRCUS_CLICKS  = 8     # 서커스이벤트 좌표 수
+# 클릭 대신 '마우스 휠 올리기'를 할 자리 (던전키: {0부터 센 클릭번호})
+WHEEL_UP_INDICES = {"circus": {4}}     # 서커스이벤트 클릭5 = 휠 위로
+WHEEL_UP_NOTCH  = 3    # 한 번에 굴릴 칸 수
+WHEEL_UP_TIMES  = 3    # 몇 번 굴릴지
 DOLL_SLOTS     = 16    # 인형 탐험 슬롯 수
 DOLL_CLICKS    = 18    # 각 슬롯 좌표(클릭) 수
 DOLL_MIN       = 2.0   # 슬롯 안 좌표 간 클릭 간격(초) — 2~3초 (1·2·3번 모두)
@@ -3155,6 +3159,18 @@ class App(tk.Tk):
         self.after(300, lambda: threading.Thread(
             target=self._run_task, args=(title, lambda: self._run_dgn2(fkey)), daemon=True).start())
 
+    def _do_click_or_wheel(self, fkey, j, coord):
+        """그 자리가 '휠 올리기'로 지정돼 있으면 클릭 대신 휠을 위로 굴린다."""
+        if j in WHEEL_UP_INDICES.get(fkey, ()):
+            pyautogui.moveTo(*coord)
+            time.sleep(0.08)
+            for _ in range(WHEEL_UP_TIMES):
+                pyautogui.scroll(WHEEL_UP_NOTCH)     # 양수 = 위로
+                time.sleep(random.uniform(0.12, 0.25))
+            return "휠▲"
+        pyautogui.click(*coord)
+        return "클릭"
+
     def _run_dgn2_wave(self, fkey, targets, nclk, icon, stop, lanes=4, gap=(2.0, 4.0)):
         """번갈아(웨이브) 실행 — 동시 lanes개 슬롯을 섞어가며 클릭 하나씩.
         각 좌표 사이 간격은 slot마다 따로 흐르고 gap 범위에서 랜덤."""
@@ -3196,8 +3212,8 @@ class App(tk.Tk):
             if not self._wait_mouse_idle(stop): return
             if getattr(self, stop, False): break
             name = st["slot"].get("name", f"#{si+1}")
-            self.status.set(f"{icon} [{name}] 클릭{j+1}/{nclk}  (남은 슬롯 {len(alive)})")
-            pyautogui.click(*coords[j])
+            _act = self._do_click_or_wheel(fkey, j, coords[j])
+            self.status.set(f"{icon} [{name}] {_act}{j+1}/{nclk}  (남은 슬롯 {len(alive)})")
             done += 1
             st["due"] = time.time() + random.uniform(*gap)
             time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
@@ -3245,8 +3261,8 @@ class App(tk.Tk):
                     if getattr(self, stop, False):
                         if fkey == "coupon": self._coupon_log(f"멈춤 플래그로 중단 (클릭{j+1} 직전)")
                         break
-                    self.status.set(f"{icon} [{name}] 클릭{j+1}...")
-                    pyautogui.click(*coords[j])
+                    _act = self._do_click_or_wheel(fkey, j, coords[j])
+                    self.status.set(f"{icon} [{name}] {_act}{j+1}...")
                     if fkey == "coupon":
                         self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
                     if fkey == "coupon" and j == paste_after:
