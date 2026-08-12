@@ -3220,7 +3220,8 @@ class App(tk.Tk):
         pyautogui.click(*coord)
         return "클릭"
 
-    def _run_dgn2_wave(self, fkey, targets, nclk, icon, stop, lanes=4, gap=(2.0, 4.0)):
+    def _run_dgn2_wave(self, fkey, targets, nclk, icon, stop, lanes=4, gap=(2.0, 4.0),
+                       slow=(1.0, 1.0), slot_gap=(0.5, 3.0)):
         """번갈아(웨이브) 실행 — 동시 lanes개 슬롯을 섞어가며 클릭 하나씩.
         각 좌표 사이 간격은 slot마다 따로 흐르고 gap 범위에서 랜덤."""
         state = {si: {"slot": sl, "j": 0, "due": time.time() + random.uniform(0, 6.0)}
@@ -3236,7 +3237,9 @@ class App(tk.Tk):
                 active.remove(si)
                 if waiting:
                     nx = waiting.pop(0)
-                    state[nx]["due"] = time.time() + random.uniform(0.5, 3.0)
+                    # 슬롯이 새로 들어올 때도 넉넉히 (10~20% 할증)
+                    state[nx]["due"] = (time.time() + random.uniform(*slot_gap)
+                                        * random.uniform(*slow))
                     active.append(nx)
             alive = [si for si in active if state[si]["j"] < nclk]
             if not alive:
@@ -3265,7 +3268,8 @@ class App(tk.Tk):
             self.status.set(f"{icon} [{name}] {_act}{j+1}/{nclk}  (남은 슬롯 {len(alive)})")
             done += 1
             _g = self._slot_gap(st["slot"], j)          # 칸에 적어둔 초가 있으면 그걸로
-            st["due"] = time.time() + (_g if _g is not None else random.uniform(*gap))
+            _base = _g if _g is not None else random.uniform(*gap)
+            st["due"] = time.time() + _base * random.uniform(*slow)   # 10~20% 할증
             time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
         self.status.set(f"{icon} 번갈아 실행 완료 — 클릭 {done}회")
 
@@ -3288,7 +3292,12 @@ class App(tk.Tk):
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
                 random.shuffle(targets)   # 슬롯 클릭 순서 매번 랜덤
-            if fkey in ("fish", "circus") and slot_idx is None and len(targets) > 1:
+            if fkey == "circus" and slot_idx is None and len(targets) > 1:
+                # 서커스이벤트: 동시 2슬롯, 간격·슬롯투입 모두 10~20% 할증
+                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
+                                    slow=(1.10, 1.20), slot_gap=(3.0, 6.0))
+                return
+            if fkey in ("fish",) and slot_idx is None and len(targets) > 1:
                 # 낚시녹임은 번갈아(웨이브) 실행 — 동시 4슬롯, 좌표 간격 2~4초 랜덤
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop)
                 return
