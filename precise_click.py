@@ -112,3 +112,43 @@ def install(pyautogui):
     pyautogui.moveTo = moveTo
     pyautogui.mouseDown = mouseDown
     pyautogui.mouseUp = mouseUp
+
+# ── 커서를 전혀 움직이지 않는 클릭 (창에 메시지로 직접 전달) ──────────────
+# 사용자가 마우스를 쓰는 동안에도 겹치지 않는다. 다만 게임이 이런 '가짜 입력'을
+# 받아주는지는 프로그램마다 달라서, 반드시 먼저 테스트해보고 써야 한다.
+def post_click(x, y, double=False):
+    """화면 좌표 (x, y) 에 있는 창에 클릭 메시지를 보낸다. 커서는 그대로 둔다.
+    보낸 창을 찾지 못하면 False."""
+    u = ctypes.windll.user32
+    pt = ctypes.wintypes.POINT(int(x), int(y))
+    hwnd = u.WindowFromPoint(pt)
+    if not hwnd:
+        return False
+    cpt = ctypes.wintypes.POINT(int(x), int(y))
+    u.ScreenToClient(hwnd, ctypes.byref(cpt))
+    lp = ((cpt.y & 0xFFFF) << 16) | (cpt.x & 0xFFFF)
+    WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0200, 0x0201, 0x0202
+    MK_LBUTTON = 0x0001
+    u.PostMessageW(hwnd, WM_MOUSEMOVE, 0, lp)
+    u.PostMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp)
+    time.sleep(0.04)
+    u.PostMessageW(hwnd, WM_LBUTTONUP, 0, lp)
+    if double:
+        time.sleep(0.06)
+        u.PostMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp)
+        time.sleep(0.04)
+        u.PostMessageW(hwnd, WM_LBUTTONUP, 0, lp)
+    return True
+
+
+def post_wheel(x, y, notches):
+    """커서를 옮기지 않고 그 자리에 휠을 굴린다 (양수=위로)."""
+    u = ctypes.windll.user32
+    pt = ctypes.wintypes.POINT(int(x), int(y))
+    hwnd = u.WindowFromPoint(pt)
+    if not hwnd:
+        return False
+    lp = ((int(y) & 0xFFFF) << 16) | (int(x) & 0xFFFF)   # 휠은 화면 좌표
+    wp = (int(notches) * 120) << 16
+    u.PostMessageW(hwnd, 0x020A, wp, lp)                  # WM_MOUSEWHEEL
+    return True

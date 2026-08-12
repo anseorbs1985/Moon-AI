@@ -3557,6 +3557,22 @@ class App(tk.Tk):
                 return i
         return 0
 
+    def _test_post_click(self):
+        """커서를 움직이지 않고 '지금 커서가 있는 자리'에 클릭 메시지만 보내본다.
+        게임이 이 방식을 받아주는지 확인용 — 되면 실행에도 쓸 수 있다."""
+        self.status.set("🖱 3초 뒤 커서 위치에 '커서 없이 클릭'을 보냅니다 — 게임 버튼 위에 올려두세요")
+
+        def _go():
+            try:
+                import precise_click as _pc
+                x, y = pyautogui.position()
+                ok = _pc.post_click(x, y)
+                self.status.set(f"🖱 ({x},{y}) 로 클릭 메시지 전송 {'성공' if ok else '실패(창 못 찾음)'} "
+                                f"— 게임이 반응했는지 확인해주세요")
+            except Exception as e:
+                self.status.set(f"🖱 테스트 오류: {e}")
+        self.after(3000, _go)
+
     def _reg_check_area(self):
         """경고가 '떠 있는 상태'의 01번 클라 화면에서 그 자리를 드래그해 등록."""
         rects = self._client_rects_by_slot()
@@ -5897,6 +5913,15 @@ class App(tk.Tk):
                   command=self._check_scan).pack(side="left", padx=(4, 0))
         tk.Label(parent, text="(경고가 떠 있는 01번 클라 화면에서 그 자리를 드래그해 등록 · "
                               "F11을 누를 때마다 16개를 확인합니다)",
+                 font=("맑은 고딕", 7), fg="#888").pack(anchor="w", padx=6)
+        _cr = tk.Frame(parent); _cr.pack(fill="x", padx=6, pady=(4, 0))
+        tk.Label(_cr, text="🖱 커서 없이 클릭:", font=("맑은 고딕", 8, "bold"),
+                 fg="#1a5276").pack(side="left")
+        tk.Button(_cr, text="3초 뒤 커서 위치로 테스트", font=("맑은 고딕", 8, "bold"),
+                  bg="#1a5276", fg="white",
+                  command=self._test_post_click).pack(side="left", padx=(4, 0))
+        tk.Label(parent, text="(게임 버튼 위에 마우스를 올려두고 누르세요 · 커서를 움직이지 않고 "
+                              "그 자리에 클릭 메시지만 보냅니다 — 게임이 반응하면 성공)",
                  font=("맑은 고딕", 7), fg="#888").pack(anchor="w", padx=6)
         tk.Label(parent, text="절전해제 — 단축키를 누르면 순서대로 1회씩",
                  font=("맑은 고딕", 9, "bold"), fg="#5b2c6f").pack(pady=(6, 2))
