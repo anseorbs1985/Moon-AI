@@ -3,6 +3,7 @@
   "keys": [
     "fish_slots",
     "potion_area_rel",
-    "check_area_rel"
+    "check_area_rel",
+    "circus_slots"
   ]
 }
