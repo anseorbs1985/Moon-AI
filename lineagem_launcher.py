@@ -730,7 +730,9 @@ class App(tk.Tk):
         self._sched_any_stop = False
         self._mail_on      = bool(self.cfg.get("mail_on", False))   # 우편 스케줄 — 기본 꺼짐(사용자 요청), 토글로 켜면 유지
         self._mail_triggered_date = None
-        self._past_triggered_date = None
+        # (2026-08-13) '오늘 이미 돌렸다'를 파일에 남긴다 —
+        # 런처를 재시작해도 기억이 지워지지 않아 하루 두 번 도는 사고를 막는다
+        self._past_triggered_date = self._past_ran_load()
         self._purple_triggered_date = None
         self._win_lock     = WindowSizeLock()
         self._hp_stop      = False
@@ -8659,6 +8661,29 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    @staticmethod
+    def _past_ran_path():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "past_ran.json")
+
+    def _past_ran_load(self):
+        """마지막으로 과거섬 스케줄을 실행한 날짜 (없으면 None)."""
+        try:
+            import datetime
+            with open(self._past_ran_path(), encoding="utf-8") as f:
+                v = (json.load(f) or {}).get("date")
+            return datetime.date.fromisoformat(v) if v else None
+        except Exception:
+            return None
+
+    def _past_ran_save(self, day):
+        try:
+            with open(self._past_ran_path(), "w", encoding="utf-8") as f:
+                json.dump({"date": day.isoformat()}, f)
+        except Exception:
+            pass
+
     def _past_scheduler_tick(self):
         import datetime
         now = datetime.datetime.now()
@@ -10393,6 +10418,7 @@ class App(tk.Tk):
             self._enqueue_front("과거섬(스케줄)", self._start_past_scheduled)
             return
         self._past_triggered_date = today
+        self._past_ran_save(today)          # 재시작해도 오늘 또 돌지 않게 기록
         self._busy_task = "과거섬(스케줄)"
         threading.Thread(target=self._run_task,
             args=("과거섬(스케줄)", self._run_past_scheduled), daemon=True).start()
