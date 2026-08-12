@@ -571,6 +571,25 @@ def find_purple():
     return None
 
 
+# 커서를 움직이지 않는 클릭 사용 여부 (2026-08-11)
+NO_CURSOR_CLICK = True
+
+
+def click_at(x, y):
+    """좌표 클릭 — 기본은 '커서를 움직이지 않는' 방식(창에 메시지 전달).
+    실패하면 예전처럼 커서를 옮겨 클릭한다.
+    (드래그·방향키·녹화 재생은 커서가 필요해서 그대로 둔다)"""
+    if NO_CURSOR_CLICK:
+        try:
+            import precise_click as _pc
+            if _pc.post_click(x, y):
+                return "post"
+        except Exception:
+            pass
+    pyautogui.click(x, y)
+    return "cursor"
+
+
 def close_purple_popup_if_visible(cfg, status_fn=None):
     """Purple 팝업 감지 후 체크박스 → X 버튼 클릭으로 닫기.
     감지: X버튼 좌표의 픽셀이 등록된 색상과 일치할 때만 클릭.
@@ -3206,19 +3225,30 @@ class App(tk.Tk):
         if not n and j in WHEEL_UP_INDICES.get(fkey, ()):
             n = WHEEL_UP_NOTCH                # 슬롯 설정이 없으면 기본값
         if n:
-            # pyautogui.scroll(n) 은 윈도우에서 n을 '휠 델타 원시값'으로 넘겨서
-            # 1칸(=120)의 1/120 밖에 안 굴러간다 → 직접 120단위로 보낸다
+            # 휠도 커서를 옮기지 않고 그 자리에 메시지로 보낸다 (실패하면 예전 방식)
             import ctypes
-            pyautogui.moveTo(*coord)
-            time.sleep(0.08)
-            for _ in range(WHEEL_UP_TIMES):
+            sent = False
+            if NO_CURSOR_CLICK:
                 try:
-                    ctypes.windll.user32.mouse_event(0x0800, 0, 0, int(n) * 120, 0)
+                    import precise_click as _pc
+                    for _ in range(WHEEL_UP_TIMES):
+                        if not _pc.post_wheel(coord[0], coord[1], int(n)):
+                            sent = False; break
+                        sent = True
+                        time.sleep(random.uniform(0.12, 0.25))
                 except Exception:
-                    pyautogui.scroll(int(n) * 120)
-                time.sleep(random.uniform(0.12, 0.25))
+                    sent = False
+            if not sent:
+                pyautogui.moveTo(*coord)
+                time.sleep(0.08)
+                for _ in range(WHEEL_UP_TIMES):
+                    try:
+                        ctypes.windll.user32.mouse_event(0x0800, 0, 0, int(n) * 120, 0)
+                    except Exception:
+                        pyautogui.scroll(int(n) * 120)
+                    time.sleep(random.uniform(0.12, 0.25))
             return f"휠▲{n}"
-        pyautogui.click(*coord)
+        click_at(*coord)
         return "클릭"
 
     def _run_dgn2_wave(self, fkey, targets, nclk, icon, stop, lanes=4, gap=(2.0, 4.0),
@@ -7854,7 +7884,7 @@ class App(tk.Tk):
                 break
             name = st["slot"].get("name", f"#{si+1}")
             self.status.set(f"🧸 [{name}] 좌표 {j+1}/{len(st['coords'])} (남은 슬롯 {len(alive)})")
-            pyautogui.click(*coord)
+            click_at(*coord)
             done += 1
             st["due"] = time.time() + random.uniform(DOLL_MIN, DOLL_MAX)
             time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격

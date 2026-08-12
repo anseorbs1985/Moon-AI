@@ -167,6 +167,25 @@ def slow_factor():
     return random.uniform(SLOW_MIN, SLOW_MAX)
 
 
+# 커서를 움직이지 않는 클릭 사용 여부 (2026-08-11 — 마우스 조작과 겹치지 않게)
+NO_CURSOR_CLICK = True
+
+
+def click_at(x, y):
+    """좌표 클릭 — 기본은 '커서를 움직이지 않는' 방식(창에 메시지 전달).
+    실패하면 예전처럼 커서를 옮겨 클릭한다.
+    (드래그·방향키·녹화 재생은 커서가 필요해서 그대로 둔다)"""
+    if NO_CURSOR_CLICK:
+        try:
+            import precise_click as _pc
+            if _pc.post_click(x, y):
+                return "post"
+        except Exception:
+            pass
+    pyautogui.click(x, y)
+    return "cursor"
+
+
 def today():
     return datetime.date.today().isoformat()
 
@@ -2103,7 +2122,7 @@ class IslandApp(tk.Tk):
                     self._hold_arrow(d_[0], float(d_[1]), name)
                 elif c:
                     self._status.set(f"🏝 [{name}] {lbl} 클릭 테스트...")
-                    pyautogui.click(*c)
+                    click_at(*c)
                 else:
                     self._status.set(f"{lbl}: 등록된 좌표/동작이 없습니다"); return
                 if rec and not self._stop_flag:
@@ -2651,7 +2670,7 @@ class IslandApp(tk.Tk):
             if j in move_set:
                 pyautogui.moveTo(*c)
             else:
-                pyautogui.click(*c)
+                click_at(*c)
             did = True
         if rec and not self._stop_flag:
             self._play_events(rec, name)
@@ -2912,7 +2931,7 @@ class IslandApp(tk.Tk):
                         if j in move_set:
                             pyautogui.moveTo(*coords[j])
                         else:
-                            pyautogui.click(*coords[j])
+                            click_at(*coords[j])
                         did = True
                     if rec and not self._stop_flag:
                         # 녹화는 클릭과 별개 — 이 자리 동작 후 녹화 재생
