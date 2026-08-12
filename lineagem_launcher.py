@@ -1167,11 +1167,17 @@ class App(tk.Tk):
         tk.Button(tjcol, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
                   width=4, height=2, command=self._start_tj).pack(pady=(2, 0))
-        # 💬 클로드 앞으로 — TJ성공!! 바로 오른편에 붙임
-        tk.Button(btn_row, text="💬 클로드", font=("맑은 고딕", 8, "bold"),
+        # 💬 클로드 앞으로 + 그 아래 🔄 런처재시작 — TJ성공!! 바로 오른편에 붙임
+        cl_col = tk.Frame(btn_row); cl_col.pack(side="left", padx=(0, 41), anchor="n")
+        tk.Button(cl_col, text="💬 클로드", font=("맑은 고딕", 8, "bold"),
                   bg="#c0392b", fg="white", activebackground="#7b241c",
                   width=6, height=2,
-                  command=self._raise_claude).pack(side="left", padx=(0, 41), anchor="n")
+                  command=self._raise_claude).pack()
+        tk.Button(cl_col, text="🔄 런처" + chr(10) + "재시작",
+                  font=("맑은 고딕", 8, "bold"),
+                  bg="#2c3e50", fg="white", activebackground="#1b2631",
+                  width=6, height=2,
+                  command=self._restart_launcher).pack(pady=(2, 0))
         tk.Button(btn_row, text="🔑 계정\n관리",
             font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
             activebackground="#0e6655", width=7, height=2,
@@ -3317,6 +3323,26 @@ class App(tk.Tk):
         if getattr(self, "_running", False):
             return  # 자동실행 중에는 복원 차단
         super().deiconify()
+
+    def _restart_launcher(self):
+        """[🔄 런처재시작] — 런처를 껐다가 바로 다시 켠다.
+        (버튼 위치가 틀어지거나 반응이 이상할 때 한 번 눌러 초기화)"""
+        self.status.set("🔄 런처를 다시 시작합니다...")
+        try:
+            pyw = sys.executable.replace("python.exe", "pythonw.exe")
+            me = os.path.join(BASE, "lineagem_launcher.py")
+            ps = ("Start-Sleep -Milliseconds 1500; "
+                  "schtasks /Run /TN 'LineageM_Watchdog' | Out-Null; "
+                  "Start-Sleep -Seconds 5; "
+                  "$p = Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe'\" | "
+                  "Where-Object { $_.CommandLine -like '*lineagem_launcher*' }; "
+                  f"if (-not $p) {{ Start-Process -FilePath '{pyw}' -ArgumentList '{me}' }}")
+            subprocess.Popen(["powershell", "-NoProfile", "-Command", ps],
+                             creationflags=0x08000000)
+        except Exception as e:
+            self.status.set(f"재시작 준비 실패: {e}")
+            return
+        self.after(600, self.destroy)
 
     def _raise_claude(self):
         import win32gui, win32con
