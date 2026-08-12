@@ -155,6 +155,8 @@ DC_BURST_MIN   = 1.0   # 한 좌표의 7~9회 클릭을 이 시간(초) 안에 �
 DC_BURST_MAX   = 2.0
 FISH_SLOTS     = 16    # 낚시녹임 슬롯 수 (인형탐험과 동일 구조)
 FISH_CLICKS    = 18    # 낚시녹임 좌표 수
+CIRCUS_SLOTS   = 16    # 서커스이벤트 슬롯 수 (낚시녹임과 동일 구조)
+CIRCUS_CLICKS  = 8     # 서커스이벤트 좌표 수
 DOLL_SLOTS     = 16    # 인형 탐험 슬롯 수
 DOLL_CLICKS    = 18    # 각 슬롯 좌표(클릭) 수
 DOLL_MIN       = 2.0   # 슬롯 안 좌표 간 클릭 간격(초) — 2~3초 (1·2·3번 모두)
@@ -227,6 +229,8 @@ DEFAULT_CFG = {
                      for _ in range(DOLL_SLOTS)],   # 인형 탐험 (16슬롯 × 18좌표)
     "fish_slots":   [{"name": "미등록", "coords": [None]*FISH_CLICKS}
                      for _ in range(FISH_SLOTS)],   # 낚시녹임 (16슬롯 × 18좌표)
+    "circus_slots": [{"name": "미등록", "coords": [None]*CIRCUS_CLICKS}
+                     for _ in range(CIRCUS_SLOTS)], # 서커스이벤트 (16슬롯 × 8좌표)
     # 아이템 리롤(새로고침 매크로)
     "reroll_refresh_btn": None,   # 새로고침 버튼 좌표 [x,y]
     "reroll_confirm_btn": None,   # 발견 시 자동으로 누를 확인 버튼 좌표 [x,y]
@@ -495,6 +499,17 @@ def load_cfg():
         while len(nfl) < FISH_SLOTS:
             nfl.append({"name": "미등록", "coords": [None]*FISH_CLICKS, "enabled": True})
         cfg["fish_slots"] = nfl[:FISH_SLOTS]
+        # circus_slots (서커스이벤트 16슬롯 × 8좌표)
+        cl, ncl = cfg.get("circus_slots", []), []
+        for s_ in cl:
+            c = s_.get("coords", [None]*CIRCUS_CLICKS) if isinstance(s_, dict) else [None]*CIRCUS_CLICKS
+            while len(c) < CIRCUS_CLICKS: c.append(None)
+            ncl.append({"name": s_.get("name", "미등록") if isinstance(s_, dict) else "미등록",
+                        "coords": c[:CIRCUS_CLICKS],
+                        "enabled": s_.get("enabled", True) if isinstance(s_, dict) else True})
+        while len(ncl) < CIRCUS_SLOTS:
+            ncl.append({"name": "미등록", "coords": [None]*CIRCUS_CLICKS, "enabled": True})
+        cfg["circus_slots"] = ncl[:CIRCUS_SLOTS]
         # doll_slots (인형 탐험 16슬롯 × 18좌표)
         dl, ndl = cfg.get("doll_slots", []), []
         for s in dl:
@@ -698,6 +713,7 @@ class App(tk.Tk):
         self._item_stop    = False
         self._dollchk_stop = False
         self._fish_stop = False
+        self._circus_stop = False
         self._relic_stop   = False
         self._coupon_stop  = False
         self._eventshop_stop = False
@@ -1363,7 +1379,8 @@ class App(tk.Tk):
         for _t, _bg, _open, _run in (
                 ("🏰 변신\n확인용", "#d35400", self._open_dungeon_win, self._start_dungeon),
                 ("🧸 인형\n확인용", "#b9770e", self._open_dollchk_win, lambda: self._start_dgn2("dollchk")),
-                ("🗿 성물\n확인용", "#117864", self._open_relic_win,   lambda: self._start_dgn2("relic"))):
+                ("🗿 성물\n확인용", "#117864", self._open_relic_win,   lambda: self._start_dgn2("relic")),
+                ("🎪 서커스\n이벤트", "#7d3c98", self._open_circus_win, lambda: self._start_dgn2("circus"))):
             rr = tk.Frame(chk_col); rr.pack(anchor="n", pady=(0,4))
             tk.Button(rr, text=_t, font=("맑은 고딕", 9, "bold"), bg=_bg, fg="white",
                       width=7, height=2, command=_open).pack(side="left")
@@ -2927,7 +2944,8 @@ class App(tk.Tk):
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
                 "eventshop": ("eventshop_slots", "이벤트상점", "🛒"),
-                "fish":    ("fish_slots",    "낚시녹임",   "🎣")}[fkey]
+                "fish":    ("fish_slots",    "낚시녹임",   "🎣"),
+                "circus":  ("circus_slots",  "서커스이벤트", "🎪")}[fkey]
 
     def _open_coupon_win(self):
         self._open_section_win("_coupon_win", "🎟 쿠폰등록",
@@ -2940,6 +2958,10 @@ class App(tk.Tk):
     def _open_dollchk_win(self):
         self._open_section_win("_dollchk_win", "🧸 인형확인용",
                                lambda p: self._build_dgn2("dollchk", p), w=470, h=600, pinnable=True)
+
+    def _open_circus_win(self):
+        self._open_section_win("_circus_win", "🎪 서커스이벤트",
+                               lambda p: self._build_dgn2("circus", p), w=470, h=560, pinnable=True)
 
     def _open_fish_win(self):
         self._open_section_win("_fish_win", "🎣 낚시녹임",
@@ -3194,7 +3216,7 @@ class App(tk.Tk):
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
                 random.shuffle(targets)   # 슬롯 클릭 순서 매번 랜덤
-            if fkey == "fish" and slot_idx is None and len(targets) > 1:
+            if fkey in ("fish", "circus") and slot_idx is None and len(targets) > 1:
                 # 낚시녹임은 번갈아(웨이브) 실행 — 동시 4슬롯, 좌표 간격 2~4초 랜덤
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop)
                 return
@@ -7152,6 +7174,11 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("eventshop", i),
                             prev=lambda i: self._preview_dgn2("eventshop", i),
                             delete=lambda i: self._del_dgn2("eventshop", i)),
+            "circus":  dict(title="서커스이벤트", key="circus_slots", clicks=CIRCUS_CLICKS, color="#7d3c98",
+                            reg=lambda s, c: self._reg_dgn2_click("circus", s, c),
+                            test=lambda i: self._test_dgn2("circus", i),
+                            prev=lambda i: self._preview_dgn2("circus", i),
+                            delete=lambda i: self._del_dgn2("circus", i)),
             "fish":    dict(title="낚시녹임",  key="fish_slots",    clicks=FISH_CLICKS,    color="#1a5276",
                             reg=lambda s, c: self._reg_dgn2_click("fish", s, c),
                             test=lambda i: self._test_dgn2("fish", i),
@@ -9387,7 +9414,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_dollchk_win","_relic_win","_tj_win","_coupon_win","_fish_win",
+                 "_dollchk_win","_relic_win","_tj_win","_coupon_win","_fish_win","_circus_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs
@@ -10218,6 +10245,7 @@ class App(tk.Tk):
         self._coupon_stop    = True
         self._eventshop_stop = True
         self._fish_stop      = True
+        self._circus_stop    = True
         self._tj_stop        = True
         self._reroll_running = False  # 오림의일기장도 정지
         self._busy_task      = None   # 잠금 해제
