@@ -573,6 +573,12 @@ class IslandApp(tk.Tk):
         fg = getattr(self, "_fixed_geometry", None)
         if fg:                      # 잊혀진섬: 가로·위치는 지정값 유지, 높이만 내용에 맞춤
             wpart, rest = fg.split("x", 1)
+            # 칸 내용이 지정폭보다 넓어지면(층수·물약 표시 등) 글씨가 잘리므로 그만큼 넓힌다
+            try:
+                wpart = str(min(max(int(wpart), self.winfo_reqwidth() + 10),
+                                self.winfo_screenwidth() - 40))
+            except Exception:
+                pass
             pos = rest[rest.index("+"):] if "+" in rest else ""
             if pos:
                 _y = int(pos.split("+")[2])
@@ -807,8 +813,10 @@ class IslandApp(tk.Tk):
             if not hasattr(self, "_match_lbls"):
                 self._match_lbls = {}
             ml = tk.Label(parent, text="", font=("맑은 고딕", 13, "bold"),
-                          fg="white", bg="#7f8c8d", pady=3)
+                          fg="white", bg="#7f8c8d", pady=3, justify="center")
             ml.pack(fill="x", padx=4, pady=(2, 3))
+            ml.bind("<Configure>",
+                    lambda e, l=ml: l.config(wraplength=max(150, e.width - 12)))
             self._match_lbls[key] = ml
         _stretch = bool(getattr(self, "_fixed_geometry", None))
         wg = tk.Frame(parent)
@@ -846,12 +854,12 @@ class IslandApp(tk.Tk):
             # 📜 주문서 층수 — 오만의탑만, 물약색 왼쪽에 숫자로 표시
             if "오만" in key:
                 sl = tk.Label(head, text="", font=("맑은 고딕", 7, "bold"),
-                              fg="white", bg=cell.cget("bg"), width=3, padx=1)
+                              fg="white", bg=cell.cget("bg"), padx=2)
                 sl.pack(side="left", padx=(0, 1))
                 self._scroll_lbls.setdefault(key, []).append(sl)
             # 🧪 물약색 — 메인런처에서 확인한 결과를 슬롯 번호 왼쪽에 그대로 표시
             pl = tk.Label(head, text="", font=("맑은 고딕", 7, "bold"),
-                          fg="white", bg=cell.cget("bg"), width=4, padx=1)
+                          fg="white", bg=cell.cget("bg"), padx=2)
             pl.pack(side="left", padx=(0, 2))
             self._potion_lbls.setdefault(key, []).append(pl)
             tk.Label(head, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"),
