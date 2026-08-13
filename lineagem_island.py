@@ -802,6 +802,14 @@ class IslandApp(tk.Tk):
         if not hasattr(self, "_cell_name_ents"):
             self._cell_name_ents = {}
         self._cell_name_ents[key] = []
+        # 🎯 주문서 층수 ↔ 슬롯에 고른 층 맞춤 결과 (오만의탑만)
+        if "오만" in key:
+            if not hasattr(self, "_match_lbls"):
+                self._match_lbls = {}
+            ml = tk.Label(parent, text="", font=("맑은 고딕", 13, "bold"),
+                          fg="white", bg="#7f8c8d", pady=3)
+            ml.pack(fill="x", padx=4, pady=(2, 3))
+            self._match_lbls[key] = ml
         _stretch = bool(getattr(self, "_fixed_geometry", None))
         wg = tk.Frame(parent)
         if _stretch:
@@ -1678,26 +1686,60 @@ class IslandApp(tk.Tk):
                      "6": "#2471a3", "7": "#8e44ad", "8": "#b7950b",
                      "9": "#16a085", "10": "#7f2ba8"}
 
+    @staticmethod
+    def _floor_of(name):
+        """'5층 빨갱이 82%' → '5' (층수가 없으면 빈 값)."""
+        import re
+        m = re.match(r"\s*(\d+)\s*층", str(name or ""))
+        return m.group(1) if m else ""
+
     def _scroll_apply(self):
-        """메인런처 [📜 주문서] 결과를 물약색 왼쪽에 'N층'으로 표시 (오만의탑)."""
+        """메인런처 [📜 주문서] 결과를 물약색 왼쪽에 'N층'으로 표시하고,
+        슬롯에 고른 층(이름의 'N층')과 같은지 맞춰본다 (오만의탑)."""
         try:
             with open(self._scroll_path(), encoding="utf-8") as f:
                 res = (json.load(f) or {}).get("slots") or {}
         except Exception:
             res = {}
         for key, lbls in (self._scroll_lbls or {}).items():
+            hit, miss, none = 0, [], 0
+            slots = self.cfg.get(key) or []
             for i, lb in enumerate(lbls):
                 try:
                     if not lb.winfo_exists():
                         continue
                     n = str(res.get(str(i + 1), "") or "").strip()
-                    if n:
-                        lb.config(text=f"{n}층", fg="white",
-                                  bg=self.SCROLL_COLORS.get(n, "#34495e"))
+                    if not n:
+                        lb.config(text="", bg=lb.master.cget("bg")); none += 1; continue
+                    want = self._floor_of(slots[i].get("name") if i < len(slots) else "")
+                    mark = ""
+                    if want:
+                        if want == n:
+                            mark = " \u2714"; hit += 1
+                        else:
+                            mark = " \u2716"; miss.append((i + 1, want, n))
                     else:
-                        lb.config(text="", bg=lb.master.cget("bg"))
+                        none += 1
+                    lb.config(text=f"{n}층{mark}", fg="white",
+                              bg=self.SCROLL_COLORS.get(n, "#34495e"))
                 except Exception:
                     pass
+            self._match_banner(key, hit, miss, none)
+
+    def _match_banner(self, key, hit, miss, none):
+        """맨 위에 크게 — 전부 맞으면 '정답!', 다르면 몇 번이 다른지."""
+        ml = (getattr(self, "_match_lbls", None) or {}).get(key)
+        if not (ml and ml.winfo_exists()):
+            return
+        if not hit and not miss:
+            ml.config(text="\U0001F4DC 주문서 층수 확인 전", bg="#7f8c8d")
+        elif not miss:
+            ml.config(text=f"\U0001F3AF 정답!  {hit}칸 전부 맞음", bg="#1e8449")
+        else:
+            t = ", ".join(f"{n}번({w}층↔{g}층)" for n, w, g in miss[:4])
+            if len(miss) > 4:
+                t += f" 외 {len(miss)-4}개"
+            ml.config(text=f"\u26a0 {len(miss)}칸 다름 — {t}", bg="#c0392b")
 
     def _potion_tick(self):
         """결과 파일이 새로 써지면 자동으로 표시를 갱신한다."""
@@ -1709,10 +1751,7 @@ class IslandApp(tk.Tk):
         except Exception:
             pass
         try:
-            m = os.path.getmtime(self._scroll_path())
-            if m != getattr(self, "_scroll_mtime", 0):
-                self._scroll_mtime = m
-                self._scroll_apply()
+            self._scroll_apply()      # 슬롯 이름(고른 층)이 바뀌어도 바로 반영되게
         except Exception:
             pass
         self.after(3000, self._potion_tick)
