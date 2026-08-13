@@ -3995,47 +3995,81 @@ class App(tk.Tk):
             pass
         self.status.set(f"🧪 빨강 {len(reds)}개 {reds or ''} / 주황 {len(oranges)}개 {oranges or ''}")
 
-    # ── 📜 주문서 층수 확인 (물약색과 같은 방식 — 영역 1번 등록, 16클라 동시) ──
+    # ── 📜 주문서 층수 확인 ──────────────────────────────────────────────
+    #   숫자가 5x8픽셀밖에 안 돼서 글자인식(OCR)으로는 못 읽는다.
+    #   → 한 번만 사람이 숫자를 적어주면 그 그림을 기억해뒀다가(scroll_digits)
+    #     다음부터는 그림을 맞대보고 같은 숫자를 찾아낸다. (경고확인과 같은 방식)
+    SCROLL_PAD = 3          # 잘라올 때 상하좌우로 더 두는 여유 (px)
+
+    @staticmethod
+    def _scroll_dir():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI", "scroll_digits")
+        os.makedirs(d, exist_ok=True)
+        return d
+
     def _open_scroll_win(self):
         self._open_section_win("_scroll_win", "\U0001F4DC 주문서 층수",
-                               self._build_scroll, w=470, h=430, pinnable=True)
+                               self._build_scroll, w=520, h=560, pinnable=True)
 
     def _build_scroll(self, parent):
         tk.Label(parent, text="\U0001F4DC 주문서 층수 확인  (16개 클라를 한 번에)",
                  font=("맑은 고딕", 10, "bold"), fg="#1a5276").pack(anchor="w", padx=6, pady=(6, 2))
-        tk.Label(parent, text="① [영역 지정]으로 주문서의 '층수 숫자' 자리를 한 번만 드래그해서 등록\n"
-                              "② [확인]을 누르면 16개 클라의 같은 자리 숫자를 읽어옵니다\n"
-                              "   → 오만의탑 실행기 슬롯의 물약색 왼쪽에 그 숫자가 표시됩니다",
+        tk.Label(parent, text="① [영역 지정]으로 주문서의 '층수 숫자' 자리만 드래그해서 한 번 등록\n"
+                              "② [확인] → 16개 클라의 같은 자리를 잘라와 아래에 보여줍니다\n"
+                              "③ 처음엔 못 읽으니 그림을 보고 칸에 숫자를 적고 [숫자 가르치기]\n"
+                              "   → 그 그림을 기억해서 다음부터는 저절로 읽습니다",
                  font=("맑은 고딕", 8), fg="#555", justify="left").pack(anchor="w", padx=6)
         row = tk.Frame(parent); row.pack(fill="x", padx=6, pady=6)
-        tk.Button(row, text="\U0001F4F7 영역 지정 (01번 기준)", font=("맑은 고딕", 9, "bold"),
+        tk.Button(row, text="\U0001F4F7 영역 지정", font=("맑은 고딕", 9, "bold"),
                   bg="#2471a3", fg="white", command=self._reg_scroll_area).pack(side="left")
         tk.Button(row, text="\U0001F50D 확인", font=("맑은 고딕", 9, "bold"),
-                  bg="#1a5276", fg="white", width=8,
+                  bg="#1a5276", fg="white", width=7,
                   command=self._scroll_check).pack(side="left", padx=(6, 0))
+        tk.Button(row, text="\U0001F4DD 숫자 가르치기", font=("맑은 고딕", 9, "bold"),
+                  bg="#117864", fg="white",
+                  command=self._scroll_teach).pack(side="left", padx=(6, 0))
         self._scroll_area_lbl = tk.Label(parent, text="", font=("맑은 고딕", 8), fg="#888")
         self._scroll_area_lbl.pack(anchor="w", padx=6)
         self._refresh_scroll_area_lbl()
 
         grid = tk.Frame(parent); grid.pack(padx=6, pady=6)
-        self._scroll_cells = []
+        self._scroll_imgs  = []          # 잘라온 그림을 보여주는 라벨
+        self._scroll_vars  = []          # 칸마다 숫자 입력
+        self._scroll_photos = []         # PhotoImage 보관 (안 하면 그림이 사라짐)
         for i in range(16):
             r, c = i % 4, i // 4
-            cell = tk.Frame(grid, bd=1, relief="groove", padx=4, pady=3, width=96)
+            cell = tk.Frame(grid, bd=1, relief="groove", padx=3, pady=2)
             cell.grid(row=r, column=c, padx=4, pady=4, sticky="we")
             tk.Label(cell, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"), fg="#555").pack()
-            lb = tk.Label(cell, text="\u2014", font=("맑은 고딕", 12, "bold"),
-                          fg="white", bg="#bdc3c7", width=6)
-            lb.pack()
-            self._scroll_cells.append(lb)
+            il = tk.Label(cell, bg="#222", width=8, height=3)
+            il.pack()
+            self._scroll_imgs.append(il)
+            self._scroll_photos.append(None)
+            v = tk.StringVar()
+            self._scroll_vars.append(v)
+            tk.Entry(cell, textvariable=v, font=("맑은 고딕", 10, "bold"), width=5,
+                     justify="center").pack(pady=(2, 1))
+        self.after(100, self._scroll_show_saved)
+
+    def _scroll_show_saved(self):
+        """지난번에 확인한 결과를 칸에 그대로 채워둔다."""
+        try:
+            with open(os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
+                                   "scroll_result.json"), encoding="utf-8") as f:
+                res = (json.load(f) or {}).get("slots") or {}
+            for i, v in enumerate(self._scroll_vars):
+                v.set(str(res.get(str(i + 1), "") or ""))
+        except Exception:
+            pass
 
     def _refresh_scroll_area_lbl(self):
         lb = getattr(self, "_scroll_area_lbl", None)
         if not lb or not lb.winfo_exists():
             return
         a = self.cfg.get("scroll_area_rel")
-        lb.config(text=(f"등록된 영역: 01번 클라 기준 ({a[0]},{a[1]}) 크기 {a[2]}x{a[3]}"
-                        if a else "등록된 영역 없음 — [영역 지정]을 먼저 눌러주세요"))
+        n = len([f for f in os.listdir(self._scroll_dir()) if f.endswith(".png")])
+        lb.config(text=((f"등록된 영역: ({a[0]},{a[1]}) 크기 {a[2]}x{a[3]}  /  기억한 숫자 {n}개"
+                         if a else "등록된 영역 없음 — [영역 지정]을 먼저 눌러주세요")))
 
     def _reg_scroll_area(self):
         rects = self._client_rects_by_slot()
@@ -4063,96 +4097,157 @@ class App(tk.Tk):
             self.status.set("\u26a0 클라이언트 16개 감지 실패"); return
         oi = self._rect_owner(rects, x, y)      # 어느 클라에서 찍었는지 자동 인식
         base = rects[oi]
-        self.cfg["scroll_area_rel"] = [x - base[0], y - base[1], w, h]
+        old = self.cfg.get("scroll_area_rel")
+        # 기준 클라의 창 크기도 함께 저장 — 클라마다 창이 몇 px씩 달라서
+        # 다른 클라에서는 그 비율만큼 자리를 옮겨 잘라야 같은 곳이 나온다
+        self.cfg["scroll_area_rel"] = [x - base[0], y - base[1], w, h,
+                                       base[2] - base[0], base[3] - base[1]]
         save_cfg(self.cfg)
+        if old and (old[2], old[3]) != (w, h):
+            # 영역 크기가 바뀌면 기억해둔 그림을 못 쓴다 — 다시 가르쳐야 한다
+            try:
+                for f in os.listdir(self._scroll_dir()):
+                    if f.endswith(".png"):
+                        os.remove(os.path.join(self._scroll_dir(), f))
+            except Exception:
+                pass
         self._refresh_scroll_area_lbl()
         self.status.set(f"\u2714 주문서 층수 영역 등록 — #{oi+1:02d} 클라 기준 "
-                        f"({x-base[0]},{y-base[1]}) {w}x{h}")
+                        f"({x-base[0]},{y-base[1]}) {w}x{h} — 이제 [확인]을 눌러주세요")
 
-    @staticmethod
-    def _read_digits(rd, im):
-        """작은 숫자 영역 → 숫자만 뽑아낸다 (밝은 글자·어두운 글자 둘 다 시도)."""
-        import numpy as np
-        from PIL import Image, ImageEnhance
-        g = im.convert("L").resize((im.width * 3, im.height * 3), Image.LANCZOS)
-        g = ImageEnhance.Contrast(g).enhance(2.5)
-        g = ImageEnhance.Sharpness(g).enhance(2.0)
-        base = np.array(g)
-        best, best_cf = "", 0.0
-        for arr in (base, 255 - base):
-            try:
-                res = rd.readtext(arr, detail=1, paragraph=False, allowlist="0123456789")
-            except Exception:
-                continue
-            ok = [(bb, t, cf) for bb, t, cf in res
-                  if cf >= 0.2 and any(ch.isdigit() for ch in t)]
-            if not ok:
-                continue
-            ok.sort(key=lambda r: r[0][0][0])              # 왼쪽 → 오른쪽
-            txt = "".join(ch for _, t, _ in ok for ch in t if ch.isdigit())
-            cf = sum(c for _, _, c in ok) / len(ok)
-            if txt and (len(txt) > len(best) or (len(txt) == len(best) and cf > best_cf)):
-                best, best_cf = txt, cf
-        return best
-
-    def _scroll_check(self):
+    def _scroll_grab(self):
+        """16개 클라의 등록 영역을 잘라온다 (가려져 있어도 창을 직접 캡처)."""
         area = self.cfg.get("scroll_area_rel")
         if not area:
             self.status.set("먼저 [\U0001F4DC 주문서] 창에서 [영역 지정]을 해주세요")
-            self._open_scroll_win(); return
+            self._open_scroll_win(); return None
         rects = self._client_rects_by_slot()
         if not rects:
-            self.status.set("\u26a0 리니지M 클라이언트 16개가 보이지 않습니다"); return
+            self.status.set("\u26a0 리니지M 클라이언트 16개가 보이지 않습니다"); return None
+        from PIL import ImageGrab
+        dx, dy, w, h = area[:4]
+        rw, rh = (area[4], area[5]) if len(area) >= 6 else (None, None)
+        P = self.SCROLL_PAD                 # 창이 몇 px 어긋나도 찾아내도록 여유를 둔다
+        hw = self._client_hwnds_by_slot()
+        out = []
+        for i, rc in enumerate(rects):
+            try:
+                cw, ch = rc[2] - rc[0], rc[3] - rc[1]
+                ox = int(round(dx * cw / rw)) if rw else dx      # 창 크기 비율만큼 자리 보정
+                oy = int(round(dy * ch / rh)) if rh else dy
+                if hw:
+                    l, t, r, b, hwnd = hw[i]
+                    im = self._grab_client(hwnd, r - l, b - t).crop(
+                        (ox - P, oy - P, ox + w + P, oy + h + P))
+                else:
+                    im = ImageGrab.grab(bbox=(rc[0] + ox - P, rc[1] + oy - P,
+                                              rc[0] + ox + w + P,
+                                              rc[1] + oy + h + P)).convert("RGB")
+            except Exception:
+                im = None
+            out.append(im)
+        return out
+
+    def _scroll_match(self, im):
+        """기억해둔 그림들과 맞대본다 → (숫자, 닮은정도, 2등과의 차이).
+        1등과 2등이 비슷하면(차이가 작으면) 헷갈리는 것이니 못 읽은 것으로 친다."""
+        try:
+            import cv2, numpy as np
+        except Exception:
+            return "", 0.0, 0.0
+        a = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2GRAY)
+        scores = []
+        d = self._scroll_dir()
+        for f in sorted(os.listdir(d)):
+            if not f.endswith(".png"):
+                continue
+            t = cv2.imread(os.path.join(d, f), cv2.IMREAD_GRAYSCALE)
+            if t is None or t.shape[0] > a.shape[0] or t.shape[1] > a.shape[1]:
+                continue
+            try:
+                v = float(cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED).max())
+            except Exception:
+                continue
+            scores.append((v, os.path.splitext(f)[0]))
+        if not scores:
+            return "", 0.0, 0.0
+        scores.sort(reverse=True)
+        gap = 1.0 if len(scores) == 1 else scores[0][0] - scores[1][0]
+        return scores[0][1], scores[0][0], gap
+
+    def _scroll_show(self, i, im):
+        """잘라온 그림을 칸에 크게 보여준다."""
+        try:
+            from PIL import ImageTk, Image
+            big = im.resize((im.width * 5, im.height * 5), Image.LANCZOS)
+            ph = ImageTk.PhotoImage(big)
+            self._scroll_photos[i] = ph                     # 참조 유지
+            self._scroll_imgs[i].config(image=ph, width=big.width, height=big.height)
+        except Exception:
+            pass
+
+    def _scroll_check(self):
         if not (getattr(self, "_scroll_win", None) and self._scroll_win.winfo_exists()):
             self._open_scroll_win()
             self.after(400, self._scroll_check); return
-        self.status.set("\U0001F4DC 주문서 층수 읽는 중… (글자인식 준비에 몇 초 걸립니다)")
-        threading.Thread(target=self._scroll_worker, args=(area, rects), daemon=True).start()
+        crops = self._scroll_grab()
+        if crops is None:
+            return
+        self._scroll_crops = crops
+        got, unknown = 0, []
+        for i, im in enumerate(crops):
+            if im is None:
+                unknown.append(i + 1); continue
+            self._scroll_show(i, im)
+            num, sc, gap = self._scroll_match(im)
+            if num and sc >= 0.88 and gap >= 0.03:
+                self._scroll_vars[i].set(num); got += 1
+            else:
+                unknown.append(i + 1)
+        self._scroll_save_result()
+        self._refresh_scroll_area_lbl()
+        self._scroll_raise()
+        if got == 0:
+            self.status.set("\U0001F4DC 아직 기억한 숫자가 없습니다 — 그림을 보고 칸에 숫자를 적은 뒤 "
+                            "[\U0001F4DD 숫자 가르치기]를 눌러주세요")
+        else:
+            self.status.set(f"\U0001F4DC 주문서 층수 {got}/16 인식"
+                            + (f" — 못 읽음 {unknown}" if unknown else ""))
 
-    def _scroll_worker(self, area, rects):
-        dx, dy, w, h = area
-        try:
-            import easyocr
-            from PIL import ImageGrab
-            rd = easyocr.Reader(["en"], gpu=False, verbose=False)
-        except Exception as e:
-            self.after(0, lambda: self.status.set(f"\u26a0 글자인식 준비 실패: {e}")); return
-        hw = self._client_hwnds_by_slot()
-        out = {}
-        for i, rc in enumerate(rects):
+    def _scroll_teach(self):
+        """칸에 적힌 숫자를 그 그림의 정답으로 기억한다."""
+        crops = getattr(self, "_scroll_crops", None)
+        if not crops:
+            self.status.set("먼저 [\U0001F50D 확인]을 눌러 그림을 가져와주세요"); return
+        n = 0
+        for i, v in enumerate(self._scroll_vars):
+            num = (v.get() or "").strip()
+            if not num.isdigit() or i >= len(crops) or crops[i] is None:
+                continue
             try:
-                if hw:      # 창을 직접 캡처 — 다른 창에 가려져도 제대로 읽는다
-                    l, t, r, b, hwnd = hw[i]
-                    im = self._grab_client(hwnd, r - l, b - t).crop((dx, dy, dx + w, dy + h))
-                else:
-                    im = ImageGrab.grab(bbox=(rc[0] + dx, rc[1] + dy,
-                                              rc[0] + dx + w, rc[1] + dy + h)).convert("RGB")
-                num = self._read_digits(rd, im)
+                im = crops[i]
+                P = self.SCROLL_PAD
+                if im.width > 2 * P and im.height > 2 * P:
+                    im = im.crop((P, P, im.width - P, im.height - P))
+                im.save(os.path.join(self._scroll_dir(), f"{num}.png"))
+                n += 1
             except Exception:
-                num = ""
-            out[str(i + 1)] = num
-            self.after(0, lambda x=i, n=num: self._scroll_cell(x, n))
-        # 결과를 파일로 — 오만의탑 실행기 슬롯에 표시되고, 다시 측정 전까지 유지된다
+                pass
+        self._scroll_save_result()
+        self._refresh_scroll_area_lbl()
+        self.status.set(f"\U0001F4DD 숫자 {n}칸 기억했습니다 — 다음부터는 [확인]만 누르면 저절로 읽습니다")
+
+    def _scroll_save_result(self):
+        """칸에 적힌 값을 결과로 저장 — 오만의탑 실행기에 그대로 표시된다."""
         try:
             import datetime as _dt
-            res = {"time": f"{_dt.datetime.now():%m-%d %H:%M}", "slots": out}
+            res = {"time": f"{_dt.datetime.now():%m-%d %H:%M}",
+                   "slots": {str(i + 1): (v.get() or "").strip()
+                             for i, v in enumerate(self._scroll_vars)}}
             d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
             os.makedirs(d, exist_ok=True)
             with open(os.path.join(d, "scroll_result.json"), "w", encoding="utf-8") as f:
                 json.dump(res, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-        got = [f"{k}번 {v}층" for k, v in out.items() if v]
-        self.after(0, lambda: self.status.set(
-            f"\U0001F4DC 주문서 층수 {len(got)}/16 — " + (", ".join(got) if got else "읽지 못했습니다")))
-        self.after(0, self._scroll_raise)
-
-    def _scroll_cell(self, i, num):
-        try:
-            lb = self._scroll_cells[i]
-            if lb.winfo_exists():
-                lb.config(text=(f"{num}층" if num else "?"),
-                          bg=("#1a5276" if num else "#7f8c8d"))
         except Exception:
             pass
 
