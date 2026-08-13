@@ -4053,6 +4053,7 @@ class App(tk.Tk):
                               "② [확인] → 16개 클라의 같은 자리를 잘라와 아래에 보여줍니다\n"
                               "③ 처음엔 못 읽으니 '그림을 직접 보고' 칸에 숫자를 적은 뒤 [숫자 가르치기]\n"
                               "   → 칸에 미리 적혀 있는 값을 그대로 가르치면 안 됩니다 (틀리게 기억함)\n"
+                              "   ※ 슬롯마다 따로 기억합니다 (클라마다 화면이 미세하게 다름)\n"
                               "   ※ 빨간 테두리 칸 = 클라 화면이 꺼져 있어 못 읽은 칸",
                  font=("맑은 고딕", 8), fg="#555", justify="left").pack(anchor="w", padx=6)
         row = tk.Frame(parent); row.pack(fill="x", padx=6, pady=6)
@@ -4187,52 +4188,48 @@ class App(tk.Tk):
             out.append(im)
         return out
 
-    def _scroll_match(self, im):
-        """기억해둔 그림들과 맞대본다 → 숫자 (헷갈리면 빈 값).
-        주문서 아이콘은 어느 클라나 똑같이 그려지고 '숫자 자리'만 다르다.
-        그래서 ① 아이콘 전체로 자리를 맞춘 뒤 ② 기억해둔 그림들끼리
-        서로 다른 곳(=숫자가 그려진 자리)만 비교한다."""
+    def _scroll_match(self, im, idx):
+        """그 슬롯에서 기억해둔 그림들과만 맞대본다 → 숫자 (헷갈리면 빈 값).
+
+        클라마다 창 크기가 몇 px씩 달라 화면이 미세하게 다르게 그려진다.
+        그래서 '다른 클라의 그림'과 비교하면 숫자 차이보다 그 차이가 더 커서
+        틀리게 읽는다. 슬롯마다 따로 기억해두고 자기 것과만 비교한다."""
         try:
             import cv2, numpy as np
         except Exception:
             return ""
         a = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2GRAY)
-        d = self._scroll_dir()
-        tpl = {}
+        sc = []
+        for num, t in self._scroll_tpls(idx).items():
+            if t.shape[0] > a.shape[0] or t.shape[1] > a.shape[1]:
+                continue
+            try:
+                sc.append((float(cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED).max()), num))
+            except Exception:
+                pass
+        if not sc:
+            return ""
+        sc.sort(reverse=True)
+        if sc[0][0] < 0.97:
+            return ""                                   # 기억한 것과 충분히 닮지 않음
+        if len(sc) > 1 and (sc[0][0] - sc[1][0]) < 0.02:
+            return ""                                   # 1등과 2등이 비슷하면 헷갈림
+        return sc[0][1]
+
+    def _scroll_tpls(self, idx):
+        """그 슬롯에서 기억해둔 {숫자: 그림}."""
+        try:
+            import cv2
+        except Exception:
+            return {}
+        out, d, pre = {}, self._scroll_dir(), f"s{idx+1:02d}_"
         for f in sorted(os.listdir(d)):
-            if not f.endswith(".png"):
+            if not (f.startswith(pre) and f.endswith(".png")):
                 continue
             t = cv2.imread(os.path.join(d, f), cv2.IMREAD_GRAYSCALE)
-            if t is not None and t.shape[0] <= a.shape[0] and t.shape[1] <= a.shape[1]:
-                tpl[os.path.splitext(f)[0]] = t
-        if not tpl:
-            return ""
-        shp = next(iter(tpl.values())).shape
-        tpl = {k: v for k, v in tpl.items() if v.shape == shp}
-        # ① 자리 맞추기 (창 크기가 몇 px 달라도 여기서 흡수된다)
-        try:
-            _, _, _, loc = cv2.minMaxLoc(
-                cv2.matchTemplate(a, next(iter(tpl.values())), cv2.TM_CCOEFF_NORMED))
-        except Exception:
-            return ""
-        x, y = loc
-        win = a[y:y + shp[0], x:x + shp[1]].astype(int)
-        # ② 숫자 자리만 비교
-        stk = np.stack([v.astype(int) for v in tpl.values()])
-        mask = (stk.max(0) - stk.min(0)) > 30 if len(tpl) > 1 else None
-        if mask is not None and mask.sum() < 6:
-            mask = None
-        out = []
-        for num, t in tpl.items():
-            dif = np.abs(win - t.astype(int))
-            out.append((float((dif[mask] if mask is not None else dif).mean()), num))
-        out.sort()
-        if len(out) == 1:
-            # 기억한 숫자가 하나뿐이면 '거의 똑같을 때'만 인정한다
-            return out[0][1] if out[0][0] < 2.0 else ""
-        if out[0][0] > 25 or (out[1][0] - out[0][0]) < 8:
-            return ""                      # 1등과 2등이 비슷하면 헷갈리는 것
-        return out[0][1]
+            if t is not None:
+                out[f[len(pre):-4]] = t
+        return out
 
     @staticmethod
     def _scroll_is_dark(im):
@@ -4261,6 +4258,26 @@ class App(tk.Tk):
         if crops is None:
             return
         self._scroll_crops = crops
+        # 게임 배경(캐릭터·풍경)이 움직이는 순간엔 잘 안 맞을 수 있어서
+        # 못 읽은 칸만 잠깐 뒤에 다시 찍어본다 (최대 3번)
+        res = {}
+        for tries in range(3):
+            if tries:
+                time.sleep(0.7)
+                nc = self._scroll_grab()
+                if nc:
+                    for i in range(len(crops)):
+                        if i not in res and nc[i] is not None:
+                            crops[i] = nc[i]
+                    self._scroll_crops = crops
+            for i, im in enumerate(crops):
+                if i in res or im is None or self._scroll_is_dark(im):
+                    continue
+                n = self._scroll_match(im, i)
+                if n:
+                    res[i] = n
+            if len(res) == len(crops):
+                break
         got, unknown, dark = 0, [], []
         for i, im in enumerate(crops):
             if im is None:
@@ -4274,9 +4291,8 @@ class App(tk.Tk):
                 continue
             try: self._scroll_imgs[i].config(bg="#222")
             except Exception: pass
-            num = self._scroll_match(im)
-            if num:
-                self._scroll_vars[i].set(num); got += 1
+            if i in res:
+                self._scroll_vars[i].set(res[i]); got += 1
             else:
                 unknown.append(i + 1)
         self._scroll_save_result()
@@ -4309,7 +4325,7 @@ class App(tk.Tk):
                 continue
             if self._scroll_is_dark(crops[i]):
                 dark.append(i + 1); continue    # 꺼진 화면은 기억해봐야 소용없다
-            same = self._scroll_same_as(crops[i])       # 이미 기억한 그림과 같은가
+            same = self._scroll_same_as(crops[i], i)   # 이 슬롯에서 이미 기억한 그림과 같은가
             if same and same != num:
                 bad.append(f"{i+1}번({num}\u2260{same})")
                 continue
@@ -4318,7 +4334,7 @@ class App(tk.Tk):
                 P = self.SCROLL_PAD
                 if im.width > 2 * P and im.height > 2 * P:
                     im = im.crop((P, P, im.width - P, im.height - P))
-                im.save(os.path.join(self._scroll_dir(), f"{num}.png"))
+                im.save(os.path.join(self._scroll_dir(), f"s{i+1:02d}_{num}.png"))
                 n += 1
             except Exception:
                 pass
@@ -4332,28 +4348,21 @@ class App(tk.Tk):
             msg += f"  (화면 꺼짐 {dark} 은 제외)"
         self.status.set(msg)
 
-    def _scroll_same_as(self, im):
-        """이 그림이 이미 기억해둔 어떤 숫자와 사실상 같은 그림인가? → 그 숫자."""
+    def _scroll_same_as(self, im, idx):
+        """이 그림이 그 슬롯에서 이미 기억한 어떤 숫자와 사실상 같은가? → 그 숫자."""
         try:
             import cv2, numpy as np
         except Exception:
             return ""
         a = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2GRAY)
-        d = self._scroll_dir()
-        for f in sorted(os.listdir(d)):
-            if not f.endswith(".png"):
-                continue
-            t = cv2.imread(os.path.join(d, f), cv2.IMREAD_GRAYSCALE)
-            if t is None or t.shape[0] > a.shape[0] or t.shape[1] > a.shape[1]:
+        for num, t in self._scroll_tpls(idx).items():
+            if t.shape[0] > a.shape[0] or t.shape[1] > a.shape[1]:
                 continue
             try:
-                _, mv, _, loc = cv2.minMaxLoc(cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED))
+                if float(cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED).max()) > 0.99:
+                    return num                                # 거의 똑같은 그림
             except Exception:
-                continue
-            x, y = loc
-            win = a[y:y + t.shape[0], x:x + t.shape[1]].astype(int)
-            if np.abs(win - t.astype(int)).mean() < 2.0:      # 거의 똑같은 그림
-                return os.path.splitext(f)[0]
+                pass
         return ""
 
     def _scroll_forget(self):
