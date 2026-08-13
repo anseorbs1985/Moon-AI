@@ -4516,7 +4516,7 @@ class App(tk.Tk):
                     pass
         except Exception:
             pass
-        self.after(1500, self._purple_ad_tick)
+        self.after(3000, self._purple_ad_tick)   # 3초마다 (부하 절반)
 
     def _auto_back_check(self, _e=None):
         """(2026-08-11) 메인런처 말고 다른 창(리니지M 클라·바탕화면 등)이 앞으로 오면
