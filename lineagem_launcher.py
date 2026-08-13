@@ -4493,9 +4493,18 @@ class App(tk.Tk):
             u.GetWindowThreadProcessId(fg, ctypes.byref(pid))
             if pid.value == os.getpid():
                 self._auto_back_done = 0        # 내 창을 보고 있으면 그대로 둔다
-            elif self.state() == "normal" and fg and fg != getattr(self, "_auto_back_done", 0):
+                return
+            # 클로드 창을 보고 있으면 건드리지 않는다 (사용자가 쓰는 중)
+            buf = ctypes.create_unicode_buffer(256)
+            u.GetWindowTextW(fg, buf, 256)
+            if "claude" in buf.value.lower():
+                self._auto_back_done = 0
+                return
+            if fg and fg != getattr(self, "_auto_back_done", 0):
                 self._auto_back_done = fg       # 같은 창에 대해 한 번만
-                self._send_to_back()
+                if self.state() == "normal":
+                    self._send_to_back()        # 메인런처는 맨 뒤로
+                self._minimize_claude()         # 클로드 창은 최소화 (2026-08-13)
         except Exception:
             pass
 
