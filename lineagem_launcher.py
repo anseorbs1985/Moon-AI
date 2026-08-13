@@ -3333,6 +3333,12 @@ class App(tk.Tk):
             done += 1
             _g = self._slot_gap(st["slot"], j)          # 칸에 적어둔 초가 있으면 그걸로
             _base = _g if _g is not None else random.uniform(*gap)
+            # 사람처럼 — 한 슬롯에서 2~3번 이어 누르고 다른 슬롯으로 넘어간다
+            if st.get("burst", 0) <= 0:
+                st["burst"] = random.choice([1, 2, 2, 3])
+            st["burst"] -= 1
+            if st["burst"] > 0 and _g is None:
+                _base = random.uniform(0.7, 1.4)        # 이어 누를 땐 짧게
             st["due"] = time.time() + _base * random.uniform(*slow)   # 10~20% 할증
             time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
         self.status.set(f"{icon} 번갈아 실행 완료 — 클릭 {done}회")
@@ -3356,10 +3362,15 @@ class App(tk.Tk):
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
                 random.shuffle(targets)   # 슬롯 클릭 순서 매번 랜덤
-            if fkey in ("circus", "circus2") and slot_idx is None and len(targets) > 1:
-                # 서커스이벤트: 동시 2슬롯, 간격·슬롯투입 모두 10~20% 할증
+            if fkey == "circus" and slot_idx is None and len(targets) > 1:
+                # 서커스 이벤트등록: 동시 2슬롯, 간격·슬롯투입 모두 10~20% 할증
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
-                                    slow=(1.10, 1.20), slot_gap=(3.0, 6.0))
+                                    slow=(1.10, 1.20), slot_gap=(3.0, 5.0))
+                return
+            if fkey == "circus2" and slot_idx is None and len(targets) > 1:
+                # 서커스 이벤트실행: 동시 2슬롯, 좌표 2~4초 / 슬롯 3~5초 랜덤
+                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
+                                    gap=(2.0, 4.0), slot_gap=(3.0, 5.0))
                 return
             if fkey in ("fish",) and slot_idx is None and len(targets) > 1:
                 # 낚시녹임은 번갈아(웨이브) 실행 — 동시 4슬롯, 좌표 간격 2~4초 랜덤

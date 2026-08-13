@@ -8570,6 +8570,552 @@
       "enabled": true
     }
   ],
+  "circus2_slots": [
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          463,
+          156
+        ],
+        [
+          48,
+          170
+        ],
+        [
+          325,
+          289
+        ],
+        [
+          388,
+          272
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          463,
+          472
+        ],
+        [
+          48,
+          486
+        ],
+        [
+          325,
+          605
+        ],
+        [
+          388,
+          588
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          463,
+          786
+        ],
+        [
+          48,
+          800
+        ],
+        [
+          325,
+          919
+        ],
+        [
+          388,
+          902
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          462,
+          1101
+        ],
+        [
+          47,
+          1115
+        ],
+        [
+          324,
+          1234
+        ],
+        [
+          387,
+          1217
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          1146,
+          152
+        ],
+        [
+          731,
+          166
+        ],
+        [
+          1008,
+          285
+        ],
+        [
+          1071,
+          268
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          1144,
+          467
+        ],
+        [
+          729,
+          481
+        ],
+        [
+          1006,
+          600
+        ],
+        [
+          1069,
+          583
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          1147,
+          784
+        ],
+        [
+          732,
+          798
+        ],
+        [
+          1009,
+          917
+        ],
+        [
+          1072,
+          900
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          1146,
+          1101
+        ],
+        [
+          731,
+          1115
+        ],
+        [
+          1008,
+          1234
+        ],
+        [
+          1071,
+          1217
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          1814,
+          158
+        ],
+        [
+          1399,
+          172
+        ],
+        [
+          1676,
+          291
+        ],
+        [
+          1739,
+          274
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          1815,
+          475
+        ],
+        [
+          1400,
+          489
+        ],
+        [
+          1677,
+          608
+        ],
+        [
+          1740,
+          591
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          1816,
+          793
+        ],
+        [
+          1401,
+          807
+        ],
+        [
+          1678,
+          926
+        ],
+        [
+          1741,
+          909
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          1816,
+          1108
+        ],
+        [
+          1401,
+          1122
+        ],
+        [
+          1678,
+          1241
+        ],
+        [
+          1741,
+          1224
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          2464,
+          150
+        ],
+        [
+          2049,
+          164
+        ],
+        [
+          2326,
+          283
+        ],
+        [
+          2389,
+          266
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          2466,
+          468
+        ],
+        [
+          2051,
+          482
+        ],
+        [
+          2328,
+          601
+        ],
+        [
+          2391,
+          584
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          2465,
+          786
+        ],
+        [
+          2050,
+          800
+        ],
+        [
+          2327,
+          919
+        ],
+        [
+          2390,
+          902
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          2466,
+          1102
+        ],
+        [
+          2051,
+          1116
+        ],
+        [
+          2328,
+          1235
+        ],
+        [
+          2391,
+          1218
+        ]
+      ],
+      "gap_list": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "wheel_list": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "enabled": true
+    }
+  ],
   "reroll_refresh_btn": [
     1467,
     963
@@ -21934,8 +22480,8 @@
     1356
   ],
   "claude_win_pos": [
-    677,
-    301
+    641,
+    276
   ],
   "seq2_on": false,
   "purple_popup_color": [
