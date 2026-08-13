@@ -1673,8 +1673,13 @@ class IslandApp(tk.Tk):
         return os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
                             "scroll_result.json")
 
+    # 층수마다 다른 색 — 한눈에 구분되게
+    SCROLL_COLORS = {"3": "#c0392b", "4": "#d35400", "5": "#27ae60",
+                     "6": "#2471a3", "7": "#8e44ad", "8": "#b7950b",
+                     "9": "#16a085", "10": "#7f2ba8"}
+
     def _scroll_apply(self):
-        """메인런처 [📜 주문서] 결과를 물약색 왼쪽에 층수로 표시 (오만의탑)."""
+        """메인런처 [📜 주문서] 결과를 물약색 왼쪽에 'N층'으로 표시 (오만의탑)."""
         try:
             with open(self._scroll_path(), encoding="utf-8") as f:
                 res = (json.load(f) or {}).get("slots") or {}
@@ -1687,7 +1692,8 @@ class IslandApp(tk.Tk):
                         continue
                     n = str(res.get(str(i + 1), "") or "").strip()
                     if n:
-                        lb.config(text=n, bg="#1a5276", fg="white")
+                        lb.config(text=f"{n}층", fg="white",
+                                  bg=self.SCROLL_COLORS.get(n, "#34495e"))
                     else:
                         lb.config(text="", bg=lb.master.cget("bg"))
                 except Exception:
