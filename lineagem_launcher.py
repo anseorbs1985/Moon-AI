@@ -157,6 +157,8 @@ FISH_SLOTS     = 16    # 낚시녹임 슬롯 수 (인형탐험과 동일 구조)
 FISH_CLICKS    = 18    # 낚시녹임 좌표 수
 CIRCUS_SLOTS   = 16    # 서커스이벤트 슬롯 수 (낚시녹임과 동일 구조)
 CIRCUS_CLICKS  = 9     # 서커스이벤트 좌표 수 (9번은 8번을 따라감)
+CIRCUS2_SLOTS  = 16    # 서커스 이벤트실행 슬롯 수
+CIRCUS2_CLICKS = 4     # 서커스 이벤트실행 좌표 수
 # 클릭 대신 '마우스 휠 올리기'를 할 자리 (던전키: {0부터 센 클릭번호})
 WHEEL_UP_INDICES = {"circus": {4}}     # 서커스이벤트 클릭5 = 휠 위로
 WHEEL_UP_NOTCH  = 3    # 한 번에 굴릴 칸 수
@@ -235,6 +237,8 @@ DEFAULT_CFG = {
                      for _ in range(FISH_SLOTS)],   # 낚시녹임 (16슬롯 × 18좌표)
     "circus_slots": [{"name": "미등록", "coords": [None]*CIRCUS_CLICKS}
                      for _ in range(CIRCUS_SLOTS)], # 서커스이벤트 (16슬롯 × 8좌표)
+    "circus2_slots": [{"name": "미등록", "coords": [None]*CIRCUS2_CLICKS}
+                      for _ in range(CIRCUS2_SLOTS)],  # 서커스 이벤트실행 (16슬롯 × 4좌표)
     # 아이템 리롤(새로고침 매크로)
     "reroll_refresh_btn": None,   # 새로고침 버튼 좌표 [x,y]
     "reroll_confirm_btn": None,   # 발견 시 자동으로 누를 확인 버튼 좌표 [x,y]
@@ -525,6 +529,25 @@ def load_cfg():
                         "gap_list": [None]*CIRCUS_CLICKS,
                         "wheel_list": [0]*CIRCUS_CLICKS, "enabled": True})
         cfg["circus_slots"] = ncl[:CIRCUS_SLOTS]
+        # circus2_slots (서커스 이벤트실행 16슬롯 × 4좌표)
+        c2l, nc2 = cfg.get("circus2_slots", []), []
+        for s_ in c2l:
+            c = s_.get("coords", [None]*CIRCUS2_CLICKS) if isinstance(s_, dict) else [None]*CIRCUS2_CLICKS
+            while len(c) < CIRCUS2_CLICKS: c.append(None)
+            _g = (s_.get("gap_list") or []) if isinstance(s_, dict) else []
+            _w = (s_.get("wheel_list") or []) if isinstance(s_, dict) else []
+            while len(_g) < CIRCUS2_CLICKS: _g.append(None)
+            while len(_w) < CIRCUS2_CLICKS: _w.append(0)
+            nc2.append({"name": s_.get("name", "미등록") if isinstance(s_, dict) else "미등록",
+                        "coords": c[:CIRCUS2_CLICKS],
+                        "gap_list": _g[:CIRCUS2_CLICKS],
+                        "wheel_list": _w[:CIRCUS2_CLICKS],
+                        "enabled": s_.get("enabled", True) if isinstance(s_, dict) else True})
+        while len(nc2) < CIRCUS2_SLOTS:
+            nc2.append({"name": "미등록", "coords": [None]*CIRCUS2_CLICKS,
+                        "gap_list": [None]*CIRCUS2_CLICKS,
+                        "wheel_list": [0]*CIRCUS2_CLICKS, "enabled": True})
+        cfg["circus2_slots"] = nc2[:CIRCUS2_SLOTS]
         # doll_slots (인형 탐험 16슬롯 × 18좌표)
         dl, ndl = cfg.get("doll_slots", []), []
         for s in dl:
@@ -750,6 +773,7 @@ class App(tk.Tk):
         self._dollchk_stop = False
         self._fish_stop = False
         self._circus_stop = False
+        self._circus2_stop = False
         self._relic_stop   = False
         self._coupon_stop  = False
         self._eventshop_stop = False
@@ -1424,7 +1448,8 @@ class App(tk.Tk):
                 ("🏰 변신\n확인용", "#d35400", self._open_dungeon_win, self._start_dungeon),
                 ("🧸 인형\n확인용", "#b9770e", self._open_dollchk_win, lambda: self._start_dgn2("dollchk")),
                 ("🗿 성물\n확인용", "#117864", self._open_relic_win,   lambda: self._start_dgn2("relic")),
-                ("🎪 서커스\n이벤트", "#7d3c98", self._open_circus_win, lambda: self._start_dgn2("circus"))):
+                ("🎪 서커스\n이벤트등록", "#7d3c98", self._open_circus_win, lambda: self._start_dgn2("circus")),
+                ("🎪 서커스\n이벤트실행", "#5b2c6f", self._open_circus2_win, lambda: self._start_dgn2("circus2"))):
             rr = tk.Frame(chk_col); rr.pack(anchor="n", pady=(0,4))
             tk.Button(rr, text=_t, font=("맑은 고딕", 9, "bold"), bg=_bg, fg="white",
                       width=7, height=2, command=_open).pack(side="left")
@@ -2989,7 +3014,8 @@ class App(tk.Tk):
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
                 "eventshop": ("eventshop_slots", "이벤트상점", "🛒"),
                 "fish":    ("fish_slots",    "낚시녹임",   "🎣"),
-                "circus":  ("circus_slots",  "서커스이벤트", "🎪")}[fkey]
+                "circus":  ("circus_slots",  "서커스 이벤트등록", "🎪"),
+                "circus2": ("circus2_slots", "서커스 이벤트실행", "🎪")}[fkey]
 
     def _open_coupon_win(self):
         self._open_section_win("_coupon_win", "🎟 쿠폰등록",
@@ -3004,8 +3030,12 @@ class App(tk.Tk):
                                lambda p: self._build_dgn2("dollchk", p), w=470, h=600, pinnable=True)
 
     def _open_circus_win(self):
-        self._open_section_win("_circus_win", "🎪 서커스이벤트",
+        self._open_section_win("_circus_win", "🎪 서커스 이벤트등록",
                                lambda p: self._build_dgn2("circus", p), w=470, h=560, pinnable=True)
+
+    def _open_circus2_win(self):
+        self._open_section_win("_circus2_win", "🎪 서커스 이벤트실행",
+                               lambda p: self._build_dgn2("circus2", p), w=470, h=460, pinnable=True)
 
     def _open_fish_win(self):
         self._open_section_win("_fish_win", "🎣 낚시녹임",
@@ -3326,7 +3356,7 @@ class App(tk.Tk):
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
                 random.shuffle(targets)   # 슬롯 클릭 순서 매번 랜덤
-            if fkey == "circus" and slot_idx is None and len(targets) > 1:
+            if fkey in ("circus", "circus2") and slot_idx is None and len(targets) > 1:
                 # 서커스이벤트: 동시 2슬롯, 간격·슬롯투입 모두 10~20% 할증
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
                                     slow=(1.10, 1.20), slot_gap=(3.0, 6.0))
@@ -7424,7 +7454,13 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("eventshop", i),
                             prev=lambda i: self._preview_dgn2("eventshop", i),
                             delete=lambda i: self._del_dgn2("eventshop", i)),
-            "circus":  dict(title="서커스이벤트", key="circus_slots", clicks=CIRCUS_CLICKS, color="#7d3c98",
+            "circus2": dict(title="서커스 이벤트실행", key="circus2_slots",
+                            clicks=CIRCUS2_CLICKS, color="#5b2c6f", opts=True,
+                            reg=lambda s, c: self._reg_dgn2_click("circus2", s, c),
+                            test=lambda i: self._test_dgn2("circus2", i),
+                            prev=lambda i: self._preview_dgn2("circus2", i),
+                            delete=lambda i: self._del_dgn2("circus2", i)),
+            "circus":  dict(title="서커스 이벤트등록", key="circus_slots", clicks=CIRCUS_CLICKS, color="#7d3c98",
                             opts=True,        # 칸마다 간격(초)·휠칸수 직접 지정
                             reg=lambda s, c: self._reg_dgn2_click("circus", s, c),
                             test=lambda i: self._test_dgn2("circus", i),
@@ -9722,7 +9758,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_dollchk_win","_relic_win","_tj_win","_coupon_win","_fish_win","_circus_win",
+                 "_dollchk_win","_relic_win","_tj_win","_coupon_win","_fish_win","_circus_win","_circus2_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs
@@ -10555,6 +10591,7 @@ class App(tk.Tk):
         self._eventshop_stop = True
         self._fish_stop      = True
         self._circus_stop    = True
+        self._circus2_stop   = True
         self._tj_stop        = True
         self._reroll_running = False  # 오림의일기장도 정지
         self._busy_task      = None   # 잠금 해제
