@@ -4149,31 +4149,59 @@ class App(tk.Tk):
         return out
 
     def _scroll_match(self, im):
-        """기억해둔 그림들과 맞대본다 → (숫자, 닮은정도, 2등과의 차이).
-        1등과 2등이 비슷하면(차이가 작으면) 헷갈리는 것이니 못 읽은 것으로 친다."""
+        """기억해둔 그림들과 맞대본다 → 숫자 (헷갈리면 빈 값).
+        주문서 아이콘은 어느 클라나 똑같이 그려지고 '숫자 자리'만 다르다.
+        그래서 ① 아이콘 전체로 자리를 맞춘 뒤 ② 기억해둔 그림들끼리
+        서로 다른 곳(=숫자가 그려진 자리)만 비교한다."""
         try:
             import cv2, numpy as np
         except Exception:
-            return "", 0.0, 0.0
+            return ""
         a = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2GRAY)
-        scores = []
         d = self._scroll_dir()
+        tpl = {}
         for f in sorted(os.listdir(d)):
             if not f.endswith(".png"):
                 continue
             t = cv2.imread(os.path.join(d, f), cv2.IMREAD_GRAYSCALE)
-            if t is None or t.shape[0] > a.shape[0] or t.shape[1] > a.shape[1]:
-                continue
-            try:
-                v = float(cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED).max())
-            except Exception:
-                continue
-            scores.append((v, os.path.splitext(f)[0]))
-        if not scores:
-            return "", 0.0, 0.0
-        scores.sort(reverse=True)
-        gap = 1.0 if len(scores) == 1 else scores[0][0] - scores[1][0]
-        return scores[0][1], scores[0][0], gap
+            if t is not None and t.shape[0] <= a.shape[0] and t.shape[1] <= a.shape[1]:
+                tpl[os.path.splitext(f)[0]] = t
+        if not tpl:
+            return ""
+        shp = next(iter(tpl.values())).shape
+        tpl = {k: v for k, v in tpl.items() if v.shape == shp}
+        # ① 자리 맞추기 (창 크기가 몇 px 달라도 여기서 흡수된다)
+        try:
+            _, _, _, loc = cv2.minMaxLoc(
+                cv2.matchTemplate(a, next(iter(tpl.values())), cv2.TM_CCOEFF_NORMED))
+        except Exception:
+            return ""
+        x, y = loc
+        win = a[y:y + shp[0], x:x + shp[1]].astype(int)
+        # ② 숫자 자리만 비교
+        stk = np.stack([v.astype(int) for v in tpl.values()])
+        mask = (stk.max(0) - stk.min(0)) > 30 if len(tpl) > 1 else None
+        if mask is not None and mask.sum() < 6:
+            mask = None
+        out = []
+        for num, t in tpl.items():
+            dif = np.abs(win - t.astype(int))
+            out.append((float((dif[mask] if mask is not None else dif).mean()), num))
+        out.sort()
+        if len(out) == 1:
+            # 기억한 숫자가 하나뿐이면 '거의 똑같을 때'만 인정한다
+            return out[0][1] if out[0][0] < 2.0 else ""
+        if out[0][0] > 25 or (out[1][0] - out[0][0]) < 8:
+            return ""                      # 1등과 2등이 비슷하면 헷갈리는 것
+        return out[0][1]
+
+    @staticmethod
+    def _scroll_is_dark(im):
+        """클라가 절전(화면 꺼짐)이면 잘라온 그림이 온통 어둡다."""
+        try:
+            return max(im.convert("L").getdata()) < 80
+        except Exception:
+            return False
 
     def _scroll_show(self, i, im):
         """잘라온 그림을 칸에 크게 보여준다."""
@@ -4194,25 +4222,33 @@ class App(tk.Tk):
         if crops is None:
             return
         self._scroll_crops = crops
-        got, unknown = 0, []
+        got, unknown, dark = 0, [], []
         for i, im in enumerate(crops):
             if im is None:
                 unknown.append(i + 1); continue
             self._scroll_show(i, im)
-            num, sc, gap = self._scroll_match(im)
-            if num and sc >= 0.88 and gap >= 0.03:
+            if self._scroll_is_dark(im):
+                # 화면이 꺼져 있으면 주문서가 안 보인다 — 예전 값을 그대로 둔다
+                dark.append(i + 1); continue
+            num = self._scroll_match(im)
+            if num:
                 self._scroll_vars[i].set(num); got += 1
             else:
                 unknown.append(i + 1)
         self._scroll_save_result()
         self._refresh_scroll_area_lbl()
         self._scroll_raise()
-        if got == 0:
+        if dark and len(dark) == len(crops):
+            self.status.set(f"\U0001F4DC 클라 화면이 꺼져 있어 주문서가 안 보입니다 "
+                            f"— 절전을 풀고 다시 [확인]을 눌러주세요")
+        elif got == 0:
             self.status.set("\U0001F4DC 아직 기억한 숫자가 없습니다 — 그림을 보고 칸에 숫자를 적은 뒤 "
-                            "[\U0001F4DD 숫자 가르치기]를 눌러주세요")
+                            "[\U0001F4DD 숫자 가르치기]를 눌러주세요"
+                            + (f"  (화면 꺼짐 {dark})" if dark else ""))
         else:
             self.status.set(f"\U0001F4DC 주문서 층수 {got}/16 인식"
-                            + (f" — 못 읽음 {unknown}" if unknown else ""))
+                            + (f" — 못 읽음 {unknown}" if unknown else "")
+                            + (f" — 화면 꺼짐 {dark}" if dark else ""))
 
     def _scroll_teach(self):
         """칸에 적힌 숫자를 그 그림의 정답으로 기억한다."""
@@ -4224,6 +4260,8 @@ class App(tk.Tk):
             num = (v.get() or "").strip()
             if not num.isdigit() or i >= len(crops) or crops[i] is None:
                 continue
+            if self._scroll_is_dark(crops[i]):
+                continue                    # 꺼진 화면은 기억해봐야 소용없다
             try:
                 im = crops[i]
                 P = self.SCROLL_PAD
