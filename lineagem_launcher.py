@@ -185,6 +185,7 @@ DEFAULT_CFG = {
     "confirm_btn": None,
     "profile_target_id": "",
     "potion_area_rel": None,
+    "scroll_area_rel": None,
     "check_area_rel": None,             # F11 때 확인할 경고 영역 (01번 클라 기준 [x,y,w,h])            # 물약색 확인 영역 (01번 클라 기준 상대 [x,y,w,h])
     "profile_id_area": None,
     "profile_reveal_btn": None,
@@ -3994,6 +3995,175 @@ class App(tk.Tk):
             pass
         self.status.set(f"🧪 빨강 {len(reds)}개 {reds or ''} / 주황 {len(oranges)}개 {oranges or ''}")
 
+    # ── 📜 주문서 층수 확인 (물약색과 같은 방식 — 영역 1번 등록, 16클라 동시) ──
+    def _open_scroll_win(self):
+        self._open_section_win("_scroll_win", "\U0001F4DC 주문서 층수",
+                               self._build_scroll, w=470, h=430, pinnable=True)
+
+    def _build_scroll(self, parent):
+        tk.Label(parent, text="\U0001F4DC 주문서 층수 확인  (16개 클라를 한 번에)",
+                 font=("맑은 고딕", 10, "bold"), fg="#1a5276").pack(anchor="w", padx=6, pady=(6, 2))
+        tk.Label(parent, text="① [영역 지정]으로 주문서의 '층수 숫자' 자리를 한 번만 드래그해서 등록\n"
+                              "② [확인]을 누르면 16개 클라의 같은 자리 숫자를 읽어옵니다\n"
+                              "   → 오만의탑 실행기 슬롯의 물약색 왼쪽에 그 숫자가 표시됩니다",
+                 font=("맑은 고딕", 8), fg="#555", justify="left").pack(anchor="w", padx=6)
+        row = tk.Frame(parent); row.pack(fill="x", padx=6, pady=6)
+        tk.Button(row, text="\U0001F4F7 영역 지정 (01번 기준)", font=("맑은 고딕", 9, "bold"),
+                  bg="#2471a3", fg="white", command=self._reg_scroll_area).pack(side="left")
+        tk.Button(row, text="\U0001F50D 확인", font=("맑은 고딕", 9, "bold"),
+                  bg="#1a5276", fg="white", width=8,
+                  command=self._scroll_check).pack(side="left", padx=(6, 0))
+        self._scroll_area_lbl = tk.Label(parent, text="", font=("맑은 고딕", 8), fg="#888")
+        self._scroll_area_lbl.pack(anchor="w", padx=6)
+        self._refresh_scroll_area_lbl()
+
+        grid = tk.Frame(parent); grid.pack(padx=6, pady=6)
+        self._scroll_cells = []
+        for i in range(16):
+            r, c = i % 4, i // 4
+            cell = tk.Frame(grid, bd=1, relief="groove", padx=4, pady=3, width=96)
+            cell.grid(row=r, column=c, padx=4, pady=4, sticky="we")
+            tk.Label(cell, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"), fg="#555").pack()
+            lb = tk.Label(cell, text="\u2014", font=("맑은 고딕", 12, "bold"),
+                          fg="white", bg="#bdc3c7", width=6)
+            lb.pack()
+            self._scroll_cells.append(lb)
+
+    def _refresh_scroll_area_lbl(self):
+        lb = getattr(self, "_scroll_area_lbl", None)
+        if not lb or not lb.winfo_exists():
+            return
+        a = self.cfg.get("scroll_area_rel")
+        lb.config(text=(f"등록된 영역: 01번 클라 기준 ({a[0]},{a[1]}) 크기 {a[2]}x{a[3]}"
+                        if a else "등록된 영역 없음 — [영역 지정]을 먼저 눌러주세요"))
+
+    def _reg_scroll_area(self):
+        rects = self._client_rects_by_slot()
+        if not rects:
+            self.status.set("\u26a0 리니지M 클라이언트 16개가 보이지 않습니다 (창을 모두 띄운 뒤 다시)")
+            return
+        self._scroll_rects = rects
+        w = getattr(self, "_scroll_win", None)
+        if w and w.winfo_exists():
+            try: w.withdraw()
+            except Exception: pass
+        self.withdraw()
+        self.after(200, lambda: _PotionAreaOverlay(self, self._on_scroll_area))
+
+    def _on_scroll_area(self, x, y, w, h):
+        self.deiconify()
+        pw = getattr(self, "_scroll_win", None)
+        if pw and pw.winfo_exists():
+            try: pw.deiconify(); pw.lift()
+            except Exception: pass
+        if w < 3 or h < 3:
+            self.status.set("영역이 너무 작습니다 — 다시 드래그해주세요"); return
+        rects = getattr(self, "_scroll_rects", None) or self._client_rects_by_slot()
+        if not rects:
+            self.status.set("\u26a0 클라이언트 16개 감지 실패"); return
+        oi = self._rect_owner(rects, x, y)      # 어느 클라에서 찍었는지 자동 인식
+        base = rects[oi]
+        self.cfg["scroll_area_rel"] = [x - base[0], y - base[1], w, h]
+        save_cfg(self.cfg)
+        self._refresh_scroll_area_lbl()
+        self.status.set(f"\u2714 주문서 층수 영역 등록 — #{oi+1:02d} 클라 기준 "
+                        f"({x-base[0]},{y-base[1]}) {w}x{h}")
+
+    @staticmethod
+    def _read_digits(rd, im):
+        """작은 숫자 영역 → 숫자만 뽑아낸다 (밝은 글자·어두운 글자 둘 다 시도)."""
+        import numpy as np
+        from PIL import Image, ImageEnhance
+        g = im.convert("L").resize((im.width * 3, im.height * 3), Image.LANCZOS)
+        g = ImageEnhance.Contrast(g).enhance(2.5)
+        g = ImageEnhance.Sharpness(g).enhance(2.0)
+        base = np.array(g)
+        best, best_cf = "", 0.0
+        for arr in (base, 255 - base):
+            try:
+                res = rd.readtext(arr, detail=1, paragraph=False, allowlist="0123456789")
+            except Exception:
+                continue
+            ok = [(bb, t, cf) for bb, t, cf in res
+                  if cf >= 0.2 and any(ch.isdigit() for ch in t)]
+            if not ok:
+                continue
+            ok.sort(key=lambda r: r[0][0][0])              # 왼쪽 → 오른쪽
+            txt = "".join(ch for _, t, _ in ok for ch in t if ch.isdigit())
+            cf = sum(c for _, _, c in ok) / len(ok)
+            if txt and (len(txt) > len(best) or (len(txt) == len(best) and cf > best_cf)):
+                best, best_cf = txt, cf
+        return best
+
+    def _scroll_check(self):
+        area = self.cfg.get("scroll_area_rel")
+        if not area:
+            self.status.set("먼저 [\U0001F4DC 주문서] 창에서 [영역 지정]을 해주세요")
+            self._open_scroll_win(); return
+        rects = self._client_rects_by_slot()
+        if not rects:
+            self.status.set("\u26a0 리니지M 클라이언트 16개가 보이지 않습니다"); return
+        if not (getattr(self, "_scroll_win", None) and self._scroll_win.winfo_exists()):
+            self._open_scroll_win()
+            self.after(400, self._scroll_check); return
+        self.status.set("\U0001F4DC 주문서 층수 읽는 중… (글자인식 준비에 몇 초 걸립니다)")
+        threading.Thread(target=self._scroll_worker, args=(area, rects), daemon=True).start()
+
+    def _scroll_worker(self, area, rects):
+        dx, dy, w, h = area
+        try:
+            import easyocr
+            from PIL import ImageGrab
+            rd = easyocr.Reader(["en"], gpu=False, verbose=False)
+        except Exception as e:
+            self.after(0, lambda: self.status.set(f"\u26a0 글자인식 준비 실패: {e}")); return
+        hw = self._client_hwnds_by_slot()
+        out = {}
+        for i, rc in enumerate(rects):
+            try:
+                if hw:      # 창을 직접 캡처 — 다른 창에 가려져도 제대로 읽는다
+                    l, t, r, b, hwnd = hw[i]
+                    im = self._grab_client(hwnd, r - l, b - t).crop((dx, dy, dx + w, dy + h))
+                else:
+                    im = ImageGrab.grab(bbox=(rc[0] + dx, rc[1] + dy,
+                                              rc[0] + dx + w, rc[1] + dy + h)).convert("RGB")
+                num = self._read_digits(rd, im)
+            except Exception:
+                num = ""
+            out[str(i + 1)] = num
+            self.after(0, lambda x=i, n=num: self._scroll_cell(x, n))
+        # 결과를 파일로 — 오만의탑 실행기 슬롯에 표시되고, 다시 측정 전까지 유지된다
+        try:
+            import datetime as _dt
+            res = {"time": f"{_dt.datetime.now():%m-%d %H:%M}", "slots": out}
+            d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "scroll_result.json"), "w", encoding="utf-8") as f:
+                json.dump(res, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        got = [f"{k}번 {v}층" for k, v in out.items() if v]
+        self.after(0, lambda: self.status.set(
+            f"\U0001F4DC 주문서 층수 {len(got)}/16 — " + (", ".join(got) if got else "읽지 못했습니다")))
+        self.after(0, self._scroll_raise)
+
+    def _scroll_cell(self, i, num):
+        try:
+            lb = self._scroll_cells[i]
+            if lb.winfo_exists():
+                lb.config(text=(f"{num}층" if num else "?"),
+                          bg=("#1a5276" if num else "#7f8c8d"))
+        except Exception:
+            pass
+
+    def _scroll_raise(self):
+        try:
+            w = getattr(self, "_scroll_win", None)
+            if w and w.winfo_exists():
+                w.deiconify(); w.lift()
+        except Exception:
+            pass
+
     # ── 🔐 본인확인 도우미 (임시제한 해제 시 전화·이메일 붙여넣기 보조) ──────
     #    감지+계정확인+전화/이메일 클립보드 복사까지만. 붙여넣기·확인은 사람이.
     @staticmethod
@@ -5282,6 +5452,7 @@ class App(tk.Tk):
             ("🔆 절전해제",  "#7d3c98", self._open_seq_win,      "#5b2c6f", self._start_seq),
             ("🌙 절전모드",  "#1f618d", self._open_slp_win,      "#154360", self._start_slp),
             ("🧪 물약색",   "#8e44ad", self._open_potion_win,   "#6c3483", self._potion_check),
+            ("📜 주문서",    "#2471a3", self._open_scroll_win,   "#1a5276", self._scroll_check),
         ]
         for text, color, cmd, run_color, run_cmd in fixed:
             grp = tk.Frame(self._sec_row); grp.pack(side="left", padx=2)
@@ -9769,7 +9940,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_dollchk_win","_relic_win","_tj_win","_coupon_win","_fish_win","_circus_win","_circus2_win",
+                 "_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_fish_win","_circus_win","_circus2_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs

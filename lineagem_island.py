@@ -413,6 +413,7 @@ class IslandApp(tk.Tk):
         self._repeat_left = {}                               # (key,idx) → 남은 반복 횟수
         self._paste_marks = {}                               # 붙여넣기 표시(⭕) 라벨
         self._potion_lbls = {}                               # 🧪 물약색 표시 라벨
+        self._scroll_lbls = {}                               # 📜 주문서 층수 표시 라벨
         self._move_btns = {}                                 # ▶▶/◀◀ 방향 전환 버튼
         self._potion_mtime = 0
 
@@ -456,6 +457,7 @@ class IslandApp(tk.Tk):
         # 여기서는 타이머를 돌리지 않는다 (⏰ 설정값만 저장하는 역할).
         self.after(1000, self._lock_tick)      # 실행 중 잠금 파일 갱신
         self.after(800, self._potion_tick)     # 🧪 물약색 결과 표시
+        self.after(900, self._scroll_apply)    # 📜 주문서 층수 표시
         self.after(300, self._scroll_all_to_bottom)
         self.after(80, self._fit_width)
         # 창을 옮기거나 크기를 바꾸면 그 자리를 기억한다 (다음에 그 자리에 뜸)
@@ -792,6 +794,7 @@ class IslandApp(tk.Tk):
         self._en_btns[key] = []
         self._paste_marks[key] = []
         self._potion_lbls[key] = []
+        self._scroll_lbls[key] = []
         self._move_btns[key] = []
         if not hasattr(self, "_cell_name_vars"):
             self._cell_name_vars = {}
@@ -832,6 +835,12 @@ class IslandApp(tk.Tk):
             nvv.trace_add("write", lambda *_a, f=_sv_name: f())
             # 프리셋 P1~P5 — 이 슬롯에 바로 적용 (이름칸 바로 아래)
             head = tk.Frame(cell); head.pack()
+            # 📜 주문서 층수 — 오만의탑만, 물약색 왼쪽에 숫자로 표시
+            if "오만" in key:
+                sl = tk.Label(head, text="", font=("맑은 고딕", 7, "bold"),
+                              fg="white", bg=cell.cget("bg"), width=3, padx=1)
+                sl.pack(side="left", padx=(0, 1))
+                self._scroll_lbls.setdefault(key, []).append(sl)
             # 🧪 물약색 — 메인런처에서 확인한 결과를 슬롯 번호 왼쪽에 그대로 표시
             pl = tk.Label(head, text="", font=("맑은 고딕", 7, "bold"),
                           fg="white", bg=cell.cget("bg"), width=4, padx=1)
@@ -1659,6 +1668,31 @@ class IslandApp(tk.Tk):
                 except Exception:
                     pass
 
+    @staticmethod
+    def _scroll_path():
+        return os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
+                            "scroll_result.json")
+
+    def _scroll_apply(self):
+        """메인런처 [📜 주문서] 결과를 물약색 왼쪽에 층수로 표시 (오만의탑)."""
+        try:
+            with open(self._scroll_path(), encoding="utf-8") as f:
+                res = (json.load(f) or {}).get("slots") or {}
+        except Exception:
+            res = {}
+        for key, lbls in (self._scroll_lbls or {}).items():
+            for i, lb in enumerate(lbls):
+                try:
+                    if not lb.winfo_exists():
+                        continue
+                    n = str(res.get(str(i + 1), "") or "").strip()
+                    if n:
+                        lb.config(text=n, bg="#1a5276", fg="white")
+                    else:
+                        lb.config(text="", bg=lb.master.cget("bg"))
+                except Exception:
+                    pass
+
     def _potion_tick(self):
         """결과 파일이 새로 써지면 자동으로 표시를 갱신한다."""
         try:
@@ -1666,6 +1700,13 @@ class IslandApp(tk.Tk):
             if m != getattr(self, "_potion_mtime", 0):
                 self._potion_mtime = m
                 self._potion_apply()
+        except Exception:
+            pass
+        try:
+            m = os.path.getmtime(self._scroll_path())
+            if m != getattr(self, "_scroll_mtime", 0):
+                self._scroll_mtime = m
+                self._scroll_apply()
         except Exception:
             pass
         self.after(3000, self._potion_tick)
