@@ -4051,8 +4051,9 @@ class App(tk.Tk):
                  font=("맑은 고딕", 10, "bold"), fg="#1a5276").pack(anchor="w", padx=6, pady=(6, 2))
         tk.Label(parent, text="① [영역 지정]으로 주문서의 '층수 숫자' 자리만 드래그해서 한 번 등록\n"
                               "② [확인] → 16개 클라의 같은 자리를 잘라와 아래에 보여줍니다\n"
-                              "③ 처음엔 못 읽으니 그림을 보고 칸에 숫자를 적고 [숫자 가르치기]\n"
-                              "   → 그 그림을 기억해서 다음부터는 저절로 읽습니다",
+                              "③ 처음엔 못 읽으니 '그림을 직접 보고' 칸에 숫자를 적은 뒤 [숫자 가르치기]\n"
+                              "   → 칸에 미리 적혀 있는 값을 그대로 가르치면 안 됩니다 (틀리게 기억함)\n"
+                              "   ※ 빨간 테두리 칸 = 클라 화면이 꺼져 있어 못 읽은 칸",
                  font=("맑은 고딕", 8), fg="#555", justify="left").pack(anchor="w", padx=6)
         row = tk.Frame(parent); row.pack(fill="x", padx=6, pady=6)
         tk.Button(row, text="\U0001F4F7 영역 지정", font=("맑은 고딕", 9, "bold"),
@@ -4063,6 +4064,9 @@ class App(tk.Tk):
         tk.Button(row, text="\U0001F4DD 숫자 가르치기", font=("맑은 고딕", 9, "bold"),
                   bg="#117864", fg="white",
                   command=self._scroll_teach).pack(side="left", padx=(6, 0))
+        tk.Button(row, text="\U0001F5D1 기억 지우기", font=("맑은 고딕", 9, "bold"),
+                  bg="#7f8c8d", fg="white",
+                  command=self._scroll_forget).pack(side="left", padx=(6, 0))
         self._scroll_area_lbl = tk.Label(parent, text="", font=("맑은 고딕", 8), fg="#888")
         self._scroll_area_lbl.pack(anchor="w", padx=6)
         self._refresh_scroll_area_lbl()
@@ -4264,7 +4268,12 @@ class App(tk.Tk):
             self._scroll_show(i, im)
             if self._scroll_is_dark(im):
                 # 화면이 꺼져 있으면 주문서가 안 보인다 — 예전 값을 그대로 둔다
-                dark.append(i + 1); continue
+                dark.append(i + 1)
+                try: self._scroll_imgs[i].config(bg="#c0392b")
+                except Exception: pass
+                continue
+            try: self._scroll_imgs[i].config(bg="#222")
+            except Exception: pass
             num = self._scroll_match(im)
             if num:
                 self._scroll_vars[i].set(num); got += 1
@@ -4287,17 +4296,23 @@ class App(tk.Tk):
                             + (f" — 화면 꺼짐 {dark}" if dark else ""))
 
     def _scroll_teach(self):
-        """칸에 적힌 숫자를 그 그림의 정답으로 기억한다."""
+        """칸에 적힌 숫자를 그 그림의 정답으로 기억한다.
+        이미 다른 숫자로 기억해둔 그림과 똑같으면 거부한다 —
+        한 번 잘못 기억하면 그 뒤로 계속 그 숫자로 읽히기 때문."""
         crops = getattr(self, "_scroll_crops", None)
         if not crops:
             self.status.set("먼저 [\U0001F50D 확인]을 눌러 그림을 가져와주세요"); return
-        n = 0
+        n, bad, dark = 0, [], []
         for i, v in enumerate(self._scroll_vars):
             num = (v.get() or "").strip()
             if not num.isdigit() or i >= len(crops) or crops[i] is None:
                 continue
             if self._scroll_is_dark(crops[i]):
-                continue                    # 꺼진 화면은 기억해봐야 소용없다
+                dark.append(i + 1); continue    # 꺼진 화면은 기억해봐야 소용없다
+            same = self._scroll_same_as(crops[i])       # 이미 기억한 그림과 같은가
+            if same and same != num:
+                bad.append(f"{i+1}번({num}\u2260{same})")
+                continue
             try:
                 im = crops[i]
                 P = self.SCROLL_PAD
@@ -4309,7 +4324,50 @@ class App(tk.Tk):
                 pass
         self._scroll_save_result()
         self._refresh_scroll_area_lbl()
-        self.status.set(f"\U0001F4DD 숫자 {n}칸 기억했습니다 — 다음부터는 [확인]만 누르면 저절로 읽습니다")
+        msg = f"\U0001F4DD 숫자 {n}칸 기억했습니다"
+        if bad:
+            msg += (f"  \u26a0 {', '.join(bad)} 는 이미 다른 숫자로 기억한 그림과 똑같아서 "
+                    f"넘겼습니다 — 숫자를 다시 확인해주세요")
+        if dark:
+            msg += f"  (화면 꺼짐 {dark} 은 제외)"
+        self.status.set(msg)
+
+    def _scroll_same_as(self, im):
+        """이 그림이 이미 기억해둔 어떤 숫자와 사실상 같은 그림인가? → 그 숫자."""
+        try:
+            import cv2, numpy as np
+        except Exception:
+            return ""
+        a = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2GRAY)
+        d = self._scroll_dir()
+        for f in sorted(os.listdir(d)):
+            if not f.endswith(".png"):
+                continue
+            t = cv2.imread(os.path.join(d, f), cv2.IMREAD_GRAYSCALE)
+            if t is None or t.shape[0] > a.shape[0] or t.shape[1] > a.shape[1]:
+                continue
+            try:
+                _, mv, _, loc = cv2.minMaxLoc(cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED))
+            except Exception:
+                continue
+            x, y = loc
+            win = a[y:y + t.shape[0], x:x + t.shape[1]].astype(int)
+            if np.abs(win - t.astype(int)).mean() < 2.0:      # 거의 똑같은 그림
+                return os.path.splitext(f)[0]
+        return ""
+
+    def _scroll_forget(self):
+        """기억한 숫자 그림을 전부 지운다 (잘못 가르쳤을 때)."""
+        d = self._scroll_dir()
+        n = 0
+        for f in os.listdir(d):
+            if f.endswith(".png"):
+                try:
+                    os.remove(os.path.join(d, f)); n += 1
+                except Exception:
+                    pass
+        self._refresh_scroll_area_lbl()
+        self.status.set(f"\U0001F5D1 기억한 숫자 {n}개를 지웠습니다 — 다시 가르쳐주세요")
 
     def _scroll_save_result(self):
         """칸에 적힌 값을 결과로 저장 — 오만의탑 실행기에 그대로 표시된다."""
