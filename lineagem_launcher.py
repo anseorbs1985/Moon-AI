@@ -777,7 +777,8 @@ class App(tk.Tk):
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
         self.after(2000, self._queue_tick)               # 실행 대기열 순차 처리
         self.after(3000, self._auto_back_tick)           # 다른 창을 클릭하면 런처를 바로 맨 뒤로
-        # (2026-08-11) 퍼플 팝업 상시 감시는 잠시 끔 — 감지색이 너무 흔해 오작동
+        # 퍼플 광고창('소식')은 마우스 없이 창만 닫는다 (픽셀 감지 방식은 폐기)
+        self.after(4000, self._purple_ad_tick)
         # 포커스를 잃는 순간에도 즉시 반응 (0.15초 확인보다 더 빠름)
         self.bind("<FocusOut>", self._auto_back_check, add="+")
         self.after(20000, self._island_repeat_tick)      # 섬/던전 슬롯 반복(2h N회) 관리
@@ -4484,6 +4485,38 @@ class App(tk.Tk):
         except Exception:
             pass
         self.after(2000, self._purple_popup_tick)
+
+    def _purple_ad_tick(self):
+        """(2026-08-13) 퍼플 광고창('소식')이 뜨면 마우스를 전혀 쓰지 않고 그 창만 닫는다.
+        창을 직접 닫는 방식이라 게임 조작이나 커서에 아무 영향이 없다."""
+        try:
+            import win32gui, win32con
+            targets = []
+
+            def _cb(hwnd, _):
+                if not win32gui.IsWindowVisible(hwnd):
+                    return True
+                cls = win32gui.GetClassName(hwnd) or ""
+                if not cls.startswith("HwndWrapper[Purple.exe"):
+                    return True
+                t = (win32gui.GetWindowText(hwnd) or "").strip()
+                if t in ("소식", "공지", "이벤트", "알림"):
+                    l, tp, r, b = win32gui.GetWindowRect(hwnd)
+                    if r - l > 200 and b - tp > 150:      # 작은 보조창은 제외
+                        targets.append((hwnd, t))
+                return True
+
+            win32gui.EnumWindows(_cb, None)
+            for hwnd, t in targets:
+                try:
+                    win32gui.SendMessageTimeout(hwnd, win32con.WM_CLOSE, 0, 0,
+                                                win32con.SMTO_ABORTIFHUNG, 1500)
+                    self.status.set(f"✔ 퍼플 광고창 '{t}' 자동으로 닫음")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        self.after(1500, self._purple_ad_tick)
 
     def _auto_back_check(self, _e=None):
         """(2026-08-11) 메인런처 말고 다른 창(리니지M 클라·바탕화면 등)이 앞으로 오면
