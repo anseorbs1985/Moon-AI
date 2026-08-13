@@ -4051,8 +4051,8 @@ class App(tk.Tk):
                  font=("맑은 고딕", 10, "bold"), fg="#1a5276").pack(anchor="w", padx=6, pady=(6, 2))
         tk.Label(parent, text="① [영역 지정]으로 주문서의 '층수 숫자' 자리만 드래그해서 한 번 등록\n"
                               "② [확인] → 16개 클라의 같은 자리를 잘라와 아래에 보여줍니다\n"
-                              "③ 처음엔 못 읽으니 '그림을 직접 보고' 칸에 숫자를 적은 뒤 [숫자 가르치기]\n"
-                              "   → 칸에 미리 적혀 있는 값을 그대로 가르치면 안 됩니다 (틀리게 기억함)\n"
+                              "③ 빈 칸은 '그림을 직접 보고' 숫자를 적은 뒤 [숫자 가르치기]\n"
+                              "   → 칸은 확인할 때마다 비워집니다 — 이번에 읽은 것만 적힙니다\n"
                               "   ※ 슬롯마다 따로 기억합니다 (클라마다 화면이 미세하게 다름)\n"
                               "   ※ 빨간 테두리 칸 = 클라 화면이 꺼져 있어 못 읽은 칸",
                  font=("맑은 고딕", 8), fg="#555", justify="left").pack(anchor="w", padx=6)
@@ -4089,18 +4089,6 @@ class App(tk.Tk):
             self._scroll_vars.append(v)
             tk.Entry(cell, textvariable=v, font=("맑은 고딕", 10, "bold"), width=5,
                      justify="center").pack(pady=(2, 1))
-        self.after(100, self._scroll_show_saved)
-
-    def _scroll_show_saved(self):
-        """지난번에 확인한 결과를 칸에 그대로 채워둔다."""
-        try:
-            with open(os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
-                                   "scroll_result.json"), encoding="utf-8") as f:
-                res = (json.load(f) or {}).get("slots") or {}
-            for i, v in enumerate(self._scroll_vars):
-                v.set(str(res.get(str(i + 1), "") or ""))
-        except Exception:
-            pass
 
     def _refresh_scroll_area_lbl(self):
         lb = getattr(self, "_scroll_area_lbl", None)
@@ -4258,6 +4246,8 @@ class App(tk.Tk):
         if crops is None:
             return
         self._scroll_crops = crops
+        for v in self._scroll_vars:      # 이번에 읽은 것만 적는다
+            v.set("")
         # 게임 배경(캐릭터·풍경)이 움직이는 순간엔 잘 안 맞을 수 있어서
         # 못 읽은 칸만 잠깐 뒤에 다시 찍어본다 (최대 3번)
         res = {}
