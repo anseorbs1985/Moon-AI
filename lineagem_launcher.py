@@ -3476,8 +3476,11 @@ class App(tk.Tk):
             title = win32gui.GetWindowText(hwnd)
             if "claude" in title.lower():
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
-                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+                # 잠깐 맨 위로 올렸다가 곧바로 '항상 위'를 푼다 —
+                # 계속 TOPMOST로 두면 메인런처가 그 위로 올라올 수 없다 (2026-08-13)
+                _f = win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0, _f)
+                win32gui.SetWindowPos(hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0, _f)
                 win32gui.SetForegroundWindow(hwnd)
             return True
         win32gui.EnumWindows(_cb, None)
@@ -4510,7 +4513,7 @@ class App(tk.Tk):
 
     def _auto_back_tick(self):
         self._auto_back_check()
-        self.after(150, self._auto_back_tick)   # 0.15초마다 — 사실상 즉시 반응
+        self.after(80, self._auto_back_tick)    # 0.08초마다 — 즉시 반응
 
     def _raise_on_click(self, e=None):
         """메인런처 안 아무 곳(빈 곳 포함)이나 클릭하면 창을 앞으로 올린다."""
