@@ -1742,8 +1742,15 @@ class App(tk.Tk):
         except Exception:
             return {}
 
+    # 정해진 횟수를 다 채워도 ⏰를 끄지 않고 다시 채워 넣는 던전 (2026-08-14 사용자 지시)
+    #   — 악몽의섬은 2시간 6회를 계속 돌린다. [■ 전체멈춤]·[⏰ 반복]으로 끄는 것은 그대로 동작.
+    REPEAT_FIXED = ("토요일_악몽의섬",)
+
     def _rep_turn_off(self, key, idx):
-        """정해진 횟수를 다 채웠으면 섬/던전 설정의 ⏰도 꺼준다."""
+        """정해진 횟수를 다 채웠으면 섬/던전 설정의 ⏰도 꺼준다.
+        (고정 던전은 끄지 않는다 — 계속 돌아야 하므로)"""
+        if key in self.REPEAT_FIXED:
+            return
         try:
             path = os.path.join(BASE, "island_coords.json")
             with open(path, encoding="utf-8") as f:
@@ -1755,6 +1762,13 @@ class App(tk.Tk):
             os.replace(tmp, path)
         except Exception as e:
             self._rep_log(f"⚠ {key} #{idx+1:02d} ⏰ 끄기 실패: {e!r}")
+
+    def _rep_full_n(self, key, idx):
+        """그 슬롯에 정해둔 반복 횟수 (없으면 6회)."""
+        try:
+            return int(self._island_cfg()[key][idx].get("repeat_n") or 6)
+        except Exception:
+            return 6
 
     def _rep_count(self):
         return sum(1 for k in self._rep_load() if not k.startswith("_"))
@@ -1887,7 +1901,14 @@ class App(tk.Tk):
         for bi, e, h in batch:
             kk = f"{key}|{bi}"
             e["left"] = int(e.get("left", 1)) - 1
-            if e["left"] <= 0:
+            if e["left"] <= 0 and key in self.REPEAT_FIXED:
+                # 고정 던전 — 횟수를 다 채우면 끄지 않고 처음부터 다시
+                e["left"] = self._rep_full_n(key, bi)
+                e["next"] = now + self._rep_delay(h)
+                st[kk] = e
+                self._rep_log(f"{key} #{bi+1:02d} 마지막 회차 실행 — 고정이라 "
+                              f"{e['left']}회로 다시 채움")
+            elif e["left"] <= 0:
                 st.pop(kk, None)
                 self._rep_turn_off(key, bi)
                 self._rep_log(f"{key} #{bi+1:02d} 마지막 회차 실행 (반복 종료)")
