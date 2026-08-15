@@ -3425,6 +3425,13 @@ class App(tk.Tk):
             font=("맑은 고딕", 9, "bold"), bg=color, fg="white",
             width=13, height=2, command=lambda: self._start_dgn2(fkey))
         run.pack(side="left", padx=(0,3))
+        if sp.get("sel"):
+            tk.Button(dr, text="▶ 선택실행", font=("맑은 고딕", 9, "bold"),
+                      bg="#1e8449", fg="white", width=10, height=2,
+                      command=lambda: self._start_dgn2_sel(fkey)).pack(side="left", padx=(0, 3))
+            tk.Button(dr, text="선택해제", font=("맑은 고딕", 8),
+                      bg="#95a5a6", fg="white", width=8, height=2,
+                      command=lambda: self._grid_sel_clear(fkey)).pack(side="left", padx=(0, 3))
         setattr(self, f"btn_{fkey}_run", run)
         stopb = tk.Button(dr, text="■ 멈춤",
             font=("맑은 고딕", 8, "bold"), bg="#c0392b", fg="white",
@@ -3610,15 +3617,45 @@ class App(tk.Tk):
             u32.CloseClipboard()
         return True
 
-    def _start_dgn2(self, fkey):
+    def _start_dgn2(self, fkey, sel_list=None):
         key, title, _ = self._dgn2_info(fkey)
-        if not self._try_busy_or_queue(title, lambda: self._start_dgn2(fkey)): return
+        if not self._try_busy_or_queue(title, lambda: self._start_dgn2(fkey, sel_list)): return
         setattr(self, f"_{fkey}_stop", False)
         self._set_btn(f"btn_{fkey}_run", state="disabled")
         self._set_btn(f"btn_{fkey}_stop", state="normal")
         self._minimize_all()
         self.after(300, lambda: threading.Thread(
-            target=self._run_task, args=(title, lambda: self._run_dgn2(fkey)), daemon=True).start())
+            target=self._run_task,
+            args=(title, lambda: self._run_dgn2(fkey, sel_list=sel_list)), daemon=True).start())
+
+    def _start_dgn2_sel(self, fkey):
+        """+ 로 고른 슬롯만 실행 — 고른 게 없으면 전체."""
+        sel = sorted((getattr(self, "_grid_sel", None) or {}).get(fkey) or [])
+        self._start_dgn2(fkey, sel or None)
+        title = self._dgn2_info(fkey)[1]
+        self.status.set(f"{title} — " + (f"{[i+1 for i in sel]}번 실행" if sel else "전체 실행"))
+
+    def _grid_sel_toggle(self, fkey, idx):
+        sel = (getattr(self, "_grid_sel", None) or {}).setdefault(fkey, set())
+        sel.discard(idx) if idx in sel else sel.add(idx)
+        self._refresh_grid_sel(fkey)
+
+    def _grid_sel_clear(self, fkey):
+        (getattr(self, "_grid_sel", None) or {})[fkey] = set()
+        self._refresh_grid_sel(fkey)
+
+    def _refresh_grid_sel(self, fkey):
+        sel = (getattr(self, "_grid_sel", None) or {}).get(fkey) or set()
+        for i, b in enumerate((getattr(self, "_grid_selbtns", None) or {}).get(fkey) or []):
+            try:
+                on = i in sel
+                b.config(text="✔" if on else "+",
+                         bg="#e67e22" if on else "#dfe3e6",
+                         fg="white" if on else "#e67e22")
+            except Exception:
+                pass
+        self.status.set(f"{self._dgn2_info(fkey)[1]} 선택 {sorted(i+1 for i in sel)}"
+                        if sel else "선택 없음")
 
     @staticmethod
     def _slot_wheel(slot, j):
@@ -3736,7 +3773,7 @@ class App(tk.Tk):
             time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
         self.status.set(f"{icon} 번갈아 실행 완료 — 클릭 {done}회")
 
-    def _run_dgn2(self, fkey, slot_idx=None):
+    def _run_dgn2(self, fkey, slot_idx=None, sel_list=None):
         self._start_pause()
         key, title, icon = self._dgn2_info(fkey)
         nclk = self._grid_spec(fkey)["clicks"]
@@ -3752,8 +3789,9 @@ class App(tk.Tk):
             if slot_idx is not None:
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
             else:
-                targets = [(i, s) for i, s in enumerate(slots)
-                           if any(s.get("coords", []))]
+                _pick = sel_list if sel_list else range(len(slots))
+                targets = [(i, slots[i]) for i in _pick
+                           if i < len(slots) and any(slots[i].get("coords", []))]
                 random.shuffle(targets)   # 슬롯 클릭 순서 매번 랜덤
             if fkey == "circus" and slot_idx is None and len(targets) > 1:
                 # 서커스 이벤트등록: 동시 2슬롯, 간격·슬롯투입 모두 10~20% 할증
@@ -8247,7 +8285,7 @@ class App(tk.Tk):
                             prev=lambda i: self._preview_dgn2("relic", i),
                             delete=lambda i: self._del_dgn2("relic", i)),
             "market":  dict(title="거래소검색", key="market_slots", clicks=MARKET_CLICKS,
-                            color="#2874a6", opts=True, paste=True,
+                            color="#2874a6", opts=True, paste=True, sel=True,
                             reg=lambda s, c: self._reg_dgn2_click("market", s, c),
                             test=lambda i: self._test_dgn2("market", i),
                             prev=lambda i: self._preview_dgn2("market", i),
@@ -8297,6 +8335,9 @@ class App(tk.Tk):
             self._grid_state = {}
         st = self._grid_state.setdefault(fkey, {})
         st["cnt_vars"] = []; st["enable_btns"] = []
+        if not hasattr(self, "_grid_selbtns"):
+            self._grid_sel = {}; self._grid_selbtns = {}
+        self._grid_selbtns[fkey] = []
         st["pop"] = None; st["pop_slot"] = None
         tk.Button(parent, text="👁 전체 좌표 보기", font=("맑은 고딕", 8),
                   bg="#566573", fg="white",
@@ -8328,6 +8369,15 @@ class App(tk.Tk):
                       command=lambda x=idx, f=fkey: self._grid_paste(f, x)).pack(side="left", padx=(0, 2))
             tk.Button(row3, text="👁", font=("맑은 고딕", 6), bg="#566573", fg="white", width=2,
                       command=lambda x=idx, f=fkey: self._grid_spec(f)["prev"](x)).pack(side="left")
+            if sp.get("sel"):
+                if not hasattr(self, "_grid_sel"):
+                    self._grid_sel = {}; self._grid_selbtns = {}
+                self._grid_sel.setdefault(fkey, set())
+                pb = tk.Button(cell, text="+", font=("맑은 고딕", 7, "bold"), width=10,
+                               bg="#dfe3e6", fg="#e67e22",
+                               command=lambda x=idx, f=fkey: self._grid_sel_toggle(f, x))
+                pb.pack(pady=(1, 0))
+                self._grid_selbtns.setdefault(fkey, []).append(pb)
         self._refresh_slot_grids(fkey)
 
     def _open_grid_slot(self, fkey, idx):
