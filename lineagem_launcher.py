@@ -3476,7 +3476,8 @@ class App(tk.Tk):
             if tries < 240:
                 self.after(500, lambda: self._dragon_wait_seq(tries + 1)); return
             self.status.set("⚠ 절전해제가 안 끝나서 용던고고를 시작하지 못했습니다"); return
-        self.status.set("🐲 용던고고!!! 시작")
+        self._dragon_deadline = time.time() + DRAGON_BUDGET   # 지금부터 3분30초
+        self.status.set(f"🐲 용던고고!!! 시작 — {DRAGON_BUDGET}초 안에 끝냅니다")
         self._start_dgn2("dragon")
 
     def _open_market_win(self):
@@ -3951,22 +3952,12 @@ class App(tk.Tk):
                 targets = [(i, slots[i]) for i in _pick
                            if i < len(slots) and any(slots[i].get("coords", []))
                            and (not _en or slots[i].get("enabled", True))]
-                random.shuffle(targets)   # 슬롯 클릭 순서 매번 랜덤
+                if fkey != "dragon":      # 용던고고는 번호 순서대로 (섞지 않는다)
+                    random.shuffle(targets)   # 슬롯 클릭 순서 매번 랜덤
             if fkey == "circus" and slot_idx is None and len(targets) > 1:
                 # 서커스 이벤트등록: 동시 2슬롯, 간격·슬롯투입 모두 10~20% 할증
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
                                     slow=(1.10, 1.20), slot_gap=(3.0, 5.0))
-                return
-            if fkey == "dragon" and slot_idx is None and len(targets) > 1:
-                # 용던고고!!! — 전체를 3분30초 안에 끝내야 한다.
-                # 남은 시간을 클릭 수로 나눠 좌표 간격을 자동으로 정한다 (동시 4슬롯).
-                lanes = 4
-                total = max(1, len(targets) * nclk)
-                per   = max(0.45, (DRAGON_BUDGET - 20) * lanes / total)
-                self._rep_log(f"용던고고 — {len(targets)}슬롯 × {nclk}좌표, "
-                              f"좌표 간격 약 {per:.1f}초 (목표 {DRAGON_BUDGET}초)")
-                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=lanes,
-                                    gap=(per * 0.85, per * 1.15), slot_gap=(0.8, 2.0))
                 return
             if fkey == "market" and slot_idx is None and len(targets) > 1:
                 # 거래소검색: 동시 2슬롯 번갈아 (간격은 칸에 적어둔 값 우선)
@@ -3987,6 +3978,14 @@ class App(tk.Tk):
                 # 낚시녹임은 번갈아(웨이브) 실행 — 동시 4슬롯, 좌표 간격 2~4초 랜덤
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop)
                 return
+            if fkey == "dragon":
+                # F11(절전해제)이 끝난 시각부터 3분30초 안에 전부 끝낸다.
+                # 남은 시간 ÷ 남은 클릭 수로 간격을 매번 다시 계산해 스스로 맞춘다.
+                _dl = getattr(self, "_dragon_deadline", 0) or (time.time() + DRAGON_BUDGET)
+                _left = sum(1 for _si, _sl in targets
+                            for _c in (_sl.get("coords") or [])[:nclk] if _c)
+                self.status.set(f"🐲 용던고고!!! — {len(targets)}슬롯 / 클릭 {_left}회, "
+                                f"{int(_dl - time.time())}초 안에 끝내기")
             for tn, (si, slot) in enumerate(targets):
                 if getattr(self, stop, False): break
                 name = slot.get("name", f"#{si+1}")
@@ -4015,10 +4014,17 @@ class App(tk.Tk):
                         self.status.set(f"{icon} [{name}] {_act}{j+1}...")
                         if fkey == "coupon":
                             self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
+                    if fkey == "dragon":
+                        # 남은 시간 ÷ 남은 클릭 수 만큼만 쉰다 (슬롯 사이도 포함)
+                        _left -= 1
+                        _rem = _dl - time.time()
+                        time.sleep(max(0.25, min(_rem / max(1, _left), 4.0)))
                     if n < len(order) - 1:
                         if fkey == "eventshop" and j == 0:
                             # 이벤트상점: 클릭1 → 4초 × 1.15~1.30 랜덤 증가 후 클릭2
                             time.sleep(4.0 * random.uniform(1.15, 1.30))
+                        elif fkey == "dragon":
+                            pass                 # 아래에서 이미 쉬었다
                         else:
                             _cg = self._slot_gap(slot, j)    # 칸에 적어둔 초가 있으면 그걸로
                             if _cg is not None:
@@ -4035,7 +4041,12 @@ class App(tk.Tk):
                         g = COUPON_SLOT_GAP * random.uniform(1.02, 1.18)
                         self._coupon_log(f"슬롯 간격 {g:.2f}초 대기")
                         time.sleep(g)
-            self.status.set(f"✔ {title} 실행 완료!")
+            if fkey == "dragon":
+                _el = int(time.time() - (getattr(self, "_dragon_deadline", 0) - DRAGON_BUDGET))
+                self.status.set(f"✔ {title} 완료 — {_el//60}분 {_el%60}초 걸림 "
+                                f"(목표 {DRAGON_BUDGET//60}분 {DRAGON_BUDGET%60}초)")
+            else:
+                self.status.set(f"✔ {title} 실행 완료!")
         except Exception as e:
             self.status.set(f"오류: {e}")
         finally:
