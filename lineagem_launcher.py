@@ -3816,8 +3816,6 @@ class App(tk.Tk):
             if not v:
                 return 0, False
             t = str(v).strip()
-            if t and t[0] in "du":            # 끌기(누른 채 이동) — 클릭이 되면 안 되는 자리
-                return int(t[1:]) * (1 if t[0] == "u" else -1), "drag"
             cl = t.startswith("c")
             n = int(t[1:] if cl else t)
             return n, cl
@@ -3845,20 +3843,6 @@ class App(tk.Tk):
         n, also_click = self._slot_wheel(slot, j) if slot else (0, False)
         if not n and j in WHEEL_UP_INDICES.get(fkey, ()):
             n = WHEEL_UP_NOTCH                # 슬롯 설정이 없으면 기본값
-        if n and also_click == "drag":
-            # 끌기 — 누른 채 천천히 움직였다가 '옮겨간 자리에서' 뗀다.
-            # (제자리에서 떼면 게임이 클릭으로 받아들인다). 한 칸 = 30px
-            dist = abs(n) * 30 * (1 if n < 0 else -1)     # 아래로(-값) / 위로(+값)
-            sx, sy = int(coord[0]), int(coord[1])
-            pyautogui.moveTo(sx, sy); time.sleep(0.05)
-            pyautogui.mouseDown()
-            time.sleep(0.12)
-            for _st in range(1, 9):
-                pyautogui.moveTo(sx, sy + int(dist * _st / 8))
-                time.sleep(0.025)
-            time.sleep(0.08)
-            pyautogui.mouseUp(sx, sy + dist)
-            return ("끌\u2193" if n < 0 else "끌\u2191") + str(abs(n))
         if n and also_click:                  # 클릭한 뒤에 굴린다
             click_at(*coord)
             time.sleep(random.uniform(0.35, 0.6))
@@ -8624,18 +8608,12 @@ class App(tk.Tk):
                     def _wtxt(n, cl):
                         if not n:
                             return "0"
-                        _ar = "▲" if n > 0 else "▼"
-                        if cl == "drag":
-                            return "끌" + _ar + str(abs(n))
-                        return ("클릭" if cl else "") + _ar + str(abs(n))
+                        return ("클릭" if cl else "") + ("▲" if n > 0 else "▼") + str(abs(n))
                     _opts = ["0"]
                     for _cl in (False, True):
                         for _d in ("▲", "▼"):
                             for _k in range(1, 10):
                                 _opts.append(("클릭" if _cl else "") + _d + str(_k))
-                    for _d in ("▼", "▲"):     # 끌기 (누른 채 이동)
-                        for _k in range(1, 10):
-                            _opts.append("끌" + _d + str(_k))
                     wv = tk.StringVar(value=_wtxt(_n0, _c0))
                     om = tk.OptionMenu(cc, wv, *_opts)
                     om.config(font=("맑은 고딕", 7), width=4, pady=0, highlightthickness=0)
@@ -8643,17 +8621,13 @@ class App(tk.Tk):
                     def _sv_wheel(*_a, x=idx, c=j, v=wv, f=fkey):
                         t = v.get()
                         try:
-                            dg = t.startswith("끌")
                             cl = t.startswith("클릭")
-                            t2 = t[1:] if dg else (t[2:] if cl else t)
+                            t2 = t[2:] if cl else t
                             if t2 in ("", "0"):
                                 val = 0
                             else:
                                 n = int(t2[1:]) * (1 if t2[0] == "▲" else -1)
-                                if dg:
-                                    val = ("u" if n > 0 else "d") + str(abs(n))
-                                else:
-                                    val = (f"c{n}" if cl else n)
+                                val = (f"c{n}" if cl else n)
                         except Exception:
                             val = 0
                         self._grid_set_list(f, x, "wheel_list", c, val)
