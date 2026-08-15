@@ -214,8 +214,6 @@ DEFAULT_CFG = {
     "coupon_text":   "",                # 쿠폰등록 클릭5에서 붙여넣을 글
     "market_slots":  None,              # 거래소검색 — 16슬롯 × 좌표9 (쿠폰등록 방식)
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
-    "market_gaps":   [],                # 거래소검색 칸별 간격(초) — 모든 슬롯 공통
-    "market_paste":  [],                # 거래소검색 붙여넣기 자리 — 체크한 좌표 '다음'에 붙임
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
@@ -475,7 +473,9 @@ def load_cfg():
                 if isinstance(s, dict):
                     c = s.get("coords", [None] * _n3)
                     while len(c) < _n3: c.append(None)
-                    nc.append({"name": s.get("name", "미등록"), "coords": c[:_n3]})
+                    # 칸별 간격(gap_list)·붙임 자리(paste_list)는 그대로 살려둔다
+                    _e = {k: v for k, v in s.items() if k in ("gap_list", "paste_list")}
+                    nc.append({"name": s.get("name", "미등록"), "coords": c[:_n3], **_e})
                 else:
                     nc.append({"name": "미등록", "coords": [None] * _n3})
             while len(nc) < 16:
@@ -3170,33 +3170,6 @@ class App(tk.Tk):
                 self.cfg[f"{f}_text"] = v.get()
                 save_cfg(self.cfg)
             ent.bind("<FocusOut>", _save_txt); ent.bind("<Return>", _save_txt)
-        if sp.get("cmnopt"):
-            # 칸별 간격(초) + 붙여넣기 자리 — 모든 슬롯 공통
-            ob = tk.LabelFrame(parent,
-                               text="칸별 간격(초) / 붙여넣기 자리 — 체크한 좌표 '다음'에 붙여넣습니다",
-                               font=("맑은 고딕", 8, "bold"), fg=color)
-            ob.pack(fill="x", padx=6, pady=(0, 4))
-            gaps = list(self.cfg.get(f"{fkey}_gaps") or [])
-            pst  = list(self.cfg.get(f"{fkey}_paste") or [])
-            while len(gaps) < sp["clicks"]: gaps.append("")
-            while len(pst)  < sp["clicks"]: pst.append(False)
-            if not hasattr(self, "_cmn_pvars"):
-                self._cmn_pvars = {}
-            self._cmn_pvars[fkey] = []
-            for j in range(sp["clicks"]):
-                cc = tk.Frame(ob); cc.pack(side="left", padx=2, pady=2)
-                tk.Label(cc, text=f"클릭{j+1}", font=("맑은 고딕", 7, "bold"),
-                         fg="#555").pack()
-                gv = tk.StringVar(value=("" if gaps[j] in (None, "") else str(gaps[j])))
-                tk.Entry(cc, textvariable=gv, width=4, justify="center",
-                         font=("맑은 고딕", 8), relief="solid", bd=1).pack()
-                def _sv_g(*_a, c=j, v=gv, f=fkey):
-                    self._cmn_set(f, "gaps", c, v.get().strip())
-                gv.trace_add("write", _sv_g)
-                bv = tk.BooleanVar(value=bool(pst[j]))
-                self._cmn_pvars[fkey].append(bv)
-                tk.Checkbutton(cc, text="붙임", variable=bv, font=("맑은 고딕", 7),
-                               command=lambda c=j, f=fkey: self._cmn_paste_pick(f, c)).pack()
         dr = tk.Frame(parent); dr.pack(pady=3)
         setattr(self, f"_{fkey}_stop", False)
         run = tk.Button(dr, text="▶  실행",
@@ -3528,7 +3501,7 @@ class App(tk.Tk):
                 # 쿠폰: 클릭5(입력칸)가 등록돼 있으면 그 직후, 없으면 클릭4 직후에 붙여넣기
                 paste_after = None
                 if fkey in self.PASTE_FKEYS:
-                    paste_after = self._cmn_paste_idx(fkey)      # 창에서 체크한 자리
+                    paste_after = self._paste_idx(slot)          # 칸에 체크한 자리
                     if paste_after is None:                      # 없으면 예전 규칙(클릭5)
                         paste_after = 4 if (len(coords) > 4 and coords[4]) else 3
                 if fkey == "coupon":
@@ -3567,7 +3540,7 @@ class App(tk.Tk):
                             # 이벤트상점: 클릭1 → 4초 × 1.15~1.30 랜덤 증가 후 클릭2
                             time.sleep(4.0 * random.uniform(1.15, 1.30))
                         else:
-                            _cg = self._cmn_gap(fkey, j)     # 칸에 적어둔 초가 있으면 그걸로
+                            _cg = self._slot_gap(slot, j)    # 칸에 적어둔 초가 있으면 그걸로
                             if _cg is not None:
                                 time.sleep(_cg * random.uniform(1.0, 1.10))
                             else:
@@ -7976,7 +7949,7 @@ class App(tk.Tk):
                             prev=lambda i: self._preview_dgn2("relic", i),
                             delete=lambda i: self._del_dgn2("relic", i)),
             "market":  dict(title="거래소검색", key="market_slots", clicks=MARKET_CLICKS,
-                            color="#2874a6", cmnopt=True,
+                            color="#2874a6", opts=True, paste=True,
                             reg=lambda s, c: self._reg_dgn2_click("market", s, c),
                             test=lambda i: self._test_dgn2("market", i),
                             prev=lambda i: self._preview_dgn2("market", i),
@@ -8081,7 +8054,7 @@ class App(tk.Tk):
             save_cfg(self.cfg)
         ent.bind("<FocusOut>", _save_name); ent.bind("<Return>", _save_name)
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
-        st["pop_vars"] = []; st["pop_btns"] = []
+        st["pop_vars"] = []; st["pop_btns"] = []; st["pop_pvars"] = []
         locked = sp.get("locked", ())
         coords = slot.get("coords", [None] * sp["clicks"])
         for j in range(sp["clicks"]):
@@ -8109,16 +8082,25 @@ class App(tk.Tk):
                 def _sv_gap(*_a, x=idx, c=j, v=gv, f=fkey):
                     self._grid_set_list(f, x, "gap_list", c, v.get().strip())
                 gv.trace_add("write", _sv_gap)
-                wl = slot.get("wheel_list") or []
-                wv = tk.StringVar(value=(str(wl[j]) if j < len(wl) and wl[j] else "0"))
-                om = tk.OptionMenu(cc, wv, *[str(k) for k in range(10)])
-                om.config(font=("맑은 고딕", 7), width=1, pady=0, highlightthickness=0)
-                om.pack(pady=(1, 0))
-                def _sv_wheel(*_a, x=idx, c=j, v=wv, f=fkey):
-                    try: n = int(v.get())
-                    except Exception: n = 0
-                    self._grid_set_list(f, x, "wheel_list", c, n)
-                wv.trace_add("write", _sv_wheel)
+                if sp.get("paste"):
+                    # 간격 아래에 '붙임' — 체크한 좌표 '다음'에 적어둔 글을 붙여넣는다
+                    pl = slot.get("paste_list") or []
+                    pv = tk.BooleanVar(value=bool(pl[j]) if j < len(pl) else False)
+                    st["pop_pvars"].append(pv)
+                    tk.Checkbutton(cc, text="붙임", font=("맑은 고딕", 7), variable=pv,
+                                   command=lambda x=idx, c=j, f=fkey:
+                                   self._pick_paste(f, x, c)).pack(pady=(1, 0))
+                else:
+                    wl = slot.get("wheel_list") or []
+                    wv = tk.StringVar(value=(str(wl[j]) if j < len(wl) and wl[j] else "0"))
+                    om = tk.OptionMenu(cc, wv, *[str(k) for k in range(10)])
+                    om.config(font=("맑은 고딕", 7), width=1, pady=0, highlightthickness=0)
+                    om.pack(pady=(1, 0))
+                    def _sv_wheel(*_a, x=idx, c=j, v=wv, f=fkey):
+                        try: n = int(v.get())
+                        except Exception: n = 0
+                        self._grid_set_list(f, x, "wheel_list", c, n)
+                    wv.trace_add("write", _sv_wheel)
         bot = tk.Frame(win); bot.pack(pady=(4, 10))
         if sp.get("assign"):
             tk.Button(bot, text="🖥 창 지정", font=("맑은 고딕", 8), bg="#8e44ad", fg="white",
@@ -8129,57 +8111,34 @@ class App(tk.Tk):
                   command=lambda: sp["delete"](idx)).pack(side="left", padx=3)
         tk.Button(bot, text="닫기", font=("맑은 고딕", 8), command=win.destroy).pack(side="left", padx=3)
 
-    def _cmn_set(self, fkey, kind, j, val):
-        """모든 슬롯 공통 값(칸별 간격 등) 저장."""
+    def _pick_paste(self, fkey, idx, j):
+        """붙여넣기 자리는 슬롯마다 한 곳만 — 체크하면 나머지는 자동으로 풀린다."""
         try:
-            n = self._grid_spec(fkey)["clicks"]
-            lst = list(self.cfg.get(f"{fkey}_{kind}") or [])
-            while len(lst) < n:
-                lst.append("" if kind == "gaps" else False)
-            lst[j] = val
-            self.cfg[f"{fkey}_{kind}"] = lst
-            save_cfg(self.cfg)
-        except Exception:
-            pass
-
-    def _cmn_paste_pick(self, fkey, j):
-        """붙여넣기 자리는 한 곳만 — 체크하면 나머지는 자동으로 풀린다."""
-        try:
-            vars_ = (getattr(self, "_cmn_pvars", None) or {}).get(fkey) or []
+            sp = self._grid_spec(fkey)
+            st = self._grid_state[fkey]
+            vars_ = st.get("pop_pvars") or []
             on = bool(vars_[j].get()) if j < len(vars_) else False
             for i, v in enumerate(vars_):
                 if i != j:
                     v.set(False)
-            n = self._grid_spec(fkey)["clicks"]
-            self.cfg[f"{fkey}_paste"] = [(i == j and on) for i in range(n)]
+            self.cfg[sp["key"]][idx]["paste_list"] = [(i == j and on)
+                                                      for i in range(sp["clicks"])]
             save_cfg(self.cfg)
-            self.status.set(f"붙여넣기 자리 — 클릭{j+1} 다음" if on else "붙여넣기 자리 없음")
+            self.status.set(f"{sp['title']} #{idx+1:02d} 붙여넣기 자리 — "
+                            + (f"클릭{j+1} 다음" if on else "없음"))
         except Exception:
             pass
 
-    def _cmn_paste_idx(self, fkey):
-        """체크해둔 붙여넣기 자리 (없으면 None)."""
+    @staticmethod
+    def _paste_idx(slot):
+        """그 슬롯에서 체크해둔 붙여넣기 자리 (없으면 None)."""
         try:
-            for i, v in enumerate(self.cfg.get(f"{fkey}_paste") or []):
+            for i, v in enumerate(slot.get("paste_list") or []):
                 if v:
                     return i
         except Exception:
             pass
         return None
-
-    def _cmn_gap(self, fkey, j):
-        """그 칸에 적어둔 간격(초) — 없으면 None. '2~4' 처럼 범위도 된다."""
-        try:
-            lst = self.cfg.get(f"{fkey}_gaps") or []
-            t = str(lst[j] if j < len(lst) else "").strip()
-            if not t:
-                return None
-            if "~" in t:
-                a_, b_ = t.split("~")
-                return random.uniform(float(a_), float(b_))
-            return float(t)
-        except Exception:
-            return None
 
     def _grid_set_list(self, fkey, idx, field, j, val):
         """슬롯의 gap_list / wheel_list 같은 '칸별 값'을 저장한다."""
