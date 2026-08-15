@@ -2499,15 +2499,18 @@ class App(tk.Tk):
                   bg="#95a5a6", fg="white",
                   command=lambda: self._night_sel_clear()).pack(side="left", padx=(4, 0))
         wg = tk.Frame(parent); wg.pack(anchor="w")
-        self._night_btns = []; self._night_plus = []
+        self._night_btns = []; self._night_plus = []; self._night_runbtns = []
         self._night_sel = set()
+        self._night_queue = []          # 눌러둔 슬롯을 쌓아두고 하나씩 실행
         for idx in range(16):
             r, c = idx % 4, idx // 4
             cell = tk.Frame(wg); cell.grid(row=r, column=c, padx=5, pady=3)
             tk.Label(cell, text=f"{idx+1:02d}", font=("맑은 고딕", 7), fg="#888").pack()
-            tk.Button(cell, text="실행", font=("맑은 고딕", 7, "bold"),
-                      bg="#2471a3", fg="white", width=6,
-                      command=lambda x=idx: self._run_night_slot(x)).pack()
+            xb = tk.Button(cell, text="실행", font=("맑은 고딕", 7, "bold"),
+                           bg="#2471a3", fg="white", width=6,
+                           command=lambda x=idx: self._run_night_slot(x))
+            xb.pack()
+            self._night_runbtns.append(xb)
             rb = tk.Button(cell, text="⏰", font=("맑은 고딕", 7, "bold"),
                            bg="#7f8c8d", fg="white", width=6,
                            command=lambda x=idx: self._night_rep_off(x))
@@ -2586,16 +2589,41 @@ class App(tk.Tk):
         self.after(20000, self._refresh_night_btns)
 
     def _run_night_slot(self, slot_idx):
-        """악몽의섬 그 슬롯 하나만 실행 — 누른 때부터 2시간 N회를 다시 센다."""
-        if self._is_busy():
-            self._enqueue(f"악몽의섬 #{slot_idx+1:02d}",
-                          lambda: self._run_night_slot(slot_idx)); return
+        """[실행]은 '대기열에 쌓기' — 누른 순서대로 하나씩 자동으로 돈다.
+        (여러 개를 눌러두고 잊어도 되게. 대기 중인 것을 다시 누르면 취소)"""
+        if not hasattr(self, "_night_queue"):
+            self._night_queue = []
         try:
             slots = self._island_cfg().get(self.NIGHT_KEY, [])
             if slot_idx >= len(slots) or not any(slots[slot_idx].get("coords") or []):
                 self.status.set(f"악몽의섬 #{slot_idx+1:02d} — 등록된 좌표 없음"); return
         except Exception:
             pass
+        if slot_idx in self._night_queue:
+            self._night_queue.remove(slot_idx)
+            self._refresh_night_queue()
+            self.status.set(f"🌑 악몽의섬 #{slot_idx+1:02d} 대기 취소 "
+                            f"(대기 {len(self._night_queue)}개)"); return
+        self._night_queue.append(slot_idx)
+        self._refresh_night_queue()
+        self.status.set(f"🌑 악몽의섬 #{slot_idx+1:02d} 대기에 넣음 — "
+                        f"{[i+1 for i in self._night_queue]} 순서로 하나씩 실행")
+        self._night_queue_tick()
+
+    def _night_queue_tick(self):
+        """앞 작업이 끝나면 대기열에서 하나 꺼내 실행한다."""
+        q = getattr(self, "_night_queue", None)
+        if not q:
+            return
+        if self._is_busy():
+            self.after(3000, self._night_queue_tick); return
+        idx = q.pop(0)
+        self._refresh_night_queue()
+        self._night_launch(idx)
+        self.after(6000, self._night_queue_tick)   # 다음 것은 이 실행이 끝난 뒤
+
+    def _night_launch(self, slot_idx):
+        """실제 실행 — 누른 때부터 2시간 N회를 다시 센다."""
         self._island_step_back()
         cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"),
                str(self.NIGHT_DIDX), "--run", "--slot", str(slot_idx + 1)]
@@ -2603,7 +2631,23 @@ class App(tk.Tk):
         self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
         self._night_rep_restart(slot_idx)
-        self.status.set(f"🌑 악몽의섬 #{slot_idx+1:02d} 실행 — 지금부터 2시간 다시 셈")
+        left = len(getattr(self, "_night_queue", []) or [])
+        self.status.set(f"🌑 악몽의섬 #{slot_idx+1:02d} 실행 — 지금부터 2시간 다시 셈"
+                        + (f" (대기 {left}개 남음)" if left else ""))
+
+    def _refresh_night_queue(self):
+        """대기 중인 슬롯은 [실행] 버튼에 순번을 보여준다."""
+        q = getattr(self, "_night_queue", []) or []
+        for i, b in enumerate(getattr(self, "_night_runbtns", []) or []):
+            try:
+                if not b.winfo_exists():
+                    continue
+                if i in q:
+                    b.config(text=f"대기{q.index(i)+1}", bg="#e67e22")
+                else:
+                    b.config(text="실행", bg="#2471a3")
+            except Exception:
+                pass
 
     def _night_rep_restart(self, slot_idx):
         """그 슬롯의 반복을 '지금부터' 다시 시작 (2시간 N회)."""
