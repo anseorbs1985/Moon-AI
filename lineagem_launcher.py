@@ -1256,7 +1256,8 @@ class App(tk.Tk):
                    width=4, font=("맑은 고딕", 9), state="normal").pack(side="left", padx=4)
 
         # 실행 / 멈춤
-        btn_row = tk.Frame(self); btn_row.pack(pady=6)
+        # 가운데정렬이면 창을 넓힐 때마다 버튼이 오른쪽으로 밀린다 → 왼쪽 고정
+        btn_row = tk.Frame(self); btn_row.pack(pady=6, anchor="w", padx=(38, 0))
         # TJ성공!! (동그라미 버튼) + 실행 — 계정관리 왼쪽
         tjcol = tk.Frame(btn_row); tjcol.pack(side="left", padx=(0, 6), anchor="n")
         self._tjcol = tjcol
@@ -1406,12 +1407,12 @@ class App(tk.Tk):
         tk.Frame(self, height=1, bg="#ccc").pack(fill="x", padx=10, pady=3)
 
         # ── 섹션 버튼 행 (좌표등록·과거섬·스케줄·사냥 등 직접 표시) ──
-        self._sec_row = tk.Frame(self); self._sec_row.pack(pady=4)
+        self._sec_row = tk.Frame(self); self._sec_row.pack(pady=4, anchor="w", padx=(38, 0))
         self._build_sec_row()
 
         # ── 배열창 재배치(슬롯별 그리드) + 다야 수량 ──
         tk.Frame(self, height=1, bg="#ccc").pack(fill="x", padx=10, pady=(4,2))
-        front_row = tk.Frame(self); front_row.pack(pady=4, anchor="n")
+        front_row = tk.Frame(self); front_row.pack(pady=4, anchor="w", padx=(38, 0))
         self._front_row = front_row   # 정렬 보정용 (일반던전충전 열 ← TJ 좌측 라인)
 
         # 배열창 재배치 왼쪽: (1행) 일반던전충전+실행  (2행) 인형탐험+실행 — 각 버튼 옆에 실행
