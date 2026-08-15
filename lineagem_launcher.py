@@ -3506,6 +3506,34 @@ class App(tk.Tk):
         inp.u.ki = KEYBDINPUT(0, scan, flags, 0, None)
         ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
 
+    def _focus_client_at(self, coord):
+        """그 좌표에 있는 리니지M 창을 앞으로 가져온다.
+        커서 없는 클릭(메시지 전달)은 창을 활성화하지 않아서, 그대로 Ctrl+V를 보내면
+        엉뚱한 창(또는 아무 데도)에 붙는다 → 붙여넣기 직전에 이 창을 활성화한다."""
+        try:
+            import win32gui, win32con, win32process, ctypes
+            hwnd = win32gui.WindowFromPoint((int(coord[0]), int(coord[1])))
+            root = ctypes.windll.user32.GetAncestor(hwnd, 2)      # GA_ROOT
+            if not root:
+                return False
+            title = win32gui.GetWindowText(root)
+            if not title.startswith("리니지M"):
+                return False
+            if win32gui.GetForegroundWindow() == root:
+                return True
+            try:                     # 다른 스레드 창은 그냥은 못 올려서 입력 큐를 붙였다 뗀다
+                cur = win32process.GetWindowThreadProcessId(win32gui.GetForegroundWindow())[0]
+                tgt = win32process.GetWindowThreadProcessId(root)[0]
+                ctypes.windll.user32.AttachThreadInput(cur, tgt, True)
+                win32gui.SetForegroundWindow(root)
+                ctypes.windll.user32.AttachThreadInput(cur, tgt, False)
+            except Exception:
+                win32gui.SetForegroundWindow(root)
+            time.sleep(0.25)
+            return win32gui.GetForegroundWindow() == root
+        except Exception:
+            return False
+
     def _paste_ctrl_v(self):
         # Ctrl(0x1D)+V(0x2F) 스캔코드 순서대로 누르고 떼기 — 게임 프레임이 놓치지 않게 여유 있게
         self._send_key_input_cp(0x1D, 0x0008);          time.sleep(0.12)
@@ -3765,6 +3793,10 @@ class App(tk.Tk):
                         # 오류가 나도 뒤 클릭이 끊기지 않게 보호
                         try:
                             time.sleep(random.uniform(1.3, 1.7))
+                            # 커서 없는 클릭은 창을 활성화하지 않는다 → 이 창을 먼저 앞으로
+                            _fw = self._focus_client_at(coords[j])
+                            self._coupon_log(f"창 활성화 {'성공' if _fw else '실패/불필요'}"
+                                             f" {tuple(coords[j])}")
                             ok = self._set_clipboard_text(txt)
                             self._coupon_log(f"클립보드 복사 {'성공' if ok else '실패'}: {txt!r}")
                             time.sleep(0.15)
