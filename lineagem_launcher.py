@@ -2459,10 +2459,12 @@ class App(tk.Tk):
         except Exception:
             self.status.set("island_coords.json 을 찾을 수 없습니다"); return
         sel = sorted(getattr(self, "_return_sel", set()))
-        todo = [(i, slots[i]) for i in (sel or range(len(slots)))
+        if not sel:                      # 아무것도 안 골랐으면 실행하지 않는다
+            self.status.set("📜 귀환주문서 — 슬롯을 고르세요 ([+] 를 눌러 선택)"); return
+        todo = [(i, slots[i]) for i in sel
                 if i < len(slots) and any(slots[i].get("coords") or [])]
         if not todo:
-            self.status.set("귀환주문서 — 실행할 슬롯이 없습니다 (좌표 미등록)"); return
+            self.status.set("귀환주문서 — 고른 슬롯에 등록된 좌표가 없습니다"); return
         if not self._try_busy_or_queue("귀환주문서", self._run_return_sel,
                                        label=f"귀환주문서 {len(todo)}칸"): return
         self._return_running = True
@@ -2559,23 +2561,23 @@ class App(tk.Tk):
     def _run_night_sel(self):
         """+ 로 고른 슬롯들만 웨이브(번갈아)로 한 번에 — 고른 게 없으면 전체."""
         sel = sorted(getattr(self, "_night_sel", set()))
+        if not sel:                      # 아무것도 안 골랐으면 실행하지 않는다
+            self.status.set("🌑 악몽의섬 — 슬롯을 고르세요 ([+] 를 눌러 선택)"); return
         if self._is_busy():
             self._enqueue("악몽의섬 선택실행", self._run_night_sel); return
         self._island_step_back()
         cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"),
-               str(self.NIGHT_DIDX), "--run"]
-        if sel:
-            cmd += ["--slots", ",".join(str(i + 1) for i in sel), "--lanes", "2"]
+               str(self.NIGHT_DIDX), "--run",
+               "--slots", ",".join(str(i + 1) for i in sel), "--lanes", "2"]
         proc = subprocess.Popen(cmd)
         self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
-        for i in (sel or range(16)):
+        for i in sel:
             self._night_rep_restart(i)
         self._night_sel = set()          # 실행했으면 + 선택은 풀어준다
         self._refresh_night_plus()
-        self.status.set(f"🌑 악몽의섬 실행 — "
-                        + (f"{[i+1 for i in sel]}번" if sel else "전체")
-                        + " (지금부터 2시간 다시 셈 / 선택 해제됨)")
+        self.status.set(f"🌑 악몽의섬 실행 — {[i+1 for i in sel]}번 "
+                        f"(지금부터 2시간 다시 셈 / 선택 해제됨)")
 
     # 남은 횟수별 색 — 많이 남았으면 초록, 줄어들수록 파랑→보라→빨강
     REP_LEFT_COLORS = {6: "#1e8449", 5: "#27ae60", 4: "#16a085",
@@ -3749,9 +3751,11 @@ class App(tk.Tk):
     def _start_dgn2_sel(self, fkey):
         """+ 로 고른 슬롯만 실행 — 고른 게 없으면 전체."""
         sel = sorted((getattr(self, "_grid_sel", None) or {}).get(fkey) or [])
-        self._start_dgn2(fkey, sel or None)
         title = self._dgn2_info(fkey)[1]
-        self.status.set(f"{title} — " + (f"{[i+1 for i in sel]}번 실행" if sel else "전체 실행"))
+        if not sel:                      # 아무것도 안 골랐으면 실행하지 않는다
+            self.status.set(f"{title} — 슬롯을 고르세요 ([+] 를 눌러 선택)"); return
+        self._start_dgn2(fkey, sel)
+        self.status.set(f"{title} — {[i+1 for i in sel]}번 실행")
 
     def _grid_sel_toggle(self, fkey, idx):
         sel = (getattr(self, "_grid_sel", None) or {}).setdefault(fkey, set())
