@@ -3808,19 +3808,12 @@ class App(tk.Tk):
 
     @staticmethod
     def _slot_wheel(slot, j):
-        """이 칸의 휠 설정 → (칸수, 클릭도 함께 할지).
-        저장 형식: 3 = 위로3 / -3 = 아래로3 / "c-3" = 클릭한 뒤 아래로3."""
+        """이 칸에 지정된 휠 칸수 (0이면 그냥 클릭)."""
         try:
             wl = slot.get("wheel_list") or []
-            v = wl[j] if j < len(wl) else 0
-            if not v:
-                return 0, False
-            t = str(v).strip()
-            cl = t.startswith("c")
-            n = int(t[1:] if cl else t)
-            return n, cl
+            return int(wl[j]) if j < len(wl) and wl[j] else 0
         except Exception:
-            return 0, False
+            return 0
 
     @staticmethod
     def _slot_gap(slot, j, default=None):
@@ -3840,12 +3833,9 @@ class App(tk.Tk):
 
     def _do_click_or_wheel(self, fkey, j, coord, slot=None):
         """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다."""
-        n, also_click = self._slot_wheel(slot, j) if slot else (0, False)
+        n = self._slot_wheel(slot, j) if slot else 0
         if not n and j in WHEEL_UP_INDICES.get(fkey, ()):
             n = WHEEL_UP_NOTCH                # 슬롯 설정이 없으면 기본값
-        if n and also_click:                  # 클릭한 뒤에 굴린다
-            click_at(*coord)
-            time.sleep(random.uniform(0.35, 0.6))
         if n:
             # 휠도 커서를 옮기지 않고 그 자리에 메시지로 보낸다 (실패하면 예전 방식)
             import ctypes
@@ -3869,7 +3859,7 @@ class App(tk.Tk):
                     except Exception:
                         pyautogui.scroll(int(n) * 120)
                     time.sleep(random.uniform(0.12, 0.25))
-            return ("클릭+" if also_click else "") + ("휠▲" if n > 0 else "휠▼") + str(abs(n))
+            return ("휠▲" if n > 0 else "휠▼") + str(abs(n))
         click_at(*coord)
         return "클릭"
 
@@ -8604,33 +8594,22 @@ class App(tk.Tk):
                                    command=lambda x=idx, c=j, f=fkey:
                                    self._pick_paste(f, x, c)).pack(pady=(1, 0))
                 else:
-                    _n0, _c0 = self._slot_wheel(slot, j)
-                    def _wtxt(n, cl):
-                        if not n:
-                            return "0"
-                        return ("클릭" if cl else "") + ("▲" if n > 0 else "▼") + str(abs(n))
-                    _opts = ["0"]
-                    for _cl in (False, True):
-                        for _d in ("▲", "▼"):
-                            for _k in range(1, 10):
-                                _opts.append(("클릭" if _cl else "") + _d + str(_k))
-                    wv = tk.StringVar(value=_wtxt(_n0, _c0))
+                    wl = slot.get("wheel_list") or []
+                    _cur = int(wl[j]) if j < len(wl) and wl[j] else 0
+                    _opts = (["0"] + [f"▲{k}" for k in range(1, 10)]
+                                   + [f"▼{k}" for k in range(1, 10)])
+                    wv = tk.StringVar(value=("0" if not _cur else
+                                             (f"▲{_cur}" if _cur > 0 else f"▼{-_cur}")))
                     om = tk.OptionMenu(cc, wv, *_opts)
-                    om.config(font=("맑은 고딕", 7), width=4, pady=0, highlightthickness=0)
+                    om.config(font=("맑은 고딕", 7), width=2, pady=0, highlightthickness=0)
                     om.pack(pady=(1, 0))
                     def _sv_wheel(*_a, x=idx, c=j, v=wv, f=fkey):
                         t = v.get()
                         try:
-                            cl = t.startswith("클릭")
-                            t2 = t[2:] if cl else t
-                            if t2 in ("", "0"):
-                                val = 0
-                            else:
-                                n = int(t2[1:]) * (1 if t2[0] == "▲" else -1)
-                                val = (f"c{n}" if cl else n)
+                            n = 0 if t == "0" else (int(t[1:]) if t[0] == "▲" else -int(t[1:]))
                         except Exception:
-                            val = 0
-                        self._grid_set_list(f, x, "wheel_list", c, val)
+                            n = 0
+                        self._grid_set_list(f, x, "wheel_list", c, n)
                     wv.trace_add("write", _sv_wheel)
         bot = tk.Frame(win); bot.pack(pady=(4, 10))
         if sp.get("assign"):
