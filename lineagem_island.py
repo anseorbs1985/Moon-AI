@@ -812,8 +812,8 @@ class IslandApp(tk.Tk):
         if not hasattr(self, "_cell_name_ents"):
             self._cell_name_ents = {}
         self._cell_name_ents[key] = []
-        # 🎯 주문서 층수 ↔ 슬롯에 고른 층 맞춤 결과 (오만의탑만)
-        if "오만" in key:
+        # 🎯 물약색·층수가 슬롯에 고른 것과 맞는지 알려주는 줄
+        if True:
             if not hasattr(self, "_match_lbls"):
                 self._match_lbls = {}
             ml = tk.Label(parent, text="", font=("맑은 고딕", 13, "bold"),
@@ -1672,27 +1672,49 @@ class IslandApp(tk.Tk):
         return os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
                             "potion_result.json")
 
+    @staticmethod
+    def _potion_of(name):
+        """슬롯 이름에 고른 물약 — '빨갱이' / '주홍이' (없으면 빈 값)."""
+        t = str(name or "")
+        if "빨갱이" in t or "빨강" in t:
+            return "빨갱이"
+        if "주홍이" in t or "주황" in t:
+            return "주홍이"
+        return ""
+
     def _potion_apply(self):
-        """메인런처 [🧪 물약색] 결과를 슬롯 번호 왼쪽에 표시.
-        다시 측정하기 전까지 그대로 유지된다 (파일로 남아 있음)."""
+        """메인런처 [🧪 물약색] 결과를 슬롯 번호 왼쪽에 표시하고,
+        슬롯에 고른 물약(빨갱이/주홍이)과 같은지 ✔/✖ 로 알려준다."""
         try:
             with open(self._potion_path(), encoding="utf-8") as f:
                 res = (json.load(f) or {}).get("slots") or {}
         except Exception:
             res = {}
-        COL = {"빨강": ("빨강", "#c0392b"), "주황": ("주홍이", "#e67e22")}
+        COL = {"빨강": ("빨갱이", "#c0392b"), "주황": ("주홍이", "#e67e22")}
+        if not hasattr(self, "_match_pot"):
+            self._match_pot = {}
         for key, lbls in (self._potion_lbls or {}).items():
+            slots = self.cfg.get(key) or []
+            hit, miss = 0, []
             for i, lb in enumerate(lbls):
                 try:
                     if not lb.winfo_exists():
                         continue
                     txt, col = COL.get(res.get(str(i + 1), ""), ("", None))
-                    if col:
-                        lb.config(text=txt, bg=col, fg="white")
-                    else:
-                        lb.config(text="", bg=lb.master.cget("bg"))
+                    if not col:
+                        lb.config(text="", bg=lb.master.cget("bg")); continue
+                    want = self._potion_of(slots[i].get("name") if i < len(slots) else "")
+                    mark = ""
+                    if want:
+                        if want == txt:
+                            mark = " \u2714"; hit += 1
+                        else:
+                            mark = " \u2716"; miss.append((i + 1, want, txt))
+                    lb.config(text=f"{txt}{mark}", bg=col, fg="white")
                 except Exception:
                     pass
+            self._match_pot[key] = (hit, miss)
+            self._match_banner(key)
 
     @staticmethod
     def _scroll_path():
@@ -1742,22 +1764,42 @@ class IslandApp(tk.Tk):
                               bg=self.SCROLL_COLORS.get(n, "#34495e"))
                 except Exception:
                     pass
-            self._match_banner(key, hit, miss, none)
+            if not hasattr(self, "_match_scr"):
+                self._match_scr = {}
+            self._match_scr[key] = (hit, miss)
+            self._match_banner(key)
 
-    def _match_banner(self, key, hit, miss, none):
-        """맨 위에 크게 — 전부 맞으면 '정답!', 다르면 몇 번이 다른지."""
+    def _match_banner(self, key):
+        """맨 위에 크게 — 물약(빨갱이/주홍이)과 층수가 고른 것과 맞는지."""
         ml = (getattr(self, "_match_lbls", None) or {}).get(key)
         if not (ml and ml.winfo_exists()):
             return
-        if not hit and not miss:
-            ml.config(text="\U0001F4DC 주문서 층수 확인 전", bg="#7f8c8d")
-        elif not miss:
-            ml.config(text=f"\U0001F3AF 정답!  {hit}칸 전부 맞음", bg="#1e8449")
-        else:
-            t = ", ".join(f"{n}번({w}층↔{g}층)" for n, w, g in miss[:4])
-            if len(miss) > 4:
-                t += f" 외 {len(miss)-4}개"
-            ml.config(text=f"\u26a0 {len(miss)}칸 다름 — {t}", bg="#c0392b")
+        ph, pm = (getattr(self, "_match_pot", None) or {}).get(key, (0, []))
+        sh, sm = (getattr(self, "_match_scr", None) or {}).get(key, (0, []))
+        parts, bad = [], False
+        if ph or pm:
+            if pm:
+                bad = True
+                t = ", ".join(f"{n}번(고른것 {w}↔실제 {g})" for n, w, g in pm[:3])
+                if len(pm) > 3:
+                    t += f" 외 {len(pm)-3}개"
+                parts.append(f"\u26a0 물약 {len(pm)}칸 다름 — {t}")
+            else:
+                parts.append(f"\U0001F9EA 물약 {ph}칸 전부 맞음")
+        if sh or sm:
+            if sm:
+                bad = True
+                t = ", ".join(f"{n}번({w}층↔{g}층)" for n, w, g in sm[:3])
+                if len(sm) > 3:
+                    t += f" 외 {len(sm)-3}개"
+                parts.append(f"\u26a0 층수 {len(sm)}칸 다름 — {t}")
+            else:
+                parts.append(f"\U0001F4DC 층수 {sh}칸 전부 맞음")
+        if not parts:
+            ml.config(text="\U0001F9EA 물약색 확인 전", bg="#7f8c8d"); return
+        head = "\u26a0 안 맞음" if bad else "\U0001F3AF 정답!"
+        ml.config(text=f"{head}   " + "   /   ".join(parts),
+                  bg=("#c0392b" if bad else "#1e8449"))
 
     def _potion_tick(self):
         """결과 파일이 새로 써지면 자동으로 표시를 갱신한다."""
