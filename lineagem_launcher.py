@@ -856,7 +856,6 @@ class App(tk.Tk):
         self.after(4000, self._purple_ad_tick)
         # 포커스를 잃는 순간에도 즉시 반응 (0.15초 확인보다 더 빠름)
         self.bind("<FocusOut>", self._auto_back_check, add="+")
-        self.after(5000,  self._rep_arm_fixed)           # 고정 던전(악몽의섬) ⏰ 자동 켜기
         self.after(20000, self._island_repeat_tick)      # 섬/던전 슬롯 반복(2h N회) 관리
         # (자동 업데이트는 사용자 요청으로 비활성 — 업데이트는 🔄 버튼으로 수동 실행)
         # (2026-08-07 사용자 지시) 새벽 4시 퍼플 자동 확인·전환 사용 안 함 — 틱 미실행
@@ -1820,39 +1819,6 @@ class App(tk.Tk):
             os.replace(tmp, path)
         except Exception as e:
             self._rep_log(f"⚠ {key} #{idx+1:02d} ⏰ 끄기 실패: {e!r}")
-
-    def _rep_arm_fixed(self):
-        """고정 던전은 런처가 켜질 때 ⏰가 꺼져 있으면 자동으로 켠다.
-        — 컴퓨터마다 따로 켤 필요 없이 어디서나 같은 설정으로 돈다.
-        (사용자가 [전체멈춤]·[⏰ 반복]으로 끄면 그때는 꺼진 채로 두고,
-         다음에 런처를 켤 때 다시 켜진다)"""
-        try:
-            if self._rep_load().get("_off"):
-                self._rep_log("고정 반복 자동 켜기 건너뜀 — 사용자가 ⏰를 꺼둔 상태")
-                return
-            path = os.path.join(BASE, "island_coords.json")
-            with open(path, encoding="utf-8") as f:
-                cfg = json.load(f)
-            n = 0
-            for key, (h, cnt) in self.REPEAT_FIXED.items():
-                for slot in cfg.get(key, []):
-                    if not isinstance(slot, dict) or slot.get("repeat_h"):
-                        continue
-                    if not any(slot.get("coords") or []) or not slot.get("enabled", True):
-                        continue
-                    slot["repeat_h"] = h
-                    slot["repeat_n"] = int(slot.get("repeat_n") or cnt)
-                    n += 1
-            if n:
-                tmp = path + ".tmp"
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(cfg, f, ensure_ascii=False, indent=2)
-                os.replace(tmp, path)
-                ks = ", ".join(self.REPEAT_FIXED)
-                self._rep_log(f"고정 반복 자동 켜짐 — {ks} {n}개 슬롯")
-                self._refresh_rep_btn()
-        except Exception as e:
-            self._rep_log(f"⚠ 고정 반복 켜기 실패: {e!r}")
 
     def _rep_full_n(self, key, idx):
         """그 슬롯에 정해둔 반복 횟수 (없으면 6회)."""
