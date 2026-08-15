@@ -117,6 +117,7 @@ DUNGEON_SLOTS  = 16
 DUNGEON_CLICKS = 5
 DUNGEON_HOVER  = 1.5
 COUPON_CLICKS  = 9     # 쿠폰등록 — 슬롯당 좌표 9개 (클릭5에서 글 붙여넣기)
+MARKET_CLICKS  = 9     # 거래소검색 — 쿠폰등록과 같은 방식 (좌표 9개, 글 붙여넣기)
 EVENTSHOP_CLICKS = 3   # 이벤트상점 — 슬롯당 좌표 3개
 COUPON_SLOT_GAP = 3.0  # 쿠폰등록 슬롯 간 기본 간격(초) — 슬롯마다 ×1.02~1.18 랜덤
 PAST_SLOTS     = 16
@@ -211,6 +212,8 @@ DEFAULT_CFG = {
     "relic_slots":   None,              # 성물확인용 — 처음 로드 때 변신확인용 복사
     "coupon_slots":  None,              # 쿠폰등록 — 16슬롯 × 좌표9 (변신확인용 방식)
     "coupon_text":   "",                # 쿠폰등록 클릭5에서 붙여넣을 글
+    "market_slots":  None,              # 거래소검색 — 16슬롯 × 좌표9 (쿠폰등록 방식)
+    "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
@@ -463,7 +466,8 @@ def load_cfg():
                     n2.append({"name": "미등록", "coords": [None] * DUNGEON_CLICKS})
                 cfg[_k2] = n2[:16]
         # coupon_slots(쿠폰등록 ×9)·eventshop_slots(이벤트상점 ×3) — 16슬롯 정규화
-        for _k3, _n3 in (("coupon_slots", COUPON_CLICKS), ("eventshop_slots", EVENTSHOP_CLICKS)):
+        for _k3, _n3 in (("coupon_slots", COUPON_CLICKS), ("market_slots", MARKET_CLICKS),
+                         ("eventshop_slots", EVENTSHOP_CLICKS)):
             nc = []
             for s in (cfg.get(_k3) or []):
                 if isinstance(s, dict):
@@ -801,6 +805,7 @@ class App(tk.Tk):
         self._circus3_stop = False
         self._relic_stop   = False
         self._coupon_stop  = False
+        self._market_stop  = False
         self._eventshop_stop = False
         self._tj_stop      = False
         self._task_queue   = []   # 연속으로 누른 실행/재측정 순차 실행 대기열
@@ -1221,6 +1226,14 @@ class App(tk.Tk):
         home_c.create_text(BTN // 2, BTN // 2, text="📍 제\n자리", fill="white",
                            font=("맑은 고딕", 7, "bold"), justify="center")
         home_c.bind("<Button-1>", lambda e: self._go_home())
+        # 거래소검색 — 제자리 오른쪽 (쿠폰등록과 같은 방식: 좌표 클릭 + 글 붙여넣기)
+        mk = tk.Frame(top_row); mk.pack(side="left", padx=(GAP, 0), pady=(2, 0))
+        tk.Button(mk, text="🔎 거래소검색", font=("맑은 고딕", 8, "bold"),
+                  bg="#2874a6", fg="white", width=11,
+                  command=self._open_market_win).pack(side="top")
+        tk.Button(mk, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#27ae60", fg="white", activebackground="#1e8449", width=11,
+                  command=lambda: self._start_dgn2("market")).pack(side="top", pady=(2, 0))
         # 맨뒤로 — 위 두 버튼 폭에 맞춘 긴 버튼 (좌·우 끝 정렬)
         back_row = tk.Frame(self); back_row.pack(fill="x")
         self._back_circle = tk.Canvas(back_row, width=WIDE, height=34, highlightthickness=0,
@@ -3090,6 +3103,7 @@ class App(tk.Tk):
         return {"dollchk": ("dollchk_slots", "인형확인용", "🧸"),
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
+                "market":  ("market_slots",  "거래소검색", "🔎"),
                 "eventshop": ("eventshop_slots", "이벤트상점", "🛒"),
                 "fish":    ("fish_slots",    "낚시녹임",   "🎣"),
                 "circus":  ("circus_slots",  "서커스 이벤트등록", "🎪"),
@@ -3099,6 +3113,10 @@ class App(tk.Tk):
     def _open_coupon_win(self):
         self._open_section_win("_coupon_win", "🎟 쿠폰등록",
                                lambda p: self._build_dgn2("coupon", p), w=470, h=640, pinnable=True)
+
+    def _open_market_win(self):
+        self._open_section_win("_market_win", "🔎 거래소검색",
+                               lambda p: self._build_dgn2("market", p), w=470, h=640, pinnable=True)
 
     def _open_eventshop_win(self):
         self._open_section_win("_eventshop_win", "🛒 이벤트상점",
@@ -3128,23 +3146,26 @@ class App(tk.Tk):
         self._open_section_win("_relic_win", "🗿 성물확인용",
                                lambda p: self._build_dgn2("relic", p), w=470, h=600, pinnable=True)
 
+    # 좌표를 누른 뒤 '적어둔 글'을 붙여넣는 런처들 (쿠폰등록·거래소검색)
+    PASTE_FKEYS = ("coupon", "market")
+
     def _build_dgn2(self, fkey, parent):
         key, title, icon = self._dgn2_info(fkey)
         sp = self._grid_spec(fkey)
         color = sp["color"]
-        sub = "클릭5에서 글 붙여넣기" if fkey == "coupon" else "간격 랜덤"
+        sub = "클릭5에서 글 붙여넣기" if fkey in self.PASTE_FKEYS else "간격 랜덤"
         tk.Label(parent, text=f"{title}  (슬롯 순서 랜덤 / 클릭1~{sp['clicks']} 순서대로, {sub})",
                  font=("맑은 고딕", 9, "bold"), fg=color).pack(anchor="w", padx=4, pady=(4,2))
-        if fkey == "coupon":
+        if fkey in self.PASTE_FKEYS:
             # 클릭5에서 붙여넣을 글 — 여기 적으면 자동 저장, 모든 슬롯 공통
             tr = tk.Frame(parent); tr.pack(fill="x", padx=6, pady=(0, 3))
             tk.Label(tr, text="붙여넣을 글", font=("맑은 고딕", 9, "bold"),
                      fg=color).pack(side="left")
-            tv = tk.StringVar(value=str(self.cfg.get("coupon_text", "") or ""))
+            tv = tk.StringVar(value=str(self.cfg.get(f"{fkey}_text", "") or ""))
             ent = tk.Entry(tr, textvariable=tv, font=("맑은 고딕", 10))
             ent.pack(side="left", fill="x", expand=True, padx=6)
-            def _save_txt(e=None):
-                self.cfg["coupon_text"] = tv.get()
+            def _save_txt(e=None, f=fkey, v=tv):
+                self.cfg[f"{f}_text"] = v.get()
                 save_cfg(self.cfg)
             ent.bind("<FocusOut>", _save_txt); ent.bind("<Return>", _save_txt)
         dr = tk.Frame(parent); dr.pack(pady=3)
@@ -3433,10 +3454,10 @@ class App(tk.Tk):
         stop = f"_{fkey}_stop"
         try:
             slots = self.cfg.get(key, [])
-            if fkey == "coupon":
-                txt = str(self.cfg.get("coupon_text", "") or "")
+            if fkey in self.PASTE_FKEYS:
+                txt = str(self.cfg.get(f"{fkey}_text", "") or "")
                 if not txt.strip():
-                    self.status.set("🎟 쿠폰등록: 붙여넣을 글이 비어 있습니다 — 창에서 글을 먼저 적어주세요")
+                    self.status.set(f"{icon} {title}: 붙여넣을 글이 비어 있습니다 — 창에서 글을 먼저 적어주세요")
                     return
                 self._set_clipboard_text(txt)
             if slot_idx is not None:
@@ -3472,11 +3493,12 @@ class App(tk.Tk):
                     coords.append(None)
                 if not self._wait_mouse_idle(stop): return
                 # 쿠폰: 슬롯마다 클릭 간격 배수를 새로 뽑음 (기본의 -5%~+20%)
-                c_mult = random.uniform(0.95, 1.20) if fkey == "coupon" else 1.0
+                c_mult = random.uniform(0.95, 1.20) if fkey in self.PASTE_FKEYS else 1.0
                 # 클릭1~N을 순서대로, 클릭 사이 간격만 랜덤
                 order = [j for j in range(nclk) if coords[j]]
                 # 쿠폰: 클릭5(입력칸)가 등록돼 있으면 그 직후, 없으면 클릭4 직후에 붙여넣기
-                paste_after = (4 if (len(coords) > 4 and coords[4]) else 3) if fkey == "coupon" else None
+                paste_after = ((4 if (len(coords) > 4 and coords[4]) else 3)
+                               if fkey in self.PASTE_FKEYS else None)
                 if fkey == "coupon":
                     self._coupon_log(f"슬롯 [{name}] 시작 — 등록클릭 {[x+1 for x in order]}, 붙여넣기는 클릭{(paste_after or 0)+1} 직후")
                 for n, j in enumerate(order):
@@ -3487,7 +3509,7 @@ class App(tk.Tk):
                     self.status.set(f"{icon} [{name}] {_act}{j+1}...")
                     if fkey == "coupon":
                         self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
-                    if fkey == "coupon" and j == paste_after:
+                    if fkey in self.PASTE_FKEYS and j == paste_after:
                         # 클릭 후 입력칸 포커스가 잡힐 때까지 기다렸다가 Ctrl+V(스캔코드) 붙여넣기
                         # 오류가 나도 뒤 클릭이 끊기지 않게 보호
                         try:
@@ -7917,6 +7939,11 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("relic", i),
                             prev=lambda i: self._preview_dgn2("relic", i),
                             delete=lambda i: self._del_dgn2("relic", i)),
+            "market":  dict(title="거래소검색", key="market_slots", clicks=MARKET_CLICKS, color="#2874a6",
+                            reg=lambda s, c: self._reg_dgn2_click("market", s, c),
+                            test=lambda i: self._test_dgn2("market", i),
+                            prev=lambda i: self._preview_dgn2("market", i),
+                            delete=lambda i: self._del_dgn2("market", i)),
             "coupon":  dict(title="쿠폰등록",  key="coupon_slots",  clicks=COUPON_CLICKS,  color="#1f618d",
                             reg=lambda s, c: self._reg_dgn2_click("coupon", s, c),
                             test=lambda i: self._test_dgn2("coupon", i),
@@ -10237,7 +10264,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
+                 "_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs
@@ -11067,6 +11094,7 @@ class App(tk.Tk):
         self._dollchk_stop   = True
         self._relic_stop     = True
         self._coupon_stop    = True
+        self._market_stop    = True
         self._eventshop_stop = True
         self._fish_stop      = True
         self._circus_stop    = True
