@@ -3419,6 +3419,15 @@ class App(tk.Tk):
                 self.cfg[f"{f}_text"] = v.get()
                 save_cfg(self.cfg)
             ent.bind("<FocusOut>", _save_txt); ent.bind("<Return>", _save_txt)
+            def _clr_txt(f=fkey, v=tv, e=ent):      # ✖ — 적어둔 글을 한 번에 지운다
+                v.set("")
+                self.cfg[f"{f}_text"] = ""
+                save_cfg(self.cfg)
+                try: e.focus_set()
+                except Exception: pass
+                self.status.set("붙여넣을 글을 지웠습니다")
+            tk.Button(tr, text="✖", font=("맑은 고딕", 9, "bold"), width=3,
+                      bg="#c0392b", fg="white", command=_clr_txt).pack(side="left")
         dr = tk.Frame(parent); dr.pack(pady=3)
         setattr(self, f"_{fkey}_stop", False)
         run = tk.Button(dr, text="▶  실행",
