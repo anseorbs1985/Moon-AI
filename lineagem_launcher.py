@@ -125,6 +125,8 @@ PAST_CLICKS    = 3
 PAST_INTERVAL  = 2.8   # 과거의말하는섬 클릭 간격(초)
 SCHED_SLOTS        = 16
 SCHED_CLICKS       = 3
+DRAGON_CLICKS      = 10    # 용던고고!!! — 슬롯당 좌표 10개
+DRAGON_BUDGET      = 210   # 전체 슬롯을 3분30초 안에 끝낸다 (초)
 ITEM_SWIPE_DIST    = 250   # 아이템정리 클릭3: 누른 채 위로 쓸어올리는 거리(px) — 클라이언트 창 안에 있어야 함
 TJ_CLICKS          = 3     # TJ성공!! 슬롯당 좌표 수
 TJ_MIN             = 0.81  # TJ성공!! 좌표 간 클릭 간격(초) — 10~20% 완화(0.7~1.2 → 0.77~1.44)
@@ -213,6 +215,7 @@ DEFAULT_CFG = {
     "coupon_slots":  None,              # 쿠폰등록 — 16슬롯 × 좌표9 (변신확인용 방식)
     "coupon_text":   "",                # 쿠폰등록 클릭5에서 붙여넣을 글
     "market_slots":  None,              # 거래소검색 — 16슬롯 × 좌표9 (쿠폰등록 방식)
+    "dragon_slots":  None,              # 용던고고!!! — 16슬롯 × 좌표10 (스케줄과 같은 구조)
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
@@ -466,6 +469,19 @@ def load_cfg():
                     n2.append({"name": "미등록", "coords": [None] * DUNGEON_CLICKS})
                 cfg[_k2] = n2[:16]
         # coupon_slots(쿠폰등록 ×9)·eventshop_slots(이벤트상점 ×3) — 16슬롯 정규화
+        # dragon_slots (용던고고!!! 16슬롯 × 10좌표, 슬롯별 ON/OFF)
+        dl, ndl = cfg.get("dragon_slots") or [], []
+        for s_ in dl:
+            if isinstance(s_, dict):
+                c = s_.get("coords", [None] * DRAGON_CLICKS)
+                while len(c) < DRAGON_CLICKS: c.append(None)
+                ndl.append({"name": s_.get("name", "미등록"), "coords": c[:DRAGON_CLICKS],
+                            "enabled": s_.get("enabled", True)})
+            else:
+                ndl.append({"name": "미등록", "coords": [None] * DRAGON_CLICKS, "enabled": True})
+        while len(ndl) < 16:
+            ndl.append({"name": "미등록", "coords": [None] * DRAGON_CLICKS, "enabled": True})
+        cfg["dragon_slots"] = ndl[:16]
         for _k3, _n3 in (("coupon_slots", COUPON_CLICKS), ("market_slots", MARKET_CLICKS),
                          ("eventshop_slots", EVENTSHOP_CLICKS)):
             nc = []
@@ -808,6 +824,7 @@ class App(tk.Tk):
         self._relic_stop   = False
         self._coupon_stop  = False
         self._market_stop  = False
+        self._dragon_stop  = False
         self._eventshop_stop = False
         self._tj_stop      = False
         self._task_queue   = []   # 연속으로 누른 실행/재측정 순차 실행 대기열
@@ -1417,6 +1434,28 @@ class App(tk.Tk):
 
         # 배열창 재배치 왼쪽: (1행) 일반던전충전+실행  (2행) 인형탐험+실행 — 각 버튼 옆에 실행
         dc_col = tk.Frame(front_row); dc_col.pack(side="left", padx=(4,8), anchor="n")
+        # ── 매일 해야 하는 것 (네모 박스) : 용던고고!!! / 스케줄 ──
+        daily = tk.LabelFrame(dc_col, text=" 매일 ", font=("맑은 고딕", 8, "bold"),
+                              fg="#a04000", bd=2, relief="groove")
+        daily.pack(anchor="n", pady=(0, 5), padx=1)
+        d1 = tk.Frame(daily); d1.pack(anchor="n", padx=3, pady=(3, 0))
+        tk.Button(d1, text="🐲 용던\n고고!!!",
+            font=("맑은 고딕", 9, "bold"), bg="#a04000", fg="white",
+            activebackground="#7b3000", width=7, height=2,
+            command=self._open_dragon_win).pack(side="left")
+        tk.Button(d1, text="▶\n실행",
+            font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
+            activebackground="#1e8449", width=4, height=2,
+            command=self._start_dragon).pack(side="left", padx=(2, 0))
+        d2 = tk.Frame(daily); d2.pack(anchor="n", padx=3, pady=(4, 4))
+        tk.Button(d2, text="📅 스케줄",
+            font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
+            activebackground="#0e6655", width=7, height=2,
+            command=self._open_sched_win).pack(side="left")
+        tk.Button(d2, text="▶\n실행",
+            font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
+            activebackground="#1e8449", width=4, height=2,
+            command=self._start_sched).pack(side="left", padx=(2, 0))
         r1 = tk.Frame(dc_col); r1.pack(anchor="n")
         self._dc_open_btn = tk.Button(r1, text="🎯 일반\n던전충전",
             font=("맑은 고딕", 9, "bold"), bg="#6c3483", fg="white",
@@ -1437,16 +1476,8 @@ class App(tk.Tk):
             activebackground="#1e8449", width=4, height=2,
             command=self._start_doll).pack(side="left", padx=(2,0))
         # 인형탐험 아래: 매일매일 스케줄 (자주 쓰는 기능이라 앞으로 이동)
-        r3 = tk.Frame(dc_col); r3.pack(anchor="n", pady=(4,0))
-        tk.Button(r3, text="📅 스케줄",
-            font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
-            activebackground="#0e6655", width=7, height=2,
-            command=self._open_sched_win).pack(side="left")
-        tk.Button(r3, text="▶\n실행",
-            font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
-            activebackground="#1e8449", width=4, height=2,
-            command=self._start_sched).pack(side="left", padx=(2,0))
-        # 스케줄 아래: 아이템정리 (스케줄과 동일 구조 + 단축키)
+        # 스케줄은 위쪽 [매일] 박스로 옮겼다 (2026-08-16)
+        # 아이템정리 (스케줄과 동일 구조 + 단축키)
         r4 = tk.Frame(dc_col); r4.pack(anchor="n", pady=(4,0))
         tk.Button(r4, text="🧹 아이템\n정리",
             font=("맑은 고딕", 9, "bold"), bg="#7d6608", fg="white",
@@ -3415,6 +3446,7 @@ class App(tk.Tk):
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
                 "market":  ("market_slots",  "거래소검색", "🔎"),
+                "dragon":  ("dragon_slots",  "용던고고!!!", "🐲"),
                 "eventshop": ("eventshop_slots", "이벤트상점", "🛒"),
                 "fish":    ("fish_slots",    "낚시녹임",   "🎣"),
                 "circus":  ("circus_slots",  "서커스 이벤트등록", "🎪"),
@@ -3424,6 +3456,28 @@ class App(tk.Tk):
     def _open_coupon_win(self):
         self._open_section_win("_coupon_win", "🎟 쿠폰등록",
                                lambda p: self._build_dgn2("coupon", p), w=470, h=640, pinnable=True)
+
+    def _open_dragon_win(self):
+        self._open_section_win("_dragon_win", "🐲 용던고고!!!",
+                               lambda p: self._build_dgn2("dragon", p), w=470, h=620, pinnable=True)
+
+    def _start_dragon(self):
+        """[실행] — 먼저 F11(절전모드 해제)을 돌리고, 끝나면 이어서 시작한다."""
+        self.status.set("🐲 용던고고!!! — 먼저 절전해제(F11) 실행…")
+        try:
+            self._start_seq()
+        except Exception as e:
+            self.status.set(f"⚠ 절전해제 실행 실패: {e}")
+        self.after(1500, lambda: self._dragon_wait_seq(0))
+
+    def _dragon_wait_seq(self, tries):
+        """절전해제가 끝날 때까지 기다렸다가 시작 (최대 2분)."""
+        if self._is_busy():
+            if tries < 240:
+                self.after(500, lambda: self._dragon_wait_seq(tries + 1)); return
+            self.status.set("⚠ 절전해제가 안 끝나서 용던고고를 시작하지 못했습니다"); return
+        self.status.set("🐲 용던고고!!! 시작")
+        self._start_dgn2("dragon")
 
     def _open_market_win(self):
         self._open_section_win("_market_win", "🔎 거래소검색",
@@ -3819,6 +3873,7 @@ class App(tk.Tk):
         random.shuffle(order)
         active, waiting = order[:lanes], order[lanes:]
         last_si, done = None, 0
+        _t0 = time.time()
         self.status.set(f"{icon} 번갈아 실행 — 동시 {lanes}슬롯 (좌표 간격 "
                         f"{gap[0]:.0f}~{gap[1]:.0f}초)")
         while not getattr(self, stop, False):
@@ -3871,7 +3926,9 @@ class App(tk.Tk):
                 _base = random.uniform(0.7, 1.4)        # 이어 누를 땐 짧게
             st["due"] = time.time() + _base * random.uniform(*slow)   # 10~20% 할증
             time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
-        self.status.set(f"{icon} 번갈아 실행 완료 — 클릭 {done}회")
+        _el = int(time.time() - _t0)
+        self.status.set(f"{icon} 번갈아 실행 완료 — 클릭 {done}회, "
+                        f"{_el//60}분 {_el%60}초 걸림")
 
     def _run_dgn2(self, fkey, slot_idx=None, sel_list=None):
         self._start_pause()
@@ -3890,13 +3947,26 @@ class App(tk.Tk):
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
             else:
                 _pick = sel_list if sel_list else range(len(slots))
+                _en = self._grid_spec(fkey).get("enable")
                 targets = [(i, slots[i]) for i in _pick
-                           if i < len(slots) and any(slots[i].get("coords", []))]
+                           if i < len(slots) and any(slots[i].get("coords", []))
+                           and (not _en or slots[i].get("enabled", True))]
                 random.shuffle(targets)   # 슬롯 클릭 순서 매번 랜덤
             if fkey == "circus" and slot_idx is None and len(targets) > 1:
                 # 서커스 이벤트등록: 동시 2슬롯, 간격·슬롯투입 모두 10~20% 할증
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
                                     slow=(1.10, 1.20), slot_gap=(3.0, 5.0))
+                return
+            if fkey == "dragon" and slot_idx is None and len(targets) > 1:
+                # 용던고고!!! — 전체를 3분30초 안에 끝내야 한다.
+                # 남은 시간을 클릭 수로 나눠 좌표 간격을 자동으로 정한다 (동시 4슬롯).
+                lanes = 4
+                total = max(1, len(targets) * nclk)
+                per   = max(0.45, (DRAGON_BUDGET - 20) * lanes / total)
+                self._rep_log(f"용던고고 — {len(targets)}슬롯 × {nclk}좌표, "
+                              f"좌표 간격 약 {per:.1f}초 (목표 {DRAGON_BUDGET}초)")
+                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=lanes,
+                                    gap=(per * 0.85, per * 1.15), slot_gap=(0.8, 2.0))
                 return
             if fkey == "market" and slot_idx is None and len(targets) > 1:
                 # 거래소검색: 동시 2슬롯 번갈아 (간격은 칸에 적어둔 값 우선)
@@ -8358,6 +8428,12 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("relic", i),
                             prev=lambda i: self._preview_dgn2("relic", i),
                             delete=lambda i: self._del_dgn2("relic", i)),
+            "dragon":  dict(title="용던고고!!!", key="dragon_slots", clicks=DRAGON_CLICKS,
+                            color="#a04000", enable=True, sel=True,
+                            reg=lambda s, c: self._reg_dgn2_click("dragon", s, c),
+                            test=lambda i: self._test_dgn2("dragon", i),
+                            prev=lambda i: self._preview_dgn2("dragon", i),
+                            delete=lambda i: self._del_dgn2("dragon", i)),
             "market":  dict(title="거래소검색", key="market_slots", clicks=MARKET_CLICKS,
                             color="#2874a6", opts=True, paste=True, sel=True,
                             reg=lambda s, c: self._reg_dgn2_click("market", s, c),
@@ -8426,7 +8502,7 @@ class App(tk.Tk):
             if sp.get("enable"):
                 eb = tk.Button(top, text="ON", font=("맑은 고딕", 7, "bold"), width=4,
                                bg="#27ae60", fg="white", pady=0,
-                               command=lambda x=idx: self._toggle_hunt_enable(x))
+                               command=lambda x=idx, f=fkey: self._toggle_slot_enable(f, x))
                 eb.pack(side="left", padx=(4, 0))
                 st["enable_btns"].append(eb)
             sv = tk.StringVar(value="좌표 0/%d" % sp["clicks"])
@@ -9541,6 +9617,20 @@ class App(tk.Tk):
             finally:
                 self.deiconify()
         threading.Thread(target=run, daemon=True).start()
+
+    def _toggle_slot_enable(self, fkey, idx):
+        """슬롯 ON/OFF — 꺼둔 슬롯은 실행에서 빠진다."""
+        if fkey == "hunt":
+            return self._toggle_hunt_enable(idx)
+        try:
+            sp = self._grid_spec(fkey)
+            slot = self.cfg[sp["key"]][idx]
+            slot["enabled"] = not slot.get("enabled", True)
+            save_cfg(self.cfg); self._refresh_slot_grids(fkey)
+            self.status.set(f"{sp['title']} #{idx+1:02d} "
+                            + ("ON" if slot["enabled"] else "OFF (실행에서 제외)"))
+        except Exception:
+            pass
 
     def _toggle_hunt_enable(self, idx):
         cur = self.cfg["hunt_slots"][idx].get("enabled", True)
@@ -10752,7 +10842,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
+                 "_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs
@@ -11583,6 +11673,7 @@ class App(tk.Tk):
         self._relic_stop     = True
         self._coupon_stop    = True
         self._market_stop    = True
+        self._dragon_stop    = True
         self._eventshop_stop = True
         self._fish_stop      = True
         self._circus_stop    = True
