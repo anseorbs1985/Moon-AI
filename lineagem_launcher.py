@@ -8606,8 +8606,15 @@ class App(tk.Tk):
         coords = self.cfg[sp["key"]][idx].get("coords", [])
         if not any(coords):
             self.status.set(f"{sp['title']} #{idx+1:02d} 복사할 좌표가 없습니다"); return
-        self._grid_clip = {"f": fkey, "src": idx, "coords": copy.deepcopy(coords)}
-        self.status.set(f"📋 {sp['title']} #{idx+1:02d} 좌표 {sum(1 for c in coords if c)}개 복사됨 — [붙임]을 누르세요")
+        slot = self.cfg[sp["key"]][idx]
+        # 좌표뿐 아니라 칸별 간격·휠·붙임 자리도 같이 복사한다
+        # (예전엔 좌표만 복사돼서 2번 슬롯부터 붙여넣기 자리가 기본값으로 돌아갔다)
+        self._grid_clip = {"f": fkey, "src": idx, "coords": copy.deepcopy(coords),
+                           "gap_list":   copy.deepcopy(slot.get("gap_list")),
+                           "wheel_list": copy.deepcopy(slot.get("wheel_list")),
+                           "paste_list": copy.deepcopy(slot.get("paste_list"))}
+        self.status.set(f"📋 {sp['title']} #{idx+1:02d} 좌표 {sum(1 for c in coords if c)}개 "
+                        f"+ 간격·붙임 자리 복사됨 — [붙임]을 누르세요")
 
     def _grid_paste(self, fkey, idx):
         """복사한 좌표를 붙여넣기 — 클라이언트 창 위치 자동보정 (인형탐험과 동일)."""
@@ -8630,8 +8637,11 @@ class App(tk.Tk):
             else:
                 note = " — ⚠ 클라이언트 16개 감지 실패, 원본 위치 그대로"
         self.cfg[sp["key"]][idx]["coords"] = shifted
+        for _f in ("gap_list", "wheel_list", "paste_list"):     # 설정도 함께
+            if clip.get(_f) is not None:
+                self.cfg[sp["key"]][idx][_f] = copy.deepcopy(clip[_f])
         save_cfg(self.cfg); self._refresh_ui()
-        self.status.set(f"✔ {sp['title']} #{idx+1:02d} 붙여넣기 완료{note}")
+        self.status.set(f"✔ {sp['title']} #{idx+1:02d} 붙여넣기 완료 (간격·붙임 자리 포함){note}")
 
     # ── 공용 그리드 (연속클릭/주말던전끄기 — 슬롯당 좌표 1개) ──
     def _build_flat_grid(self, parent, fkey):
