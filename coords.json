@@ -4988,6 +4988,420 @@
       ]
     }
   ],
+  "dragon_slots": [
+    {
+      "name": "미등록",
+      "coords": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": false
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          226,
+          600
+        ],
+        [
+          33,
+          440
+        ],
+        [
+          43,
+          463
+        ],
+        [
+          296,
+          601
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          226,
+          914
+        ],
+        [
+          33,
+          754
+        ],
+        [
+          43,
+          777
+        ],
+        [
+          296,
+          915
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          225,
+          1229
+        ],
+        [
+          32,
+          1069
+        ],
+        [
+          42,
+          1092
+        ],
+        [
+          295,
+          1230
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": false
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          907,
+          595
+        ],
+        [
+          714,
+          435
+        ],
+        [
+          724,
+          458
+        ],
+        [
+          977,
+          596
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          910,
+          912
+        ],
+        [
+          717,
+          752
+        ],
+        [
+          727,
+          775
+        ],
+        [
+          980,
+          913
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          909,
+          1229
+        ],
+        [
+          716,
+          1069
+        ],
+        [
+          726,
+          1092
+        ],
+        [
+          979,
+          1230
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": false
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          1578,
+          603
+        ],
+        [
+          1385,
+          443
+        ],
+        [
+          1395,
+          466
+        ],
+        [
+          1648,
+          604
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          1579,
+          921
+        ],
+        [
+          1386,
+          761
+        ],
+        [
+          1396,
+          784
+        ],
+        [
+          1649,
+          922
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          1579,
+          1236
+        ],
+        [
+          1386,
+          1076
+        ],
+        [
+          1396,
+          1099
+        ],
+        [
+          1649,
+          1237
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          2227,
+          278
+        ],
+        [
+          2034,
+          118
+        ],
+        [
+          2044,
+          141
+        ],
+        [
+          2297,
+          279
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          2229,
+          596
+        ],
+        [
+          2036,
+          436
+        ],
+        [
+          2046,
+          459
+        ],
+        [
+          2299,
+          597
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          2228,
+          914
+        ],
+        [
+          2035,
+          754
+        ],
+        [
+          2045,
+          777
+        ],
+        [
+          2298,
+          915
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": true
+    },
+    {
+      "name": "미등록",
+      "coords": [
+        [
+          2229,
+          1230
+        ],
+        [
+          2036,
+          1070
+        ],
+        [
+          2046,
+          1093
+        ],
+        [
+          2299,
+          1231
+        ],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "enabled": true
+    }
+  ],
   "market_text": "5층",
   "eventshop_slots": [
     {
