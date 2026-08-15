@@ -850,6 +850,7 @@ class IslandApp(tk.Tk):
                     return
                 self.cfg[k][x]["name"] = v.get().strip() or "미등록"
                 save_cfg(self.cfg)
+                self._match_now()      # 이름(고른 물약·층)이 바뀌면 바로 다시 맞춰본다
             ne.bind("<FocusOut>", _sv_name); ne.bind("<Return>", _sv_name)
             # 타이핑할 때마다 즉시 저장 — Enter를 안 눌러도 복사에 반영되게
             nvv.trace_add("write", lambda *_a, f=_sv_name: f())
@@ -1463,6 +1464,12 @@ class IslandApp(tk.Tk):
                          + ("  [클라 #" + str(base + 1) + " 자동 인식]" if hit is not None else "")
                          + "  — 이어서 다른 번호도 지정하세요")
 
+    def _match_now(self):
+        """지금 바로 다시 맞춰보기 (프리셋 적용·이름 변경 직후)."""
+        for f in (self._potion_apply, self._scroll_apply):
+            try: f()
+            except Exception: pass
+
     def _preset_reapply(self):
         """프리셋을 고쳐도 '이미 그 프리셋을 쓰던 슬롯'은 자동으로 안 바뀐다.
         이 버튼을 누르면 이름에 그 프리셋이 들어간 슬롯을 찾아 전부 다시 적용한다."""
@@ -1802,19 +1809,16 @@ class IslandApp(tk.Tk):
                   bg=("#c0392b" if bad else "#1e8449"))
 
     def _potion_tick(self):
-        """결과 파일이 새로 써지면 자동으로 표시를 갱신한다."""
+        """이름·프리셋을 바꾸면 바로 다시 맞춰보도록 1.2초마다 갱신한다."""
         try:
-            m = os.path.getmtime(self._potion_path())
-            if m != getattr(self, "_potion_mtime", 0):
-                self._potion_mtime = m
-                self._potion_apply()
+            self._potion_apply()
         except Exception:
             pass
         try:
-            self._scroll_apply()      # 슬롯 이름(고른 층)이 바뀌어도 바로 반영되게
+            self._scroll_apply()
         except Exception:
             pass
-        self.after(3000, self._potion_tick)
+        self.after(1200, self._potion_tick)
 
     def _move_presets(self, key):
         """'이동' 그룹 프리셋들의 (번호, 이름) 목록."""
