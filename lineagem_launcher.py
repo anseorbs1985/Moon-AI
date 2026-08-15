@@ -3859,7 +3859,7 @@ class App(tk.Tk):
                     except Exception:
                         pyautogui.scroll(int(n) * 120)
                     time.sleep(random.uniform(0.12, 0.25))
-            return ("휠▲" if n > 0 else "휠▼") + str(abs(n))
+            return f"휠▲{n}"
         click_at(*coord)
         return "클릭"
 
@@ -8429,7 +8429,7 @@ class App(tk.Tk):
                             prev=lambda i: self._preview_dgn2("relic", i),
                             delete=lambda i: self._del_dgn2("relic", i)),
             "dragon":  dict(title="용던고고!!!", key="dragon_slots", clicks=DRAGON_CLICKS,
-                            color="#a04000", enable=True, sel=True, opts=True,
+                            color="#a04000", enable=True, sel=True,
                             reg=lambda s, c: self._reg_dgn2_click("dragon", s, c),
                             test=lambda i: self._test_dgn2("dragon", i),
                             prev=lambda i: self._preview_dgn2("dragon", i),
@@ -8595,20 +8595,13 @@ class App(tk.Tk):
                                    self._pick_paste(f, x, c)).pack(pady=(1, 0))
                 else:
                     wl = slot.get("wheel_list") or []
-                    _cur = int(wl[j]) if j < len(wl) and wl[j] else 0
-                    _opts = (["0"] + [f"▲{k}" for k in range(1, 10)]
-                                   + [f"▼{k}" for k in range(1, 10)])
-                    wv = tk.StringVar(value=("0" if not _cur else
-                                             (f"▲{_cur}" if _cur > 0 else f"▼{-_cur}")))
-                    om = tk.OptionMenu(cc, wv, *_opts)
-                    om.config(font=("맑은 고딕", 7), width=2, pady=0, highlightthickness=0)
+                    wv = tk.StringVar(value=(str(wl[j]) if j < len(wl) and wl[j] else "0"))
+                    om = tk.OptionMenu(cc, wv, *[str(k) for k in range(10)])
+                    om.config(font=("맑은 고딕", 7), width=1, pady=0, highlightthickness=0)
                     om.pack(pady=(1, 0))
                     def _sv_wheel(*_a, x=idx, c=j, v=wv, f=fkey):
-                        t = v.get()
-                        try:
-                            n = 0 if t == "0" else (int(t[1:]) if t[0] == "▲" else -int(t[1:]))
-                        except Exception:
-                            n = 0
+                        try: n = int(v.get())
+                        except Exception: n = 0
                         self._grid_set_list(f, x, "wheel_list", c, n)
                     wv.trace_add("write", _sv_wheel)
         bot = tk.Frame(win); bot.pack(pady=(4, 10))
