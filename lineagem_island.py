@@ -2533,6 +2533,7 @@ class IslandApp(tk.Tk):
                 if not h:
                     continue
                 n = int(slot.get("repeat_n") or (fix[1] if fix else 6))
+                st.pop("_off", None)      # 직접 실행했으니 '꺼둠' 표시 해제
                 st[f"{key}|{i}"] = {"h": h, "left": max(0, n - 1), "run": 1,
                                     "next": now + h * 3600}
                 done.append((i + 1, h, n))
@@ -2597,6 +2598,7 @@ class IslandApp(tk.Tk):
                 save_cfg(self.cfg)
             except Exception:
                 pass
+            st.pop("_off", None)          # 사용자가 다시 켰으니 '꺼둠' 표시 해제
             st[k] = {"h": h, "left": n, "next": time.time() + h * 3600}
             self._rep_write(st)
             self._status.set(f"⏰ {key} #{idx+1:02d} 반복 다시 시작 — {h}시간 {n}회")

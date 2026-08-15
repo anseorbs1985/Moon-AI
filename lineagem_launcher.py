@@ -1794,6 +1794,9 @@ class App(tk.Tk):
         (사용자가 [전체멈춤]·[⏰ 반복]으로 끄면 그때는 꺼진 채로 두고,
          다음에 런처를 켤 때 다시 켜진다)"""
         try:
+            if self._rep_load().get("_off"):
+                self._rep_log("고정 반복 자동 켜기 건너뜀 — 사용자가 ⏰를 꺼둔 상태")
+                return
             path = os.path.join(BASE, "island_coords.json")
             with open(path, encoding="utf-8") as f:
                 cfg = json.load(f)
@@ -1848,7 +1851,8 @@ class App(tk.Tk):
             os.replace(tmp, path)
         except Exception as e:
             self._rep_log(f"⚠ 반복 종료 중 오류: {e!r}")
-        self._rep_save({})
+        # 사용자가 직접 껐다는 표시 — 런처를 다시 켜도 자동으로 되살리지 않는다
+        self._rep_save({"_off": True})
         self._rep_log(f"반복 종료 — {n}개 슬롯의 ⏰ 전부 꺼짐"
                       + ("" if quiet else " (사용자)"))
         self._refresh_rep_btn()
@@ -2665,6 +2669,7 @@ class App(tk.Tk):
             h = int(slot.get("repeat_h") or h)
             n = int(slot.get("repeat_n") or n)
             st = self._rep_load()
+            st.pop("_off", None)          # 다시 켰으니 '꺼둠' 표시 해제
             # 사용자가 직접 누른 실행도 '1회차'로 센다 (2026-08-16 사용자 지시)
             st[f"{self.NIGHT_KEY}|{slot_idx}"] = {"h": h, "left": max(0, n - 1), "run": 1,
                                                   "next": time.time() + self._rep_delay(h)}
