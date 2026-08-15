@@ -3623,6 +3623,32 @@ class App(tk.Tk):
         except Exception:
             return False
 
+    def _paste_at(self, coord, txt, label=""):
+        """붙여넣기 자리 — 진짜 커서로 눌러 그 창을 앞으로 세운 뒤 Ctrl+V, Enter.
+        (커서 없는 클릭은 창을 활성화하지 못해 Ctrl+V가 엉뚱한 곳으로 간다)"""
+        pyautogui.moveTo(*coord); time.sleep(0.15)
+        pyautogui.click()
+        try:
+            time.sleep(random.uniform(1.3, 1.7))
+            _fw = self._focus_client_at(coord)
+            self._coupon_log(f"{label} 창 활성화 {'성공' if _fw else '실패/불필요'} {tuple(coord)}")
+            ok = self._set_clipboard_text(txt)
+            self._coupon_log(f"{label} 클립보드 복사 {'성공' if ok else '실패'}: {txt!r}")
+            time.sleep(0.15)
+            self._paste_ctrl_v()
+            self._coupon_log(f"{label} Ctrl+V 전송 완료")
+            time.sleep(random.uniform(0.6, 0.9))
+            # 입력칸이 살아 있으면 다음 클릭을 게임이 씹으므로 Enter로 입력 확정
+            self._send_key_input_cp(0x1C, 0x0008)
+            time.sleep(0.08)
+            self._send_key_input_cp(0x1C, 0x0008 | 0x0002)
+            self._coupon_log(f"{label} Enter(입력 확정) 전송 완료")
+            time.sleep(random.uniform(0.5, 0.8))
+            return True
+        except Exception as e:
+            self._coupon_log(f"{label} 붙여넣기 오류: {e!r}")
+            return False
+
     def _paste_ctrl_v(self):
         # Ctrl(0x1D)+V(0x2F) 스캔코드 순서대로 누르고 떼기 — 게임 프레임이 놓치지 않게 여유 있게
         self._send_key_input_cp(0x1D, 0x0008);          time.sleep(0.12)
@@ -3827,7 +3853,12 @@ class App(tk.Tk):
             if not self._wait_mouse_idle(stop): return
             if getattr(self, stop, False): break
             name = st["slot"].get("name", f"#{si+1}")
-            _act = self._do_click_or_wheel(fkey, j, coords[j], st["slot"])
+            if fkey in self.PASTE_FKEYS and j == self._paste_idx_or_default(fkey, st["slot"]):
+                self._paste_at(coords[j], str(self.cfg.get(f"{fkey}_text", "") or ""),
+                               f"[{name}]")
+                _act = "붙임"
+            else:
+                _act = self._do_click_or_wheel(fkey, j, coords[j], st["slot"])
             self.status.set(f"{icon} [{name}] {_act}{j+1}/{nclk}  (남은 슬롯 {len(alive)})")
             done += 1
             _g = self._slot_gap(st["slot"], j)          # 칸에 적어둔 초가 있으면 그걸로
@@ -3867,6 +3898,11 @@ class App(tk.Tk):
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
                                     slow=(1.10, 1.20), slot_gap=(3.0, 5.0))
                 return
+            if fkey == "market" and slot_idx is None and len(targets) > 1:
+                # 거래소검색: 동시 2슬롯 번갈아 (간격은 칸에 적어둔 값 우선)
+                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
+                                    gap=(2.0, 4.0), slot_gap=(3.0, 5.0))
+                return
             if fkey == "circus3" and slot_idx is None and len(targets) > 1:
                 # 서커스 이벤트퀘스트: 서커스와 같은 시간 + 10~20% 할증
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
@@ -3893,11 +3929,8 @@ class App(tk.Tk):
                 # 클릭1~N을 순서대로, 클릭 사이 간격만 랜덤
                 order = [j for j in range(nclk) if coords[j]]
                 # 쿠폰: 클릭5(입력칸)가 등록돼 있으면 그 직후, 없으면 클릭4 직후에 붙여넣기
-                paste_after = None
-                if fkey in self.PASTE_FKEYS:
-                    paste_after = self._paste_idx(slot)          # 칸에 체크한 자리
-                    if paste_after is None:                      # 없으면 예전 규칙(클릭5)
-                        paste_after = 4 if (len(coords) > 4 and coords[4]) else 3
+                paste_after = (self._paste_idx_or_default(fkey, slot)
+                               if fkey in self.PASTE_FKEYS else None)
                 if fkey == "coupon":
                     self._coupon_log(f"슬롯 [{name}] 시작 — 등록클릭 {[x+1 for x in order]}, 붙여넣기는 클릭{(paste_after or 0)+1} 직후")
                 for n, j in enumerate(order):
@@ -3905,41 +3938,13 @@ class App(tk.Tk):
                         if fkey == "coupon": self._coupon_log(f"멈춤 플래그로 중단 (클릭{j+1} 직전)")
                         break
                     if fkey in self.PASTE_FKEYS and j == paste_after:
-                        # 커서 없는 클릭은 창을 활성화하지 못해 Ctrl+V가 엉뚱한 곳으로 간다
-                        # → 붙여넣기 직전 이 한 번만 진짜 커서로 클릭해 창을 앞으로 세운다
-                        pyautogui.moveTo(*coords[j]); time.sleep(0.15)
-                        pyautogui.click()
-                        _act = "클릭"
+                        self._paste_at(coords[j], txt, f"[{name}]")
+                        self.status.set(f"{icon} [{name}] 붙여넣기 완료 (클릭{j+1} 다음)")
                     else:
                         _act = self._do_click_or_wheel(fkey, j, coords[j], slot)
-                    self.status.set(f"{icon} [{name}] {_act}{j+1}...")
-                    if fkey == "coupon":
-                        self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
-                    if fkey in self.PASTE_FKEYS and j == paste_after:
-                        # 클릭 후 입력칸 포커스가 잡힐 때까지 기다렸다가 Ctrl+V(스캔코드) 붙여넣기
-                        # 오류가 나도 뒤 클릭이 끊기지 않게 보호
-                        try:
-                            time.sleep(random.uniform(1.3, 1.7))
-                            # 커서 없는 클릭은 창을 활성화하지 않는다 → 이 창을 먼저 앞으로
-                            _fw = self._focus_client_at(coords[j])
-                            self._coupon_log(f"창 활성화 {'성공' if _fw else '실패/불필요'}"
-                                             f" {tuple(coords[j])}")
-                            ok = self._set_clipboard_text(txt)
-                            self._coupon_log(f"클립보드 복사 {'성공' if ok else '실패'}: {txt!r}")
-                            time.sleep(0.15)
-                            self._paste_ctrl_v()
-                            self._coupon_log("Ctrl+V 전송 완료")
-                            time.sleep(random.uniform(0.6, 0.9))
-                            # 입력칸이 계속 활성화돼 있으면 다음 클릭을 게임이 씹으므로 Enter로 입력 확정
-                            self._send_key_input_cp(0x1C, 0x0008)
-                            time.sleep(0.08)
-                            self._send_key_input_cp(0x1C, 0x0008 | 0x0002)
-                            self._coupon_log("Enter(입력 확정) 전송 완료")
-                            time.sleep(random.uniform(0.5, 0.8))
-                            self.status.set(f"{icon} [{name}] 붙여넣기 완료")
-                        except Exception as e:
-                            self._coupon_log(f"붙여넣기 오류: {e!r}")
-                            self.status.set(f"{icon} 붙여넣기 오류: {e}")
+                        self.status.set(f"{icon} [{name}] {_act}{j+1}...")
+                        if fkey == "coupon":
+                            self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
                     if n < len(order) - 1:
                         if fkey == "eventshop" and j == 0:
                             # 이벤트상점: 클릭1 → 4초 × 1.15~1.30 랜덤 증가 후 클릭2
@@ -8545,6 +8550,14 @@ class App(tk.Tk):
                             + (f"클릭{j+1} 다음" if on else "없음"))
         except Exception:
             pass
+
+    def _paste_idx_or_default(self, fkey, slot):
+        """칸에 체크한 붙여넣기 자리 (없으면 예전 규칙 = 클릭5, 없으면 클릭4)."""
+        j = self._paste_idx(slot)
+        if j is not None:
+            return j
+        cs = slot.get("coords") or []
+        return 4 if (len(cs) > 4 and cs[4]) else 3
 
     @staticmethod
     def _paste_idx(slot):
