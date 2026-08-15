@@ -458,6 +458,7 @@ class IslandApp(tk.Tk):
         self.after(1000, self._lock_tick)      # 실행 중 잠금 파일 갱신
         self.after(800, self._potion_tick)     # 🧪 물약색 결과 표시
         self.after(900, self._scroll_apply)    # 📜 주문서 층수 표시
+        self.after(1000, self._rep_btn_tick)   # ⏰ 슬롯별 반복 표시
         self.after(300, self._scroll_all_to_bottom)
         self.after(80, self._fit_width)
         # 창을 옮기거나 크기를 바꾸면 그 자리를 기억한다 (다음에 그 자리에 뜸)
@@ -801,6 +802,9 @@ class IslandApp(tk.Tk):
         self._paste_marks[key] = []
         self._potion_lbls[key] = []
         self._scroll_lbls[key] = []
+        if not hasattr(self, "_rep_btns"):
+            self._rep_btns = {}
+        self._rep_btns[key] = []
         self._move_btns[key] = []
         if not hasattr(self, "_cell_name_vars"):
             self._cell_name_vars = {}
@@ -900,6 +904,12 @@ class IslandApp(tk.Tk):
                       command=lambda k=key, x=i: self._preview(k, x)).pack(side="left", padx=(0, 1))
             tk.Button(r3, text="×", font=("맑은 고딕", 7), fg="red", width=2,
                       command=lambda k=key, x=i: self._del(k, x)).pack(side="left")
+            # ⏰ 이 슬롯의 반복만 끄기 (꺼진 것을 누르면 지금부터 다시 시작)
+            rb = tk.Button(r3, text="⏰", font=("맑은 고딕", 7, "bold"), width=2,
+                           bg="#7f8c8d", fg="white",
+                           command=lambda k=key, x=i: self._rep_toggle(k, x))
+            rb.pack(side="left", padx=(1, 0))
+            self._rep_btns.setdefault(key, []).append(rb)
             r4 = tk.Frame(cell); r4.pack(pady=(1, 0))
             tk.Button(r4, text="복사", font=("맑은 고딕", 7), bg="#2980b9", fg="white", width=2,
                       command=lambda k=key, x=i: self._slot_copy(k, x)).pack(side="left", padx=(0, 1))
@@ -2458,6 +2468,76 @@ class IslandApp(tk.Tk):
                     pass
         except Exception:
             pass
+
+    def _rep_file(self):
+        return os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
+                            "island_repeat.json")
+
+    def _rep_state(self):
+        try:
+            with open(self._rep_file(), encoding="utf-8") as f:
+                return json.load(f) or {}
+        except Exception:
+            return {}
+
+    def _rep_write(self, st):
+        try:
+            d = os.path.dirname(self._rep_file())
+            os.makedirs(d, exist_ok=True)
+            tmp = self._rep_file() + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(st, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self._rep_file())
+        except Exception:
+            pass
+
+    def _rep_toggle(self, key, idx):
+        """⏰ 이 슬롯의 반복만 끈다. 이미 꺼져 있으면 지금부터 다시 시작."""
+        st = self._rep_state()
+        k = f"{key}|{idx}"
+        if k in st:
+            st.pop(k, None)
+            self._rep_write(st)
+            try:                                  # 설정의 ⏰도 함께 끈다
+                self.cfg[key][idx]["repeat_h"] = 0
+                save_cfg(self.cfg)
+            except Exception:
+                pass
+            self._status.set(f"⏰ {key} #{idx+1:02d} 반복 껐습니다")
+        else:
+            fix = self.REPEAT_FIXED.get(key)
+            slot = (self.cfg.get(key) or [])[idx]
+            h = int(slot.get("repeat_h") or (fix[0] if fix else 2))
+            n = int(slot.get("repeat_n") or (fix[1] if fix else 6))
+            try:
+                slot["repeat_h"] = h; slot["repeat_n"] = n
+                save_cfg(self.cfg)
+            except Exception:
+                pass
+            st[k] = {"h": h, "left": n, "next": time.time() + h * 3600}
+            self._rep_write(st)
+            self._status.set(f"⏰ {key} #{idx+1:02d} 반복 다시 시작 — {h}시간 {n}회")
+        self._refresh_rep_btns()
+
+    def _refresh_rep_btns(self):
+        """반복이 걸린 슬롯은 초록(남은 횟수), 아니면 회색."""
+        st = self._rep_state()
+        for key, btns in (getattr(self, "_rep_btns", None) or {}).items():
+            for i, b in enumerate(btns):
+                try:
+                    if not b.winfo_exists():
+                        continue
+                    e = st.get(f"{key}|{i}")
+                    if e:
+                        b.config(text=str(int(e.get("left", 0))), bg="#1e8449")
+                    else:
+                        b.config(text="⏰", bg="#7f8c8d")
+                except Exception:
+                    pass
+
+    def _rep_btn_tick(self):
+        self._refresh_rep_btns()
+        self.after(20000, self._rep_btn_tick)
 
     def _test_sel(self, key, sel):
         """고른 슬롯들을 웨이브(번갈아)로 한 번에 — 반복 차례가 여러 개일 때 쓴다."""

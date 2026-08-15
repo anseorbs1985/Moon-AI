@@ -1551,6 +1551,11 @@ class App(tk.Tk):
         return_col = tk.Frame(front_row); return_col.pack(side="left", anchor="n")
         self._build_return_grid(return_col)
 
+        # 귀환주문서 우측: 악몽의섬 슬롯별 실행 + 반복끄기
+        tk.Frame(front_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(8, 8))
+        night_col = tk.Frame(front_row); night_col.pack(side="left", anchor="n")
+        self._build_night_grid(night_col)
+
         # 서브창 핸들 초기화
         self._settings_win = None
         self._hunt_win     = None
@@ -2397,6 +2402,107 @@ class App(tk.Tk):
             tk.Button(cell, text="실행", font=("맑은 고딕", 7, "bold"),
                       bg="#c0392b", fg="white", width=6,
                       command=lambda x=idx: self._run_return_slot(x)).pack()
+
+    NIGHT_KEY = "토요일_악몽의섬"      # 메인런처에서 슬롯별로 다루는 던전
+    NIGHT_DIDX = 1                     # 섬/던전 실행기의 던전 번호 (0오만 1악몽 2잊섬 3에카)
+
+    def _build_night_grid(self, parent):
+        """악몽의섬 슬롯별 [실행] + [⏰끄기] — 좌표·반복 설정은 섬/던전 실행기에서 관리."""
+        tk.Label(parent, text="🌑 악몽의섬", font=("맑은 고딕", 9, "bold"),
+                 fg="#2c3e50").pack(anchor="w", pady=(0, 2))
+        wg = tk.Frame(parent); wg.pack(anchor="w")
+        self._night_btns = []
+        for idx in range(16):
+            r, c = idx % 4, idx // 4
+            cell = tk.Frame(wg); cell.grid(row=r, column=c, padx=5, pady=3)
+            tk.Label(cell, text=f"{idx+1:02d}", font=("맑은 고딕", 7), fg="#888").pack()
+            tk.Button(cell, text="실행", font=("맑은 고딕", 7, "bold"),
+                      bg="#2471a3", fg="white", width=6,
+                      command=lambda x=idx: self._run_night_slot(x)).pack()
+            rb = tk.Button(cell, text="⏰", font=("맑은 고딕", 7, "bold"),
+                           bg="#7f8c8d", fg="white", width=6,
+                           command=lambda x=idx: self._night_rep_off(x))
+            rb.pack(pady=(1, 0))
+            self._night_btns.append(rb)
+        self.after(1200, self._refresh_night_btns)
+
+    def _refresh_night_btns(self):
+        """반복이 걸린 슬롯은 초록(남은 횟수), 아니면 회색."""
+        try:
+            st = self._rep_load()
+            for i, b in enumerate(self._night_btns or []):
+                if not b.winfo_exists():
+                    continue
+                e = st.get(f"{self.NIGHT_KEY}|{i}")
+                if e:
+                    b.config(text=f"⏰{int(e.get('left', 0))}회", bg="#1e8449")
+                else:
+                    b.config(text="⏰꺼짐", bg="#7f8c8d")
+        except Exception:
+            pass
+        self.after(20000, self._refresh_night_btns)
+
+    def _run_night_slot(self, slot_idx):
+        """악몽의섬 그 슬롯 하나만 실행 — 누른 때부터 2시간 N회를 다시 센다."""
+        if self._is_busy():
+            self._enqueue(f"악몽의섬 #{slot_idx+1:02d}",
+                          lambda: self._run_night_slot(slot_idx)); return
+        try:
+            slots = self._island_cfg().get(self.NIGHT_KEY, [])
+            if slot_idx >= len(slots) or not any(slots[slot_idx].get("coords") or []):
+                self.status.set(f"악몽의섬 #{slot_idx+1:02d} — 등록된 좌표 없음"); return
+        except Exception:
+            pass
+        self._island_step_back()
+        cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"),
+               str(self.NIGHT_DIDX), "--run", "--slot", str(slot_idx + 1)]
+        proc = subprocess.Popen(cmd)
+        self._island_proc = proc
+        threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
+        self._night_rep_restart(slot_idx)
+        self.status.set(f"🌑 악몽의섬 #{slot_idx+1:02d} 실행 — 지금부터 2시간 다시 셈")
+
+    def _night_rep_restart(self, slot_idx):
+        """그 슬롯의 반복을 '지금부터' 다시 시작 (2시간 N회)."""
+        try:
+            h, n = self.REPEAT_FIXED.get(self.NIGHT_KEY, (2, 6))
+            slot = (self._island_cfg().get(self.NIGHT_KEY) or [])[slot_idx]
+            h = int(slot.get("repeat_h") or h)
+            n = int(slot.get("repeat_n") or n)
+            st = self._rep_load()
+            st[f"{self.NIGHT_KEY}|{slot_idx}"] = {"h": h, "left": n,
+                                                  "next": time.time() + self._rep_delay(h)}
+            self._rep_save(st)
+            self._rep_log(f"{self.NIGHT_KEY} #{slot_idx+1:02d} 메인런처 실행 — "
+                          f"지금부터 {h}시간 {n}회 다시 시작")
+            self._refresh_night_btns()
+        except Exception as e:
+            self._rep_log(f"⚠ 악몽의섬 #{slot_idx+1:02d} 반복 재시작 실패: {e!r}")
+
+    def _night_rep_off(self, slot_idx):
+        """그 슬롯의 ⏰ 반복만 끈다 (다른 슬롯은 그대로). 꺼진 것을 누르면 다시 시작."""
+        try:
+            st = self._rep_load()
+            k = f"{self.NIGHT_KEY}|{slot_idx}"
+            if k not in st:                      # 이미 꺼져 있으면 → 다시 시작
+                self._night_rep_restart(slot_idx)
+                self.status.set(f"⏰ 악몽의섬 #{slot_idx+1:02d} 반복 다시 시작 (2시간)")
+                return
+            st.pop(k, None)
+            self._rep_save(st)
+            path = os.path.join(BASE, "island_coords.json")
+            with open(path, encoding="utf-8") as f:
+                cfg = json.load(f)
+            cfg[self.NIGHT_KEY][slot_idx]["repeat_h"] = 0
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+            self._rep_log(f"{self.NIGHT_KEY} #{slot_idx+1:02d} 반복 끔 (사용자)")
+            self._refresh_night_btns(); self._refresh_rep_btn()
+            self.status.set(f"⏰ 악몽의섬 #{slot_idx+1:02d} 반복 껐습니다")
+        except Exception as e:
+            self.status.set(f"⚠ 반복 끄기 실패: {e}")
 
     def _run_return_slot(self, slot_idx):
         """귀환주문서(섬/던전 실행기의 컬럼) 슬롯 하나만 메인 런처에서 단독 실행."""
