@@ -1597,7 +1597,10 @@ class App(tk.Tk):
     def _open_section_win(self, attr, title, build_fn, w=420, h=700, pinnable=False, fit=True):
         win = getattr(self, attr, None)
         if win and win.winfo_exists():
-            win.lift(); return
+            # 같은 버튼을 다시 누르면 열려 있던 창을 닫고 새로 띄운다 (2026-08-15 사용자 지시)
+            try: win.destroy()
+            except Exception: pass
+            setattr(self, attr, None)
         win = tk.Toplevel(self)
         win.title(title)
         win.attributes("-topmost", True)
