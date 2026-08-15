@@ -4017,11 +4017,13 @@ class App(tk.Tk):
                         if fkey == "coupon":
                             self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
                     if fkey == "dragon":
-                        # 남은 시간 ÷ 남은 클릭 수 만큼만 쉰다 (슬롯 사이도 포함)
+                        # 남은 시간 ÷ 남은 클릭 수 = 평균 간격.
+                        # 매번 똑같으면 기계처럼 보이니 ±25% 흔들어 준다
+                        # (전체 시간은 다음 클릭에서 다시 계산돼 저절로 맞춰진다)
                         _left -= 1
                         _rem = _dl - time.time()
-                        time.sleep(max(DRAGON_GAP_MIN,
-                                       min(_rem / max(1, _left), DRAGON_GAP_MAX)))
+                        _g = (_rem / max(1, _left)) * random.uniform(0.75, 1.25)
+                        time.sleep(max(DRAGON_GAP_MIN, min(_g, DRAGON_GAP_MAX)))
                     if n < len(order) - 1:
                         if fkey == "eventshop" and j == 0:
                             # 이벤트상점: 클릭1 → 4초 × 1.15~1.30 랜덤 증가 후 클릭2
