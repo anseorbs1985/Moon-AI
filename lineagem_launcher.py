@@ -2392,26 +2392,111 @@ class App(tk.Tk):
     def _build_return_grid(self, parent):
         """귀환주문서 슬롯별 실행 그리드 (좌표는 섬/던전 실행기에서 관리, 여기선 실행만).
         배열창 재배치와 동일한 세로(열 우선) 번호 배치."""
-        tk.Label(parent, text="📜 귀환주문서", font=("맑은 고딕", 9, "bold"),
-                 fg="#2c3e50").pack(anchor="w", pady=(0, 2))
+        hd = tk.Frame(parent); hd.pack(anchor="w", pady=(0, 2))
+        tk.Label(hd, text="📜 귀환주문서", font=("맑은 고딕", 9, "bold"),
+                 fg="#2c3e50").pack(side="left")
+        tk.Button(hd, text="▶ 선택실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#1e8449", fg="white",
+                  command=self._run_return_sel).pack(side="left", padx=(6, 0))
+        tk.Button(hd, text="선택해제", font=("맑은 고딕", 8),
+                  bg="#95a5a6", fg="white",
+                  command=self._return_sel_clear).pack(side="left", padx=(4, 0))
         wg = tk.Frame(parent); wg.pack(anchor="w")
+        self._return_plus = []
+        self._return_sel = set()
         for idx in range(16):
             r, c = idx % 4, idx // 4
-            cell = tk.Frame(wg); cell.grid(row=r, column=c, padx=6, pady=5)
+            cell = tk.Frame(wg); cell.grid(row=r, column=c, padx=6, pady=4)
             tk.Label(cell, text=f"{idx+1:02d}", font=("맑은 고딕", 7), fg="#888").pack()
             tk.Button(cell, text="실행", font=("맑은 고딕", 7, "bold"),
                       bg="#c0392b", fg="white", width=6,
                       command=lambda x=idx: self._run_return_slot(x)).pack()
+            pb = tk.Button(cell, text="+", font=("맑은 고딕", 7, "bold"), width=6,
+                           bg="#dfe3e6", fg="#e67e22",
+                           command=lambda x=idx: self._return_sel_toggle(x))
+            pb.pack(pady=(1, 0))
+            self._return_plus.append(pb)
+
+    def _return_sel_toggle(self, idx):
+        sel = getattr(self, "_return_sel", None)
+        if sel is None:
+            sel = self._return_sel = set()
+        sel.discard(idx) if idx in sel else sel.add(idx)
+        self._refresh_return_plus()
+
+    def _return_sel_clear(self):
+        self._return_sel = set()
+        self._refresh_return_plus()
+        self.status.set("선택 해제")
+
+    def _refresh_return_plus(self):
+        sel = getattr(self, "_return_sel", set())
+        for i, b in enumerate(getattr(self, "_return_plus", []) or []):
+            try:
+                on = i in sel
+                b.config(text="✔" if on else "+",
+                         bg="#e67e22" if on else "#dfe3e6",
+                         fg="white" if on else "#e67e22")
+            except Exception:
+                pass
+        self.status.set(f"귀환주문서 선택 {sorted(i+1 for i in sel)}" if sel else "선택 없음")
+
+    def _run_return_sel(self):
+        """+ 로 고른 슬롯들만 차례로 — 고른 게 없으면 좌표가 있는 전체."""
+        if getattr(self, "_return_running", False):
+            self.status.set("귀환주문서 실행 중입니다"); return
+        try:
+            slots = self._island_cfg().get("귀환주문서", [])
+        except Exception:
+            self.status.set("island_coords.json 을 찾을 수 없습니다"); return
+        sel = sorted(getattr(self, "_return_sel", set()))
+        todo = [(i, slots[i]) for i in (sel or range(len(slots)))
+                if i < len(slots) and any(slots[i].get("coords") or [])]
+        if not todo:
+            self.status.set("귀환주문서 — 실행할 슬롯이 없습니다 (좌표 미등록)"); return
+        if not self._try_busy_or_queue("귀환주문서", self._run_return_sel,
+                                       label=f"귀환주문서 {len(todo)}칸"): return
+        self._return_running = True
+        self._return_stop    = False
+        self.status.set(f"2초 후 귀환주문서 {[i+1 for i, _ in todo]}번 실행...")
+        self._minimize_all()
+        threading.Thread(target=self._run_task,
+                         args=("귀환주문서", self._run_return_many, todo), daemon=True).start()
+
+    def _run_return_many(self, todo):
+        """고른 슬롯들을 차례로 실행 (슬롯 사이 2~4초)."""
+        self._return_batch = True
+        try:
+            for n, (i, slot) in enumerate(todo):
+                if getattr(self, "_return_stop", False):
+                    break
+                self._return_running = True
+                self._run_return_worker(slot.get("name", f"#{i+1}"),
+                                        slot.get("coords", []))
+                if n < len(todo) - 1:
+                    time.sleep(random.uniform(2.0, 4.0))
+        finally:
+            self._return_batch = False
+            self._return_running = False
+            self.after(0, self._raise_main)
 
     NIGHT_KEY = "토요일_악몽의섬"      # 메인런처에서 슬롯별로 다루는 던전
     NIGHT_DIDX = 1                     # 섬/던전 실행기의 던전 번호 (0오만 1악몽 2잊섬 3에카)
 
     def _build_night_grid(self, parent):
-        """악몽의섬 슬롯별 [실행] + [⏰끄기] — 좌표·반복 설정은 섬/던전 실행기에서 관리."""
-        tk.Label(parent, text="🌑 악몽의섬", font=("맑은 고딕", 9, "bold"),
-                 fg="#2c3e50").pack(anchor="w", pady=(0, 2))
+        """악몽의섬 슬롯별 [실행] + [⏰끄기] + [+선택] — 좌표·반복은 섬/던전 실행기에서 관리."""
+        hd = tk.Frame(parent); hd.pack(anchor="w", pady=(0, 2))
+        tk.Label(hd, text="🌑 악몽의섬", font=("맑은 고딕", 9, "bold"),
+                 fg="#2c3e50").pack(side="left")
+        tk.Button(hd, text="▶ 선택실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#1e8449", fg="white",
+                  command=self._run_night_sel).pack(side="left", padx=(6, 0))
+        tk.Button(hd, text="선택해제", font=("맑은 고딕", 8),
+                  bg="#95a5a6", fg="white",
+                  command=lambda: self._night_sel_clear()).pack(side="left", padx=(4, 0))
         wg = tk.Frame(parent); wg.pack(anchor="w")
-        self._night_btns = []
+        self._night_btns = []; self._night_plus = []
+        self._night_sel = set()
         for idx in range(16):
             r, c = idx % 4, idx // 4
             cell = tk.Frame(wg); cell.grid(row=r, column=c, padx=5, pady=3)
@@ -2424,7 +2509,59 @@ class App(tk.Tk):
                            command=lambda x=idx: self._night_rep_off(x))
             rb.pack(pady=(1, 0))
             self._night_btns.append(rb)
+            pb = tk.Button(cell, text="+", font=("맑은 고딕", 7, "bold"), width=6,
+                           bg="#dfe3e6", fg="#e67e22",
+                           command=lambda x=idx: self._night_sel_toggle(x))
+            pb.pack(pady=(1, 0))
+            self._night_plus.append(pb)
         self.after(1200, self._refresh_night_btns)
+
+    def _night_sel_toggle(self, idx):
+        """+ 로 고른 슬롯만 [선택실행]으로 한 번에 돌린다."""
+        sel = getattr(self, "_night_sel", None)
+        if sel is None:
+            sel = self._night_sel = set()
+        if idx in sel:
+            sel.discard(idx)
+        else:
+            sel.add(idx)
+        self._refresh_night_plus()
+
+    def _night_sel_clear(self):
+        self._night_sel = set()
+        self._refresh_night_plus()
+        self.status.set("선택 해제")
+
+    def _refresh_night_plus(self):
+        sel = getattr(self, "_night_sel", set())
+        for i, b in enumerate(getattr(self, "_night_plus", []) or []):
+            try:
+                on = i in sel
+                b.config(text="✔" if on else "+",
+                         bg="#e67e22" if on else "#dfe3e6",
+                         fg="white" if on else "#e67e22")
+            except Exception:
+                pass
+        self.status.set(f"악몽의섬 선택 {sorted(i+1 for i in sel)}" if sel else "선택 없음")
+
+    def _run_night_sel(self):
+        """+ 로 고른 슬롯들만 웨이브(번갈아)로 한 번에 — 고른 게 없으면 전체."""
+        sel = sorted(getattr(self, "_night_sel", set()))
+        if self._is_busy():
+            self._enqueue("악몽의섬 선택실행", self._run_night_sel); return
+        self._island_step_back()
+        cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"),
+               str(self.NIGHT_DIDX), "--run"]
+        if sel:
+            cmd += ["--slots", ",".join(str(i + 1) for i in sel), "--lanes", "2"]
+        proc = subprocess.Popen(cmd)
+        self._island_proc = proc
+        threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
+        for i in (sel or range(16)):
+            self._night_rep_restart(i)
+        self.status.set(f"🌑 악몽의섬 실행 — "
+                        + (f"{[i+1 for i in sel]}번" if sel else "전체")
+                        + " (지금부터 2시간 다시 셈)")
 
     def _refresh_night_btns(self):
         """반복이 걸린 슬롯은 초록(남은 횟수), 아니면 회색."""
@@ -2550,7 +2687,9 @@ class App(tk.Tk):
             self.after(0, lambda e=e: self.status.set(f"귀환주문서 오류: {e}"))
         finally:
             self._return_running = False
-            self.after(0, self._raise_main)
+            # 여러 칸을 이어서 돌 때는 중간에 런처를 앞으로 올리지 않는다
+            if not getattr(self, "_return_batch", False):
+                self.after(0, self._raise_main)
 
     ACC_TYPES  = ["구글",    "NC",      "전번",    "페이스북"]
     ACC_COLORS = ["#DB4437", "#e67e22", "#27ae60", "#6c3483"]
