@@ -1956,9 +1956,11 @@ class App(tk.Tk):
         for bi, e, h in batch:
             kk = f"{key}|{bi}"
             e["left"] = int(e.get("left", 1)) - 1
+            e["run"]  = int(e.get("run", 0)) + 1      # 이번이 몇 회차인지 (물약 교체용)
             if e["left"] <= 0 and key in self.REPEAT_FIXED:
                 # 고정 던전 — 횟수를 다 채우면 끄지 않고 처음부터 다시
                 e["left"] = self._rep_full_n(key, bi)
+                e["run"]  = 0                          # 다음 실행이 다시 1회차
                 e["next"] = now + self._rep_delay(h)
                 st[kk] = e
                 self._rep_log(f"{key} #{bi+1:02d} 마지막 회차 실행 — 고정이라 "
@@ -2663,11 +2665,12 @@ class App(tk.Tk):
             h = int(slot.get("repeat_h") or h)
             n = int(slot.get("repeat_n") or n)
             st = self._rep_load()
-            st[f"{self.NIGHT_KEY}|{slot_idx}"] = {"h": h, "left": n,
+            # 사용자가 직접 누른 실행도 '1회차'로 센다 (2026-08-16 사용자 지시)
+            st[f"{self.NIGHT_KEY}|{slot_idx}"] = {"h": h, "left": max(0, n - 1), "run": 1,
                                                   "next": time.time() + self._rep_delay(h)}
             self._rep_save(st)
             self._rep_log(f"{self.NIGHT_KEY} #{slot_idx+1:02d} 메인런처 실행 — "
-                          f"지금부터 {h}시간 {n}회 다시 시작")
+                          f"1회차 (남은 {max(0, n-1)}회, 다음 {h}시간 뒤)")
             self._refresh_night_btns()
         except Exception as e:
             self._rep_log(f"⚠ 악몽의섬 #{slot_idx+1:02d} 반복 재시작 실패: {e!r}")

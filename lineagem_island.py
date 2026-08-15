@@ -969,6 +969,41 @@ class IslandApp(tk.Tk):
                   command=lambda k=key: self._open_preset_win(k)).pack(side="left", padx=(8, 0))
         # 프리셋 — 층별로 줄을 나눠 배치 (누르면 이 슬롯에 바로 적용)
         self._build_preset_rows(win, key, idx)
+        # 🧪 반복 N회차에 물약(프리셋) 바꾸기 — 새 사이클(1회차)엔 원래대로 되돌린다
+        sw = tk.Frame(win); sw.pack(fill="x", padx=10, pady=(2, 0))
+        tk.Label(sw, text="🧪 물약 바꾸기:", font=("맑은 고딕", 8, "bold"),
+                 fg="#8e44ad").pack(side="left")
+        av = tk.StringVar(value=str(slot.get("sw_at") or ""))
+        tk.Entry(sw, textvariable=av, width=3, justify="center",
+                 font=("맑은 고딕", 8)).pack(side="left", padx=(4, 1))
+        tk.Label(sw, text="회차에", font=("맑은 고딕", 8)).pack(side="left")
+        _names = ["(안 바꿈)"] + [self._preset_full(key, q)
+                                 for q in range(len(self._presets(key)))]
+        _cur = slot.get("sw_p")
+        pv = tk.StringVar(value=(_names[int(_cur) + 1] if _cur is not None
+                                 and int(_cur) + 1 < len(_names) else _names[0]))
+        om = tk.OptionMenu(sw, pv, *_names)
+        om.config(font=("맑은 고딕", 8), pady=0, highlightthickness=0)
+        om.pack(side="left", padx=3)
+        tk.Label(sw, text="로  (1회차엔 원래대로)", font=("맑은 고딕", 8),
+                 fg="#888").pack(side="left")
+        def _sv_sw(*_a, k=key, x=idx, a_=av, p_=pv, nm=_names):
+            try:
+                sl = self.cfg[k][x]
+                t_ = a_.get().strip()
+                sl["sw_at"] = int(t_) if t_.isdigit() and int(t_) > 0 else None
+                v = p_.get()
+                sl["sw_p"] = (nm.index(v) - 1) if (v in nm and nm.index(v) > 0) else None
+                if sl["sw_p"] is None or not sl["sw_at"]:
+                    sl.pop("sw_base", None)          # 안 쓰면 되돌리기 기준도 지운다
+                save_cfg(self.cfg)
+                self._status.set(f"🧪 #{x+1:02d} — "
+                                 + (f"{sl['sw_at']}회차에 {v} 로 바꿈"
+                                    if sl.get("sw_at") and sl.get("sw_p") is not None
+                                    else "물약 바꾸기 없음"))
+            except Exception:
+                pass
+        av.trace_add("write", _sv_sw); pv.trace_add("write", _sv_sw)
         tk.Label(win, text=f"버튼: [✔등록][×삭제][▶테스트][⏺녹화 — 3초 뒤 녹화, ESC 종료, 저장되면 빨간 ●]  |  [방향]: 이동·⇩끌어내리기  |  'ㅡ'=대기 초(8~10=랜덤, 비우면 {CLICK_INTERVAL})",
                  font=("맑은 고딕", 7), fg="#888").pack()
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
@@ -2498,7 +2533,8 @@ class IslandApp(tk.Tk):
                 if not h:
                     continue
                 n = int(slot.get("repeat_n") or (fix[1] if fix else 6))
-                st[f"{key}|{i}"] = {"h": h, "left": n, "next": now + h * 3600}
+                st[f"{key}|{i}"] = {"h": h, "left": max(0, n - 1), "run": 1,
+                                    "next": now + h * 3600}
                 done.append((i + 1, h, n))
             if done:
                 tmp = f + ".tmp"
@@ -2509,7 +2545,8 @@ class IslandApp(tk.Tk):
                     with open(os.path.join(d, "repeat_log.txt"), "a", encoding="utf-8") as fp:
                         for i, h, n in done:
                             fp.write(f"[{time.strftime('%m-%d %H:%M:%S')}] {key} #{i:02d} "
-                                     f"개별 실행 — 지금부터 {h}시간 {n}회 다시 시작\n")
+                                     f"개별 실행 — 1회차 (남은 {max(0,n-1)}회, "
+                                     f"다음 {h}시간 뒤)\n")
                 except Exception:
                     pass
         except Exception:
@@ -2585,13 +2622,60 @@ class IslandApp(tk.Tk):
         self._refresh_rep_btns()
         self.after(20000, self._rep_btn_tick)
 
+    def _run_no(self, key, idx):
+        """이번이 몇 회차인지 (반복 예약이 없으면 1회차로 본다)."""
+        e = (self._rep_state() or {}).get(f"{key}|{idx}")
+        try:
+            return int((e or {}).get("run") or 1)
+        except Exception:
+            return 1
+
+    def _preset_index_of(self, key, name):
+        """슬롯 이름과 같은 프리셋 번호 (없으면 None)."""
+        nm = str(name or "").strip()
+        for pi in range(len(self._presets(key))):
+            if self._preset_full(key, pi) == nm:
+                return pi
+        return None
+
+    def _swap_if_due(self, key, idxs):
+        """정해둔 회차가 되면 그 슬롯의 물약(프리셋)을 바꾸고,
+        새 사이클(1회차)에는 원래 물약으로 되돌린다."""
+        for i in idxs:
+            try:
+                slot = (self.cfg.get(key) or [])[i]
+            except Exception:
+                continue
+            at = slot.get("sw_at")
+            pi = slot.get("sw_p")
+            if not at or pi is None:
+                continue
+            run = self._run_no(key, i)
+            if run == int(at):
+                base = slot.get("sw_base")
+                if base is None:              # 바꾸기 전 물약을 기억해둔다 (되돌리기용)
+                    base = self._preset_index_of(key, slot.get("name"))
+                    if base is not None:
+                        slot["sw_base"] = base
+                self._apply_preset(key, i, int(pi))
+                self._status.set(f"🧪 #{i+1:02d} {run}회차 — 물약을 "
+                                 f"{self._preset_short(key, int(pi))} 로 바꿈")
+            elif run <= 1 and slot.get("sw_base") is not None:
+                self._apply_preset(key, i, int(slot["sw_base"]))
+                self._status.set(f"🧪 #{i+1:02d} 1회차 — 물약을 원래대로 되돌림")
+        try:
+            save_cfg(self.cfg)
+        except Exception:
+            pass
+
     def _test_sel(self, key, sel):
         """고른 슬롯들을 웨이브(번갈아)로 한 번에 — 반복 차례가 여러 개일 때 쓴다."""
         self._slot_running = True
         # (2026-08-09) 최소화하지 않는다 — 메인런처와 함께 '맨 뒤'로만 보낸다
         self._send_behind_main()
         self._minimize_claude()
-        self._rep_restart(key, list(sel))      # 개별 실행 → 지금부터 다시 2시간 N회
+        self._rep_restart(key, list(sel))      # 개별 실행 → 1회차로 세고 2시간 뒤 다음
+        self._swap_if_due(key, list(sel))      # 정해둔 회차면 물약(프리셋) 교체
         threading.Thread(target=self._run, args=(key,),
                          kwargs={"sel_list": list(sel)}, daemon=True).start()
 
@@ -2600,7 +2684,8 @@ class IslandApp(tk.Tk):
         # (2026-08-09) 최소화하지 않는다 — 이 창도 메인런처도 '맨 뒤'로만 보낸다
         self._send_behind_main()
         self._minimize_claude()
-        self._rep_restart(key, [idx])          # 개별 실행 → 지금부터 다시 2시간 N회
+        self._rep_restart(key, [idx])          # 개별 실행 → 1회차로 세고 2시간 뒤 다음
+        self._swap_if_due(key, [idx])          # 정해둔 회차면 물약(프리셋) 교체
         threading.Thread(target=self._run, args=(key, idx), daemon=True).start()
 
     def _send_behind_main(self):
