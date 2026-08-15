@@ -3905,7 +3905,7 @@ class App(tk.Tk):
             if si != last_si:
                 time.sleep(random.uniform(0.6, 1.1))   # 다른 창으로 넘어갈 여유
                 last_si = si
-            if not self._wait_mouse_idle(stop): return
+            if not self._wait_mouse_idle(stop, fkey=fkey): return
             if getattr(self, stop, False): break
             name = st["slot"].get("name", f"#{si+1}")
             if fkey in self.PASTE_FKEYS and j == self._paste_idx_or_default(fkey, st["slot"]):
@@ -3993,7 +3993,7 @@ class App(tk.Tk):
                 coords = slot.get("coords", [])
                 while len(coords) < nclk:
                     coords.append(None)
-                if not self._wait_mouse_idle(stop): return
+                if not self._wait_mouse_idle(stop, fkey=fkey): return
                 # 쿠폰: 슬롯마다 클릭 간격 배수를 새로 뽑음 (기본의 -5%~+20%)
                 c_mult = random.uniform(0.95, 1.20) if fkey in self.PASTE_FKEYS else 1.0
                 # 클릭1~N을 순서대로, 클릭 사이 간격만 랜덤
@@ -6526,8 +6526,14 @@ class App(tk.Tk):
             time.sleep(0.1)
         return True
 
-    def _wait_mouse_idle(self, stop_flag_name, idle_sec=1.5):
-        """마우스가 움직이는 중일 때만 대기. 안 움직이면 즉시 True 반환."""
+    # 커서를 쓰지 않는(메시지로 클릭하는) 런처 — 사용자가 마우스를 써도 안 기다린다
+    NO_WAIT_MOUSE = ("dragon",)
+
+    def _wait_mouse_idle(self, stop_flag_name, idle_sec=1.5, fkey=None):
+        """마우스가 움직이는 중일 때만 대기. 안 움직이면 즉시 True 반환.
+        (커서 없이 클릭하는 런처는 겹칠 일이 없어 기다리지 않는다)"""
+        if fkey in self.NO_WAIT_MOUSE and NO_CURSOR_CLICK:
+            return not getattr(self, stop_flag_name, False)
         CHECK = 0.1
         prev = pyautogui.position()
         # 움직임이 없으면 즉시 통과
