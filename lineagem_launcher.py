@@ -2563,9 +2563,11 @@ class App(tk.Tk):
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
         for i in (sel or range(16)):
             self._night_rep_restart(i)
+        self._night_sel = set()          # 실행했으면 + 선택은 풀어준다
+        self._refresh_night_plus()
         self.status.set(f"🌑 악몽의섬 실행 — "
                         + (f"{[i+1 for i in sel]}번" if sel else "전체")
-                        + " (지금부터 2시간 다시 셈)")
+                        + " (지금부터 2시간 다시 셈 / 선택 해제됨)")
 
     def _refresh_night_btns(self):
         """반복이 걸린 슬롯은 초록(남은 횟수), 아니면 회색."""
