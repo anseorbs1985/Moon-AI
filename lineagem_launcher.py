@@ -126,7 +126,9 @@ PAST_INTERVAL  = 2.8   # 과거의말하는섬 클릭 간격(초)
 SCHED_SLOTS        = 16
 SCHED_CLICKS       = 3
 DRAGON_CLICKS      = 10    # 용던고고!!! — 슬롯당 좌표 10개
-DRAGON_BUDGET      = 210   # 전체 슬롯을 3분30초 안에 끝낸다 (초)
+DRAGON_BUDGET      = 240   # 전체 슬롯을 4분 안에 끝낸다 (초)
+DRAGON_GAP_MIN     = 1.0   # 좌표 간격 최소 (렉을 감안해 1초 밑으로는 안 내린다)
+DRAGON_GAP_MAX     = 4.0   # 좌표 간격 최대
 ITEM_SWIPE_DIST    = 250   # 아이템정리 클릭3: 누른 채 위로 쓸어올리는 거리(px) — 클라이언트 창 안에 있어야 함
 TJ_CLICKS          = 3     # TJ성공!! 슬롯당 좌표 수
 TJ_MIN             = 0.81  # TJ성공!! 좌표 간 클릭 간격(초) — 10~20% 완화(0.7~1.2 → 0.77~1.44)
@@ -3979,7 +3981,7 @@ class App(tk.Tk):
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop)
                 return
             if fkey == "dragon":
-                # F11(절전해제)이 끝난 시각부터 3분30초 안에 전부 끝낸다.
+                # F11(절전해제)이 끝난 시각부터 정해둔 시간 안에 전부 끝낸다.
                 # 남은 시간 ÷ 남은 클릭 수로 간격을 매번 다시 계산해 스스로 맞춘다.
                 _dl = getattr(self, "_dragon_deadline", 0) or (time.time() + DRAGON_BUDGET)
                 _left = sum(1 for _si, _sl in targets
@@ -4018,7 +4020,8 @@ class App(tk.Tk):
                         # 남은 시간 ÷ 남은 클릭 수 만큼만 쉰다 (슬롯 사이도 포함)
                         _left -= 1
                         _rem = _dl - time.time()
-                        time.sleep(max(0.25, min(_rem / max(1, _left), 4.0)))
+                        time.sleep(max(DRAGON_GAP_MIN,
+                                       min(_rem / max(1, _left), DRAGON_GAP_MAX)))
                     if n < len(order) - 1:
                         if fkey == "eventshop" and j == 0:
                             # 이벤트상점: 클릭1 → 4초 × 1.15~1.30 랜덤 증가 후 클릭2
