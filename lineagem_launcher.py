@@ -8570,6 +8570,11 @@ class App(tk.Tk):
             b = tk.Button(cc, textvariable=cv, font=("맑은 고딕", 8), width=4, pady=2,
                           bg="#27ae60" if on else "#7f8c8d", fg="white", command=cmd)
             b.pack(); st["pop_btns"].append(b)
+            # 좌표마다 ▶ — 그 좌표 하나만 눌러본다 (휠로 지정했으면 휠을 굴린다)
+            tk.Button(cc, text="▶", font=("맑은 고딕", 7), width=4, pady=0,
+                      bg="#1e8449", fg="white",
+                      command=lambda x=idx, c=j, f=fkey:
+                      self._test_grid_click(f, x, c)).pack(pady=(1, 0))
             if sp.get("opts"):
                 # ㅡ 칸: 다음 좌표까지 기다릴 초 (비우면 기본), 아래는 휠 굴릴 칸수(0=클릭)
                 gl = slot.get("gap_list") or []
@@ -8652,6 +8657,29 @@ class App(tk.Tk):
         except Exception:
             pass
         return None
+
+    def _test_grid_click(self, fkey, idx, j):
+        """좌표 하나만 눌러보기 — 등록한 자리가 맞는지 확인용."""
+        try:
+            sp = self._grid_spec(fkey)
+            slot = self.cfg[sp["key"]][idx]
+            coords = slot.get("coords") or []
+            c = coords[j] if j < len(coords) else None
+        except Exception:
+            c = None
+        if not c:
+            self.status.set("그 자리에 등록된 좌표가 없습니다"); return
+        title = self._grid_spec(fkey)["title"]
+        self.status.set(f"{title} #{idx+1:02d} 좌표{j+1} — 0.8초 뒤 실행")
+        def _go():
+            time.sleep(0.8)
+            try:
+                act = self._do_click_or_wheel(fkey, j, c, slot)
+            except Exception as e:
+                act = f"오류 {e}"
+            self.after(0, lambda: self.status.set(
+                f"{title} #{idx+1:02d} 좌표{j+1} {act} {tuple(c)}"))
+        threading.Thread(target=_go, daemon=True).start()
 
     def _grid_set_list(self, fkey, idx, field, j, val):
         """슬롯의 gap_list / wheel_list 같은 '칸별 값'을 저장한다."""
