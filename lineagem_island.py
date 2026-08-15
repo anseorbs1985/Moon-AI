@@ -2415,12 +2415,57 @@ class IslandApp(tk.Tk):
             pass
         self.after(1000, self._lock_tick)
 
+    # 런처와 같은 고정 반복 설정 — {던전: (몇시간, 몇회)}
+    REPEAT_FIXED = {"토요일_악몽의섬": (2, 6)}
+
+    def _rep_restart(self, key, idxs):
+        """개별로 돌린 슬롯은 '지금부터' 2시간 N회를 다시 센다.
+        (사용자가 직접 누른 실행만 해당 — 반복 관리가 돌린 것은 그대로 둔다)"""
+        if getattr(self, "_auto_run", False):
+            return
+        try:
+            import json as _j
+            d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+            os.makedirs(d, exist_ok=True)
+            f = os.path.join(d, "island_repeat.json")
+            try:
+                with open(f, encoding="utf-8") as fp:
+                    st = _j.load(fp) or {}
+            except Exception:
+                st = {}
+            fix = self.REPEAT_FIXED.get(key)
+            now = time.time()
+            done = []
+            for i in idxs:
+                slot = (self.cfg.get(key) or [])[i] if i < len(self.cfg.get(key) or []) else {}
+                h = int(slot.get("repeat_h") or (fix[0] if fix else 0))
+                if not h:
+                    continue
+                n = int(slot.get("repeat_n") or (fix[1] if fix else 6))
+                st[f"{key}|{i}"] = {"h": h, "left": n, "next": now + h * 3600}
+                done.append((i + 1, h, n))
+            if done:
+                tmp = f + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as fp:
+                    _j.dump(st, fp, ensure_ascii=False, indent=2)
+                os.replace(tmp, f)
+                try:
+                    with open(os.path.join(d, "repeat_log.txt"), "a", encoding="utf-8") as fp:
+                        for i, h, n in done:
+                            fp.write(f"[{time.strftime('%m-%d %H:%M:%S')}] {key} #{i:02d} "
+                                     f"개별 실행 — 지금부터 {h}시간 {n}회 다시 시작\n")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def _test_sel(self, key, sel):
         """고른 슬롯들을 웨이브(번갈아)로 한 번에 — 반복 차례가 여러 개일 때 쓴다."""
         self._slot_running = True
         # (2026-08-09) 최소화하지 않는다 — 메인런처와 함께 '맨 뒤'로만 보낸다
         self._send_behind_main()
         self._minimize_claude()
+        self._rep_restart(key, list(sel))      # 개별 실행 → 지금부터 다시 2시간 N회
         threading.Thread(target=self._run, args=(key,),
                          kwargs={"sel_list": list(sel)}, daemon=True).start()
 
@@ -2429,6 +2474,7 @@ class IslandApp(tk.Tk):
         # (2026-08-09) 최소화하지 않는다 — 이 창도 메인런처도 '맨 뒤'로만 보낸다
         self._send_behind_main()
         self._minimize_claude()
+        self._rep_restart(key, [idx])          # 개별 실행 → 지금부터 다시 2시간 N회
         threading.Thread(target=self._run, args=(key, idx), daemon=True).start()
 
     def _send_behind_main(self):

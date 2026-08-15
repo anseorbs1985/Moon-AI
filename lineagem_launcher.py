@@ -214,6 +214,8 @@ DEFAULT_CFG = {
     "coupon_text":   "",                # 쿠폰등록 클릭5에서 붙여넣을 글
     "market_slots":  None,              # 거래소검색 — 16슬롯 × 좌표9 (쿠폰등록 방식)
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
+    "market_gaps":   [],                # 거래소검색 칸별 간격(초) — 모든 슬롯 공통
+    "market_paste":  [],                # 거래소검색 붙여넣기 자리 — 체크한 좌표 '다음'에 붙임
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
@@ -3168,6 +3170,33 @@ class App(tk.Tk):
                 self.cfg[f"{f}_text"] = v.get()
                 save_cfg(self.cfg)
             ent.bind("<FocusOut>", _save_txt); ent.bind("<Return>", _save_txt)
+        if sp.get("cmnopt"):
+            # 칸별 간격(초) + 붙여넣기 자리 — 모든 슬롯 공통
+            ob = tk.LabelFrame(parent,
+                               text="칸별 간격(초) / 붙여넣기 자리 — 체크한 좌표 '다음'에 붙여넣습니다",
+                               font=("맑은 고딕", 8, "bold"), fg=color)
+            ob.pack(fill="x", padx=6, pady=(0, 4))
+            gaps = list(self.cfg.get(f"{fkey}_gaps") or [])
+            pst  = list(self.cfg.get(f"{fkey}_paste") or [])
+            while len(gaps) < sp["clicks"]: gaps.append("")
+            while len(pst)  < sp["clicks"]: pst.append(False)
+            if not hasattr(self, "_cmn_pvars"):
+                self._cmn_pvars = {}
+            self._cmn_pvars[fkey] = []
+            for j in range(sp["clicks"]):
+                cc = tk.Frame(ob); cc.pack(side="left", padx=2, pady=2)
+                tk.Label(cc, text=f"클릭{j+1}", font=("맑은 고딕", 7, "bold"),
+                         fg="#555").pack()
+                gv = tk.StringVar(value=("" if gaps[j] in (None, "") else str(gaps[j])))
+                tk.Entry(cc, textvariable=gv, width=4, justify="center",
+                         font=("맑은 고딕", 8), relief="solid", bd=1).pack()
+                def _sv_g(*_a, c=j, v=gv, f=fkey):
+                    self._cmn_set(f, "gaps", c, v.get().strip())
+                gv.trace_add("write", _sv_g)
+                bv = tk.BooleanVar(value=bool(pst[j]))
+                self._cmn_pvars[fkey].append(bv)
+                tk.Checkbutton(cc, text="붙임", variable=bv, font=("맑은 고딕", 7),
+                               command=lambda c=j, f=fkey: self._cmn_paste_pick(f, c)).pack()
         dr = tk.Frame(parent); dr.pack(pady=3)
         setattr(self, f"_{fkey}_stop", False)
         run = tk.Button(dr, text="▶  실행",
@@ -3497,8 +3526,11 @@ class App(tk.Tk):
                 # 클릭1~N을 순서대로, 클릭 사이 간격만 랜덤
                 order = [j for j in range(nclk) if coords[j]]
                 # 쿠폰: 클릭5(입력칸)가 등록돼 있으면 그 직후, 없으면 클릭4 직후에 붙여넣기
-                paste_after = ((4 if (len(coords) > 4 and coords[4]) else 3)
-                               if fkey in self.PASTE_FKEYS else None)
+                paste_after = None
+                if fkey in self.PASTE_FKEYS:
+                    paste_after = self._cmn_paste_idx(fkey)      # 창에서 체크한 자리
+                    if paste_after is None:                      # 없으면 예전 규칙(클릭5)
+                        paste_after = 4 if (len(coords) > 4 and coords[4]) else 3
                 if fkey == "coupon":
                     self._coupon_log(f"슬롯 [{name}] 시작 — 등록클릭 {[x+1 for x in order]}, 붙여넣기는 클릭{(paste_after or 0)+1} 직후")
                 for n, j in enumerate(order):
@@ -3535,12 +3567,16 @@ class App(tk.Tk):
                             # 이벤트상점: 클릭1 → 4초 × 1.15~1.30 랜덤 증가 후 클릭2
                             time.sleep(4.0 * random.uniform(1.15, 1.30))
                         else:
-                            gap = random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX)
-                            if fkey == "eventshop":
-                                gap *= random.uniform(1.15, 1.25)   # 좌표별 15~25% 추가 증가
-                            time.sleep(gap * c_mult)
-                if fkey == "coupon":
-                    self._coupon_log(f"슬롯 [{name}] 끝 (클릭간격 배수 {c_mult:.2f})")
+                            _cg = self._cmn_gap(fkey, j)     # 칸에 적어둔 초가 있으면 그걸로
+                            if _cg is not None:
+                                time.sleep(_cg * random.uniform(1.0, 1.10))
+                            else:
+                                gap = random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX)
+                                if fkey == "eventshop":
+                                    gap *= random.uniform(1.15, 1.25)   # 좌표별 15~25% 추가 증가
+                                time.sleep(gap * c_mult)
+                if fkey in self.PASTE_FKEYS:
+                    self._coupon_log(f"[{fkey}] 슬롯 [{name}] 끝 (클릭간격 배수 {c_mult:.2f})")
                     # 슬롯 간 간격 — 기본 3초의 +2%~18% 랜덤 (마지막 슬롯 뒤엔 생략)
                     if slot_idx is None and tn < len(targets) - 1:
                         g = COUPON_SLOT_GAP * random.uniform(1.02, 1.18)
@@ -7939,7 +7975,8 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("relic", i),
                             prev=lambda i: self._preview_dgn2("relic", i),
                             delete=lambda i: self._del_dgn2("relic", i)),
-            "market":  dict(title="거래소검색", key="market_slots", clicks=MARKET_CLICKS, color="#2874a6",
+            "market":  dict(title="거래소검색", key="market_slots", clicks=MARKET_CLICKS,
+                            color="#2874a6", cmnopt=True,
                             reg=lambda s, c: self._reg_dgn2_click("market", s, c),
                             test=lambda i: self._test_dgn2("market", i),
                             prev=lambda i: self._preview_dgn2("market", i),
@@ -8091,6 +8128,58 @@ class App(tk.Tk):
         tk.Button(bot, text="× 전체삭제", font=("맑은 고딕", 8), fg="white", bg="#c0392b",
                   command=lambda: sp["delete"](idx)).pack(side="left", padx=3)
         tk.Button(bot, text="닫기", font=("맑은 고딕", 8), command=win.destroy).pack(side="left", padx=3)
+
+    def _cmn_set(self, fkey, kind, j, val):
+        """모든 슬롯 공통 값(칸별 간격 등) 저장."""
+        try:
+            n = self._grid_spec(fkey)["clicks"]
+            lst = list(self.cfg.get(f"{fkey}_{kind}") or [])
+            while len(lst) < n:
+                lst.append("" if kind == "gaps" else False)
+            lst[j] = val
+            self.cfg[f"{fkey}_{kind}"] = lst
+            save_cfg(self.cfg)
+        except Exception:
+            pass
+
+    def _cmn_paste_pick(self, fkey, j):
+        """붙여넣기 자리는 한 곳만 — 체크하면 나머지는 자동으로 풀린다."""
+        try:
+            vars_ = (getattr(self, "_cmn_pvars", None) or {}).get(fkey) or []
+            on = bool(vars_[j].get()) if j < len(vars_) else False
+            for i, v in enumerate(vars_):
+                if i != j:
+                    v.set(False)
+            n = self._grid_spec(fkey)["clicks"]
+            self.cfg[f"{fkey}_paste"] = [(i == j and on) for i in range(n)]
+            save_cfg(self.cfg)
+            self.status.set(f"붙여넣기 자리 — 클릭{j+1} 다음" if on else "붙여넣기 자리 없음")
+        except Exception:
+            pass
+
+    def _cmn_paste_idx(self, fkey):
+        """체크해둔 붙여넣기 자리 (없으면 None)."""
+        try:
+            for i, v in enumerate(self.cfg.get(f"{fkey}_paste") or []):
+                if v:
+                    return i
+        except Exception:
+            pass
+        return None
+
+    def _cmn_gap(self, fkey, j):
+        """그 칸에 적어둔 간격(초) — 없으면 None. '2~4' 처럼 범위도 된다."""
+        try:
+            lst = self.cfg.get(f"{fkey}_gaps") or []
+            t = str(lst[j] if j < len(lst) else "").strip()
+            if not t:
+                return None
+            if "~" in t:
+                a_, b_ = t.split("~")
+                return random.uniform(float(a_), float(b_))
+            return float(t)
+        except Exception:
+            return None
 
     def _grid_set_list(self, fkey, idx, field, j, val):
         """슬롯의 gap_list / wheel_list 같은 '칸별 값'을 저장한다."""
