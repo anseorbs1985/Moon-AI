@@ -142,13 +142,14 @@ def post_click(x, y, double=False):
 
 
 def post_wheel(x, y, notches):
-    """커서를 옮기지 않고 그 자리에 휠을 굴린다 (양수=위로)."""
+    """커서를 옮기지 않고 그 자리에 휠을 굴린다 (양수=위로, 음수=아래로)."""
     u = ctypes.windll.user32
     pt = ctypes.wintypes.POINT(int(x), int(y))
     hwnd = u.WindowFromPoint(pt)
     if not hwnd:
         return False
     lp = ((int(y) & 0xFFFF) << 16) | (int(x) & 0xFFFF)   # 휠은 화면 좌표
-    wp = (int(notches) * 120) << 16
+    # WM_MOUSEWHEEL: 위쪽 16비트 = 굴린 양(부호 있는 값) → 음수도 되게 마스킹
+    wp = ((int(notches) * 120) & 0xFFFF) << 16
     u.PostMessageW(hwnd, 0x020A, wp, lp)                  # WM_MOUSEWHEEL
     return True
