@@ -3525,10 +3525,20 @@ class App(tk.Tk):
                 cur = win32process.GetWindowThreadProcessId(win32gui.GetForegroundWindow())[0]
                 tgt = win32process.GetWindowThreadProcessId(root)[0]
                 ctypes.windll.user32.AttachThreadInput(cur, tgt, True)
-                win32gui.SetForegroundWindow(root)
-                ctypes.windll.user32.AttachThreadInput(cur, tgt, False)
+                try:
+                    win32gui.SetForegroundWindow(root)
+                finally:
+                    ctypes.windll.user32.AttachThreadInput(cur, tgt, False)
             except Exception:
-                win32gui.SetForegroundWindow(root)
+                pass
+            if win32gui.GetForegroundWindow() != root:
+                # 윈도우가 창 올리기를 막을 때 — ALT를 한 번 눌렀다 떼면 잠금이 풀린다
+                try:
+                    ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)
+                    ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)
+                    win32gui.SetForegroundWindow(root)
+                except Exception:
+                    pass
             time.sleep(0.25)
             return win32gui.GetForegroundWindow() == root
         except Exception:
@@ -3784,7 +3794,14 @@ class App(tk.Tk):
                     if getattr(self, stop, False):
                         if fkey == "coupon": self._coupon_log(f"멈춤 플래그로 중단 (클릭{j+1} 직전)")
                         break
-                    _act = self._do_click_or_wheel(fkey, j, coords[j], slot)
+                    if fkey in self.PASTE_FKEYS and j == paste_after:
+                        # 커서 없는 클릭은 창을 활성화하지 못해 Ctrl+V가 엉뚱한 곳으로 간다
+                        # → 붙여넣기 직전 이 한 번만 진짜 커서로 클릭해 창을 앞으로 세운다
+                        pyautogui.moveTo(*coords[j]); time.sleep(0.15)
+                        pyautogui.click()
+                        _act = "클릭"
+                    else:
+                        _act = self._do_click_or_wheel(fkey, j, coords[j], slot)
                     self.status.set(f"{icon} [{name}] {_act}{j+1}...")
                     if fkey == "coupon":
                         self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
