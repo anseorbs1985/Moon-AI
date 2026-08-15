@@ -2572,8 +2572,12 @@ class App(tk.Tk):
                         + (f"{[i+1 for i in sel]}번" if sel else "전체")
                         + " (지금부터 2시간 다시 셈 / 선택 해제됨)")
 
+    # 남은 횟수별 색 — 많이 남았으면 초록, 줄어들수록 파랑→보라→빨강
+    REP_LEFT_COLORS = {6: "#1e8449", 5: "#27ae60", 4: "#16a085",
+                       3: "#2980b9", 2: "#8e44ad", 1: "#c0392b"}
+
     def _refresh_night_btns(self):
-        """반복이 걸린 슬롯은 초록(남은 횟수), 아니면 회색."""
+        """반복이 걸린 슬롯은 남은 횟수에 따라 색이 다르다 (꺼졌으면 회색)."""
         try:
             st = self._rep_load()
             for i, b in enumerate(self._night_btns or []):
@@ -2581,7 +2585,9 @@ class App(tk.Tk):
                     continue
                 e = st.get(f"{self.NIGHT_KEY}|{i}")
                 if e:
-                    b.config(text=f"⏰{int(e.get('left', 0))}회", bg="#1e8449")
+                    n = int(e.get("left", 0))
+                    b.config(text=f"⏰{n}회",
+                             bg=self.REP_LEFT_COLORS.get(n, "#34495e"))
                 else:
                     b.config(text="⏰꺼짐", bg="#7f8c8d")
         except Exception:
@@ -11568,14 +11574,16 @@ class App(tk.Tk):
             pass
         self._ocr_proc = None
         self._island_proc = None
-        # ⏰ 2시간 N회 반복도 함께 '종료' — 멈췄다 재개하는 개념은 없다.
-        # (안 끄면 잠시 뒤 다음 슬롯이 또 시작된다)
-        _n = 0
+        # (2026-08-15 사용자 지시) ⏰ 2시간 N회 반복은 여기서 끄지 않는다 —
+        # [■ 전체멈춤]은 '지금 돌고 있는 것'만, 반복을 끄려면 [⏰] 버튼을 쓴다.
+        _n = self._rep_count()
+        self._night_queue = []          # 눌러둔 대기열은 함께 비운다
         try:
-            _n = self._rep_stop_all(quiet=True)
+            self._refresh_night_queue()
         except Exception:
             pass
-        self.status.set("전체 종료 중..." + (f" (⏰ 반복 {_n}개도 꺼짐)" if _n else ""))
+        self.status.set("전체 종료 중..."
+                        + (f" (⏰ 반복 {_n}개는 그대로 — 끄려면 ⏰ 버튼)" if _n else ""))
 
     # ── 클릭 실행 ─────────────────────────────────────────────────────
     def _start_click(self):
