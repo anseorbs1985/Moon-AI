@@ -129,6 +129,14 @@ DRAGON_CLICKS      = 10    # 용던고고!!! — 슬롯당 좌표 10개
 DRAGON_BUDGET      = 180   # 전체 슬롯을 3분 안에 끝낸다 (초, 4분에서 25% 단축)
 DRAGON_GAP_MIN     = 1.0   # 좌표 간격 최소 (렉을 감안해 1초 밑으로는 안 내린다)
 DRAGON_GAP_MAX     = 3.0   # 좌표 간격 최대 (4초에서 25% 단축)
+DRAGON_EXTRA       = {1: (0.8, 1.5)}   # 좌표2 뒤(2→3 사이)에 0.8~1.5초 더 쉰다 (모든 슬롯)
+
+def dragon_extra(j):
+    """그 좌표 뒤에 더 쉬는 시간 (범위면 랜덤)."""
+    v = DRAGON_EXTRA.get(j)
+    if not v:
+        return 0.0
+    return random.uniform(*v) if isinstance(v, (tuple, list)) else float(v)
 ITEM_SWIPE_DIST    = 250   # 아이템정리 클릭3: 누른 채 위로 쓸어올리는 거리(px) — 클라이언트 창 안에 있어야 함
 TJ_CLICKS          = 3     # TJ성공!! 슬롯당 좌표 수
 TJ_MIN             = 0.81  # TJ성공!! 좌표 간 클릭 간격(초) — 10~20% 완화(0.7~1.2 → 0.77~1.44)
@@ -3930,6 +3938,8 @@ class App(tk.Tk):
             done += 1
             _g = self._slot_gap(st["slot"], j)          # 칸에 적어둔 초가 있으면 그걸로
             _base = _g if _g is not None else random.uniform(*gap)
+            if fkey == "dragon":
+                _base += dragon_extra(j)              # 좌표2→3 처럼 더 쉬어야 하는 자리
             # 사람처럼 — 한 슬롯에서 2~3번 이어 누르고 다른 슬롯으로 넘어간다
             if st.get("burst", 0) <= 0:
                 st["burst"] = random.choice([1, 2, 2, 3])
@@ -3996,8 +4006,10 @@ class App(tk.Tk):
                 _cl = sum(1 for _si, _sl in targets
                           for _c in (_sl.get("coords") or [])[:nclk] if _c)
                 lanes = 2
+                _ex = sum((sum(v) / 2 if isinstance(v, (tuple, list)) else v)
+                          for v in DRAGON_EXTRA.values()) * len(targets)   # 더 쉬는 시간(평균) 총합
                 per = max(DRAGON_GAP_MIN,
-                          min((_dl - time.time()) * lanes / max(1, _cl), 6.0))
+                          min(((_dl - time.time()) - _ex / lanes) * lanes / max(1, _cl), 6.0))
                 self.status.set(f"🐲 용던고고!!! — {len(targets)}슬롯 / 클릭 {_cl}회, "
                                 f"2슬롯 번갈아 (좌표 간격 약 {per:.1f}초)")
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=lanes,
@@ -4047,7 +4059,8 @@ class App(tk.Tk):
                         _left -= 1
                         _rem = _dl - time.time()
                         _g = (_rem / max(1, _left)) * random.uniform(0.75, 1.25)
-                        time.sleep(max(DRAGON_GAP_MIN, min(_g, DRAGON_GAP_MAX)))
+                        time.sleep(max(DRAGON_GAP_MIN, min(_g, DRAGON_GAP_MAX))
+                                   + dragon_extra(j))
                     if n < len(order) - 1:
                         if fkey == "eventshop" and j == 0:
                             # 이벤트상점: 클릭1 → 4초 × 1.15~1.30 랜덤 증가 후 클릭2
