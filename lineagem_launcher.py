@@ -3873,13 +3873,16 @@ class App(tk.Tk):
         return "클릭"
 
     def _run_dgn2_wave(self, fkey, targets, nclk, icon, stop, lanes=4, gap=(2.0, 4.0),
-                       slow=(1.0, 1.0), slot_gap=(0.5, 3.0)):
+                       slow=(1.0, 1.0), slot_gap=(0.5, 3.0), keep_order=False):
         """번갈아(웨이브) 실행 — 동시 lanes개 슬롯을 섞어가며 클릭 하나씩.
         각 좌표 사이 간격은 slot마다 따로 흐르고 gap 범위에서 랜덤."""
-        state = {si: {"slot": sl, "j": 0, "due": time.time() + random.uniform(0, 6.0)}
+        _t_now = time.time()
+        state = {si: {"slot": sl, "j": 0,
+                      "due": _t_now + (0.0 if keep_order else random.uniform(0, 6.0))}
                  for si, sl in targets}
         order = [si for si, _ in targets]
-        random.shuffle(order)
+        if not keep_order:                 # 용던고고는 번호 순서대로 투입한다
+            random.shuffle(order)
         active, waiting = order[:lanes], order[lanes:]
         last_si, done = None, 0
         _t0 = time.time()
@@ -3985,6 +3988,21 @@ class App(tk.Tk):
             if fkey in ("fish",) and slot_idx is None and len(targets) > 1:
                 # 낚시녹임은 번갈아(웨이브) 실행 — 동시 4슬롯, 좌표 간격 2~4초 랜덤
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop)
+                return
+            if fkey == "dragon" and slot_idx is None and len(targets) > 1:
+                # 용던고고 — 2슬롯씩 번갈아(웨이브), 슬롯 순서는 번호대로.
+                # 남은 시간에 맞춰 좌표 간격을 정한다 (F11 끝난 시각부터 3분)
+                _dl = getattr(self, "_dragon_deadline", 0) or (time.time() + DRAGON_BUDGET)
+                _cl = sum(1 for _si, _sl in targets
+                          for _c in (_sl.get("coords") or [])[:nclk] if _c)
+                lanes = 2
+                per = max(DRAGON_GAP_MIN,
+                          min((_dl - time.time()) * lanes / max(1, _cl), 6.0))
+                self.status.set(f"🐲 용던고고!!! — {len(targets)}슬롯 / 클릭 {_cl}회, "
+                                f"2슬롯 번갈아 (좌표 간격 약 {per:.1f}초)")
+                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=lanes,
+                                    gap=(per * 0.75, per * 1.25), slot_gap=(1.0, 2.5),
+                                    keep_order=True)
                 return
             if fkey == "dragon":
                 # F11(절전해제)이 끝난 시각부터 정해둔 시간 안에 전부 끝낸다.
