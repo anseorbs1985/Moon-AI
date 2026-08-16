@@ -4002,28 +4002,25 @@ class App(tk.Tk):
             if fkey == "dragon" and slot_idx is None and len(targets) > 1:
                 # 용던고고 — 2슬롯씩 번갈아(웨이브), 슬롯 순서는 번호대로.
                 # 남은 시간에 맞춰 좌표 간격을 정한다 (F11 끝난 시각부터 3분)
-                _dl = getattr(self, "_dragon_deadline", 0) or (time.time() + DRAGON_BUDGET)
+                # 시간을 억지로 맞추지 않는다 — 정해둔 범위에서 랜덤으로 쉬고,
+                # 좌표는 하나도 빠짐없이 다 누른다. 슬롯이 적으면 그만큼 빨리 끝난다.
                 _cl = sum(1 for _si, _sl in targets
                           for _c in (_sl.get("coords") or [])[:nclk] if _c)
-                lanes = 2
-                _ex = sum((sum(v) / 2 if isinstance(v, (tuple, list)) else v)
-                          for v in DRAGON_EXTRA.values()) * len(targets)   # 더 쉬는 시간(평균) 총합
-                per = max(DRAGON_GAP_MIN,
-                          min(((_dl - time.time()) - _ex / lanes) * lanes / max(1, _cl), 6.0))
+                _avg = (DRAGON_GAP_MIN + DRAGON_GAP_MAX) / 2 + 0.15
+                _est = int(len(targets) / 2 * (nclk * _avg + 1.15))   # 2슬롯 번갈아 기준
                 self.status.set(f"🐲 용던고고!!! — {len(targets)}슬롯 / 클릭 {_cl}회, "
-                                f"2슬롯 번갈아 (좌표 간격 약 {per:.1f}초)")
-                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=lanes,
-                                    gap=(per * 0.75, per * 1.25), slot_gap=(1.0, 2.5),
-                                    keep_order=True)
+                                f"2슬롯 번갈아 (좌표 간격 {DRAGON_GAP_MIN:.0f}~{DRAGON_GAP_MAX:.0f}초 랜덤, "
+                                f"약 {_est//60}분 {_est%60}초 예상)")
+                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
+                                    gap=(DRAGON_GAP_MIN, DRAGON_GAP_MAX),
+                                    slot_gap=(1.0, 2.5), keep_order=True)
                 return
             if fkey == "dragon":
                 # F11(절전해제)이 끝난 시각부터 정해둔 시간 안에 전부 끝낸다.
                 # 남은 시간 ÷ 남은 클릭 수로 간격을 매번 다시 계산해 스스로 맞춘다.
-                _dl = getattr(self, "_dragon_deadline", 0) or (time.time() + DRAGON_BUDGET)
                 _left = sum(1 for _si, _sl in targets
                             for _c in (_sl.get("coords") or [])[:nclk] if _c)
-                self.status.set(f"🐲 용던고고!!! — {len(targets)}슬롯 / 클릭 {_left}회, "
-                                f"{int(_dl - time.time())}초 안에 끝내기")
+                self.status.set(f"🐲 용던고고!!! — {len(targets)}슬롯 / 클릭 {_left}회")
             for tn, (si, slot) in enumerate(targets):
                 if getattr(self, stop, False): break
                 name = slot.get("name", f"#{si+1}")
@@ -4053,13 +4050,9 @@ class App(tk.Tk):
                         if fkey == "coupon":
                             self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
                     if fkey == "dragon":
-                        # 남은 시간 ÷ 남은 클릭 수 = 평균 간격.
-                        # 매번 똑같으면 기계처럼 보이니 ±25% 흔들어 준다
-                        # (전체 시간은 다음 클릭에서 다시 계산돼 저절로 맞춰진다)
+                        # 정해둔 범위에서 랜덤 (좌표2→3은 더 쉬어준다)
                         _left -= 1
-                        _rem = _dl - time.time()
-                        _g = (_rem / max(1, _left)) * random.uniform(0.75, 1.25)
-                        time.sleep(max(DRAGON_GAP_MIN, min(_g, DRAGON_GAP_MAX))
+                        time.sleep(random.uniform(DRAGON_GAP_MIN, DRAGON_GAP_MAX)
                                    + dragon_extra(j))
                     if n < len(order) - 1:
                         if fkey == "eventshop" and j == 0:
