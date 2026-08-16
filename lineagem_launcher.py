@@ -856,7 +856,7 @@ class App(tk.Tk):
         self.after(4000, self._purple_ad_tick)
         # 포커스를 잃는 순간에도 즉시 반응 (0.15초 확인보다 더 빠름)
         self.bind("<FocusOut>", self._auto_back_check, add="+")
-        self.after(8000,  self._time_sync_tick)          # 🕐 컴퓨터 시계 맞추기 (하루 1회)
+        self.after(8000,  self._ensure_time_sync_task)   # 🕐 시계 맞춤 예약 (매주 수 05:00)
         self.after(20000, self._island_repeat_tick)      # 섬/던전 슬롯 반복(2h N회) 관리
         # (자동 업데이트는 사용자 요청으로 비활성 — 업데이트는 🔄 버튼으로 수동 실행)
         # (2026-08-07 사용자 지시) 새벽 4시 퍼플 자동 확인·전환 사용 안 함 — 틱 미실행
@@ -1821,52 +1821,37 @@ class App(tk.Tk):
         except Exception as e:
             self._rep_log(f"⚠ {key} #{idx+1:02d} ⏰ 끄기 실패: {e!r}")
 
-    # ── 🕐 컴퓨터 시계 맞추기 (모든 컴퓨터의 시간을 같게) ──────────────
-    def _time_sync(self, quiet=True):
-        """윈도우 시간 서버에 맞춰 시계를 다시 맞춘다. 하루 한 번만 (quiet일 때).
-        컴퓨터마다 시간이 달라 스케줄·2시간 반복이 어긋나는 것을 막는다."""
-        import subprocess, datetime
-        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
-        mark = os.path.join(d, "timesync.txt")
-        today = datetime.date.today().isoformat()
+    # ── 🕐 컴퓨터 시계 맞추기 — 매주 수요일 05:00 한 번 ────────────────
+    TIMESYNC_TASK = "LineageM_TimeSync"
+
+    def _ensure_time_sync_task(self):
+        """매주 수요일 새벽 5시에 시계를 인터넷 시각에 맞추는 예약 작업을 등록한다.
+        (컴퓨터마다 시간이 달라 스케줄·2시간 반복이 어긋나는 것을 막는다)
+        이미 있으면 아무것도 하지 않는다. 런처가 꺼져 있어도 예약이 돌아간다."""
+        import subprocess
         try:
-            os.makedirs(d, exist_ok=True)
-            if quiet and os.path.exists(mark):
-                if open(mark, encoding="utf-8").read().strip()[:10] == today:
-                    return                     # 오늘 이미 맞췄다
-        except Exception:
-            pass
-        out, ok = "", False
-        try:
-            subprocess.run(["net", "start", "w32time"], capture_output=True,
-                           creationflags=0x08000000)      # 꺼져 있으면 켠다
-        except Exception:
-            pass
-        for cmd in (["w32tm", "/resync"], ["w32tm", "/resync", "/rediscover"]):
-            try:
+            q = subprocess.run(["schtasks", "/Query", "/TN", self.TIMESYNC_TASK],
+                               capture_output=True, creationflags=0x08000000)
+            if q.returncode == 0:
+                return
+            cmd = ["schtasks", "/Create", "/F", "/TN", self.TIMESYNC_TASK,
+                   "/SC", "WEEKLY", "/D", "WED", "/ST", "05:00",
+                   "/TR", "cmd /c w32tm /resync"]
+            r = subprocess.run(cmd + ["/RL", "HIGHEST"], capture_output=True,
+                               text=True, encoding="cp949", errors="replace",
+                               creationflags=0x08000000)
+            if r.returncode != 0:            # 권한이 없으면 일반 권한으로라도
                 r = subprocess.run(cmd, capture_output=True, text=True,
                                    encoding="cp949", errors="replace",
-                                   creationflags=0x08000000, timeout=40)
-                out = ((r.stdout or "") + (r.stderr or "")).strip()
-                if r.returncode == 0:
-                    ok = True
-                    break
-            except Exception as e:
-                out = repr(e)
-        try:
-            with open(mark, "w", encoding="utf-8") as f:
-                f.write(f"{today} {datetime.datetime.now():%H:%M:%S} "
-                        f"{'성공' if ok else '실패'} {out[:200]}")
+                                   creationflags=0x08000000)
+            if r.returncode == 0:
+                self.after(0, lambda: self.status.set(
+                    "🕐 시계 맞춤 예약 등록 — 매주 수요일 05:00"))
+            else:
+                _m = ((r.stderr or "") + (r.stdout or "")).strip()[:80]
+                self.after(0, lambda m=_m: self.status.set(f"⚠ 시계 맞춤 예약 등록 실패: {m}"))
         except Exception:
             pass
-        msg = (f"🕐 시간 맞춤 완료 ({datetime.datetime.now():%H:%M:%S})" if ok else
-               "⚠ 시간 맞춤 실패 — 런처를 '관리자 권한으로 실행' 한 번 해주세요")
-        self.after(0, lambda: self.status.set(msg))
-
-    def _time_sync_tick(self):
-        """런처가 켜져 있는 동안 6시간마다 한 번씩 다시 맞춘다."""
-        threading.Thread(target=self._time_sync, daemon=True).start()
-        self.after(6 * 3600 * 1000, self._time_sync_tick)
 
     def _rep_full_n(self, key, idx):
         """그 슬롯에 정해둔 반복 횟수 (없으면 6회)."""
