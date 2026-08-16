@@ -3432,23 +3432,26 @@ class App(tk.Tk):
                                lambda p: self._build_dgn2("dragon", p), w=470, h=620, pinnable=True)
 
     def _start_dragon(self):
-        """[실행] — 먼저 F11(절전모드 해제)을 돌리고, 끝나면 이어서 시작한다."""
-        self.status.set("🐲 용던고고!!! — 먼저 절전해제(F11) 실행…")
-        try:
-            self._start_seq()
-        except Exception as e:
-            self.status.set(f"⚠ 절전해제 실행 실패: {e}")
-        self.after(1500, lambda: self._dragon_wait_seq(0))
-
-    def _dragon_wait_seq(self, tries):
-        """절전해제가 끝날 때까지 기다렸다가 시작 (최대 2분)."""
+        """[실행] — 절전해제(F11) 전체를 '끝까지' 돌린 뒤 이어서 용던고고를 시작한다."""
         if self._is_busy():
-            if tries < 240:
-                self.after(500, lambda: self._dragon_wait_seq(tries + 1)); return
-            self.status.set("⚠ 절전해제가 안 끝나서 용던고고를 시작하지 못했습니다"); return
-        self._dragon_deadline = time.time() + DRAGON_BUDGET   # 지금부터 3분30초
-        self.status.set(f"🐲 용던고고!!! 시작 — {DRAGON_BUDGET}초 안에 끝냅니다")
-        self._start_dgn2("dragon")
+            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 끝난 뒤 다시 눌러주세요")
+            return
+        self.status.set("🐲 용던고고!!! — 먼저 절전해제(F11) 전체 실행…")
+        threading.Thread(target=self._dragon_seq_then_run, daemon=True).start()
+
+    def _dragon_seq_then_run(self):
+        """절전해제를 이 스레드에서 통째로 돌린다(끝날 때까지 대기) → 그 다음 용던고고.
+        (예전엔 절전해제를 띄워놓고 1.5초 뒤 상태만 봤더니, 아직 시작 전이라
+         용던고고가 먼저 잠금을 채가서 절전해제가 통째로 건너뛰어졌다)"""
+        try:
+            self._run_seq()
+        except Exception as e:
+            self.after(0, lambda err=e: self.status.set(f"⚠ 절전해제 실패: {err}"))
+        time.sleep(1.0)                      # 마지막 클릭이 먹을 시간
+        self._dragon_deadline = time.time() + DRAGON_BUDGET   # 여기서부터 시간을 잰다
+        self.after(0, lambda: self.status.set(
+            f"🐲 용던고고!!! 시작 — {DRAGON_BUDGET}초 안에 끝냅니다"))
+        self.after(0, lambda: self._start_dgn2("dragon"))
 
     def _open_market_win(self):
         self._open_section_win("_market_win", "🔎 거래소검색",
