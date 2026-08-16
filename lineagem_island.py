@@ -2889,6 +2889,60 @@ class IslandApp(tk.Tk):
         self.withdraw()
         threading.Thread(target=rec, daemon=True).start()
 
+    def _focus_client(self, si, coord=None):
+        """그 슬롯의 리니지M 창을 앞으로 가져온다.
+        커서 없는 클릭(메시지 전달)은 창을 활성화하지 않아서, 그대로 녹화를 재생하면
+        WASD·방향키가 엉뚱한 창으로 간다 → 재생 직전에 이 창을 활성화한다."""
+        try:
+            import win32gui, win32process, ctypes
+            wins = []
+            def cb(h, _):
+                if win32gui.IsWindowVisible(h) and not win32gui.IsIconic(h):
+                    t = win32gui.GetWindowText(h)
+                    if t.startswith("리니지M l"):
+                        l, tp, r, b = win32gui.GetWindowRect(h)
+                        if r - l > 100 and b - tp > 100:
+                            wins.append((l, tp, r, b, h))
+                return True
+            win32gui.EnumWindows(cb, None)
+            hwnd = None
+            if len(wins) == 16:
+                wins.sort(key=lambda w: w[0])
+                cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
+                order = [w for col in cols for w in col]
+                if 0 <= si < 16:
+                    hwnd = order[si][4]
+            if hwnd is None and coord:            # 슬롯 감지 실패 → 좌표로 찾는다
+                h2 = win32gui.WindowFromPoint((int(coord[0]), int(coord[1])))
+                u = ctypes.windll.user32
+                u.GetAncestor.restype = ctypes.c_void_p
+                u.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+                r2 = u.GetAncestor(ctypes.c_void_p(h2), 2)
+                hwnd = int(r2) if r2 else None
+            if not hwnd or win32gui.GetForegroundWindow() == hwnd:
+                return bool(hwnd)
+            try:                                  # 다른 스레드 창은 입력 큐를 붙였다 뗀다
+                cur = win32process.GetWindowThreadProcessId(win32gui.GetForegroundWindow())[0]
+                tgt = win32process.GetWindowThreadProcessId(hwnd)[0]
+                ctypes.windll.user32.AttachThreadInput(cur, tgt, True)
+                try:
+                    win32gui.SetForegroundWindow(hwnd)
+                finally:
+                    ctypes.windll.user32.AttachThreadInput(cur, tgt, False)
+            except Exception:
+                pass
+            if win32gui.GetForegroundWindow() != hwnd:
+                try:                              # 윈도우가 막으면 ALT 한 번으로 잠금 해제
+                    ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)
+                    ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)
+                    win32gui.SetForegroundWindow(hwnd)
+                except Exception:
+                    pass
+            time.sleep(0.25)
+            return win32gui.GetForegroundWindow() == hwnd
+        except Exception:
+            return False
+
     def _play_events(self, events, name):
         """녹화 재생 — 저장된 타이밍 그대로 마우스/이동키(WASD·방향키) 입력."""
         SCAN = {0x26: 0x48, 0x28: 0x50, 0x25: 0x4B, 0x27: 0x4D,
@@ -3026,6 +3080,8 @@ class IslandApp(tk.Tk):
                 click_at(*c)
             did = True
         if rec and not self._stop_flag:
+            # 녹화는 키보드 입력이라 '앞에 있는 창'으로만 들어간다 → 이 클라를 먼저 앞으로
+            self._focus_client(si, c)
             self._play_events(rec, name)
             did = True
         return did
@@ -3288,6 +3344,8 @@ class IslandApp(tk.Tk):
                         did = True
                     if rec and not self._stop_flag:
                         # 녹화는 클릭과 별개 — 이 자리 동작 후 녹화 재생
+                        # (키보드 입력이라 그 클라가 앞에 있어야 들어간다)
+                        self._focus_client(si, coords[j] if j < len(coords) else None)
                         self._play_events(rec, name)
                         did = True
                     if not did:
