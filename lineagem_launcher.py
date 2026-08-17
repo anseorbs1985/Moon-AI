@@ -10873,6 +10873,10 @@ class App(tk.Tk):
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
                 random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
+            if slot_idx is None and len(targets) > 1:
+                self._run_sched_wave(targets)            # 2슬롯 번갈아
+                self.status.set("✔ 매일매일 스케줄 완료!")
+                return
             for si, slot in targets:
                 if self._sched_stop: break
                 name   = slot.get("name", f"#{si+1}")
@@ -10892,7 +10896,7 @@ class App(tk.Tk):
                     self.status.set(f"📅 [{name}] 클릭2...")
                     pyautogui.click(*coords[2])
                 if self._sched_stop: break
-                time.sleep(4)
+                time.sleep(random.uniform(2.3, 3.0))     # 슬롯 끝 대기 (4초 → 2.3~3초)
             self.status.set("✔ 매일매일 스케줄 완료!")
         except Exception as e:
             self.status.set(f"오류: {e}")
@@ -10900,6 +10904,65 @@ class App(tk.Tk):
             self.after(0, self._restore_back)
             self._set_btn("btn_sched_run", state="normal", bg="#16a085", text="▶  실행")
             self._set_btn("btn_sched_stop", state="disabled")
+
+    def _run_sched_wave(self, targets):
+        """스케줄 2슬롯 번갈아 — 한 슬롯이 기다리는 동안 다른 슬롯을 진행한다.
+        '마우스 이동 → 클릭2'는 반드시 붙여서 한 묶음으로 처리한다
+        (사이에 다른 클릭이 끼면 이동해둔 자리가 풀린다)."""
+        LANES = 2
+        state = {si: {"slot": sl, "u": 0, "due": time.time()} for si, sl in targets}
+        order = [si for si, _ in targets]
+        active, waiting = order[:LANES], order[LANES:]
+        last, done = None, 0
+        self.status.set(f"📅 스케줄 번갈아 실행 — 동시 {LANES}슬롯 ({len(targets)}슬롯)")
+        while not self._sched_stop:
+            for si in [x for x in active if state[x]["u"] >= 2]:
+                active.remove(si)
+                if waiting:
+                    nx = waiting.pop(0)
+                    state[nx]["due"] = time.time() + random.uniform(0.5, 1.2)
+                    active.append(nx)
+            alive = [si for si in active if state[si]["u"] < 2]
+            if not alive:
+                break
+            now = time.time()
+            ready = [si for si in alive if state[si]["due"] <= now]
+            if not ready:
+                nxt = min(state[si]["due"] for si in alive)
+                time.sleep(max(0.05, min(nxt - now, 0.5)))
+                continue
+            si = random.choice(ready)
+            st = state[si]
+            slot = st["slot"]
+            name = slot.get("name", f"#{si+1}")
+            coords = slot.get("coords", [None] * SCHED_CLICKS)
+            if si != last:
+                time.sleep(random.uniform(0.4, 0.8))     # 다른 창으로 넘어갈 여유
+                last = si
+            if not self._wait_mouse_idle("_sched_stop"):
+                return
+            if self._sched_stop:
+                break
+            if st["u"] == 0:
+                if coords[0]:
+                    self.status.set(f"📅 [{name}] 클릭1...  (남은 슬롯 {len(alive)})")
+                    pyautogui.click(*coords[0])
+                    done += 1
+                st["due"] = (time.time() + random.uniform(0.1, 0.6)
+                             + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+            else:
+                if coords[1]:
+                    self.status.set(f"📅 [{name}] 마우스 이동...")
+                    pyautogui.moveTo(*coords[1])
+                    time.sleep(random.uniform(0.1, 0.6)
+                               + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                if len(coords) > 2 and coords[2]:
+                    self.status.set(f"📅 [{name}] 클릭2...")
+                    pyautogui.click(*coords[2])
+                    done += 1
+                st["due"] = time.time() + random.uniform(2.3, 3.0)   # 슬롯 끝 대기
+            st["u"] += 1
+            time.sleep(random.uniform(0.2, 0.45))        # 클릭끼리 최소 간격
 
     def _reg_sched_click(self, slot_idx, click_idx):
         self._reg_sched_slot_idx  = slot_idx
