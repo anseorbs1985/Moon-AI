@@ -149,6 +149,18 @@ DATA_FILES = ["island_counts.json"]
 DATA_DIRS  = ["reroll_templates"]
 
 
+def load_coord_lock():
+    """🔒 좌표 잠금 — 이 컴퓨터에서 잠근 항목은 업데이트가 절대 건드리지 않는다.
+    (%LOCALAPPDATA%\\MoonAI\\coord_lock.json — 머신별 파일이라 git과 무관)"""
+    try:
+        f = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI", "coord_lock.json")
+        with open(f, encoding="utf-8") as fp:
+            d = json.load(fp) or {}
+        return set(d.get("keys") or []), set(d.get("island") or [])
+    except Exception:
+        return set(), set()
+
+
 def sync_times(log):
     """좌표는 그대로 두고 '클릭 간격(gap_list)'만 메인 것으로 맞춘다.
     share_times.json 에 적힌 던전만 대상 (컴퓨터마다 좌표 위치가 다르기 때문)."""
@@ -158,6 +170,8 @@ def sync_times(log):
             return
         with open(man, encoding="utf-8") as f:
             keys = (json.load(f) or {}).get("keys") or []
+            _, lock_i = load_coord_lock()
+            keys = [k for k in keys if k not in lock_i]   # 🔒 잠근 던전은 제외
         if not keys:
             return
         src_p = os.path.join(REPO, "island_coords.json")
@@ -204,6 +218,13 @@ def sync_island_keys(log):
             cfgm = json.load(f) or {}
         keys = cfgm.get("keys") or []
         only_p = cfgm.get("presets_only") or []      # 이 던전은 '프리셋만' 받는다
+        _, lock_i = load_coord_lock()                # 🔒 잠근 던전은 제외
+        if lock_i:
+            _skip = [k for k in list(keys) + list(only_p) if k in lock_i]
+            if _skip:
+                log(f"   🔒 잠금 — 건드리지 않음: {', '.join(sorted(set(_skip)))}")
+            keys   = [k for k in keys if k not in lock_i]
+            only_p = [k for k in only_p if k not in lock_i]
         with_presets = bool(cfgm.get("presets"))
         if not keys and not only_p:
             return
@@ -261,14 +282,19 @@ def sync_coord_keys(log):
             src = json.load(f)
         with open(dst_p, encoding="utf-8") as f:
             dst = json.load(f)
-        got = []
+        lock_k, _ = load_coord_lock()
+        got, locked = [], []
         for k in keys:
+            if k in lock_k:                 # 🔒 잠근 항목은 건너뛴다
+                locked.append(k); continue
             v = src.get(k)
             if v is None:
                 continue
             if dst.get(k) != v:
                 dst[k] = v
                 got.append(f"{k}({_count_in(v)}좌표)")
+        if locked:
+            log(f"   🔒 잠금 — 건드리지 않음: {', '.join(locked)}")
         if not got:
             log("   항목 좌표 동기화: 이미 메인과 같습니다")
             return

@@ -1405,7 +1405,13 @@ class App(tk.Tk):
                   bg="#7d3c98", fg="white", activebackground="#5b2c6f",
                   width=9, height=1, pady=2,
                   command=self._restore_coord_snapshot).pack(side="top", pady=(1, 0))
+        # 🔒 좌표 잠금 — 잠근 런처는 업데이트가 절대 못 건드린다
+        self._lock_btn = tk.Button(sv, text="🔒 좌표잠금", font=("맑은 고딕", 8, "bold"),
+                                   bg="#c0392b", fg="white", activebackground="#922b21",
+                                   width=9, height=1, pady=2, command=self._open_lock_win)
+        self._lock_btn.pack(side="top", pady=(1, 0))
         self._refresh_coord_save_lbl()
+        self.after(1500, self._refresh_lock_btn)
         # TJ성공!! 좌측 끝 정렬용 가변 여백 (행이 가운데 정렬이라 오른쪽을 늘려 왼쪽으로 밀기)
         self._btnrow_pad = tk.Frame(btn_row, width=0, height=1)
         self._btnrow_pad.pack(side="left")
@@ -1828,6 +1834,135 @@ class App(tk.Tk):
             os.replace(tmp, path)
         except Exception as e:
             self._rep_log(f"⚠ {key} #{idx+1:02d} ⏰ 끄기 실패: {e!r}")
+
+    # ── 🔒 좌표 잠금 — 잠근 런처는 업데이트(git pull)가 절대 못 건드린다 ──
+    #    (%LOCALAPPDATA%\MoonAI\coord_lock.json — 이 컴퓨터만의 파일)
+    LOCK_ITEMS = [
+        ("dragon_slots",   "🐲 용던고고!!!"),
+        ("sched_slots",    "📅 스케줄"),
+        ("dc_slots",       "🎯 일반던전충전"),
+        ("doll_slots",     "🧸 인형탐험"),
+        ("dollchk_slots",  "🧸 인형확인용"),
+        ("relic_slots",    "🗿 성물확인용"),
+        ("dungeon_slots",  "🏰 변신확인용"),
+        ("fish_slots",     "🎣 낚시녹임"),
+        ("market_slots",   "🔎 거래소검색"),
+        ("coupon_slots",   "🎟 쿠폰등록"),
+        ("circus_slots",   "🎪 서커스 이벤트등록"),
+        ("circus2_slots",  "🎪 서커스 이벤트실행"),
+        ("circus3_slots",  "🎪 서커스 이벤트퀘스트"),
+        ("hunt_slots",     "🏹 사냥"),
+        ("mail_slots",     "📬 우편함"),
+        ("past_slots",     "🏝 과거섬"),
+        ("item_slots",     "🧹 아이템정리"),
+        ("pass_slots",     "🎫 패스권"),
+        ("seq_slots",      "🔆 절전해제"),
+        ("slp_slots",      "🌙 절전모드"),
+        ("potion_area_rel", "🧪 물약색 영역"),
+        ("check_area_rel", "⚠ 경고확인 영역"),
+        ("scroll_area_rel", "📜 주문서 영역"),
+    ]
+
+    @staticmethod
+    def _lock_path():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "coord_lock.json")
+
+    def _lock_load(self):
+        try:
+            with open(self._lock_path(), encoding="utf-8") as f:
+                d = json.load(f) or {}
+            return set(d.get("keys") or []), set(d.get("island") or [])
+        except Exception:
+            return set(), set()
+
+    def _lock_save(self, keys, island):
+        try:
+            with open(self._lock_path(), "w", encoding="utf-8") as f:
+                json.dump({"_설명": "🔒 잠근 항목은 업데이트가 덮어쓰지 않는다 (이 컴퓨터만)",
+                           "keys": sorted(keys), "island": sorted(island)},
+                          f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.status.set(f"⚠ 잠금 저장 실패: {e}")
+
+    def _open_lock_win(self):
+        self._open_section_win("_lock_win", "🔒 좌표 잠금",
+                               self._build_lock, w=560, h=640, pinnable=True)
+
+    def _build_lock(self, parent):
+        tk.Label(parent, text="🔒 좌표 잠금 — 잠근 것은 업데이트(git pull)가 절대 안 건드립니다",
+                 font=("맑은 고딕", 10, "bold"), fg="#7b241c").pack(anchor="w", padx=6, pady=(6, 2))
+        tk.Label(parent, text="잠그면 그 런처의 좌표는 이 컴퓨터 것이 원본이 됩니다.\n"
+                              "(잠금은 이 컴퓨터에만 저장되고 GitHub와 무관합니다)",
+                 font=("맑은 고딕", 8), fg="#555", justify="left").pack(anchor="w", padx=6)
+        kl, il = self._lock_load()
+        self._lock_vars = {}
+        bar = tk.Frame(parent); bar.pack(fill="x", padx=6, pady=4)
+        tk.Button(bar, text="🔒 전부 잠그기", font=("맑은 고딕", 9, "bold"),
+                  bg="#c0392b", fg="white",
+                  command=lambda: self._lock_all(True)).pack(side="left")
+        tk.Button(bar, text="🔓 전부 풀기", font=("맑은 고딕", 9, "bold"),
+                  bg="#7f8c8d", fg="white",
+                  command=lambda: self._lock_all(False)).pack(side="left", padx=(6, 0))
+
+        box = tk.LabelFrame(parent, text=" 런처 (coords.json) ", font=("맑은 고딕", 9, "bold"),
+                            fg="#2c3e50")
+        box.pack(fill="x", padx=6, pady=(4, 2))
+        for n, (k, label) in enumerate(self.LOCK_ITEMS):
+            v = tk.BooleanVar(value=(k in kl))
+            self._lock_vars[("k", k)] = v
+            tk.Checkbutton(box, text=label, variable=v, font=("맑은 고딕", 9),
+                           anchor="w", command=self._lock_apply).grid(
+                               row=n % 12, column=n // 12, sticky="w", padx=6, pady=1)
+        box2 = tk.LabelFrame(parent, text=" 섬/던전 (island_coords.json) ",
+                             font=("맑은 고딕", 9, "bold"), fg="#2c3e50")
+        box2.pack(fill="x", padx=6, pady=(6, 2))
+        try:
+            dungeons = [k for k in (self._island_cfg() or {}) if not k.startswith("_")]
+        except Exception:
+            dungeons = list(self.ISLAND_KEYS)
+        for n, k in enumerate(dungeons):
+            v = tk.BooleanVar(value=(k in il))
+            self._lock_vars[("i", k)] = v
+            tk.Checkbutton(box2, text="🏝 " + k, variable=v, font=("맑은 고딕", 9),
+                           anchor="w", command=self._lock_apply).grid(
+                               row=n % 6, column=n // 6, sticky="w", padx=6, pady=1)
+        self._lock_lbl = tk.Label(parent, text="", font=("맑은 고딕", 9, "bold"), fg="#7b241c")
+        self._lock_lbl.pack(anchor="w", padx=6, pady=(6, 0))
+        self._lock_refresh_lbl()
+
+    def _lock_apply(self):
+        keys = {k for (t, k), v in self._lock_vars.items() if t == "k" and v.get()}
+        isl  = {k for (t, k), v in self._lock_vars.items() if t == "i" and v.get()}
+        self._lock_save(keys, isl)
+        self._lock_refresh_lbl()
+        self._refresh_lock_btn()
+        self.status.set(f"🔒 잠금 {len(keys) + len(isl)}개 저장 — 업데이트가 이 좌표는 안 건드립니다")
+
+    def _lock_all(self, on):
+        for v in self._lock_vars.values():
+            v.set(bool(on))
+        self._lock_apply()
+
+    def _refresh_lock_btn(self):
+        """잠근 게 있으면 버튼에 개수를 보여준다."""
+        try:
+            kl, il = self._lock_load()
+            n = len(kl) + len(il)
+            b = getattr(self, "_lock_btn", None)
+            if b and b.winfo_exists():
+                b.config(text=(f"🔒 잠금 {n}개" if n else "🔒 좌표잠금"),
+                         bg=("#7b241c" if n else "#c0392b"))
+        except Exception:
+            pass
+
+    def _lock_refresh_lbl(self):
+        kl, il = self._lock_load()
+        lb = getattr(self, "_lock_lbl", None)
+        if lb and lb.winfo_exists():
+            lb.config(text=(f"지금 잠긴 것: {len(kl) + len(il)}개"
+                            + (f"  —  {', '.join(sorted(kl) + sorted(il))}" if (kl or il) else "")))
 
     # ── 🕐 컴퓨터 시계 맞추기 — 매주 수요일 05:00 한 번 ────────────────
     TIMESYNC_TASK = "LineageM_TimeSync"
@@ -10922,7 +11057,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
+                 "_lock_win","_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs
