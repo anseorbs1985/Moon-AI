@@ -10937,7 +10937,7 @@ class App(tk.Tk):
             name = slot.get("name", f"#{si+1}")
             coords = slot.get("coords", [None] * SCHED_CLICKS)
             if si != last:
-                time.sleep(random.uniform(0.4, 0.8))     # 다른 창으로 넘어갈 여유
+                time.sleep(random.uniform(0.4, 0.9))     # 다른 창으로 넘어갈 여유
                 last = si
             if not self._wait_mouse_idle("_sched_stop"):
                 return
@@ -10948,21 +10948,19 @@ class App(tk.Tk):
                     self.status.set(f"📅 [{name}] 클릭1...  (남은 슬롯 {len(alive)})")
                     pyautogui.click(*coords[0])
                     done += 1
-                st["due"] = (time.time() + random.uniform(0.1, 0.6)
-                             + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                st["due"] = time.time() + random.uniform(1.8, 3.0)   # 클릭1 뒤 여유
             else:
                 if coords[1]:
                     self.status.set(f"📅 [{name}] 마우스 이동...")
                     pyautogui.moveTo(*coords[1])
-                    time.sleep(random.uniform(0.1, 0.6)
-                               + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                    time.sleep(random.uniform(1.8, 3.0))     # 이동 뒤 여유
                 if len(coords) > 2 and coords[2]:
                     self.status.set(f"📅 [{name}] 클릭2...")
                     pyautogui.click(*coords[2])
                     done += 1
-                st["due"] = time.time() + random.uniform(2.3, 3.0)   # 슬롯 끝 대기
+                st["due"] = time.time() + random.uniform(3.2, 4.2)   # 슬롯 끝 대기
             st["u"] += 1
-            time.sleep(random.uniform(0.2, 0.45))        # 클릭끼리 최소 간격
+            time.sleep(random.uniform(0.25, 0.5))        # 클릭끼리 최소 간격
 
     def _reg_sched_click(self, slot_idx, click_idx):
         self._reg_sched_slot_idx  = slot_idx
