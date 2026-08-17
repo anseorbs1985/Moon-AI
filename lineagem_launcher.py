@@ -127,8 +127,8 @@ SCHED_SLOTS        = 16
 SCHED_CLICKS       = 3
 DRAGON_CLICKS      = 10    # 용던고고!!! — 슬롯당 좌표 10개
 DRAGON_BUDGET      = 180   # 전체 슬롯을 3분 안에 끝낸다 (초, 4분에서 25% 단축)
-DRAGON_GAP_MIN     = 1.3   # 좌표 간격 최소 (1.0에서 30% 늘림)
-DRAGON_GAP_MAX     = 3.9   # 좌표 간격 최대 (3.0에서 30% 늘림)
+DRAGON_GAP_MIN     = 1.1   # 좌표 간격 최소 (16슬롯 3분40초에 맞춤)
+DRAGON_GAP_MAX     = 3.2   # 좌표 간격 최대 (16슬롯 3분40초에 맞춤)
 DRAGON_EXTRA       = {1: (2.5, 4.0)}   # 좌표2→3 은 부하가 커서 2.5~4.0초 더 쉰다 (모든 슬롯)
 
 def dragon_extra(j):
