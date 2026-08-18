@@ -207,6 +207,63 @@ def sync_times(log):
         log(f"   ⚠ 시간 동기화 실패: {e}")
 
 
+def sync_recs(log):
+    """녹화(⏺)만 메인 것으로 받는다 — share_recs.json 의 keys.
+    좌표·이름·간격·방향은 전혀 건드리지 않는다 (그 던전이 잠겨 있으면 건너뜀).
+    예) {"화요일_에카": [23]} → 에카의 클릭23 녹화만 받는다."""
+    try:
+        man = os.path.join(REPO, "share_recs.json")
+        if not os.path.exists(man):
+            return
+        with open(man, encoding="utf-8") as f:
+            cfgm = json.load(f) or {}
+        keys = cfgm.get("keys") or {}
+        if not keys:
+            return
+        _, lock_i = load_coord_lock()
+        if not cfgm.get("ignore_lock"):
+            skip = [k for k in keys if k in lock_i]
+            if skip:
+                log(f"   🔒 잠금 — 녹화 공유 건너뜀: {', '.join(skip)}")
+            keys = {k: v for k, v in keys.items() if k not in lock_i}
+            if not keys:
+                return
+        src_p = os.path.join(REPO, "island_coords.json")
+        dst_p = os.path.join(DESK, "island_coords.json")
+        if not (os.path.exists(src_p) and os.path.exists(dst_p)):
+            return
+        with open(src_p, encoding="utf-8") as f:
+            src = json.load(f)
+        with open(dst_p, encoding="utf-8") as f:
+            dst = json.load(f)
+        got = []
+        for key, clicks in keys.items():
+            a_, b_ = src.get(key), dst.get(key)
+            if not (isinstance(a_, list) and isinstance(b_, list)):
+                continue
+            for i in range(min(len(a_), len(b_))):
+                sr = (a_[i].get("recs") or {})
+                for c in (clicks or []):
+                    j = str(int(c) - 1)          # 클릭 번호 → 저장 인덱스
+                    ev = sr.get(j)
+                    if ev is None:
+                        continue
+                    if (b_[i].get("recs") or {}).get(j) != ev:
+                        b_[i].setdefault("recs", {})[j] = ev
+                        got.append(f"{key} #{i+1:02d} 클릭{c}({len(ev)}개)")
+        if not got:
+            log("   녹화 공유: 이미 메인과 같습니다")
+            return
+        tmp = dst_p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(dst, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, dst_p)
+        log(f"   ⏺ 녹화만 받음 — {', '.join(got[:6])}"
+            + (f" 외 {len(got)-6}개" if len(got) > 6 else "") + " (좌표는 그대로)")
+    except Exception as e:
+        log(f"   ⚠ 녹화 공유 실패: {e}")
+
+
 def sync_island_keys(log):
     """island_coords.json 중 '지정한 던전만' 메인 것을 통째로 받는다
     (share_island.json 의 keys). 좌표·간격·이름·녹화·프리셋까지 그 던전 것만 교체."""
@@ -747,7 +804,8 @@ def main():
             if not is_main:
                 sync_times(log)          # 좌표는 그대로, 시간만 메인과 맞춤
                 sync_coord_keys(log)     # 지정한 항목(낚시녹임 등)만 좌표도 받음
-                sync_island_keys(log)    # 지정한 던전(잊혀진섬 등)은 통째로 받음
+                sync_island_keys(log)    # 지정한 던전은 통째로 받음
+                sync_recs(log)           # 지정한 녹화(⏺)만 받음 — 좌표는 그대로
             # 섬/던전 창 위치(island_win_pos.json)도 메인 것을 받는다
             try:
                 src_w = os.path.join(REPO, "island_win_pos.json")
