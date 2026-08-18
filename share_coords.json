@@ -1,14 +1,4 @@
 {
-  "_설명": "업데이트 때 coords.json 중 '이 항목만' 메인 좌표를 받는다. 나머지 좌표는 로컬 것 유지.",
-  "keys": [
-    "fish_slots",
-    "potion_area_rel",
-    "check_area_rel",
-    "scroll_area_rel",
-    "circus_slots",
-    "circus2_slots",
-    "circus3_slots",
-    "market_slots",
-    "dragon_slots"
-  ]
+  "_설명": "(2026-08-17) 좌표 자동 배포 전면 중단 — 로컬 좌표가 덮어써지는 사고로 비움",
+  "keys": []
 }

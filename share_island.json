@@ -1,8 +1,6 @@
 {
-  "_설명": "keys=던전 통째로 / presets_only=그 던전의 프리셋만 받는다",
+  "_설명": "(2026-08-17) 좌표 자동 배포 전면 중단 — 로컬 좌표가 덮어써지는 사고로 비움",
   "keys": [],
-  "presets": true,
-  "presets_only": [
-    "화요일_에카"
-  ]
+  "presets": false,
+  "presets_only": []
 }
