@@ -221,6 +221,8 @@ def sync_recs(log):
         if not keys:
             return
         _, lock_i = load_coord_lock()
+        if cfgm.get("ignore_lock"):
+            log("   ⏺ 녹화 공유는 잠금과 무관 (좌표는 잠금 그대로 보호)")
         if not cfgm.get("ignore_lock"):
             skip = [k for k in keys if k in lock_i]
             if skip:
