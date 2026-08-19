@@ -127,8 +127,8 @@ SCHED_SLOTS        = 16
 SCHED_CLICKS       = 3
 DRAGON_CLICKS      = 10    # 용던고고!!! — 슬롯당 좌표 10개
 DRAGON_BUDGET      = 180   # 전체 슬롯을 3분 안에 끝낸다 (초, 4분에서 25% 단축)
-DRAGON_GAP_MIN     = 1.1   # 좌표 간격 최소 (16슬롯 3분40초에 맞춤)
-DRAGON_GAP_MAX     = 3.2   # 좌표 간격 최대 (16슬롯 3분40초에 맞춤)
+DRAGON_GAP_MIN     = 0.8   # 좌표 간격 최소 (23% 단축)
+DRAGON_GAP_MAX     = 2.3   # 좌표 간격 최대 (23% 단축)
 DRAGON_EXTRA       = {1: (2.5, 4.0)}   # 좌표2→3 은 부하가 커서 2.5~4.0초 더 쉰다 (모든 슬롯)
 
 def dragon_extra(j):
@@ -656,16 +656,18 @@ NO_CURSOR_CLICK = True
 
 def click_at(x, y):
     """좌표 클릭 — 기본은 '커서를 움직이지 않는' 방식(창에 메시지 전달).
-    실패하면 예전처럼 커서를 옮겨 클릭한다.
+    한 번 실패하면 잠깐 뒤 다시, 그래도 안 되면 진짜 커서로 클릭한다.
     (드래그·방향키·녹화 재생은 커서가 필요해서 그대로 둔다)"""
     if NO_CURSOR_CLICK:
         try:
             import precise_click as _pc
-            if _pc.post_click(x, y):
-                return "post"
+            for _try in range(2):
+                if _pc.post_click(x, y):
+                    return "post"
+                time.sleep(0.12)          # 창이 잠깐 안 잡힐 때가 있어 한 번 더
         except Exception:
             pass
-    pyautogui.click(x, y)
+    pyautogui.click(x, y)                 # 마지막 수단 — 확실히 눌리게
     return "cursor"
 
 

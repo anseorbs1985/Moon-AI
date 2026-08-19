@@ -10,6 +10,7 @@ SendInput 은 '한 번의 호출에 담긴 이벤트들 사이에 물리 마우�
 import ctypes
 import ctypes.wintypes
 import time
+import random
 
 _MOVE   = 0x0001
 _LDOWN  = 0x0002
@@ -116,12 +117,55 @@ def install(pyautogui):
 # ── 커서를 전혀 움직이지 않는 클릭 (창에 메시지로 직접 전달) ──────────────
 # 사용자가 마우스를 쓰는 동안에도 겹치지 않는다. 다만 게임이 이런 '가짜 입력'을
 # 받아주는지는 프로그램마다 달라서, 반드시 먼저 테스트해보고 써야 한다.
-def post_click(x, y, double=False):
-    """화면 좌표 (x, y) 에 있는 창에 클릭 메시지를 보낸다. 커서는 그대로 둔다.
-    보낸 창을 찾지 못하면 False."""
+def game_window_at(x, y):
+    """그 좌표를 품고 있는 리니지M 창 핸들 — 다른 창이 위에 덮여 있어도 찾아낸다.
+    (WindowFromPoint 는 '맨 위 창'을 주기 때문에, 런처·클로드 창이 가리면
+     클릭이 엉뚱한 창으로 가서 게임이 못 받는다 → 씹힘의 주된 원인)"""
     u = ctypes.windll.user32
-    pt = ctypes.wintypes.POINT(int(x), int(y))
-    hwnd = u.WindowFromPoint(pt)
+    found = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    def _cb(h, _):
+        try:
+            if not u.IsWindowVisible(h) or u.IsIconic(h):
+                return True
+            n = u.GetWindowTextLengthW(h)
+            if not n:
+                return True
+            buf = ctypes.create_unicode_buffer(n + 1)
+            u.GetWindowTextW(h, buf, n + 1)
+            if not buf.value.startswith("리니지M"):
+                return True
+            r = ctypes.wintypes.RECT()
+            u.GetWindowRect(h, ctypes.byref(r))
+            if r.left <= x < r.right and r.top <= y < r.bottom:
+                found.append(h)
+        except Exception:
+            pass
+        return True
+
+    try:
+        u.EnumWindows(_cb, 0)
+    except Exception:
+        return None
+    return found[0] if found else None
+
+
+def _target_hwnd(x, y):
+    """클릭을 보낼 창 — 그 자리의 리니지M 창을 우선한다."""
+    u = ctypes.windll.user32
+    h = game_window_at(x, y)
+    if h:
+        return h
+    pt = ctypes.wintypes.POINT(int(x), int(y))     # 리니지M이 아니면 예전처럼
+    return u.WindowFromPoint(pt) or None
+
+
+def post_click(x, y, double=False):
+    """화면 좌표 (x, y) 의 리니지M 창에 클릭 메시지를 보낸다. 커서는 그대로 둔다.
+    창을 못 찾으면 False (부르는 쪽에서 진짜 클릭으로 넘어간다)."""
+    u = ctypes.windll.user32
+    hwnd = _target_hwnd(x, y)
     if not hwnd:
         return False
     cpt = ctypes.wintypes.POINT(int(x), int(y))
@@ -129,14 +173,16 @@ def post_click(x, y, double=False):
     lp = ((cpt.y & 0xFFFF) << 16) | (cpt.x & 0xFFFF)
     WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0200, 0x0201, 0x0202
     MK_LBUTTON = 0x0001
+    # 누르는 시간이 너무 짧으면 게임이 무시한다 → 60~110ms 로 사람처럼
     u.PostMessageW(hwnd, WM_MOUSEMOVE, 0, lp)
+    time.sleep(0.02)
     u.PostMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp)
-    time.sleep(0.04)
+    time.sleep(random.uniform(0.06, 0.11))
     u.PostMessageW(hwnd, WM_LBUTTONUP, 0, lp)
     if double:
         time.sleep(0.06)
         u.PostMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp)
-        time.sleep(0.04)
+        time.sleep(random.uniform(0.06, 0.11))
         u.PostMessageW(hwnd, WM_LBUTTONUP, 0, lp)
     return True
 
@@ -144,8 +190,7 @@ def post_click(x, y, double=False):
 def post_wheel(x, y, notches):
     """커서를 옮기지 않고 그 자리에 휠을 굴린다 (양수=위로)."""
     u = ctypes.windll.user32
-    pt = ctypes.wintypes.POINT(int(x), int(y))
-    hwnd = u.WindowFromPoint(pt)
+    hwnd = _target_hwnd(x, y)
     if not hwnd:
         return False
     lp = ((int(y) & 0xFFFF) << 16) | (int(x) & 0xFFFF)   # 휠은 화면 좌표
