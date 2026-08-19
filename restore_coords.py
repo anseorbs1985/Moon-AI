@@ -21,6 +21,11 @@ import shutil
 import datetime
 import subprocess
 
+try:                       # 콘솔이 cp949 라도 한글·기호가 깨지지 않게
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 DESK = os.path.join(os.path.expanduser("~"), "Desktop")
 LOCAL = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
 BACKUPS = os.path.join(LOCAL, "backups")
@@ -146,7 +151,7 @@ def show(rows, limit=20):
     print("\n되돌리려면:  py restore_coords.py <번호>        (예: py restore_coords.py "
           f"{len(rows)})")
     print("한 파일만:   py restore_coords.py <번호> coords   또는  island")
-    print("※ 기본은 '좌표만' 되돌리고 녹화(⏺)는 지금 것을 그대로 둡니다.")
+    print("* 기본은 '좌표만' 되돌리고 녹화는 지금 것을 그대로 둡니다.")
     print("   녹화까지 통째로 되돌리려면 뒤에 full 을 붙이세요:  "
           "py restore_coords.py <번호> full\n")
 
@@ -196,7 +201,7 @@ def restore(rows, idx, only=None, keep_recs=True):
         subprocess.run(["schtasks", "/Run", "/TN", "LineageM_Watchdog"], capture_output=True)
         print("   메인런처를 다시 실행했습니다.")
     except Exception:
-        print("   ⚠ 런처 재시작은 직접 해주세요.")
+        print("   [!] 런처 재시작은 직접 해주세요.")
 
 
 def main():
