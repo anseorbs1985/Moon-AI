@@ -266,6 +266,100 @@ def sync_recs(log):
         log(f"   ⚠ 녹화 공유 실패: {e}")
 
 
+def apply_restore_order(log):
+    """저장소의 restore_order.json 이 시키면 '한 번만' 좌표를 되돌린다.
+    - 되돌리는 것은 좌표·이름·간격·방향·프리셋
+    - 녹화(⏺)는 지금 것을 그대로 둔다 (keep_recs)
+    - 한 번 한 컴퓨터는 다시 하지 않는다 (restore_done.json 에 표시)"""
+    try:
+        man = os.path.join(REPO, "restore_order.json")
+        if not os.path.exists(man):
+            return
+        with open(man, encoding="utf-8") as f:
+            order = json.load(f) or {}
+        oid = str(order.get("id") or "")
+        if not oid:
+            return
+        ldir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
+        done_p = os.path.join(ldir, "restore_done.json")
+        try:
+            with open(done_p, encoding="utf-8") as f:
+                done = json.load(f) or []
+        except Exception:
+            done = []
+        if oid in done:
+            return                                    # 이미 되돌린 컴퓨터
+        bdir = os.path.join(ldir, "backups")
+        if not os.path.isdir(bdir):
+            log("   되돌리기: 백업 폴더가 없어 건너뜁니다")
+            return
+        import glob as _g
+        picked = {}
+        for f in MERGE_FILES:
+            pat = os.path.join(bdir, f"*_before_update_{f}")
+            cand = sorted(_g.glob(pat))
+            if cand:
+                picked[f] = cand[-1]                  # 가장 최근 '업데이트 직전' 백업
+        if not picked:
+            log("   되돌리기: '업데이트 직전' 백업이 없어 건너뜁니다")
+            return
+        import datetime as _dt
+        now = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        keep = bool(order.get("keep_recs", True))
+        msgs = []
+        for f, src in picked.items():
+            dst = os.path.join(DESK, f)
+            if not os.path.exists(dst):
+                continue
+            try:
+                with open(src, encoding="utf-8") as fa:
+                    old = json.load(fa)
+            except Exception:
+                continue
+            if not old:
+                continue
+            shutil.copy2(dst, os.path.join(bdir, f"{now}_before_restore_{f}"))
+            if keep and f == "island_coords.json":
+                try:
+                    with open(dst, encoding="utf-8") as fb:
+                        cur = json.load(fb)
+                except Exception:
+                    cur = {}
+                # 좌표는 백업 것, 녹화(recs)는 지금 것 그대로
+                for key, slots in old.items():
+                    if key.startswith("_") or not isinstance(slots, list):
+                        continue
+                    cslots = cur.get(key)
+                    if not isinstance(cslots, list):
+                        continue
+                    for i, sl in enumerate(slots):
+                        if not isinstance(sl, dict) or i >= len(cslots):
+                            continue
+                        c = cslots[i]
+                        if not isinstance(c, dict):
+                            continue
+                        for fld in ("recs", "recs_off"):
+                            if fld in c:
+                                sl[fld] = c[fld]
+                            else:
+                                sl.pop(fld, None)
+            tmp = dst + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fo:
+                json.dump(old, fo, ensure_ascii=False, indent=2)
+            os.replace(tmp, dst)
+            msgs.append(os.path.basename(src))
+        if msgs:
+            log(f"   ↩ 좌표 되돌림 — {', '.join(msgs)}"
+                + (" (녹화는 지금 것 그대로)" if keep else ""))
+            log(f"      되돌리기 직전 상태는 backups\\{now}_before_restore_* 에 백업")
+        done.append(oid)
+        os.makedirs(ldir, exist_ok=True)
+        with open(done_p, "w", encoding="utf-8") as f:
+            json.dump(done, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log(f"   ⚠ 되돌리기 실패: {e}")
+
+
 def sync_island_keys(log):
     """island_coords.json 중 '지정한 던전만' 메인 것을 통째로 받는다
     (share_island.json 의 keys). 좌표·간격·이름·녹화·프리셋까지 그 던전 것만 교체."""
@@ -770,8 +864,10 @@ def main():
                 if not os.path.exists(s):
                     continue
                 dst = os.path.join(DESK, f)
-                if is_main and f in MERGE_FILES:
-                    log(f"   {f}: 메인 컴퓨터 — 로컬 원본 유지")
+                if f in MERGE_FILES:
+                    # (2026-08-17) 좌표는 어떤 컴퓨터에서도 통째로 덮어쓰지 않는다.
+                    # 로컬 좌표가 그 컴퓨터의 원본 — 공유가 필요하면 share_*.json 으로만.
+                    log(f"   {f}: 좌표는 그대로 둡니다 (덮어쓰기 안 함)")
                     continue
                 try:
                     with open(s, "rb") as fa, open(dst, "rb") as fb:
@@ -808,6 +904,7 @@ def main():
                 sync_coord_keys(log)     # 지정한 항목(낚시녹임 등)만 좌표도 받음
                 sync_island_keys(log)    # 지정한 던전은 통째로 받음
                 sync_recs(log)           # 지정한 녹화(⏺)만 받음 — 좌표는 그대로
+                apply_restore_order(log)  # 되돌리기 지시가 있으면 한 번만 수행
             # 섬/던전 창 위치(island_win_pos.json)도 메인 것을 받는다
             try:
                 src_w = os.path.join(REPO, "island_win_pos.json")
