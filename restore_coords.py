@@ -5,6 +5,9 @@
     py restore_coords.py            → 되돌릴 수 있는 시점 목록만 보여준다 (아무것도 안 바꿈)
     py restore_coords.py 3          → 목록의 3번으로 되돌린다 (되돌리기 전 현재 상태도 백업)
     py restore_coords.py 3 coords   → coords.json 만 되돌린다 (island 는 그대로)
+    py restore_coords.py 3 full     → 녹화(⏺)까지 통째로 되돌린다
+
+기본 동작: 좌표·이름·간격·방향은 백업 것으로 되돌리고, 녹화(⏺)는 지금 것을 그대로 유지한다.
 
 찾는 곳 (최근 것부터):
     %LOCALAPPDATA%\\MoonAI\\backups        — 업데이트 직전 자동 백업(_before_update_), 하루 1회 백업
@@ -47,6 +50,52 @@ def count_coords(path):
                 walk(x)
     walk(d)
     return n
+
+
+def count_recs(path_or_data):
+    """녹화(⏺)가 몇 개인지."""
+    try:
+        d = path_or_data
+        if isinstance(d, str):
+            with open(d, encoding="utf-8") as f:
+                d = json.load(f)
+    except Exception:
+        return 0
+    n = 0
+    if isinstance(d, dict):
+        for k, slots in d.items():
+            if k.startswith("_") or not isinstance(slots, list):
+                continue
+            for s in slots:
+                if isinstance(s, dict):
+                    n += len(s.get("recs") or {})
+    return n
+
+
+def merge_keep_recs(old, cur):
+    """백업(old)으로 되돌리되, 지금 파일(cur)의 녹화(recs)는 그대로 유지한다.
+    좌표·이름·간격·방향·프리셋은 백업 것, 녹화만 지금 것."""
+    if not (isinstance(old, dict) and isinstance(cur, dict)):
+        return old
+    out = json.loads(json.dumps(old))          # 깊은 복사
+    for key, slots in out.items():
+        if key.startswith("_") or not isinstance(slots, list):
+            continue
+        cur_slots = cur.get(key)
+        if not isinstance(cur_slots, list):
+            continue
+        for i, s in enumerate(slots):
+            if not isinstance(s, dict) or i >= len(cur_slots):
+                continue
+            c = cur_slots[i]
+            if not isinstance(c, dict):
+                continue
+            for f in ("recs", "recs_off"):
+                if f in c:
+                    s[f] = c[f]
+                else:
+                    s.pop(f, None)
+    return out
 
 
 def candidates():
@@ -96,10 +145,13 @@ def show(rows, limit=20):
               f"{(str(c2) + '좌표') if c2 is not None else '   -':>8}")
     print("\n되돌리려면:  py restore_coords.py <번호>        (예: py restore_coords.py "
           f"{len(rows)})")
-    print("한 파일만:   py restore_coords.py <번호> coords   또는  island\n")
+    print("한 파일만:   py restore_coords.py <번호> coords   또는  island")
+    print("※ 기본은 '좌표만' 되돌리고 녹화(⏺)는 지금 것을 그대로 둡니다.")
+    print("   녹화까지 통째로 되돌리려면 뒤에 full 을 붙이세요:  "
+          "py restore_coords.py <번호> full\n")
 
 
-def restore(rows, idx, only=None):
+def restore(rows, idx, only=None, keep_recs=True):
     if not (1 <= idx <= len(rows)):
         print("그런 번호가 없습니다."); return
     stamp, tag, files = rows[idx - 1]
@@ -120,6 +172,19 @@ def restore(rows, idx, only=None):
         dst = os.path.join(DESK, f)
         if os.path.exists(dst):      # 되돌리기 전 지금 상태도 백업
             shutil.copy2(dst, os.path.join(BACKUPS, f"{now}_before_restore_{f}"))
+        if keep_recs and f == "island_coords.json" and os.path.exists(dst):
+            # 좌표만 되돌리고 녹화(⏺)는 지금 것을 그대로 남긴다
+            with open(src, encoding="utf-8") as fa:
+                old = json.load(fa)
+            with open(dst, encoding="utf-8") as fb:
+                cur = json.load(fb)
+            merged = merge_keep_recs(old, cur)
+            tmp = dst + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fo:
+                json.dump(merged, fo, ensure_ascii=False, indent=2)
+            os.replace(tmp, dst)
+            done.append(f"{f}({count_coords(dst)}좌표, 녹화 {count_recs(dst)}개 그대로)")
+            continue
         shutil.copy2(src, dst)
         done.append(f"{f}({count_coords(dst)}좌표)")
     if not done:
@@ -146,7 +211,10 @@ def main():
         idx = int(sys.argv[1])
     except ValueError:
         show(rows); return
-    restore(rows, idx, sys.argv[2] if len(sys.argv) > 2 else None)
+    args = list(sys.argv[2:])
+    full = "full" in args                      # full = 녹화까지 통째로 되돌린다
+    only = next((a for a in args if a in ("coords", "island")), None)
+    restore(rows, idx, only, keep_recs=not full)
 
 
 if __name__ == "__main__":
