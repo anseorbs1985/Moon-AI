@@ -654,6 +654,20 @@ def find_purple():
 NO_CURSOR_CLICK = True
 
 
+def move_at(x, y):
+    """마우스를 '올려놓기'만 하는 자리 — 커서를 움직이지 않고 신호만 보낸다.
+    실패하면 예전처럼 커서를 옮긴다."""
+    if NO_CURSOR_CLICK:
+        try:
+            import precise_click as _pc
+            if _pc.post_move(x, y):
+                return "post"
+        except Exception:
+            pass
+    pyautogui.moveTo(x, y)
+    return "cursor"
+
+
 def click_at(x, y):
     """좌표 클릭 — 기본은 '커서를 움직이지 않는' 방식(창에 메시지 전달).
     한 번 실패하면 잠깐 뒤 다시, 그래도 안 되면 진짜 커서로 클릭한다.
@@ -6242,12 +6256,12 @@ class App(tk.Tk):
                 if not self._wait_mouse_idle("_item_stop"): return
                 if coords[0]:
                     self.status.set(f"🧹 [{name}] 클릭1...")
-                    pyautogui.click(*coords[0])
+                    click_at(*coords[0])
                     time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._item_stop: break
                 if coords[1]:
                     self.status.set(f"🧹 [{name}] 클릭2...")
-                    pyautogui.click(*coords[1])
+                    click_at(*coords[1])
                     time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._item_stop: break
                 if len(coords) > 2 and coords[2]:
@@ -6255,7 +6269,8 @@ class App(tk.Tk):
                     sx, sy = coords[2]
                     for rep in range(ITEM_SWIPE_COUNT):
                         if self._item_stop: break
-                        self.status.set(f"🧹 [{name}] 위로 쓸어올리기 {rep+1}/{ITEM_SWIPE_COUNT}...")
+                        self.status.set(f"🧹 [{name}] 위로 쓸어올리기 "
+                                        f"{rep+1}/{ITEM_SWIPE_COUNT}... (이때만 커서를 씁니다)")
                         pyautogui.mouseDown(sx, sy)
                         time.sleep(0.09)              # 드래그로 인식될 시간
                         steps = 6                     # 빠른 플릭 — 속도가 높을수록 관성 스크롤이 세짐
@@ -6712,7 +6727,9 @@ class App(tk.Tk):
         return True
 
     # 커서를 쓰지 않는(메시지로 클릭하는) 런처 — 사용자가 마우스를 써도 안 기다린다
-    NO_WAIT_MOUSE = ("dragon",)
+    # 커서를 쓰지 않는(메시지로 클릭하는) 런처 — 사용자가 마우스를 써도 기다리지 않는다
+    NO_WAIT_MOUSE = ("dragon", "sched", "item", "dc", "doll", "dungeon",
+                     "dollchk", "relic", "fish")
 
     def _wait_mouse_idle(self, stop_flag_name, idle_sec=1.5, fkey=None):
         """마우스가 움직이는 중일 때만 대기. 안 움직이면 즉시 True 반환.
@@ -7972,7 +7989,7 @@ class App(tk.Tk):
                 self.after(0, lambda a=i, t=taps, w=window: self.status.set(
                     f"🎯 일반던전충전 {a+1}/{n} — {t}회 연속({w:.1f}초 내)..."))
                 for k in range(taps):
-                    pyautogui.click(x, y)
+                    click_at(x, y)
                     if k < taps - 1:
                         time.sleep(intervals[k])
                 if i < n - 1:
@@ -8537,7 +8554,7 @@ class App(tk.Tk):
                     if _clicked == 0:
                         time.sleep(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))  # 첫 클릭 전 여유
                     self.status.set(f"[{name}] 좌표{j+1} 실행...")
-                    pyautogui.click(*c)
+                    click_at(*c)
                     _clicked += 1
                     time.sleep(random.uniform(DOLL_MIN, DOLL_MAX))  # 좌표 간 간격
                 self.status.set(f"✔ [{name}] 슬롯 완료!")
@@ -9289,7 +9306,7 @@ class App(tk.Tk):
                         if not self._doll_wait(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX)):
                             self.status.set("인형탐험 멈춤"); return
                     self.status.set(f"🧸 [{name}] 좌표 {j+1}/{DOLL_CLICKS}...")
-                    pyautogui.click(*coord)
+                    click_at(*coord)
                     _clicked += 1
                     if j < len(coords) - 1:
                         if not self._doll_wait(random.uniform(DOLL_MIN, DOLL_MAX)):
@@ -10589,7 +10606,7 @@ class App(tk.Tk):
                 for n, j in enumerate(order):
                     if self._dungeon_stop: break
                     self.status.set(f"🏰 [{name}] 클릭{j+1}...")
-                    pyautogui.click(*coords[j])
+                    click_at(*coords[j])
                     if n < len(order) - 1:
                         time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
             self.status.set("✔ 던전 실행 완료!")
@@ -10888,17 +10905,17 @@ class App(tk.Tk):
                 if not self._wait_mouse_idle("_sched_stop"): return
                 if coords[0]:
                     self.status.set(f"📅 [{name}] 클릭1...")
-                    pyautogui.click(*coords[0])
+                    click_at(*coords[0])
                     time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._sched_stop: break
                 if coords[1]:
                     self.status.set(f"📅 [{name}] 마우스 이동...")
-                    pyautogui.moveTo(*coords[1])
+                    move_at(*coords[1])
                     time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._sched_stop: break
                 if len(coords) > 2 and coords[2]:
                     self.status.set(f"📅 [{name}] 클릭2...")
-                    pyautogui.click(*coords[2])
+                    click_at(*coords[2])
                 if self._sched_stop: break
                 time.sleep(random.uniform(2.3, 3.0))     # 슬롯 끝 대기 (4초 → 2.3~3초)
             self.status.set("✔ 매일매일 스케줄 완료!")
@@ -10950,17 +10967,17 @@ class App(tk.Tk):
             if st["u"] == 0:
                 if coords[0]:
                     self.status.set(f"📅 [{name}] 클릭1...  (남은 슬롯 {len(alive)})")
-                    pyautogui.click(*coords[0])
+                    click_at(*coords[0])
                     done += 1
                 st["due"] = time.time() + random.uniform(1.8, 3.0)   # 클릭1 뒤 여유
             else:
                 if coords[1]:
                     self.status.set(f"📅 [{name}] 마우스 이동...")
-                    pyautogui.moveTo(*coords[1])
+                    move_at(*coords[1])
                     time.sleep(random.uniform(1.8, 3.0))     # 이동 뒤 여유
                 if len(coords) > 2 and coords[2]:
                     self.status.set(f"📅 [{name}] 클릭2...")
-                    pyautogui.click(*coords[2])
+                    click_at(*coords[2])
                     done += 1
                 st["due"] = time.time() + random.uniform(3.2, 4.2)   # 슬롯 끝 대기
             st["u"] += 1

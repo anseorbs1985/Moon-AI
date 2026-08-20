@@ -187,6 +187,20 @@ def post_click(x, y, double=False):
     return True
 
 
+def post_move(x, y):
+    """커서를 옮기지 않고 그 자리에 '마우스가 올라갔다'는 신호만 보낸다.
+    (스케줄의 '마우스 이동'처럼 올려놓기만 하면 되는 자리에 쓴다)"""
+    u = ctypes.windll.user32
+    hwnd = _target_hwnd(x, y)
+    if not hwnd:
+        return False
+    cpt = ctypes.wintypes.POINT(int(x), int(y))
+    u.ScreenToClient(hwnd, ctypes.byref(cpt))
+    lp = ((cpt.y & 0xFFFF) << 16) | (cpt.x & 0xFFFF)
+    u.PostMessageW(hwnd, 0x0200, 0, lp)          # WM_MOUSEMOVE
+    return True
+
+
 def post_wheel(x, y, notches):
     """커서를 옮기지 않고 그 자리에 휠을 굴린다 (양수=위로)."""
     u = ctypes.windll.user32
