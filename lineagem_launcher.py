@@ -1840,16 +1840,17 @@ class App(tk.Tk):
 
     def _rep_hn(self, key, slot=None):
         """그 던전의 (몇시간, 몇회).
-        고정 던전(악몽의섬)은 슬롯에 뭐가 적혀 있든 코드값으로 통일한다
-        — 컴퓨터마다·슬롯마다 다르게 되던 것을 한 번에 맞추기 위함."""
-        if key in self.REPEAT_FIXED:
-            return self.REPEAT_FIXED[key]
+        슬롯에 정해둔 값이 있으면 그것을 쓴다 — 창 위 '전체 일괄'로 바꾼 값이 이긴다.
+        비어 있으면 고정 던전 기본값(악몽의섬 2시간 6회)."""
         h = n = 0
         try:
             h = int((slot or {}).get("repeat_h") or 0)
             n = int((slot or {}).get("repeat_n") or 0)
         except Exception:
             pass
+        fx = self.REPEAT_FIXED.get(key)
+        if fx:
+            return (h or fx[0]), (n or fx[1])
         return (h or 2), (n or 8)
 
     def _rep_turn_off(self, key, idx):
@@ -2201,9 +2202,8 @@ class App(tk.Tk):
     def _rep_full_n(self, key, idx):
         """그 슬롯에 정해둔 반복 횟수 (없으면 6회)."""
         try:
-            if key in self.REPEAT_FIXED:
-                return self.REPEAT_FIXED[key][1]          # 악몽의섬 = 항상 6회
-            return int(self._island_cfg()[key][idx].get("repeat_n") or 6)
+            slot = self._island_cfg()[key][idx]
+            return self._rep_hn(key, slot)[1]             # 슬롯 값 우선, 없으면 고정값
         except Exception:
             return 6
 

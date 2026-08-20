@@ -763,6 +763,42 @@ class IslandApp(tk.Tk):
                   command=lambda k=key: self._preview_all(k)
                   ).pack(fill="x", padx=4, pady=(0,2))
 
+        # ── 전체 일괄 — 여기서 한 번만 정하면 모든 슬롯이 같아진다 ──
+        ab = tk.LabelFrame(parent, text="전체 일괄 (한 번에 모든 슬롯)",
+                           font=("맑은 고딕", 7, "bold"), fg="#7b241c", padx=3, pady=2)
+        ab.pack(fill="x", padx=4, pady=(0, 3))
+        # 1줄: ⏰ 반복 시간·횟수
+        b1 = tk.Frame(ab); b1.pack(fill="x")
+        tk.Label(b1, text="⏰", font=("맑은 고딕", 8)).pack(side="left")
+        _h0, _n0 = self._rep_hn(key)
+        hv = tk.StringVar(value=str(_h0))
+        nv2 = tk.StringVar(value=str(_n0))
+        tk.Spinbox(b1, from_=1, to=12, textvariable=hv, width=2,
+                   font=("맑은 고딕", 8)).pack(side="left")
+        tk.Label(b1, text="시간", font=("맑은 고딕", 7)).pack(side="left")
+        tk.Spinbox(b1, from_=1, to=20, textvariable=nv2, width=2,
+                   font=("맑은 고딕", 8)).pack(side="left", padx=(2, 0))
+        tk.Label(b1, text="회", font=("맑은 고딕", 7)).pack(side="left")
+        tk.Button(b1, text="전체 적용", font=("맑은 고딕", 7, "bold"),
+                  bg="#7b241c", fg="white",
+                  command=lambda k=key, a_=hv, b_=nv2: self._bulk_repeat(k, a_, b_)
+                  ).pack(side="left", padx=(4, 0))
+        tk.Button(b1, text="전체 끄기", font=("맑은 고딕", 7),
+                  bg="#7f8c8d", fg="white",
+                  command=lambda k=key: self._bulk_repeat_off(k)).pack(side="left", padx=(3, 0))
+        # 2줄: 프리셋(물약) 전체 적용
+        b2 = tk.Frame(ab); b2.pack(fill="x", pady=(3, 0))
+        tk.Label(b2, text="🧪", font=("맑은 고딕", 8)).pack(side="left")
+        names = [self._preset_full(key, q) for q in range(len(self._presets(key)))]
+        pv = tk.StringVar(value=(names[0] if names else ""))
+        om = tk.OptionMenu(b2, pv, *(names or [""]))
+        om.config(font=("맑은 고딕", 7), width=14, pady=0, highlightthickness=0)
+        om.pack(side="left")
+        tk.Button(b2, text="전체 적용", font=("맑은 고딕", 7, "bold"),
+                  bg="#7b241c", fg="white",
+                  command=lambda k=key, v=pv, nm=names: self._bulk_preset(k, v, nm)
+                  ).pack(side="left", padx=(4, 0))
+
         # ── 번호 지정 일괄 적용 — 지정한 클릭 번호만 전 슬롯에 복사/삭제 ──
         nb = tk.LabelFrame(parent, text="번호 지정 일괄 (예: 3,7,12-14)",
                            font=("맑은 고딕", 7), fg="#7d6608", padx=3, pady=2)
@@ -2510,15 +2546,81 @@ class IslandApp(tk.Tk):
     REPEAT_FIXED = {"토요일_악몽의섬": (2, 6)}
 
     def _rep_hn(self, key, slot=None):
-        """그 던전의 (몇시간, 몇회) — 고정 던전은 슬롯 값과 무관하게 코드값."""
-        if key in self.REPEAT_FIXED:
-            return self.REPEAT_FIXED[key]
+        """그 던전의 (몇시간, 몇회).
+        슬롯에 정해둔 값이 있으면 그것을 쓴다 — 창 위 '전체 일괄'로 바꾼 값이 이긴다.
+        비어 있으면 고정 던전 기본값(악몽의섬 2시간 6회)."""
+        h = n = 0
         try:
             h = int((slot or {}).get("repeat_h") or 0)
             n = int((slot or {}).get("repeat_n") or 0)
         except Exception:
-            h = n = 0
+            pass
+        fx = self.REPEAT_FIXED.get(key)
+        if fx:
+            return (h or fx[0]), (n or fx[1])
         return (h or 2), (n or 8)
+
+    def _bulk_repeat(self, key, hv, nv):
+        """⏰ 반복을 이 던전의 모든 슬롯에 똑같이 건다 (좌표가 있는 슬롯만)."""
+        try:
+            h = max(1, int(hv.get())); n = max(1, int(nv.get()))
+        except Exception:
+            self._status.set("시간·횟수를 숫자로 적어주세요"); return
+        slots = self.cfg.get(key) or []
+        st = self._rep_state()
+        st.pop("_off", None)                       # 사용자가 직접 켰다
+        now = time.time()
+        cnt = 0
+        for i, sl in enumerate(slots):
+            if not isinstance(sl, dict) or not any(sl.get("coords") or []):
+                continue
+            sl["repeat_h"] = h
+            sl["repeat_n"] = n
+            st[f"{key}|{i}"] = {"h": h, "left": n, "run": 0, "next": now + h * 3600}
+            cnt += 1
+        save_cfg(self.cfg)
+        self._rep_write(st)
+        self._refresh_rep_btns()
+        self._status.set(f"⏰ {key} — {cnt}개 슬롯 전부 {h}시간 {n}회로 맞췄습니다 "
+                         f"(첫 실행 약 {h}시간 뒤)")
+
+    def _bulk_repeat_off(self, key):
+        """이 던전의 ⏰ 반복을 전부 끈다."""
+        slots = self.cfg.get(key) or []
+        st = self._rep_state()
+        cnt = 0
+        for i, sl in enumerate(slots):
+            if isinstance(sl, dict) and sl.get("repeat_h"):
+                sl["repeat_h"] = 0
+                cnt += 1
+            st.pop(f"{key}|{i}", None)
+        save_cfg(self.cfg)
+        self._rep_write(st)
+        self._refresh_rep_btns()
+        self._status.set(f"⏰ {key} — 반복 전부 껐습니다 ({cnt}개 슬롯)")
+
+    def _bulk_preset(self, key, pv, names):
+        """고른 프리셋(물약 등)을 이 던전의 모든 슬롯에 적용한다."""
+        try:
+            pi = names.index(pv.get())
+        except Exception:
+            self._status.set("적용할 프리셋을 골라주세요"); return
+        slots = self.cfg.get(key) or []
+        cnt = 0
+        for i, sl in enumerate(slots):
+            if not isinstance(sl, dict) or not any(sl.get("coords") or []):
+                continue
+            try:
+                self._apply_preset(key, i, pi)
+                cnt += 1
+            except Exception:
+                pass
+        save_cfg(self.cfg)
+        try:
+            self._match_now()
+        except Exception:
+            pass
+        self._status.set(f"🧪 {key} — {cnt}개 슬롯 전부 '{names[pi]}' 로 바꿨습니다")
 
     def _rep_restart(self, key, idxs):
         """개별로 돌린 슬롯은 '지금부터' 2시간 N회를 다시 센다.
