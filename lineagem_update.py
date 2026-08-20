@@ -266,6 +266,129 @@ def sync_recs(log):
         log(f"   ⚠ 녹화 공유 실패: {e}")
 
 
+def _last_run_times(log=None):
+    """repeat_log.txt 에서 던전별 '마지막으로 실제 클릭이 돌아간 시각'을 뽑는다."""
+    import re as _re, datetime as _dt
+    ldir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
+    p = os.path.join(ldir, "repeat_log.txt")
+    if not os.path.exists(p):
+        return {}
+    year = _dt.date.today().year
+    out = {}
+    try:
+        for ln in open(p, encoding="utf-8", errors="replace"):
+            m = _re.match(r"\[(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)\]\s+(?:\[클릭\]\s+)?(\S+)", ln)
+            if not m:
+                continue
+            mm, dd, hh, mi, ss, key = m.groups()
+            if not any(x in key for x in ("섬", "탑", "에카", "주문서", "카매사")):
+                continue
+            try:
+                t = _dt.datetime(year, int(mm), int(dd), int(hh), int(mi), int(ss))
+            except ValueError:
+                continue
+            if t > _dt.datetime.now() + _dt.timedelta(days=1):
+                t = t.replace(year=year - 1)          # 해 넘어간 로그
+            if key not in out or t > out[key]:
+                out[key] = t
+    except Exception:
+        return {}
+    return out
+
+
+def _island_backups():
+    """섬/던전 좌표 백업 — (실제 저장시각, 경로) 오래된 것부터."""
+    import glob as _g, datetime as _dt
+    bdir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI", "backups")
+    rows = []
+    for p in _g.glob(os.path.join(bdir, "*island_coords.json")):
+        try:
+            rows.append((_dt.datetime.fromtimestamp(os.path.getmtime(p)), p))
+        except Exception:
+            pass
+    rows.sort()
+    return rows
+
+
+def _restore_last_run(log, order):
+    """던전마다 '그 던전을 마지막으로 실행했을 때'의 좌표로 되돌린다.
+    - 던전별로 시점이 달라도 각각 맞춰서 고른다
+    - 녹화(⏺)는 지금 것을 그대로 둔다"""
+    import datetime as _dt
+    dst = os.path.join(DESK, "island_coords.json")
+    if not os.path.exists(dst):
+        log("   되돌리기: island_coords.json 이 없습니다"); return False
+    runs = _last_run_times()
+    if not runs:
+        log("   되돌리기: 실행 기록(repeat_log.txt)이 없어 건너뜁니다"); return False
+    backups = _island_backups()
+    if not backups:
+        log("   되돌리기: 섬/던전 백업이 없어 건너뜁니다"); return False
+    want = order.get("keys") or list(runs.keys())
+    keep = bool(order.get("keep_recs", True))
+    with open(dst, encoding="utf-8") as f:
+        cur = json.load(f)
+    now = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    bdir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI", "backups")
+    os.makedirs(bdir, exist_ok=True)
+    shutil.copy2(dst, os.path.join(bdir, f"{now}_before_restore_island_coords.json"))
+    done = []
+    for key in want:
+        t = runs.get(key)
+        if not t:
+            log(f"   {key}: 실행 기록이 없어 건너뜀"); continue
+        pick = None
+        import glob as _g, datetime as _dt2
+        snapd = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI", "runsnap")
+        snaps = sorted((_dt2.datetime.fromtimestamp(os.path.getmtime(x)), x)
+                       for x in _g.glob(os.path.join(snapd, f"{key}_*.json")))
+        for bt, bp in snaps:            # 실행 직전에 남긴 스냅샷이 가장 정확
+            if bt <= t + _dt2.timedelta(seconds=90):
+                pick = (bt, bp)
+        if not pick:
+            for bt, bp in backups:
+                if bt <= t:
+                    pick = (bt, bp)
+        if not pick:
+            log(f"   {key}: 마지막 실행({t:%m-%d %H:%M}) 이전 백업이 없어 건너뜀"); continue
+        try:
+            with open(pick[1], encoding="utf-8") as f:
+                old = json.load(f)
+        except Exception:
+            continue
+        slots = old.get(key)
+        if not isinstance(slots, list) or not slots:
+            log(f"   {key}: 그 백업에 자료가 없어 건너뜀"); continue
+        slots = json.loads(json.dumps(slots))         # 깊은 복사
+        cslots = cur.get(key)
+        if keep and isinstance(cslots, list):         # 녹화는 지금 것 유지
+            for i, sl in enumerate(slots):
+                if not isinstance(sl, dict) or i >= len(cslots):
+                    continue
+                c = cslots[i]
+                if not isinstance(c, dict):
+                    continue
+                for fld in ("recs", "recs_off"):
+                    if fld in c:
+                        sl[fld] = c[fld]
+                    else:
+                        sl.pop(fld, None)
+        cur[key] = slots
+        done.append(f"{key}(실행 {t:%m-%d %H:%M} → 백업 {pick[0]:%m-%d %H:%M})")
+    if not done:
+        log("   되돌리기: 되돌린 던전이 없습니다"); return False
+    tmp = dst + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cur, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, dst)
+    log("   ↩ 던전별로 '마지막 실행 시점'의 좌표로 되돌림"
+        + (" (녹화는 지금 것 그대로)" if keep else ""))
+    for d in done:
+        log(f"      · {d}")
+    log(f"      되돌리기 직전 상태는 backups\\{now}_before_restore_* 에 백업")
+    return True
+
+
 def apply_restore_order(log):
     """저장소의 restore_order.json 이 시키면 '한 번만' 좌표를 되돌린다.
     - 되돌리는 것은 좌표·이름·간격·방향·프리셋
@@ -289,6 +412,13 @@ def apply_restore_order(log):
             done = []
         if oid in done:
             return                                    # 이미 되돌린 컴퓨터
+        if str(order.get("mode") or "") == "last_run":
+            _restore_last_run(log, order)
+            done.append(oid)
+            os.makedirs(ldir, exist_ok=True)
+            with open(done_p, "w", encoding="utf-8") as f:
+                json.dump(done, f, ensure_ascii=False, indent=2)
+            return
         bdir = os.path.join(ldir, "backups")
         if not os.path.isdir(bdir):
             log("   되돌리기: 백업 폴더가 없어 건너뜁니다")

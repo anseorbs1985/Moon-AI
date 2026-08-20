@@ -2553,6 +2553,30 @@ class IslandApp(tk.Tk):
         except Exception:
             pass
 
+    def _run_snapshot(self, key):
+        """실행 직전 그 던전의 좌표를 따로 남겨둔다 —
+        나중에 '마지막 실행 시점으로 되돌리기'를 정확히 할 수 있게.
+        (LOCALAPPDATA / MoonAI / runsnap / 던전_시각.json — 던전마다 최근 10개 보관)"""
+        try:
+            import datetime as _dt, glob as _g
+            slots = self.cfg.get(key)
+            if not isinstance(slots, list) or not any(
+                    any(s.get("coords") or []) for s in slots if isinstance(s, dict)):
+                return                                   # 빈 좌표는 남기지 않는다
+            d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI", "runsnap")
+            os.makedirs(d, exist_ok=True)
+            f = os.path.join(d, f"{key}_{_dt.datetime.now():%Y%m%d_%H%M%S}.json")
+            tmp = f + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fp:
+                json.dump({key: slots}, fp, ensure_ascii=False, indent=2)
+            os.replace(tmp, f)
+            old = sorted(_g.glob(os.path.join(d, f"{key}_*.json")))
+            for x in old[:-10]:                          # 최근 10개만 보관
+                try: os.remove(x)
+                except Exception: pass
+        except Exception:
+            pass
+
     def _rep_file(self):
         return os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
                             "island_repeat.json")
@@ -2676,6 +2700,7 @@ class IslandApp(tk.Tk):
         # (2026-08-09) 최소화하지 않는다 — 메인런처와 함께 '맨 뒤'로만 보낸다
         self._send_behind_main()
         self._minimize_claude()
+        self._run_snapshot(key)                # 실행 직전 좌표를 남겨둔다
         self._rep_restart(key, list(sel))      # 개별 실행 → 1회차로 세고 2시간 뒤 다음
         self._swap_if_due(key, list(sel))      # 정해둔 회차면 물약(프리셋) 교체
         threading.Thread(target=self._run, args=(key,),
@@ -2686,6 +2711,7 @@ class IslandApp(tk.Tk):
         # (2026-08-09) 최소화하지 않는다 — 이 창도 메인런처도 '맨 뒤'로만 보낸다
         self._send_behind_main()
         self._minimize_claude()
+        self._run_snapshot(key)                # 실행 직전 좌표를 남겨둔다
         self._rep_restart(key, [idx])          # 개별 실행 → 1회차로 세고 2시간 뒤 다음
         self._swap_if_due(key, [idx])          # 정해둔 회차면 물약(프리셋) 교체
         threading.Thread(target=self._run, args=(key, idx), daemon=True).start()
@@ -2726,6 +2752,7 @@ class IslandApp(tk.Tk):
         self.after(30000, self._idle_back_tick)
 
     def _start(self, key):
+        self._run_snapshot(key)      # 실행 직전 좌표를 남겨둔다 (되돌리기용)
         # +로 고른 슬롯이 있으면 그것만 누른 순서대로, 없으면 전체 실행
         sel = list(self._sel_order.get(key, []))
         self._stop_flag  = False
