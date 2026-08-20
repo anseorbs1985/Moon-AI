@@ -326,6 +326,17 @@ def _restore_last_run(log, order):
         log("   되돌리기: 섬/던전 백업이 없어 건너뜁니다"); return False
     want = order.get("keys") or list(runs.keys())
     keep = bool(order.get("keep_recs", True))
+    if order.get("ignore_lock"):
+        log("   ↩ 이번 복구는 🔒 잠금과 무관하게 진행 (잠금 설정 자체는 그대로 남습니다)")
+    if not order.get("ignore_lock"):          # 🔒 잠근 던전은 되돌리기도 하지 않는다
+        _, lock_i = load_coord_lock()
+        skip = [k for k in want if k in lock_i]
+        if skip:
+            log(f"   🔒 잠금 — 되돌리기 건너뜀: {', '.join(skip)}"
+                f" (되돌리려면 그 던전 잠금을 잠깐 풀고 업데이트)")
+        want = [k for k in want if k not in lock_i]
+        if not want:
+            return False
     with open(dst, encoding="utf-8") as f:
         cur = json.load(f)
     now = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
