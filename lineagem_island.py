@@ -2509,6 +2509,17 @@ class IslandApp(tk.Tk):
     # 런처와 같은 고정 반복 설정 — {던전: (몇시간, 몇회)}
     REPEAT_FIXED = {"토요일_악몽의섬": (2, 6)}
 
+    def _rep_hn(self, key, slot=None):
+        """그 던전의 (몇시간, 몇회) — 고정 던전은 슬롯 값과 무관하게 코드값."""
+        if key in self.REPEAT_FIXED:
+            return self.REPEAT_FIXED[key]
+        try:
+            h = int((slot or {}).get("repeat_h") or 0)
+            n = int((slot or {}).get("repeat_n") or 0)
+        except Exception:
+            h = n = 0
+        return (h or 2), (n or 8)
+
     def _rep_restart(self, key, idxs):
         """개별로 돌린 슬롯은 '지금부터' 2시간 N회를 다시 센다.
         (사용자가 직접 누른 실행만 해당 — 반복 관리가 돌린 것은 그대로 둔다)"""
@@ -2524,15 +2535,13 @@ class IslandApp(tk.Tk):
                     st = _j.load(fp) or {}
             except Exception:
                 st = {}
-            fix = self.REPEAT_FIXED.get(key)
             now = time.time()
             done = []
             for i in idxs:
                 slot = (self.cfg.get(key) or [])[i] if i < len(self.cfg.get(key) or []) else {}
-                h = int(slot.get("repeat_h") or (fix[0] if fix else 0))
-                if not h:
-                    continue
-                n = int(slot.get("repeat_n") or (fix[1] if fix else 6))
+                if key not in self.REPEAT_FIXED and not (slot.get("repeat_h") or 0):
+                    continue                      # 반복을 안 켠 슬롯은 그대로
+                h, n = self._rep_hn(key, slot)    # 고정 던전은 코드값(2시간 6회)
                 st.pop("_off", None)      # 직접 실행했으니 '꺼둠' 표시 해제
                 st[f"{key}|{i}"] = {"h": h, "left": max(0, n - 1), "run": 1,
                                     "next": now + h * 3600}
@@ -2613,10 +2622,8 @@ class IslandApp(tk.Tk):
                 pass
             self._status.set(f"⏰ {key} #{idx+1:02d} 반복 껐습니다")
         else:
-            fix = self.REPEAT_FIXED.get(key)
             slot = (self.cfg.get(key) or [])[idx]
-            h = int(slot.get("repeat_h") or (fix[0] if fix else 2))
-            n = int(slot.get("repeat_n") or (fix[1] if fix else 6))
+            h, n = self._rep_hn(key, slot)           # 고정 던전은 코드값(2시간 6회)
             try:
                 slot["repeat_h"] = h; slot["repeat_n"] = n
                 save_cfg(self.cfg)

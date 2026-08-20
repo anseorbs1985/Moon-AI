@@ -1838,6 +1838,20 @@ class App(tk.Tk):
     #   — 악몽의섬은 2시간 6회를 계속 돌린다. [■ 전체멈춤]·[⏰ 반복]으로 끄는 것은 그대로 동작.
     REPEAT_FIXED = {"토요일_악몽의섬": (2, 6)}      # {던전: (몇시간, 몇회)}
 
+    def _rep_hn(self, key, slot=None):
+        """그 던전의 (몇시간, 몇회).
+        고정 던전(악몽의섬)은 슬롯에 뭐가 적혀 있든 코드값으로 통일한다
+        — 컴퓨터마다·슬롯마다 다르게 되던 것을 한 번에 맞추기 위함."""
+        if key in self.REPEAT_FIXED:
+            return self.REPEAT_FIXED[key]
+        h = n = 0
+        try:
+            h = int((slot or {}).get("repeat_h") or 0)
+            n = int((slot or {}).get("repeat_n") or 0)
+        except Exception:
+            pass
+        return (h or 2), (n or 8)
+
     def _rep_turn_off(self, key, idx):
         """정해진 횟수를 다 채웠으면 섬/던전 설정의 ⏰도 꺼준다.
         (고정 던전은 끄지 않는다 — 계속 돌아야 하므로)"""
@@ -2187,6 +2201,8 @@ class App(tk.Tk):
     def _rep_full_n(self, key, idx):
         """그 슬롯에 정해둔 반복 횟수 (없으면 6회)."""
         try:
+            if key in self.REPEAT_FIXED:
+                return self.REPEAT_FIXED[key][1]          # 악몽의섬 = 항상 6회
             return int(self._island_cfg()[key][idx].get("repeat_n") or 6)
         except Exception:
             return 6
@@ -2283,7 +2299,9 @@ class App(tk.Tk):
                 e = st.get(k)
                 if not e or e.get("h") != h:
                     # 새로 켰거나 시간을 바꿨다 → 지금부터 다시 카운트
-                    st[k] = {"h": h, "left": slot.get("repeat_n") or 8,
+                    _h, _n = self._rep_hn(key, slot)      # 고정 던전은 코드값(2시간 6회)
+                    h = _h
+                    st[k] = {"h": h, "left": _n,
                              "next": now + self._rep_delay(h)}
                     changed = True
                     self._rep_log(f"{key} #{i+1:02d} 반복 등록 — {h}시간 "
@@ -3029,10 +3047,8 @@ class App(tk.Tk):
     def _night_rep_restart(self, slot_idx):
         """그 슬롯의 반복을 '지금부터' 다시 시작 (2시간 N회)."""
         try:
-            h, n = self.REPEAT_FIXED.get(self.NIGHT_KEY, (2, 6))
             slot = (self._island_cfg().get(self.NIGHT_KEY) or [])[slot_idx]
-            h = int(slot.get("repeat_h") or h)
-            n = int(slot.get("repeat_n") or n)
+            h, n = self._rep_hn(self.NIGHT_KEY, slot)     # 악몽의섬 = 항상 2시간 6회
             st = self._rep_load()
             st.pop("_off", None)          # 다시 켰으니 '꺼둠' 표시 해제
             # 사용자가 직접 누른 실행도 '1회차'로 센다 (2026-08-16 사용자 지시)
