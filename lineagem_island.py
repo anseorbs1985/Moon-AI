@@ -409,6 +409,7 @@ class IslandApp(tk.Tk):
         self._plus_btns = {d["key"]: [] for d in DUNGEONS}   # 슬롯별 + 선택 버튼
         self._sel_order = {d["key"]: [] for d in DUNGEONS}   # +로 고른 슬롯 (누른 순서)
         self._rep_vars  = {d["key"]: [] for d in DUNGEONS}   # ⏰ 드롭다운 표시 변수
+        self._repn_vars = {d["key"]: [] for d in DUNGEONS}   # 반복 '횟수' 드롭다운 변수
         self._numsel    = {}                                 # 번호 지정 일괄 입력칸
         self._repeat_left = {}                               # (key,idx) → 남은 반복 횟수
         self._paste_marks = {}                               # 붙여넣기 표시(⭕) 라벨
@@ -964,6 +965,7 @@ class IslandApp(tk.Tk):
             rom.pack(side="left")
             self._rep_vars[key].append(rv)
             nv = tk.StringVar(value=f"{_rn}회")
+            self._repn_vars.setdefault(key, []).append(nv)
             nom = tk.OptionMenu(r5, nv, *[f"{x}회" for x in range(1, 9)],
                                 command=lambda val, k=key, x=i: self._set_repeat_n(k, x, val))
             nom.config(font=("맑은 고딕", 6), width=3, pady=0, highlightthickness=0,
@@ -2560,6 +2562,24 @@ class IslandApp(tk.Tk):
             return (h or fx[0]), (n or fx[1])
         return (h or 2), (n or 8)
 
+    def _sync_rep_cells(self, key):
+        """아래 슬롯 칸의 ⏰(시간)·횟수 드롭다운 표시를 지금 설정과 맞춘다."""
+        slots = self.cfg.get(key) or []
+        for i, sl in enumerate(slots):
+            if not isinstance(sl, dict):
+                continue
+            try:
+                h = int(sl.get("repeat_h") or 0)
+                n = int(sl.get("repeat_n") or 8)
+                vs = (self._rep_vars.get(key) or [])
+                if i < len(vs):
+                    vs[i].set(f"⏰{h}h" if h else "⏰없음")
+                ns = (getattr(self, "_repn_vars", None) or {}).get(key) or []
+                if i < len(ns):
+                    ns[i].set(f"{n}회")
+            except Exception:
+                pass
+
     def _bulk_repeat(self, key, hv, nv):
         """⏰ 반복을 이 던전의 모든 슬롯에 똑같이 건다 (좌표가 있는 슬롯만)."""
         try:
@@ -2580,6 +2600,7 @@ class IslandApp(tk.Tk):
             cnt += 1
         save_cfg(self.cfg)
         self._rep_write(st)
+        self._sync_rep_cells(key)          # 아래 칸의 ⏰/횟수 표시도 같이 바꾼다
         self._refresh_rep_btns()
         self._status.set(f"⏰ {key} — {cnt}개 슬롯 전부 {h}시간 {n}회로 맞췄습니다 "
                          f"(첫 실행 약 {h}시간 뒤)")
@@ -2596,6 +2617,7 @@ class IslandApp(tk.Tk):
             st.pop(f"{key}|{i}", None)
         save_cfg(self.cfg)
         self._rep_write(st)
+        self._sync_rep_cells(key)
         self._refresh_rep_btns()
         self._status.set(f"⏰ {key} — 반복 전부 껐습니다 ({cnt}개 슬롯)")
 
