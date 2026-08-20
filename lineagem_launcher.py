@@ -1426,6 +1426,10 @@ class App(tk.Tk):
                                    bg="#c0392b", fg="white", activebackground="#922b21",
                                    width=9, height=1, pady=2, command=self._open_lock_win)
         self._lock_btn.pack(side="top", pady=(1, 0))
+        tk.Button(sv, text="↩ 되돌리기", font=("맑은 고딕", 8, "bold"),
+                  bg="#7b241c", fg="white", activebackground="#5b1a15",
+                  width=9, height=1, pady=2,
+                  command=self._open_lastrun_win).pack(side="top", pady=(1, 0))
         self._refresh_coord_save_lbl()
         self.after(1500, self._refresh_lock_btn)
         # TJ성공!! 좌측 끝 정렬용 가변 여백 (행이 가운데 정렬이라 오른쪽을 늘려 왼쪽으로 밀기)
@@ -1850,6 +1854,174 @@ class App(tk.Tk):
             os.replace(tmp, path)
         except Exception as e:
             self._rep_log(f"⚠ {key} #{idx+1:02d} ⏰ 끄기 실패: {e!r}")
+
+    # ── ↩ 마지막 실행 시점으로 되돌리기 (섬/던전 좌표) ───────────────
+    DUNGEON_HINT = ("섬", "탑", "에카", "주문서", "카매사")
+
+    def _lr_last_runs(self):
+        """repeat_log.txt 에서 던전별 '마지막으로 클릭이 돌아간 시각'."""
+        import re, datetime as _dt
+        p = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI", "repeat_log.txt")
+        out, hit = {}, 0
+        if not os.path.exists(p):
+            return out, hit
+        year = _dt.date.today().year
+        for ln in open(p, encoding="utf-8", errors="replace"):
+            m = re.match(r"\[(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)\]\s+(?:\[클릭\]\s+)?(\S+)", ln)
+            if not m:
+                continue
+            mm, dd, hh, mi, ss, key = m.groups()
+            if not any(x in key for x in self.DUNGEON_HINT):
+                continue
+            try:
+                t = _dt.datetime(year, int(mm), int(dd), int(hh), int(mi), int(ss))
+            except ValueError:
+                continue
+            if t > _dt.datetime.now() + _dt.timedelta(days=1):
+                t = t.replace(year=year - 1)
+            hit += 1
+            if key not in out or t > out[key]:
+                out[key] = t
+        return out, hit
+
+    @staticmethod
+    def _lr_slots(path, key):
+        try:
+            with open(path, encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            return None
+        v = d.get(key)
+        if not isinstance(v, list) or not v:
+            return None
+        if not any(isinstance(x, dict) and any(x.get("coords") or []) for x in v):
+            return None
+        return v
+
+    def _lr_scan(self):
+        """던전마다 '마지막 실행 시점'으로 되돌릴 자료를 찾는다 (바꾸지는 않음)."""
+        import glob as _g, datetime as _dt
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        runs, hit = self._lr_last_runs()
+        rows, cur = [], {}
+        try:
+            with open(os.path.join(BASE, "island_coords.json"), encoding="utf-8") as f:
+                cur = json.load(f)
+        except Exception:
+            return [], hit, {}
+        for key, t in sorted(runs.items(), key=lambda x: x[1]):
+            srcs = []
+            for q in _g.glob(os.path.join(d, "runsnap", f"{key}_*.json")):
+                srcs.append((_dt.datetime.fromtimestamp(os.path.getmtime(q)), q, "실행직전"))
+            for q in _g.glob(os.path.join(d, "backups", "*island_coords.json")):
+                srcs.append((_dt.datetime.fromtimestamp(os.path.getmtime(q)), q, "백업"))
+            srcs = [x for x in sorted(srcs) if self._lr_slots(x[1], key)]
+            if not srcs:
+                rows.append({"key": key, "run": t, "why": "되돌릴 자료 없음"}); continue
+            before = [x for x in srcs if x[0] <= t + _dt.timedelta(seconds=90)]
+            bt, bp, kind = (before[-1] if before else srcs[0])
+            old = self._lr_slots(bp, key)
+            same = (json.dumps(old, sort_keys=True) == json.dumps(cur.get(key), sort_keys=True))
+            rows.append({"key": key, "run": t, "src": bt, "path": bp, "kind": kind,
+                         "old": old, "same": same,
+                         "cur_n": sum(1 for x in (cur.get(key) or []) if any(x.get("coords") or [])),
+                         "old_n": sum(1 for x in old if any(x.get("coords") or []))})
+        return rows, hit, cur
+
+    def _open_lastrun_win(self):
+        self._open_section_win("_lastrun_win", "↩ 마지막 실행 시점으로 되돌리기",
+                               self._build_lastrun, w=620, h=460, pinnable=True)
+
+    def _build_lastrun(self, parent):
+        tk.Label(parent, text="↩ 섬/던전 좌표를 '그 던전을 마지막으로 실행했던 때'로 되돌립니다",
+                 font=("맑은 고딕", 10, "bold"), fg="#7b241c").pack(anchor="w", padx=6, pady=(6, 2))
+        tk.Label(parent, text="· 되돌리는 것: 좌표·이름·간격·방향·프리셋\n"
+                              "· 그대로 두는 것: 녹화(⏺), 다른 던전, 메인런처 좌표(coords.json) 전부\n"
+                              "· 되돌리기 직전 상태는 자동으로 백업됩니다",
+                 font=("맑은 고딕", 8), fg="#555", justify="left").pack(anchor="w", padx=6)
+        box = tk.Frame(parent, bd=1, relief="groove")
+        box.pack(fill="both", expand=True, padx=6, pady=6)
+        self._lr_rows = []
+        rows, hit, _cur = self._lr_scan()
+        tk.Label(box, text=f"실행 기록에서 찾은 던전 줄: {hit}개",
+                 font=("맑은 고딕", 8), fg="#888").pack(anchor="w", padx=6, pady=(4, 2))
+        if not rows:
+            tk.Label(box, text="던전 실행 기록을 찾지 못했습니다 — 되돌릴 기준이 없습니다.",
+                     font=("맑은 고딕", 9, "bold"), fg="#c0392b").pack(anchor="w", padx=6, pady=6)
+        for r in rows:
+            fr = tk.Frame(box); fr.pack(fill="x", padx=6, pady=2)
+            v = tk.BooleanVar(value=not r.get("same") and "old" in r)
+            if "old" in r:
+                self._lr_rows.append((r, v))
+                tk.Checkbutton(fr, variable=v).pack(side="left")
+                txt = (f"{r['key']}   실행 {r['run']:%m-%d %H:%M}  →  "
+                       f"{r['src']:%m-%d %H:%M} [{r['kind']}]   "
+                       f"{r['cur_n']}슬롯 → {r['old_n']}슬롯")
+                col = "#7f8c8d" if r["same"] else "#1a5276"
+                if r["same"]:
+                    txt += "   (이미 같음)"
+                tk.Label(fr, text=txt, font=("맑은 고딕", 9), fg=col).pack(side="left")
+            else:
+                tk.Label(fr, text=f"{r['key']}   실행 {r['run']:%m-%d %H:%M}  →  ⚠ {r['why']}",
+                         font=("맑은 고딕", 9), fg="#c0392b").pack(side="left", padx=(20, 0))
+        br = tk.Frame(parent); br.pack(fill="x", padx=6, pady=(0, 8))
+        tk.Button(br, text="↩ 체크한 던전 되돌리기", font=("맑은 고딕", 10, "bold"),
+                  bg="#c0392b", fg="white", height=2,
+                  command=self._lr_apply).pack(side="left")
+        tk.Button(br, text="다시 확인", font=("맑은 고딕", 9),
+                  bg="#7f8c8d", fg="white", height=2,
+                  command=lambda: (self._close_subwin(self._lastrun_win),
+                                   self._open_lastrun_win())).pack(side="left", padx=(6, 0))
+        self._lr_msg = tk.Label(parent, text="", font=("맑은 고딕", 9, "bold"), fg="#1e8449",
+                                wraplength=580, justify="left")
+        self._lr_msg.pack(anchor="w", padx=6, pady=(0, 6))
+
+    def _lr_apply(self):
+        """체크한 던전을 그 시점으로 되돌린다 (녹화는 지금 것 유지)."""
+        import datetime as _dt, shutil
+        picks = [(r, v) for r, v in (getattr(self, "_lr_rows", None) or []) if v.get()]
+        if not picks:
+            self._lr_msg.config(text="체크한 던전이 없습니다.", fg="#c0392b"); return
+        path = os.path.join(BASE, "island_coords.json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                cur = json.load(f)
+        except Exception as e:
+            self._lr_msg.config(text=f"실패: {e}", fg="#c0392b"); return
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI", "backups")
+        os.makedirs(d, exist_ok=True)
+        now = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        try:
+            shutil.copy2(path, os.path.join(d, f"{now}_before_restore_island_coords.json"))
+        except Exception:
+            pass
+        names = []
+        for r, _v in picks:
+            new = json.loads(json.dumps(r["old"]))
+            cs = cur.get(r["key"])
+            if isinstance(cs, list):                       # 녹화는 지금 것 유지
+                for i, sl in enumerate(new):
+                    if not isinstance(sl, dict) or i >= len(cs) or not isinstance(cs[i], dict):
+                        continue
+                    for fld in ("recs", "recs_off"):
+                        if fld in cs[i]:
+                            sl[fld] = cs[i][fld]
+                        else:
+                            sl.pop(fld, None)
+            cur[r["key"]] = new
+            names.append(f"{r['key']}({r['src']:%m-%d %H:%M})")
+        try:
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cur, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+        except Exception as e:
+            self._lr_msg.config(text=f"쓰기 실패: {e}", fg="#c0392b"); return
+        self._lr_msg.config(text=f"✔ 되돌렸습니다 — {', '.join(names)}\n"
+                                 f"   녹화는 그대로. 직전 상태는 backups\\{now}_before_restore_* "
+                                 f"에 백업했습니다. 런처를 다시 시작합니다…", fg="#1e8449")
+        self.status.set(f"↩ 되돌림 — {', '.join(names)}")
+        self.after(1500, self._restart_launcher)
 
     # ── 🔒 좌표 잠금 — 잠근 런처는 업데이트(git pull)가 절대 못 건드린다 ──
     #    (%LOCALAPPDATA%\MoonAI\coord_lock.json — 이 컴퓨터만의 파일)
@@ -11139,7 +11311,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_lock_win","_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
+                 "_lastrun_win","_lock_win","_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs
