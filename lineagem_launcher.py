@@ -4334,6 +4334,46 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"기록 비우기 실패: {e}")
 
+    def _user_focus_snap(self):
+        """사용자가 방금까지 조작하던 게임 창과 커서 위치를 기억한다.
+        자동 클릭은 그 창을 앞으로 끌어올려(포커스를 뺏어) 캐릭터 이동을 끊는다 —
+        클릭 직후 원래 창으로 돌려주기 위한 것. 한동안 안 만졌으면 None."""
+        try:
+            import precise_click as _pc
+            if _pc.idle_seconds() > 8.0:       # 안 만지고 있으면 되돌릴 이유가 없다
+                return None
+            import win32gui
+            h = win32gui.GetForegroundWindow()
+            if not h or not _pc.is_game_window(h):
+                return None                    # 게임 창을 보고 있을 때만
+            return (h, pyautogui.position())
+        except Exception:
+            return None
+
+    def _user_focus_back(self, snap, move_cursor=True):
+        """기억해둔 창을 다시 앞으로, 커서도 원래 자리로 (이동이 안 끊기게)."""
+        if not snap:
+            return
+        h, pos = snap
+        try:
+            import win32gui, win32process, ctypes
+            fg = win32gui.GetForegroundWindow()
+            if fg != h and win32gui.IsWindow(h):
+                try:      # 다른 스레드 창은 그냥은 못 올려서 입력 큐를 붙였다 뗀다
+                    cur = win32process.GetWindowThreadProcessId(fg)[0]
+                    tgt = win32process.GetWindowThreadProcessId(h)[0]
+                    ctypes.windll.user32.AttachThreadInput(cur, tgt, True)
+                    try:
+                        win32gui.SetForegroundWindow(h)
+                    finally:
+                        ctypes.windll.user32.AttachThreadInput(cur, tgt, False)
+                except Exception:
+                    pass
+            if move_cursor and pos:
+                pyautogui.moveTo(int(pos[0]), int(pos[1]))
+        except Exception:
+            pass
+
     def _do_click_or_wheel(self, fkey, j, coord, slot=None):
         """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다.
         HOVER_INDICES 에 적힌 자리는 클릭하지 않고 '마우스만 올려놓는다'."""
@@ -4357,9 +4397,13 @@ class App(tk.Tk):
                 time.sleep(random.uniform(0.12, 0.25))
             return f"휠▲{n}"
         self._click_log(fkey, j, coord, slot, "클릭")
+        snap = None
         if fkey in self.CLICK_GUARD:
             self._wait_user_free(f"_{fkey}_stop")   # 사람이 마우스 놓을 때까지
+            if fkey != "sched":                     # 스케줄은 슬롯이 끝난 뒤에 되돌린다
+                snap = self._user_focus_snap()      # 지금 사용자가 보던 창·커서
         click_at(*coord)
+        self._user_focus_back(snap)                 # 곧바로 원래 창·커서로
         return "클릭"
 
     def _run_dgn2_wave(self, fkey, targets, nclk, icon, stop, lanes=4, gap=(2.0, 4.0),
@@ -11286,6 +11330,7 @@ class App(tk.Tk):
                 name   = slot.get("name", f"#{si+1}")
                 coords = slot.get("coords", [None]*SCHED_CLICKS)
                 if not self._wait_mouse_idle("_sched_stop"): return
+                _snap = self._user_focus_snap()   # 사용자가 보던 창 (슬롯 끝나면 복귀)
                 if coords[0]:
                     self.status.set(f"📅 [{name}] 클릭1...")
                     self._wait_user_free("_sched_stop")
@@ -11302,6 +11347,7 @@ class App(tk.Tk):
                     self.status.set(f"📅 [{name}] 클릭2...")
                     self._wait_user_free("_sched_stop")
                     click_at(*coords[2])
+                self._user_focus_back(_snap)      # 이 슬롯 끝 — 사용자 창으로 복귀
                 if self._sched_stop: break
                 time.sleep(random.uniform(1.38, 1.80))   # 슬롯 사이 (2.3~3.0초에서 40% 줄임)
             self.status.set("✔ 매일매일 스케줄 완료!")
@@ -11354,12 +11400,15 @@ class App(tk.Tk):
                 if coords[0]:
                     self.status.set(f"📅 [{name}] 클릭1...  (남은 슬롯 {len(alive)})")
                     self._wait_user_free("_sched_stop")
+                    _snap = self._user_focus_snap()
                     click_at(*coords[0])
+                    self._user_focus_back(_snap)
                     done += 1
                 st["due"] = time.time() + random.uniform(1.8, 3.0)   # 클릭1 뒤 여유
             else:
                 # ── 좌표2 → 좌표3 은 여기서 '한 번에' 끝낸다 ──
                 # 사이에 다른 슬롯이 끼면 올려둔 자리가 풀려 클릭2가 씹힌다.
+                _snap = self._user_focus_snap()   # 묶음 끝나면 사용자 창으로 복귀
                 if coords[1]:
                     self.status.set(f"📅 [{name}] 마우스 이동...")
                     self._wait_user_free("_sched_stop")
@@ -11370,6 +11419,7 @@ class App(tk.Tk):
                     self._wait_user_free("_sched_stop")
                     click_at(*coords[2])
                     done += 1
+                self._user_focus_back(_snap)
                 st["due"] = time.time() + random.uniform(1.9, 2.5)   # 슬롯 끝 대기 (40% 단축)
             st["u"] += 1
             time.sleep(random.uniform(0.25, 0.5))        # 클릭끼리 최소 간격
