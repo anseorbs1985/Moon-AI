@@ -4417,23 +4417,8 @@ class App(tk.Tk):
                 # 낚시녹임은 번갈아(웨이브) 실행 — 동시 4슬롯, 좌표 간격 2~4초 랜덤
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop)
                 return
-            if fkey == "knight" and slot_idx is None and len(targets) > 1:
-                # 흑기사 — 2슬롯씩 번갈아, 슬롯 순서는 번호대로.
-                # 좌표 간격은 정해둔 범위에서 랜덤, 좌표2→3만 7~10초 더 쉰다.
-                _cl = sum(1 for _si, _sl in targets
-                          for _c in (_sl.get("coords") or [])[:nclk] if _c)
-                _avg = (KNIGHT_GAP_MIN + KNIGHT_GAP_MAX) / 2 + 0.15
-                _ex = sum((sum(v) / 2 if isinstance(v, (tuple, list)) else v)
-                          for v in KNIGHT_EXTRA.values())
-                _est = int(len(targets) / 2 * (nclk * _avg + _ex + 1.15))
-                self.status.set(f"🖤 던전끝! 흑기사!! — {len(targets)}슬롯 / 클릭 {_cl}회, "
-                                f"2슬롯 번갈아 (간격 {KNIGHT_GAP_MIN:.1f}~{KNIGHT_GAP_MAX:.1f}초, "
-                                f"좌표2→3은 +{KNIGHT_EXTRA[1][0]:.1f}~{KNIGHT_EXTRA[1][1]:.1f}초, "
-                                f"약 {_est//60}분 {_est%60}초 예상)")
-                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
-                                    gap=(KNIGHT_GAP_MIN, KNIGHT_GAP_MAX),
-                                    slot_gap=(1.0, 2.5), keep_order=True)
-                return
+            # 흑기사는 웨이브를 쓰지 않는다 (2026-08-21 사용자 지시) —
+            # 한 슬롯의 좌표 5개를 끝까지 누르고 나서 다음 슬롯으로 넘어간다.
             if fkey == "dragon" and slot_idx is None and len(targets) > 1:
                 # 용던고고 — 2슬롯씩 번갈아(웨이브), 슬롯 순서는 번호대로.
                 # 시간을 억지로 맞추지 않는다 — 정해둔 범위에서 랜덤으로 쉬고,
@@ -4457,7 +4442,11 @@ class App(tk.Tk):
                 # 남은 시간 ÷ 남은 클릭 수로 간격을 매번 다시 계산해 스스로 맞춘다.
                 _left = sum(1 for _si, _sl in targets
                             for _c in (_sl.get("coords") or [])[:nclk] if _c)
-                self.status.set(f"🐲 용던고고!!! — {len(targets)}슬롯 / 클릭 {_left}회")
+                _tt = "🖤 던전끝! 흑기사!!" if fkey == "knight" else "🐲 용던고고!!!"
+                _mn, _mx = ((KNIGHT_GAP_MIN, KNIGHT_GAP_MAX) if fkey == "knight"
+                            else (DRAGON_GAP_MIN, DRAGON_GAP_MAX))
+                self.status.set(f"{_tt} — {len(targets)}슬롯 / 클릭 {_left}회, "
+                                f"한 슬롯씩 차례로 (간격 {_mn:.1f}~{_mx:.1f}초)")
             for tn, (si, slot) in enumerate(targets):
                 if getattr(self, stop, False): break
                 name = slot.get("name", f"#{si+1}")
