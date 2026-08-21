@@ -137,6 +137,13 @@ KNIGHT_GAP_MAX     = 2.5   # 좌표 간격 최대
 KNIGHT_EXTRA       = {1: (7.0, 10.0)}   # 좌표2 뒤(2→3 사이)에 7~10초 더 쉰다
 
 # 런처별 '그 좌표 뒤에 더 쉬는 시간'
+# 클릭하지 않고 '마우스만 올려놓는' 좌표 (0부터 셈 — 2 = 좌표3)
+HOVER_INDICES = {"knight": {2}}
+
+# 이 좌표와 '바로 다음 좌표'는 한 묶음으로 — 사이에 다른 슬롯이 끼지 못하게 한다
+# (마우스를 올려둔 상태에서 다른 곳을 누르면 다음 클릭이 씹힌다)
+ATOMIC_NEXT = {"knight": {2}}
+
 EXTRA_GAPS = {"dragon": DRAGON_EXTRA, "knight": KNIGHT_EXTRA}
 
 
@@ -4246,7 +4253,11 @@ class App(tk.Tk):
             return default
 
     def _do_click_or_wheel(self, fkey, j, coord, slot=None):
-        """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다."""
+        """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다.
+        HOVER_INDICES 에 적힌 자리는 클릭하지 않고 '마우스만 올려놓는다'."""
+        if j in HOVER_INDICES.get(fkey, ()):
+            move_at(*coord)                   # 커서는 그대로, 그 자리에 올림 신호만
+            return "마우스올림"
         n = self._slot_wheel(slot, j) if slot else 0
         if not n and j in WHEEL_UP_INDICES.get(fkey, ()):
             n = WHEEL_UP_NOTCH                # 슬롯 설정이 없으면 기본값
@@ -4333,6 +4344,16 @@ class App(tk.Tk):
                 _act = self._do_click_or_wheel(fkey, j, coords[j], st["slot"])
             self.status.set(f"{icon} [{name}] {_act}{j+1}/{nclk}  (남은 슬롯 {len(alive)})")
             done += 1
+            # 묶음 자리 — 다음 좌표를 '바로 이어서' 처리한다 (다른 슬롯이 끼어들지 못하게)
+            while (j in ATOMIC_NEXT.get(fkey, ()) and j + 1 < nclk
+                   and j + 1 < len(coords) and coords[j + 1]
+                   and not getattr(self, stop, False)):
+                time.sleep(random.uniform(0.35, 0.8))   # 올려둔 채 잠깐 뒤 바로
+                _a2 = self._do_click_or_wheel(fkey, j + 1, coords[j + 1], st["slot"])
+                self.status.set(f"{icon} [{name}] {_a2}{j+2}/{nclk}  (앞 좌표와 묶음)")
+                done += 1
+                j += 1
+                st["j"] = j + 1
             _g = self._slot_gap(st["slot"], j)          # 칸에 적어둔 초가 있으면 그걸로
             _base = _g if _g is not None else random.uniform(*gap)
             if fkey in EXTRA_GAPS:
