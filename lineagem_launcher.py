@@ -1922,9 +1922,28 @@ class App(tk.Tk):
     #   악몽의섬 6회 = 4시간 1회 + 2시간 5회
     REPEAT_FIRST = {"토요일_악몽의섬": 4}          # {던전: 첫 대기 시간(시간)}
 
-    def _rep_first_h(self, key, h):
-        """그 던전의 '첫 대기 시간' — 정해둔 게 없으면 평소 주기 그대로."""
-        return int(self.REPEAT_FIRST.get(key, h) or h)
+    def _rep_first_h(self, key, h, idx=None):
+        """그 던전의 '첫 대기 시간'.
+        슬롯 번호를 주면 그 슬롯이 '첫 4시간' 모드일 때만 4시간을 쓴다
+        (첫 4시간을 이미 돌았거나 팅긴 뒤엔 2시간부터 다시 돌리려고 — 2026-08-22)."""
+        f = int(self.REPEAT_FIRST.get(key, h) or h)
+        if f == h or idx is None:
+            return f
+        return f if self._rep_first_on(key, idx) else h
+
+    def _rep_first_on(self, key, idx):
+        """그 슬롯이 '4시간 → 2시간' 모드인가 (기본 켜짐)."""
+        try:
+            return bool(self._rep_load().get("_first", {}).get(f"{key}|{idx}", True))
+        except Exception:
+            return True
+
+    def _rep_first_set(self, key, idx, on):
+        st = self._rep_load()
+        d = st.get("_first") or {}
+        d[f"{key}|{idx}"] = bool(on)
+        st["_first"] = d
+        self._rep_save(st)
 
     def _rep_hn(self, key, slot=None):
         """그 던전의 (몇시간, 몇회).
@@ -2389,7 +2408,7 @@ class App(tk.Tk):
                     # 새로 켰거나 시간을 바꿨다 → 지금부터 다시 카운트
                     _h, _n = self._rep_hn(key, slot)      # 고정 던전은 코드값(2시간 6회)
                     h = _h
-                    _f = self._rep_first_h(key, h)        # 첫 회차만 다른 시간(악몽 4시간)
+                    _f = self._rep_first_h(key, h, i)     # 첫 회차만 다른 시간(악몽 4시간)
                     st[k] = {"h": h, "left": _n,
                              "next": now + self._rep_delay(_f)}
                     changed = True
@@ -2979,6 +2998,7 @@ class App(tk.Tk):
                   command=lambda: self._night_sel_clear()).pack(side="left", padx=(4, 0))
         wg = tk.Frame(parent); wg.pack(anchor="w")
         self._night_btns = []; self._night_plus = []; self._night_runbtns = []
+        self._night_firstbtns = []      # 첫 회차 4시간/2시간 선택
         self._night_sel = set()
         self._night_queue = []          # 눌러둔 슬롯을 쌓아두고 하나씩 실행
         for idx in range(16):
@@ -3001,6 +3021,11 @@ class App(tk.Tk):
                            bg="#c0392b", fg="white", activebackground="#922b21",
                            width=1, command=lambda x=idx: self._night_rep_cancel(x))
             cb.pack(side="left", padx=(1, 0))
+            # 첫 회차 시간 고르기 — [4h→2h] ↔ [2h만]
+            fb = tk.Button(cell, font=("맑은 고딕", 7, "bold"), width=6,
+                           command=lambda x=idx: self._night_first_toggle(x))
+            fb.pack(pady=(1, 0))
+            self._night_firstbtns.append(fb)
             pb = tk.Button(cell, text="+", font=("맑은 고딕", 7, "bold"), width=6,
                            bg="#dfe3e6", fg="#e67e22",
                            command=lambda x=idx: self._night_sel_toggle(x))
@@ -3075,6 +3100,15 @@ class App(tk.Tk):
                              bg=self.REP_LEFT_COLORS.get(n, "#34495e"))
                 else:
                     b.config(text="⏰꺼짐", bg="#7f8c8d")
+            h, _n = self._rep_hn(self.NIGHT_KEY)
+            f = int(self.REPEAT_FIRST.get(self.NIGHT_KEY, h) or h)
+            for i, b in enumerate(getattr(self, "_night_firstbtns", []) or []):
+                if not b.winfo_exists():
+                    continue
+                if self._rep_first_on(self.NIGHT_KEY, i):
+                    b.config(text=f"{f}h→{h}h", bg="#196f3d", fg="white")
+                else:
+                    b.config(text=f"{h}h만", bg="#b3b6b7", fg="#2c3e50")
         except Exception:
             pass
         self.after(20000, self._refresh_night_btns)
@@ -3145,7 +3179,7 @@ class App(tk.Tk):
         try:
             slot = (self._island_cfg().get(self.NIGHT_KEY) or [])[slot_idx]
             h, n = self._rep_hn(self.NIGHT_KEY, slot)     # 악몽의섬 = 2시간 6회
-            f = self._rep_first_h(self.NIGHT_KEY, h)      # 첫 대기만 4시간
+            f = self._rep_first_h(self.NIGHT_KEY, h, slot_idx)   # 슬롯이 4시간 모드면 4시간
             st = self._rep_load()
             st.pop("_off", None)          # 다시 켰으니 '꺼둠' 표시 해제
             # 사용자가 직접 누른 실행도 '1회차'로 센다 (2026-08-16 사용자 지시)
@@ -3158,6 +3192,31 @@ class App(tk.Tk):
             self._refresh_night_btns()
         except Exception as e:
             self._rep_log(f"⚠ 악몽의섬 #{slot_idx+1:02d} 반복 재시작 실패: {e!r}")
+
+    def _night_first_toggle(self, slot_idx):
+        """첫 회차를 4시간으로 시작할지, 처음부터 2시간으로 할지 고른다.
+        (4시간짜리를 이미 돌았거나 팅긴 뒤엔 2시간부터 다시 돌리려고)"""
+        on = not self._rep_first_on(self.NIGHT_KEY, slot_idx)
+        self._rep_first_set(self.NIGHT_KEY, slot_idx, on)
+        h, _n = self._rep_hn(self.NIGHT_KEY)
+        f = int(self.REPEAT_FIRST.get(self.NIGHT_KEY, h) or h)
+        # 이미 걸려 있는 예약이 아직 한 번도 안 돌았으면 그 대기 시간도 맞춰 고친다
+        try:
+            st = self._rep_load()
+            k = f"{self.NIGHT_KEY}|{slot_idx}"
+            e = st.get(k)
+            if e and not int(e.get("run", 0)):
+                e["next"] = time.time() + self._rep_delay(f if on else h)
+                st[k] = e
+                self._rep_save(st)
+        except Exception:
+            pass
+        self._rep_log(f"{self.NIGHT_KEY} #{slot_idx+1:02d} 첫 회차 "
+                      f"{'%d시간' % f if on else '%d시간' % h} 으로 설정 (사용자)")
+        self.status.set(f"악몽의섬 #{slot_idx+1:02d} — "
+                        + (f"첫 회차 {f}시간, 그 다음부터 {h}시간"
+                           if on else f"처음부터 {h}시간"))
+        self._refresh_night_btns()
 
     def _night_rep_cancel(self, slot_idx):
         """✕ — 그 슬롯의 ⏰ 반복만 취소한다 (토글 아님, 끄기만).

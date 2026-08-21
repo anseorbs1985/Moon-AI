@@ -2551,9 +2551,18 @@ class IslandApp(tk.Tk):
     # 반복을 새로 걸 때 '첫 회차만' 이 시간 (2026-08-22 — 악몽 6회 = 4시간 1회 + 2시간 5회)
     REPEAT_FIRST = {"토요일_악몽의섬": 4}
 
-    def _rep_first_h(self, key, h):
-        """첫 대기 시간 — 정해둔 게 없으면 평소 주기 그대로."""
-        return int(self.REPEAT_FIRST.get(key, h) or h)
+    def _rep_first_h(self, key, h, idx=None):
+        """첫 대기 시간 — 슬롯이 '4시간 → 2시간' 모드일 때만 다른 시간을 쓴다.
+        (선택은 메인런처 악몽의섬 판의 [4h→2h]/[2h만] 버튼과 같은 파일을 본다)"""
+        f = int(self.REPEAT_FIRST.get(key, h) or h)
+        if f == h or idx is None:
+            return f
+        try:
+            if not self._rep_state().get("_first", {}).get(f"{key}|{idx}", True):
+                return h
+        except Exception:
+            pass
+        return f
 
     def _rep_hn(self, key, slot=None):
         """그 던전의 (몇시간, 몇회).
@@ -2605,7 +2614,7 @@ class IslandApp(tk.Tk):
             sl["repeat_h"] = h
             sl["repeat_n"] = n
             st[f"{key}|{i}"] = {"h": h, "left": n, "run": 0,
-                                "next": now + self._rep_first_h(key, h) * 3600}
+                                "next": now + self._rep_first_h(key, h, i) * 3600}
             cnt += 1
         save_cfg(self.cfg)
         self._rep_write(st)
@@ -2679,7 +2688,7 @@ class IslandApp(tk.Tk):
                 h, n = self._rep_hn(key, slot)    # 고정 던전은 코드값(2시간 6회)
                 st.pop("_off", None)      # 직접 실행했으니 '꺼둠' 표시 해제
                 st[f"{key}|{i}"] = {"h": h, "left": max(0, n - 1), "run": 1,
-                                    "next": now + self._rep_first_h(key, h) * 3600}
+                                    "next": now + self._rep_first_h(key, h, i) * 3600}
                 done.append((i + 1, h, n))
             if done:
                 tmp = f + ".tmp"
@@ -2766,7 +2775,7 @@ class IslandApp(tk.Tk):
                 pass
             st.pop("_off", None)          # 사용자가 다시 켰으니 '꺼둠' 표시 해제
             st[k] = {"h": h, "left": n,
-                     "next": time.time() + self._rep_first_h(key, h) * 3600}
+                     "next": time.time() + self._rep_first_h(key, h, idx) * 3600}
             self._rep_write(st)
             self._status.set(f"⏰ {key} #{idx+1:02d} 반복 다시 시작 — {h}시간 {n}회")
         self._refresh_rep_btns()
