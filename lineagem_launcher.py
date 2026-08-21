@@ -167,7 +167,7 @@ DC_TAPS_MAX    = 9     # 한 좌표당 연속 클릭 횟수(최대)
 DC_BURST_MIN   = 1.0   # 한 좌표의 7~9회 클릭을 이 시간(초) 안에 모두 실행
 DC_BURST_MAX   = 2.0
 FISH_SLOTS     = 16    # 낚시녹임 슬롯 수 (인형탐험과 동일 구조)
-FISH_CLICKS    = 18    # 낚시녹임 좌표 수
+FISH_CLICKS    = 19    # 낚시녹임 좌표 수 (2026-08-19 맨 앞에 하나 추가)
 CIRCUS_SLOTS   = 16    # 서커스이벤트 슬롯 수 (낚시녹임과 동일 구조)
 CIRCUS_CLICKS  = 9     # 서커스이벤트 좌표 수 (9번은 8번을 따라감)
 CIRCUS2_SLOTS  = 16    # 서커스 이벤트실행 슬롯 수
@@ -533,14 +533,28 @@ def load_cfg():
         while len(dq) < DC_SLOTS:
             dq.append(None)
         cfg["dc_slots"] = dq[:DC_SLOTS]
-        # fish_slots (낚시녹임 16슬롯 × 18좌표)
+        # fish_slots (낚시녹임 16슬롯 × 19좌표)
+        # (2026-08-19) 맨 앞에 좌표 하나를 새로 넣는다 — 기존 좌표는 한 칸씩 밀려
+        # 클릭1→클릭2 … 순서는 그대로. 컴퓨터마다 한 번만 밀도록 표시를 남긴다.
+        if not cfg.get("_fish_front_v2"):
+            for s_ in (cfg.get("fish_slots") or []):
+                if not isinstance(s_, dict):
+                    continue
+                for fld in ("coords", "gap_list", "wheel_list", "paste_list"):
+                    v = s_.get(fld)
+                    if isinstance(v, list) and len(v) < FISH_CLICKS:
+                        v.insert(0, None if fld != "wheel_list" else 0)
+            cfg["_fish_front_v2"] = True
         fl, nfl = cfg.get("fish_slots", []), []
         for s_ in fl:
             c = s_.get("coords", [None]*FISH_CLICKS) if isinstance(s_, dict) else [None]*FISH_CLICKS
             while len(c) < FISH_CLICKS: c.append(None)
+            _e = {k: v for k, v in (s_.items() if isinstance(s_, dict) else [])
+                  if k in ("gap_list", "wheel_list", "paste_list")}
             nfl.append({"name": s_.get("name", "미등록") if isinstance(s_, dict) else "미등록",
                         "coords": c[:FISH_CLICKS],
-                        "enabled": s_.get("enabled", True) if isinstance(s_, dict) else True})
+                        "enabled": s_.get("enabled", True) if isinstance(s_, dict) else True,
+                        **_e})
         while len(nfl) < FISH_SLOTS:
             nfl.append({"name": "미등록", "coords": [None]*FISH_CLICKS, "enabled": True})
         cfg["fish_slots"] = nfl[:FISH_SLOTS]
