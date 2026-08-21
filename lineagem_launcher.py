@@ -134,7 +134,7 @@ DRAGON_EXTRA       = {1: (2.5, 4.0)}   # 좌표2→3 은 부하가 커서 2.5~4.
 KNIGHT_CLICKS      = 5     # 던전끝! 흑기사!! — 슬롯당 좌표 5개
 KNIGHT_GAP_MIN     = 1.0   # 좌표 간격 최소
 KNIGHT_GAP_MAX     = 2.5   # 좌표 간격 최대
-KNIGHT_EXTRA       = {1: (7.0, 10.0)}   # 좌표2 뒤(2→3 사이)에 7~10초 더 쉰다
+KNIGHT_EXTRA       = {1: (9.1, 13.0)}   # 좌표2 뒤(2→3 사이)에 9.1~13초 더 쉰다 (7~10초에서 30% 늘림)
 
 # 런처별 '그 좌표 뒤에 더 쉬는 시간'
 # 클릭하지 않고 '마우스만 올려놓는' 좌표 (0부터 셈 — 2 = 좌표3)
@@ -4428,7 +4428,7 @@ class App(tk.Tk):
                 _est = int(len(targets) / 2 * (nclk * _avg + _ex + 1.15))
                 self.status.set(f"🖤 던전끝! 흑기사!! — {len(targets)}슬롯 / 클릭 {_cl}회, "
                                 f"2슬롯 번갈아 (간격 {KNIGHT_GAP_MIN:.1f}~{KNIGHT_GAP_MAX:.1f}초, "
-                                f"좌표2→3은 +{KNIGHT_EXTRA[1][0]:.0f}~{KNIGHT_EXTRA[1][1]:.0f}초, "
+                                f"좌표2→3은 +{KNIGHT_EXTRA[1][0]:.1f}~{KNIGHT_EXTRA[1][1]:.1f}초, "
                                 f"약 {_est//60}분 {_est%60}초 예상)")
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
                                     gap=(KNIGHT_GAP_MIN, KNIGHT_GAP_MAX),
