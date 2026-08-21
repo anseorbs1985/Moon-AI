@@ -771,20 +771,27 @@ class IslandApp(tk.Tk):
         # 1줄: ⏰ 반복 시간·횟수
         b1 = tk.Frame(ab); b1.pack(fill="x")
         tk.Label(b1, text="⏰", font=("맑은 고딕", 8)).pack(side="left")
+        # 지금 걸려 있는 값이 있으면 그대로, 없으면 고정 던전 기본값
+        _cur_h = next((int(x.get("repeat_h") or 0) for x in (self.cfg.get(key) or [])
+                       if isinstance(x, dict) and (x.get("repeat_h") or 0)), 0)
+        _cur_n = next((int(x.get("repeat_n") or 0) for x in (self.cfg.get(key) or [])
+                       if isinstance(x, dict) and (x.get("repeat_n") or 0)), 0)
         _h0, _n0 = self._rep_hn(key)
-        hv = tk.StringVar(value=str(_h0))
-        nv2 = tk.StringVar(value=str(_n0))
+        hv = tk.StringVar(value=str(_cur_h or _h0))
+        nv2 = tk.StringVar(value=str(_cur_n or _n0))
+        tk.Label(b1, text=("지금 " + (f"{_cur_h}시간 {_cur_n or _n0}회" if _cur_h else "반복 없음")),
+                 font=("맑은 고딕", 7), fg=("#1e8449" if _cur_h else "#7f8c8d")).pack(side="right")
         tk.Spinbox(b1, from_=1, to=12, textvariable=hv, width=2,
                    font=("맑은 고딕", 8)).pack(side="left")
         tk.Label(b1, text="시간", font=("맑은 고딕", 7)).pack(side="left")
         tk.Spinbox(b1, from_=1, to=20, textvariable=nv2, width=2,
                    font=("맑은 고딕", 8)).pack(side="left", padx=(2, 0))
         tk.Label(b1, text="회", font=("맑은 고딕", 7)).pack(side="left")
-        tk.Button(b1, text="전체 적용", font=("맑은 고딕", 7, "bold"),
+        tk.Button(b1, text="⏰ 반복 켜기(전체)", font=("맑은 고딕", 7, "bold"),
                   bg="#7b241c", fg="white",
                   command=lambda k=key, a_=hv, b_=nv2: self._bulk_repeat(k, a_, b_)
                   ).pack(side="left", padx=(4, 0))
-        tk.Button(b1, text="전체 끄기", font=("맑은 고딕", 7),
+        tk.Button(b1, text="⏰ 반복 끄기(전체)", font=("맑은 고딕", 7, "bold"),
                   bg="#7f8c8d", fg="white",
                   command=lambda k=key: self._bulk_repeat_off(k)).pack(side="left", padx=(3, 0))
         # 2줄: 프리셋(물약) 전체 적용
@@ -795,7 +802,7 @@ class IslandApp(tk.Tk):
         om = tk.OptionMenu(b2, pv, *(names or [""]))
         om.config(font=("맑은 고딕", 7), width=14, pady=0, highlightthickness=0)
         om.pack(side="left")
-        tk.Button(b2, text="전체 적용", font=("맑은 고딕", 7, "bold"),
+        tk.Button(b2, text="🧪 물약 전체 적용", font=("맑은 고딕", 7, "bold"),
                   bg="#7b241c", fg="white",
                   command=lambda k=key, v=pv, nm=names: self._bulk_preset(k, v, nm)
                   ).pack(side="left", padx=(4, 0))
@@ -2602,6 +2609,7 @@ class IslandApp(tk.Tk):
         self._rep_write(st)
         self._sync_rep_cells(key)          # 아래 칸의 ⏰/횟수 표시도 같이 바꾼다
         self._refresh_rep_btns()
+        self._rlog(f"{key} 전체 일괄 — {cnt}개 슬롯에 {h}시간 {n}회 반복 켬 (사용자)")
         self._status.set(f"⏰ {key} — {cnt}개 슬롯 전부 {h}시간 {n}회로 맞췄습니다 "
                          f"(첫 실행 약 {h}시간 뒤)")
 
@@ -2619,6 +2627,7 @@ class IslandApp(tk.Tk):
         self._rep_write(st)
         self._sync_rep_cells(key)
         self._refresh_rep_btns()
+        self._rlog(f"{key} 전체 일괄 — 반복 전부 끔 ({cnt}개 슬롯, 사용자)")
         self._status.set(f"⏰ {key} — 반복 전부 껐습니다 ({cnt}개 슬롯)")
 
     def _bulk_preset(self, key, pv, names):
