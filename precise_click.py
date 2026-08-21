@@ -151,14 +151,38 @@ def game_window_at(x, y):
     return found[0] if found else None
 
 
+LAST = {}      # 마지막으로 신호를 보낸 창 (진단용 — 런처가 기록에 적는다)
+
+
+def window_title(h):
+    """창 제목 (없으면 빈 문자열)."""
+    try:
+        u = ctypes.windll.user32
+        n = u.GetWindowTextLengthW(h)
+        if not n:
+            return ""
+        buf = ctypes.create_unicode_buffer(n + 1)
+        u.GetWindowTextW(h, buf, n + 1)
+        return buf.value
+    except Exception:
+        return ""
+
+
 def _target_hwnd(x, y):
-    """클릭을 보낼 창 — 그 자리의 리니지M 창을 우선한다."""
+    """클릭을 보낼 창 — 그 자리의 리니지M 창을 우선한다.
+    어느 창으로 갔는지 LAST 에 남긴다 (씹힘 진단용)."""
     u = ctypes.windll.user32
     h = game_window_at(x, y)
     if h:
+        LAST.clear()
+        LAST.update(hwnd=int(h), title=window_title(h), game=True)
         return h
     pt = ctypes.wintypes.POINT(int(x), int(y))     # 리니지M이 아니면 예전처럼
-    return u.WindowFromPoint(pt) or None
+    h2 = u.WindowFromPoint(pt) or None
+    LAST.clear()
+    LAST.update(hwnd=int(h2) if h2 else 0,
+                title=window_title(h2) if h2 else "", game=False)
+    return h2
 
 
 def post_click(x, y, double=False):

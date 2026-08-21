@@ -703,6 +703,34 @@ def find_purple():
 NO_CURSOR_CLICK = True
 
 
+CLICK_LOG = os.path.join(LOCAL_DATA, "click_log.txt")   # 클릭이 어느 창에 갔는지 기록
+
+
+def click_target(x, y):
+    """그 좌표를 받아줄 창 이름 — 리니지M 창이 없으면 ('', False)."""
+    try:
+        import precise_click as _pc
+        h = _pc.game_window_at(x, y)
+        if h:
+            return _pc.window_title(h), True
+        import ctypes, ctypes.wintypes
+        pt = ctypes.wintypes.POINT(int(x), int(y))
+        h2 = ctypes.windll.user32.WindowFromPoint(pt)
+        return (_pc.window_title(h2) if h2 else ""), False
+    except Exception:
+        return "", False
+
+
+def click_log(line):
+    """클릭 기록 한 줄 남기기 (LOCALAPPDATA/MoonAI/click_log.txt)."""
+    try:
+        os.makedirs(LOCAL_DATA, exist_ok=True)
+        with open(CLICK_LOG, "a", encoding="utf-8") as f:
+            f.write(time.strftime("%m-%d %H:%M:%S ") + line + "\n")
+    except Exception:
+        pass
+
+
 def move_at(x, y):
     """마우스를 '올려놓기'만 하는 자리 — 커서를 움직이지 않고 신호만 보낸다.
     실패하면 예전처럼 커서를 옮긴다."""
@@ -3983,6 +4011,14 @@ class App(tk.Tk):
             state="disabled")
         stopb.pack(side="left")
         setattr(self, f"btn_{fkey}_stop", stopb)
+        if fkey in self.LOG_FKEYS:
+            # 클릭이 어느 창에 갔는지 남긴 기록 — 씹히는 자리를 찾을 때 본다
+            tk.Button(dr, text="📋 클릭기록", font=("맑은 고딕", 8),
+                      bg="#34495e", fg="white", width=9, height=2,
+                      command=self._open_click_log).pack(side="left", padx=(3, 0))
+            tk.Button(dr, text="비우기", font=("맑은 고딕", 8),
+                      bg="#95a5a6", fg="white", width=6, height=2,
+                      command=self._clear_click_log).pack(side="left", padx=(2, 0))
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
         self._build_slot_grid(parent, fkey)   # 4×4 그리드 (화면 배치와 동일)
 
@@ -4252,10 +4288,61 @@ class App(tk.Tk):
         except Exception:
             return default
 
+    LOG_FKEYS = ("knight", "dragon")      # 클릭이 어느 창에 갔는지 기록해두는 런처
+
+    def _click_log(self, fkey, j, coord, slot, act):
+        """이 클릭이 '리니지M 창'에 제대로 갔는지 기록한다 (씹힘 찾기용)."""
+        if fkey not in self.LOG_FKEYS:
+            return
+        nm = (slot or {}).get("name", "?")
+        tt, ok = click_target(coord[0], coord[1])
+        if ok:
+            click_log(f"{fkey} [{nm}] 좌표{j+1} ({coord[0]},{coord[1]}) {act} → {tt}")
+        else:
+            click_log(f"{fkey} [{nm}] 좌표{j+1} ({coord[0]},{coord[1]}) {act} "
+                      f"→ ⚠ 그 자리에 리니지M 창이 없음"
+                      + (f" (덮은 창: {tt})" if tt else ""))
+            try:
+                self.status.set(f"⚠ [{nm}] 좌표{j+1} — 그 자리에 리니지M 창이 없습니다 "
+                                f"(클릭이 씹히는 자리)")
+            except Exception:
+                pass
+
+    def _wait_gap(self, stop, name, j, secs):
+        """좌표 사이 대기 — 남은 초를 계속 보여준다 (멈춘 것처럼 보이지 않게)."""
+        t_end = time.time() + secs
+        while True:
+            left = t_end - time.time()
+            if left <= 0 or getattr(self, stop, False):
+                return
+            if secs >= 3.0:
+                self.status.set(f"⏳ [{name}] 좌표{j+1} 다음까지 {left:.0f}초 "
+                                f"(이번 대기 {secs:.1f}초)")
+            time.sleep(min(0.4, max(0.05, left)))
+
+    def _open_click_log(self):
+        """클릭 기록 파일을 연다 — 어느 클릭이 리니지M 창에 안 갔는지 볼 수 있다."""
+        try:
+            os.makedirs(LOCAL_DATA, exist_ok=True)
+            if not os.path.exists(CLICK_LOG):
+                click_log("(기록 시작)")
+            os.startfile(CLICK_LOG)
+            self.status.set("클릭 기록을 열었습니다 — ⚠ 표시가 씹힌 자리입니다")
+        except Exception as e:
+            self.status.set(f"기록 열기 실패: {e}")
+
+    def _clear_click_log(self):
+        try:
+            open(CLICK_LOG, "w", encoding="utf-8").close()
+            self.status.set("클릭 기록을 비웠습니다")
+        except Exception as e:
+            self.status.set(f"기록 비우기 실패: {e}")
+
     def _do_click_or_wheel(self, fkey, j, coord, slot=None):
         """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다.
         HOVER_INDICES 에 적힌 자리는 클릭하지 않고 '마우스만 올려놓는다'."""
         if j in HOVER_INDICES.get(fkey, ()):
+            self._click_log(fkey, j, coord, slot, "마우스올림")
             move_at(*coord)                   # 커서는 그대로, 그 자리에 올림 신호만
             return "마우스올림"
         n = self._slot_wheel(slot, j) if slot else 0
@@ -4285,6 +4372,7 @@ class App(tk.Tk):
                         pyautogui.scroll(int(n) * 120)
                     time.sleep(random.uniform(0.12, 0.25))
             return f"휠▲{n}"
+        self._click_log(fkey, j, coord, slot, "클릭")
         click_at(*coord)
         return "클릭"
 
@@ -4480,7 +4568,8 @@ class App(tk.Tk):
                         _left -= 1
                         _mn, _mx = ((KNIGHT_GAP_MIN, KNIGHT_GAP_MAX) if fkey == "knight"
                                     else (DRAGON_GAP_MIN, DRAGON_GAP_MAX))
-                        time.sleep(random.uniform(_mn, _mx) + extra_gap(fkey, j))
+                        self._wait_gap(stop, name, j,
+                                       random.uniform(_mn, _mx) + extra_gap(fkey, j))
                     if n < len(order) - 1:
                         if fkey == "eventshop" and j == 0:
                             # 이벤트상점: 클릭1 → 4초 × 1.15~1.30 랜덤 증가 후 클릭2
