@@ -2548,6 +2548,12 @@ class IslandApp(tk.Tk):
 
     # 런처와 같은 고정 반복 설정 — {던전: (몇시간, 몇회)}
     REPEAT_FIXED = {"토요일_악몽의섬": (2, 6)}
+    # 반복을 새로 걸 때 '첫 회차만' 이 시간 (2026-08-22 — 악몽 6회 = 4시간 1회 + 2시간 5회)
+    REPEAT_FIRST = {"토요일_악몽의섬": 4}
+
+    def _rep_first_h(self, key, h):
+        """첫 대기 시간 — 정해둔 게 없으면 평소 주기 그대로."""
+        return int(self.REPEAT_FIRST.get(key, h) or h)
 
     def _rep_hn(self, key, slot=None):
         """그 던전의 (몇시간, 몇회).
@@ -2598,7 +2604,8 @@ class IslandApp(tk.Tk):
                 continue
             sl["repeat_h"] = h
             sl["repeat_n"] = n
-            st[f"{key}|{i}"] = {"h": h, "left": n, "run": 0, "next": now + h * 3600}
+            st[f"{key}|{i}"] = {"h": h, "left": n, "run": 0,
+                                "next": now + self._rep_first_h(key, h) * 3600}
             cnt += 1
         save_cfg(self.cfg)
         self._rep_write(st)
@@ -2672,7 +2679,7 @@ class IslandApp(tk.Tk):
                 h, n = self._rep_hn(key, slot)    # 고정 던전은 코드값(2시간 6회)
                 st.pop("_off", None)      # 직접 실행했으니 '꺼둠' 표시 해제
                 st[f"{key}|{i}"] = {"h": h, "left": max(0, n - 1), "run": 1,
-                                    "next": now + h * 3600}
+                                    "next": now + self._rep_first_h(key, h) * 3600}
                 done.append((i + 1, h, n))
             if done:
                 tmp = f + ".tmp"
@@ -2758,7 +2765,8 @@ class IslandApp(tk.Tk):
             except Exception:
                 pass
             st.pop("_off", None)          # 사용자가 다시 켰으니 '꺼둠' 표시 해제
-            st[k] = {"h": h, "left": n, "next": time.time() + h * 3600}
+            st[k] = {"h": h, "left": n,
+                     "next": time.time() + self._rep_first_h(key, h) * 3600}
             self._rep_write(st)
             self._status.set(f"⏰ {key} #{idx+1:02d} 반복 다시 시작 — {h}시간 {n}회")
         self._refresh_rep_btns()
