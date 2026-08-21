@@ -134,7 +134,10 @@ def game_window_at(x, y):
                 return True
             buf = ctypes.create_unicode_buffer(n + 1)
             u.GetWindowTextW(h, buf, n + 1)
-            if not buf.value.startswith("리니지M"):
+            t = buf.value
+            # 게임 클라이언트만 — '리니지M 자동 실행' 같은 런처 창은 제외한다.
+            # (그 창이 화면 넓은 영역을 덮고 있어서 클릭을 대신 받아 삼킨다 = 씹힘)
+            if not t.startswith("리니지M") or "자동 실행" in t:
                 return True
             r = ctypes.wintypes.RECT()
             u.GetWindowRect(h, ctypes.byref(r))
