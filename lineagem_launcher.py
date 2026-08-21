@@ -248,6 +248,7 @@ DEFAULT_CFG = {
     "market_slots":  None,              # 거래소검색 — 16슬롯 × 좌표9 (쿠폰등록 방식)
     "dragon_slots":  None,              # 용던고고!!! — 16슬롯 × 좌표10 (스케줄과 같은 구조)
     "knight_slots":  None,              # 던전끝! 흑기사!! — 16슬롯 × 좌표5
+    "no_cursor_click": False,           # 클릭 방식 — False=커서 이동(정확), True=창에 메시지
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
@@ -699,8 +700,19 @@ def find_purple():
     return None
 
 
-# 커서를 움직이지 않는 클릭 사용 여부 (2026-08-11)
-NO_CURSOR_CLICK = True
+# 클릭 방식 (2026-08-21 — 사용자가 런처에서 바꿀 수 있다)
+#   False = 예전 방식: 커서를 그 좌표로 옮겨 SendInput 으로 [이동+누름+뗌]을 한 번에.
+#           사용자가 마우스를 움직여도 클릭은 지정 좌표에 정확히 찍힌다(끼어들기 불가).
+#           게임이 진짜 입력으로 받으므로 가장 확실하다.
+#   True  = 창에 메시지만 보내는 방식: 커서를 아예 안 쓰지만, 창을 못 찾거나
+#           게임이 가짜 입력을 무시하면 씹힌다.
+NO_CURSOR_CLICK = False
+
+
+def set_click_mode(no_cursor):
+    """클릭 방식 전환 — 런처 [🖱 클릭방식] 버튼이 부른다."""
+    global NO_CURSOR_CLICK
+    NO_CURSOR_CLICK = bool(no_cursor)
 
 
 CLICK_LOG = os.path.join(LOCAL_DATA, "click_log.txt")   # 클릭이 어느 창에 갔는지 기록
@@ -884,6 +896,7 @@ class App(tk.Tk):
         self.after(20000, lambda: setattr(self, "_unmap_couple_ok", True))
 
         self.cfg = load_cfg()
+        set_click_mode(self.cfg.get("no_cursor_click", False))   # 저장해둔 클릭 방식
         self._accounts = load_accounts()
         while len(self._accounts) < 20:
             self._accounts.append({"type": "구글", "f1": "", "f2": "", "f3": "", "f4": "", "f5": ""})
@@ -1508,6 +1521,12 @@ class App(tk.Tk):
                   bg="#7b241c", fg="white", activebackground="#5b1a15",
                   width=9, height=1, pady=2,
                   command=self._open_lastrun_win).pack(side="top", pady=(1, 0))
+        # 🖱 클릭 방식 — 커서 이동(예전·확실) ↔ 창에 메시지(커서 안 씀)
+        self._click_mode_btn = tk.Button(sv, font=("맑은 고딕", 8, "bold"),
+                                         fg="white", width=9, height=1, pady=2,
+                                         command=self._toggle_click_mode)
+        self._click_mode_btn.pack(side="top", pady=(1, 0))
+        self._refresh_click_mode_btn()
         self._refresh_coord_save_lbl()
         self.after(1500, self._refresh_lock_btn)
         # TJ성공!! 좌측 끝 정렬용 가변 여백 (행이 가운데 정렬이라 오른쪽을 늘려 왼쪽으로 밀기)
@@ -2030,6 +2049,28 @@ class App(tk.Tk):
                          "cur_n": sum(1 for x in (cur.get(key) or []) if any(x.get("coords") or [])),
                          "old_n": sum(1 for x in old if any(x.get("coords") or []))})
         return rows, hit, cur
+
+    def _refresh_click_mode_btn(self):
+        b = getattr(self, "_click_mode_btn", None)
+        if not b:
+            return
+        if NO_CURSOR_CLICK:
+            b.config(text="🖱 커서 안씀", bg="#5d6d7e", activebackground="#41525e")
+        else:
+            b.config(text="🖱 커서 클릭", bg="#117864", activebackground="#0e6251")
+
+    def _toggle_click_mode(self):
+        """클릭 방식 바꾸기 — 커서 이동(예전 방식) ↔ 창에 메시지(커서 안 씀)."""
+        set_click_mode(not NO_CURSOR_CLICK)
+        self.cfg["no_cursor_click"] = NO_CURSOR_CLICK
+        save_cfg(self.cfg)
+        self._refresh_click_mode_btn()
+        if NO_CURSOR_CLICK:
+            self.status.set("🖱 창에 메시지 보내는 방식 — 커서를 안 쓰지만 "
+                            "창을 못 찾으면 씹힐 수 있습니다")
+        else:
+            self.status.set("🖱 커서 클릭(예전 방식) — 커서가 그 좌표로 이동합니다. "
+                            "마우스를 움직여도 클릭은 지정 좌표에 정확히 찍힙니다")
 
     def _open_lastrun_win(self):
         self._open_section_win("_lastrun_win", "↩ 마지막 실행 시점으로 되돌리기",

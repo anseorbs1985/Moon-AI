@@ -167,15 +167,28 @@ def slow_factor():
     return random.uniform(SLOW_MIN, SLOW_MAX)
 
 
-# 커서를 움직이지 않는 클릭 사용 여부 (2026-08-11 — 마우스 조작과 겹치지 않게)
-NO_CURSOR_CLICK = True
+# 클릭 방식 — 메인런처 [🖱 클릭방식] 버튼과 같은 설정을 따라간다 (coords.json).
+#   False(기본) = 커서를 그 좌표로 옮겨 SendInput 으로 한 번에 클릭 (예전 방식, 확실)
+#   True        = 창에 메시지만 보냄 (커서 안 씀)
+NO_CURSOR_CLICK = False        # 아래 _no_cursor() 가 설정 파일을 보고 정한다
+_NC_CACHE = [None]
+
+
+def _no_cursor():
+    """설정(coords.json 의 no_cursor_click)을 한 번 읽어 기억한다."""
+    if _NC_CACHE[0] is None:
+        try:
+            _NC_CACHE[0] = bool(load_cfg().get("no_cursor_click", False))
+        except Exception:
+            _NC_CACHE[0] = NO_CURSOR_CLICK
+    return _NC_CACHE[0]
 
 
 def click_at(x, y):
     """좌표 클릭 — 기본은 '커서를 움직이지 않는' 방식(창에 메시지 전달).
     실패하면 예전처럼 커서를 옮겨 클릭한다.
     (드래그·방향키·녹화 재생은 커서가 필요해서 그대로 둔다)"""
-    if NO_CURSOR_CLICK:
+    if _no_cursor():
         try:
             import precise_click as _pc
             if _pc.post_click(x, y):
