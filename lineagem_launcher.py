@@ -131,10 +131,10 @@ PAST_INTERVAL  = 2.8   # 과거의말하는섬 클릭 간격(초)
 SCHED_SLOTS        = 16
 SCHED_CLICKS       = 3
 DRAGON_CLICKS      = 10    # 용던고고!!! — 슬롯당 좌표 10개
-DRAGON_BUDGET      = 180   # 전체 슬롯을 3분 안에 끝낸다 (초, 4분에서 25% 단축)
-DRAGON_GAP_MIN     = 0.8   # 좌표 간격 최소 (23% 단축)
-DRAGON_GAP_MAX     = 2.3   # 좌표 간격 최대 (23% 단축)
-DRAGON_EXTRA       = {1: (2.5, 4.0)}   # 좌표2→3 은 부하가 커서 2.5~4.0초 더 쉰다 (모든 슬롯)
+DRAGON_BUDGET      = 144   # 전체 슬롯을 2분 24초 안에 (3분에서 20% 단축)
+DRAGON_GAP_MIN     = 0.64  # 좌표 간격 최소 (0.8초에서 20% 단축)
+DRAGON_GAP_MAX     = 1.84  # 좌표 간격 최대 (2.3초에서 20% 단축)
+DRAGON_EXTRA       = {1: (2.0, 3.2)}   # 좌표2→3 추가 대기 (2.5~4.0초에서 20% 단축)
 
 KNIGHT_CLICKS      = 8     # 던전끝! 흑기사!! — 슬롯당 좌표 8개 (2026-08-21 5→8)
 KNIGHT_GAP_MIN     = 1.0   # 좌표 간격 최소
@@ -4525,7 +4525,7 @@ class App(tk.Tk):
                                 f"약 {_est//60}분 {_est%60}초 예상)")
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
                                     gap=(DRAGON_GAP_MIN, DRAGON_GAP_MAX),
-                                    slot_gap=(1.0, 2.5), keep_order=True)
+                                    slot_gap=(0.8, 2.0), keep_order=True)   # 20% 단축
                 return
             if fkey in ("dragon", "knight"):
                 # F11(절전해제)이 끝난 시각부터 정해둔 시간 안에 전부 끝낸다.
@@ -11275,8 +11275,12 @@ class App(tk.Tk):
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
                 random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
-            # 웨이브(2슬롯 번갈아)는 쓰지 않는다 (2026-08-21 사용자 지시) —
-            # 창이 서로 가려서 클릭이 씹힌다. 한 슬롯을 끝내고 다음 슬롯으로 간다.
+            if slot_idx is None and len(targets) > 1:
+                # 2슬롯씩 번갈아(웨이브). '마우스 이동(좌표2) → 클릭2(좌표3)'는
+                # 한 묶음으로 처리해 사이에 다른 슬롯이 끼지 못하게 한다.
+                self._run_sched_wave(targets)
+                self.status.set("✔ 매일매일 스케줄 완료!")
+                return
             for si, slot in targets:
                 if self._sched_stop: break
                 name   = slot.get("name", f"#{si+1}")
@@ -11349,19 +11353,24 @@ class App(tk.Tk):
             if st["u"] == 0:
                 if coords[0]:
                     self.status.set(f"📅 [{name}] 클릭1...  (남은 슬롯 {len(alive)})")
+                    self._wait_user_free("_sched_stop")
                     click_at(*coords[0])
                     done += 1
                 st["due"] = time.time() + random.uniform(1.8, 3.0)   # 클릭1 뒤 여유
             else:
+                # ── 좌표2 → 좌표3 은 여기서 '한 번에' 끝낸다 ──
+                # 사이에 다른 슬롯이 끼면 올려둔 자리가 풀려 클릭2가 씹힌다.
                 if coords[1]:
                     self.status.set(f"📅 [{name}] 마우스 이동...")
+                    self._wait_user_free("_sched_stop")
                     move_at(*coords[1])
                     time.sleep(random.uniform(1.8, 3.0))     # 이동 뒤 여유
                 if len(coords) > 2 and coords[2]:
-                    self.status.set(f"📅 [{name}] 클릭2...")
+                    self.status.set(f"📅 [{name}] 클릭2...  (좌표2와 한 묶음)")
+                    self._wait_user_free("_sched_stop")
                     click_at(*coords[2])
                     done += 1
-                st["due"] = time.time() + random.uniform(3.2, 4.2)   # 슬롯 끝 대기
+                st["due"] = time.time() + random.uniform(1.9, 2.5)   # 슬롯 끝 대기 (40% 단축)
             st["u"] += 1
             time.sleep(random.uniform(0.25, 0.5))        # 클릭끼리 최소 간격
 
