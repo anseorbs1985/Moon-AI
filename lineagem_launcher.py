@@ -11251,7 +11251,7 @@ class App(tk.Tk):
                     self.status.set(f"📅 [{name}] 클릭2...")
                     click_at(*coords[2])
                 if self._sched_stop: break
-                time.sleep(random.uniform(2.3, 3.0))     # 슬롯 끝 대기 (4초 → 2.3~3초)
+                time.sleep(random.uniform(1.38, 1.80))   # 슬롯 사이 (2.3~3.0초에서 40% 줄임)
             self.status.set("✔ 매일매일 스케줄 완료!")
         except Exception as e:
             self.status.set(f"오류: {e}")
