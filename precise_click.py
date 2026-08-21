@@ -117,8 +117,39 @@ def install(pyautogui):
 # ── 커서를 전혀 움직이지 않는 클릭 (창에 메시지로 직접 전달) ──────────────
 # 사용자가 마우스를 쓰는 동안에도 겹치지 않는다. 다만 게임이 이런 '가짜 입력'을
 # 받아주는지는 프로그램마다 달라서, 반드시 먼저 테스트해보고 써야 한다.
+# 게임 쪽 창의 클래스 — 클라이언트 본체(GLFW30)뿐 아니라 그 위의 상단바(ngptop)와
+# 옆의 이벤트 패널(CEFCLIENT)도 '눌러야 하는 창'이다. 스케줄 클릭1(상단바)·
+# 클릭2(옆 패널)가 여기에 해당해서, 이걸 빼면 런처·클로드 창에 가려 클릭이 씹힌다.
+GAME_CLASSES = ("GLFW30", "CEFCLIENT")
+
+
+def _win_class(h):
+    try:
+        b = ctypes.create_unicode_buffer(256)
+        ctypes.windll.user32.GetClassNameW(h, b, 256)
+        return b.value
+    except Exception:
+        return ""
+
+
+def is_game_window(h):
+    """게임(클라이언트·상단바·옆 패널) 창이면 True. 런처·클로드 창은 False."""
+    u = ctypes.windll.user32
+    cls = _win_class(h)
+    if cls in GAME_CLASSES:
+        return True
+    n = u.GetWindowTextLengthW(h)
+    if not n:
+        return False
+    buf = ctypes.create_unicode_buffer(n + 1)
+    u.GetWindowTextW(h, buf, n + 1)
+    t = buf.value
+    # '리니지M 자동 실행'(런처 Tk 창)은 넓은 영역을 덮고 있어 클릭을 삼킨다 → 제외
+    return t.startswith("리니지M") and "자동 실행" not in t
+
+
 def game_window_at(x, y):
-    """그 좌표를 품고 있는 리니지M 창 핸들 — 다른 창이 위에 덮여 있어도 찾아낸다.
+    """그 좌표를 품고 있는 게임 창 핸들 — 다른 창이 위에 덮여 있어도 찾아낸다.
     (WindowFromPoint 는 '맨 위 창'을 주기 때문에, 런처·클로드 창이 가리면
      클릭이 엉뚱한 창으로 가서 게임이 못 받는다 → 씹힘의 주된 원인)"""
     u = ctypes.windll.user32
@@ -129,15 +160,7 @@ def game_window_at(x, y):
         try:
             if not u.IsWindowVisible(h) or u.IsIconic(h):
                 return True
-            n = u.GetWindowTextLengthW(h)
-            if not n:
-                return True
-            buf = ctypes.create_unicode_buffer(n + 1)
-            u.GetWindowTextW(h, buf, n + 1)
-            t = buf.value
-            # 게임 클라이언트만 — '리니지M 자동 실행' 같은 런처 창은 제외한다.
-            # (그 창이 화면 넓은 영역을 덮고 있어서 클릭을 대신 받아 삼킨다 = 씹힘)
-            if not t.startswith("리니지M") or "자동 실행" in t:
+            if not is_game_window(h):
                 return True
             r = ctypes.wintypes.RECT()
             u.GetWindowRect(h, ctypes.byref(r))
@@ -148,7 +171,7 @@ def game_window_at(x, y):
         return True
 
     try:
-        u.EnumWindows(_cb, 0)
+        u.EnumWindows(_cb, 0)          # 위(앞)에서 아래 순서 — 첫 번째가 맨 위 게임 창
     except Exception:
         return None
     return found[0] if found else None
