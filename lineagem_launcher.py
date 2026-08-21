@@ -131,12 +131,26 @@ DRAGON_GAP_MIN     = 0.8   # 좌표 간격 최소 (23% 단축)
 DRAGON_GAP_MAX     = 2.3   # 좌표 간격 최대 (23% 단축)
 DRAGON_EXTRA       = {1: (2.5, 4.0)}   # 좌표2→3 은 부하가 커서 2.5~4.0초 더 쉰다 (모든 슬롯)
 
-def dragon_extra(j):
+KNIGHT_CLICKS      = 5     # 던전끝나고 흑기사!! — 슬롯당 좌표 5개
+KNIGHT_GAP_MIN     = 1.0   # 좌표 간격 최소
+KNIGHT_GAP_MAX     = 2.5   # 좌표 간격 최대
+KNIGHT_EXTRA       = {1: (7.0, 10.0)}   # 좌표2 뒤(2→3 사이)에 7~10초 더 쉰다
+
+# 런처별 '그 좌표 뒤에 더 쉬는 시간'
+EXTRA_GAPS = {"dragon": DRAGON_EXTRA, "knight": KNIGHT_EXTRA}
+
+
+def extra_gap(fkey, j):
     """그 좌표 뒤에 더 쉬는 시간 (범위면 랜덤)."""
-    v = DRAGON_EXTRA.get(j)
+    v = (EXTRA_GAPS.get(fkey) or {}).get(j)
     if not v:
         return 0.0
     return random.uniform(*v) if isinstance(v, (tuple, list)) else float(v)
+
+
+def dragon_extra(j):
+    """(예전 이름 유지) 용던고고의 추가 대기."""
+    return extra_gap("dragon", j)
 ITEM_SWIPE_DIST    = 250   # 아이템정리 클릭3: 누른 채 위로 쓸어올리는 거리(px) — 클라이언트 창 안에 있어야 함
 TJ_CLICKS          = 3     # TJ성공!! 슬롯당 좌표 수
 TJ_MIN             = 0.81  # TJ성공!! 좌표 간 클릭 간격(초) — 10~20% 완화(0.7~1.2 → 0.77~1.44)
@@ -226,6 +240,7 @@ DEFAULT_CFG = {
     "coupon_text":   "",                # 쿠폰등록 클릭5에서 붙여넣을 글
     "market_slots":  None,              # 거래소검색 — 16슬롯 × 좌표9 (쿠폰등록 방식)
     "dragon_slots":  None,              # 용던고고!!! — 16슬롯 × 좌표10 (스케줄과 같은 구조)
+    "knight_slots":  None,              # 던전끝나고 흑기사!! — 16슬롯 × 좌표5
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
@@ -479,6 +494,19 @@ def load_cfg():
                     n2.append({"name": "미등록", "coords": [None] * DUNGEON_CLICKS})
                 cfg[_k2] = n2[:16]
         # coupon_slots(쿠폰등록 ×9)·eventshop_slots(이벤트상점 ×3) — 16슬롯 정규화
+        # knight_slots (던전끝나고 흑기사!! 16슬롯 × 5좌표, 슬롯별 ON/OFF)
+        kl, nkl = cfg.get("knight_slots") or [], []
+        for s_ in kl:
+            if isinstance(s_, dict):
+                c = s_.get("coords", [None] * KNIGHT_CLICKS)
+                while len(c) < KNIGHT_CLICKS: c.append(None)
+                nkl.append({"name": s_.get("name", "미등록"), "coords": c[:KNIGHT_CLICKS],
+                            "enabled": s_.get("enabled", True)})
+            else:
+                nkl.append({"name": "미등록", "coords": [None] * KNIGHT_CLICKS, "enabled": True})
+        while len(nkl) < 16:
+            nkl.append({"name": "미등록", "coords": [None] * KNIGHT_CLICKS, "enabled": True})
+        cfg["knight_slots"] = nkl[:16]
         # dragon_slots (용던고고!!! 16슬롯 × 10좌표, 슬롯별 ON/OFF)
         dl, ndl = cfg.get("dragon_slots") or [], []
         for s_ in dl:
@@ -865,6 +893,7 @@ class App(tk.Tk):
         self._coupon_stop  = False
         self._market_stop  = False
         self._dragon_stop  = False
+        self._knight_stop  = False
         self._eventshop_stop = False
         self._tj_stop      = False
         self._task_queue   = []   # 연속으로 누른 실행/재측정 순차 실행 대기열
@@ -1506,6 +1535,16 @@ class App(tk.Tk):
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
             command=self._start_sched).pack(side="left", padx=(2, 0))
+        # 던전끝나고 흑기사!! — [매일] 박스 바로 아래
+        kr = tk.Frame(dc_col); kr.pack(anchor="n", pady=(0, 5))
+        tk.Button(kr, text="🖤 던전끝나고\n흑기사!!",
+            font=("맑은 고딕", 9, "bold"), bg="#212f3d", fg="white",
+            activebackground="#17202a", width=9, height=2,
+            command=self._open_knight_win).pack(side="left")
+        tk.Button(kr, text="▶\n실행",
+            font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
+            activebackground="#1e8449", width=4, height=2,
+            command=lambda: self._start_dgn2("knight")).pack(side="left", padx=(2, 0))
         r1 = tk.Frame(dc_col); r1.pack(anchor="n")
         self._dc_open_btn = tk.Button(r1, text="🎯 일반\n던전충전",
             font=("맑은 고딕", 9, "bold"), bg="#6c3483", fg="white",
@@ -3811,6 +3850,7 @@ class App(tk.Tk):
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
                 "market":  ("market_slots",  "거래소검색", "🔎"),
                 "dragon":  ("dragon_slots",  "용던고고!!!", "🐲"),
+                "knight":  ("knight_slots",  "던전끝나고 흑기사!!", "🖤"),
                 "eventshop": ("eventshop_slots", "이벤트상점", "🛒"),
                 "fish":    ("fish_slots",    "낚시녹임",   "🎣"),
                 "circus":  ("circus_slots",  "서커스 이벤트등록", "🎪"),
@@ -3821,8 +3861,12 @@ class App(tk.Tk):
         self._open_section_win("_coupon_win", "🎟 쿠폰등록",
                                lambda p: self._build_dgn2("coupon", p), w=470, h=640, pinnable=True)
 
+    def _open_knight_win(self):
+        self._open_section_win("_knight_win", "🖤 던전끝나고 흑기사!!",
+                               lambda p: self._build_dgn2("knight", p), w=470, h=560, pinnable=True)
+
     def _open_dragon_win(self):
-        self._open_section_win("_dragon_win", "🐲 용던고고!!!",
+        self._open_section_win("_dragon_win","_knight_win", "🐲 용던고고!!!",
                                lambda p: self._build_dgn2("dragon", p), w=470, h=620, pinnable=True)
 
     def _start_dragon(self):
@@ -4291,8 +4335,8 @@ class App(tk.Tk):
             done += 1
             _g = self._slot_gap(st["slot"], j)          # 칸에 적어둔 초가 있으면 그걸로
             _base = _g if _g is not None else random.uniform(*gap)
-            if fkey == "dragon":
-                _base += dragon_extra(j)              # 좌표2→3 처럼 더 쉬어야 하는 자리
+            if fkey in EXTRA_GAPS:
+                _base += extra_gap(fkey, j)           # 좌표2→3 처럼 더 쉬어야 하는 자리
             # 사람처럼 — 한 슬롯에서 2~3번 이어 누르고 다른 슬롯으로 넘어간다
             if st.get("burst", 0) <= 0:
                 st["burst"] = random.choice([1, 2, 2, 3])
@@ -4352,6 +4396,23 @@ class App(tk.Tk):
                 # 낚시녹임은 번갈아(웨이브) 실행 — 동시 4슬롯, 좌표 간격 2~4초 랜덤
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop)
                 return
+            if fkey == "knight" and slot_idx is None and len(targets) > 1:
+                # 흑기사 — 2슬롯씩 번갈아, 슬롯 순서는 번호대로.
+                # 좌표 간격은 정해둔 범위에서 랜덤, 좌표2→3만 7~10초 더 쉰다.
+                _cl = sum(1 for _si, _sl in targets
+                          for _c in (_sl.get("coords") or [])[:nclk] if _c)
+                _avg = (KNIGHT_GAP_MIN + KNIGHT_GAP_MAX) / 2 + 0.15
+                _ex = sum((sum(v) / 2 if isinstance(v, (tuple, list)) else v)
+                          for v in KNIGHT_EXTRA.values())
+                _est = int(len(targets) / 2 * (nclk * _avg + _ex + 1.15))
+                self.status.set(f"🖤 던전끝나고 흑기사!! — {len(targets)}슬롯 / 클릭 {_cl}회, "
+                                f"2슬롯 번갈아 (간격 {KNIGHT_GAP_MIN:.1f}~{KNIGHT_GAP_MAX:.1f}초, "
+                                f"좌표2→3은 +{KNIGHT_EXTRA[1][0]:.0f}~{KNIGHT_EXTRA[1][1]:.0f}초, "
+                                f"약 {_est//60}분 {_est%60}초 예상)")
+                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
+                                    gap=(KNIGHT_GAP_MIN, KNIGHT_GAP_MAX),
+                                    slot_gap=(1.0, 2.5), keep_order=True)
+                return
             if fkey == "dragon" and slot_idx is None and len(targets) > 1:
                 # 용던고고 — 2슬롯씩 번갈아(웨이브), 슬롯 순서는 번호대로.
                 # 시간을 억지로 맞추지 않는다 — 정해둔 범위에서 랜덤으로 쉬고,
@@ -4370,7 +4431,7 @@ class App(tk.Tk):
                                     gap=(DRAGON_GAP_MIN, DRAGON_GAP_MAX),
                                     slot_gap=(1.0, 2.5), keep_order=True)
                 return
-            if fkey == "dragon":
+            if fkey in ("dragon", "knight"):
                 # F11(절전해제)이 끝난 시각부터 정해둔 시간 안에 전부 끝낸다.
                 # 남은 시간 ÷ 남은 클릭 수로 간격을 매번 다시 계산해 스스로 맞춘다.
                 _left = sum(1 for _si, _sl in targets
@@ -4404,16 +4465,17 @@ class App(tk.Tk):
                         self.status.set(f"{icon} [{name}] {_act}{j+1}...")
                         if fkey == "coupon":
                             self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
-                    if fkey == "dragon":
+                    if fkey in ("dragon", "knight"):
                         # 정해둔 범위에서 랜덤 (좌표2→3은 더 쉬어준다)
                         _left -= 1
-                        time.sleep(random.uniform(DRAGON_GAP_MIN, DRAGON_GAP_MAX)
-                                   + dragon_extra(j))
+                        _mn, _mx = ((KNIGHT_GAP_MIN, KNIGHT_GAP_MAX) if fkey == "knight"
+                                    else (DRAGON_GAP_MIN, DRAGON_GAP_MAX))
+                        time.sleep(random.uniform(_mn, _mx) + extra_gap(fkey, j))
                     if n < len(order) - 1:
                         if fkey == "eventshop" and j == 0:
                             # 이벤트상점: 클릭1 → 4초 × 1.15~1.30 랜덤 증가 후 클릭2
                             time.sleep(4.0 * random.uniform(1.15, 1.30))
-                        elif fkey == "dragon":
+                        elif fkey in ("dragon", "knight"):
                             pass                 # 아래에서 이미 쉬었다
                         else:
                             _cg = self._slot_gap(slot, j)    # 칸에 적어둔 초가 있으면 그걸로
@@ -6930,7 +6992,7 @@ class App(tk.Tk):
 
     # 커서를 쓰지 않는(메시지로 클릭하는) 런처 — 사용자가 마우스를 써도 안 기다린다
     # 커서를 쓰지 않는(메시지로 클릭하는) 런처 — 사용자가 마우스를 써도 기다리지 않는다
-    NO_WAIT_MOUSE = ("dragon", "sched", "item", "dc", "doll", "dungeon",
+    NO_WAIT_MOUSE = ("dragon", "knight", "sched", "item", "dc", "doll", "dungeon",
                      "dollchk", "relic", "fish")
 
     def _wait_mouse_idle(self, stop_flag_name, idle_sec=1.5, fkey=None):
@@ -8838,6 +8900,12 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("relic", i),
                             prev=lambda i: self._preview_dgn2("relic", i),
                             delete=lambda i: self._del_dgn2("relic", i)),
+            "knight":  dict(title="던전끝나고 흑기사!!", key="knight_slots",
+                            clicks=KNIGHT_CLICKS, color="#212f3d", enable=True, sel=True,
+                            reg=lambda s, c: self._reg_dgn2_click("knight", s, c),
+                            test=lambda i: self._test_dgn2("knight", i),
+                            prev=lambda i: self._preview_dgn2("knight", i),
+                            delete=lambda i: self._del_dgn2("knight", i)),
             "dragon":  dict(title="용던고고!!!", key="dragon_slots", clicks=DRAGON_CLICKS,
                             color="#a04000", enable=True, sel=True,
                             reg=lambda s, c: self._reg_dgn2_click("dragon", s, c),
@@ -12173,6 +12241,7 @@ class App(tk.Tk):
         self._coupon_stop    = True
         self._market_stop    = True
         self._dragon_stop    = True
+        self._knight_stop    = True
         self._eventshop_stop = True
         self._fish_stop      = True
         self._circus_stop    = True
