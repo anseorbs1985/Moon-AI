@@ -98,6 +98,11 @@ pyautogui.PAUSE    = 0.05
 try:
     from precise_click import install as _install_precise_click
     _install_precise_click(pyautogui)
+    try:                       # 사람이 마우스를 쓰는 중인지 감시 (클릭 겹침 방지)
+        import precise_click as _pc0
+        _pc0.start_input_watch()
+    except Exception:
+        pass
 except Exception:
     pass
 
@@ -4277,6 +4282,9 @@ class App(tk.Tk):
             return default
 
     LOG_FKEYS = ("knight", "dragon")      # 클릭이 어느 창에 갔는지 기록해두는 런처
+    # 좌표 하나하나 누르기 직전에 '사람이 마우스를 놓았는지' 확인하는 런처
+    # (사용자가 제일 중요하게 보는 것 — 겹치면 팅긴다)
+    CLICK_GUARD = ("dragon", "knight", "sched")
 
     def _click_log(self, fkey, j, coord, slot, act):
         """이 클릭이 '리니지M 창'에 제대로 갔는지 기록한다 (씹힘 찾기용)."""
@@ -4349,6 +4357,8 @@ class App(tk.Tk):
                 time.sleep(random.uniform(0.12, 0.25))
             return f"휠▲{n}"
         self._click_log(fkey, j, coord, slot, "클릭")
+        if fkey in self.CLICK_GUARD:
+            self._wait_user_free(f"_{fkey}_stop")   # 사람이 마우스 놓을 때까지
         click_at(*coord)
         return "클릭"
 
@@ -7070,11 +7080,46 @@ class App(tk.Tk):
     NO_WAIT_MOUSE = ("dragon", "knight", "sched", "item", "dc", "doll", "dungeon",
                      "dollchk", "relic", "fish")
 
+    def _user_busy(self, sec=0.8):
+        """사람이 방금 마우스를 만졌는가 (움직임뿐 아니라 '클릭'까지 본다).
+        저수준 훅으로 물리 입력만 골라 보므로, 우리가 보낸 클릭은 세지 않는다."""
+        try:
+            import precise_click as _pc
+            if not _pc.start_input_watch():
+                return None                     # 감시를 못 켜면 예전 방식으로
+            return _pc.button_down() or _pc.idle_seconds() < sec
+        except Exception:
+            return None
+
+    def _wait_user_free(self, stop_flag_name, sec=0.8, limit=30.0):
+        """사람이 마우스를 놓을 때까지 잠깐 기다린다 (클릭 겹침 = 팅김 방지).
+        감시를 못 켜면 아무것도 하지 않고 통과한다."""
+        t0 = time.time()
+        shown = False
+        while True:
+            if getattr(self, stop_flag_name, False):
+                return False
+            b = self._user_busy(sec)
+            if b is None:
+                return True                     # 훅 실패 — 기존 로직에 맡긴다
+            if not b:
+                if shown:
+                    self.after(0, lambda: self.status.set("▶ 마우스 놓음 — 이어서 진행"))
+                return True
+            if not shown:
+                self.after(0, lambda: self.status.set(
+                    "⏸ 마우스 쓰는 중 — 손 떼면 바로 이어서 클릭합니다"))
+                shown = True
+            if time.time() - t0 > limit:        # 너무 오래 붙잡고 있지 않게
+                return True
+            time.sleep(0.06)
+
     def _wait_mouse_idle(self, stop_flag_name, idle_sec=1.5, fkey=None):
-        """마우스가 움직이는 중일 때만 대기. 안 움직이면 즉시 True 반환.
-        (커서 없이 클릭하는 런처는 겹칠 일이 없어 기다리지 않는다)"""
-        if fkey in self.NO_WAIT_MOUSE and NO_CURSOR_CLICK:
-            return not getattr(self, stop_flag_name, False)
+        """마우스를 쓰는 중이면 대기. 안 쓰면 즉시 True.
+        훅이 켜지면 '클릭까지' 감지하고, 안 되면 예전(위치 비교) 방식으로."""
+        b = self._user_busy(idle_sec)
+        if b is not None:
+            return self._wait_user_free(stop_flag_name, idle_sec)
         CHECK = 0.1
         prev = pyautogui.position()
         # 움직임이 없으면 즉시 통과
@@ -11239,16 +11284,19 @@ class App(tk.Tk):
                 if not self._wait_mouse_idle("_sched_stop"): return
                 if coords[0]:
                     self.status.set(f"📅 [{name}] 클릭1...")
+                    self._wait_user_free("_sched_stop")
                     click_at(*coords[0])
                     time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._sched_stop: break
                 if coords[1]:
                     self.status.set(f"📅 [{name}] 마우스 이동...")
+                    self._wait_user_free("_sched_stop")
                     move_at(*coords[1])
                     time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._sched_stop: break
                 if len(coords) > 2 and coords[2]:
                     self.status.set(f"📅 [{name}] 클릭2...")
+                    self._wait_user_free("_sched_stop")
                     click_at(*coords[2])
                 if self._sched_stop: break
                 time.sleep(random.uniform(1.38, 1.80))   # 슬롯 사이 (2.3~3.0초에서 40% 줄임)
