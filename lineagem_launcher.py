@@ -248,7 +248,6 @@ DEFAULT_CFG = {
     "market_slots":  None,              # 거래소검색 — 16슬롯 × 좌표9 (쿠폰등록 방식)
     "dragon_slots":  None,              # 용던고고!!! — 16슬롯 × 좌표10 (스케줄과 같은 구조)
     "knight_slots":  None,              # 던전끝! 흑기사!! — 16슬롯 × 좌표5
-    "no_cursor_click": False,           # 클릭 방식 — False=커서 이동(정확), True=창에 메시지
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
@@ -700,19 +699,12 @@ def find_purple():
     return None
 
 
-# 클릭 방식 (2026-08-21 — 사용자가 런처에서 바꿀 수 있다)
-#   False = 예전 방식: 커서를 그 좌표로 옮겨 SendInput 으로 [이동+누름+뗌]을 한 번에.
-#           사용자가 마우스를 움직여도 클릭은 지정 좌표에 정확히 찍힌다(끼어들기 불가).
-#           게임이 진짜 입력으로 받으므로 가장 확실하다.
-#   True  = 창에 메시지만 보내는 방식: 커서를 아예 안 쓰지만, 창을 못 찾거나
-#           게임이 가짜 입력을 무시하면 씹힌다.
+# 클릭은 '마우스 분리' 방식 하나만 쓴다 (2026-08-21 사용자 지시).
+#   precise_click.install() 이 pyautogui.click 을 SendInput 으로 바꿔놨다 —
+#   [이동+누름+뗌]이 한 번에 전송돼 사용자가 마우스를 움직여도 끼어들지 못하고
+#   클릭은 항상 지정 좌표에 찍힌다. 게임도 진짜 입력으로 받는다.
+#   (창에 메시지만 보내는 '가상 클릭'은 씹혀서 없앴다 — 다시 넣지 말 것)
 NO_CURSOR_CLICK = False
-
-
-def set_click_mode(no_cursor):
-    """클릭 방식 전환 — 런처 [🖱 클릭방식] 버튼이 부른다."""
-    global NO_CURSOR_CLICK
-    NO_CURSOR_CLICK = bool(no_cursor)
 
 
 CLICK_LOG = os.path.join(LOCAL_DATA, "click_log.txt")   # 클릭이 어느 창에 갔는지 기록
@@ -744,33 +736,17 @@ def click_log(line):
 
 
 def move_at(x, y):
-    """마우스를 '올려놓기'만 하는 자리 — 커서를 움직이지 않고 신호만 보낸다.
-    실패하면 예전처럼 커서를 옮긴다."""
-    if NO_CURSOR_CLICK:
-        try:
-            import precise_click as _pc
-            if _pc.post_move(x, y):
-                return "post"
-        except Exception:
-            pass
+    """마우스를 '올려놓기'만 하는 자리 — 그 좌표로 커서를 옮긴다.
+    (SendInput 이라 사용자가 마우스를 움직여도 이 이동이 밀리지 않는다)"""
     pyautogui.moveTo(x, y)
     return "cursor"
 
 
 def click_at(x, y):
-    """좌표 클릭 — 기본은 '커서를 움직이지 않는' 방식(창에 메시지 전달).
-    한 번 실패하면 잠깐 뒤 다시, 그래도 안 되면 진짜 커서로 클릭한다.
-    (드래그·방향키·녹화 재생은 커서가 필요해서 그대로 둔다)"""
-    if NO_CURSOR_CLICK:
-        try:
-            import precise_click as _pc
-            for _try in range(2):
-                if _pc.post_click(x, y):
-                    return "post"
-                time.sleep(0.12)          # 창이 잠깐 안 잡힐 때가 있어 한 번 더
-        except Exception:
-            pass
-    pyautogui.click(x, y)                 # 마지막 수단 — 확실히 눌리게
+    """좌표 클릭 — [이동+누름+뗌]을 SendInput 으로 한 번에 보낸다.
+    실행 중 사용자가 마우스를 움직여도 그 사이에 끼어들지 못해
+    클릭은 항상 지정 좌표에 찍힌다 (precise_click.install 이 걸어둔 것)."""
+    pyautogui.click(x, y)
     return "cursor"
 
 
@@ -896,7 +872,6 @@ class App(tk.Tk):
         self.after(20000, lambda: setattr(self, "_unmap_couple_ok", True))
 
         self.cfg = load_cfg()
-        set_click_mode(self.cfg.get("no_cursor_click", False))   # 저장해둔 클릭 방식
         self._accounts = load_accounts()
         while len(self._accounts) < 20:
             self._accounts.append({"type": "구글", "f1": "", "f2": "", "f3": "", "f4": "", "f5": ""})
@@ -1521,12 +1496,6 @@ class App(tk.Tk):
                   bg="#7b241c", fg="white", activebackground="#5b1a15",
                   width=9, height=1, pady=2,
                   command=self._open_lastrun_win).pack(side="top", pady=(1, 0))
-        # 🖱 클릭 방식 — 커서 이동(예전·확실) ↔ 창에 메시지(커서 안 씀)
-        self._click_mode_btn = tk.Button(sv, font=("맑은 고딕", 8, "bold"),
-                                         fg="white", width=9, height=1, pady=2,
-                                         command=self._toggle_click_mode)
-        self._click_mode_btn.pack(side="top", pady=(1, 0))
-        self._refresh_click_mode_btn()
         self._refresh_coord_save_lbl()
         self.after(1500, self._refresh_lock_btn)
         # TJ성공!! 좌측 끝 정렬용 가변 여백 (행이 가운데 정렬이라 오른쪽을 늘려 왼쪽으로 밀기)
@@ -2049,28 +2018,6 @@ class App(tk.Tk):
                          "cur_n": sum(1 for x in (cur.get(key) or []) if any(x.get("coords") or [])),
                          "old_n": sum(1 for x in old if any(x.get("coords") or []))})
         return rows, hit, cur
-
-    def _refresh_click_mode_btn(self):
-        b = getattr(self, "_click_mode_btn", None)
-        if not b:
-            return
-        if NO_CURSOR_CLICK:
-            b.config(text="🖱 커서 안씀", bg="#5d6d7e", activebackground="#41525e")
-        else:
-            b.config(text="🖱 커서 클릭", bg="#117864", activebackground="#0e6251")
-
-    def _toggle_click_mode(self):
-        """클릭 방식 바꾸기 — 커서 이동(예전 방식) ↔ 창에 메시지(커서 안 씀)."""
-        set_click_mode(not NO_CURSOR_CLICK)
-        self.cfg["no_cursor_click"] = NO_CURSOR_CLICK
-        save_cfg(self.cfg)
-        self._refresh_click_mode_btn()
-        if NO_CURSOR_CLICK:
-            self.status.set("🖱 창에 메시지 보내는 방식 — 커서를 안 쓰지만 "
-                            "창을 못 찾으면 씹힐 수 있습니다")
-        else:
-            self.status.set("🖱 커서 클릭(예전 방식) — 커서가 그 좌표로 이동합니다. "
-                            "마우스를 움직여도 클릭은 지정 좌표에 정확히 찍힙니다")
 
     def _open_lastrun_win(self):
         self._open_section_win("_lastrun_win", "↩ 마지막 실행 시점으로 되돌리기",
@@ -4392,26 +4339,14 @@ class App(tk.Tk):
         if n:
             # 휠도 커서를 옮기지 않고 그 자리에 메시지로 보낸다 (실패하면 예전 방식)
             import ctypes
-            sent = False
-            if NO_CURSOR_CLICK:
+            pyautogui.moveTo(*coord)
+            time.sleep(0.08)
+            for _ in range(WHEEL_UP_TIMES):
                 try:
-                    import precise_click as _pc
-                    for _ in range(WHEEL_UP_TIMES):
-                        if not _pc.post_wheel(coord[0], coord[1], int(n)):
-                            sent = False; break
-                        sent = True
-                        time.sleep(random.uniform(0.12, 0.25))
+                    ctypes.windll.user32.mouse_event(0x0800, 0, 0, int(n) * 120, 0)
                 except Exception:
-                    sent = False
-            if not sent:
-                pyautogui.moveTo(*coord)
-                time.sleep(0.08)
-                for _ in range(WHEEL_UP_TIMES):
-                    try:
-                        ctypes.windll.user32.mouse_event(0x0800, 0, 0, int(n) * 120, 0)
-                    except Exception:
-                        pyautogui.scroll(int(n) * 120)
-                    time.sleep(random.uniform(0.12, 0.25))
+                    pyautogui.scroll(int(n) * 120)
+                time.sleep(random.uniform(0.12, 0.25))
             return f"휠▲{n}"
         self._click_log(fkey, j, coord, slot, "클릭")
         click_at(*coord)
@@ -4851,22 +4786,6 @@ class App(tk.Tk):
             if l <= x <= r and t <= y <= b:
                 return i
         return 0
-
-    def _test_post_click(self):
-        """커서를 움직이지 않고 '지금 커서가 있는 자리'에 클릭 메시지만 보내본다.
-        게임이 이 방식을 받아주는지 확인용 — 되면 실행에도 쓸 수 있다."""
-        self.status.set("🖱 3초 뒤 커서 위치에 '커서 없이 클릭'을 보냅니다 — 게임 버튼 위에 올려두세요")
-
-        def _go():
-            try:
-                import precise_click as _pc
-                x, y = pyautogui.position()
-                ok = _pc.post_click(x, y)
-                self.status.set(f"🖱 ({x},{y}) 로 클릭 메시지 전송 {'성공' if ok else '실패(창 못 찾음)'} "
-                                f"— 게임이 반응했는지 확인해주세요")
-            except Exception as e:
-                self.status.set(f"🖱 테스트 오류: {e}")
-        self.after(3000, _go)
 
     def _reg_check_area(self):
         """경고가 '떠 있는 상태'의 01번 클라 화면에서 그 자리를 드래그해 등록."""
@@ -7632,15 +7551,6 @@ class App(tk.Tk):
                   command=self._check_scan).pack(side="left", padx=(4, 0))
         tk.Label(parent, text="(경고가 떠 있는 01번 클라 화면에서 그 자리를 드래그해 등록 · "
                               "F11을 누를 때마다 16개를 확인합니다)",
-                 font=("맑은 고딕", 7), fg="#888").pack(anchor="w", padx=6)
-        _cr = tk.Frame(parent); _cr.pack(fill="x", padx=6, pady=(4, 0))
-        tk.Label(_cr, text="🖱 커서 없이 클릭:", font=("맑은 고딕", 8, "bold"),
-                 fg="#1a5276").pack(side="left")
-        tk.Button(_cr, text="3초 뒤 커서 위치로 테스트", font=("맑은 고딕", 8, "bold"),
-                  bg="#1a5276", fg="white",
-                  command=self._test_post_click).pack(side="left", padx=(4, 0))
-        tk.Label(parent, text="(게임 버튼 위에 마우스를 올려두고 누르세요 · 커서를 움직이지 않고 "
-                              "그 자리에 클릭 메시지만 보냅니다 — 게임이 반응하면 성공)",
                  font=("맑은 고딕", 7), fg="#888").pack(anchor="w", padx=6)
         tk.Label(parent, text="절전해제 — 단축키를 누르면 순서대로 1회씩",
                  font=("맑은 고딕", 9, "bold"), fg="#5b2c6f").pack(pady=(6, 2))
