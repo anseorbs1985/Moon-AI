@@ -131,18 +131,18 @@ DRAGON_GAP_MIN     = 0.8   # 좌표 간격 최소 (23% 단축)
 DRAGON_GAP_MAX     = 2.3   # 좌표 간격 최대 (23% 단축)
 DRAGON_EXTRA       = {1: (2.5, 4.0)}   # 좌표2→3 은 부하가 커서 2.5~4.0초 더 쉰다 (모든 슬롯)
 
-KNIGHT_CLICKS      = 5     # 던전끝! 흑기사!! — 슬롯당 좌표 5개
+KNIGHT_CLICKS      = 8     # 던전끝! 흑기사!! — 슬롯당 좌표 8개 (2026-08-21 5→8)
 KNIGHT_GAP_MIN     = 1.0   # 좌표 간격 최소
 KNIGHT_GAP_MAX     = 2.5   # 좌표 간격 최대
 KNIGHT_EXTRA       = {1: (9.1, 13.0)}   # 좌표2 뒤(2→3 사이)에 9.1~13초 더 쉰다 (7~10초에서 30% 늘림)
 
 # 런처별 '그 좌표 뒤에 더 쉬는 시간'
 # 클릭하지 않고 '마우스만 올려놓는' 좌표 (0부터 셈 — 2 = 좌표3)
-HOVER_INDICES = {"knight": {2}}
+HOVER_INDICES = {}      # 마우스만 올리는 자리 — 없앰 (2026-08-21 사용자 지시, 전부 클릭)
 
 # 이 좌표와 '바로 다음 좌표'는 한 묶음으로 — 사이에 다른 슬롯이 끼지 못하게 한다
 # (마우스를 올려둔 상태에서 다른 곳을 누르면 다음 클릭이 씹힌다)
-ATOMIC_NEXT = {"knight": {2}}
+ATOMIC_NEXT = {}        # (호버를 없애서 묶을 이유가 사라짐)
 
 EXTRA_GAPS = {"dragon": DRAGON_EXTRA, "knight": KNIGHT_EXTRA}
 
@@ -3898,10 +3898,10 @@ class App(tk.Tk):
 
     def _open_knight_win(self):
         self._open_section_win("_knight_win", "🖤 던전끝! 흑기사!!",
-                               lambda p: self._build_dgn2("knight", p), w=470, h=560, pinnable=True)
+                               lambda p: self._build_dgn2("knight", p), w=470, h=620, pinnable=True)
 
     def _open_dragon_win(self):
-        self._open_section_win("_dragon_win","_knight_win", "🐲 용던고고!!!",
+        self._open_section_win("_dragon_win", "🐲 용던고고!!!",
                                lambda p: self._build_dgn2("dragon", p), w=470, h=620, pinnable=True)
 
     def _start_dragon(self):
@@ -4505,8 +4505,24 @@ class App(tk.Tk):
                 # 낚시녹임은 번갈아(웨이브) 실행 — 동시 4슬롯, 좌표 간격 2~4초 랜덤
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop)
                 return
-            # 흑기사는 웨이브를 쓰지 않는다 (2026-08-21 사용자 지시) —
-            # 한 슬롯의 좌표 5개를 끝까지 누르고 나서 다음 슬롯으로 넘어간다.
+            if fkey == "knight" and slot_idx is None and len(targets) > 1:
+                # 흑기사 — 2슬롯씩 번갈아(웨이브), 슬롯 순서는 랜덤.
+                # 좌표 간격은 정해둔 범위에서 랜덤, 좌표2→3만 더 쉰다.
+                _cl = sum(1 for _si, _sl in targets
+                          for _c in (_sl.get("coords") or [])[:nclk] if _c)
+                _avg = (KNIGHT_GAP_MIN + KNIGHT_GAP_MAX) / 2 + 0.15
+                _ex = sum((sum(v) / 2 if isinstance(v, (tuple, list)) else v)
+                          for v in KNIGHT_EXTRA.values())
+                _per = _cl / max(len(targets), 1)
+                _est = int(len(targets) / 2 * (_per * _avg + _ex + 1.75))
+                self.status.set(f"🖤 던전끝! 흑기사!! — {len(targets)}슬롯 / 클릭 {_cl}회, "
+                                f"2슬롯 번갈아 (간격 {KNIGHT_GAP_MIN:.1f}~{KNIGHT_GAP_MAX:.1f}초, "
+                                f"좌표2→3은 +{KNIGHT_EXTRA[1][0]:.1f}~{KNIGHT_EXTRA[1][1]:.1f}초, "
+                                f"약 {_est//60}분 {_est%60}초 예상)")
+                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
+                                    gap=(KNIGHT_GAP_MIN, KNIGHT_GAP_MAX),
+                                    slot_gap=(1.0, 2.5))
+                return
             if fkey == "dragon" and slot_idx is None and len(targets) > 1:
                 # 용던고고 — 2슬롯씩 번갈아(웨이브), 슬롯 순서는 번호대로.
                 # 시간을 억지로 맞추지 않는다 — 정해둔 범위에서 랜덤으로 쉬고,
@@ -11508,7 +11524,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_lastrun_win","_lock_win","_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
+                 "_lastrun_win","_lock_win","_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_knight_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs
