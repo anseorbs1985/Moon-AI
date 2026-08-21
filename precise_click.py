@@ -268,9 +268,16 @@ def post_wheel(x, y, notches):
 # 감지하지 못하고 그 위에 자동 클릭이 겹쳐 들어갔다(= 팅김).
 # 저수준 훅으로 물리 마우스 이벤트만 골라 본다 (우리가 보낸 SendInput 은 injected
 # 표시가 붙어 있어 제외된다).
-_WATCH = {"on": False, "ts": 0.0, "down": False}
+_WATCH = {"on": False, "ts": 0.0, "down": False, "keys": set()}
 _LLMHF_INJECTED = 0x00000001
 _LLMHF_LOWER_IL_INJECTED = 0x00000002
+_LLKHF_INJECTED = 0x00000010          # 키보드 — 우리가 보낸 키에 붙는 표시
+
+
+class _KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [("vkCode", ctypes.c_ulong), ("scanCode", ctypes.c_ulong),
+                ("flags", ctypes.c_ulong), ("time", ctypes.c_ulong),
+                ("dwExtraInfo", ctypes.c_size_t)]
 
 
 class _MSLLHOOKSTRUCT(ctypes.Structure):
@@ -312,6 +319,31 @@ def _watch_thread():
     if not h:
         _WATCH["on"] = False
         return
+
+    # 키보드도 같이 본다 — 사용자가 키를 누르는 중에 자동 클릭이 들어가면 팅긴다.
+    # 우리가 보낸 키(F11·녹화 재생 등)는 injected 표시가 붙어 걸러진다.
+    KBPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int,
+                                ctypes.c_size_t, ctypes.POINTER(_KBDLLHOOKSTRUCT))
+    _CallNextKb = u.CallNextHookEx
+
+    def _kproc(code, wparam, lparam):
+        try:
+            if code >= 0 and not (lparam.contents.flags & _LLKHF_INJECTED):
+                _WATCH["ts"] = time.time()
+                if wparam in (0x0100, 0x0104):          # 키 누름
+                    _WATCH["keys"].add(int(lparam.contents.vkCode))
+                elif wparam in (0x0101, 0x0105):        # 키 뗌
+                    _WATCH["keys"].discard(int(lparam.contents.vkCode))
+        except Exception:
+            pass
+        return _CallNextKb(None, code, wparam, ctypes.cast(lparam, ctypes.c_void_p))
+
+    kcb = KBPROC(_kproc)
+    _WATCH["kcb"] = kcb
+    u.SetWindowsHookExW.argtypes = [ctypes.c_int, KBPROC, ctypes.c_void_p, ctypes.c_ulong]
+    u.CallNextHookEx.argtypes = None       # 두 훅이 같이 쓰므로 형 검사는 끈다
+    u.SetWindowsHookExW(13, kcb, k.GetModuleHandleW(None), 0)
+
     _WATCH["ts"] = 0.0
     msg = ctypes.wintypes.MSG()
     while u.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
@@ -343,5 +375,12 @@ def idle_seconds():
 
 
 def button_down():
-    """지금 사람이 마우스 버튼을 누르고 있는가."""
-    return bool(_WATCH["on"] and _WATCH["down"])
+    """지금 사람이 마우스 버튼이나 키를 누르고 있는가.
+    (뗌 신호를 놓쳐 '계속 눌림'으로 남는 것을 막으려고, 5초 넘게 조용하면 비운다)"""
+    if not _WATCH["on"]:
+        return False
+    if idle_seconds() > 5.0:
+        _WATCH["keys"].clear()
+        _WATCH["down"] = False
+        return False
+    return bool(_WATCH["down"] or _WATCH["keys"])
