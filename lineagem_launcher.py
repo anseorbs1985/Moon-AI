@@ -11279,10 +11279,8 @@ class App(tk.Tk):
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
                 random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
-            if slot_idx is None and len(targets) > 1:
-                self._run_sched_wave(targets)            # 2슬롯 번갈아
-                self.status.set("✔ 매일매일 스케줄 완료!")
-                return
+            # 웨이브(2슬롯 번갈아)는 쓰지 않는다 (2026-08-21 사용자 지시) —
+            # 창이 서로 가려서 클릭이 씹힌다. 한 슬롯을 끝내고 다음 슬롯으로 간다.
             for si, slot in targets:
                 if self._sched_stop: break
                 name   = slot.get("name", f"#{si+1}")
