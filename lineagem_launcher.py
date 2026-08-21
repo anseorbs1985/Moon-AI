@@ -131,7 +131,7 @@ DRAGON_GAP_MIN     = 0.8   # 좌표 간격 최소 (23% 단축)
 DRAGON_GAP_MAX     = 2.3   # 좌표 간격 최대 (23% 단축)
 DRAGON_EXTRA       = {1: (2.5, 4.0)}   # 좌표2→3 은 부하가 커서 2.5~4.0초 더 쉰다 (모든 슬롯)
 
-KNIGHT_CLICKS      = 5     # 던전끝나고 흑기사!! — 슬롯당 좌표 5개
+KNIGHT_CLICKS      = 5     # 던전끝! 흑기사!! — 슬롯당 좌표 5개
 KNIGHT_GAP_MIN     = 1.0   # 좌표 간격 최소
 KNIGHT_GAP_MAX     = 2.5   # 좌표 간격 최대
 KNIGHT_EXTRA       = {1: (7.0, 10.0)}   # 좌표2 뒤(2→3 사이)에 7~10초 더 쉰다
@@ -240,7 +240,7 @@ DEFAULT_CFG = {
     "coupon_text":   "",                # 쿠폰등록 클릭5에서 붙여넣을 글
     "market_slots":  None,              # 거래소검색 — 16슬롯 × 좌표9 (쿠폰등록 방식)
     "dragon_slots":  None,              # 용던고고!!! — 16슬롯 × 좌표10 (스케줄과 같은 구조)
-    "knight_slots":  None,              # 던전끝나고 흑기사!! — 16슬롯 × 좌표5
+    "knight_slots":  None,              # 던전끝! 흑기사!! — 16슬롯 × 좌표5
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
@@ -494,7 +494,7 @@ def load_cfg():
                     n2.append({"name": "미등록", "coords": [None] * DUNGEON_CLICKS})
                 cfg[_k2] = n2[:16]
         # coupon_slots(쿠폰등록 ×9)·eventshop_slots(이벤트상점 ×3) — 16슬롯 정규화
-        # knight_slots (던전끝나고 흑기사!! 16슬롯 × 5좌표, 슬롯별 ON/OFF)
+        # knight_slots (던전끝! 흑기사!! 16슬롯 × 5좌표, 슬롯별 ON/OFF)
         kl, nkl = cfg.get("knight_slots") or [], []
         for s_ in kl:
             if isinstance(s_, dict):
@@ -1535,11 +1535,11 @@ class App(tk.Tk):
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
             command=self._start_sched).pack(side="left", padx=(2, 0))
-        # 던전끝나고 흑기사!! — [매일] 박스 바로 아래
+        # 던전끝! 흑기사!! — [매일] 박스 바로 아래
         kr = tk.Frame(dc_col); kr.pack(anchor="n", pady=(0, 5))
-        tk.Button(kr, text="🖤 던전끝나고\n흑기사!!",
+        tk.Button(kr, text="🖤 던전끝!\n흑기사!!",
             font=("맑은 고딕", 9, "bold"), bg="#212f3d", fg="white",
-            activebackground="#17202a", width=9, height=2,
+            activebackground="#17202a", width=7, height=2,
             command=self._open_knight_win).pack(side="left")
         tk.Button(kr, text="▶\n실행",
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
@@ -3850,7 +3850,7 @@ class App(tk.Tk):
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
                 "market":  ("market_slots",  "거래소검색", "🔎"),
                 "dragon":  ("dragon_slots",  "용던고고!!!", "🐲"),
-                "knight":  ("knight_slots",  "던전끝나고 흑기사!!", "🖤"),
+                "knight":  ("knight_slots",  "던전끝! 흑기사!!", "🖤"),
                 "eventshop": ("eventshop_slots", "이벤트상점", "🛒"),
                 "fish":    ("fish_slots",    "낚시녹임",   "🎣"),
                 "circus":  ("circus_slots",  "서커스 이벤트등록", "🎪"),
@@ -3862,7 +3862,7 @@ class App(tk.Tk):
                                lambda p: self._build_dgn2("coupon", p), w=470, h=640, pinnable=True)
 
     def _open_knight_win(self):
-        self._open_section_win("_knight_win", "🖤 던전끝나고 흑기사!!",
+        self._open_section_win("_knight_win", "🖤 던전끝! 흑기사!!",
                                lambda p: self._build_dgn2("knight", p), w=470, h=560, pinnable=True)
 
     def _open_dragon_win(self):
@@ -4405,7 +4405,7 @@ class App(tk.Tk):
                 _ex = sum((sum(v) / 2 if isinstance(v, (tuple, list)) else v)
                           for v in KNIGHT_EXTRA.values())
                 _est = int(len(targets) / 2 * (nclk * _avg + _ex + 1.15))
-                self.status.set(f"🖤 던전끝나고 흑기사!! — {len(targets)}슬롯 / 클릭 {_cl}회, "
+                self.status.set(f"🖤 던전끝! 흑기사!! — {len(targets)}슬롯 / 클릭 {_cl}회, "
                                 f"2슬롯 번갈아 (간격 {KNIGHT_GAP_MIN:.1f}~{KNIGHT_GAP_MAX:.1f}초, "
                                 f"좌표2→3은 +{KNIGHT_EXTRA[1][0]:.0f}~{KNIGHT_EXTRA[1][1]:.0f}초, "
                                 f"약 {_est//60}분 {_est%60}초 예상)")
@@ -8900,7 +8900,7 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("relic", i),
                             prev=lambda i: self._preview_dgn2("relic", i),
                             delete=lambda i: self._del_dgn2("relic", i)),
-            "knight":  dict(title="던전끝나고 흑기사!!", key="knight_slots",
+            "knight":  dict(title="던전끝! 흑기사!!", key="knight_slots",
                             clicks=KNIGHT_CLICKS, color="#212f3d", enable=True, sel=True,
                             reg=lambda s, c: self._reg_dgn2_click("knight", s, c),
                             test=lambda i: self._test_dgn2("knight", i),
