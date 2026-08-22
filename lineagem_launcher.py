@@ -746,6 +746,7 @@ DARK_BG   = "#23272e"      # 창 배경
 DARK_BG2  = "#2b3038"      # 입력칸·리스트 배경
 DARK_FG   = "#e6e6e6"      # 기본 글씨
 DARK_DIM  = "#9aa4b0"      # 흐린 설명 글씨
+DARK_LINE = "#d6dde5"      # 구분선·박스 테두리 (어두운 배경에서 보이게 밝은 회색)
 
 
 def _lum(w, color):
@@ -769,11 +770,31 @@ def apply_dark(w, on=True):
         if cls in ("Frame", "Labelframe", "Toplevel", "Tk", "Canvas", "Panedwindow"):
             bg = str(w.cget("bg")) if "bg" in w.keys() else ""
             l = _lum(w, bg) if bg else None
+            # 얇은 띠(구분선)는 어둡게 만들지 말고 '밝게' 살려야 칸이 구분된다
+            thin = False
+            try:
+                hh = int(w.cget("height") or 0); ww = int(w.cget("width") or 0)
+                thin = cls == "Frame" and ((0 < hh <= 3) or (0 < ww <= 3))
+            except Exception:
+                pass
+            if thin:
+                w.configure(bg=DARK_LINE if on else "#ddd")
+                return
             if on:
                 if l is None or l > 0.55:          # 밝은 배경만 어둡게
                     w.configure(bg=DARK_BG)
             elif str(w.cget("bg")) in (DARK_BG, DARK_BG2):
                 w.configure(bg="SystemButtonFace")
+            if on:
+                try:                       # 박스 테두리를 밝게 그려 칸을 구분한다
+                    if cls == "Labelframe" or int(w.cget("bd") or 0) > 0:
+                        w.configure(highlightbackground=DARK_LINE, highlightcolor=DARK_LINE,
+                                    highlightthickness=1)
+                except Exception:
+                    pass
+            else:
+                try: w.configure(highlightthickness=0)
+                except Exception: pass
             if cls == "Labelframe" and on:
                 try: w.configure(fg=DARK_FG)
                 except Exception: pass
