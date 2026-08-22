@@ -253,6 +253,7 @@ DEFAULT_CFG = {
     "market_slots":  None,              # 거래소검색 — 16슬롯 × 좌표9 (쿠폰등록 방식)
     "dragon_slots":  None,              # 용던고고!!! — 16슬롯 × 좌표10 (스케줄과 같은 구조)
     "knight_slots":  None,              # 던전끝! 흑기사!! — 16슬롯 × 좌표5
+    "dark_ui":       True,              # 어두운 화면 (눈 보호)
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
@@ -738,6 +739,75 @@ def click_log(line):
             f.write(time.strftime("%m-%d %H:%M:%S ") + line + "\n")
     except Exception:
         pass
+
+
+# ── 어두운 화면 (눈 보호) — 2026-08-22 사용자 지시 ────────────────────
+DARK_BG   = "#23272e"      # 창 배경
+DARK_BG2  = "#2b3038"      # 입력칸·리스트 배경
+DARK_FG   = "#e6e6e6"      # 기본 글씨
+DARK_DIM  = "#9aa4b0"      # 흐린 설명 글씨
+
+
+def _lum(w, color):
+    """색의 밝기(0~1). 실패하면 None."""
+    try:
+        r, g, b = w.winfo_rgb(color)
+        return (0.299 * r + 0.587 * g + 0.114 * b) / 65535.0
+    except Exception:
+        return None
+
+
+def apply_dark(w, on=True):
+    """창 하나를 어둡게(또는 원래대로) 바꾼다.
+    색을 일부러 지정해둔 버튼(빨강·초록 등)은 건드리지 않고,
+    흰 배경 / 어두운 글씨만 바꿔서 대비를 지킨다."""
+    try:
+        cls = w.winfo_class()
+    except Exception:
+        return
+    try:
+        if cls in ("Frame", "Labelframe", "Toplevel", "Tk", "Canvas", "Panedwindow"):
+            bg = str(w.cget("bg")) if "bg" in w.keys() else ""
+            l = _lum(w, bg) if bg else None
+            if on:
+                if l is None or l > 0.55:          # 밝은 배경만 어둡게
+                    w.configure(bg=DARK_BG)
+            elif str(w.cget("bg")) in (DARK_BG, DARK_BG2):
+                w.configure(bg="SystemButtonFace")
+            if cls == "Labelframe" and on:
+                try: w.configure(fg=DARK_FG)
+                except Exception: pass
+        elif cls in ("Label", "Checkbutton", "Radiobutton", "Message"):
+            bg = str(w.cget("bg")); fg = str(w.cget("fg"))
+            lb, lf = _lum(w, bg), _lum(w, fg)
+            if on:
+                if lb is None or lb > 0.55:
+                    w.configure(bg=DARK_BG)
+                    if lf is not None and lf < 0.45:      # 어두운 글씨 → 밝게
+                        w.configure(fg=DARK_DIM if lf > 0.25 else DARK_FG)
+                if cls in ("Checkbutton", "Radiobutton"):
+                    try: w.configure(selectcolor=DARK_BG2, activebackground=DARK_BG,
+                                     activeforeground=DARK_FG)
+                    except Exception: pass
+        elif cls in ("Entry", "Text", "Listbox", "Spinbox"):
+            if on:
+                try: w.configure(bg=DARK_BG2, fg=DARK_FG, insertbackground=DARK_FG)
+                except Exception: pass
+        elif cls == "Button":
+            bg = str(w.cget("bg")); lb = _lum(w, bg)
+            if on and (lb is None or lb > 0.80):   # 색 없는(흰) 버튼만
+                try: w.configure(bg="#3a4149", fg=DARK_FG, activebackground="#4a525b",
+                                 activeforeground=DARK_FG)
+                except Exception: pass
+        elif cls == "Menubutton":
+            if on:
+                try: w.configure(bg="#3a4149", fg=DARK_FG,
+                                 activebackground="#4a525b", activeforeground=DARK_FG)
+                except Exception: pass
+    except Exception:
+        pass
+    for c in w.winfo_children():
+        apply_dark(c, on)
 
 
 def move_at(x, y):
@@ -1501,8 +1571,14 @@ class App(tk.Tk):
                   bg="#7b241c", fg="white", activebackground="#5b1a15",
                   width=9, height=1, pady=2,
                   command=self._open_lastrun_win).pack(side="top", pady=(1, 0))
+        # 🌙 어두운 화면 / ☀ 밝은 화면
+        self._dark_btn = tk.Button(sv, font=("맑은 고딕", 8, "bold"), fg="white",
+                                   width=9, height=1, pady=2,
+                                   command=self._toggle_dark)
+        self._dark_btn.pack(side="top", pady=(1, 0))
         self._refresh_coord_save_lbl()
         self.after(1500, self._refresh_lock_btn)
+        self.after(300, self._apply_dark_all)     # 저장해둔 화면 밝기 적용
         # TJ성공!! 좌측 끝 정렬용 가변 여백 (행이 가운데 정렬이라 오른쪽을 늘려 왼쪽으로 밀기)
         self._btnrow_pad = tk.Frame(btn_row, width=0, height=1)
         self._btnrow_pad.pack(side="left")
@@ -1783,6 +1859,12 @@ class App(tk.Tk):
                 nh = win.winfo_reqheight() + 6
                 win.geometry(f"{nw}x{nh}")
             win.after(80, _fit)
+        try:                    # 새 창도 지금 화면 밝기에 맞춘다
+            if self._dark_on():
+                apply_dark(win, True)
+        except Exception:
+            pass
+        return win
 
     def _close_subwin(self, win):
         """서브창을 닫고 메인런처를 앞으로 띄운다."""
@@ -2049,6 +2131,40 @@ class App(tk.Tk):
                          "cur_n": sum(1 for x in (cur.get(key) or []) if any(x.get("coords") or [])),
                          "old_n": sum(1 for x in old if any(x.get("coords") or []))})
         return rows, hit, cur
+
+    def _dark_on(self):
+        return bool(self.cfg.get("dark_ui", True))
+
+    def _refresh_dark_btn(self):
+        b = getattr(self, "_dark_btn", None)
+        if not b:
+            return
+        if self._dark_on():
+            b.config(text="☀ 밝게", bg="#566573", activebackground="#41525e")
+        else:
+            b.config(text="🌙 어둡게", bg="#2c3e50", activebackground="#1b2631")
+
+    def _apply_dark_all(self):
+        """메인 창과 열려 있는 모든 서브창에 적용."""
+        on = self._dark_on()
+        try:
+            apply_dark(self, on)
+        except Exception:
+            pass
+        for w in list(self.winfo_children()):      # 열려 있는 서브창들
+            try:
+                if isinstance(w, tk.Toplevel) and w.winfo_exists():
+                    apply_dark(w, on)
+            except Exception:
+                pass
+        self._refresh_dark_btn()
+
+    def _toggle_dark(self):
+        self.cfg["dark_ui"] = not self._dark_on()
+        save_cfg(self.cfg)
+        self._apply_dark_all()
+        self.status.set("🌙 어두운 화면으로 바꿨습니다 (눈 보호)"
+                        if self._dark_on() else "☀ 밝은 화면으로 되돌렸습니다")
 
     def _open_lastrun_win(self):
         self._open_section_win("_lastrun_win", "↩ 마지막 실행 시점으로 되돌리기",
@@ -3210,12 +3326,20 @@ class App(tk.Tk):
         try:
             slot = (self._island_cfg().get(self.NIGHT_KEY) or [])[slot_idx]
             h, n = self._rep_hn(self.NIGHT_KEY, slot)     # 악몽의섬 = 2시간 6회
-            f = self._rep_first_h(self.NIGHT_KEY, h, slot_idx)   # 슬롯이 4시간 모드면 4시간
+            # 개별로 직접 실행하면 '지금부터 2시간 간격'이 기본 (2026-08-22 사용자 지시).
+            # 4시간으로 시작하려면 슬롯 모드 버튼에서 직접 고른다.
+            f = h
             st = self._rep_load()
             st.pop("_off", None)          # 다시 켰으니 '꺼둠' 표시 해제
             # 사용자가 직접 누른 실행도 '1회차'로 센다 (2026-08-16 사용자 지시)
             st[f"{self.NIGHT_KEY}|{slot_idx}"] = {"h": h, "left": max(0, n - 1), "run": 1,
                                                   "next": time.time() + self._rep_delay(f)}
+            md = st.get("_mode") or {}                  # 표시도 '2h마다' 로
+            md[f"{self.NIGHT_KEY}|{slot_idx}"] = "h2"
+            st["_mode"] = md
+            fd = st.get("_first") or {}
+            fd[f"{self.NIGHT_KEY}|{slot_idx}"] = False
+            st["_first"] = fd
             self._rep_save(st)
             self._rep_log(f"{self.NIGHT_KEY} #{slot_idx+1:02d} 메인런처 실행 — "
                           f"1회차 (남은 {max(0, n-1)}회, 다음 {f}시간 뒤"
@@ -3269,10 +3393,9 @@ class App(tk.Tk):
 
     # 슬롯 버튼을 누를 때마다 이 순서로 돌아간다 (2026-08-22 사용자 지시)
     #   first = 첫 회차 4시간 → 그 다음부터 2시간 / h2 = 계속 2시간 / h4 = 계속 4시간
-    NIGHT_MODES = ("first", "h2", "h4")
+    NIGHT_MODES = ("first", "h2")
     NIGHT_MODE_TXT = {"first": ("4h→2h", "#196f3d"),
-                      "h2":    ("2h마다", "#1f618d"),
-                      "h4":    ("4h마다", "#7e5109")}
+                      "h2":    ("2h마다", "#1f618d")}
 
     def _night_mode(self, slot_idx):
         """그 슬롯의 지금 모드."""
@@ -3280,6 +3403,8 @@ class App(tk.Tk):
             st = self._rep_load()
             k = f"{self.NIGHT_KEY}|{slot_idx}"
             m = (st.get("_mode") or {}).get(k)
+            if m == "h4":                 # 없앤 모드 — 2h마다로 본다
+                return "h2"
             if m in self.NIGHT_MODES:
                 return m
             # 예전 방식(_first)만 있으면 그걸로 본다
@@ -3300,8 +3425,8 @@ class App(tk.Tk):
     def _night_mode_set(self, slot_idx, mode):
         """그 슬롯의 주기를 바꾸고, 다음 실행 시각만 다시 잡는다 (횟수는 유지)."""
         try:
-            h = 4 if mode == "h4" else 2                  # 평소 주기
-            first = 4 if mode in ("first", "h4") else 2   # 첫 회차 대기
+            h = 2                                     # 평소 주기는 항상 2시간
+            first = 4 if mode == "first" else 2        # 첫 회차만 4시간 or 2시간
             st = self._rep_load()
             k = f"{self.NIGHT_KEY}|{slot_idx}"
             md = st.get("_mode") or {}; md[k] = mode; st["_mode"] = md

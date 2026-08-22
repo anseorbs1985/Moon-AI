@@ -2732,7 +2732,8 @@ class IslandApp(tk.Tk):
                 h, n = self._rep_hn(key, slot)    # 고정 던전은 코드값(2시간 6회)
                 st.pop("_off", None)      # 직접 실행했으니 '꺼둠' 표시 해제
                 st[f"{key}|{i}"] = {"h": h, "left": max(0, n - 1), "run": 1,
-                                    "next": now + self._rep_first_h(key, h, i) * 3600}
+                                    # 직접 실행한 것은 지금부터 평소 주기(2시간)
+                                    "next": now + h * 3600}
                 done.append((i + 1, h, n))
             if done:
                 tmp = f + ".tmp"
