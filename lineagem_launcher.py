@@ -3151,9 +3151,12 @@ class App(tk.Tk):
         hd = tk.Frame(parent); hd.pack(anchor="w", pady=(0, 2))
         tk.Label(hd, text="🌑 악몽의섬", font=("맑은 고딕", 9, "bold"),
                  fg="#2c3e50").pack(side="left")
+        tk.Button(hd, text="✔ 전체선택", font=("맑은 고딕", 8, "bold"),
+                  bg="#e67e22", fg="white", activebackground="#ca6f1e",
+                  command=self._night_sel_all).pack(side="left", padx=(6, 0))
         tk.Button(hd, text="▶ 선택실행", font=("맑은 고딕", 8, "bold"),
                   bg="#1e8449", fg="white",
-                  command=self._run_night_sel).pack(side="left", padx=(6, 0))
+                  command=self._run_night_sel).pack(side="left", padx=(4, 0))
         tk.Button(hd, text="선택해제", font=("맑은 고딕", 8),
                   bg="#95a5a6", fg="white",
                   command=lambda: self._night_sel_clear()).pack(side="left", padx=(4, 0))
@@ -3215,6 +3218,24 @@ class App(tk.Tk):
         else:
             sel.add(idx)
         self._refresh_night_plus()
+
+    def _night_sel_all(self):
+        """좌표가 등록된 슬롯을 전부 선택한다 (실행은 [▶ 선택실행] 을 눌러야 시작).
+        이미 전부 선택돼 있으면 해제 — 한 버튼으로 켜고 끈다."""
+        try:
+            slots = self._island_cfg().get(self.NIGHT_KEY) or []
+        except Exception:
+            slots = []
+        able = {i for i, s_ in enumerate(slots)
+                if isinstance(s_, dict) and any(s_.get("coords") or [])}
+        if not able:
+            self.status.set("악몽의섬 — 좌표가 등록된 슬롯이 없습니다"); return
+        cur = getattr(self, "_night_sel", set()) or set()
+        self._night_sel = set() if cur >= able else set(able)
+        self._refresh_night_plus()
+        if self._night_sel:
+            self.status.set(f"악몽의섬 {len(able)}개 슬롯 전체선택 — "
+                            f"[▶ 선택실행] 을 누르면 시작합니다")
 
     def _night_sel_clear(self):
         self._night_sel = set()
