@@ -2379,11 +2379,35 @@ class App(tk.Tk):
             b.config(text="⏰ 반복" + chr(10) + "없음",
                      bg="#7f8c8d", activebackground="#5d6d7e")
 
+    def _night_week_reset_check(self):
+        """토요일이 지나면(일요일이 되면) 악몽의섬을 기본값으로 한 번 초기화한다.
+        같은 주에는 다시 하지 않는다. 반복 예약만 다시 걸 뿐 실행하지는 않는다."""
+        try:
+            import datetime as _dt
+            now = _dt.datetime.now()
+            if now.weekday() != 6:            # 일요일에만 (토요일이 막 지난 시점)
+                return
+            wk = now.strftime("%G-W%V")       # ISO 주 (한 주에 한 번)
+            st = self._rep_load()
+            if st.get("_night_reset_week") == wk:
+                return
+            st["_night_reset_week"] = wk
+            self._rep_save(st)
+            self._rep_log(f"{self.NIGHT_KEY} — 토요일이 지나 자동 초기화 "
+                          f"(4시간→2시간 6회, {wk})")
+            self._night_rearm_all(True)
+        except Exception as e:
+            self._rep_log(f"⚠ 악몽의섬 주간 자동 초기화 실패: {e!r}")
+
     def _island_repeat_tick(self):
         try:
             self._island_repeat_check()
         except Exception as e:
             self._rep_log(f"⚠ 반복 관리 오류: {e!r}")
+        try:
+            self._night_week_reset_check()    # 토요일 지나면 악몽의섬 자동 초기화
+        except Exception:
+            pass
         self.after(60000, self._island_repeat_tick)
 
     def _island_repeat_check(self):
@@ -2998,13 +3022,14 @@ class App(tk.Tk):
                   command=lambda: self._night_sel_clear()).pack(side="left", padx=(4, 0))
         # 반복을 16슬롯 전부 '지금부터' 다시 건다 (실행은 하지 않는다) — 제목 아랫줄
         rr2 = tk.Frame(parent); rr2.pack(anchor="w", pady=(0, 3))
-        tk.Button(rr2, text="⏰ 4h→2h 6회", font=("맑은 고딕", 8, "bold"),
+        tk.Button(rr2, text="🔄 초기화 (4h→2h 6회)", font=("맑은 고딕", 8, "bold"),
                   bg="#196f3d", fg="white", activebackground="#145a32",
                   command=lambda: self._night_rearm_all(True)).pack(side="left")
         tk.Button(rr2, text="⏰ 2h 6회", font=("맑은 고딕", 8, "bold"),
                   bg="#1f618d", fg="white", activebackground="#154360",
                   command=lambda: self._night_rearm_all(False)).pack(side="left", padx=(3, 0))
-        tk.Label(rr2, text="← 16슬롯 전부 다시(횟수도 6회로 초기화) · 슬롯 하나만은 아래 칸 클릭",
+        tk.Label(rr2, text="← 16슬롯 전부 기본값으로 (토요일 지나면 자동으로도 실행) · "
+                           "슬롯 하나만은 아래 칸 클릭",
                  font=("맑은 고딕", 7), fg="#888").pack(side="left", padx=(5, 0))
         wg = tk.Frame(parent); wg.pack(anchor="w")
         self._night_btns = []; self._night_plus = []; self._night_runbtns = []
@@ -3217,6 +3242,9 @@ class App(tk.Tk):
                     continue
                 sl["repeat_h"] = h; sl["repeat_n"] = n     # 주기는 항상 2시간
                 d[f"{self.NIGHT_KEY}|{i}"] = bool(first_4h)
+                md = st.get("_mode") or {}
+                md[f"{self.NIGHT_KEY}|{i}"] = "first" if first_4h else "h2"
+                st["_mode"] = md
                 st[f"{self.NIGHT_KEY}|{i}"] = {"h": h, "left": n, "run": 0,
                                                "next": now + self._rep_delay(f)}
                 cnt += 1

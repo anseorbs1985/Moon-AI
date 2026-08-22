@@ -786,6 +786,11 @@ class IslandApp(tk.Tk):
                   bg="#7b241c", fg="white",
                   command=lambda k=key, a_=hv, b_=nv2: self._bulk_repeat(k, a_, b_)
                   ).pack(side="left", padx=(4, 0))
+        if key in self.REPEAT_FIRST:      # 악몽의섬 — 기본값으로 되돌리는 버튼
+            tk.Button(b1, text="🔄 초기화 (4h→2h 6회)", font=("맑은 고딕", 7, "bold"),
+                      bg="#196f3d", fg="white", activebackground="#145a32",
+                      command=lambda k=key: self._night_reset_default(k)
+                      ).pack(side="left", padx=(4, 0))
         tk.Button(b1, text="⏰ 반복 끄기(전체)", font=("맑은 고딕", 7, "bold"),
                   bg="#7f8c8d", fg="white",
                   command=lambda k=key: self._bulk_repeat_off(k)).pack(side="left", padx=(3, 0))
@@ -2630,6 +2635,38 @@ class IslandApp(tk.Tk):
             _msg += (f"  ※ 매번 {h}시간 간격입니다 — 첫 회차만 {_ff}시간이고 그 다음부터"
                      f" {_fx[0]}시간으로 돌리려면 여기서 {_fx[0]}시간 {n}회로 켜세요")
         self._status.set(_msg)
+
+    def _night_reset_default(self, key):
+        """악몽의섬을 기본값으로 되돌린다 — 첫 회차 4시간, 그 다음부터 2시간, 6회.
+        (메인런처의 [🔄 초기화] 와 같은 동작. 실행은 하지 않는다)"""
+        h, n = self.REPEAT_FIXED.get(key, (2, 6))
+        f = int(self.REPEAT_FIRST.get(key, h) or h)
+        slots = self.cfg.get(key) or []
+        st = self._rep_state()
+        st.pop("_off", None)
+        md = st.get("_mode") or {}
+        fd = st.get("_first") or {}
+        now, cnt = time.time(), 0
+        for i, sl in enumerate(slots):
+            if not (isinstance(sl, dict) and any(sl.get("coords") or [])):
+                continue
+            sl["repeat_h"] = h
+            sl["repeat_n"] = n
+            md[f"{key}|{i}"] = "first"
+            fd[f"{key}|{i}"] = True
+            st[f"{key}|{i}"] = {"h": h, "left": n, "run": 0, "next": now + f * 3600}
+            cnt += 1
+        st["_mode"] = md
+        st["_first"] = fd
+        save_cfg(self.cfg)
+        self._rep_write(st)
+        self._refresh_rep_btns()
+        try:
+            self._sync_rep_cells(key)
+        except Exception:
+            pass
+        self._status.set(f"🔄 {key} 초기화 — {cnt}개 슬롯 전부 첫 회차 {f}시간 뒤, "
+                         f"그 다음부터 {h}시간 간격 {n}회")
 
     def _bulk_repeat_off(self, key):
         """이 던전의 ⏰ 반복을 전부 끈다."""
