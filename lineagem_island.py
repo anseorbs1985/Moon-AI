@@ -2663,7 +2663,7 @@ class IslandApp(tk.Tk):
             sl["repeat_n"] = n
             md[f"{key}|{i}"] = "first"
             fd[f"{key}|{i}"] = True
-            st[f"{key}|{i}"] = {"h": h, "left": n, "run": 0, "next": now + f * 3600}
+            st.pop(f"{key}|{i}", None)      # 걸려 있던 예약은 지운다 (켜지 않는다)
             cnt += 1
         st["_mode"] = md
         st["_first"] = fd
@@ -2674,8 +2674,8 @@ class IslandApp(tk.Tk):
             self._sync_rep_cells(key)
         except Exception:
             pass
-        self._status.set(f"🔄 {key} 초기화 — {cnt}개 슬롯 전부 첫 회차 {f}시간 뒤, "
-                         f"그 다음부터 {h}시간 간격 {n}회")
+        self._status.set(f"🔄 {key} 설정 초기화 — {cnt}개 슬롯 {f}시간 → {h}시간 {n}회. "
+                         f"반복은 [실행] 을 눌렀을 때 걸립니다")
 
     def _bulk_repeat_off(self, key):
         """이 던전의 ⏰ 반복을 전부 끈다."""
@@ -2741,8 +2741,8 @@ class IslandApp(tk.Tk):
                 h, n = self._rep_hn(key, slot)    # 고정 던전은 코드값(2시간 6회)
                 st.pop("_off", None)      # 직접 실행했으니 '꺼둠' 표시 해제
                 st[f"{key}|{i}"] = {"h": h, "left": max(0, n - 1), "run": 1,
-                                    # 직접 실행한 것은 지금부터 평소 주기(2시간)
-                                    "next": now + h * 3600}
+                                    # 첫 대기는 그 슬롯 모드대로 (4h→2h 면 4시간)
+                                    "next": now + self._rep_first_h(key, h, i) * 3600}
                 done.append((i + 1, h, n))
             if done:
                 tmp = f + ".tmp"

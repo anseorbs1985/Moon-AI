@@ -2516,35 +2516,11 @@ class App(tk.Tk):
             b.config(text="⏰ 반복" + chr(10) + "없음",
                      bg="#7f8c8d", activebackground="#5d6d7e")
 
-    def _night_week_reset_check(self):
-        """토요일이 지나면(일요일이 되면) 악몽의섬을 기본값으로 한 번 초기화한다.
-        같은 주에는 다시 하지 않는다. 반복 예약만 다시 걸 뿐 실행하지는 않는다."""
-        try:
-            import datetime as _dt
-            now = _dt.datetime.now()
-            if now.weekday() != 6:            # 일요일에만 (토요일이 막 지난 시점)
-                return
-            wk = now.strftime("%G-W%V")       # ISO 주 (한 주에 한 번)
-            st = self._rep_load()
-            if st.get("_night_reset_week") == wk:
-                return
-            st["_night_reset_week"] = wk
-            self._rep_save(st)
-            self._rep_log(f"{self.NIGHT_KEY} — 토요일이 지나 자동 초기화 "
-                          f"(4시간→2시간 6회, {wk})")
-            self._night_rearm_all(True)
-        except Exception as e:
-            self._rep_log(f"⚠ 악몽의섬 주간 자동 초기화 실패: {e!r}")
-
     def _island_repeat_tick(self):
         try:
             self._island_repeat_check()
         except Exception as e:
             self._rep_log(f"⚠ 반복 관리 오류: {e!r}")
-        try:
-            self._night_week_reset_check()    # 토요일 지나면 악몽의섬 자동 초기화
-        except Exception:
-            pass
         self.after(60000, self._island_repeat_tick)
 
     def _island_repeat_check(self):
@@ -2565,17 +2541,14 @@ class App(tk.Tk):
                         st.pop(k, None); changed = True
                     continue
                 e = st.get(k)
-                if not e or e.get("h") != h:
-                    # 새로 켰거나 시간을 바꿨다 → 지금부터 다시 카운트
-                    _h, _n = self._rep_hn(key, slot)      # 고정 던전은 코드값(2시간 6회)
-                    h = _h
-                    _f = self._rep_first_h(key, h, i)     # 첫 회차만 다른 시간(악몽 4시간)
-                    st[k] = {"h": h, "left": _n,
-                             "next": now + self._rep_delay(_f)}
+                if not e:
+                    # 설정만 있고 예약이 없으면 '꺼진 것'이다 — 여기서 켜지 않는다.
+                    # 반복은 사용자가 실행했을 때만 걸린다 (2026-08-23 사용자 지시, 절대 규칙)
+                    continue
+                if e.get("h") != h:
+                    e["h"] = h            # 주기만 맞춰준다 (시각·횟수는 그대로)
+                    st[k] = e
                     changed = True
-                    self._rep_log(f"{key} #{i+1:02d} 반복 등록 — {h}시간 "
-                                  f"{st[k]['left']}회 (첫 실행 약 {_f}시간 뒤"
-                                  f"{', 이후 %d시간마다' % h if _f != h else ''})")
                 elif now >= e.get("next", 0):
                     due.append((e["next"], di, key, i, h))
         if changed:
@@ -3368,20 +3341,14 @@ class App(tk.Tk):
         try:
             slot = (self._island_cfg().get(self.NIGHT_KEY) or [])[slot_idx]
             h, n = self._rep_hn(self.NIGHT_KEY, slot)     # 악몽의섬 = 2시간 6회
-            # 개별로 직접 실행하면 '지금부터 2시간 간격'이 기본 (2026-08-22 사용자 지시).
-            # 4시간으로 시작하려면 슬롯 모드 버튼에서 직접 고른다.
-            f = h
+            # 실행했을 때만 반복이 걸린다. 첫 대기는 그 슬롯의 모드대로 —
+            # [4h→2h] 면 4시간, [2h마다] 면 2시간 (2026-08-23 사용자 지시)
+            f = self._rep_first_h(self.NIGHT_KEY, h, slot_idx)
             st = self._rep_load()
             st.pop("_off", None)          # 다시 켰으니 '꺼둠' 표시 해제
             # 사용자가 직접 누른 실행도 '1회차'로 센다 (2026-08-16 사용자 지시)
             st[f"{self.NIGHT_KEY}|{slot_idx}"] = {"h": h, "left": max(0, n - 1), "run": 1,
                                                   "next": time.time() + self._rep_delay(f)}
-            md = st.get("_mode") or {}                  # 표시도 '2h마다' 로
-            md[f"{self.NIGHT_KEY}|{slot_idx}"] = "h2"
-            st["_mode"] = md
-            fd = st.get("_first") or {}
-            fd[f"{self.NIGHT_KEY}|{slot_idx}"] = False
-            st["_first"] = fd
             self._rep_save(st)
             self._rep_log(f"{self.NIGHT_KEY} #{slot_idx+1:02d} 메인런처 실행 — "
                           f"1회차 (남은 {max(0, n-1)}회, 다음 {f}시간 뒤"
@@ -3391,30 +3358,30 @@ class App(tk.Tk):
             self._rep_log(f"⚠ 악몽의섬 #{slot_idx+1:02d} 반복 재시작 실패: {e!r}")
 
     def _night_rearm_all(self, first_4h):
-        """악몽의섬 16슬롯의 반복을 '지금부터' 다시 건다 (실행은 하지 않는다).
-        first_4h=True  → 첫 회차 4시간, 그 다음부터 2시간 (평소)
-        first_4h=False → 처음부터 2시간 (돌던 중에 팅겼을 때 이걸로 이어서)"""
+        """악몽의섬 16슬롯의 '설정만' 기본값으로 되돌린다.
+        first_4h=True  → 4시간 → 2시간 6회 (기본값)
+        first_4h=False → 처음부터 2시간 6회
+        **반복(⏰)을 켜지는 않는다** — 반복은 사용자가 실행했을 때만 걸린다
+        (2026-08-23 사용자 지시, 절대 규칙)."""
         try:
             h, n = self._rep_hn(self.NIGHT_KEY)          # 코드 기본값 2시간 6회
             f = int(self.REPEAT_FIRST.get(self.NIGHT_KEY, h) or h) if first_4h else h
             cfg = self._island_cfg()
             slots = cfg.get(self.NIGHT_KEY) or []
             st = self._rep_load()
-            st.pop("_off", None)
-            d = st.get("_first") or {}
-            now, cnt = time.time(), 0
+            md = st.get("_mode") or {}
+            fd = st.get("_first") or {}
+            cnt = 0
             for i, sl in enumerate(slots):
                 if not (isinstance(sl, dict) and any(sl.get("coords") or [])):
                     continue
                 sl["repeat_h"] = h; sl["repeat_n"] = n     # 주기는 항상 2시간
-                d[f"{self.NIGHT_KEY}|{i}"] = bool(first_4h)
-                md = st.get("_mode") or {}
                 md[f"{self.NIGHT_KEY}|{i}"] = "first" if first_4h else "h2"
-                st["_mode"] = md
-                st[f"{self.NIGHT_KEY}|{i}"] = {"h": h, "left": n, "run": 0,
-                                               "next": now + self._rep_delay(f)}
+                fd[f"{self.NIGHT_KEY}|{i}"] = bool(first_4h)
+                st.pop(f"{self.NIGHT_KEY}|{i}", None)      # 걸려 있던 예약은 지운다
                 cnt += 1
-            st["_first"] = d
+            st["_mode"] = md
+            st["_first"] = fd
             self._rep_save(st)
             try:                                   # 섬/던전 설정에도 2시간 6회로 남긴다
                 path = os.path.join(BASE, "island_coords.json")
@@ -3424,20 +3391,14 @@ class App(tk.Tk):
                 os.replace(tmp, path)
             except Exception as e:
                 self._rep_log(f"⚠ 악몽의섬 설정 저장 실패: {e!r}")
-            when = time.strftime("%H:%M", time.localtime(now + f * 3600))
-            self._rep_log(f"{self.NIGHT_KEY} — {cnt}개 슬롯 반복 다시 걸기 "
-                          f"(첫 회차 {f}시간 뒤, 이후 {h}시간 {n}회) (사용자)")
-            self.status.set(f"⏰ 악몽의섬 {cnt}개 슬롯 — 첫 회차 {f}시간 뒤(약 {when}), "
-                            f"그 다음부터 {h}시간 간격 {n}회")
+            _t = f"{f}시간 → {h}시간" if f != h else f"{h}시간"
+            self._rep_log(f"{self.NIGHT_KEY} — {cnt}개 슬롯 설정 초기화 "
+                          f"({_t} {n}회). 반복은 켜지 않음 (사용자)")
+            self.status.set(f"🔄 악몽의섬 {cnt}개 슬롯 설정 초기화 — {_t} {n}회. "
+                            f"반복은 [실행] 을 눌렀을 때 걸립니다")
             self._refresh_night_btns(); self._refresh_rep_btn()
         except Exception as e:
-            self.status.set(f"반복 다시 걸기 실패: {e}")
-
-    # 슬롯 버튼을 누를 때마다 이 순서로 돌아간다 (2026-08-22 사용자 지시)
-    #   first = 첫 회차 4시간 → 그 다음부터 2시간 / h2 = 계속 2시간 / h4 = 계속 4시간
-    NIGHT_MODES = ("first", "h2")
-    NIGHT_MODE_TXT = {"first": ("4h→2h", "#196f3d"),
-                      "h2":    ("2h마다", "#1f618d")}
+            self.status.set(f"초기화 실패: {e}")
 
     def _night_mode(self, slot_idx):
         """그 슬롯의 지금 모드."""
@@ -3481,10 +3442,10 @@ class App(tk.Tk):
                 e["next"] = time.time() + self._rep_delay(first if not run else h)
                 st[k] = e
                 left_txt = f"남은 {e.get('left', n0)}회 그대로"
-            else:                       # 꺼져 있던 슬롯이면 새로 건다
-                st[k] = {"h": h, "left": n0, "run": 0,
-                         "next": time.time() + self._rep_delay(first)}
-                left_txt = f"{n0}회로 새로 걸림"
+            else:
+                # 반복이 꺼져 있으면 '설정만' 바꾼다 — 여기서 켜지 않는다.
+                # 반복은 사용자가 실행했을 때만 걸린다 (2026-08-23 사용자 지시, 절대 규칙)
+                left_txt = "반복은 꺼진 상태 — [실행] 하면 이 설정으로 걸립니다"
             self._rep_save(st)
             try:                        # 섬/던전 설정에도 그 슬롯만 주기를 남긴다
                 path = os.path.join(BASE, "island_coords.json")
@@ -3499,7 +3460,8 @@ class App(tk.Tk):
             except Exception as ex:
                 self._rep_log(f"⚠ 악몽의섬 #{slot_idx+1:02d} 주기 저장 실패: {ex!r}")
             txt = self.NIGHT_MODE_TXT[mode][0]
-            when = time.strftime("%H:%M", time.localtime(st[k]["next"]))
+            when = (time.strftime("%H:%M", time.localtime(st[k]["next"]))
+                    if k in st else "-")
             self._rep_log(f"{self.NIGHT_KEY} #{slot_idx+1:02d} {txt} 로 변경 "
                           f"(다음 {when}, {left_txt}) (사용자)")
             self.status.set(f"악몽의섬 #{slot_idx+1:02d} — {txt} "
