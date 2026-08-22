@@ -2996,6 +2996,15 @@ class App(tk.Tk):
         tk.Button(hd, text="선택해제", font=("맑은 고딕", 8),
                   bg="#95a5a6", fg="white",
                   command=lambda: self._night_sel_clear()).pack(side="left", padx=(4, 0))
+        # 반복을 16슬롯 전부 '지금부터' 다시 건다 (실행은 하지 않는다)
+        tk.Button(hd, text="⏰ 4h→2h 6회", font=("맑은 고딕", 8, "bold"),
+                  bg="#196f3d", fg="white", activebackground="#145a32",
+                  command=lambda: self._night_rearm_all(True)).pack(side="left", padx=(10, 0))
+        tk.Button(hd, text="⏰ 2h 6회", font=("맑은 고딕", 8, "bold"),
+                  bg="#1f618d", fg="white", activebackground="#154360",
+                  command=lambda: self._night_rearm_all(False)).pack(side="left", padx=(3, 0))
+        tk.Label(hd, text="(팅기면 [2h 6회] 한 번 — 지금부터 2시간 간격)",
+                 font=("맑은 고딕", 7), fg="#888").pack(side="left", padx=(5, 0))
         wg = tk.Frame(parent); wg.pack(anchor="w")
         self._night_btns = []; self._night_plus = []; self._night_runbtns = []
         self._night_firstbtns = []      # 첫 회차 4시간/2시간 선택
@@ -3196,6 +3205,46 @@ class App(tk.Tk):
             self._refresh_night_btns()
         except Exception as e:
             self._rep_log(f"⚠ 악몽의섬 #{slot_idx+1:02d} 반복 재시작 실패: {e!r}")
+
+    def _night_rearm_all(self, first_4h):
+        """악몽의섬 16슬롯의 반복을 '지금부터' 다시 건다 (실행은 하지 않는다).
+        first_4h=True  → 첫 회차 4시간, 그 다음부터 2시간 (평소)
+        first_4h=False → 처음부터 2시간 (돌던 중에 팅겼을 때 이걸로 이어서)"""
+        try:
+            h, n = self._rep_hn(self.NIGHT_KEY)          # 코드 기본값 2시간 6회
+            f = int(self.REPEAT_FIRST.get(self.NIGHT_KEY, h) or h) if first_4h else h
+            cfg = self._island_cfg()
+            slots = cfg.get(self.NIGHT_KEY) or []
+            st = self._rep_load()
+            st.pop("_off", None)
+            d = st.get("_first") or {}
+            now, cnt = time.time(), 0
+            for i, sl in enumerate(slots):
+                if not (isinstance(sl, dict) and any(sl.get("coords") or [])):
+                    continue
+                sl["repeat_h"] = h; sl["repeat_n"] = n     # 주기는 항상 2시간
+                d[f"{self.NIGHT_KEY}|{i}"] = bool(first_4h)
+                st[f"{self.NIGHT_KEY}|{i}"] = {"h": h, "left": n, "run": 0,
+                                               "next": now + self._rep_delay(f)}
+                cnt += 1
+            st["_first"] = d
+            self._rep_save(st)
+            try:                                   # 섬/던전 설정에도 2시간 6회로 남긴다
+                path = os.path.join(BASE, "island_coords.json")
+                tmp = path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as fp:
+                    json.dump(cfg, fp, ensure_ascii=False, indent=2)
+                os.replace(tmp, path)
+            except Exception as e:
+                self._rep_log(f"⚠ 악몽의섬 설정 저장 실패: {e!r}")
+            when = time.strftime("%H:%M", time.localtime(now + f * 3600))
+            self._rep_log(f"{self.NIGHT_KEY} — {cnt}개 슬롯 반복 다시 걸기 "
+                          f"(첫 회차 {f}시간 뒤, 이후 {h}시간 {n}회) (사용자)")
+            self.status.set(f"⏰ 악몽의섬 {cnt}개 슬롯 — 첫 회차 {f}시간 뒤(약 {when}), "
+                            f"그 다음부터 {h}시간 간격 {n}회")
+            self._refresh_night_btns(); self._refresh_rep_btn()
+        except Exception as e:
+            self.status.set(f"반복 다시 걸기 실패: {e}")
 
     def _night_first_toggle(self, slot_idx):
         """첫 회차를 4시간으로 시작할지, 처음부터 2시간으로 할지 고른다.
