@@ -2621,8 +2621,15 @@ class IslandApp(tk.Tk):
         self._sync_rep_cells(key)          # 아래 칸의 ⏰/횟수 표시도 같이 바꾼다
         self._refresh_rep_btns()
         self._rlog(f"{key} 전체 일괄 — {cnt}개 슬롯에 {h}시간 {n}회 반복 켬 (사용자)")
-        self._status.set(f"⏰ {key} — {cnt}개 슬롯 전부 {h}시간 {n}회로 맞췄습니다 "
-                         f"(첫 실행 약 {h}시간 뒤)")
+        _fx = self.REPEAT_FIXED.get(key)
+        _ff = self.REPEAT_FIRST.get(key)
+        _msg = (f"⏰ {key} — {cnt}개 슬롯 전부 {h}시간 {n}회로 맞췄습니다 "
+                f"(첫 실행 약 {self._rep_first_h(key, h)}시간 뒤)")
+        if _fx and _ff and h == _ff and _fx[0] != _ff:
+            # '첫 회차만 4시간'을 원한 것이라면 주기는 2시간으로 켜야 한다
+            _msg += (f"  ※ 매번 {h}시간 간격입니다 — 첫 회차만 {_ff}시간이고 그 다음부터"
+                     f" {_fx[0]}시간으로 돌리려면 여기서 {_fx[0]}시간 {n}회로 켜세요")
+        self._status.set(_msg)
 
     def _bulk_repeat_off(self, key):
         """이 던전의 ⏰ 반복을 전부 끈다."""

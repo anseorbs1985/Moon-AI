@@ -3105,7 +3105,11 @@ class App(tk.Tk):
             for i, b in enumerate(getattr(self, "_night_firstbtns", []) or []):
                 if not b.winfo_exists():
                     continue
-                if self._rep_first_on(self.NIGHT_KEY, i):
+                if f == h:
+                    # 전체 일괄에서 주기를 첫회차와 같게 잡아둔 상태 —
+                    # '첫 회차만 다르게'가 성립하지 않는다는 것을 그대로 보여준다
+                    b.config(text=f"매번 {h}h", bg="#7e5109", fg="white")
+                elif self._rep_first_on(self.NIGHT_KEY, i):
                     b.config(text=f"{f}h→{h}h", bg="#196f3d", fg="white")
                 else:
                     b.config(text=f"{h}h만", bg="#b3b6b7", fg="#2c3e50")
