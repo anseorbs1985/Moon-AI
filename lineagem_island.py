@@ -3308,6 +3308,8 @@ class IslandApp(tk.Tk):
             self._focus_client(si, c)
             self._play_events(rec, name)
             did = True
+        if did:
+            self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) 실행")
         return did
 
     @staticmethod
@@ -3441,7 +3443,15 @@ class IslandApp(tk.Tk):
             # 다른 클라이언트로 넘어가는 클릭이면 창이 앞으로 올라올 시간을 더 준다 —
             # 바로 누르면 첫 클릭이 '창 활성화'로만 먹히고 사라질 수 있다
             if si != last_si:
+                # 다른 클라로 넘어가는 첫 클릭은 '창 활성화'로만 먹히고 사라질 수 있다
+                # → 그 창을 먼저 앞으로 올려두고 잠깐 뒤에 누른다 (2026-08-22)
                 time.sleep(random.uniform(0.6, 1.1))
+                try:
+                    _cs = st["slot"].get("coords") or []
+                    self._focus_client(si, _cs[j] if j < len(_cs) else None)
+                    time.sleep(random.uniform(0.25, 0.45))
+                except Exception:
+                    pass
                 last_si = si
             if not wait_mouse_idle(stop_fn, status_fn): return
             if self._stop_flag: break
@@ -3462,6 +3472,15 @@ class IslandApp(tk.Tk):
             time.sleep(random.uniform(0.35, 0.7))   # 클릭 사이 텀 (창 전환 여유)
         if not self._stop_flag:
             time.sleep(2)          # (2026-08-09) 마지막 클릭 후 2초 뒤 마무리
+        try:                        # 슬롯별로 몇 자리까지 갔는지 기록 (덜 돈 슬롯 찾기용)
+            _done = {si: state[si]["j"] for si, _s in targets}
+            _short = [f"#{si+1:02d} {v}/{total}" for si, v in sorted(_done.items())
+                      if v < total]
+            self._rlog(f"[웨이브끝] {key} {len(targets)}슬롯 · 클릭 {done_cnt}회"
+                       + (f" · ⚠ 덜 돈 슬롯: {', '.join(_short)}" if _short
+                          else " · 전 슬롯 끝까지 완료"))
+        except Exception:
+            pass
         for si, _s in targets:
             self._add_count(si)
 
