@@ -97,14 +97,20 @@ def _send_scan_key(scan_codes, down):
 
 MOUSE_IDLE_SEC = 5.0  # 마우스 정지 후 재개까지 대기 시간
 
+MOUSE_WAIT_MAX = 25.0      # 사람이 계속 마우스를 써도 이만큼 지나면 그냥 진행한다
+
+
 def wait_mouse_idle(stop_fn, status_fn, idle_sec=MOUSE_IDLE_SEC):
-    """마우스가 움직이는 중일 때만 대기. 안 움직이면 즉시 True 반환."""
+    """마우스가 움직이는 중일 때만 대기. 안 움직이면 즉시 True 반환.
+    (2026-08-22) 계속 마우스를 쓰면 예전엔 '무한정' 기다려서 반복 실행이
+    통째로 멈췄다 — 이제 최대 MOUSE_WAIT_MAX 초까지만 기다리고 진행한다."""
     prev = pyautogui.position()
     time.sleep(0.1)
     cur = pyautogui.position()
     if cur == prev:
         return not stop_fn()
-    status_fn(f"⏸ 마우스 움직임 감지 — {int(idle_sec)}초 정지 후 재개...")
+    status_fn(f"⏸ 마우스 움직임 감지 — 멈추면 재개 (최대 {int(MOUSE_WAIT_MAX)}초)")
+    t0 = time.time()
     last_move = time.time()
     prev = cur
     while True:
@@ -115,6 +121,9 @@ def wait_mouse_idle(stop_fn, status_fn, idle_sec=MOUSE_IDLE_SEC):
             last_move = time.time()
             prev = cur
         elif time.time() - last_move >= idle_sec:
+            return True
+        if time.time() - t0 >= MOUSE_WAIT_MAX:      # 너무 오래 붙잡지 않는다
+            status_fn("▶ 마우스 사용 중이지만 예정된 클릭을 진행합니다")
             return True
 
 import datetime
