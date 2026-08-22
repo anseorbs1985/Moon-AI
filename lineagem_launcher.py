@@ -3028,9 +3028,9 @@ class App(tk.Tk):
         tk.Button(rr2, text="⏰ 2h 6회", font=("맑은 고딕", 8, "bold"),
                   bg="#1f618d", fg="white", activebackground="#154360",
                   command=lambda: self._night_rearm_all(False)).pack(side="left", padx=(3, 0))
-        tk.Label(rr2, text="← 16슬롯 전부 기본값으로 (토요일 지나면 자동으로도 실행) · "
-                           "슬롯 하나만은 아래 칸 클릭",
-                 font=("맑은 고딕", 7), fg="#888").pack(side="left", padx=(5, 0))
+        tk.Label(parent, text="16슬롯 전부 기본값으로 (토요일 지나면 자동으로도) · "
+                              "슬롯 하나만은 아래 칸 클릭",
+                 font=("맑은 고딕", 7), fg="#888").pack(anchor="w", pady=(0, 3))
         wg = tk.Frame(parent); wg.pack(anchor="w")
         self._night_btns = []; self._night_plus = []; self._night_runbtns = []
         self._night_firstbtns = []      # 첫 회차 4시간/2시간 선택
