@@ -2996,14 +2996,15 @@ class App(tk.Tk):
         tk.Button(hd, text="선택해제", font=("맑은 고딕", 8),
                   bg="#95a5a6", fg="white",
                   command=lambda: self._night_sel_clear()).pack(side="left", padx=(4, 0))
-        # 반복을 16슬롯 전부 '지금부터' 다시 건다 (실행은 하지 않는다)
-        tk.Button(hd, text="⏰ 4h→2h 6회", font=("맑은 고딕", 8, "bold"),
+        # 반복을 16슬롯 전부 '지금부터' 다시 건다 (실행은 하지 않는다) — 제목 아랫줄
+        rr2 = tk.Frame(parent); rr2.pack(anchor="w", pady=(0, 3))
+        tk.Button(rr2, text="⏰ 4h→2h 6회", font=("맑은 고딕", 8, "bold"),
                   bg="#196f3d", fg="white", activebackground="#145a32",
-                  command=lambda: self._night_rearm_all(True)).pack(side="left", padx=(10, 0))
-        tk.Button(hd, text="⏰ 2h 6회", font=("맑은 고딕", 8, "bold"),
+                  command=lambda: self._night_rearm_all(True)).pack(side="left")
+        tk.Button(rr2, text="⏰ 2h 6회", font=("맑은 고딕", 8, "bold"),
                   bg="#1f618d", fg="white", activebackground="#154360",
                   command=lambda: self._night_rearm_all(False)).pack(side="left", padx=(3, 0))
-        tk.Label(hd, text="(팅기면 [2h 6회] 한 번 — 지금부터 2시간 간격)",
+        tk.Label(rr2, text="전체 다시 걸기 (팅기면 [2h 6회])",
                  font=("맑은 고딕", 7), fg="#888").pack(side="left", padx=(5, 0))
         wg = tk.Frame(parent); wg.pack(anchor="w")
         self._night_btns = []; self._night_plus = []; self._night_runbtns = []
