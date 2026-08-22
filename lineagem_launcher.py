@@ -3004,7 +3004,7 @@ class App(tk.Tk):
         tk.Button(rr2, text="⏰ 2h 6회", font=("맑은 고딕", 8, "bold"),
                   bg="#1f618d", fg="white", activebackground="#154360",
                   command=lambda: self._night_rearm_all(False)).pack(side="left", padx=(3, 0))
-        tk.Label(rr2, text="전체 다시 걸기 (팅기면 [2h 6회])",
+        tk.Label(rr2, text="← 16슬롯 전부 다시(횟수도 6회로 초기화) · 슬롯 하나만은 아래 칸 클릭",
                  font=("맑은 고딕", 7), fg="#888").pack(side="left", padx=(5, 0))
         wg = tk.Frame(parent); wg.pack(anchor="w")
         self._night_btns = []; self._night_plus = []; self._night_runbtns = []
@@ -3110,19 +3110,11 @@ class App(tk.Tk):
                              bg=self.REP_LEFT_COLORS.get(n, "#34495e"))
                 else:
                     b.config(text="⏰꺼짐", bg="#7f8c8d")
-            h, _n = self._rep_hn(self.NIGHT_KEY)
-            f = int(self.REPEAT_FIRST.get(self.NIGHT_KEY, h) or h)
             for i, b in enumerate(getattr(self, "_night_firstbtns", []) or []):
                 if not b.winfo_exists():
                     continue
-                if f == h:
-                    # 전체 일괄에서 주기를 첫회차와 같게 잡아둔 상태 —
-                    # '첫 회차만 다르게'가 성립하지 않는다는 것을 그대로 보여준다
-                    b.config(text=f"매번 {h}h", bg="#7e5109", fg="white")
-                elif self._rep_first_on(self.NIGHT_KEY, i):
-                    b.config(text=f"{f}h→{h}h", bg="#196f3d", fg="white")
-                else:
-                    b.config(text=f"{h}h만", bg="#b3b6b7", fg="#2c3e50")
+                txt, col = self.NIGHT_MODE_TXT[self._night_mode(i)]
+                b.config(text=txt, bg=col, fg="white")
         except Exception:
             pass
         self.after(20000, self._refresh_night_btns)
@@ -3247,30 +3239,79 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"반복 다시 걸기 실패: {e}")
 
-    def _night_first_toggle(self, slot_idx):
-        """첫 회차를 4시간으로 시작할지, 처음부터 2시간으로 할지 고른다.
-        (4시간짜리를 이미 돌았거나 팅긴 뒤엔 2시간부터 다시 돌리려고)"""
-        on = not self._rep_first_on(self.NIGHT_KEY, slot_idx)
-        self._rep_first_set(self.NIGHT_KEY, slot_idx, on)
-        h, _n = self._rep_hn(self.NIGHT_KEY)
-        f = int(self.REPEAT_FIRST.get(self.NIGHT_KEY, h) or h)
-        # 이미 걸려 있는 예약이 아직 한 번도 안 돌았으면 그 대기 시간도 맞춰 고친다
+    # 슬롯 버튼을 누를 때마다 이 순서로 돌아간다 (2026-08-22 사용자 지시)
+    #   first = 첫 회차 4시간 → 그 다음부터 2시간 / h2 = 계속 2시간 / h4 = 계속 4시간
+    NIGHT_MODES = ("first", "h2", "h4")
+    NIGHT_MODE_TXT = {"first": ("4h→2h", "#196f3d"),
+                      "h2":    ("2h마다", "#1f618d"),
+                      "h4":    ("4h마다", "#7e5109")}
+
+    def _night_mode(self, slot_idx):
+        """그 슬롯의 지금 모드."""
         try:
             st = self._rep_load()
             k = f"{self.NIGHT_KEY}|{slot_idx}"
-            e = st.get(k)
-            if e and not int(e.get("run", 0)):
-                e["next"] = time.time() + self._rep_delay(f if on else h)
-                st[k] = e
-                self._rep_save(st)
+            m = (st.get("_mode") or {}).get(k)
+            if m in self.NIGHT_MODES:
+                return m
+            # 예전 방식(_first)만 있으면 그걸로 본다
+            return "first" if (st.get("_first") or {}).get(k, True) else "h2"
         except Exception:
-            pass
-        self._rep_log(f"{self.NIGHT_KEY} #{slot_idx+1:02d} 첫 회차 "
-                      f"{'%d시간' % f if on else '%d시간' % h} 으로 설정 (사용자)")
-        self.status.set(f"악몽의섬 #{slot_idx+1:02d} — "
-                        + (f"첫 회차 {f}시간, 그 다음부터 {h}시간"
-                           if on else f"처음부터 {h}시간"))
-        self._refresh_night_btns()
+            return "first"
+
+    def _night_first_toggle(self, slot_idx):
+        """버튼을 누를 때마다 4h→2h / 2h마다 / 4h마다 로 돌려가며 고른다.
+        **그 슬롯만** 바뀌고, 이미 돈 횟수(남은 회)는 그대로 이어간다."""
+        cur = self._night_mode(slot_idx)
+        try:
+            nxt = self.NIGHT_MODES[(self.NIGHT_MODES.index(cur) + 1) % len(self.NIGHT_MODES)]
+        except ValueError:
+            nxt = "first"
+        self._night_mode_set(slot_idx, nxt)
+
+    def _night_mode_set(self, slot_idx, mode):
+        """그 슬롯의 주기를 바꾸고, 다음 실행 시각만 다시 잡는다 (횟수는 유지)."""
+        try:
+            h = 4 if mode == "h4" else 2                  # 평소 주기
+            first = 4 if mode in ("first", "h4") else 2   # 첫 회차 대기
+            st = self._rep_load()
+            k = f"{self.NIGHT_KEY}|{slot_idx}"
+            md = st.get("_mode") or {}; md[k] = mode; st["_mode"] = md
+            fd = st.get("_first") or {}; fd[k] = (mode == "first"); st["_first"] = fd
+            e = st.get(k)
+            _h0, n0 = self._rep_hn(self.NIGHT_KEY)
+            if e:                       # 이미 걸려 있으면 남은 횟수를 그대로 이어간다
+                run = int(e.get("run", 0) or 0)
+                e["h"] = h
+                e["next"] = time.time() + self._rep_delay(first if not run else h)
+                st[k] = e
+                left_txt = f"남은 {e.get('left', n0)}회 그대로"
+            else:                       # 꺼져 있던 슬롯이면 새로 건다
+                st[k] = {"h": h, "left": n0, "run": 0,
+                         "next": time.time() + self._rep_delay(first)}
+                left_txt = f"{n0}회로 새로 걸림"
+            self._rep_save(st)
+            try:                        # 섬/던전 설정에도 그 슬롯만 주기를 남긴다
+                path = os.path.join(BASE, "island_coords.json")
+                with open(path, encoding="utf-8") as fp:
+                    cfg = json.load(fp)
+                cfg[self.NIGHT_KEY][slot_idx]["repeat_h"] = h
+                cfg[self.NIGHT_KEY][slot_idx]["repeat_n"] = n0
+                tmp = path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as fp:
+                    json.dump(cfg, fp, ensure_ascii=False, indent=2)
+                os.replace(tmp, path)
+            except Exception as ex:
+                self._rep_log(f"⚠ 악몽의섬 #{slot_idx+1:02d} 주기 저장 실패: {ex!r}")
+            txt = self.NIGHT_MODE_TXT[mode][0]
+            when = time.strftime("%H:%M", time.localtime(st[k]["next"]))
+            self._rep_log(f"{self.NIGHT_KEY} #{slot_idx+1:02d} {txt} 로 변경 "
+                          f"(다음 {when}, {left_txt}) (사용자)")
+            self.status.set(f"악몽의섬 #{slot_idx+1:02d} — {txt} "
+                            f"(다음 실행 {when}, {left_txt})")
+            self._refresh_night_btns()
+        except Exception as e:
+            self.status.set(f"악몽의섬 #{slot_idx+1:02d} 변경 실패: {e}")
 
     def _night_rep_cancel(self, slot_idx):
         """✕ — 그 슬롯의 ⏰ 반복만 취소한다 (토글 아님, 끄기만).
