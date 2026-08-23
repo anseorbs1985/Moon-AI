@@ -3350,6 +3350,21 @@ class App(tk.Tk):
             st[f"{self.NIGHT_KEY}|{slot_idx}"] = {"h": h, "left": max(0, n - 1), "run": 1,
                                                   "next": time.time() + self._rep_delay(f)}
             self._rep_save(st)
+            # ★ 설정에도 주기를 되살린다 — [반복 종료]로 repeat_h 가 0이면
+            #   반복 관리자가 방금 건 예약을 '꺼진 것'으로 보고 지워버린다
+            #   (그래서 한 번만 돌고 끝났다 — 2026-08-23)
+            try:
+                path = os.path.join(BASE, "island_coords.json")
+                with open(path, encoding="utf-8") as fp:
+                    _cfg = json.load(fp)
+                _cfg[self.NIGHT_KEY][slot_idx]["repeat_h"] = h
+                _cfg[self.NIGHT_KEY][slot_idx]["repeat_n"] = n
+                tmp = path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as fp:
+                    json.dump(_cfg, fp, ensure_ascii=False, indent=2)
+                os.replace(tmp, path)
+            except Exception as _e:
+                self._rep_log(f"⚠ 악몽의섬 #{slot_idx+1:02d} 주기 저장 실패: {_e!r}")
             self._rep_log(f"{self.NIGHT_KEY} #{slot_idx+1:02d} 메인런처 실행 — "
                           f"1회차 (남은 {max(0, n-1)}회, 다음 {f}시간 뒤"
                           f"{', 그 다음부터 %d시간' % h if f != h else ''})")

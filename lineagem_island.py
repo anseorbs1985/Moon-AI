@@ -2743,8 +2743,19 @@ class IslandApp(tk.Tk):
                 st[f"{key}|{i}"] = {"h": h, "left": max(0, n - 1), "run": 1,
                                     # 첫 대기는 그 슬롯 모드대로 (4h→2h 면 4시간)
                                     "next": now + self._rep_first_h(key, h, i) * 3600}
+                # ★ 설정에도 주기를 되살린다 — repeat_h 가 0이면 메인런처의 반복 관리자가
+                #   방금 건 예약을 '꺼진 것'으로 보고 지운다 (2026-08-23)
+                try:
+                    slot["repeat_h"] = h
+                    slot["repeat_n"] = n
+                except Exception:
+                    pass
                 done.append((i + 1, h, n))
             if done:
+                try:
+                    save_cfg(self.cfg)          # repeat_h 되살린 것 저장
+                except Exception:
+                    pass
                 tmp = f + ".tmp"
                 with open(tmp, "w", encoding="utf-8") as fp:
                     _j.dump(st, fp, ensure_ascii=False, indent=2)
