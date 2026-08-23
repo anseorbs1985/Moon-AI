@@ -2741,13 +2741,19 @@ class IslandApp(tk.Tk):
                 h, n = self._rep_hn(key, slot)    # 고정 던전은 코드값(2시간 6회)
                 st.pop("_off", None)      # 직접 실행했으니 '꺼둠' 표시 해제
                 st[f"{key}|{i}"] = {"h": h, "left": max(0, n - 1), "run": 1,
-                                    # 첫 대기는 그 슬롯 모드대로 (4h→2h 면 4시간)
-                                    "next": now + self._rep_first_h(key, h, i) * 3600}
+                                    # 직접 실행은 항상 평소 주기(2시간)부터 — 사용자 지시
+                                    "next": now + h * 3600}
                 # ★ 설정에도 주기를 되살린다 — repeat_h 가 0이면 메인런처의 반복 관리자가
                 #   방금 건 예약을 '꺼진 것'으로 보고 지운다 (2026-08-23)
                 try:
                     slot["repeat_h"] = h
                     slot["repeat_n"] = n
+                    md = st.get("_mode") or {}       # 표시도 '2h마다' 로
+                    md[f"{key}|{i}"] = "h2"
+                    st["_mode"] = md
+                    fd = st.get("_first") or {}
+                    fd[f"{key}|{i}"] = False
+                    st["_first"] = fd
                 except Exception:
                     pass
                 done.append((i + 1, h, n))

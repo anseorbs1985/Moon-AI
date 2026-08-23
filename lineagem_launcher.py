@@ -3262,7 +3262,9 @@ class App(tk.Tk):
                 e = st.get(f"{self.NIGHT_KEY}|{i}")
                 if e:
                     n = int(e.get("left", 0))
-                    b.config(text=f"⏰{n}회",
+                    _h = int(e.get("h", 2) or 2)
+                    # 시간까지 같이 보여준다 — 예: '2h 5회' (2026-08-23 사용자 요청)
+                    b.config(text=f"{_h}h {n}회",
                              bg=self.REP_LEFT_COLORS.get(n, "#34495e"))
                 else:
                     b.config(text="⏰꺼짐", bg="#7f8c8d")
@@ -3341,14 +3343,20 @@ class App(tk.Tk):
         try:
             slot = (self._island_cfg().get(self.NIGHT_KEY) or [])[slot_idx]
             h, n = self._rep_hn(self.NIGHT_KEY, slot)     # 악몽의섬 = 2시간 6회
-            # 실행했을 때만 반복이 걸린다. 첫 대기는 그 슬롯의 모드대로 —
-            # [4h→2h] 면 4시간, [2h마다] 면 2시간 (2026-08-23 사용자 지시)
-            f = self._rep_first_h(self.NIGHT_KEY, h, slot_idx)
+            # 실행(선택실행·개별실행)은 **항상 2시간 6회** — 사용자 지시(2026-08-23).
+            # 누른 그 실행이 1회차이므로 남은 5회, 다음은 2시간 뒤.
+            f = h
             st = self._rep_load()
             st.pop("_off", None)          # 다시 켰으니 '꺼둠' 표시 해제
             # 사용자가 직접 누른 실행도 '1회차'로 센다 (2026-08-16 사용자 지시)
             st[f"{self.NIGHT_KEY}|{slot_idx}"] = {"h": h, "left": max(0, n - 1), "run": 1,
                                                   "next": time.time() + self._rep_delay(f)}
+            md = st.get("_mode") or {}          # 표시도 '2h마다' 로 맞춘다
+            md[f"{self.NIGHT_KEY}|{slot_idx}"] = "h2"
+            st["_mode"] = md
+            fd = st.get("_first") or {}
+            fd[f"{self.NIGHT_KEY}|{slot_idx}"] = False
+            st["_first"] = fd
             self._rep_save(st)
             # ★ 설정에도 주기를 되살린다 — [반복 종료]로 repeat_h 가 0이면
             #   반복 관리자가 방금 건 예약을 '꺼진 것'으로 보고 지워버린다
