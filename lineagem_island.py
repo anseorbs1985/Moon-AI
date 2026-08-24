@@ -452,6 +452,26 @@ class IslandApp(tk.Tk):
                 self.withdraw()
             except Exception:
                 pass
+            # '지금 돌고 있다' 표시 — 요약런처가 이 파일 하나만 보고 즉시 판단한다
+            # (예전엔 wmic 로 프로세스를 뒤져서 버튼이 1~3초씩 멈췄다)
+            try:
+                d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+                os.makedirs(d, exist_ok=True)
+                with open(os.path.join(d, "island_run.json"), "w",
+                          encoding="utf-8") as f:
+                    json.dump({"pid": os.getpid(), "ts": time.time()}, f)
+            except Exception:
+                pass
+
+            def _clear_run_flag():
+                try:
+                    os.remove(os.path.join(
+                        os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
+                        "island_run.json"))
+                except Exception:
+                    pass
+            import atexit
+            atexit.register(_clear_run_flag)
         self.cfg    = load_cfg()
         self.counts = load_counts()
         self._stop_flag     = False

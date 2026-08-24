@@ -22,6 +22,7 @@ LOCAL  = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
 CFG    = os.path.join(LOCAL, "bar.json")
 UI     = os.path.join(LOCAL, "ui.json")
 REPF   = os.path.join(LOCAL, "island_repeat.json")
+RUNF   = os.path.join(LOCAL, "island_run.json")     # 실행 중 표시 (섬 실행기가 남긴다)
 LOGF   = os.path.join(LOCAL, "repeat_log.txt")
 ISLAND = os.path.join(BASE, "lineagem_island.py")
 COORDS = os.path.join(BASE, "island_coords.json")
@@ -73,7 +74,9 @@ class Bar(tk.Tk):
         super().__init__()
         self.cfg = jload(CFG)
         self.overrideredirect(True)
-        self.attributes("-topmost", True)
+        # 항상 위로 두지 않는다 — 다른 창을 누르면 뒤로 물러난다 (2026-08-24 사용자 지시).
+        # 다시 보고 싶으면 메인런처의 [📏 요약런처] 버튼을 누른다.
+        self.attributes("-topmost", False)
         self.configure(bg=self.BG)
         self.tab = int(self.cfg.get("tab", 0) or 0)
         self.sel = set()
@@ -86,6 +89,9 @@ class Bar(tk.Tk):
         self._show(self.tab)
         self._place()
         self.after(20000, self._tick)
+        self.after(1000, self._raise_watch)
+        self.bind("<Button-1>", self._touch, add="+")
+        self.bind("<FocusOut>", lambda _e: self._maybe_back(), add="+")
 
     # ── 화면 ────────────────────────────────────────────────────────
     def _build(self):
@@ -401,10 +407,37 @@ class Bar(tk.Tk):
         self._refresh()
 
     # ── 실행 ────────────────────────────────────────────────────────
+    def _touch(self, _e=None):
+        """이 창을 누르면 앞으로 올라온다."""
+        try:
+            self.lift()
+        except Exception:
+            pass
+
+    def _maybe_back(self):
+        """다른 창을 누르면 뒤로 물러난다 (실행 중이면 이미 뒤에 있다)."""
+        try:
+            self.lower()
+        except Exception:
+            pass
+
+    def _raise_watch(self):
+        """메인런처가 [📏 요약런처] 를 다시 누르면 이 창을 앞으로 올린다."""
+        try:
+            r = float(jload(CFG).get("raise") or 0)
+            if r > float(getattr(self, "_last_raise", 0)):
+                self._last_raise = r
+                self.deiconify()
+                self.lift()
+                self.attributes("-topmost", True)
+                self.after(400, lambda: self.attributes("-topmost", False))
+        except Exception:
+            pass
+        self.after(1000, self._raise_watch)
+
     def _to_back(self):
         """실행 중에는 맨 뒤로 — 항상 위로 떠 있으면 좌표 클릭을 이 창이 먹는다."""
         try:
-            self.attributes("-topmost", False)
             self.lower()
         except Exception:
             pass
@@ -419,23 +452,30 @@ class Bar(tk.Tk):
             return
         self._wait_done = False
         try:
-            self.attributes("-topmost", True)
-            self.lift()
+            self.lift()          # 끝나면 다시 보이게 (항상 위로 두지는 않는다)
         except Exception:
             pass
         self.lbl.config(text="✔ 실행 완료 — 창을 다시 앞으로")
         self._refresh()
 
     def _busy(self):
-        """지금 섬/던전 실행기가 돌고 있나 (메인런처가 돌린 것도 잡는다)."""
+        """지금 섬/던전 실행기가 돌고 있나 — 표시 파일 하나만 본다(즉시).
+        (예전엔 wmic 로 프로세스를 뒤져서 버튼이 1~3초씩 멈췄다)"""
         if self.proc and self.proc.poll() is None:
             return True
-        try:
-            out = subprocess.run(
-                ["wmic", "process", "where", "name='pythonw.exe'",
-                 "get", "commandline"],
-                capture_output=True, text=True, timeout=6).stdout
-            return "lineagem_island.py" in out
+        d = jload(RUNF)
+        pid = int(d.get("pid") or 0)
+        if not pid:
+            return False
+        try:      # 그 번호의 프로세스가 아직 살아 있나 (커널에 바로 물어본다)
+            import ctypes
+            h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+            if not h:
+                return False
+            code = ctypes.c_ulong()
+            ok = ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+            ctypes.windll.kernel32.CloseHandle(h)
+            return bool(ok and code.value == 259)      # STILL_ACTIVE
         except Exception:
             return False
 

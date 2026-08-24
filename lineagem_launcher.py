@@ -2204,8 +2204,18 @@ class App(tk.Tk):
                         ["tasklist", "/FI", f"PID eq {pid}"],
                         capture_output=True, text=True, timeout=5).stdout
                     if str(pid) in out:
-                        self.status.set("📏 요약런처가 이미 떠 있습니다 "
-                                        "(안 보이면 ≡ 로 끌어오세요)")
+                        # 떠 있으면 새로 띄우지 않고 '앞으로 올려라' 신호만 남긴다
+                        try:
+                            with open(pidf, encoding="utf-8") as f:
+                                d2 = json.load(f) or {}
+                            d2["raise"] = time.time()
+                            tmp = pidf + ".tmp"
+                            with open(tmp, "w", encoding="utf-8") as f:
+                                json.dump(d2, f, ensure_ascii=False, indent=2)
+                            os.replace(tmp, pidf)
+                        except Exception:
+                            pass
+                        self.status.set("📏 요약런처를 앞으로 가져왔습니다")
                         return
                 except Exception:
                     pass
