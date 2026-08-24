@@ -78,6 +78,8 @@ class Bar(tk.Tk):
         self.tab = int(self.cfg.get("tab", 0) or 0)
         self.sel = set()
         self._drag = None
+        self.cfg["pid"] = os.getpid()      # 메인런처가 '이미 떠 있나' 확인할 때 쓴다
+        jsave(CFG, self.cfg)
         self._build()
         self._show(self.tab)
         self._place()
@@ -404,7 +406,9 @@ class Bar(tk.Tk):
         self.lbl.config(text=f"던전 창 투명도 {int(nxt*100)}%")
 
     def _quit(self):
+        """창만 닫는다 — 돌던 작업·⏰ 반복은 그대로 둔다."""
         self.cfg["x"], self.cfg["y"] = self.winfo_x(), self.winfo_y()
+        self.cfg["pid"] = 0
         jsave(CFG, self.cfg)
         self.destroy()
 

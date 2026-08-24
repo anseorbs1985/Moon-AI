@@ -1515,10 +1515,16 @@ class App(tk.Tk):
         # layout toggle 참조 유지 (내부 사용)
 
         tk.Frame(btn_row, width=20).pack(side="left")
-        tk.Button(btn_row, text="🏝 섬/던전 실행기",
+        _isl_col = tk.Frame(btn_row); _isl_col.pack(side="left")
+        tk.Button(_isl_col, text="🏝 섬/던전 실행기",
             font=("맑은 고딕", 11, "bold"), bg="#2c3e50", fg="white",
             width=14, height=2,
-            command=self._open_island).pack(side="left")
+            command=self._open_island).pack()
+        # 그 아래 — 요약 런처(작은 창)를 띄운다. ✕ 로 닫아도 런처·작업은 그대로.
+        tk.Button(_isl_col, text="📏 요약런처 (던전 4개)",
+            font=("맑은 고딕", 8, "bold"), bg="#117a8b", fg="white",
+            activebackground="#0e6270", pady=2,
+            command=self._open_bar).pack(fill="x", pady=(2, 0))
         tk.Button(btn_row, text="🎫 패스권\n새로운 등록",
             font=("맑은 고딕", 10, "bold"), bg="#6c3483", fg="white",
             width=10, height=2,
@@ -1597,11 +1603,6 @@ class App(tk.Tk):
                                    width=9, height=1, pady=2,
                                    command=self._toggle_dark)
         self._dark_btn.pack(side="top", pady=(1, 0))
-        # 📏 얇은 막대 런처 — 던전 4개(에카·잊섬·악몽·오만)만 따로
-        tk.Button(sv, text="📏 막대런처", font=("맑은 고딕", 8, "bold"),
-                  bg="#117a8b", fg="white", activebackground="#0e6270",
-                  width=9, height=1, pady=2,
-                  command=self._open_bar).pack(side="top", pady=(1, 0))
         self._refresh_coord_save_lbl()
         self.after(1500, self._refresh_lock_btn)
         self.after(300, self._apply_dark_all)     # 저장해둔 화면 밝기 적용
@@ -2186,13 +2187,33 @@ class App(tk.Tk):
         self._refresh_dark_btn()
 
     def _open_bar(self):
-        """얇은 막대 런처를 띄운다 (따로 도는 별도 창 — 이미 떠 있으면 그대로)."""
+        """요약 런처(작은 창)를 띄운다 — 별도 프로세스라 메인런처·작업과 무관하다.
+        이미 떠 있으면 새로 띄우지 않는다. 그 창의 ✕ 는 '창만' 닫는다."""
         try:
+            d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+            pidf = os.path.join(d, "bar.json")
+            pid = 0
+            try:
+                with open(pidf, encoding="utf-8") as f:
+                    pid = int((json.load(f) or {}).get("pid") or 0)
+            except Exception:
+                pid = 0
+            if pid:      # 그 번호의 프로세스가 아직 살아 있나
+                try:
+                    out = subprocess.run(
+                        ["tasklist", "/FI", f"PID eq {pid}"],
+                        capture_output=True, text=True, timeout=5).stdout
+                    if str(pid) in out:
+                        self.status.set("📏 요약런처가 이미 떠 있습니다 "
+                                        "(안 보이면 ≡ 로 끌어오세요)")
+                        return
+                except Exception:
+                    pass
             subprocess.Popen(["pythonw", os.path.join(BASE, "lineagem_bar.pyw")])
-            self.status.set("📏 막대런처 — 화면 아래에 떴습니다 "
-                            "(≡ 로 옮기고 ◐ 로 투명도, ✕ 로 닫기)")
+            self.status.set("📏 요약런처 — 화면 아래에 떴습니다 "
+                            "(✕ 는 창만 닫고, 돌던 작업·반복은 그대로)")
         except Exception as e:
-            self.status.set(f"막대런처 실행 실패: {e}")
+            self.status.set(f"요약런처 실행 실패: {e}")
 
     def _toggle_dark(self):
         self.cfg["dark_ui"] = not self._dark_on()
