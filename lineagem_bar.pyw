@@ -77,6 +77,8 @@ class Bar(tk.Tk):
         self.configure(bg=self.BG)
         self.tab = int(self.cfg.get("tab", 0) or 0)
         self.sel = set()
+        self.queue = []           # 실행 중이면 여기에 쌓아둔다
+        self.proc = None
         self._drag = None
         self.cfg["pid"] = os.getpid()      # 메인런처가 '이미 떠 있나' 확인할 때 쓴다
         jsave(CFG, self.cfg)
@@ -155,11 +157,14 @@ class Bar(tk.Tk):
                             bg="#c0392b", fg="white", width=1,
                             command=lambda x=i: self._rep_cancel(x))
             can.pack(side="left", padx=(1, 0))
+            mode = tk.Button(c, font=("맑은 고딕", 7, "bold"), bd=0, width=7,
+                             command=lambda x=i: self._mode_toggle(x))
+            mode.pack(pady=(1, 0))
             plus = tk.Button(c, text="+", font=("맑은 고딕", 7, "bold"), bd=0,
                              bg="#3a4149", fg="#e67e22", width=7,
                              command=lambda x=i: self._sel_toggle(x))
             plus.pack(pady=(1, 0))
-            self.cells.append((run, rep, plus))
+            self.cells.append((run, rep, plus, mode))
 
         self.lbl = tk.Label(pad, text="", font=("맑은 고딕", 7), bg=self.BG,
                             fg=self.DIM, anchor="w")
@@ -196,16 +201,25 @@ class Bar(tk.Tk):
         key = self._cur()[2]
         slots, st = self._slots(), jload(REPF)
         live = 0
-        for i, (run, rep, plus) in enumerate(self.cells):
+        for i, (run, rep, plus, mode) in enumerate(self.cells):
             s = slots[i] if i < len(slots) else None
             has = bool(s and any(s.get("coords") or []))
-            for w in (run, rep, plus):
+            for w in (run, rep, plus, mode):
                 w.config(state=("normal" if has else "disabled"))
             if not has:
                 run.config(text="·", bg=self.BG2)
                 rep.config(text="", bg=self.BG2)
                 plus.config(text="", bg=self.BG2)
+                mode.config(text="", bg=self.BG2)
                 continue
+            if key == NIGHT:            # 첫 대기 방식 — 악몽의섬만
+                m = (st.get("_mode") or {}).get(f"{key}|{i}", "first")
+                if m == "h2":
+                    mode.config(text="2h마다", bg="#1f618d", fg="white")
+                else:
+                    mode.config(text="4h→2h", bg="#196f3d", fg="white")
+            else:
+                mode.config(text="—", bg=self.BG2, fg=self.DIM)
             live += 1
             run.config(text=f"{i+1:02d} 실행", bg="#2471a3")
             e = st.get(f"{key}|{i}")
@@ -317,6 +331,27 @@ class Bar(tk.Tk):
             return
         self._refresh()
 
+    def _mode_toggle(self, i):
+        """첫 대기 방식 — [4h→2h] ↔ [2h마다] (악몽의섬만). 반복을 켜지는 않는다."""
+        key = self._cur()[2]
+        if key != NIGHT:
+            self.lbl.config(text="첫 대기 선택은 악몽의섬만 있습니다")
+            return
+        st = jload(REPF)
+        md, fd = st.get("_mode") or {}, st.get("_first") or {}
+        k = f"{key}|{i}"
+        nxt = "h2" if md.get(k, "first") == "first" else "first"
+        md[k], fd[k] = nxt, (nxt == "first")
+        st["_mode"], st["_first"] = md, fd
+        e = st.get(k)
+        if e and not int(e.get("run", 0)):     # 아직 안 돈 예약이면 시각도 맞춘다
+            e["next"] = time.time() + (4 if nxt == "first" else NH) * 3600
+            st[k] = e
+        jsave(REPF, st)
+        rlog(f"{key} #{i+1:02d} "
+             + ("4h→2h" if nxt == "first" else "2h마다") + " 로 변경 (요약런처)")
+        self._refresh()
+
     def _rep_cancel(self, i):
         key = self._cur()[2]
         st = jload(REPF)
@@ -362,20 +397,63 @@ class Bar(tk.Tk):
         self._refresh()
 
     # ── 실행 ────────────────────────────────────────────────────────
-    def _spawn(self, args):
+    def _busy(self):
+        """지금 섬/던전 실행기가 돌고 있나 (메인런처가 돌린 것도 잡는다)."""
+        if self.proc and self.proc.poll() is None:
+            return True
         try:
-            subprocess.Popen(["pythonw", ISLAND] + args)
+            out = subprocess.run(
+                ["wmic", "process", "where", "name='pythonw.exe'",
+                 "get", "commandline"],
+                capture_output=True, text=True, timeout=6).stdout
+            return "lineagem_island.py" in out
+        except Exception:
+            return False
+
+    def _spawn(self, args, label=""):
+        """실행 중이면 대기열에 쌓았다가 끝난 뒤 하나씩 (겹쳐 돌면 클릭이 엉킨다)."""
+        if self._busy():
+            self.queue.append((args, label))
+            self.lbl.config(text=f"실행 중 — 대기열에 넣음 ({len(self.queue)}개 대기)")
+            self._watch_queue()
+            return False
+        try:
+            self.proc = subprocess.Popen(["pythonw", ISLAND] + args)
             return True
         except Exception as e:
             self.lbl.config(text=f"실행 실패: {e}")
             return False
 
+    def _watch_queue(self):
+        """앞 작업이 끝나면 대기열의 다음 것을 돌린다."""
+        if getattr(self, "_watching", False):
+            return
+        self._watching = True
+
+        def tick():
+            if not self.queue:
+                self._watching = False
+                return
+            if self._busy():
+                self.after(4000, tick)
+                return
+            args, label = self.queue.pop(0)
+            try:
+                self.proc = subprocess.Popen(["pythonw", ISLAND] + args)
+                self.lbl.config(text=f"대기열 실행 — {label} (남은 {len(self.queue)}개)")
+            except Exception as e:
+                self.lbl.config(text=f"대기열 실행 실패: {e}")
+            self.after(6000, tick)
+        self.after(2000, tick)
+
     def _run_one(self, i):
         didx, name, key, _c = self._cur()
-        if self._spawn([str(didx), "--run", "--slot", str(i + 1)]):
-            self._arm([i])
+        ran = self._spawn([str(didx), "--run", "--slot", str(i + 1)],
+                          f"{name} #{i+1:02d}")
+        self._arm([i])
+        if ran:
             self.lbl.config(text=f"{name} #{i+1:02d} 실행")
-            self.after(1500, self._refresh)
+        self.after(1500, self._refresh)
 
     def _run_sel(self):
         didx, name, key, _c = self._cur()
@@ -383,12 +461,14 @@ class Bar(tk.Tk):
         if not sel:
             self.lbl.config(text="슬롯을 고르세요 ([+] 또는 [✔ 전체선택])")
             return
-        if self._spawn([str(didx), "--run", "--slots",
-                        ",".join(str(i + 1) for i in sel), "--lanes", "2"]):
-            self._arm(sel)
-            self.sel = set()
+        ran = self._spawn([str(didx), "--run", "--slots",
+                           ",".join(str(i + 1) for i in sel), "--lanes", "2"],
+                          f"{name} {len(sel)}슬롯")
+        self._arm(sel)
+        self.sel = set()
+        if ran:
             self.lbl.config(text=f"{name} 선택실행 — {len(sel)}슬롯")
-            self.after(1500, self._refresh)
+        self.after(1500, self._refresh)
 
     def _open_win(self):
         didx, name, _k, _c = self._cur()
