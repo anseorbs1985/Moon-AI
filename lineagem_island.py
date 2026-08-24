@@ -445,6 +445,13 @@ class IslandApp(tk.Tk):
         self.resizable(True, True)
 
         self.after(200, self._apply_alpha)      # 저장해둔 창 투명도
+        # 실행만 하러 켜진 것이면 창을 아예 띄우지 않는다 (2026-08-24 사용자 지시)
+        #  — 예전엔 띄웠다가 맨 뒤로 보냈는데, 그 순간 부하가 걸려 렉이 생겼다.
+        if ("--run" in sys.argv) or ("--slot" in sys.argv) or ("--slots" in sys.argv):
+            try:
+                self.withdraw()
+            except Exception:
+                pass
         self.cfg    = load_cfg()
         self.counts = load_counts()
         self._stop_flag     = False
@@ -2995,8 +3002,13 @@ class IslandApp(tk.Tk):
         threading.Thread(target=self._run, args=(key, idx), daemon=True).start()
 
     def _send_behind_main(self):
-        """이 창을 '메인런처 바로 앞'에 배치 — 리니지M 클라이언트 뒤, 메인런처 위.
-        최소화하지 않으므로 개별 실행을 이어서 누르기 편하다."""
+        """창을 맨 뒤로. 실행만 하러 켜진 경우(--run)에는 창 자체가 없으므로 아무것도 안 한다.
+        (2026-08-24 — 띄웠다 내리는 순간 부하가 걸려 렉이 생겨서 아예 안 띄운다)"""
+        try:
+            if self.state() == "withdrawn":
+                return
+        except Exception:
+            pass
         try:
             import win32gui, win32con
             main  = win32gui.FindWindow(None, "리니지M 자동 실행")
@@ -3348,6 +3360,8 @@ class IslandApp(tk.Tk):
     # ── 웨이브(번갈아) 실행 — 클릭1을 전 슬롯에 쫙 → 클릭2 쫙 … (과거섬식) ──
     WAVE_KEYS = ("수금_오만의탑", "토요일_악몽의섬")
 
+    _last_focus = None      # 마지막으로 앞으로 올린 클라 (같은 창이면 다시 안 올린다)
+
     def _do_one_click(self, key, si, slot, j, lbl, move_set, tag=""):
         """슬롯의 j번째 자리 1개 실행 (드래그/방향키/클릭/녹화). 실행했으면 True."""
         name   = slot.get("name", f"#{si+1}")
@@ -3664,6 +3678,15 @@ class IslandApp(tk.Tk):
                         if j in move_set:
                             pyautogui.moveTo(*coords[j])
                         else:
+                            # 그 클라를 먼저 앞으로 — 비활성 창은 첫 클릭이
+                            # '창 띄우기'로만 먹히고 사라진다 (씹힘 방지, 2026-08-24)
+                            if j == 0 or self._last_focus != si:
+                                try:
+                                    self._focus_client(si, coords[j])
+                                    time.sleep(random.uniform(0.25, 0.45))
+                                except Exception:
+                                    pass
+                                self._last_focus = si
                             click_at(*coords[j])
                         did = True
                     if rec and not self._stop_flag:

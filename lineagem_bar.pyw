@@ -221,7 +221,11 @@ class Bar(tk.Tk):
             else:
                 mode.config(text="—", bg=self.BG2, fg=self.DIM)
             live += 1
-            run.config(text=f"{i+1:02d} 실행", bg="#2471a3")
+            q = [n for n, (_a, _l, ix) in enumerate(self.queue, 1) if i in ix]
+            if q:
+                run.config(text=f"대기{q[0]}", bg="#e67e22")
+            else:
+                run.config(text=f"{i+1:02d} 실행", bg="#2471a3")
             e = st.get(f"{key}|{i}")
             if e:
                 n = int(e.get("left", 0))
@@ -397,6 +401,31 @@ class Bar(tk.Tk):
         self._refresh()
 
     # ── 실행 ────────────────────────────────────────────────────────
+    def _to_back(self):
+        """실행 중에는 맨 뒤로 — 항상 위로 떠 있으면 좌표 클릭을 이 창이 먹는다."""
+        try:
+            self.attributes("-topmost", False)
+            self.lower()
+        except Exception:
+            pass
+        if not getattr(self, "_wait_done", False):
+            self._wait_done = True
+            self.after(3000, self._back_watch)
+
+    def _back_watch(self):
+        """실행이 끝나면 다시 앞(항상 위)으로 돌려놓는다."""
+        if self._busy() or self.queue:
+            self.after(4000, self._back_watch)
+            return
+        self._wait_done = False
+        try:
+            self.attributes("-topmost", True)
+            self.lift()
+        except Exception:
+            pass
+        self.lbl.config(text="✔ 실행 완료 — 창을 다시 앞으로")
+        self._refresh()
+
     def _busy(self):
         """지금 섬/던전 실행기가 돌고 있나 (메인런처가 돌린 것도 잡는다)."""
         if self.proc and self.proc.poll() is None:
@@ -410,10 +439,10 @@ class Bar(tk.Tk):
         except Exception:
             return False
 
-    def _spawn(self, args, label=""):
+    def _spawn(self, args, label="", idxs=None):
         """실행 중이면 대기열에 쌓았다가 끝난 뒤 하나씩 (겹쳐 돌면 클릭이 엉킨다)."""
         if self._busy():
-            self.queue.append((args, label))
+            self.queue.append((args, label, tuple(idxs or ())))
             self.lbl.config(text=f"실행 중 — 대기열에 넣음 ({len(self.queue)}개 대기)")
             self._watch_queue()
             return False
@@ -437,10 +466,12 @@ class Bar(tk.Tk):
             if self._busy():
                 self.after(4000, tick)
                 return
-            args, label = self.queue.pop(0)
+            args, label, _ix = self.queue.pop(0)
             try:
                 self.proc = subprocess.Popen(["pythonw", ISLAND] + args)
                 self.lbl.config(text=f"대기열 실행 — {label} (남은 {len(self.queue)}개)")
+                self._to_back()
+                self._refresh()
             except Exception as e:
                 self.lbl.config(text=f"대기열 실행 실패: {e}")
             self.after(6000, tick)
@@ -449,10 +480,11 @@ class Bar(tk.Tk):
     def _run_one(self, i):
         didx, name, key, _c = self._cur()
         ran = self._spawn([str(didx), "--run", "--slot", str(i + 1)],
-                          f"{name} #{i+1:02d}")
+                          f"{name} #{i+1:02d}", [i])
         self._arm([i])
         if ran:
             self.lbl.config(text=f"{name} #{i+1:02d} 실행")
+            self._to_back()
         self.after(1500, self._refresh)
 
     def _run_sel(self):
@@ -463,11 +495,12 @@ class Bar(tk.Tk):
             return
         ran = self._spawn([str(didx), "--run", "--slots",
                            ",".join(str(i + 1) for i in sel), "--lanes", "2"],
-                          f"{name} {len(sel)}슬롯")
+                          f"{name} {len(sel)}슬롯", sel)
         self._arm(sel)
         self.sel = set()
         if ran:
             self.lbl.config(text=f"{name} 선택실행 — {len(sel)}슬롯")
+            self._to_back()
         self.after(1500, self._refresh)
 
     def _open_win(self):
