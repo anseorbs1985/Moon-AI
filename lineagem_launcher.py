@@ -1597,6 +1597,11 @@ class App(tk.Tk):
                                    width=9, height=1, pady=2,
                                    command=self._toggle_dark)
         self._dark_btn.pack(side="top", pady=(1, 0))
+        # 📏 얇은 막대 런처 — 던전 4개(에카·잊섬·악몽·오만)만 따로
+        tk.Button(sv, text="📏 막대런처", font=("맑은 고딕", 8, "bold"),
+                  bg="#117a8b", fg="white", activebackground="#0e6270",
+                  width=9, height=1, pady=2,
+                  command=self._open_bar).pack(side="top", pady=(1, 0))
         self._refresh_coord_save_lbl()
         self.after(1500, self._refresh_lock_btn)
         self.after(300, self._apply_dark_all)     # 저장해둔 화면 밝기 적용
@@ -2179,6 +2184,15 @@ class App(tk.Tk):
             except Exception:
                 pass
         self._refresh_dark_btn()
+
+    def _open_bar(self):
+        """얇은 막대 런처를 띄운다 (따로 도는 별도 창 — 이미 떠 있으면 그대로)."""
+        try:
+            subprocess.Popen(["pythonw", os.path.join(BASE, "lineagem_bar.pyw")])
+            self.status.set("📏 막대런처 — 화면 아래에 떴습니다 "
+                            "(≡ 로 옮기고 ◐ 로 투명도, ✕ 로 닫기)")
+        except Exception as e:
+            self.status.set(f"막대런처 실행 실패: {e}")
 
     def _toggle_dark(self):
         self.cfg["dark_ui"] = not self._dark_on()
