@@ -356,6 +356,54 @@ class BatchOverlay(tk.Toplevel):
 
 
 class IslandApp(tk.Tk):
+    # 창 불투명도 — 뒤(게임 화면)가 비쳐 보이게. ◐ 로 바꾸고 파일에 남긴다.
+    ALPHAS = [1.0, 0.85, 0.7, 0.55, 0.4]
+
+    @staticmethod
+    def _ui_file():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "ui.json")
+
+    @classmethod
+    def _ui_load(cls):
+        try:
+            with open(cls._ui_file(), encoding="utf-8") as f:
+                return json.load(f) or {}
+        except Exception:
+            return {}
+
+    @classmethod
+    def _ui_save(cls, d):
+        try:
+            tmp = cls._ui_file() + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, cls._ui_file())
+        except Exception:
+            pass
+
+    def _apply_alpha(self, a=None):
+        if a is None:
+            a = float(self._ui_load().get("island_alpha", 1.0))
+        try:
+            self.attributes("-alpha", max(0.3, min(1.0, float(a))))
+        except Exception:
+            pass
+        return a
+
+    def _cycle_alpha(self):
+        cur = float(self._ui_load().get("island_alpha", 1.0))
+        nxt = self.ALPHAS[(self.ALPHAS.index(
+            min(self.ALPHAS, key=lambda x: abs(x - cur))) + 1) % len(self.ALPHAS)]
+        self._apply_alpha(nxt)
+        d = self._ui_load(); d["island_alpha"] = nxt; self._ui_save(d)
+        try:
+            self._alpha_btn.config(text=f"◐ {int(nxt*100)}%")
+            self._status.set(f"창 투명도 {int(nxt*100)}% (뒤가 비쳐 보입니다)")
+        except Exception:
+            pass
+
     def __init__(self, focus_idx=None):
         super().__init__()
         self._focus_idx = focus_idx  # None=전체, 0~3=해당 던전만
@@ -396,6 +444,7 @@ class IslandApp(tk.Tk):
             self.geometry(f"{int(1380*1.3)}x{_h}+{ox}+{_y}")
         self.resizable(True, True)
 
+        self.after(200, self._apply_alpha)      # 저장해둔 창 투명도
         self.cfg    = load_cfg()
         self.counts = load_counts()
         self._stop_flag     = False
@@ -795,6 +844,12 @@ class IslandApp(tk.Tk):
                   bg="#7b241c", fg="white",
                   command=lambda k=key, a_=hv, b_=nv2: self._bulk_repeat(k, a_, b_)
                   ).pack(side="left", padx=(4, 0))
+        _a0 = float(self._ui_load().get("island_alpha", 1.0))
+        self._alpha_btn = tk.Button(b1, text=f"◐ {int(_a0*100)}%",
+                                    font=("맑은 고딕", 7, "bold"),
+                                    bg="#566573", fg="white",
+                                    command=self._cycle_alpha)
+        self._alpha_btn.pack(side="right", padx=(3, 2))
         if key in self.REPEAT_FIRST:      # 악몽의섬 — 기본값으로 되돌리는 버튼
             tk.Button(b1, text="🔄 초기화 (4h→2h 6회)", font=("맑은 고딕", 7, "bold"),
                       bg="#196f3d", fg="white", activebackground="#145a32",

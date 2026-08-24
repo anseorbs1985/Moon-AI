@@ -14,7 +14,8 @@ import tkinter as tk
 
 BASE  = os.path.dirname(os.path.abspath(__file__))
 LOCAL = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
-CFG   = os.path.join(LOCAL, "bar.json")
+CFG   = os.path.join(LOCAL, "bar.json")     # 막대 위치
+UI    = os.path.join(LOCAL, "ui.json")      # 던전 창 투명도 (섬/던전 실행기와 공유)
 ISLAND = os.path.join(BASE, "lineagem_island.py")
 
 # 메인런처와 같은 던전 번호 (lineagem_island.py 의 DUNGEONS 순서)
@@ -27,21 +28,22 @@ DUNS = [
 ALPHAS = [1.0, 0.85, 0.7, 0.55, 0.4]      # ◐ 를 누를 때마다 이 순서로
 
 
-def load():
+def load(path=None):
     try:
-        with open(CFG, encoding="utf-8") as f:
+        with open(path or CFG, encoding="utf-8") as f:
             return json.load(f) or {}
     except Exception:
         return {}
 
 
-def save(d):
+def save(d, path=None):
     try:
         os.makedirs(LOCAL, exist_ok=True)
-        tmp = CFG + ".tmp"
+        p = path or CFG
+        tmp = p + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, CFG)
+        os.replace(tmp, p)
     except Exception:
         pass
 
@@ -56,10 +58,16 @@ class Bar(tk.Tk):
         self.overrideredirect(True)             # 제목표시줄 없이 얇게
         self.attributes("-topmost", True)
         self.configure(bg=self.BG)
-        self.attributes("-alpha", float(self.cfg.get("alpha", 0.85)))
+        self.attributes("-alpha", 1.0)      # 막대는 또렷하게 (투명도는 던전 창에 적용)
         self._build()
         self._place()
         self._drag = None
+        try:
+            _a = int(float(load(UI).get("island_alpha", 1.0)) * 100)
+            self.abtn.config(text=f"◐{_a}")
+            self.lbl.config(text=f"던전창 {_a}%")
+        except Exception:
+            pass
 
     # ── 화면 ────────────────────────────────────────────────────────
     def _build(self):
@@ -75,24 +83,31 @@ class Bar(tk.Tk):
             w.bind("<B1-Motion>", self._move)
             w.bind("<ButtonRelease-1>", self._drop)
 
-        for idx, name, col in DUNS:
-            cell = tk.Frame(pad, bg=self.BG)
-            cell.pack(side="left", padx=(3, 0))
-            tk.Button(cell, text=f"▶ {name}", font=("맑은 고딕", 8, "bold"),
-                      bg=col, fg="white", bd=0, padx=5, pady=2,
-                      activebackground=col,
-                      command=lambda i=idx, n=name: self._run(i, n)).pack(side="left")
-            tk.Button(cell, text="⌖", font=("맑은 고딕", 8, "bold"),
-                      bg="#3a4149", fg=self.FG, bd=0, padx=3, pady=2,
+        body = tk.Frame(pad, bg=self.BG)
+        body.pack(side="left")
+        for col_i, (idx, name, col) in enumerate(DUNS):
+            cell = tk.Frame(body, bg=self.BG)
+            cell.grid(row=0, column=col_i, padx=2, pady=1)
+            # 위 — 좌표(설정) 창 열기
+            tk.Button(cell, text=f"⌖ {name}", font=("맑은 고딕", 8, "bold"),
+                      bg="#3a4149", fg=self.FG, bd=0, width=7, pady=3,
                       activebackground="#4a525b",
-                      command=lambda i=idx: self._open(i)).pack(side="left", padx=(1, 0))
+                      command=lambda i=idx: self._open(i)).pack(fill="x")
+            # 아래 — 그 던전 실행
+            tk.Button(cell, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
+                      bg=col, fg="white", bd=0, width=7, pady=3,
+                      activebackground=col,
+                      command=lambda i=idx, n=name: self._run(i, n)).pack(fill="x", pady=(2, 0))
 
-        tk.Button(pad, text="◐", font=("맑은 고딕", 9, "bold"),
-                  bg="#566573", fg="white", bd=0, padx=4, pady=2,
-                  command=self._cycle_alpha).pack(side="left", padx=(6, 0))
-        tk.Button(pad, text="✕", font=("맑은 고딕", 9, "bold"),
-                  bg="#c0392b", fg="white", bd=0, padx=4, pady=2,
-                  command=self._quit).pack(side="left", padx=(3, 3))
+        side = tk.Frame(pad, bg=self.BG)
+        side.pack(side="left", padx=(6, 2))
+        self.abtn = tk.Button(side, text="◐", font=("맑은 고딕", 9, "bold"),
+                              bg="#566573", fg="white", bd=0, width=4, pady=2,
+                              command=self._cycle_alpha)
+        self.abtn.pack()
+        tk.Button(side, text="✕", font=("맑은 고딕", 9, "bold"),
+                  bg="#c0392b", fg="white", bd=0, width=4, pady=2,
+                  command=self._quit).pack(pady=(2, 0))
 
         self.lbl = tk.Label(pad, text="", font=("맑은 고딕", 7),
                             bg=self.BG, fg="#9aa4b0")
@@ -127,16 +142,16 @@ class Bar(tk.Tk):
 
     # ── 기능 ────────────────────────────────────────────────────────
     def _cycle_alpha(self):
-        cur = float(self.cfg.get("alpha", 0.85))
-        try:
-            nxt = ALPHAS[(ALPHAS.index(min(ALPHAS, key=lambda a: abs(a - cur))) + 1)
-                         % len(ALPHAS)]
-        except Exception:
-            nxt = 0.85
-        self.attributes("-alpha", nxt)
-        self.cfg["alpha"] = nxt
-        save(self.cfg)
-        self.lbl.config(text=f"투명도 {int(nxt * 100)}%")
+        """좌표·개별실행 창(섬/던전 실행기)의 투명도를 정한다.
+        여기서 정해두면 그 창을 열 때마다 그대로 적용된다."""
+        ui = load(UI)
+        cur = float(ui.get("island_alpha", 1.0))
+        nxt = ALPHAS[(ALPHAS.index(min(ALPHAS, key=lambda a: abs(a - cur))) + 1)
+                     % len(ALPHAS)]
+        ui["island_alpha"] = nxt
+        save(ui, UI)
+        self.abtn.config(text=f"◐{int(nxt*100)}")
+        self.lbl.config(text=f"던전창 투명도 {int(nxt*100)}%")
 
     def _spawn(self, args):
         try:
