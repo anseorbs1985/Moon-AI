@@ -192,6 +192,8 @@ DC_TAPS_MIN    = 7     # 한 좌표당 연속 클릭 횟수(최소)
 DC_TAPS_MAX    = 9     # 한 좌표당 연속 클릭 횟수(최대)
 DC_BURST_MIN   = 1.0   # 한 좌표의 7~9회 클릭을 이 시간(초) 안에 모두 실행
 DC_BURST_MAX   = 2.0
+KNIGHT2_SLOTS  = 16    # 흑기사 지정 슬롯 수 (낚시녹임과 동일 구조)
+KNIGHT2_CLICKS = 12    # 흑기사 지정 좌표 수 — 칸마다 휠(아래로) 지정 가능
 FISH_SLOTS     = 16    # 낚시녹임 슬롯 수 (인형탐험과 동일 구조)
 FISH_CLICKS    = 19    # 낚시녹임 좌표 수 (2026-08-19 맨 앞에 하나 추가)
 CIRCUS_SLOTS   = 16    # 서커스이벤트 슬롯 수 (낚시녹임과 동일 구조)
@@ -253,6 +255,7 @@ DEFAULT_CFG = {
     "market_slots":  None,              # 거래소검색 — 16슬롯 × 좌표9 (쿠폰등록 방식)
     "dragon_slots":  None,              # 용던고고!!! — 16슬롯 × 좌표10 (스케줄과 같은 구조)
     "knight_slots":  None,              # 던전끝! 흑기사!! — 16슬롯 × 좌표5
+    "knight2_slots": None,              # 흑기사 지정 — 16슬롯 × 좌표12 (휠 지정 가능)
     "dark_ui":       True,              # 어두운 화면 (눈 보호)
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
@@ -574,6 +577,31 @@ def load_cfg():
         while len(dq) < DC_SLOTS:
             dq.append(None)
         cfg["dc_slots"] = dq[:DC_SLOTS]
+        # knight2_slots (흑기사 지정 16슬롯 × 12좌표 — 칸마다 간격·휠 지정)
+        k2, nk2 = cfg.get("knight2_slots") or [], []
+        for s_ in k2:
+            if isinstance(s_, dict):
+                c = list(s_.get("coords") or [])
+                g = list(s_.get("gap_list") or [])
+                w = list(s_.get("wheel_list") or [])
+                while len(c) < KNIGHT2_CLICKS: c.append(None)
+                while len(g) < KNIGHT2_CLICKS: g.append(None)
+                while len(w) < KNIGHT2_CLICKS: w.append(0)
+                nk2.append({"name": s_.get("name", "미등록"),
+                            "coords": c[:KNIGHT2_CLICKS],
+                            "gap_list": g[:KNIGHT2_CLICKS],
+                            "wheel_list": w[:KNIGHT2_CLICKS],
+                            "enabled": s_.get("enabled", True)})
+            else:
+                nk2.append({"name": "미등록", "coords": [None] * KNIGHT2_CLICKS,
+                            "gap_list": [None] * KNIGHT2_CLICKS,
+                            "wheel_list": [0] * KNIGHT2_CLICKS, "enabled": True})
+        while len(nk2) < KNIGHT2_SLOTS:
+            nk2.append({"name": "미등록", "coords": [None] * KNIGHT2_CLICKS,
+                        "gap_list": [None] * KNIGHT2_CLICKS,
+                        "wheel_list": [0] * KNIGHT2_CLICKS, "enabled": True})
+        cfg["knight2_slots"] = nk2[:KNIGHT2_SLOTS]
+
         # fish_slots (낚시녹임 16슬롯 × 19좌표)
         # (2026-08-19) 맨 앞에 좌표 하나를 새로 넣는다 — 기존 좌표는 한 칸씩 밀려
         # 클릭1→클릭2 … 순서는 그대로. 컴퓨터마다 한 번만 밀도록 표시를 남긴다.
@@ -1713,6 +1741,10 @@ class App(tk.Tk):
             font=("맑은 고딕", 9, "bold"), bg="#1a5276", fg="white",
             activebackground="#123c56", width=7, height=2,
             command=self._open_fish_win).pack(side="left")
+        tk.Button(r5, text="🖤 흑기사" + chr(10) + "지정",
+            font=("맑은 고딕", 9, "bold"), bg="#212f3d", fg="white",
+            activebackground="#17202a", width=7, height=2,
+            command=self._open_knight2_win).pack(side="left", padx=(3, 0))
         tk.Button(r5, text="▶" + chr(10) + "실행",
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
@@ -2338,6 +2370,7 @@ class App(tk.Tk):
         ("relic_slots",    "🗿 성물확인용"),
         ("dungeon_slots",  "🏰 변신확인용"),
         ("fish_slots",     "🎣 낚시녹임"),
+        ("knight2_slots",  "🖤 흑기사 지정"),
         ("market_slots",   "🔎 거래소검색"),
         ("coupon_slots",   "🎟 쿠폰등록"),
         ("circus_slots",   "🎪 서커스 이벤트등록"),
@@ -4356,6 +4389,7 @@ class App(tk.Tk):
                 "knight":  ("knight_slots",  "던전끝! 흑기사!!", "🖤"),
                 "eventshop": ("eventshop_slots", "이벤트상점", "🛒"),
                 "fish":    ("fish_slots",    "낚시녹임",   "🎣"),
+                "knight2": ("knight2_slots", "흑기사 지정", "🖤"),
                 "circus":  ("circus_slots",  "서커스 이벤트등록", "🎪"),
                 "circus2": ("circus2_slots", "서커스 이벤트실행", "🎪"),
                 "circus3": ("circus3_slots", "서커스 이벤트퀘스트", "🎪")}[fkey]
@@ -4417,6 +4451,11 @@ class App(tk.Tk):
     def _open_circus3_win(self):
         self._open_section_win("_circus3_win", "🎪 서커스 이벤트퀘스트",
                                lambda p: self._build_dgn2("circus3", p), w=470, h=430, pinnable=True)
+
+    def _open_knight2_win(self):
+        self._open_section_win("_knight2_win", "🖤 흑기사 지정",
+                               lambda p: self._build_dgn2("knight2", p),
+                               w=520, h=620, pinnable=True)
 
     def _open_fish_win(self):
         self._open_section_win("_fish_win", "🎣 낚시녹임",
@@ -4864,13 +4903,28 @@ class App(tk.Tk):
             import ctypes
             pyautogui.moveTo(*coord)
             time.sleep(0.08)
-            for _ in range(WHEEL_UP_TIMES):
-                try:
-                    ctypes.windll.user32.mouse_event(0x0800, 0, 0, int(n) * 120, 0)
-                except Exception:
-                    pyautogui.scroll(int(n) * 120)
-                time.sleep(random.uniform(0.12, 0.25))
-            return f"휠▲{n}"
+            if abs(int(n)) >= 10:
+                # 많이 굴려야 하는 자리 (예: 맨 끝까지 내리기) — 적은 양을 여러 번
+                # 나눠 보낸다. 한 번에 크게 보내면 게임이 무시하는 일이 있다.
+                step = 3 if n > 0 else -3
+                left = abs(int(n))
+                while left > 0:
+                    d = min(3, left)
+                    try:
+                        ctypes.windll.user32.mouse_event(
+                            0x0800, 0, 0, (d if n > 0 else -d) * 120, 0)
+                    except Exception:
+                        pyautogui.scroll((d if n > 0 else -d) * 120)
+                    left -= d
+                    time.sleep(random.uniform(0.03, 0.07))
+            else:
+                for _ in range(WHEEL_UP_TIMES):
+                    try:
+                        ctypes.windll.user32.mouse_event(0x0800, 0, 0, int(n) * 120, 0)
+                    except Exception:
+                        pyautogui.scroll(int(n) * 120)
+                    time.sleep(random.uniform(0.12, 0.25))
+            return (f"휠▼{abs(n)}" if n < 0 else f"휠▲{n}")
         self._click_log(fkey, j, coord, slot, "클릭")
         snap = None
         if fkey in self.CLICK_GUARD:
@@ -9576,6 +9630,13 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("circus", i),
                             prev=lambda i: self._preview_dgn2("circus", i),
                             delete=lambda i: self._del_dgn2("circus", i)),
+            "knight2": dict(title="흑기사 지정", key="knight2_slots",
+                            clicks=KNIGHT2_CLICKS, color="#212f3d",
+                            enable=True, sel=True, opts=True,
+                            reg=lambda s, c: self._reg_dgn2_click("knight2", s, c),
+                            test=lambda i: self._test_dgn2("knight2", i),
+                            prev=lambda i: self._preview_dgn2("knight2", i),
+                            delete=lambda i: self._del_dgn2("knight2", i)),
             "fish":    dict(title="낚시녹임",  key="fish_slots",    clicks=FISH_CLICKS,    color="#1a5276",
                             reg=lambda s, c: self._reg_dgn2_click("fish", s, c),
                             test=lambda i: self._test_dgn2("fish", i),
@@ -12055,7 +12116,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_lastrun_win","_lock_win","_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_knight_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
+                 "_lastrun_win","_lock_win","_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_knight_win","_knight2_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs
