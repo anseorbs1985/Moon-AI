@@ -1741,14 +1741,20 @@ class App(tk.Tk):
             font=("맑은 고딕", 9, "bold"), bg="#1a5276", fg="white",
             activebackground="#123c56", width=7, height=2,
             command=self._open_fish_win).pack(side="left")
-        tk.Button(r5, text="🖤 흑기사" + chr(10) + "지정",
-            font=("맑은 고딕", 9, "bold"), bg="#212f3d", fg="white",
-            activebackground="#17202a", width=7, height=2,
-            command=self._open_knight2_win).pack(side="left", padx=(3, 0))
         tk.Button(r5, text="▶" + chr(10) + "실행",
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
             command=lambda: self._start_dgn2("fish")).pack(side="left", padx=(2,0))
+        # 낚시녹임 아래: 🖤 흑기사 지정 (한 번 쓰고 지울 임시 런처 — 2026-08-24)
+        r6 = tk.Frame(dc_col); r6.pack(anchor="n", pady=(4, 0))
+        tk.Button(r6, text="🖤 흑기사" + chr(10) + "지정",
+            font=("맑은 고딕", 9, "bold"), bg="#212f3d", fg="white",
+            activebackground="#17202a", width=7, height=2,
+            command=self._open_knight2_win).pack(side="left")
+        tk.Button(r6, text="▶" + chr(10) + "실행",
+            font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
+            activebackground="#1e8449", width=4, height=2,
+            command=lambda: self._start_dgn2("knight2")).pack(side="left", padx=(2, 0))
 
         # 작업이 끝나면 여기에 큰 빨간 글씨로 '완료'가 1분간 뜬다
         self._done_var = tk.StringVar(value="")
