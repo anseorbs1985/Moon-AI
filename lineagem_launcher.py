@@ -4801,7 +4801,8 @@ class App(tk.Tk):
         except Exception:
             return default
 
-    LOG_FKEYS = ("knight", "dragon")      # 클릭이 어느 창에 갔는지 기록해두는 런처
+    LOG_FKEYS = ("knight", "dragon", "knight2")   # 클릭이 어느 창에 갔는지 기록하는 런처
+    FOCUS_FIRST = ("knight2",)            # 슬롯이 바뀌면 그 클라를 먼저 앞으로 올린다
     # 좌표 하나하나 누르기 직전에 '사람이 마우스를 놓았는지' 확인하는 런처
     # (사용자가 제일 중요하게 보는 것 — 겹치면 팅긴다)
     CLICK_GUARD = ("dragon", "knight", "sched")
@@ -4985,6 +4986,13 @@ class App(tk.Tk):
                 continue
             if si != last_si:
                 time.sleep(random.uniform(0.6, 1.1))   # 다른 창으로 넘어갈 여유
+                if fkey in self.FOCUS_FIRST:
+                    # 비활성 창의 첫 클릭은 '창 띄우기'로만 먹히고 사라진다
+                    try:
+                        self._focus_client_at(coords[j])
+                        time.sleep(random.uniform(0.25, 0.45))
+                    except Exception:
+                        pass
                 last_si = si
             if not self._wait_mouse_idle(stop, fkey=fkey): return
             if getattr(self, stop, False): break
@@ -5022,6 +5030,18 @@ class App(tk.Tk):
         _el = int(time.time() - _t0)
         self.status.set(f"{icon} 번갈아 실행 완료 — 클릭 {done}회, "
                         f"{_el//60}분 {_el%60}초 걸림")
+        if fkey in self.LOG_FKEYS:
+            try:      # 슬롯별로 끝까지 갔는지 남긴다 (누락 확인용)
+                short = [f"#{si+1:02d} {state[si]['j']}/{nclk}"
+                         for si, _s in targets if state[si]["j"] < nclk]
+                click_log(f"[웨이브끝] {fkey} {len(targets)}슬롯 · 클릭 {done}회 · "
+                          + (f"⚠ 덜 돈 슬롯: {', '.join(short)}" if short
+                             else "전 슬롯 끝까지 완료"))
+                if short:
+                    self.status.set(f"{icon} 완료 — ⚠ 덜 돈 슬롯 {len(short)}개 "
+                                    f"(클릭기록 확인)")
+            except Exception:
+                pass
 
     def _run_dgn2(self, fkey, slot_idx=None, sel_list=None):
         self._start_pause()
@@ -5065,6 +5085,15 @@ class App(tk.Tk):
                 # 서커스 이벤트실행: 동시 2슬롯, 좌표 2~4초 / 슬롯 3~5초 랜덤
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
                                     gap=(2.0, 4.0), slot_gap=(3.0, 5.0))
+                return
+            if fkey == "knight2" and slot_idx is None and len(targets) > 1:
+                # 흑기사 지정 — 3슬롯씩 번갈아. 누락 없게 창을 먼저 앞으로 올리고 누른다.
+                _cl = sum(1 for _si, _sl in targets
+                          for _c in (_sl.get("coords") or [])[:nclk] if _c)
+                self.status.set(f"🖤 흑기사 지정 — {len(targets)}슬롯 / 클릭 {_cl}회, "
+                                f"3슬롯 번갈아")
+                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=3,
+                                    gap=(1.2, 2.6), slot_gap=(1.0, 2.5))
                 return
             if fkey in ("fish",) and slot_idx is None and len(targets) > 1:
                 # 낚시녹임은 번갈아(웨이브) 실행 — 동시 4슬롯, 좌표 간격 2~4초 랜덤
