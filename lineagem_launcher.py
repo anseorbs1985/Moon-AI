@@ -9769,15 +9769,36 @@ class App(tk.Tk):
                                    command=lambda x=idx, c=j, f=fkey:
                                    self._pick_paste(f, x, c)).pack(pady=(1, 0))
                 else:
+                    # 휠 — 칸수를 직접 적고(0=그냥 클릭), ▲/▼ 로 방향을 고른다
+                    # (예: 100 + ▼ = 아래로 100칸. 저장은 부호로: 아래는 음수)
                     wl = slot.get("wheel_list") or []
-                    wv = tk.StringVar(value=(str(wl[j]) if j < len(wl) and wl[j] else "0"))
-                    om = tk.OptionMenu(cc, wv, *[str(k) for k in range(10)])
-                    om.config(font=("맑은 고딕", 7), width=1, pady=0, highlightthickness=0)
-                    om.pack(pady=(1, 0))
-                    def _sv_wheel(*_a, x=idx, c=j, v=wv, f=fkey):
-                        try: n = int(v.get())
-                        except Exception: n = 0
+                    raw = int(wl[j]) if (j < len(wl) and wl[j]) else 0
+                    wf = tk.Frame(cc); wf.pack(pady=(1, 0))
+                    wv = tk.StringVar(value=str(abs(raw)))
+                    dv = tk.StringVar(value=("▼" if raw < 0 else "▲"))
+                    we = tk.Entry(wf, textvariable=wv, font=("맑은 고딕", 7), width=3,
+                                  justify="center", relief="solid", bd=1)
+                    we.pack(side="left")
+                    db = tk.Button(wf, textvariable=dv, font=("맑은 고딕", 7, "bold"),
+                                   width=1, pady=0,
+                                   bg=("#7b241c" if raw < 0 else "#1a5276"), fg="white")
+                    db.pack(side="left", padx=(1, 0))
+
+                    def _sv_wheel(*_a, x=idx, c=j, v=wv, d=dv, f=fkey):
+                        try:
+                            n = abs(int(str(v.get()).strip() or 0))
+                        except Exception:
+                            n = 0
+                        if d.get() == "▼":
+                            n = -n
                         self._grid_set_list(f, x, "wheel_list", c, n)
+
+                    def _flip(x=idx, c=j, v=wv, d=dv, f=fkey, btn=db):
+                        d.set("▲" if d.get() == "▼" else "▼")
+                        btn.config(bg=("#7b241c" if d.get() == "▼" else "#1a5276"))
+                        _sv_wheel(x=x, c=c, v=v, d=d, f=f)
+
+                    db.config(command=_flip)
                     wv.trace_add("write", _sv_wheel)
         bot = tk.Frame(win); bot.pack(pady=(4, 10))
         if sp.get("assign"):
