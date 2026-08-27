@@ -740,6 +740,51 @@ def img_path(fkey, j):
     return os.path.join(IMG_DIR, f"{fkey}_{j+1:02d}.png")
 
 
+PICKS = ["best", "top", "bottom", "left", "right"]
+PICK_TXT = {"best": "최고일치", "top": "맨위", "bottom": "맨아래",
+            "left": "맨왼쪽", "right": "맨오른쪽"}
+
+
+def stop_path(fkey):
+    """그 런처의 '여기까지만 하고 끝' 좌표번호 (1부터). 없으면 끝까지 간다."""
+    return os.path.join(IMG_DIR, f"{fkey}_stopat.json")
+
+
+def stop_at(fkey):
+    try:
+        with open(stop_path(fkey), encoding="utf-8") as f:
+            v = int((json.load(f) or {}).get("stop_at") or 0)
+        return v if v > 0 else 0
+    except Exception:
+        return 0
+
+
+def set_stop_at(fkey, v):
+    os.makedirs(IMG_DIR, exist_ok=True)
+    with open(stop_path(fkey), "w", encoding="utf-8") as f:
+        json.dump({"stop_at": int(v)}, f)
+
+
+def pick_path(fkey, j):
+    """같은 그림이 여러 개일 때 어느 것을 누를지 (위/아래 구분용)."""
+    return os.path.join(IMG_DIR, f"{fkey}_{j+1:02d}_pick.json")
+
+
+def img_pick(fkey, j):
+    try:
+        with open(pick_path(fkey, j), encoding="utf-8") as f:
+            v = (json.load(f) or {}).get("pick")
+        return v if v in PICKS else "best"
+    except Exception:
+        return "best"
+
+
+def set_img_pick(fkey, j, v):
+    os.makedirs(IMG_DIR, exist_ok=True)
+    with open(pick_path(fkey, j), "w", encoding="utf-8") as f:
+        json.dump({"pick": v}, f)
+
+
 def thr_path(fkey, j):
     """그 좌표의 '일치 기준' 파일 (작은 그림은 기준을 낮춰야 잡힌다)."""
     return os.path.join(IMG_DIR, f"{fkey}_{j+1:02d}_thr.json")
@@ -836,11 +881,47 @@ def find_image(fkey, j, coord):
             return None, None, 0.0
         res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
         _mn, mx, _ml, ml = cv2.minMaxLoc(res)
-        if mx < img_thr(fkey, j):        # 좌표마다 정해둔 기준 (기본 0.80)
+        thr = img_thr(fkey, j)
+        if mx < thr:
+            # 색으로 못 찾으면 '윤곽선(모양)'으로 한 번 더 찾는다 (2026-08-27).
+            # 아이콘은 같은데 배경(지형·몹·이펙트)이 달라 점수가 떨어지는 경우 대응.
+            try:
+                g1 = cv2.Canny(cv2.cvtColor(big, cv2.COLOR_BGR2GRAY), 60, 160)
+                g2 = cv2.Canny(cv2.cvtColor(tpl, cv2.COLOR_BGR2GRAY), 60, 160)
+                res2 = cv2.matchTemplate(g1, g2, cv2.TM_CCOEFF_NORMED)
+                _n2, mx2, _l2, ml2 = cv2.minMaxLoc(res2)
+                if mx2 >= thr:
+                    res, mx, ml = res2, mx2, ml2      # 윤곽선 결과를 쓴다
+                else:
+                    return None, None, float(max(mx, mx2))
+            except Exception:
+                return None, None, float(mx)
+        th, tw = tpl.shape[0], tpl.shape[1]
+        pick = img_pick(fkey, j)
+        if pick == "best":
+            return (int(box[0] + ml[0] + tw // 2),
+                    int(box[1] + ml[1] + th // 2), float(mx))
+        # 같은 그림이 여럿일 때 — 기준을 넘는 것을 다 모아 겹치는 것끼리 묶고
+        # 위/아래/왼/오 중 원하는 것을 고른다 (위로 갔다가 다시 내려가는 것 방지)
+        ys, xs = np.where(res >= thr)
+        cands = []
+        for y0, x0 in zip(ys.tolist(), xs.tolist()):
+            v = float(res[y0, x0])
+            for c in cands:                      # 가까운 것은 같은 대상으로 본다
+                if abs(c[0] - x0) < tw // 2 and abs(c[1] - y0) < th // 2:
+                    if v > c[2]:
+                        c[0], c[1], c[2] = x0, y0, v
+                    break
+            else:
+                cands.append([x0, y0, v])
+        if not cands:
             return None, None, float(mx)
-        cx = box[0] + ml[0] + tpl.shape[1] // 2
-        cy = box[1] + ml[1] + tpl.shape[0] // 2
-        return int(cx), int(cy), float(mx)
+        if   pick == "top":    c = min(cands, key=lambda c: c[1])
+        elif pick == "bottom": c = max(cands, key=lambda c: c[1])
+        elif pick == "left":   c = min(cands, key=lambda c: c[0])
+        else:                  c = max(cands, key=lambda c: c[0])
+        return (int(box[0] + c[0] + tw // 2),
+                int(box[1] + c[1] + th // 2), float(c[2]))
     except Exception:
         return None, None, 0.0
 
@@ -5098,6 +5179,30 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"기준 변경 실패: {e}")
 
+    def _toggle_stop_at(self, fkey, j, btn=None):
+        """'여기까지만 하고 끝' 켜기/끄기 — 그 좌표를 마치면 그 슬롯을 종료한다."""
+        cur = stop_at(fkey)
+        nxt = 0 if cur == j + 1 else j + 1
+        set_stop_at(fkey, nxt)
+        if btn and btn.winfo_exists():
+            btn.config(text=("⏹여기끝" if nxt else "⏹"),
+                       bg=("#c0392b" if nxt else "#5d6d7e"))
+        if nxt:
+            self.status.set(f"⏹ 좌표{nxt}까지만 하고 그 슬롯을 끝냅니다 "
+                            f"(뒤 좌표는 실행 안 함)")
+        else:
+            self.status.set("⏹ 해제 — 끝까지 실행합니다")
+
+    def _cycle_img_pick(self, fkey, j, btn=None):
+        """같은 그림이 여럿일 때 고를 기준 — 최고일치 → 맨위 → 맨아래 → 맨왼쪽 → 맨오른쪽."""
+        cur = img_pick(fkey, j)
+        nxt = PICKS[(PICKS.index(cur) + 1) % len(PICKS)]
+        set_img_pick(fkey, j, nxt)
+        if btn and btn.winfo_exists():
+            btn.config(text=PICK_TXT[nxt])
+        self.status.set(f"🎯 좌표{j+1} — 같은 그림이 여러 개면 "
+                        f"'{PICK_TXT[nxt]}' 것을 누릅니다")
+
     def _test_click_image(self, fkey, idx, j, btn=None):
         """지금 찾아본다 — 최고 일치도와 찾은 자리를 큰 창으로 보여준다.
         (셀이 작아 상태줄로는 확인이 어려워서 팝업으로 띄운다)"""
@@ -5125,7 +5230,8 @@ class App(tk.Tk):
         tk.Label(w, text=("찾음 ✔" if ok else "못 찾음 ✘"),
                  font=("맑은 고딕", 22, "bold"),
                  fg=("#196f3d" if ok else "#c0392b")).pack(padx=20, pady=(14, 4))
-        tk.Label(w, text=f"최고 일치도  {sc:.3f}   (기준 {thr:.2f})",
+        tk.Label(w, text=f"일치도  {sc:.3f}   (기준 {thr:.2f} · "
+                         f"{PICK_TXT[img_pick(fkey, j)]} 선택)",
                  font=("맑은 고딕", 16, "bold")).pack(padx=20)
         tk.Label(w, text=(f"찾은 자리: ({ix}, {iy})" if ok else
                           "기준보다 낮아서 이 자리는 건너뜁니다"),
@@ -5200,6 +5306,17 @@ class App(tk.Tk):
         # 이 자리에 그림을 지정해뒀으면 그림을 찾아 그 자리를 누른다.
         # 못 찾으면 "이미지없음" 을 돌려줘서 그 슬롯을 여기서 끝낸다 (사용자 지시).
         _img_hit = False
+        # 이 슬롯에서 이미 이미지를 한 번 찾았으면 더 이상 찾지 않는다 —
+        # 뒤 좌표에서 같은 그림을 또 찾아 눌러 되돌아가는 것을 막는다 (2026-08-27 사용자 지시)
+        _done = getattr(self, "_img_done", None)
+        if _done is None:
+            _done = self._img_done = set()
+        _slot_id = id(slot) if slot is not None else 0
+        if (fkey, _slot_id) in _done:
+            if coord:
+                self._click_log(fkey, j, coord, slot, "클릭")
+                click_at(*coord)
+            return "클릭"
         if os.path.exists(img_path(fkey, j)):
             nm = (slot or {}).get("name", "?")
             try:      # 이 자리에 등록된 좌표가 따로 있나 (없으면 그림을 직접 누른다)
@@ -5232,9 +5349,10 @@ class App(tk.Tk):
             # 좌표도 함께 등록돼 있으면 → 그림은 '창이 떴는지 확인'용.
             #   그림이 보일 때까지 기다렸다가 **등록한 좌표**를 누른다.
             # 좌표가 없으면 → 그림 가운데를 누른다. (2026-08-27 사용자 지시)
+            _done.add((fkey, _slot_id))        # 이 슬롯은 이미지 검색 끝
             if _own_coord:
                 click_log(f"{fkey} [{nm}] 좌표{j+1} 그림 확인됨 (일치도 {sc:.2f}) "
-                          f"→ 등록한 좌표 클릭")
+                          f"→ 등록한 좌표 클릭 · 이 슬롯은 이미지 검색 끝")
                 self.status.set(f"🖼 [{nm}] 좌표{j+1} 창 떴음 (일치도 {sc:.2f}) — 좌표 클릭")
             else:
                 click_log(f"{fkey} [{nm}] 좌표{j+1} 이미지 찾음 ({ix},{iy}) "
@@ -5352,6 +5470,11 @@ class App(tk.Tk):
             if _act == "이미지없음":
                 st["j"] = nclk          # 이 슬롯만 끝 — 다른 슬롯은 그대로 계속
                 continue
+            _sa = stop_at(fkey)
+            if _sa and (j + 1) >= _sa:
+                st["j"] = nclk          # '여기까지만' 좌표를 마쳤다 → 이 슬롯 끝
+                self.status.set(f"{icon} [{name}] 좌표{_sa}까지 끝 — 이 슬롯 종료")
+                continue
             self.status.set(f"{icon} [{name}] {_act}{j+1}/{nclk}  (남은 슬롯 {len(alive)})")
             done += 1
             # 묶음 자리 — 다음 좌표를 '바로 이어서' 처리한다 (다른 슬롯이 끼어들지 못하게)
@@ -5394,6 +5517,7 @@ class App(tk.Tk):
 
     def _run_dgn2(self, fkey, slot_idx=None, sel_list=None):
         self._start_pause()
+        self._img_done = set()      # 실행할 때마다 '이미지 찾음' 표시를 비운다
         key, title, icon = self._dgn2_info(fkey)
         nclk = self._grid_spec(fkey)["clicks"]
         stop = f"_{fkey}_stop"
@@ -5516,6 +5640,12 @@ class App(tk.Tk):
                             fkey, j, coords[j] or _anchor, slot)
                         if _act == "이미지없음":
                             break        # 이 슬롯만 끝 — 다음 슬롯으로 넘어간다
+                    _sa = stop_at(fkey)
+                    if _sa and (j + 1) >= _sa:
+                        # '여기까지만' 으로 정해둔 좌표를 마쳤다 → 이 슬롯 끝
+                        # (뒤 좌표가 같은 아이콘을 또 눌러 되돌아가는 것 방지)
+                        self.status.set(f"{icon} [{name}] 좌표{_sa}까지 끝 — 이 슬롯 종료")
+                        break
                         self.status.set(f"{icon} [{name}] {_act}{j+1}...")
                         if fkey == "coupon":
                             self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
@@ -10153,6 +10283,13 @@ class App(tk.Tk):
                 tb.pack(pady=(1, 0))
                 tb.bind("<Button-3>", lambda _e, c=j, f=fkey, b_=tb:
                         self._cycle_img_thr(f, c, b_))
+                # 🎯 — 같은 그림이 여러 개일 때 어느 것을 누를지 (맨위/맨아래…)
+                pb = tk.Button(cc, text=PICK_TXT[img_pick(fkey, j)],
+                               font=("맑은 고딕", 7), width=4, pady=0,
+                               bg="#117864", fg="white")
+                pb.config(command=lambda c=j, f=fkey, b_=pb:
+                          self._cycle_img_pick(f, c, b_))
+                pb.pack(pady=(1, 0))
             if sp.get("opts"):
                 # ㅡ 칸: 다음 좌표까지 기다릴 초 (비우면 기본), 아래는 휠 굴릴 칸수(0=클릭)
                 gl = slot.get("gap_list") or []
