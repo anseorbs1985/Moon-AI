@@ -726,6 +726,8 @@ IMG_MATCH = 0.60          # 이 정도 닮으면 같은 그림으로 본다 (202
 IMG_TRIES = 4             # 못 찾으면 1~1.5초 간격으로 몇 번까지 다시 볼지 (2026-08-27)
 PEAK_RATIO = 1.6          # '1등 ÷ 2등' 이 이만큼 크면 점수가 낮아도 찾은 것으로 본다
 PEAK_MIN   = 0.45         # 다만 이 점수 밑이면 배수와 무관하게 안 본다
+RECLICK_TRIES = 4         # 눌렀는데 창이 안 뜰 때 다시 눌러보는 횟수 (2026-08-27)
+RECLICK_HOLD = [(0.18, 0.30), (0.35, 0.50), (0.50, 0.70), (0.70, 0.95)]  # 갈수록 길게
 DRIFT_MAX  = 40           # 그림이 이만큼(px) 안에서 움직인 건 '같은 것'으로 본다.
                           # 더 멀면 다른 마름모라 겨냥을 옮기지 않는다 (엉뚱한 층 방지)
 
@@ -5748,7 +5750,7 @@ class App(tk.Tk):
             # (2026-08-27 사용자 지시 — 씹혔을 때 스스로 회복하게).
             # 로컬에서 '창이 안 뜬다'가 잦아 2회까지, 갈수록 더 길게 누른다.
             if has_img(fkey, j + 1):
-                for _try in range(2):
+                for _try in range(RECLICK_TRIES):
                     time.sleep(random.uniform(1.8, 2.4))
                     _wx, _wy, _ws = find_image(fkey, j + 1, coord)
                     if _wx is not None:
@@ -5756,12 +5758,13 @@ class App(tk.Tk):
                             click_log(f"{fkey} [{nm}] 좌표{j+1} 다시 눌러 창이 떴음 "
                                       f"(일치도 {_ws:.2f})")
                         break
-                    _hold = (0.18, 0.30) if _try == 0 else (0.35, 0.50)
+                    _hold = RECLICK_HOLD[min(_try, len(RECLICK_HOLD) - 1)]
                     click_log(f"{fkey} [{nm}] 좌표{j+1} 눌렀는데 창이 안 뜸 "
                               f"(좌표{j+2} 최고 {_ws:.2f}) → 다시 누름 "
-                              f"({_try+1}/2, {_hold[0]:.2f}~{_hold[1]:.2f}초 꾹)")
+                              f"({_try+1}/{RECLICK_TRIES}, "
+                              f"{_hold[0]:.2f}~{_hold[1]:.2f}초 꾹)")
                     self.status.set(f"🖼 [{nm}] 좌표{j+1} 창이 안 떠서 다시 누름 "
-                                    f"({_try+1}/2)")
+                                    f"({_try+1}/{RECLICK_TRIES})")
                     self._note(fkey, nm, f"좌표{j+1} 창이 안 떠서 다시 누름")
                     # 같은 자리를 또 눌러봐야 소용없다 — 그림이 움직였을 수 있으니
                     # **다시 찾아서** 누른다. 그림이 아예 없어졌으면 이미 눌린 것이므로
@@ -5790,7 +5793,7 @@ class App(tk.Tk):
                     click_hold(*coord, ms=random.uniform(*_hold))
                     time.sleep(random.uniform(0.35, 0.55))
                 else:
-                    self._note(fkey, nm, f"좌표{j+1} 두 번 눌러도 창이 안 뜸")
+                    self._note(fkey, nm, f"좌표{j+1} {RECLICK_TRIES}번 눌러도 창이 안 뜸")
                     try:    # 그 슬롯 화면을 통째로 남긴다 (덮어쓰지 않게 이름까지)
                         from PIL import ImageGrab as _IG
                         _bx = search_box(fkey, j, coord)
