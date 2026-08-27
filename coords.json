@@ -5009,13 +5009,19 @@
           285
         ],
         null,
-        null,
-        null,
+        [
+          300,
+          285
+        ],
+        [
+          390,
+          275
+        ],
         null,
         null,
         null
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -5037,8 +5043,14 @@
           601
         ],
         null,
-        null,
-        null,
+        [
+          300,
+          601
+        ],
+        [
+          390,
+          591
+        ],
         null,
         null,
         null
@@ -5065,8 +5077,14 @@
           915
         ],
         null,
-        null,
-        null,
+        [
+          300,
+          915
+        ],
+        [
+          390,
+          905
+        ],
         null,
         null,
         null
@@ -5093,8 +5111,14 @@
           1230
         ],
         null,
-        null,
-        null,
+        [
+          299,
+          1230
+        ],
+        [
+          389,
+          1220
+        ],
         null,
         null,
         null
@@ -5121,13 +5145,19 @@
           281
         ],
         null,
-        null,
-        null,
+        [
+          983,
+          281
+        ],
+        [
+          1073,
+          271
+        ],
         null,
         null,
         null
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -5149,8 +5179,14 @@
           596
         ],
         null,
-        null,
-        null,
+        [
+          981,
+          596
+        ],
+        [
+          1071,
+          586
+        ],
         null,
         null,
         null
@@ -5177,8 +5213,14 @@
           913
         ],
         null,
-        null,
-        null,
+        [
+          984,
+          913
+        ],
+        [
+          1074,
+          903
+        ],
         null,
         null,
         null
@@ -5205,8 +5247,14 @@
           1230
         ],
         null,
-        null,
-        null,
+        [
+          983,
+          1230
+        ],
+        [
+          1073,
+          1220
+        ],
         null,
         null,
         null
@@ -5233,13 +5281,19 @@
           287
         ],
         null,
-        null,
-        null,
+        [
+          1651,
+          287
+        ],
+        [
+          1741,
+          277
+        ],
         null,
         null,
         null
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "미등록",
@@ -5261,8 +5315,14 @@
           604
         ],
         null,
-        null,
-        null,
+        [
+          1652,
+          604
+        ],
+        [
+          1742,
+          594
+        ],
         null,
         null,
         null
@@ -5289,8 +5349,14 @@
           922
         ],
         null,
-        null,
-        null,
+        [
+          1653,
+          922
+        ],
+        [
+          1743,
+          912
+        ],
         null,
         null,
         null
@@ -5317,8 +5383,14 @@
           1237
         ],
         null,
-        null,
-        null,
+        [
+          1653,
+          1237
+        ],
+        [
+          1743,
+          1227
+        ],
         null,
         null,
         null
@@ -5345,8 +5417,14 @@
           279
         ],
         null,
-        null,
-        null,
+        [
+          2301,
+          279
+        ],
+        [
+          2391,
+          269
+        ],
         null,
         null,
         null
@@ -5373,8 +5451,14 @@
           597
         ],
         null,
-        null,
-        null,
+        [
+          2303,
+          597
+        ],
+        [
+          2393,
+          587
+        ],
         null,
         null,
         null
@@ -5401,8 +5485,14 @@
           915
         ],
         null,
-        null,
-        null,
+        [
+          2302,
+          915
+        ],
+        [
+          2392,
+          905
+        ],
         null,
         null,
         null
@@ -5429,8 +5519,14 @@
           1231
         ],
         null,
-        null,
-        null,
+        [
+          2303,
+          1231
+        ],
+        [
+          2393,
+          1221
+        ],
         null,
         null,
         null

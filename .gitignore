@@ -4,3 +4,6 @@ daya_crops/
 __pycache__/
 *.pyc
 ocr_debug.png
+
+# 이미지 클릭 설정(범위·일치기준)은 그림과 함께 배포한다
+!click_templates/*.json

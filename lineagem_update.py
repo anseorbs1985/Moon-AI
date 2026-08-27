@@ -146,7 +146,7 @@ CODE_FILES = ["lineagem_launcher.py", "lineagem_ocr.py", "lineagem_island.py",
 # 2026-08-09: 좌표는 컴퓨터마다 위치가 달라 더 이상 통째로 배포하지 않는다.
 #             대신 아래 sync_times()가 '클릭 간격(시간)'만 합쳐 넣는다.
 DATA_FILES = ["island_counts.json"]
-DATA_DIRS  = ["reroll_templates"]
+DATA_DIRS  = ["reroll_templates", "click_templates"]   # 이미지 클릭 그림도 배포
 
 
 def load_coord_lock():
