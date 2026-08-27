@@ -30,7 +30,7 @@ except Exception:
 
 import tkinter as tk
 from tkinter import messagebox
-import subprocess, time, threading, json, random
+import subprocess, time, threading, json, random, re
 import pyautogui
 import pygetwindow as gw
 import os
@@ -726,6 +726,8 @@ IMG_MATCH = 0.60          # 이 정도 닮으면 같은 그림으로 본다 (202
 IMG_TRIES = 4             # 못 찾으면 1~1.5초 간격으로 몇 번까지 다시 볼지 (2026-08-27)
 PEAK_RATIO = 1.6          # '1등 ÷ 2등' 이 이만큼 크면 점수가 낮아도 찾은 것으로 본다
 PEAK_MIN   = 0.45         # 다만 이 점수 밑이면 배수와 무관하게 안 본다
+DRIFT_MAX  = 40           # 그림이 이만큼(px) 안에서 움직인 건 '같은 것'으로 본다.
+                          # 더 멀면 다른 마름모라 겨냥을 옮기지 않는다 (엉뚱한 층 방지)
 
 
 def save_miss_shot(fkey, j, coord):
@@ -5710,9 +5712,30 @@ class App(tk.Tk):
                 _dr = ImageDraw.Draw(_im)
                 _dr.ellipse([48, 38, 72, 62], outline=(255, 0, 0), width=2)
                 os.makedirs(IMG_DIR, exist_ok=True)
-                _nm2 = (slot or {}).get("name", "?")
+                _nm2 = re.sub(r"[^\w가-힣]", "", str((slot or {}).get("name", "?")))[:10]
                 _im.save(os.path.join(
-                    IMG_DIR, f"_누른자리_{fkey}_{j+1:02d}.png"))
+                    IMG_DIR, f"_누른자리_{fkey}_{j+1:02d}_{_nm2}.png"))
+            except Exception:
+                pass
+            # 찾은 뒤 [창 띄우기 → 커서 올리기] 로 1초쯤 지난다. 그 사이 화면이
+            # 밀리거나(캐릭터 이동·카메라) 아이콘이 다시 그려질 수 있으므로
+            # **누르기 직전에 위치를 한 번 더 확인**한다 — 어긋나 있으면 새 자리로.
+            # (마름모 본체는 고정이고 옆 날개만 애니메이션이라 보통 0px 이다 —
+            #  값이 크게 나오면 그건 화면이 밀린 것이다. 2026-08-27)
+            try:
+                _fx, _fy, _fs = find_image(fkey, j, coord)
+                if _fx is not None:
+                    _dx, _dy = _fx - coord[0], _fy - coord[1]
+                    # 멀리 잡혔으면 '움직인 것'이 아니라 **다른 마름모**다 — 무시한다.
+                    # (위·아래에 같은 아이콘이 있어 엉뚱한 층으로 가던 문제 방지)
+                    if abs(_dx) > DRIFT_MAX or abs(_dy) > DRIFT_MAX:
+                        _fx = None
+                    elif abs(_dx) > 2 or abs(_dy) > 2:
+                        click_log(f"{fkey} [{nm}] 좌표{j+1} 자리가 어긋나 있었음 "
+                                  f"({_dx:+d},{_dy:+d}) → 새 자리로 다시 겨냥")
+                        coord = (_fx, _fy)
+                        move_at(*coord)
+                        time.sleep(random.uniform(0.12, 0.22))
             except Exception:
                 pass
             click_hold(*coord)          # 그림 자리는 꾹 눌렀다 뗀다 (게임이 확실히 받게)
@@ -5740,6 +5763,23 @@ class App(tk.Tk):
                     self.status.set(f"🖼 [{nm}] 좌표{j+1} 창이 안 떠서 다시 누름 "
                                     f"({_try+1}/2)")
                     self._note(fkey, nm, f"좌표{j+1} 창이 안 떠서 다시 누름")
+                    # 같은 자리를 또 눌러봐야 소용없다 — 그림이 움직였을 수 있으니
+                    # **다시 찾아서** 누른다. 그림이 아예 없어졌으면 이미 눌린 것이므로
+                    # 더 누르지 않고 빠진다 (2026-08-27).
+                    _rx, _ry, _rs = find_image(fkey, j, coord)
+                    if _rx is not None and (abs(_rx - coord[0]) > DRIFT_MAX
+                                            or abs(_ry - coord[1]) > DRIFT_MAX):
+                        _rx = None      # 멀리 있는 건 다른 마름모 — 그 자리를 그대로 다시
+                        _rx, _ry = coord[0], coord[1]
+                    if _rx is None:
+                        click_log(f"{fkey} [{nm}] 좌표{j+1} 그림이 사라졌음 "
+                                  f"(최고 {_rs:.2f}) — 이미 눌린 것으로 보고 더 누르지 않음")
+                        self._note(fkey, nm, f"좌표{j+1} 눌렀지만 창을 못 잡음")
+                        break
+                    if (_rx, _ry) != (coord[0], coord[1]):
+                        click_log(f"{fkey} [{nm}] 좌표{j+1} 그림이 옮겨감 "
+                                  f"({_rx-coord[0]:+d},{_ry-coord[1]:+d}) → 새 자리를 누름")
+                    coord = (_rx, _ry)
                     try:
                         self._focus_client_at(coord)
                         time.sleep(random.uniform(0.35, 0.55))
@@ -5751,6 +5791,16 @@ class App(tk.Tk):
                     time.sleep(random.uniform(0.35, 0.55))
                 else:
                     self._note(fkey, nm, f"좌표{j+1} 두 번 눌러도 창이 안 뜸")
+                    try:    # 그 슬롯 화면을 통째로 남긴다 (덮어쓰지 않게 이름까지)
+                        from PIL import ImageGrab as _IG
+                        _bx = search_box(fkey, j, coord)
+                        _n3 = re.sub(r"[^\w가-힣]", "", str(nm))[:10]
+                        _IG.grab(bbox=_bx, all_screens=True).save(os.path.join(
+                            IMG_DIR, f"_창안뜸_{fkey}_{j+1:02d}_{_n3}.png"))
+                        click_log(f"{fkey} [{nm}] 좌표{j+1} 창이 끝내 안 뜸 — "
+                                  f"그때 화면: click_templates/_창안뜸_{fkey}_{j+1:02d}_{_n3}.png")
+                    except Exception:
+                        pass
         self._user_focus_back(snap)                 # 곧바로 원래 창·커서로
         return "클릭"
 
