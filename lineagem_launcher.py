@@ -5312,7 +5312,12 @@ class App(tk.Tk):
         if _done is None:
             _done = self._img_done = set()
         _slot_id = id(slot) if slot is not None else 0
-        if (fkey, _slot_id) in _done:
+        _cl0 = (slot or {}).get("coords") or []
+        _own0 = bool(j < len(_cl0) and _cl0[j])
+        # '그림을 눌러야 하는 자리(좌표 없음)'만 한 번으로 제한한다.
+        # 좌표가 있는 자리의 그림은 '창이 떴는지 확인'용이라 매번 확인해야 한다
+        # (안 그러면 창이 안 떴는데도 다음 좌표를 눌러버린다 — 2026-08-27 수정)
+        if (not _own0) and (fkey, _slot_id) in _done:
             if coord:
                 self._click_log(fkey, j, coord, slot, "클릭")
                 click_at(*coord)
@@ -5349,10 +5354,9 @@ class App(tk.Tk):
             # 좌표도 함께 등록돼 있으면 → 그림은 '창이 떴는지 확인'용.
             #   그림이 보일 때까지 기다렸다가 **등록한 좌표**를 누른다.
             # 좌표가 없으면 → 그림 가운데를 누른다. (2026-08-27 사용자 지시)
-            _done.add((fkey, _slot_id))        # 이 슬롯은 이미지 검색 끝
             if _own_coord:
                 click_log(f"{fkey} [{nm}] 좌표{j+1} 그림 확인됨 (일치도 {sc:.2f}) "
-                          f"→ 등록한 좌표 클릭 · 이 슬롯은 이미지 검색 끝")
+                          f"→ 등록한 좌표 클릭")
                 self.status.set(f"🖼 [{nm}] 좌표{j+1} 창 떴음 (일치도 {sc:.2f}) — 좌표 클릭")
             else:
                 click_log(f"{fkey} [{nm}] 좌표{j+1} 이미지 찾음 ({ix},{iy}) "
@@ -5361,6 +5365,7 @@ class App(tk.Tk):
                                 f"— 가운데 클릭")
                 coord = (ix, iy)
                 _img_hit = True
+                _done.add((fkey, _slot_id))   # 그림 클릭은 이 슬롯에서 한 번만
         self._click_log(fkey, j, coord, slot, "클릭")
         snap = None
         if fkey in self.CLICK_GUARD:
