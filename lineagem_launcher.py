@@ -740,6 +740,55 @@ DRIFT_MAX  = 40           # 그림이 이만큼(px) 안에서 움직인 건 '같
                           # 더 멀면 다른 마름모라 겨냥을 옮기지 않는다 (엉뚱한 층 방지)
 
 
+def grab_patch(fkey, j, coord):
+    """그 자리에서 '템플릿과 같은 크기'로 화면을 잘라온다 (배우기용)."""
+    try:
+        import cv2, numpy as np
+        from PIL import ImageGrab
+        base = img_path(fkey, j)
+        if not os.path.exists(base):
+            return None
+        t0 = cv2.imdecode(np.fromfile(base, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if t0 is None:
+            return None
+        h, w = t0.shape[:2]
+        x, y = int(coord[0]) - w // 2, int(coord[1]) - h // 2
+        im = ImageGrab.grab(bbox=(x, y, x + w, y + h), all_screens=True).convert("RGB")
+        return cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+    except Exception:
+        return None
+
+
+def learn_img(fkey, j, patch, nm=""):
+    """**성공이 확인된** 클릭 자리의 그림을 '이 컴퓨터 전용'으로 모아둔다.
+
+    같은 아이콘도 배경(지형·몹·이펙트)과 날개 애니메이션에 따라 점수가
+    0.60~0.96 으로 흔들려서, 한 장으로는 몇 슬롯을 놓친다. 그래서 **실제로 창이
+    뜬 것이 확인된 자리**만 골라 여러 장 모아두면 그 컴퓨터에서 점점 잘 잡힌다.
+    (2026-08-27 — 컴퓨터마다 화면이 달라 로컬에서 특히 효과가 크다)
+
+    - 이미 비슷한 그림(0.90 이상)이 있으면 넣지 않는다 — 다양한 배경만 모은다.
+    - 최대 `IMG_MAX`(4)장. 오른쪽 클릭으로 전부 지울 수 있다."""
+    if patch is None:
+        return
+    try:
+        import cv2, numpy as np
+        for q in img_list(fkey, j):
+            old = cv2.imdecode(np.fromfile(q, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if old is None or old.shape != patch.shape:
+                continue
+            r = cv2.matchTemplate(patch, old, cv2.TM_CCOEFF_NORMED)
+            if float(r.max()) >= 0.90:
+                return                      # 이미 있는 것과 비슷 — 안 모은다
+        n = img_mine_free(fkey, j)
+        os.makedirs(IMG_DIR_MINE, exist_ok=True)
+        cv2.imencode(".png", patch)[1].tofile(img_mine_path(fkey, j, n))
+        click_log(f"{fkey} [{nm}] 좌표{j+1} 성공한 그림을 배웠음 "
+                  f"(이 컴퓨터 전용 {img_mine_count(fkey, j)}/{IMG_MAX}장)")
+    except Exception:
+        pass
+
+
 def save_miss_shot(fkey, j, coord):
     """이미지를 못 찾았을 때 '그때 훑은 화면'을 사진으로 남긴다.
     click_templates/_못찾음_<런처>_<좌표>.png — 범위가 맞는지 눈으로 확인용."""
@@ -5766,6 +5815,7 @@ class App(tk.Tk):
                         time.sleep(random.uniform(0.12, 0.22))
             except Exception:
                 pass
+            _learn = grab_patch(fkey, j, coord)   # 성공하면 배울 그림 (미리 떠 둔다)
             click_hold(*coord)          # 그림 자리는 꾹 눌렀다 뗀다 (게임이 확실히 받게)
         else:
             click_at(*coord)
@@ -5783,6 +5833,8 @@ class App(tk.Tk):
                         if _try:
                             click_log(f"{fkey} [{nm}] 좌표{j+1} 다시 눌러 창이 떴음 "
                                       f"(일치도 {_ws:.2f})")
+                        # 창이 떴다 = 그 자리가 진짜였다는 증거 → 그 그림을 배워둔다
+                        learn_img(fkey, j, _learn, nm)
                         break
                     _hold = RECLICK_HOLD[min(_try, len(RECLICK_HOLD) - 1)]
                     click_log(f"{fkey} [{nm}] 좌표{j+1} 눌렀는데 창이 안 뜸 "
