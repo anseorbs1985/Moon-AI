@@ -4803,8 +4803,25 @@ class App(tk.Tk):
                       bg="#6c3483", fg="white", width=10, height=2,
                       command=lambda f=fkey: self._diag_images(f)).pack(side="left",
                                                                         padx=(3, 0))
+            # 📁 — 그림·'못찾음' 사진이 들어 있는 폴더를 연다 (원인 확인용)
+            tk.Button(dr, text="📁 그림폴더", font=("맑은 고딕", 8),
+                      bg="#34495e", fg="white", width=9, height=2,
+                      command=self._open_img_dir).pack(side="left", padx=(3, 0))
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
         self._build_slot_grid(parent, fkey)   # 4×4 그리드 (화면 배치와 동일)
+
+    def _open_img_dir(self):
+        """그림 폴더 열기 — 공용과 '이 컴퓨터 전용' 둘 다.
+        못 찾았을 때 저장된 `_못찾음_*.png` 가 여기 있다 (원인 확인용)."""
+        try:
+            os.makedirs(IMG_DIR, exist_ok=True)
+            subprocess.Popen(["explorer", IMG_DIR])
+            if os.path.isdir(IMG_DIR_MINE):
+                subprocess.Popen(["explorer", IMG_DIR_MINE])
+            self.status.set("📁 그림 폴더를 열었습니다 — "
+                            "_못찾음_*.png 가 '그때 훑은 화면'입니다")
+        except Exception as e:
+            self.status.set(f"📁 열기 실패: {e}")
 
     def _note(self, fkey, nm, msg):
         """실행 중 '잘 안 된 것'을 슬롯별로 모아둔다 — 끝나고 요약으로 보여준다.
@@ -4903,6 +4920,14 @@ class App(tk.Tk):
         if len(sizes) > 1:
             tk.Label(w, text="⚠ 클라 창 크기가 서로 다릅니다 — 그림이 안 잡히는 원인입니다",
                      font=("맑은 고딕", 10, "bold"), fg="#c0392b").pack()
+        _nowin = sum(1 for _i, _n, rc, _g in rows if not rc)
+        if _nowin:
+            tk.Label(w, text=f"⚠ {_nowin}개 슬롯은 그 좌표에 리니지M 창이 없습니다 — "
+                             f"좌표가 이 컴퓨터와 안 맞는 것입니다",
+                     font=("맑은 고딕", 11, "bold"), fg="#c0392b").pack()
+        tk.Label(w, text=f"등록된 그림: "
+                         + " · ".join(f"좌표{j+1} {len(img_list(fkey, j))}장" for j in js),
+                 font=("맑은 고딕", 9), fg="#888").pack()
         bd = tk.Frame(w); bd.pack(padx=14, pady=8)
         hdr = ["슬롯"] + [f"좌표{j+1}" for j in js]
         for c, t in enumerate(hdr):
@@ -5604,10 +5629,17 @@ class App(tk.Tk):
                     time.sleep(random.uniform(1.0, 1.5))
             if ix is None:
                 save_miss_shot(fkey, j, coord)      # 뭘 봤는지 사진으로 남긴다
+                _bx = search_box(fkey, j, coord)
+                _rc = client_rect_at(coord[0], coord[1])
                 click_log(f"{fkey} [{nm}] 좌표{j+1} 이미지 못 찾음 "
                           f"(최고 일치도 {sc:.2f} / 기준 {img_thr(fkey, j):.2f}, "
-                          f"{IMG_TRIES}번 시도) → 이 슬롯 여기서 중단 "
+                          f"{IMG_TRIES}번 시도, 그림 {len(img_list(fkey, j))}장) "
+                          f"· 훑은 범위 {_bx[2]-_bx[0]}×{_bx[3]-_bx[1]} @{_bx[0]},{_bx[1]} "
+                          + ("" if _rc else "· ⚠ 리니지M 창을 못 찾아 좌표 주변만 훑음 ")
+                          + f"→ 이 슬롯 여기서 중단 "
                           f"· 그때 본 화면: click_templates/_못찾음_{fkey}_{j+1:02d}.png")
+                if not _rc:
+                    self._note(fkey, nm, f"좌표{j+1} ⚠ 리니지M 창을 못 찾음 (좌표가 어긋남)")
                 self.status.set(f"🖼 [{nm}] 좌표{j+1} 이미지 없음 — 이 슬롯 중단 "
                                 f"(일치도 {sc:.2f})")
                 self._note(fkey, nm,
