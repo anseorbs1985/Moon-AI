@@ -4855,7 +4855,9 @@ class App(tk.Tk):
             pass
 
     def _run_summary(self, fkey, title):
-        """실행이 끝나면 '무엇이 안 됐는지'를 슬롯별로 창에 띄운다."""
+        """실행이 끝나면 '무엇이 안 됐는지'를 기록에 남긴다.
+        **창은 띄우지 않는다** (2026-08-27 사용자 지시 — 매번 닫아야 해서 불편).
+        상태줄에 한 줄로만 알리고, 자세한 내용은 [📋 클릭기록] 에서 본다."""
         notes = getattr(self, "_run_note", None) or []
         if not notes:
             return
@@ -4865,24 +4867,8 @@ class App(tk.Tk):
                 byslot.setdefault(nm, []).append(msg)
             click_log(f"[결과] {fkey} 문제 있던 슬롯 {len(byslot)}개 · "
                       + " / ".join(f"{k}: {'; '.join(v)}" for k, v in byslot.items()))
-            w = tk.Toplevel(self); w.title(f"{title} 실행 결과")
-            w.attributes("-topmost", True)
-            tk.Label(w, text=f"{title} — 잘 안 된 슬롯 {len(byslot)}개",
-                     font=("맑은 고딕", 13, "bold"), fg="#c0392b").pack(padx=16, pady=(12, 4))
-            bd = tk.Frame(w); bd.pack(padx=16, pady=4)
-            for r, (nm, msgs) in enumerate(byslot.items()):
-                tk.Label(bd, text=nm[:14], font=("맑은 고딕", 10, "bold"),
-                         width=14, anchor="w").grid(row=r, column=0, sticky="w")
-                tk.Label(bd, text=" · ".join(msgs), font=("맑은 고딕", 10),
-                         anchor="w").grid(row=r, column=1, sticky="w")
-            tk.Label(w, text="자세한 내용은 [📋 클릭기록] 에 남아 있습니다",
-                     font=("맑은 고딕", 9), fg="#888").pack(pady=(6, 0))
-            tk.Button(w, text="닫기", font=("맑은 고딕", 10),
-                      command=w.destroy).pack(pady=10)
-            try:
-                apply_dark(w, self._dark_on())
-            except Exception:
-                pass
+            self.status.set(f"⚠ {title} — 잘 안 된 슬롯 {len(byslot)}개 "
+                            f"(자세한 내용은 [📋 클릭기록])")
         except Exception:
             pass
 
