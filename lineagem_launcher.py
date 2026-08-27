@@ -10230,10 +10230,19 @@ class App(tk.Tk):
             c = coords[j] if j < len(coords) else None
         except Exception:
             c = None
+        if not c and has_img(fkey, j):
+            # 그림만 지정한 자리 — 같은 슬롯의 다른 좌표로 어느 클라인지 찾는다
+            c = slot_anchor(slot)
         if not c:
-            self.status.set("그 자리에 등록된 좌표가 없습니다"); return
+            self.status.set("그 자리에 등록된 좌표도, 그림도 없습니다"); return
         title = self._grid_spec(fkey)["title"]
-        self.status.set(f"{title} #{idx+1:02d} 좌표{j+1} — 0.8초 뒤 실행")
+        _im = " (그림을 찾아 그 자리를 클릭합니다)" if has_img(fkey, j) else ""
+        self.status.set(f"{title} #{idx+1:02d} 좌표{j+1} — 0.8초 뒤 실행{_im}")
+        # 실행 중에는 런처를 내려둔다 — 창이 클릭 자리를 가리면 안 먹는다
+        try:
+            self._minimize_all()
+        except Exception:
+            pass
         def _go():
             time.sleep(0.8)
             try:
