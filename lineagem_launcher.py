@@ -148,6 +148,10 @@ HOVER_INDICES = {}      # 마우스만 올리는 자리 — 없앰 (2026-08-21 �
 # 이 좌표와 '바로 다음 좌표'는 한 묶음으로 — 사이에 다른 슬롯이 끼지 못하게 한다
 # (마우스를 올려둔 상태에서 다른 곳을 누르면 다음 클릭이 씹힌다)
 ATOMIC_NEXT = {}        # (호버를 없애서 묶을 이유가 사라짐)
+# 웨이브(번갈아 실행)를 '앞의 몇 좌표'까지만 하고, 그 뒤는 슬롯을 끝까지 밀어붙인다.
+# 용던고고는 좌표4부터 이미지·확인창이 이어져서, 중간에 다른 슬롯이 끼어들면
+# 그 창이 닫히거나 포커스가 바뀌어 클릭이 씹힌다 (2026-08-27 사용자 지시).
+WAVE_UNTIL = {"dragon": 3}     # 좌표1~3만 교차, 좌표4부터는 그 슬롯 완주
 
 EXTRA_GAPS = {"dragon": DRAGON_EXTRA, "knight": KNIGHT_EXTRA}
 
@@ -5426,8 +5430,63 @@ class App(tk.Tk):
             click_at(*coord)
         if _img_hit:
             time.sleep(random.uniform(0.35, 0.55))  # 게임이 클릭을 처리할 시간
+            # 눌렀는데 '뜨기로 한 창'이 안 뜨면 = 게임이 그 클릭을 안 먹은 것.
+            # 아이콘이 아닌 '창'을 보고 판단하므로 두 번 눌릴 염려가 없다
+            # (2026-08-27 사용자 지시 — 씹혔을 때 스스로 회복하게).
+            if has_img(fkey, j + 1):
+                time.sleep(random.uniform(2.0, 2.6))
+                _wx, _wy, _ws = find_image(fkey, j + 1, coord)
+                if _wx is None:
+                    click_log(f"{fkey} [{nm}] 좌표{j+1} 눌렀는데 창이 안 뜸 "
+                              f"(좌표{j+2} 최고 {_ws:.2f}) → 한 번만 다시 누름")
+                    self.status.set(f"🖼 [{nm}] 좌표{j+1} 창이 안 떠서 다시 누름")
+                    try:
+                        self._focus_client_at(coord)
+                        time.sleep(random.uniform(0.25, 0.45))
+                        move_at(*coord)
+                        time.sleep(random.uniform(0.35, 0.6))
+                    except Exception:
+                        pass
+                    click_hold(*coord)
+                    time.sleep(random.uniform(0.35, 0.55))
         self._user_focus_back(snap)                 # 곧바로 원래 창·커서로
         return "클릭"
+
+    def _wave_tail(self, fkey, st, j0, nclk, icon, stop, name, gap, slow):
+        """좌표 j0부터 그 슬롯을 '끊김 없이' 끝까지 민다 (웨이브 섞임 방지).
+        이미지·확인창이 이어지는 구간에 다른 슬롯이 끼어들면 창이 닫히거나
+        포커스가 바뀌어 클릭이 씹힌다 (2026-08-27 사용자 지시)."""
+        slot   = st["slot"]
+        coords = slot.get("coords", [])
+        _anc   = slot_anchor(slot)
+        done   = 0
+        for j in range(j0, nclk):
+            if getattr(self, stop, False):
+                break
+            _cd = coords[j] if (j < len(coords) and coords[j]) else None
+            if _cd is None and has_img(fkey, j) and _anc:
+                _cd = _anc                    # 그림만 지정한 자리
+            if _cd is None:
+                continue                      # 빈 자리는 통과
+            if not self._wait_mouse_idle(stop, fkey=fkey):
+                st["j"] = nclk
+                return done
+            _act = self._do_click_or_wheel(fkey, j, _cd, slot)
+            done += 1
+            if _act == "이미지없음":
+                break                         # 이 슬롯만 끝
+            self.status.set(f"{icon} [{name}] {_act}{j+1}/{nclk}  (이어서 완주)")
+            _sa = stop_at(fkey)
+            if _sa and (j + 1) >= _sa:
+                break
+            if j + 1 < nclk:
+                _g = self._slot_gap(slot, j)
+                _base = _g if _g is not None else random.uniform(*gap)
+                if fkey in EXTRA_GAPS:
+                    _base += extra_gap(fkey, j)
+                time.sleep(_base * random.uniform(*slow))
+        st["j"] = nclk
+        return done
 
     def _run_dgn2_wave(self, fkey, targets, nclk, icon, stop, lanes=4, gap=(2.0, 4.0),
                        slow=(1.0, 1.0), slot_gap=(0.5, 3.0), keep_order=False):
@@ -5485,9 +5544,15 @@ class App(tk.Tk):
                     except Exception:
                         pass
                 last_si = si
+            name = st["slot"].get("name", f"#{si+1}")
+            _wu = WAVE_UNTIL.get(fkey, 0)
+            if _wu and j >= _wu:
+                # 여기서부터는 교차하지 않고 이 슬롯을 끝까지 (중간 끼어들기 방지)
+                done += self._wave_tail(fkey, st, j, nclk, icon, stop,
+                                        name, gap, slow)
+                continue
             if not self._wait_mouse_idle(stop, fkey=fkey): return
             if getattr(self, stop, False): break
-            name = st["slot"].get("name", f"#{si+1}")
             if (fkey in self.PASTE_FKEYS
                     and j == self._paste_idx_or_default(fkey, st["slot"])
                     and (j < len(coords) and coords[j])):
@@ -5621,7 +5686,8 @@ class App(tk.Tk):
                           for v in DRAGON_EXTRA.values())      # 2→3 같은 추가 대기
                 _est = int(len(targets) / 2 * (nclk * _avg + _ex + 1.15))
                 self.status.set(f"🐲 용던고고!!! — {len(targets)}슬롯 / 클릭 {_cl}회, "
-                                f"2슬롯 번갈아 (간격 {DRAGON_GAP_MIN:.1f}~{DRAGON_GAP_MAX:.1f}초, "
+                                f"좌표1~3만 2슬롯 번갈아 · 좌표4부터 슬롯 완주 "
+                                f"(간격 {DRAGON_GAP_MIN:.1f}~{DRAGON_GAP_MAX:.1f}초, "
                                 f"좌표2→3은 +{DRAGON_EXTRA[1][0]:.1f}~{DRAGON_EXTRA[1][1]:.1f}초, "
                                 f"약 {_est//60}분 {_est%60}초 예상)")
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
