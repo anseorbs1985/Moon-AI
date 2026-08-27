@@ -718,7 +718,7 @@ CLICK_LOG = os.path.join(LOCAL_DATA, "click_log.txt")   # 클릭이 어느 창�
 # ── 이미지로 찾아 클릭 (2026-08-26 사용자 요청) ────────────────────────
 #   좌표 대신 '그림'을 찾아 누른다. 못 찾으면 그 슬롯은 거기서 끝낸다.
 IMG_DIR   = os.path.join(BASE, "click_templates")
-IMG_MATCH = 0.80          # 이 정도 닮으면 같은 그림으로 본다
+IMG_MATCH = 0.60          # 이 정도 닮으면 같은 그림으로 본다 (2026-08-27 사용자 지시)
 IMG_TRIES = 5             # 못 찾으면 1~1.5초 간격으로 몇 번까지 다시 볼지
 
 
