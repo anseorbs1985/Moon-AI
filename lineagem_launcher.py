@@ -5232,6 +5232,14 @@ class App(tk.Tk):
                           f"[{win32gui.GetWindowText(_r)}]")
             except Exception:
                 pass
+        if _img_hit:
+            # 게임 화면 안의 아이콘은 '커서를 올려 대상이 잡힌 뒤' 눌러야 반응한다 —
+            # 그래서 먼저 그 자리에 커서를 올리고 잠깐 뒤에 누른다 (2026-08-27)
+            try:
+                move_at(*coord)
+                time.sleep(random.uniform(0.35, 0.6))
+            except Exception:
+                pass
         click_at(*coord)
         if _img_hit:
             time.sleep(random.uniform(0.35, 0.55))  # 게임이 클릭을 처리할 시간
@@ -5246,6 +5254,11 @@ class App(tk.Tk):
                 try:
                     self._focus_client_at((_ix2, _iy2))
                     time.sleep(random.uniform(0.3, 0.5))
+                except Exception:
+                    pass
+                try:
+                    move_at(_ix2, _iy2)
+                    time.sleep(random.uniform(0.35, 0.6))
                 except Exception:
                     pass
                 click_at(_ix2, _iy2)
