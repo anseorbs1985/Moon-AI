@@ -5185,6 +5185,11 @@ class App(tk.Tk):
         _img_hit = False
         if os.path.exists(img_path(fkey, j)):
             nm = (slot or {}).get("name", "?")
+            try:      # 이 자리에 등록된 좌표가 따로 있나 (없으면 그림을 직접 누른다)
+                _cl = (slot or {}).get("coords") or []
+                _own_coord = bool(j < len(_cl) and _cl[j])
+            except Exception:
+                _own_coord = False
             # 앞 좌표를 누른 뒤 화면이 뜨는 데 시간이 걸린다 —
             # 못 찾으면 잠깐 기다렸다 다시 본다 (최대 IMG_TRIES 번, 2026-08-27)
             ix = iy = None
@@ -5194,8 +5199,9 @@ class App(tk.Tk):
                 if ix is not None:
                     break
                 if _t < IMG_TRIES - 1:
-                    self.status.set(f"🖼 [{nm}] 좌표{j+1} 그림 기다리는 중… "
-                                    f"({_t+1}/{IMG_TRIES}, 지금 {sc:.2f})")
+                    self.status.set(f"🖼 [{nm}] 좌표{j+1} "
+                                    f"{'창이 뜨기를' if _own_coord else '그림을'} "
+                                    f"기다리는 중… ({_t+1}/{IMG_TRIES}, 지금 {sc:.2f})")
                     time.sleep(random.uniform(1.0, 1.5))
             if ix is None:
                 save_miss_shot(fkey, j, coord)      # 뭘 봤는지 사진으로 남긴다
@@ -5206,10 +5212,20 @@ class App(tk.Tk):
                 self.status.set(f"🖼 [{nm}] 좌표{j+1} 이미지 없음 — 이 슬롯 중단 "
                                 f"(일치도 {sc:.2f})")
                 return "이미지없음"
-            click_log(f"{fkey} [{nm}] 좌표{j+1} 이미지 찾음 ({ix},{iy}) 일치도 {sc:.2f}")
-            self.status.set(f"🖼 [{nm}] 좌표{j+1} 이미지 찾음 (일치도 {sc:.2f}) — 가운데 클릭")
-            coord = (ix, iy)
-            _img_hit = True
+            # 좌표도 함께 등록돼 있으면 → 그림은 '창이 떴는지 확인'용.
+            #   그림이 보일 때까지 기다렸다가 **등록한 좌표**를 누른다.
+            # 좌표가 없으면 → 그림 가운데를 누른다. (2026-08-27 사용자 지시)
+            if _own_coord:
+                click_log(f"{fkey} [{nm}] 좌표{j+1} 그림 확인됨 (일치도 {sc:.2f}) "
+                          f"→ 등록한 좌표 클릭")
+                self.status.set(f"🖼 [{nm}] 좌표{j+1} 창 떴음 (일치도 {sc:.2f}) — 좌표 클릭")
+            else:
+                click_log(f"{fkey} [{nm}] 좌표{j+1} 이미지 찾음 ({ix},{iy}) "
+                          f"일치도 {sc:.2f}")
+                self.status.set(f"🖼 [{nm}] 좌표{j+1} 이미지 찾음 (일치도 {sc:.2f}) "
+                                f"— 가운데 클릭")
+                coord = (ix, iy)
+                _img_hit = True
         self._click_log(fkey, j, coord, slot, "클릭")
         snap = None
         if fkey in self.CLICK_GUARD:
@@ -5243,26 +5259,6 @@ class App(tk.Tk):
         click_at(*coord)
         if _img_hit:
             time.sleep(random.uniform(0.35, 0.55))  # 게임이 클릭을 처리할 시간
-            # 눌렀는데 그림이 그대로면 안 먹은 것 — 최대 2번까지 다시 누른다
-            for _r2 in range(2):
-                _ix2, _iy2, _sc2 = find_image(fkey, j, coord)
-                if _ix2 is None:
-                    break                          # 사라졌다 = 제대로 눌렸다
-                click_log(f"{fkey} 좌표{j+1} 그림이 그대로 남아 있음 "
-                          f"(일치도 {_sc2:.2f}) → 다시 클릭 {_r2+1}/2")
-                self.status.set(f"🖼 좌표{j+1} 반응 없음 — 다시 누릅니다 ({_r2+1}/2)")
-                try:
-                    self._focus_client_at((_ix2, _iy2))
-                    time.sleep(random.uniform(0.3, 0.5))
-                except Exception:
-                    pass
-                try:
-                    move_at(_ix2, _iy2)
-                    time.sleep(random.uniform(0.35, 0.6))
-                except Exception:
-                    pass
-                click_at(_ix2, _iy2)
-                time.sleep(random.uniform(0.5, 0.8))
         self._user_focus_back(snap)                 # 곧바로 원래 창·커서로
         return "클릭"
 
