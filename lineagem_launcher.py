@@ -886,6 +886,23 @@ def find_image(fkey, j, coord):
         res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
         _mn, mx, _ml, ml = cv2.minMaxLoc(res)
         thr = img_thr(fkey, j)
+        th, tw = tpl.shape[0], tpl.shape[1]
+        if mx < thr:
+            # 컴퓨터마다 해상도·클라 크기가 달라 그림이 조금 크거나 작게 보인다.
+            # 0.8~1.25배로 늘였다 줄였다 하며 다시 찾는다 (2026-08-27 — 로컬 성공률).
+            for _f in (0.90, 1.10, 0.80, 1.20, 0.85, 1.05, 1.15, 0.95, 1.25):
+                w2, h2 = int(round(tw * _f)), int(round(th * _f))
+                if (w2 < 6 or h2 < 6 or big.shape[0] < h2 or big.shape[1] < w2):
+                    continue
+                t2 = cv2.resize(tpl, (w2, h2),
+                                interpolation=(cv2.INTER_AREA if _f < 1
+                                               else cv2.INTER_CUBIC))
+                r2 = cv2.matchTemplate(big, t2, cv2.TM_CCOEFF_NORMED)
+                _n3, m3, _l3, l3 = cv2.minMaxLoc(r2)
+                if m3 > mx:
+                    res, mx, ml, tw, th = r2, m3, l3, w2, h2
+                if mx >= thr:
+                    break
         if mx < thr:
             # 색으로 못 찾으면 '윤곽선(모양)'으로 한 번 더 찾는다 (2026-08-27).
             # 아이콘은 같은데 배경(지형·몹·이펙트)이 달라 점수가 떨어지는 경우 대응.
@@ -896,11 +913,11 @@ def find_image(fkey, j, coord):
                 _n2, mx2, _l2, ml2 = cv2.minMaxLoc(res2)
                 if mx2 >= thr:
                     res, mx, ml = res2, mx2, ml2      # 윤곽선 결과를 쓴다
+                    th, tw = tpl.shape[0], tpl.shape[1]
                 else:
                     return None, None, float(max(mx, mx2))
             except Exception:
                 return None, None, float(mx)
-        th, tw = tpl.shape[0], tpl.shape[1]
         pick = img_pick(fkey, j)
         if pick == "best":
             return (int(box[0] + ml[0] + tw // 2),
@@ -4719,8 +4736,95 @@ class App(tk.Tk):
             tk.Button(dr, text="비우기", font=("맑은 고딕", 8),
                       bg="#95a5a6", fg="white", width=6, height=2,
                       command=self._clear_click_log).pack(side="left", padx=(2, 0))
+        if any(has_img(fkey, _j) for _j in range(sp["clicks"])):
+            # 🩺 — 지금 16클라를 전부 훑어 '그림이 잡히는지'를 슬롯별로 보여준다.
+            #      컴퓨터마다 결과가 달라서, 로컬에서 문제를 찾을 때 이걸 먼저 누른다.
+            tk.Button(dr, text="🩺 이미지진단", font=("맑은 고딕", 8, "bold"),
+                      bg="#6c3483", fg="white", width=10, height=2,
+                      command=lambda f=fkey: self._diag_images(f)).pack(side="left",
+                                                                        padx=(3, 0))
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
         self._build_slot_grid(parent, fkey)   # 4×4 그리드 (화면 배치와 동일)
+
+    def _diag_images(self, fkey):
+        """지금 16슬롯(클라)을 전부 훑어 그림이 잡히는지 슬롯별로 보여준다.
+        컴퓨터마다 해상도·클라 크기가 달라 결과가 다르므로, 로컬에서 '가끔 안 된다'는
+        문제를 찾을 때 이것부터 누른다. 결과는 클릭기록에도 남는다 (2026-08-27)."""
+        key, title, icon = self._dgn2_info(fkey)
+        nclk = self._grid_spec(fkey)["clicks"]
+        js = [j for j in range(nclk) if has_img(fkey, j)]
+        if not js:
+            self.status.set("🩺 이 런처에는 지정한 그림이 없습니다"); return
+        slots = self.cfg.get(key) or []
+        rows = []
+        self.status.set("🩺 진단 중… (16클라를 훑는 중)")
+        self.update_idletasks()
+        for i, sl in enumerate(slots):
+            anc = slot_anchor(sl)
+            if not anc:
+                continue
+            nm = (sl.get("name") or f"#{i+1}").strip()
+            rc = client_rect_at(anc[0], anc[1])
+            got = []
+            for j in js:
+                x, y, sc = find_image(fkey, j, anc)
+                got.append((j + 1, sc, x is not None, img_thr(fkey, j)))
+            rows.append((i + 1, nm, rc, got))
+        if not rows:
+            self.status.set("🩺 좌표가 등록된 슬롯이 없습니다"); return
+
+        w = tk.Toplevel(self); w.title(f"🩺 {title} 이미지 진단")
+        w.attributes("-topmost", True)
+        tk.Label(w, text=f"{title} — 지금 화면에서 그림이 잡히는지",
+                 font=("맑은 고딕", 13, "bold")).pack(padx=14, pady=(12, 2))
+        # 클라 창 크기가 다르면 그림이 안 맞는다 — 제일 흔한 원인이라 먼저 보여준다
+        sizes = {}
+        for _i, _n, rc, _g in rows:
+            if rc:
+                sizes[(rc[2] - rc[0], rc[3] - rc[1])] = sizes.get(
+                    (rc[2] - rc[0], rc[3] - rc[1]), 0) + 1
+        szt = " · ".join(f"{a}×{b} ({c}개)" for (a, b), c in
+                         sorted(sizes.items(), key=lambda kv: -kv[1]))
+        tk.Label(w, text=f"클라 창 크기: {szt or '알 수 없음'}",
+                 font=("맑은 고딕", 10),
+                 fg=("#c0392b" if len(sizes) > 1 else "#888")).pack()
+        if len(sizes) > 1:
+            tk.Label(w, text="⚠ 클라 창 크기가 서로 다릅니다 — 그림이 안 잡히는 원인입니다",
+                     font=("맑은 고딕", 10, "bold"), fg="#c0392b").pack()
+        bd = tk.Frame(w); bd.pack(padx=14, pady=8)
+        hdr = ["슬롯"] + [f"좌표{j+1}" for j in js]
+        for c, t in enumerate(hdr):
+            tk.Label(bd, text=t, font=("맑은 고딕", 9, "bold"),
+                     width=(16 if c == 0 else 9)).grid(row=0, column=c)
+        okn = 0
+        for r, (idx, nm, rc, got) in enumerate(rows, start=1):
+            tk.Label(bd, text=f"{idx:02d} {nm[:12]}", font=("맑은 고딕", 9),
+                     width=16, anchor="w").grid(row=r, column=0, sticky="w")
+            for c, (jn, sc, ok, thr) in enumerate(got, start=1):
+                if ok: okn += 1
+                tk.Label(bd, text=f"{sc:.2f}", font=("맑은 고딕", 9, "bold"),
+                         width=9, fg=("#196f3d" if ok else "#c0392b")).grid(row=r, column=c)
+        tot = len(rows) * len(js)
+        tk.Label(w, text=f"잡힘 {okn} / {tot}  (기준 "
+                         + " · ".join(f"좌표{j+1} {img_thr(fkey, j):.2f}" for j in js) + ")",
+                 font=("맑은 고딕", 12, "bold")).pack(pady=(2, 0))
+        tk.Label(w, text="초록 = 기준을 넘어 잡힘 · 빨강 = 못 잡음",
+                 font=("맑은 고딕", 9), fg="#888").pack()
+        tk.Label(w, text="지금 그 창에 그 그림이 실제로 떠 있어야 초록입니다",
+                 font=("맑은 고딕", 9), fg="#888").pack()
+        tk.Button(w, text="닫기", font=("맑은 고딕", 10),
+                  command=w.destroy).pack(pady=10)
+        try:
+            click_log(f"[진단] {fkey} 잡힘 {okn}/{tot} · 창크기 {szt} · "
+                      + " / ".join(f"{idx:02d}:" + ",".join(f"{sc:.2f}" for _j, sc, _o, _t in got)
+                                   for idx, _n, _rc, got in rows))
+        except Exception:
+            pass
+        try:
+            apply_dark(w, self._dark_on())
+        except Exception:
+            pass
+        self.status.set(f"🩺 진단 끝 — 잡힘 {okn}/{tot}")
 
     def _reg_dgn2_click(self, fkey, slot_idx, click_idx):
         key, title, _ = self._dgn2_info(fkey)
