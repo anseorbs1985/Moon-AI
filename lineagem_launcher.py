@@ -4746,6 +4746,48 @@ class App(tk.Tk):
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
         self._build_slot_grid(parent, fkey)   # 4×4 그리드 (화면 배치와 동일)
 
+    def _note(self, fkey, nm, msg):
+        """실행 중 '잘 안 된 것'을 슬롯별로 모아둔다 — 끝나고 요약으로 보여준다.
+        실행이 너무 빨라 화면으로는 못 보기 때문 (2026-08-27 사용자 요청)."""
+        try:
+            if not hasattr(self, "_run_note"):
+                self._run_note = []
+            self._run_note.append((str(nm), str(msg)))
+        except Exception:
+            pass
+
+    def _run_summary(self, fkey, title):
+        """실행이 끝나면 '무엇이 안 됐는지'를 슬롯별로 창에 띄운다."""
+        notes = getattr(self, "_run_note", None) or []
+        if not notes:
+            return
+        try:
+            byslot = {}
+            for nm, msg in notes:
+                byslot.setdefault(nm, []).append(msg)
+            click_log(f"[결과] {fkey} 문제 있던 슬롯 {len(byslot)}개 · "
+                      + " / ".join(f"{k}: {'; '.join(v)}" for k, v in byslot.items()))
+            w = tk.Toplevel(self); w.title(f"{title} 실행 결과")
+            w.attributes("-topmost", True)
+            tk.Label(w, text=f"{title} — 잘 안 된 슬롯 {len(byslot)}개",
+                     font=("맑은 고딕", 13, "bold"), fg="#c0392b").pack(padx=16, pady=(12, 4))
+            bd = tk.Frame(w); bd.pack(padx=16, pady=4)
+            for r, (nm, msgs) in enumerate(byslot.items()):
+                tk.Label(bd, text=nm[:14], font=("맑은 고딕", 10, "bold"),
+                         width=14, anchor="w").grid(row=r, column=0, sticky="w")
+                tk.Label(bd, text=" · ".join(msgs), font=("맑은 고딕", 10),
+                         anchor="w").grid(row=r, column=1, sticky="w")
+            tk.Label(w, text="자세한 내용은 [📋 클릭기록] 에 남아 있습니다",
+                     font=("맑은 고딕", 9), fg="#888").pack(pady=(6, 0))
+            tk.Button(w, text="닫기", font=("맑은 고딕", 10),
+                      command=w.destroy).pack(pady=10)
+            try:
+                apply_dark(w, self._dark_on())
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def _diag_images(self, fkey):
         """지금 16슬롯(클라)을 전부 훑어 그림이 잡히는지 슬롯별로 보여준다.
         컴퓨터마다 해상도·클라 크기가 달라 결과가 다르므로, 로컬에서 '가끔 안 된다'는
@@ -4785,6 +4827,16 @@ class App(tk.Tk):
                     (rc[2] - rc[0], rc[3] - rc[1]), 0) + 1
         szt = " · ".join(f"{a}×{b} ({c}개)" for (a, b), c in
                          sorted(sizes.items(), key=lambda kv: -kv[1]))
+        try:
+            import ctypes as _c
+            _aw = _c.c_int(0)
+            _c.windll.shcore.GetProcessDpiAwareness(None, _c.byref(_aw))
+            _dpi = _c.windll.user32.GetDpiForSystem()
+            tk.Label(w, text=f"화면 배율 {_dpi*100//96}%  ·  DPI 인식 {_aw.value} "
+                             f"(2 = 모니터별, 이 값이 메인과 같아야 좌표가 맞는다)",
+                     font=("맑은 고딕", 9), fg="#888").pack()
+        except Exception:
+            pass
         tk.Label(w, text=f"클라 창 크기: {szt or '알 수 없음'}",
                  font=("맑은 고딕", 10),
                  fg=("#c0392b" if len(sizes) > 1 else "#888")).pack()
@@ -5468,6 +5520,9 @@ class App(tk.Tk):
                           f"· 그때 본 화면: click_templates/_못찾음_{fkey}_{j+1:02d}.png")
                 self.status.set(f"🖼 [{nm}] 좌표{j+1} 이미지 없음 — 이 슬롯 중단 "
                                 f"(일치도 {sc:.2f})")
+                self._note(fkey, nm,
+                           (f"좌표{j+1} 창이 안 뜸 (최고 {sc:.2f})" if _own_coord
+                            else f"좌표{j+1} 그림 못 찾음 (최고 {sc:.2f})"))
                 return "이미지없음"
             # 좌표도 함께 등록돼 있으면 → 그림은 '창이 떴는지 확인'용.
             #   그림이 보일 때까지 기다렸다가 **등록한 좌표**를 누른다.
@@ -5537,22 +5592,34 @@ class App(tk.Tk):
             # 눌렀는데 '뜨기로 한 창'이 안 뜨면 = 게임이 그 클릭을 안 먹은 것.
             # 아이콘이 아닌 '창'을 보고 판단하므로 두 번 눌릴 염려가 없다
             # (2026-08-27 사용자 지시 — 씹혔을 때 스스로 회복하게).
+            # 로컬에서 '창이 안 뜬다'가 잦아 2회까지, 갈수록 더 길게 누른다.
             if has_img(fkey, j + 1):
-                time.sleep(random.uniform(2.0, 2.6))
-                _wx, _wy, _ws = find_image(fkey, j + 1, coord)
-                if _wx is None:
+                for _try in range(2):
+                    time.sleep(random.uniform(1.8, 2.4))
+                    _wx, _wy, _ws = find_image(fkey, j + 1, coord)
+                    if _wx is not None:
+                        if _try:
+                            click_log(f"{fkey} [{nm}] 좌표{j+1} 다시 눌러 창이 떴음 "
+                                      f"(일치도 {_ws:.2f})")
+                        break
+                    _hold = (0.18, 0.30) if _try == 0 else (0.35, 0.50)
                     click_log(f"{fkey} [{nm}] 좌표{j+1} 눌렀는데 창이 안 뜸 "
-                              f"(좌표{j+2} 최고 {_ws:.2f}) → 한 번만 다시 누름")
-                    self.status.set(f"🖼 [{nm}] 좌표{j+1} 창이 안 떠서 다시 누름")
+                              f"(좌표{j+2} 최고 {_ws:.2f}) → 다시 누름 "
+                              f"({_try+1}/2, {_hold[0]:.2f}~{_hold[1]:.2f}초 꾹)")
+                    self.status.set(f"🖼 [{nm}] 좌표{j+1} 창이 안 떠서 다시 누름 "
+                                    f"({_try+1}/2)")
+                    self._note(fkey, nm, f"좌표{j+1} 창이 안 떠서 다시 누름")
                     try:
                         self._focus_client_at(coord)
-                        time.sleep(random.uniform(0.25, 0.45))
+                        time.sleep(random.uniform(0.35, 0.55))
                         move_at(*coord)
-                        time.sleep(random.uniform(0.35, 0.6))
+                        time.sleep(random.uniform(0.5, 0.8))
                     except Exception:
                         pass
-                    click_hold(*coord)
+                    click_hold(*coord, ms=random.uniform(*_hold))
                     time.sleep(random.uniform(0.35, 0.55))
+                else:
+                    self._note(fkey, nm, f"좌표{j+1} 두 번 눌러도 창이 안 뜸")
         self._user_focus_back(snap)                 # 곧바로 원래 창·커서로
         return "클릭"
 
@@ -5716,6 +5783,7 @@ class App(tk.Tk):
     def _run_dgn2(self, fkey, slot_idx=None, sel_list=None):
         self._start_pause()
         self._img_done = set()      # 실행할 때마다 '이미지 찾음' 표시를 비운다
+        self._run_note = []         # 이번 실행에서 잘 안 된 것 (끝나고 요약)
         key, title, icon = self._dgn2_info(fkey)
         nclk = self._grid_spec(fkey)["clicks"]
         stop = f"_{fkey}_stop"
@@ -5888,6 +5956,7 @@ class App(tk.Tk):
         finally:
             self._set_btn(f"btn_{fkey}_run", state="normal")
             self._set_btn(f"btn_{fkey}_stop", state="disabled")
+            self.after(0, lambda f=fkey, t=title: self._run_summary(f, t))
             self.after(0, self._restore_back)
 
     def _build_past(self, parent):
