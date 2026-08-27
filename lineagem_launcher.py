@@ -192,8 +192,6 @@ DC_TAPS_MIN    = 7     # 한 좌표당 연속 클릭 횟수(최소)
 DC_TAPS_MAX    = 9     # 한 좌표당 연속 클릭 횟수(최대)
 DC_BURST_MIN   = 1.0   # 한 좌표의 7~9회 클릭을 이 시간(초) 안에 모두 실행
 DC_BURST_MAX   = 2.0
-KNIGHT2_SLOTS  = 16    # 흑기사 지정 슬롯 수 (낚시녹임과 동일 구조)
-KNIGHT2_CLICKS = 12    # 흑기사 지정 좌표 수 — 칸마다 휠(아래로) 지정 가능
 FISH_SLOTS     = 16    # 낚시녹임 슬롯 수 (인형탐험과 동일 구조)
 FISH_CLICKS    = 19    # 낚시녹임 좌표 수 (2026-08-19 맨 앞에 하나 추가)
 CIRCUS_SLOTS   = 16    # 서커스이벤트 슬롯 수 (낚시녹임과 동일 구조)
@@ -255,7 +253,6 @@ DEFAULT_CFG = {
     "market_slots":  None,              # 거래소검색 — 16슬롯 × 좌표9 (쿠폰등록 방식)
     "dragon_slots":  None,              # 용던고고!!! — 16슬롯 × 좌표10 (스케줄과 같은 구조)
     "knight_slots":  None,              # 던전끝! 흑기사!! — 16슬롯 × 좌표5
-    "knight2_slots": None,              # 흑기사 지정 — 16슬롯 × 좌표12 (휠 지정 가능)
     "dark_ui":       True,              # 어두운 화면 (눈 보호)
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
@@ -577,31 +574,6 @@ def load_cfg():
         while len(dq) < DC_SLOTS:
             dq.append(None)
         cfg["dc_slots"] = dq[:DC_SLOTS]
-        # knight2_slots (흑기사 지정 16슬롯 × 12좌표 — 칸마다 간격·휠 지정)
-        k2, nk2 = cfg.get("knight2_slots") or [], []
-        for s_ in k2:
-            if isinstance(s_, dict):
-                c = list(s_.get("coords") or [])
-                g = list(s_.get("gap_list") or [])
-                w = list(s_.get("wheel_list") or [])
-                while len(c) < KNIGHT2_CLICKS: c.append(None)
-                while len(g) < KNIGHT2_CLICKS: g.append(None)
-                while len(w) < KNIGHT2_CLICKS: w.append(0)
-                nk2.append({"name": s_.get("name", "미등록"),
-                            "coords": c[:KNIGHT2_CLICKS],
-                            "gap_list": g[:KNIGHT2_CLICKS],
-                            "wheel_list": w[:KNIGHT2_CLICKS],
-                            "enabled": s_.get("enabled", True)})
-            else:
-                nk2.append({"name": "미등록", "coords": [None] * KNIGHT2_CLICKS,
-                            "gap_list": [None] * KNIGHT2_CLICKS,
-                            "wheel_list": [0] * KNIGHT2_CLICKS, "enabled": True})
-        while len(nk2) < KNIGHT2_SLOTS:
-            nk2.append({"name": "미등록", "coords": [None] * KNIGHT2_CLICKS,
-                        "gap_list": [None] * KNIGHT2_CLICKS,
-                        "wheel_list": [0] * KNIGHT2_CLICKS, "enabled": True})
-        cfg["knight2_slots"] = nk2[:KNIGHT2_SLOTS]
-
         # fish_slots (낚시녹임 16슬롯 × 19좌표)
         # (2026-08-19) 맨 앞에 좌표 하나를 새로 넣는다 — 기존 좌표는 한 칸씩 밀려
         # 클릭1→클릭2 … 순서는 그대로. 컴퓨터마다 한 번만 밀도록 표시를 남긴다.
@@ -1745,16 +1717,6 @@ class App(tk.Tk):
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
             command=lambda: self._start_dgn2("fish")).pack(side="left", padx=(2,0))
-        # 낚시녹임 아래: 🖤 흑기사 지정 (한 번 쓰고 지울 임시 런처 — 2026-08-24)
-        r6 = tk.Frame(dc_col); r6.pack(anchor="n", pady=(4, 0))
-        tk.Button(r6, text="🖤 흑기사" + chr(10) + "지정",
-            font=("맑은 고딕", 9, "bold"), bg="#212f3d", fg="white",
-            activebackground="#17202a", width=7, height=2,
-            command=self._open_knight2_win).pack(side="left")
-        tk.Button(r6, text="▶" + chr(10) + "실행",
-            font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
-            activebackground="#1e8449", width=4, height=2,
-            command=lambda: self._start_dgn2("knight2")).pack(side="left", padx=(2, 0))
 
         # 작업이 끝나면 여기에 큰 빨간 글씨로 '완료'가 1분간 뜬다
         self._done_var = tk.StringVar(value="")
@@ -2376,7 +2338,6 @@ class App(tk.Tk):
         ("relic_slots",    "🗿 성물확인용"),
         ("dungeon_slots",  "🏰 변신확인용"),
         ("fish_slots",     "🎣 낚시녹임"),
-        ("knight2_slots",  "🖤 흑기사 지정"),
         ("market_slots",   "🔎 거래소검색"),
         ("coupon_slots",   "🎟 쿠폰등록"),
         ("circus_slots",   "🎪 서커스 이벤트등록"),
@@ -4395,7 +4356,6 @@ class App(tk.Tk):
                 "knight":  ("knight_slots",  "던전끝! 흑기사!!", "🖤"),
                 "eventshop": ("eventshop_slots", "이벤트상점", "🛒"),
                 "fish":    ("fish_slots",    "낚시녹임",   "🎣"),
-                "knight2": ("knight2_slots", "흑기사 지정", "🖤"),
                 "circus":  ("circus_slots",  "서커스 이벤트등록", "🎪"),
                 "circus2": ("circus2_slots", "서커스 이벤트실행", "🎪"),
                 "circus3": ("circus3_slots", "서커스 이벤트퀘스트", "🎪")}[fkey]
@@ -4457,11 +4417,6 @@ class App(tk.Tk):
     def _open_circus3_win(self):
         self._open_section_win("_circus3_win", "🎪 서커스 이벤트퀘스트",
                                lambda p: self._build_dgn2("circus3", p), w=470, h=430, pinnable=True)
-
-    def _open_knight2_win(self):
-        self._open_section_win("_knight2_win", "🖤 흑기사 지정",
-                               lambda p: self._build_dgn2("knight2", p),
-                               w=520, h=620, pinnable=True)
 
     def _open_fish_win(self):
         self._open_section_win("_fish_win", "🎣 낚시녹임",
@@ -4801,8 +4756,8 @@ class App(tk.Tk):
         except Exception:
             return default
 
-    LOG_FKEYS = ("knight", "dragon", "knight2")   # 클릭이 어느 창에 갔는지 기록하는 런처
-    FOCUS_FIRST = ("knight2",)            # 슬롯이 바뀌면 그 클라를 먼저 앞으로 올린다
+    LOG_FKEYS = ("knight", "dragon")      # 클릭이 어느 창에 갔는지 기록해두는 런처
+    FOCUS_FIRST = ()                      # 슬롯이 바뀌면 그 클라를 먼저 앞으로 올릴 런처
     # 좌표 하나하나 누르기 직전에 '사람이 마우스를 놓았는지' 확인하는 런처
     # (사용자가 제일 중요하게 보는 것 — 겹치면 팅긴다)
     CLICK_GUARD = ("dragon", "knight", "sched")
@@ -5085,15 +5040,6 @@ class App(tk.Tk):
                 # 서커스 이벤트실행: 동시 2슬롯, 좌표 2~4초 / 슬롯 3~5초 랜덤
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
                                     gap=(2.0, 4.0), slot_gap=(3.0, 5.0))
-                return
-            if fkey == "knight2" and slot_idx is None and len(targets) > 1:
-                # 흑기사 지정 — 3슬롯씩 번갈아. 누락 없게 창을 먼저 앞으로 올리고 누른다.
-                _cl = sum(1 for _si, _sl in targets
-                          for _c in (_sl.get("coords") or [])[:nclk] if _c)
-                self.status.set(f"🖤 흑기사 지정 — {len(targets)}슬롯 / 클릭 {_cl}회, "
-                                f"3슬롯 번갈아")
-                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=3,
-                                    gap=(1.2, 2.6), slot_gap=(1.0, 2.5))
                 return
             if fkey in ("fish",) and slot_idx is None and len(targets) > 1:
                 # 낚시녹임은 번갈아(웨이브) 실행 — 동시 4슬롯, 좌표 간격 2~4초 랜덤
@@ -9665,13 +9611,6 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("circus", i),
                             prev=lambda i: self._preview_dgn2("circus", i),
                             delete=lambda i: self._del_dgn2("circus", i)),
-            "knight2": dict(title="흑기사 지정", key="knight2_slots",
-                            clicks=KNIGHT2_CLICKS, color="#212f3d",
-                            enable=True, sel=True, opts=True,
-                            reg=lambda s, c: self._reg_dgn2_click("knight2", s, c),
-                            test=lambda i: self._test_dgn2("knight2", i),
-                            prev=lambda i: self._preview_dgn2("knight2", i),
-                            delete=lambda i: self._del_dgn2("knight2", i)),
             "fish":    dict(title="낚시녹임",  key="fish_slots",    clicks=FISH_CLICKS,    color="#1a5276",
                             reg=lambda s, c: self._reg_dgn2_click("fish", s, c),
                             test=lambda i: self._test_dgn2("fish", i),
@@ -12172,7 +12111,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_lastrun_win","_lock_win","_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_knight_win","_knight2_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
+                 "_lastrun_win","_lock_win","_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_knight_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs
