@@ -1072,23 +1072,39 @@ def find_image(fkey, j, coord):
     paths = img_list(fkey, j)
     if not paths:
         return None, None, 0.0
+    # 훑을 곳: 지정한 범위 → (못 찾으면) 그 클라 창 전체
+    # 범위를 좁게 잡아두면 그림이 그 밖에 떠 있을 때 영영 못 찾는다 —
+    # 실제로 로컬에서 175×127 로 잡아둬 계속 놓쳤다 (2026-08-28).
+    boxes = [search_box(fkey, j, coord)]
+    try:
+        rc = client_rect_at(coord[0], coord[1])
+        if rc and tuple(rc) != tuple(boxes[0]):
+            boxes.append(tuple(rc))
+    except Exception:
+        pass
     best = 0.0
-    for _p in paths:
-        x, y, sc = _find_one(fkey, j, coord, _p)
-        if x is not None:
-            return x, y, sc
-        best = max(best, sc)
+    for _bi, _box in enumerate(boxes):
+        for _p in paths:
+            x, y, sc = _find_one(fkey, j, coord, _p, _box)
+            if x is not None:
+                if _bi:
+                    click_log(f"{fkey} 좌표{j+1} — 지정 범위 밖에서 찾음 "
+                              f"(창 전체로 넓혀서 발견, 일치도 {sc:.2f}) "
+                              f"· 범위(📐)를 지우거나 넓혀주세요")
+                return x, y, sc
+            best = max(best, sc)
     return None, None, best
 
 
-def _find_one(fkey, j, coord, path):
-    """그림 한 장으로 찾아본다."""
+def _find_one(fkey, j, coord, path, box=None):
+    """그림 한 장으로, 지정한 화면 영역에서 찾아본다."""
     if not os.path.exists(path):
         return None, None, 0.0
     try:
         import cv2, numpy as np
         from PIL import ImageGrab
-        box = search_box(fkey, j, coord)
+        if box is None:
+            box = search_box(fkey, j, coord)
         shot = ImageGrab.grab(bbox=box, all_screens=True).convert("RGB")
         big = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2BGR)
         # cv2.imread 는 한글이 든 경로를 못 읽는다 (윈도 사용자 이름이 한글이면 전부 실패) —
