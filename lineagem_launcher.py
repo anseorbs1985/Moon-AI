@@ -152,6 +152,9 @@ ATOMIC_NEXT = {}        # (호버를 없애서 묶을 이유가 사라짐)
 # 용던고고는 좌표4부터 이미지·확인창이 이어져서, 중간에 다른 슬롯이 끼어들면
 # 그 창이 닫히거나 포커스가 바뀌어 클릭이 씹힌다 (2026-08-27 사용자 지시).
 WAVE_UNTIL = {"dragon": 3}     # 좌표1~3만 교차, 좌표4부터는 그 슬롯 완주
+# 전체를 이 시간 안에 끝낸다 (초). 남은 시간과 남은 클릭 수를 보고 간격을 스스로 줄인다.
+# 늘리지는 않는다 — 빨리 끝나면 그대로 끝난다. (2026-08-27 사용자 지시: 4분 10초)
+RUN_BUDGET = {"dragon": 250}
 
 EXTRA_GAPS = {"dragon": DRAGON_EXTRA, "knight": KNIGHT_EXTRA}
 
@@ -5830,6 +5833,36 @@ class App(tk.Tk):
         self._user_focus_back(snap)                 # 곧바로 원래 창·커서로
         return "클릭"
 
+    def _pace(self, fkey, t0, left, gap, done=0):
+        """목표 시간에 맞추려면 간격을 몇 배로 줄여야 하는지 (1.0 = 그대로).
+
+        **'지금까지 클릭 하나에 실제로 몇 초 걸렸나'로 계산한다** — 간격만 보면
+        그림 찾기·확인창 기다리기 같은 진짜 시간이 빠져서 페이스가 안 걸린다
+        (실측: 간격은 클릭당 1.24초인데 실제는 2.29초, 2026-08-27).
+
+        줄일 수 있는 건 '간격'뿐이므로, 초과분을 간격에서 빼는 식으로 계산한다.
+        **1.0 을 넘지 않고**(늦추지 않는다) **0.30 밑으로도 안 내린다**(너무 조급하면 씹힌다)."""
+        bud = RUN_BUDGET.get(fkey)
+        if not bud or left <= 0:
+            return 1.0
+        try:
+            el = time.time() - t0
+            remain = bud - el
+            avg = (gap[0] + gap[1]) / 2.0
+            # 클릭 하나에 실제로 걸린 시간 (초반엔 표본이 없어 간격+1.0 으로 가정)
+            per = (el / done) if done >= 5 else (avg + 1.0)
+            need = left * per
+            if need <= remain:
+                return 1.0              # 여유 있음 — 원래 속도 그대로
+            # 모자라는 시간을 간격에서 뺀다
+            cut = need - remain
+            room = left * avg           # 간격으로 줄일 수 있는 최대치
+            if room <= 0.1:
+                return 0.30
+            return max(0.30, min(1.0, 1.0 - cut / room))
+        except Exception:
+            return 1.0
+
     def _wave_tail(self, fkey, st, j0, nclk, icon, stop, name, gap, slow):
         """좌표 j0부터 그 슬롯을 '끊김 없이' 끝까지 민다 (웨이브 섞임 방지).
         이미지·확인창이 이어지는 구간에 다른 슬롯이 끼어들면 창이 닫히거나
@@ -5862,6 +5895,7 @@ class App(tk.Tk):
                 _base = _g if _g is not None else random.uniform(*gap)
                 if fkey in EXTRA_GAPS:
                     _base += extra_gap(fkey, j)
+                _base *= getattr(self, "_pace_now", 1.0)   # 웨이브가 정한 페이스 그대로
                 time.sleep(_base * random.uniform(*slow))
         st["j"] = nclk
         return done
@@ -5880,8 +5914,10 @@ class App(tk.Tk):
         active, waiting = order[:lanes], order[lanes:]
         last_si, done = None, 0
         _t0 = time.time()
+        _bud = RUN_BUDGET.get(fkey)
         self.status.set(f"{icon} 번갈아 실행 — 동시 {lanes}슬롯 (좌표 간격 "
-                        f"{gap[0]:.0f}~{gap[1]:.0f}초)")
+                        f"{gap[0]:.0f}~{gap[1]:.0f}초"
+                        + (f" · 목표 {_bud//60}분 {_bud%60}초 안에" if _bud else "") + ")")
         while not getattr(self, stop, False):
             for si in [x for x in active if state[x]["j"] >= nclk]:
                 active.remove(si)
@@ -5925,6 +5961,10 @@ class App(tk.Tk):
             name = st["slot"].get("name", f"#{si+1}")
             _wu = WAVE_UNTIL.get(fkey, 0)
             if _wu and j >= _wu:
+                self._pace_now = self._pace(
+                    fkey, _t0,
+                    sum(max(0, nclk - state[x]["j"]) for x in (active + waiting)),
+                    gap, done)
                 # 여기서부터는 교차하지 않고 이 슬롯을 끝까지 (중간 끼어들기 방지)
                 done += self._wave_tail(fkey, st, j, nclk, icon, stop,
                                         name, gap, slow)
@@ -5963,6 +6003,11 @@ class App(tk.Tk):
             _base = _g if _g is not None else random.uniform(*gap)
             if fkey in EXTRA_GAPS:
                 _base += extra_gap(fkey, j)           # 좌표2→3 처럼 더 쉬어야 하는 자리
+            # 목표 시간(RUN_BUDGET) 안에 끝내도록 남은 클릭 수를 보고 간격을 줄인다
+            _left = sum(max(0, nclk - state[x]["j"]) for x in (active + waiting))
+            _pc = self._pace(fkey, _t0, _left, gap, done)
+            self._pace_now = _pc
+            _base *= _pc
             # 사람처럼 — 한 슬롯에서 2~3번 이어 누르고 다른 슬롯으로 넘어간다
             if st.get("burst", 0) <= 0:
                 st["burst"] = random.choice([1, 2, 2, 3])
@@ -5972,8 +6017,13 @@ class App(tk.Tk):
             st["due"] = time.time() + _base * random.uniform(*slow)   # 10~20% 할증
             time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
         _el = int(time.time() - _t0)
+        _bud2 = RUN_BUDGET.get(fkey)
         self.status.set(f"{icon} 번갈아 실행 완료 — 클릭 {done}회, "
-                        f"{_el//60}분 {_el%60}초 걸림")
+                        f"{_el//60}분 {_el%60}초 걸림"
+                        + (f" (목표 {_bud2//60}분 {_bud2%60}초)" if _bud2 else ""))
+        if _bud2:
+            click_log(f"[시간] {fkey} {_el}초 / 목표 {_bud2}초 "
+                      + ("✔ 안에 끝남" if _el <= _bud2 else f"⚠ {_el-_bud2}초 초과"))
         if fkey in self.LOG_FKEYS:
             try:      # 슬롯별로 끝까지 갔는지 남긴다 (누락 확인용)
                 short = [f"#{si+1:02d} {state[si]['j']}/{nclk}"
@@ -5991,6 +6041,7 @@ class App(tk.Tk):
         self._start_pause()
         self._img_done = set()      # 실행할 때마다 '이미지 찾음' 표시를 비운다
         self._run_note = []         # 이번 실행에서 잘 안 된 것 (끝나고 요약)
+        self._pace_now = 1.0        # 목표 시간에 맞추는 간격 배수 (1.0 = 그대로)
         key, title, icon = self._dgn2_info(fkey)
         nclk = self._grid_spec(fkey)["clicks"]
         stop = f"_{fkey}_stop"
