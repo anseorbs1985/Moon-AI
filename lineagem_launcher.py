@@ -5397,6 +5397,20 @@ class App(tk.Tk):
             except Exception:
                 pass
         if _img_hit:
+            # 무엇을 눌렀는지 사진으로 남긴다 (오탐 확인용 — 2026-08-27)
+            try:
+                from PIL import ImageGrab, ImageDraw
+                _sx, _sy = int(coord[0]), int(coord[1])
+                _im = ImageGrab.grab(bbox=(_sx - 60, _sy - 50, _sx + 60, _sy + 50),
+                                     all_screens=True).convert("RGB")
+                _dr = ImageDraw.Draw(_im)
+                _dr.ellipse([48, 38, 72, 62], outline=(255, 0, 0), width=2)
+                os.makedirs(IMG_DIR, exist_ok=True)
+                _nm2 = (slot or {}).get("name", "?")
+                _im.save(os.path.join(
+                    IMG_DIR, f"_누른자리_{fkey}_{j+1:02d}.png"))
+            except Exception:
+                pass
             click_hold(*coord)          # 그림 자리는 꾹 눌렀다 뗀다 (게임이 확실히 받게)
         else:
             click_at(*coord)
