@@ -968,6 +968,23 @@ def move_at(x, y):
     return "cursor"
 
 
+def click_hold(x, y, ms=None):
+    """사람처럼 '꾹 눌렀다 떼는' 클릭 (기본 70~130ms).
+    [누름+뗌]이 0초 간격으로 나가면 게임이 무시하는 경우가 있다 —
+    게임 화면 안의 아이콘·오브젝트는 이 방식이라야 반응한다. (2026-08-27)"""
+    hold = (ms if ms is not None else random.uniform(0.07, 0.13))
+    try:
+        pyautogui.moveTo(int(x), int(y))
+        time.sleep(random.uniform(0.05, 0.12))
+        pyautogui.mouseDown(int(x), int(y))
+        time.sleep(hold)
+        pyautogui.mouseUp(int(x), int(y))
+        return "꾹클릭"
+    except Exception:
+        pyautogui.click(int(x), int(y))
+        return "클릭"
+
+
 def click_at(x, y):
     """좌표 클릭 — [이동+누름+뗌]을 SendInput 으로 한 번에 보낸다.
     실행 중 사용자가 마우스를 움직여도 그 사이에 끼어들지 못해
@@ -5256,7 +5273,10 @@ class App(tk.Tk):
                 time.sleep(random.uniform(0.35, 0.6))
             except Exception:
                 pass
-        click_at(*coord)
+        if _img_hit:
+            click_hold(*coord)          # 그림 자리는 꾹 눌렀다 뗀다 (게임이 확실히 받게)
+        else:
+            click_at(*coord)
         if _img_hit:
             time.sleep(random.uniform(0.35, 0.55))  # 게임이 클릭을 처리할 시간
         self._user_focus_back(snap)                 # 곧바로 원래 창·커서로
