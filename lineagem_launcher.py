@@ -158,6 +158,9 @@ RUN_BUDGET = {"dragon": 270}      # 4분 30초 (2026-08-27 사용자 지시 — 
 # 간격을 이보다 더 줄이지 않는다. 너무 서두르면 게임 화면이 아직 안 떠서
 # '그림 못 찾음'이 늘어난다 (2026-08-27 — 0.30 으로 뒀다가 인식률이 폭락했다).
 PACE_FLOOR = 0.60
+NLCH = chr(10)
+# 실행이 끝나면 '진단만' 저장소 diag/ 로 올리는 런처 (2026-08-28 사용자 지시)
+DIAG_SHARE = ("dragon",)
 
 EXTRA_GAPS = {"dragon": DRAGON_EXTRA, "knight": KNIGHT_EXTRA}
 
@@ -802,6 +805,76 @@ def _left_clicks(fkey, slot, j0, nclk):
                    if (j < len(cl) and cl[j]) or has_img(fkey, j))
     except Exception:
         return max(0, nclk - j0)
+
+
+def find_repo_dir():
+    """저장소(Moon-AI) 폴더 찾기 — 컴퓨터마다 위치가 달라도 되도록."""
+    home = os.path.expanduser("~")
+    cands = [os.path.join(BASE, "Moon-AI"), BASE,
+             os.path.join(home, "Moon-AI"),
+             os.path.join(home, "Desktop", "Moon-AI"),
+             os.path.join(home, "OneDrive", "Desktop", "Moon-AI")]
+    for c in cands:
+        try:
+            if os.path.isdir(os.path.join(c, ".git")):
+                return c
+        except Exception:
+            pass
+    return None
+
+
+def share_diag(fkey, lines, shots=()):
+    """**진단 내용만** 저장소 `diag/` 에 올린다 — 메인에서 실시간으로 로컬 상태를 본다.
+
+    사용자 지시(2026-08-28)로 만든 예외 통로다. 올리는 것은 `diag/` 아래 파일뿐이고
+    코드·좌표·계정은 **절대 건드리지 않는다** (`git add` 에 diag 경로만 준다).
+    실패해도 조용히 넘어간다 — 실행에 영향을 주지 않는다."""
+    repo = find_repo_dir()
+    if not repo:
+        return False
+    try:
+        import shutil as _sh, socket, subprocess as _sp
+        who = "".join(ch for ch in socket.gethostname() if ch.isalnum())[:16] or "pc"
+        dd = os.path.join(repo, "diag")
+        os.makedirs(dd, exist_ok=True)
+        rel = []
+        tf = os.path.join(dd, who + "_" + fkey + ".txt")
+        with open(tf, "w", encoding="utf-8") as f:
+            f.write(NLCH.join(lines))
+        rel.append("diag/" + os.path.basename(tf))
+        for src, tag in shots:
+            if not (src and os.path.exists(src)):
+                continue
+            dst = os.path.join(dd, who + "_" + fkey + "_" + tag + ".png")
+            try:
+                _sh.copy2(src, dst)
+                rel.append("diag/" + os.path.basename(dst))
+            except Exception:
+                pass
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+        def g(*args, t=60):
+            return _sp.run(["git"] + list(args), cwd=repo, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace",
+                           timeout=t, env=env)
+        g("add", "--", *rel)
+        if not g("diff", "--cached", "--quiet", "--", *rel).returncode:
+            return True                     # 바뀐 게 없으면 그냥 끝
+        g("commit", "-q", "-m", "진단 공유: " + who + " / " + fkey, "--", *rel)
+        g("fetch", "-q", "origin")
+        g("rebase", "--autostash", "-q", "origin/main")   # 남의 커밋 위로 얹는다
+                                                          # (다른 수정은 잠깐 치웠다 되돌림)
+        r = g("push", "-q", "origin", "HEAD:main", t=90)
+        ok = (r.returncode == 0)
+        click_log("[진단공유] " + ("올림 ✔ " if ok else "실패 ✘ ") +
+                  ", ".join(os.path.basename(x) for x in rel) +
+                  ("" if ok else " — " + (r.stderr or "")[:120]))
+        return ok
+    except Exception as e:
+        try:
+            click_log("[진단공유] 실패 ✘ " + str(e)[:120])
+        except Exception:
+            pass
+        return False
 
 
 def save_miss_shot(fkey, j, coord):
@@ -4943,6 +5016,159 @@ class App(tk.Tk):
                             "_못찾음_*.png 가 '그때 훑은 화면'입니다")
         except Exception as e:
             self.status.set(f"📁 열기 실패: {e}")
+
+    def _collect_diag(self, fkey):
+        """원인 확인에 필요한 것을 바탕화면 `진단_<런처>` 폴더 하나에 모은다 —
+        클릭기록, 못찾음·창안뜸·누른자리 사진, 지금 쓰는 그림과 기준.
+        원격으로 로컬을 봐줄 때 이 폴더만 통째로 보내면 된다 (2026-08-27)."""
+        import glob, shutil as _sh
+        try:
+            out = os.path.join(os.path.expanduser("~"), "Desktop", "진단_" + fkey)
+            os.makedirs(out, exist_ok=True)
+            n = 0
+            try:
+                if os.path.exists(CLICK_LOG):
+                    _sh.copy2(CLICK_LOG, os.path.join(out, "click_log.txt")); n += 1
+            except Exception:
+                pass
+            for d in (IMG_DIR, IMG_DIR_MINE):
+                if not os.path.isdir(d):
+                    continue
+                for q in glob.glob(os.path.join(d, "*")):
+                    bn = os.path.basename(q)
+                    if not (bn.startswith(("_못찾음_", "_창안뜸_", "_누른자리_"))
+                            or bn.startswith(fkey)):
+                        continue
+                    try:
+                        tag = "" if d == IMG_DIR else "전용_"
+                        _sh.copy2(q, os.path.join(out, tag + bn)); n += 1
+                    except Exception:
+                        pass
+            try:
+                nclk = self._grid_spec(fkey)["clicks"]
+                L = []
+                L.append("런처: " + fkey)
+                L.append(f"IMG_TRIES={IMG_TRIES} RECLICK_TRIES={RECLICK_TRIES}")
+                L.append(f"PEAK_MIN={PEAK_MIN} PEAK_RATIO={PEAK_RATIO} "
+                         f"GRAY_MIN={GRAY_MIN} GRAY_RATIO={GRAY_RATIO}")
+                L.append(f"RUN_BUDGET={RUN_BUDGET.get(fkey)} PACE_FLOOR={PACE_FLOOR}")
+                L.append("")
+                for j2 in range(nclk):
+                    if not has_img(fkey, j2):
+                        continue
+                    L.append(f"좌표{j2+1}: 기준 {img_thr(fkey, j2):.2f} · "
+                             f"그림 {len(img_list(fkey, j2))}장"
+                             f"(전용 {img_mine_count(fkey, j2)}) · "
+                             f"고르기 {img_pick(fkey, j2)} · "
+                             f"범위 {'있음' if os.path.exists(area_path(fkey, j2)) else '없음'}")
+                try:
+                    import ctypes as _c
+                    L.append("")
+                    L.append(f"화면 배율 {_c.windll.user32.GetDpiForSystem()*100//96}%")
+                except Exception:
+                    pass
+                with open(os.path.join(out, "설정.txt"), "w", encoding="utf-8") as f:
+                    f.write(chr(10).join(L))
+                n += 1
+            except Exception:
+                pass
+            subprocess.Popen(["explorer", out])
+            self.status.set(f"📤 바탕화면 '진단_{fkey}' 폴더에 {n}개 모았습니다 — "
+                            f"이 폴더를 통째로 보내주세요")
+        except Exception as e:
+            self.status.set(f"📤 모으기 실패: {e}")
+
+    def _note(self, fkey, nm, msg):
+        """실행 중 '잘 안 된 것'을 슬롯별로 모아둔다 — 끝나고 요약으로 보여준다.
+        실행이 너무 빨라 화면으로는 못 보기 때문 (2026-08-27 사용자 요청)."""
+        try:
+            if not hasattr(self, "_run_note"):
+                self._run_note = []
+            self._run_note.append((str(nm), str(msg)))
+        except Exception:
+            pass
+
+    def _run_summary(self, fkey, title):
+        """실행이 끝나면 무엇이 안 됐는지 기록에 남기고, 진단을 저장소에 올린다.
+        **창은 띄우지 않는다** (2026-08-27 사용자 지시 — 매번 닫아야 해서 불편)."""
+        notes = getattr(self, "_run_note", None) or []
+        try:
+            byslot = {}
+            for nm, msg in notes:
+                byslot.setdefault(nm, []).append(msg)
+            if byslot:
+                click_log("[결과] " + fkey + " 문제 있던 슬롯 " + str(len(byslot)) +
+                          "개 · " + " / ".join(k + ": " + "; ".join(v)
+                                               for k, v in byslot.items()))
+                self.status.set("⚠ " + title + " — 잘 안 된 슬롯 " +
+                                str(len(byslot)) + "개 (자세한 내용은 [📋 클릭기록])")
+        except Exception:
+            pass
+        # 메인 컴퓨터는 '읽는 쪽'이라 올리지 않는다 (로컬만 올린다)
+        if fkey in DIAG_SHARE and not load_local().get("is_main"):
+            threading.Thread(target=self._share_diag_now, args=(fkey,),
+                             daemon=True).start()
+
+    def _share_diag_now(self, fkey):
+        """이번 실행의 진단만 저장소 diag/ 로 올린다 (메인에서 바로 본다)."""
+        try:
+            import socket, datetime as _dt
+            nclk = self._grid_spec(fkey)["clicks"]
+            L = ["=== 진단 " + fkey + " ===",
+                 "컴퓨터: " + socket.gethostname(),
+                 "시각: " + _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), ""]
+            L.append("[설정]")
+            L.append("IMG_TRIES=" + str(IMG_TRIES) +
+                     " RECLICK_TRIES=" + str(RECLICK_TRIES) +
+                     " PEAK_MIN=" + str(PEAK_MIN) + " PEAK_RATIO=" + str(PEAK_RATIO) +
+                     " GRAY_MIN=" + str(GRAY_MIN) + " GRAY_RATIO=" + str(GRAY_RATIO))
+            L.append("RUN_BUDGET=" + str(RUN_BUDGET.get(fkey)) +
+                     " PACE_FLOOR=" + str(PACE_FLOOR))
+            try:
+                import ctypes as _c
+                L.append("화면 배율 " +
+                         str(_c.windll.user32.GetDpiForSystem() * 100 // 96) + "%")
+            except Exception:
+                pass
+            for j2 in range(nclk):
+                if not has_img(fkey, j2):
+                    continue
+                L.append("좌표" + str(j2 + 1) + ": 기준 " +
+                         format(img_thr(fkey, j2), ".2f") + " · 그림 " +
+                         str(len(img_list(fkey, j2))) + "장(전용 " +
+                         str(img_mine_count(fkey, j2)) + ") · 범위 " +
+                         ("있음" if os.path.exists(area_path(fkey, j2)) else "없음"))
+            # 클라 창 크기 (그림이 안 맞는 가장 흔한 원인)
+            try:
+                key = self._dgn2_info(fkey)[0]
+                sz = {}
+                for sl in (self.cfg.get(key) or []):
+                    anc = slot_anchor(sl)
+                    rc = client_rect_at(*anc) if anc else None
+                    k = (str(rc[2] - rc[0]) + "x" + str(rc[3] - rc[1])) if rc else "창없음"
+                    sz[k] = sz.get(k, 0) + 1
+                L.append("클라 창 크기: " +
+                         " · ".join(k + "(" + str(v) + ")" for k, v in sz.items()))
+            except Exception:
+                pass
+            L.append("")
+            L.append("[이번 실행 기록]")
+            try:
+                with open(CLICK_LOG, encoding="utf-8", errors="replace") as f:
+                    all_lines = [x.rstrip() for x in f]
+                L += [x for x in all_lines if fkey in x or "[결과]" in x
+                      or "[시간]" in x][-200:]
+            except Exception:
+                pass
+            shots = []
+            for j2 in range(nclk):
+                q = os.path.join(IMG_DIR, "_못찾음_" + fkey + "_" +
+                                 format(j2 + 1, "02d") + ".png")
+                if os.path.exists(q):
+                    shots.append((q, "못찾음" + format(j2 + 1, "02d")))
+            share_diag(fkey, L, shots[:3])
+        except Exception:
+            pass
 
     def _collect_diag(self, fkey):
         """원인 확인에 필요한 것을 바탕화면 `진단_<런처>` 폴더 하나에 모은다 —
