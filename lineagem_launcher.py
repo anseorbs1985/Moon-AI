@@ -5224,9 +5224,32 @@ class App(tk.Tk):
                 time.sleep(random.uniform(0.25, 0.45))
             except Exception:
                 pass
+            try:      # 그 자리에 지금 '어느 창'이 떠 있는지 기록 (가려져 있으면 여기서 드러난다)
+                import win32gui, ctypes as _ct
+                _h = win32gui.WindowFromPoint((int(coord[0]), int(coord[1])))
+                _r = _ct.windll.user32.GetAncestor(_h, 2)
+                click_log(f"{fkey} 좌표{j+1} 누르기 직전 맨 위 창 = "
+                          f"[{win32gui.GetWindowText(_r)}]")
+            except Exception:
+                pass
         click_at(*coord)
         if _img_hit:
-            time.sleep(random.uniform(0.25, 0.40))  # 게임이 클릭을 처리할 시간
+            time.sleep(random.uniform(0.35, 0.55))  # 게임이 클릭을 처리할 시간
+            # 눌렀는데 그림이 그대로면 안 먹은 것 — 최대 2번까지 다시 누른다
+            for _r2 in range(2):
+                _ix2, _iy2, _sc2 = find_image(fkey, j, coord)
+                if _ix2 is None:
+                    break                          # 사라졌다 = 제대로 눌렸다
+                click_log(f"{fkey} 좌표{j+1} 그림이 그대로 남아 있음 "
+                          f"(일치도 {_sc2:.2f}) → 다시 클릭 {_r2+1}/2")
+                self.status.set(f"🖼 좌표{j+1} 반응 없음 — 다시 누릅니다 ({_r2+1}/2)")
+                try:
+                    self._focus_client_at((_ix2, _iy2))
+                    time.sleep(random.uniform(0.3, 0.5))
+                except Exception:
+                    pass
+                click_at(_ix2, _iy2)
+                time.sleep(random.uniform(0.5, 0.8))
         self._user_focus_back(snap)                 # 곧바로 원래 창·커서로
         return "클릭"
 
