@@ -769,6 +769,67 @@ def grab_patch(fkey, j, coord):
         return None
 
 
+def zone_path(fkey, j):
+    """성공한 자리들이 모인 구역 (이 컴퓨터 전용 — 창 배치가 다를 수 있으므로)."""
+    return os.path.join(IMG_DIR_MINE, f"{fkey}_{j+1:02d}_zone.json")
+
+
+ZONE_MIN  = 5      # 이만큼 모여야 구역을 쓴다
+ZONE_PAD  = 35     # 구역 사방으로 이만큼 여유 (px)
+ZONE_OUT_MIN = 0.75  # 구역 **밖**에서 찾을 때는 이 점수를 넘어야만 인정한다.
+                     # 구역 밖은 엉뚱한 곳일 확률이 높아 느슨한 판정(배수·흑백)을 쓰지 않는다.
+ZONE_KEEP = 40     # 최근 이만큼만 보관
+
+
+def learn_zone(fkey, j, coord):
+    """**창이 실제로 뜬** 자리를 창 왼쪽위 기준으로 모아둔다.
+
+    마름모는 늘 화면의 비슷한 구역에 뜬다 (실측: 창내 x 143~290 · y 73~121).
+    그런데 낮은 점수로 **엉뚱한 곳**(예: y=31 의 UI)을 마름모로 보고 눌러 실패한
+    일이 있었다 (2026-08-28 망자로 슬롯). 그래서 성공한 자리를 모아 그 구역을
+    **먼저** 훑는다. 거기서 못 찾으면 예전처럼 창 전체를 훑으므로 놓치지는 않는다."""
+    try:
+        rc = client_rect_at(coord[0], coord[1])
+        if not rc:
+            return
+        dx, dy = int(coord[0]) - rc[0], int(coord[1]) - rc[1]
+        pts = []
+        try:
+            with open(zone_path(fkey, j), encoding="utf-8") as f:
+                pts = (json.load(f) or {}).get("pts") or []
+        except Exception:
+            pts = []
+        pts.append([dx, dy])
+        pts = pts[-ZONE_KEEP:]
+        os.makedirs(IMG_DIR_MINE, exist_ok=True)
+        with open(zone_path(fkey, j), "w", encoding="utf-8") as f:
+            json.dump({"pts": pts}, f)
+    except Exception:
+        pass
+
+
+def zone_box(fkey, j, coord):
+    """모아둔 성공 자리로 만든 구역 (없거나 표본이 적으면 None)."""
+    try:
+        with open(zone_path(fkey, j), encoding="utf-8") as f:
+            pts = (json.load(f) or {}).get("pts") or []
+        if len(pts) < ZONE_MIN:
+            return None
+        rc = client_rect_at(coord[0], coord[1])
+        if not rc:
+            return None
+        xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+        x0 = max(rc[0], rc[0] + min(xs) - ZONE_PAD)
+        y0 = max(rc[1], rc[1] + min(ys) - ZONE_PAD)
+        x1 = min(rc[2], rc[0] + max(xs) + ZONE_PAD)
+        y1 = min(rc[3], rc[1] + max(ys) + ZONE_PAD)
+        if x1 - x0 < 40 or y1 - y0 < 40:
+            return None
+        return (x0, y0, x1, y1)
+    except Exception:
+        return None
+
+
 def learn_img(fkey, j, patch, nm=""):
     """**성공이 확인된** 클릭 자리의 그림을 '이 컴퓨터 전용'으로 모아둔다.
 
@@ -1096,29 +1157,42 @@ def find_image(fkey, j, coord):
     # 훑을 곳: 지정한 범위 → (못 찾으면) 그 클라 창 전체
     # 범위를 좁게 잡아두면 그림이 그 밖에 떠 있을 때 영영 못 찾는다 —
     # 실제로 로컬에서 175×127 로 잡아둬 계속 놓쳤다 (2026-08-28).
-    boxes = [search_box(fkey, j, coord)]
+    boxes = []
+    # 순서: ① 내가 지정한 범위(📐)  ② 성공했던 자리들이 모인 구역  ③ 창 전체
+    # 뒤로 갈수록 '엉뚱한 곳'일 확률이 높아 ②③ 은 엄격하게 본다.
+    _ub = search_box(fkey, j, coord) if area_is_set(fkey, j) else None
+    if _ub:
+        boxes.append(tuple(_ub))
+    _zb = zone_box(fkey, j, coord)
+    if _zb and tuple(_zb) not in boxes:
+        boxes.append(tuple(_zb))
+    if not boxes:
+        boxes.append(tuple(search_box(fkey, j, coord)))
     try:
         rc = client_rect_at(coord[0], coord[1])
-        if rc and tuple(rc) != tuple(boxes[0]):
+        if rc and tuple(rc) not in boxes:
             boxes.append(tuple(rc))
     except Exception:
         pass
     best = 0.0
     for _bi, _box in enumerate(boxes):
+        _strict = _bi > 0        # 첫 상자 밖으로 넓힐수록 엄격하게 (오클릭 방지)
         for _p in paths:
-            x, y, sc = _find_one(fkey, j, coord, _p, _box)
+            x, y, sc = _find_one(fkey, j, coord, _p, _box, _strict)
             if x is not None:
                 if _bi:
                     click_log(f"{fkey} 좌표{j+1} — 지정 범위 밖에서 찾음 "
-                              f"(창 전체로 넓혀서 발견, 일치도 {sc:.2f}) "
-                              f"· 범위(📐)를 지우거나 넓혀주세요")
+                              f"(일치도 {sc:.2f} ≥ {ZONE_OUT_MIN}, 엄격 판정 통과) "
+                              f"· 범위(📐)를 조금 넓혀두면 더 잘 잡힙니다")
                 return x, y, sc
             best = max(best, sc)
     return None, None, best
 
 
-def _find_one(fkey, j, coord, path, box=None):
-    """그림 한 장으로, 지정한 화면 영역에서 찾아본다."""
+def _find_one(fkey, j, coord, path, box=None, strict=False):
+    """그림 한 장으로, 지정한 화면 영역에서 찾아본다.
+    strict=True 면 '늘 뜨던 구역 밖'이라는 뜻 — 점수를 높게 요구하고
+    느슨한 판정(배수·흑백·윤곽선)을 쓰지 않는다 (오클릭 방지, 2026-08-28)."""
     if not os.path.exists(path):
         return None, None, 0.0
     try:
@@ -1139,12 +1213,14 @@ def _find_one(fkey, j, coord, path, box=None):
         res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
         _mn, mx, _ml, ml = cv2.minMaxLoc(res)
         thr = img_thr(fkey, j)
+        if strict:
+            thr = max(thr, ZONE_OUT_MIN)
         th, tw = tpl.shape[0], tpl.shape[1]
         # ── 점수만 보지 않고 '나머지보다 얼마나 튀는가'도 본다 (2026-08-27 실측) ──
         # 같은 아이콘도 배경(지형·몹·이펙트)에 따라 0.60~0.96 으로 크게 흔들려서
         # 절대 점수만으로는 자를 수가 없다. 반면 '1등 ÷ 2등' 은 확실히 갈린다:
         #   아이콘 있을 때 2.23배 · 없을 때 1.00~1.20배 (16클라 실측)
-        if mx < thr and mx >= PEAK_MIN:
+        if (not strict) and mx < thr and mx >= PEAK_MIN:
             try:
                 _r2 = res.copy()
                 _y0, _x0 = max(0, ml[1] - th), max(0, ml[0] - tw)
@@ -1170,7 +1246,7 @@ def _find_one(fkey, j, coord, path, box=None):
                     res, mx, ml, tw, th = r2, m3, l3, w2, h2
                 if mx >= thr:
                     break
-        if mx < thr:
+        if (not strict) and mx < thr:
             # 색으로 못 찾으면 '흑백(밝기 평준화)'으로 한 번 더 본다 (2026-08-27).
             # 배경이 밝거나 어두워 색 점수가 깎일 때 이쪽이 더 잘 잡힌다
             # (실측: 놓쳤던 화면 색 0.606 → 흑백 0.658).
@@ -1188,7 +1264,7 @@ def _find_one(fkey, j, coord, path, box=None):
                         res, mx, ml, thr = _rg, _mg, _pg, _mg   # 흑백 결과로 인정
             except Exception:
                 pass
-        if mx < thr:
+        if (not strict) and mx < thr:
             # 그래도 못 찾으면 '윤곽선(모양)'으로 마지막 한 번 (2026-08-27).
             # 아이콘은 같은데 배경(지형·몹·이펙트)이 달라 점수가 떨어지는 경우 대응.
             try:
@@ -5838,11 +5914,57 @@ class App(tk.Tk):
                 json.dump(d, f, ensure_ascii=False, indent=2)
             if btn and btn.winfo_exists():
                 btn.config(text="📐범위", bg="#1a5276")
-            self.status.set(f"📐 좌표{j+1} 범위 저장 ({w}×{h}) — "
-                            + ("클라 창 기준이라 16슬롯 전부에 적용됩니다"
-                               if rc else "⚠ 클라 창 밖이라 이 자리 그대로만 훑습니다"))
+            # 실제로 마름모가 떴던 자리들이 이 안에 다 들어오는지 바로 확인해준다 —
+            # 좁게 잡아서 못 찾는 사고를 막는다 (2026-08-28)
+            msg = ("클라 창 기준이라 16슬롯 전부에 적용됩니다" if rc
+                   else "⚠ 클라 창 밖이라 이 자리 그대로만 훑습니다")
+            try:
+                with open(zone_path(fkey, j), encoding="utf-8") as f:
+                    pts = (json.load(f) or {}).get("pts") or []
+            except Exception:
+                pts = []
+            if pts and rc:
+                dx0, dy0 = int(x - rc[0]), int(y - rc[1])
+                out = [q for q in pts
+                       if not (dx0 <= q[0] <= dx0 + w and dy0 <= q[1] <= dy0 + h)]
+                xs = [q[0] for q in pts]; ys = [q[1] for q in pts]
+                if out:
+                    msg = (f"⚠ 실제로 뜬 자리 {len(pts)}개 중 {len(out)}개가 이 범위 밖입니다 "
+                           f"— 창 기준 x {min(xs)}~{max(xs)} · y {min(ys)}~{max(ys)} 를 "
+                           f"덮도록 더 넓게 잡아주세요")
+                else:
+                    msg = (f"✔ 실제로 뜬 자리 {len(pts)}개가 모두 이 안에 들어옵니다 "
+                           f"(x {min(xs)}~{max(xs)} · y {min(ys)}~{max(ys)})")
+            self.status.set(f"📐 좌표{j+1} 범위 저장 ({w}×{h}) — " + msg)
         except Exception as e:
             self.status.set(f"📐 범위 저장 실패: {e}")
+
+    def _auto_click_area(self, fkey, j, btn=None):
+        """실제로 마름모가 떴던 자리들로 범위를 자동 계산해 저장한다 (가운데 클릭).
+        손으로 그리는 것보다 정확하다 — 성공한 자리를 다 덮으면서 최소로 잡는다."""
+        try:
+            with open(zone_path(fkey, j), encoding="utf-8") as f:
+                pts = (json.load(f) or {}).get("pts") or []
+        except Exception:
+            pts = []
+        if len(pts) < ZONE_MIN:
+            self.status.set(f"📐 아직 자료가 적습니다 ({len(pts)}/{ZONE_MIN}) — "
+                            f"몇 번 더 돌린 뒤 눌러주세요")
+            return
+        xs = [q[0] for q in pts]; ys = [q[1] for q in pts]
+        d = {"dx": min(xs) - ZONE_PAD, "dy": min(ys) - ZONE_PAD,
+             "w": (max(xs) - min(xs)) + ZONE_PAD * 2,
+             "h": (max(ys) - min(ys)) + ZONE_PAD * 2}
+        try:
+            os.makedirs(IMG_DIR, exist_ok=True)
+            with open(area_path(fkey, j), "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False, indent=2)
+            if btn and btn.winfo_exists():
+                btn.config(text="📐범위", bg="#1a5276")
+            self.status.set(f"📐 좌표{j+1} 범위 자동 계산 완료 — "
+                            f"{d['w']}×{d['h']} (실제로 뜬 {len(pts)}자리 + 여유 {ZONE_PAD}px)")
+        except Exception as e:
+            self.status.set(f"📐 자동 계산 실패: {e}")
 
     def _del_click_area(self, fkey, j, btn=None):
         """범위 지우기 — 그 클라 창 전체에서 찾는다."""
@@ -6190,6 +6312,7 @@ class App(tk.Tk):
                                       f"(일치도 {_ws:.2f})")
                         # 창이 떴다 = 그 자리가 진짜였다는 증거 → 그 그림을 배워둔다
                         learn_img(fkey, j, _learn, nm)
+                        learn_zone(fkey, j, coord)   # 성공한 '자리'도 모아둔다
                         break
                     _hold = RECLICK_HOLD[min(_try, len(RECLICK_HOLD) - 1)]
                     click_log(f"{fkey} [{nm}] 좌표{j+1} 눌렀는데 창이 안 뜸 "
@@ -11231,6 +11354,9 @@ class App(tk.Tk):
                 if _hasa:     # 오른쪽 클릭 = 범위 지우기 (창 전체에서 찾는다)
                     ab.bind("<Button-3>", lambda _e, c=j, f=fkey, b_=ab:
                             self._del_click_area(f, c, b_))
+                # 가운데(휠) 클릭 = 실제로 뜬 자리들로 범위를 자동 계산해 저장
+                ab.bind("<Button-2>", lambda _e, c=j, f=fkey, b_=ab:
+                        self._auto_click_area(f, c, b_))
                 # 🔍 — 지금 찾아본다. 최고 일치도와 결과를 팝업으로 크게 보여준다.
                 #      오른쪽 클릭 = 일치 기준 낮추기/올리기 (작은 그림은 낮춰야 잡힌다)
                 tb = tk.Button(cc, text=f"🔍{img_thr(fkey, j):.2f}",
