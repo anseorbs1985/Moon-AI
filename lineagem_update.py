@@ -1109,8 +1109,21 @@ def main():
                 os.makedirs(ddir, exist_ok=True)
                 for fn in os.listdir(sdir):
                     sp_, dp_ = os.path.join(sdir, fn), os.path.join(ddir, fn)
-                    if (not os.path.exists(dp_)
-                            or os.path.getsize(sp_) != os.path.getsize(dp_)):
+                    # 크기만 비교하면 '내용은 바뀌었는데 크기가 같은' 파일을 놓친다 —
+                    # 예: {"thr": 0.72} 와 {"thr": 0.55} 는 둘 다 13바이트라
+                    # 로컬이 예전 인식 기준을 계속 쓰는 사고가 있었다 (2026-08-27).
+                    # 그래서 크기가 같으면 **내용까지 비교**한다.
+                    _need = not os.path.exists(dp_)
+                    if not _need:
+                        try:
+                            if os.path.getsize(sp_) != os.path.getsize(dp_):
+                                _need = True
+                            else:
+                                with open(sp_, "rb") as _fa, open(dp_, "rb") as _fb:
+                                    _need = _fa.read() != _fb.read()
+                        except Exception:
+                            _need = True
+                    if _need:
                         shutil.copy2(sp_, dp_); n += 1
                         log(f"   데이터 갱신: {d}/{fn}")
             # 프리셋만 키 단위로 동기화 — coords.json 전체는 건드리지 않고
