@@ -726,8 +726,70 @@ def img_path(fkey, j):
     return os.path.join(IMG_DIR, f"{fkey}_{j+1:02d}.png")
 
 
+def thr_path(fkey, j):
+    """그 좌표의 '일치 기준' 파일 (작은 그림은 기준을 낮춰야 잡힌다)."""
+    return os.path.join(IMG_DIR, f"{fkey}_{j+1:02d}_thr.json")
+
+
+def img_thr(fkey, j):
+    try:
+        with open(thr_path(fkey, j), encoding="utf-8") as f:
+            return float((json.load(f) or {}).get("thr") or IMG_MATCH)
+    except Exception:
+        return IMG_MATCH
+
+
+def set_img_thr(fkey, j, v):
+    os.makedirs(IMG_DIR, exist_ok=True)
+    with open(thr_path(fkey, j), "w", encoding="utf-8") as f:
+        json.dump({"thr": round(float(v), 2)}, f)
+
+
+def area_path(fkey, j):
+    """그 좌표에서 '그림을 찾을 범위' — 클라 창 왼쪽위 기준으로 저장한다."""
+    return os.path.join(IMG_DIR, f"{fkey}_{j+1:02d}_area.json")
+
+
+def client_rect_at(x, y):
+    """그 좌표를 품은 리니지M 창 위치 (없으면 None)."""
+    try:
+        import precise_click as _pc
+        import ctypes, ctypes.wintypes
+        h = _pc.game_window_at(int(x), int(y))
+        if not h:
+            return None
+        r = ctypes.wintypes.RECT()
+        ctypes.windll.user32.GetWindowRect(h, ctypes.byref(r))
+        return (r.left, r.top, r.right, r.bottom)
+    except Exception:
+        return None
+
+
+def search_box(fkey, j, coord):
+    """그림을 찾을 화면 영역.
+    범위를 지정해뒀으면 그 클라 창 기준으로 같은 자리를 계산해 쓴다
+    (16슬롯이 창만 다르고 화면 구성은 같으므로 한 번만 잡으면 전부 적용된다).
+    범위가 없으면 그 클라 창 전체, 창도 못 찾으면 좌표 주변 500×500."""
+    rc = client_rect_at(coord[0], coord[1])
+    try:
+        with open(area_path(fkey, j), encoding="utf-8") as f:
+            a = json.load(f) or {}
+        if rc and all(k in a for k in ("dx", "dy", "w", "h")):
+            x0 = rc[0] + int(a["dx"]); y0 = rc[1] + int(a["dy"])
+            return (x0, y0, x0 + int(a["w"]), y0 + int(a["h"]))
+        if all(k in a for k in ("x", "y", "w", "h")):      # 창을 못 찾으면 절대좌표
+            return (int(a["x"]), int(a["y"]),
+                    int(a["x"]) + int(a["w"]), int(a["y"]) + int(a["h"]))
+    except Exception:
+        pass
+    if rc:
+        return rc
+    x, y = int(coord[0]), int(coord[1])
+    return (x - 250, y - 250, x + 250, y + 250)
+
+
 def find_image(fkey, j, coord):
-    """그 좌표가 있는 클라 창 안에서 그림을 찾는다.
+    """지정한 범위 안에서 그림을 찾는다.
     찾으면 (x, y, 일치도), 못 찾으면 (None, None, 일치도)."""
     path = img_path(fkey, j)
     if not os.path.exists(path):
@@ -735,21 +797,7 @@ def find_image(fkey, j, coord):
     try:
         import cv2, numpy as np
         from PIL import ImageGrab
-        # 그 좌표를 품은 리니지M 창 영역만 훑는다 (없으면 좌표 주변 500×500)
-        box = None
-        try:
-            import precise_click as _pc
-            import ctypes, ctypes.wintypes
-            h = _pc.game_window_at(int(coord[0]), int(coord[1]))
-            if h:
-                r = ctypes.wintypes.RECT()
-                ctypes.windll.user32.GetWindowRect(h, ctypes.byref(r))
-                box = (r.left, r.top, r.right, r.bottom)
-        except Exception:
-            box = None
-        if not box:
-            x, y = int(coord[0]), int(coord[1])
-            box = (x - 250, y - 250, x + 250, y + 250)
+        box = search_box(fkey, j, coord)
         shot = ImageGrab.grab(bbox=box, all_screens=True).convert("RGB")
         big = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2BGR)
         tpl = cv2.imread(path, cv2.IMREAD_COLOR)
@@ -757,7 +805,7 @@ def find_image(fkey, j, coord):
             return None, None, 0.0
         res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
         _mn, mx, _ml, ml = cv2.minMaxLoc(res)
-        if mx < IMG_MATCH:
+        if mx < img_thr(fkey, j):        # 좌표마다 정해둔 기준 (기본 0.80)
             return None, None, float(mx)
         cx = box[0] + ml[0] + tpl.shape[1] // 2
         cy = box[1] + ml[1] + tpl.shape[0] // 2
@@ -4938,6 +4986,116 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"🖼 저장 실패: {e}")
 
+    def _grab_click_area(self, fkey, idx, j, btn=None):
+        """그 그림을 찾을 '범위'를 화면에서 드래그해 정한다.
+        드래그한 자리가 어느 클라 창 안인지 보고, 그 창 기준 위치로 저장한다 →
+        슬롯(클라)이 달라도 각 창의 같은 자리를 훑는다."""
+        self._area_target = (fkey, idx, j, btn)
+        self.status.set(f"📐 좌표{j+1} — 그림을 '찾을 범위'를 드래그하세요 "
+                        f"(그 그림이 뜨는 자리를 넉넉히 감싸기 · ESC 취소)")
+        for w in self._section_wins():
+            try: w.withdraw()
+            except Exception: pass
+        self.withdraw()
+        self.after(250, lambda: _PotionAreaOverlay(self, self._on_click_area))
+
+    def _on_click_area(self, x, y, w, h):
+        self.deiconify()
+        for wn in self._section_wins():
+            try: wn.deiconify()
+            except Exception: pass
+        tgt = getattr(self, "_area_target", None)
+        if not tgt:
+            return
+        fkey, idx, j, btn = tgt
+        if w < 10 or h < 10:
+            self.status.set("📐 너무 작습니다 — 다시 드래그해주세요"); return
+        rc = client_rect_at(x + w // 2, y + h // 2)
+        d = {"x": int(x), "y": int(y), "w": int(w), "h": int(h)}
+        if rc:
+            d.update(dx=int(x - rc[0]), dy=int(y - rc[1]))
+        try:
+            os.makedirs(IMG_DIR, exist_ok=True)
+            with open(area_path(fkey, j), "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False, indent=2)
+            if btn and btn.winfo_exists():
+                btn.config(text="📐범위", bg="#1a5276")
+            self.status.set(f"📐 좌표{j+1} 범위 저장 ({w}×{h}) — "
+                            + ("클라 창 기준이라 16슬롯 전부에 적용됩니다"
+                               if rc else "⚠ 클라 창 밖이라 이 자리 그대로만 훑습니다"))
+        except Exception as e:
+            self.status.set(f"📐 범위 저장 실패: {e}")
+
+    def _del_click_area(self, fkey, j, btn=None):
+        """범위 지우기 — 그 클라 창 전체에서 찾는다."""
+        try:
+            os.remove(area_path(fkey, j))
+            if btn and btn.winfo_exists():
+                btn.config(text="📐", bg="#5d6d7e")
+            self.status.set(f"📐 좌표{j+1} 범위 삭제 — 클라 창 전체에서 찾습니다")
+        except Exception as e:
+            self.status.set(f"📐 삭제 실패: {e}")
+
+    def _cycle_img_thr(self, fkey, j, btn=None):
+        """일치 기준을 0.90 → 0.85 → 0.80 → 0.75 → 0.70 → 0.60 → 0.90 … 로 바꾼다."""
+        opts = [0.90, 0.85, 0.80, 0.75, 0.70, 0.60]
+        cur = img_thr(fkey, j)
+        nxt = opts[(min(range(len(opts)), key=lambda i: abs(opts[i] - cur)) + 1) % len(opts)]
+        try:
+            set_img_thr(fkey, j, nxt)
+            if btn and btn.winfo_exists():
+                btn.config(text=f"🔍{nxt:.2f}")
+            self.status.set(f"🔍 좌표{j+1} 일치 기준 {nxt:.2f} — "
+                            f"작은 그림이 잘 안 잡히면 더 낮추세요 (오른쪽 클릭)")
+        except Exception as e:
+            self.status.set(f"기준 변경 실패: {e}")
+
+    def _test_click_image(self, fkey, idx, j, btn=None):
+        """지금 찾아본다 — 최고 일치도와 찾은 자리를 큰 창으로 보여준다.
+        (셀이 작아 상태줄로는 확인이 어려워서 팝업으로 띄운다)"""
+        try:
+            slot = (self.cfg.get(self._dgn2_info(fkey)[0]) or [])[idx]
+            coord = (slot.get("coords") or [None] * 30)[j]
+        except Exception:
+            coord = None
+        if not coord:
+            self.status.set(f"🔍 좌표{j+1} — 좌표부터 등록해주세요"); return
+        if not os.path.exists(img_path(fkey, j)):
+            self.status.set(f"🔍 좌표{j+1} — [🖼] 로 그림부터 지정해주세요"); return
+        thr = img_thr(fkey, j)
+        box = search_box(fkey, j, coord)
+        ix, iy, sc = find_image(fkey, j, coord)
+        w = tk.Toplevel(self); w.title("🔍 이미지 찾기 결과")
+        w.attributes("-topmost", True)
+        ok = ix is not None
+        tk.Label(w, text=("찾음 ✔" if ok else "못 찾음 ✘"),
+                 font=("맑은 고딕", 22, "bold"),
+                 fg=("#196f3d" if ok else "#c0392b")).pack(padx=20, pady=(14, 4))
+        tk.Label(w, text=f"최고 일치도  {sc:.3f}   (기준 {thr:.2f})",
+                 font=("맑은 고딕", 16, "bold")).pack(padx=20)
+        tk.Label(w, text=(f"찾은 자리: ({ix}, {iy})" if ok else
+                          "기준보다 낮아서 이 자리는 건너뜁니다"),
+                 font=("맑은 고딕", 11)).pack(pady=(2, 0))
+        tk.Label(w, text=f"찾은 범위: {box[2]-box[0]}×{box[3]-box[1]} "
+                         f"({box[0]},{box[1]})",
+                 font=("맑은 고딕", 9), fg="#888").pack()
+        if not ok and sc >= 0.50:
+            def _apply(v=round(max(0.50, sc - 0.03), 2)):
+                set_img_thr(fkey, j, v)
+                if btn and btn.winfo_exists():
+                    btn.config(text=f"🔍{v:.2f}")
+                self.status.set(f"🔍 좌표{j+1} 일치 기준 {v:.2f} 로 낮췄습니다")
+                w.destroy()
+            tk.Button(w, text=f"기준을 {max(0.50, sc - 0.03):.2f} 로 낮추기",
+                      font=("맑은 고딕", 10, "bold"), bg="#1a5276", fg="white",
+                      command=_apply).pack(pady=(8, 0))
+        tk.Button(w, text="닫기", font=("맑은 고딕", 10),
+                  command=w.destroy).pack(pady=10)
+        try:
+            apply_dark(w, self._dark_on())
+        except Exception:
+            pass
+
     def _del_click_image(self, fkey, j, btn=None):
         """지정해둔 그림 지우기 (오른쪽 클릭) — 다시 좌표를 그냥 누른다."""
         try:
@@ -4991,7 +5149,8 @@ class App(tk.Tk):
             ix, iy, sc = find_image(fkey, j, coord)
             nm = (slot or {}).get("name", "?")
             if ix is None:
-                click_log(f"{fkey} [{nm}] 좌표{j+1} 이미지 못 찾음 (최고 일치도 {sc:.2f}) "
+                click_log(f"{fkey} [{nm}] 좌표{j+1} 이미지 못 찾음 "
+                          f"(최고 일치도 {sc:.2f} / 기준 {img_thr(fkey, j):.2f}) "
                           f"→ 이 슬롯 여기서 중단")
                 self.status.set(f"🖼 [{nm}] 좌표{j+1} 이미지 없음 — 이 슬롯 중단 "
                                 f"(일치도 {sc:.2f})")
@@ -9848,6 +10007,28 @@ class App(tk.Tk):
                 if _has:      # 오른쪽 클릭 = 그 그림 지우기
                     ib.bind("<Button-3>", lambda _e, c=j, f=fkey, b_=ib:
                             self._del_click_image(f, c, b_))
+                # 📐 — 그 그림을 '어디에서 찾을지' 범위를 드래그로 정한다.
+                #      클라 창 기준으로 저장돼 16슬롯 전부에 그대로 적용된다.
+                _hasa = os.path.exists(area_path(fkey, j))
+                ab = tk.Button(cc, text=("📐범위" if _hasa else "📐"),
+                               font=("맑은 고딕", 7), width=4, pady=0,
+                               bg=("#1a5276" if _hasa else "#5d6d7e"), fg="white")
+                ab.config(command=lambda x=idx, c=j, f=fkey, b_=ab:
+                          self._grab_click_area(f, x, c, b_))
+                ab.pack(pady=(1, 0))
+                if _hasa:     # 오른쪽 클릭 = 범위 지우기 (창 전체에서 찾는다)
+                    ab.bind("<Button-3>", lambda _e, c=j, f=fkey, b_=ab:
+                            self._del_click_area(f, c, b_))
+                # 🔍 — 지금 찾아본다. 최고 일치도와 결과를 팝업으로 크게 보여준다.
+                #      오른쪽 클릭 = 일치 기준 낮추기/올리기 (작은 그림은 낮춰야 잡힌다)
+                tb = tk.Button(cc, text=f"🔍{img_thr(fkey, j):.2f}",
+                               font=("맑은 고딕", 7), width=4, pady=0,
+                               bg="#7d6608", fg="white")
+                tb.config(command=lambda x=idx, c=j, f=fkey, b_=tb:
+                          self._test_click_image(f, x, c, b_))
+                tb.pack(pady=(1, 0))
+                tb.bind("<Button-3>", lambda _e, c=j, f=fkey, b_=tb:
+                        self._cycle_img_thr(f, c, b_))
             if sp.get("opts"):
                 # ㅡ 칸: 다음 좌표까지 기다릴 초 (비우면 기본), 아래는 휠 굴릴 칸수(0=클릭)
                 gl = slot.get("gap_list") or []
