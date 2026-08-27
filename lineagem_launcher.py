@@ -154,7 +154,10 @@ ATOMIC_NEXT = {}        # (호버를 없애서 묶을 이유가 사라짐)
 WAVE_UNTIL = {"dragon": 3}     # 좌표1~3만 교차, 좌표4부터는 그 슬롯 완주
 # 전체를 이 시간 안에 끝낸다 (초). 남은 시간과 남은 클릭 수를 보고 간격을 스스로 줄인다.
 # 늘리지는 않는다 — 빨리 끝나면 그대로 끝난다. (2026-08-27 사용자 지시: 4분 10초)
-RUN_BUDGET = {"dragon": 250}
+RUN_BUDGET = {"dragon": 270}      # 4분 30초 (2026-08-27 사용자 지시 — 여유 있게)
+# 간격을 이보다 더 줄이지 않는다. 너무 서두르면 게임 화면이 아직 안 떠서
+# '그림 못 찾음'이 늘어난다 (2026-08-27 — 0.30 으로 뒀다가 인식률이 폭락했다).
+PACE_FLOOR = 0.60
 
 EXTRA_GAPS = {"dragon": DRAGON_EXTRA, "knight": KNIGHT_EXTRA}
 
@@ -787,6 +790,18 @@ def learn_img(fkey, j, patch, nm=""):
                   f"(이 컴퓨터 전용 {img_mine_count(fkey, j)}/{IMG_MAX}장)")
     except Exception:
         pass
+
+
+def _left_clicks(fkey, slot, j0, nclk):
+    """그 슬롯에서 **실제로 누를 좌표가 몇 개 남았나**.
+    빈 칸까지 세면 남은 일을 부풀려 계산해 간격을 쓸데없이 줄인다
+    (2026-08-27 — 16×10=160 으로 세는 바람에 처음부터 페이스가 걸렸다)."""
+    try:
+        cl = (slot or {}).get("coords") or []
+        return sum(1 for j in range(max(0, j0), nclk)
+                   if (j < len(cl) and cl[j]) or has_img(fkey, j))
+    except Exception:
+        return max(0, nclk - j0)
 
 
 def save_miss_shot(fkey, j, coord):
@@ -5910,8 +5925,8 @@ class App(tk.Tk):
             cut = need - remain
             room = left * avg           # 간격으로 줄일 수 있는 최대치
             if room <= 0.1:
-                return 0.30
-            return max(0.30, min(1.0, 1.0 - cut / room))
+                return PACE_FLOOR
+            return max(PACE_FLOOR, min(1.0, 1.0 - cut / room))
         except Exception:
             return 1.0
 
@@ -5945,9 +5960,9 @@ class App(tk.Tk):
             if j + 1 < nclk:
                 _g = self._slot_gap(slot, j)
                 _base = _g if _g is not None else random.uniform(*gap)
+                _base *= getattr(self, "_pace_now", 1.0)   # 웨이브가 정한 페이스
                 if fkey in EXTRA_GAPS:
-                    _base += extra_gap(fkey, j)
-                _base *= getattr(self, "_pace_now", 1.0)   # 웨이브가 정한 페이스 그대로
+                    _base += extra_gap(fkey, j)   # 기다림은 줄이지 않는다
                 time.sleep(_base * random.uniform(*slow))
         st["j"] = nclk
         return done
@@ -6015,8 +6030,8 @@ class App(tk.Tk):
             if _wu and j >= _wu:
                 self._pace_now = self._pace(
                     fkey, _t0,
-                    sum(max(0, nclk - state[x]["j"]) for x in (active + waiting)),
-                    gap, done)
+                    sum(_left_clicks(fkey, state[x]["slot"], state[x]["j"], nclk)
+                        for x in (active + waiting)), gap, done)
                 # 여기서부터는 교차하지 않고 이 슬롯을 끝까지 (중간 끼어들기 방지)
                 done += self._wave_tail(fkey, st, j, nclk, icon, stop,
                                         name, gap, slow)
@@ -6053,13 +6068,15 @@ class App(tk.Tk):
                 st["j"] = j + 1
             _g = self._slot_gap(st["slot"], j)          # 칸에 적어둔 초가 있으면 그걸로
             _base = _g if _g is not None else random.uniform(*gap)
-            if fkey in EXTRA_GAPS:
-                _base += extra_gap(fkey, j)           # 좌표2→3 처럼 더 쉬어야 하는 자리
+            # '더 쉬어야 하는 자리'(좌표2→3)는 화면이 뜨기를 기다리는 시간이라
+            # **페이스로 줄이지 않는다** — 줄였더니 그림을 못 찾았다 (2026-08-27)
+            _fix = extra_gap(fkey, j) if fkey in EXTRA_GAPS else 0.0
             # 목표 시간(RUN_BUDGET) 안에 끝내도록 남은 클릭 수를 보고 간격을 줄인다
-            _left = sum(max(0, nclk - state[x]["j"]) for x in (active + waiting))
+            _left = sum(_left_clicks(fkey, state[x]["slot"], state[x]["j"], nclk)
+                        for x in (active + waiting))
             _pc = self._pace(fkey, _t0, _left, gap, done)
             self._pace_now = _pc
-            _base *= _pc
+            _base = _base * _pc + _fix        # 기다림(_fix)은 그대로 더한다
             # 사람처럼 — 한 슬롯에서 2~3번 이어 누르고 다른 슬롯으로 넘어간다
             if st.get("burst", 0) <= 0:
                 st["burst"] = random.choice([1, 2, 2, 3])
