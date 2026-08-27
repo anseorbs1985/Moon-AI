@@ -745,6 +745,23 @@ def set_img_thr(fkey, j, v):
         json.dump({"thr": round(float(v), 2)}, f)
 
 
+def has_img(fkey, j):
+    """그 자리에 찾을 그림을 지정해뒀나."""
+    try:
+        return os.path.exists(img_path(fkey, j))
+    except Exception:
+        return False
+
+
+def slot_anchor(slot):
+    """그 슬롯이 '어느 클라'인지 알려주는 기준 좌표 — 등록된 첫 좌표.
+    (그림만 지정한 자리는 좌표가 없으므로, 같은 슬롯의 다른 좌표로 창을 찾는다)"""
+    for c in (slot or {}).get("coords") or []:
+        if c:
+            return c
+    return None
+
+
 def area_path(fkey, j):
     """그 좌표에서 '그림을 찾을 범위' — 클라 창 왼쪽위 기준으로 저장한다."""
     return os.path.join(IMG_DIR, f"{fkey}_{j+1:02d}_area.json")
@@ -5058,8 +5075,14 @@ class App(tk.Tk):
             coord = (slot.get("coords") or [None] * 30)[j]
         except Exception:
             coord = None
+        if not coord:      # 그림만 지정한 자리 — 같은 슬롯의 다른 좌표로 창을 찾는다
+            try:
+                coord = slot_anchor(slot)
+            except Exception:
+                coord = None
         if not coord:
-            self.status.set(f"🔍 좌표{j+1} — 좌표부터 등록해주세요"); return
+            self.status.set(f"🔍 슬롯{idx+1} — 이 슬롯에 좌표가 하나도 없습니다 "
+                            f"(어느 클라인지 알 수 없어요)"); return
         if not os.path.exists(img_path(fkey, j)):
             self.status.set(f"🔍 좌표{j+1} — [🖼] 로 그림부터 지정해주세요"); return
         thr = img_thr(fkey, j)
@@ -5207,7 +5230,11 @@ class App(tk.Tk):
             j  = st["j"]
             coords = st["slot"].get("coords", [])
             st["j"] = j + 1
-            if j >= len(coords) or not coords[j]:
+            _anc = slot_anchor(st["slot"])
+            _cd = coords[j] if (j < len(coords) and coords[j]) else None
+            if _cd is None and has_img(fkey, j) and _anc:
+                _cd = _anc                        # 그림만 지정한 자리 — 창은 이 좌표로 찾는다
+            if _cd is None:
                 st["due"] = time.time()          # 빈 자리는 기다리지 않고 통과
                 continue
             if si != last_si:
@@ -5223,12 +5250,14 @@ class App(tk.Tk):
             if not self._wait_mouse_idle(stop, fkey=fkey): return
             if getattr(self, stop, False): break
             name = st["slot"].get("name", f"#{si+1}")
-            if fkey in self.PASTE_FKEYS and j == self._paste_idx_or_default(fkey, st["slot"]):
+            if (fkey in self.PASTE_FKEYS
+                    and j == self._paste_idx_or_default(fkey, st["slot"])
+                    and (j < len(coords) and coords[j])):
                 self._paste_at(coords[j], str(self.cfg.get(f"{fkey}_text", "") or ""),
                                f"[{name}]")
                 _act = "붙임"
             else:
-                _act = self._do_click_or_wheel(fkey, j, coords[j], st["slot"])
+                _act = self._do_click_or_wheel(fkey, j, _cd, st["slot"])
             if _act == "이미지없음":
                 st["j"] = nclk          # 이 슬롯만 끝 — 다른 슬롯은 그대로 계속
                 continue
@@ -5375,7 +5404,10 @@ class App(tk.Tk):
                 # 쿠폰: 슬롯마다 클릭 간격 배수를 새로 뽑음 (기본의 -5%~+20%)
                 c_mult = random.uniform(0.95, 1.20) if fkey in self.PASTE_FKEYS else 1.0
                 # 클릭1~N을 순서대로, 클릭 사이 간격만 랜덤
-                order = [j for j in range(nclk) if coords[j]]
+                # 좌표가 없어도 '그림'을 지정해뒀으면 그 자리도 실행한다 (2026-08-27)
+                _anchor = slot_anchor(slot)
+                order = [j for j in range(nclk)
+                         if coords[j] or (has_img(fkey, j) and _anchor)]
                 # 쿠폰: 클릭5(입력칸)가 등록돼 있으면 그 직후, 없으면 클릭4 직후에 붙여넣기
                 paste_after = (self._paste_idx_or_default(fkey, slot)
                                if fkey in self.PASTE_FKEYS else None)
@@ -5385,11 +5417,12 @@ class App(tk.Tk):
                     if getattr(self, stop, False):
                         if fkey == "coupon": self._coupon_log(f"멈춤 플래그로 중단 (클릭{j+1} 직전)")
                         break
-                    if fkey in self.PASTE_FKEYS and j == paste_after:
+                    if fkey in self.PASTE_FKEYS and j == paste_after and coords[j]:
                         self._paste_at(coords[j], txt, f"[{name}]")
                         self.status.set(f"{icon} [{name}] 붙여넣기 완료 (클릭{j+1} 다음)")
                     else:
-                        _act = self._do_click_or_wheel(fkey, j, coords[j], slot)
+                        _act = self._do_click_or_wheel(
+                            fkey, j, coords[j] or _anchor, slot)
                         if _act == "이미지없음":
                             break        # 이 슬롯만 끝 — 다음 슬롯으로 넘어간다
                         self.status.set(f"{icon} [{name}] {_act}{j+1}...")
