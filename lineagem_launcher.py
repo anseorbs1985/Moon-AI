@@ -719,6 +719,20 @@ CLICK_LOG = os.path.join(LOCAL_DATA, "click_log.txt")   # 클릭이 어느 창�
 #   좌표 대신 '그림'을 찾아 누른다. 못 찾으면 그 슬롯은 거기서 끝낸다.
 IMG_DIR   = os.path.join(BASE, "click_templates")
 IMG_MATCH = 0.80          # 이 정도 닮으면 같은 그림으로 본다
+IMG_TRIES = 5             # 못 찾으면 1~1.5초 간격으로 몇 번까지 다시 볼지
+
+
+def save_miss_shot(fkey, j, coord):
+    """이미지를 못 찾았을 때 '그때 훑은 화면'을 사진으로 남긴다.
+    click_templates/_못찾음_<런처>_<좌표>.png — 범위가 맞는지 눈으로 확인용."""
+    try:
+        from PIL import ImageGrab
+        box = search_box(fkey, j, coord)
+        os.makedirs(IMG_DIR, exist_ok=True)
+        ImageGrab.grab(bbox=box, all_screens=True).save(
+            os.path.join(IMG_DIR, f"_못찾음_{fkey}_{j+1:02d}.png"))
+    except Exception:
+        pass
 
 
 def img_path(fkey, j):
@@ -5169,12 +5183,25 @@ class App(tk.Tk):
         # 이 자리에 그림을 지정해뒀으면 그림을 찾아 그 자리를 누른다.
         # 못 찾으면 "이미지없음" 을 돌려줘서 그 슬롯을 여기서 끝낸다 (사용자 지시).
         if os.path.exists(img_path(fkey, j)):
-            ix, iy, sc = find_image(fkey, j, coord)
             nm = (slot or {}).get("name", "?")
+            # 앞 좌표를 누른 뒤 화면이 뜨는 데 시간이 걸린다 —
+            # 못 찾으면 잠깐 기다렸다 다시 본다 (최대 IMG_TRIES 번, 2026-08-27)
+            ix = iy = None
+            sc = 0.0
+            for _t in range(IMG_TRIES):
+                ix, iy, sc = find_image(fkey, j, coord)
+                if ix is not None:
+                    break
+                if _t < IMG_TRIES - 1:
+                    self.status.set(f"🖼 [{nm}] 좌표{j+1} 그림 기다리는 중… "
+                                    f"({_t+1}/{IMG_TRIES}, 지금 {sc:.2f})")
+                    time.sleep(random.uniform(1.0, 1.5))
             if ix is None:
+                save_miss_shot(fkey, j, coord)      # 뭘 봤는지 사진으로 남긴다
                 click_log(f"{fkey} [{nm}] 좌표{j+1} 이미지 못 찾음 "
-                          f"(최고 일치도 {sc:.2f} / 기준 {img_thr(fkey, j):.2f}) "
-                          f"→ 이 슬롯 여기서 중단")
+                          f"(최고 일치도 {sc:.2f} / 기준 {img_thr(fkey, j):.2f}, "
+                          f"{IMG_TRIES}번 시도) → 이 슬롯 여기서 중단 "
+                          f"· 그때 본 화면: click_templates/_못찾음_{fkey}_{j+1:02d}.png")
                 self.status.set(f"🖼 [{nm}] 좌표{j+1} 이미지 없음 — 이 슬롯 중단 "
                                 f"(일치도 {sc:.2f})")
                 return "이미지없음"
