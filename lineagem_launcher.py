@@ -5182,6 +5182,7 @@ class App(tk.Tk):
             return (f"휠▼{abs(n)}" if n < 0 else f"휠▲{n}")
         # 이 자리에 그림을 지정해뒀으면 그림을 찾아 그 자리를 누른다.
         # 못 찾으면 "이미지없음" 을 돌려줘서 그 슬롯을 여기서 끝낸다 (사용자 지시).
+        _img_hit = False
         if os.path.exists(img_path(fkey, j)):
             nm = (slot or {}).get("name", "?")
             # 앞 좌표를 누른 뒤 화면이 뜨는 데 시간이 걸린다 —
@@ -5206,15 +5207,26 @@ class App(tk.Tk):
                                 f"(일치도 {sc:.2f})")
                 return "이미지없음"
             click_log(f"{fkey} [{nm}] 좌표{j+1} 이미지 찾음 ({ix},{iy}) 일치도 {sc:.2f}")
-            self.status.set(f"🖼 [{nm}] 좌표{j+1} 이미지 찾음 (일치도 {sc:.2f})")
+            self.status.set(f"🖼 [{nm}] 좌표{j+1} 이미지 찾음 (일치도 {sc:.2f}) — 가운데 클릭")
             coord = (ix, iy)
+            _img_hit = True
         self._click_log(fkey, j, coord, slot, "클릭")
         snap = None
         if fkey in self.CLICK_GUARD:
             self._wait_user_free(f"_{fkey}_stop")   # 사람이 마우스 놓을 때까지
             if fkey != "sched":                     # 스케줄은 슬롯이 끝난 뒤에 되돌린다
                 snap = self._user_focus_snap()      # 지금 사용자가 보던 창·커서
+        if _img_hit:
+            # 그림을 찾아 누를 때는 그 창을 먼저 앞으로 — 비활성 창의 첫 클릭은
+            # '창 띄우기'로만 먹히고 사라진다 (좌표 클릭과 똑같이 들어가게, 2026-08-27)
+            try:
+                self._focus_client_at(coord)
+                time.sleep(random.uniform(0.25, 0.45))
+            except Exception:
+                pass
         click_at(*coord)
+        if _img_hit:
+            time.sleep(random.uniform(0.25, 0.40))  # 게임이 클릭을 처리할 시간
         self._user_focus_back(snap)                 # 곧바로 원래 창·커서로
         return "클릭"
 
