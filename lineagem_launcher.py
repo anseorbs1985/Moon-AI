@@ -723,9 +723,14 @@ CLICK_LOG = os.path.join(LOCAL_DATA, "click_log.txt")   # 클릭이 어느 창�
 #   좌표 대신 '그림'을 찾아 누른다. 못 찾으면 그 슬롯은 거기서 끝낸다.
 IMG_DIR   = os.path.join(BASE, "click_templates")
 IMG_MATCH = 0.60          # 이 정도 닮으면 같은 그림으로 본다 (2026-08-27 사용자 지시)
-IMG_TRIES = 4             # 못 찾으면 1~1.5초 간격으로 몇 번까지 다시 볼지 (2026-08-27)
-PEAK_RATIO = 1.6          # '1등 ÷ 2등' 이 이만큼 크면 점수가 낮아도 찾은 것으로 본다
-PEAK_MIN   = 0.45         # 다만 이 점수 밑이면 배수와 무관하게 안 본다
+IMG_TRIES = 6             # 못 찾으면 1~1.5초 간격으로 몇 번까지 다시 볼지.
+                          # 날개가 애니메이션이라 프레임마다 점수가 달라 — 많이 볼수록 유리
+PEAK_RATIO = 1.45         # '1등 ÷ 2등' 이 이만큼 크면 점수가 낮아도 찾은 것으로 본다
+PEAK_MIN   = 0.40         # 다만 이 점수 밑이면 배수와 무관하게 안 본다
+# 흑백(밝기 평준화) 대조 — 색이 달라 보여도 모양이 같으면 잡는다.
+# 잡음도 같이 올라가므로(0.37~0.45) 점수·배수를 둘 다 넘어야만 인정한다.
+GRAY_MIN   = 0.55
+GRAY_RATIO = 1.35
 RECLICK_TRIES = 4         # 눌렀는데 창이 안 뜰 때 다시 눌러보는 횟수 (2026-08-27)
 RECLICK_HOLD = [(0.18, 0.30), (0.35, 0.50), (0.50, 0.70), (0.70, 0.95)]  # 갈수록 길게
 DRIFT_MAX  = 40           # 그림이 이만큼(px) 안에서 움직인 건 '같은 것'으로 본다.
@@ -989,7 +994,25 @@ def _find_one(fkey, j, coord, path):
                 if mx >= thr:
                     break
         if mx < thr:
-            # 색으로 못 찾으면 '윤곽선(모양)'으로 한 번 더 찾는다 (2026-08-27).
+            # 색으로 못 찾으면 '흑백(밝기 평준화)'으로 한 번 더 본다 (2026-08-27).
+            # 배경이 밝거나 어두워 색 점수가 깎일 때 이쪽이 더 잘 잡힌다
+            # (실측: 놓쳤던 화면 색 0.606 → 흑백 0.658).
+            try:
+                _ge = cv2.equalizeHist(cv2.cvtColor(big, cv2.COLOR_BGR2GRAY))
+                _gt = cv2.equalizeHist(cv2.cvtColor(tpl, cv2.COLOR_BGR2GRAY))
+                _rg = cv2.matchTemplate(_ge, _gt, cv2.TM_CCOEFF_NORMED)
+                _ng, _mg, _lg, _pg = cv2.minMaxLoc(_rg)
+                if _mg >= GRAY_MIN:
+                    _r3 = _rg.copy()
+                    _y3, _x3 = max(0, _pg[1] - th), max(0, _pg[0] - tw)
+                    _r3[_y3:_pg[1] + th, _x3:_pg[0] + tw] = -1
+                    _a3, _m3, _b3, _c3 = cv2.minMaxLoc(_r3)
+                    if _m3 > 0 and (_mg / _m3) >= GRAY_RATIO:
+                        res, mx, ml, thr = _rg, _mg, _pg, _mg   # 흑백 결과로 인정
+            except Exception:
+                pass
+        if mx < thr:
+            # 그래도 못 찾으면 '윤곽선(모양)'으로 마지막 한 번 (2026-08-27).
             # 아이콘은 같은데 배경(지형·몹·이펙트)이 달라 점수가 떨어지는 경우 대응.
             try:
                 g1 = cv2.Canny(cv2.cvtColor(big, cv2.COLOR_BGR2GRAY), 60, 160)
