@@ -724,6 +724,8 @@ CLICK_LOG = os.path.join(LOCAL_DATA, "click_log.txt")   # 클릭이 어느 창�
 IMG_DIR   = os.path.join(BASE, "click_templates")
 IMG_MATCH = 0.60          # 이 정도 닮으면 같은 그림으로 본다 (2026-08-27 사용자 지시)
 IMG_TRIES = 4             # 못 찾으면 1~1.5초 간격으로 몇 번까지 다시 볼지 (2026-08-27)
+PEAK_RATIO = 1.6          # '1등 ÷ 2등' 이 이만큼 크면 점수가 낮아도 찾은 것으로 본다
+PEAK_MIN   = 0.45         # 다만 이 점수 밑이면 배수와 무관하게 안 본다
 
 
 def save_miss_shot(fkey, j, coord):
@@ -940,13 +942,32 @@ def _find_one(fkey, j, coord, path):
         box = search_box(fkey, j, coord)
         shot = ImageGrab.grab(bbox=box, all_screens=True).convert("RGB")
         big = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2BGR)
-        tpl = cv2.imread(path, cv2.IMREAD_COLOR)
+        # cv2.imread 는 한글이 든 경로를 못 읽는다 (윈도 사용자 이름이 한글이면 전부 실패) —
+        # 바이트로 읽어 디코드한다 (2026-08-27).
+        try:
+            tpl = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        except Exception:
+            tpl = cv2.imread(path, cv2.IMREAD_COLOR)
         if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
             return None, None, 0.0
         res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
         _mn, mx, _ml, ml = cv2.minMaxLoc(res)
         thr = img_thr(fkey, j)
         th, tw = tpl.shape[0], tpl.shape[1]
+        # ── 점수만 보지 않고 '나머지보다 얼마나 튀는가'도 본다 (2026-08-27 실측) ──
+        # 같은 아이콘도 배경(지형·몹·이펙트)에 따라 0.60~0.96 으로 크게 흔들려서
+        # 절대 점수만으로는 자를 수가 없다. 반면 '1등 ÷ 2등' 은 확실히 갈린다:
+        #   아이콘 있을 때 2.23배 · 없을 때 1.00~1.20배 (16클라 실측)
+        if mx < thr and mx >= PEAK_MIN:
+            try:
+                _r2 = res.copy()
+                _y0, _x0 = max(0, ml[1] - th), max(0, ml[0] - tw)
+                _r2[_y0:ml[1] + th, _x0:ml[0] + tw] = -1     # 1등 주변을 지우고
+                _a2, _m2, _b2, _c2 = cv2.minMaxLoc(_r2)      # 2등을 본다
+                if _m2 > 0 and (mx / _m2) >= PEAK_RATIO:
+                    thr = mx        # 확실히 튀는 하나 — 찾은 것으로 인정
+            except Exception:
+                pass
         if mx < thr:
             # 컴퓨터마다 해상도·클라 크기가 달라 그림이 조금 크거나 작게 보인다.
             # 0.8~1.25배로 늘였다 줄였다 하며 다시 찾는다 (2026-08-27 — 로컬 성공률).
