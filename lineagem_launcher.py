@@ -742,6 +742,10 @@ GRAY_MIN   = 0.55
 GRAY_RATIO = 1.35
 RECLICK_TRIES = 4         # 눌렀는데 창이 안 뜰 때 다시 눌러보는 횟수 (2026-08-27)
 RECLICK_HOLD = [(0.18, 0.30), (0.35, 0.50), (0.50, 0.70), (0.70, 0.95)]  # 갈수록 길게
+# 누른 뒤 '창이 떴나' 보기까지 기다리는 시간 — 점점 길게 준다.
+# 마름모가 캐릭터에서 멀면 눌러도 바로 창이 안 뜨고 **걸어가는 시간**이 필요하다
+# (2026-08-28 실측: 실패한 두 슬롯은 마름모가 창 왼쪽·위 끝에 있었다 = 먼 거리).
+RECLICK_WAIT = [2.5, 5.0, 8.0, 12.0]
 DRIFT_MAX  = 40           # 그림이 이만큼(px) 안에서 움직인 건 '같은 것'으로 본다.
                           # 더 멀면 다른 마름모라 겨냥을 옮기지 않는다 (엉뚱한 층 방지)
 
@@ -5973,6 +5977,15 @@ class App(tk.Tk):
     def _do_click_or_wheel(self, fkey, j, coord, slot=None):
         """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다.
         HOVER_INDICES 에 적힌 자리는 클릭하지 않고 '마우스만 올려놓는다'."""
+        # 앞 자리에서 '이미 넘어갔다'고 표시해뒀으면 이 자리(창 확인)는 건너뛴다
+        try:
+            _sk = getattr(self, "_skip_win", None)
+            if _sk and _sk.get((fkey, id(slot))) == j:
+                _sk.pop((fkey, id(slot)), None)
+                click_log(f"{fkey} 좌표{j+1} 건너뜀 — 앞에서 이미 넘어감 (창 확인 불필요)")
+                return "건너뜀"
+        except Exception:
+            pass
         if j in HOVER_INDICES.get(fkey, ()):
             self._click_log(fkey, j, coord, slot, "마우스올림")
             move_at(*coord)                   # 커서는 그대로, 그 자리에 올림 신호만
@@ -6168,7 +6181,8 @@ class App(tk.Tk):
             # 로컬에서 '창이 안 뜬다'가 잦아 2회까지, 갈수록 더 길게 누른다.
             if has_img(fkey, j + 1):
                 for _try in range(RECLICK_TRIES):
-                    time.sleep(random.uniform(1.8, 2.4))
+                    _w = RECLICK_WAIT[min(_try, len(RECLICK_WAIT) - 1)]
+                    time.sleep(_w * random.uniform(0.9, 1.15))
                     _wx, _wy, _ws = find_image(fkey, j + 1, coord)
                     if _wx is not None:
                         if _try:
@@ -6194,9 +6208,21 @@ class App(tk.Tk):
                         _rx = None      # 멀리 있는 건 다른 마름모 — 그 자리를 그대로 다시
                         _rx, _ry = coord[0], coord[1]
                     if _rx is None:
+                        # 그림이 사라졌다 = 클릭이 먹어서 이미 넘어간 것.
+                        # 그런데 확인창을 못 봤으니, 다음 '창 확인' 자리에서 또 기다리다
+                        # 슬롯이 통째로 죽는다 → **그 자리만 건너뛰고 계속 간다**
+                        # (2026-08-28 실측: 발망 슬롯이 이 경우로 죽었는데
+                        #  화면을 보니 이미 다음 층으로 넘어가 있었다)
                         click_log(f"{fkey} [{nm}] 좌표{j+1} 그림이 사라졌음 "
-                                  f"(최고 {_rs:.2f}) — 이미 눌린 것으로 보고 더 누르지 않음")
-                        self._note(fkey, nm, f"좌표{j+1} 눌렀지만 창을 못 잡음")
+                                  f"(최고 {_rs:.2f}) — 이미 넘어간 것으로 보고 "
+                                  f"좌표{j+2}(창 확인)는 건너뜀")
+                        self._note(fkey, nm, f"좌표{j+1} 창은 못 봤지만 넘어감")
+                        try:
+                            if not hasattr(self, "_skip_win"):
+                                self._skip_win = {}
+                            self._skip_win[(fkey, id(slot))] = j + 1
+                        except Exception:
+                            pass
                         break
                     if (_rx, _ry) != (coord[0], coord[1]):
                         click_log(f"{fkey} [{nm}] 좌표{j+1} 그림이 옮겨감 "
@@ -6213,6 +6239,14 @@ class App(tk.Tk):
                     time.sleep(random.uniform(0.35, 0.55))
                 else:
                     self._note(fkey, nm, f"좌표{j+1} {RECLICK_TRIES}번 눌러도 창이 안 뜸")
+                    # 방금 확인해서 창이 없는 걸 아는데, 다음 자리에서 또 6번 훑으면
+                    # 9초를 버린다 → 그 자리는 건너뛰고 슬롯을 끝낸다 (2026-08-28)
+                    try:
+                        if not hasattr(self, "_skip_win"):
+                            self._skip_win = {}
+                        self._skip_win[(fkey, id(slot))] = j + 1
+                    except Exception:
+                        pass
                     try:    # 그 슬롯 화면을 통째로 남긴다 (덮어쓰지 않게 이름까지)
                         from PIL import ImageGrab as _IG
                         _bx = search_box(fkey, j, coord)
@@ -6437,6 +6471,7 @@ class App(tk.Tk):
         self._img_done = set()      # 실행할 때마다 '이미지 찾음' 표시를 비운다
         self._run_note = []         # 이번 실행에서 잘 안 된 것 (끝나고 요약)
         self._pace_now = 1.0        # 목표 시간에 맞추는 간격 배수 (1.0 = 그대로)
+        self._skip_win = {}         # '이미 넘어갔으니 창 확인은 건너뛰기' 표시
         key, title, icon = self._dgn2_info(fkey)
         nclk = self._grid_spec(fkey)["clicks"]
         stop = f"_{fkey}_stop"
