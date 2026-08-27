@@ -715,6 +715,57 @@ NO_CURSOR_CLICK = False
 
 CLICK_LOG = os.path.join(LOCAL_DATA, "click_log.txt")   # 클릭이 어느 창에 갔는지 기록
 
+# ── 이미지로 찾아 클릭 (2026-08-26 사용자 요청) ────────────────────────
+#   좌표 대신 '그림'을 찾아 누른다. 못 찾으면 그 슬롯은 거기서 끝낸다.
+IMG_DIR   = os.path.join(BASE, "click_templates")
+IMG_MATCH = 0.80          # 이 정도 닮으면 같은 그림으로 본다
+
+
+def img_path(fkey, j):
+    """그 런처 · 그 좌표번호에 지정해둔 그림 파일 (좌표번호는 1부터 보여준다)."""
+    return os.path.join(IMG_DIR, f"{fkey}_{j+1:02d}.png")
+
+
+def find_image(fkey, j, coord):
+    """그 좌표가 있는 클라 창 안에서 그림을 찾는다.
+    찾으면 (x, y, 일치도), 못 찾으면 (None, None, 일치도)."""
+    path = img_path(fkey, j)
+    if not os.path.exists(path):
+        return None, None, 0.0
+    try:
+        import cv2, numpy as np
+        from PIL import ImageGrab
+        # 그 좌표를 품은 리니지M 창 영역만 훑는다 (없으면 좌표 주변 500×500)
+        box = None
+        try:
+            import precise_click as _pc
+            import ctypes, ctypes.wintypes
+            h = _pc.game_window_at(int(coord[0]), int(coord[1]))
+            if h:
+                r = ctypes.wintypes.RECT()
+                ctypes.windll.user32.GetWindowRect(h, ctypes.byref(r))
+                box = (r.left, r.top, r.right, r.bottom)
+        except Exception:
+            box = None
+        if not box:
+            x, y = int(coord[0]), int(coord[1])
+            box = (x - 250, y - 250, x + 250, y + 250)
+        shot = ImageGrab.grab(bbox=box, all_screens=True).convert("RGB")
+        big = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2BGR)
+        tpl = cv2.imread(path, cv2.IMREAD_COLOR)
+        if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
+            return None, None, 0.0
+        res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
+        _mn, mx, _ml, ml = cv2.minMaxLoc(res)
+        if mx < IMG_MATCH:
+            return None, None, float(mx)
+        cx = box[0] + ml[0] + tpl.shape[1] // 2
+        cy = box[1] + ml[1] + tpl.shape[0] // 2
+        return int(cx), int(cy), float(mx)
+    except Exception:
+        return None, None, 0.0
+
+
 
 def click_target(x, y):
     """그 좌표를 받아줄 창 이름 — 리니지M 창이 없으면 ('', False)."""
@@ -4850,6 +4901,53 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _grab_click_image(self, fkey, idx, j, btn=None):
+        """그 좌표 자리에서 찾을 그림을 화면에서 드래그해 저장한다.
+        저장하면 실행 때 좌표 대신 '그 그림'을 찾아 누르고,
+        못 찾으면 그 슬롯은 거기서 끝낸다 (다른 슬롯은 계속)."""
+        self._img_target = (fkey, idx, j, btn)
+        self.status.set(f"🖼 {self._dgn2_info(fkey)[1]} 좌표{j+1} — "
+                        f"찾을 그림을 화면에서 드래그하세요 (ESC 취소)")
+        for w in self._section_wins():
+            try: w.withdraw()
+            except Exception: pass
+        self.withdraw()
+        self.after(250, lambda: _PotionAreaOverlay(self, self._on_click_image))
+
+    def _on_click_image(self, x, y, w, h):
+        """드래그한 영역을 그림 파일로 저장."""
+        self.deiconify()
+        for wn in self._section_wins():
+            try: wn.deiconify()
+            except Exception: pass
+        tgt = getattr(self, "_img_target", None)
+        if not tgt:
+            return
+        fkey, idx, j, btn = tgt
+        if w < 6 or h < 6:
+            self.status.set("🖼 너무 작습니다 — 다시 드래그해주세요"); return
+        try:
+            from PIL import ImageGrab
+            os.makedirs(IMG_DIR, exist_ok=True)
+            im = ImageGrab.grab(bbox=(x, y, x + w, y + h), all_screens=True).convert("RGB")
+            im.save(img_path(fkey, j))
+            if btn and btn.winfo_exists():
+                btn.config(text="🖼있음", bg="#8e44ad")
+            self.status.set(f"🖼 좌표{j+1} 그림 저장 ({w}×{h}) — "
+                            f"실행 때 이 그림을 찾아 누릅니다 (못 찾으면 그 슬롯 중단)")
+        except Exception as e:
+            self.status.set(f"🖼 저장 실패: {e}")
+
+    def _del_click_image(self, fkey, j, btn=None):
+        """지정해둔 그림 지우기 (오른쪽 클릭) — 다시 좌표를 그냥 누른다."""
+        try:
+            os.remove(img_path(fkey, j))
+            if btn and btn.winfo_exists():
+                btn.config(text="🖼", bg="#5d6d7e")
+            self.status.set(f"🖼 좌표{j+1} 그림 삭제 — 이제 좌표를 그냥 누릅니다")
+        except Exception as e:
+            self.status.set(f"🖼 삭제 실패: {e}")
+
     def _do_click_or_wheel(self, fkey, j, coord, slot=None):
         """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다.
         HOVER_INDICES 에 적힌 자리는 클릭하지 않고 '마우스만 올려놓는다'."""
@@ -4887,6 +4985,20 @@ class App(tk.Tk):
                         pyautogui.scroll(int(n) * 120)
                     time.sleep(random.uniform(0.12, 0.25))
             return (f"휠▼{abs(n)}" if n < 0 else f"휠▲{n}")
+        # 이 자리에 그림을 지정해뒀으면 그림을 찾아 그 자리를 누른다.
+        # 못 찾으면 "이미지없음" 을 돌려줘서 그 슬롯을 여기서 끝낸다 (사용자 지시).
+        if os.path.exists(img_path(fkey, j)):
+            ix, iy, sc = find_image(fkey, j, coord)
+            nm = (slot or {}).get("name", "?")
+            if ix is None:
+                click_log(f"{fkey} [{nm}] 좌표{j+1} 이미지 못 찾음 (최고 일치도 {sc:.2f}) "
+                          f"→ 이 슬롯 여기서 중단")
+                self.status.set(f"🖼 [{nm}] 좌표{j+1} 이미지 없음 — 이 슬롯 중단 "
+                                f"(일치도 {sc:.2f})")
+                return "이미지없음"
+            click_log(f"{fkey} [{nm}] 좌표{j+1} 이미지 찾음 ({ix},{iy}) 일치도 {sc:.2f}")
+            self.status.set(f"🖼 [{nm}] 좌표{j+1} 이미지 찾음 (일치도 {sc:.2f})")
+            coord = (ix, iy)
         self._click_log(fkey, j, coord, slot, "클릭")
         snap = None
         if fkey in self.CLICK_GUARD:
@@ -4958,6 +5070,9 @@ class App(tk.Tk):
                 _act = "붙임"
             else:
                 _act = self._do_click_or_wheel(fkey, j, coords[j], st["slot"])
+            if _act == "이미지없음":
+                st["j"] = nclk          # 이 슬롯만 끝 — 다른 슬롯은 그대로 계속
+                continue
             self.status.set(f"{icon} [{name}] {_act}{j+1}/{nclk}  (남은 슬롯 {len(alive)})")
             done += 1
             # 묶음 자리 — 다음 좌표를 '바로 이어서' 처리한다 (다른 슬롯이 끼어들지 못하게)
@@ -5116,6 +5231,8 @@ class App(tk.Tk):
                         self.status.set(f"{icon} [{name}] 붙여넣기 완료 (클릭{j+1} 다음)")
                     else:
                         _act = self._do_click_or_wheel(fkey, j, coords[j], slot)
+                        if _act == "이미지없음":
+                            break        # 이 슬롯만 끝 — 다음 슬롯으로 넘어간다
                         self.status.set(f"{icon} [{name}] {_act}{j+1}...")
                         if fkey == "coupon":
                             self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
@@ -9572,7 +9689,7 @@ class App(tk.Tk):
                             prev=lambda i: self._preview_dgn2("knight", i),
                             delete=lambda i: self._del_dgn2("knight", i)),
             "dragon":  dict(title="용던고고!!!", key="dragon_slots", clicks=DRAGON_CLICKS,
-                            color="#a04000", enable=True, sel=True,
+                            color="#a04000", enable=True, sel=True, img=True,
                             reg=lambda s, c: self._reg_dgn2_click("dragon", s, c),
                             test=lambda i: self._test_dgn2("dragon", i),
                             prev=lambda i: self._preview_dgn2("dragon", i),
@@ -9718,6 +9835,19 @@ class App(tk.Tk):
                       bg="#1e8449", fg="white",
                       command=lambda x=idx, c=j, f=fkey:
                       self._test_grid_click(f, x, c)).pack(pady=(1, 0))
+            if sp.get("img"):
+                # 🖼 — 이 자리에서 찾을 '그림'을 드래그로 잘라 저장한다.
+                #      그림이 있으면 실행 때 그림을 찾아 누르고, 못 찾으면 그 슬롯은 끝.
+                _has = os.path.exists(img_path(fkey, j))
+                ib = tk.Button(cc, text=("🖼있음" if _has else "🖼"),
+                               font=("맑은 고딕", 7), width=4, pady=0,
+                               bg=("#8e44ad" if _has else "#5d6d7e"), fg="white")
+                ib.config(command=lambda x=idx, c=j, f=fkey, b_=ib:
+                          self._grab_click_image(f, x, c, b_))
+                ib.pack(pady=(1, 0))
+                if _has:      # 오른쪽 클릭 = 그 그림 지우기
+                    ib.bind("<Button-3>", lambda _e, c=j, f=fkey, b_=ib:
+                            self._del_click_image(f, c, b_))
             if sp.get("opts"):
                 # ㅡ 칸: 다음 좌표까지 기다릴 초 (비우면 기본), 아래는 휠 굴릴 칸수(0=클릭)
                 gl = slot.get("gap_list") or []
