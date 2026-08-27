@@ -1026,6 +1026,18 @@ def area_path(fkey, j):
     return os.path.join(IMG_DIR, f"{fkey}_{j+1:02d}_area.json")
 
 
+def area_is_set(fkey, j):
+    """'진짜' 범위가 잡혀 있나 — {"full": true} 는 범위 없음으로 본다."""
+    try:
+        with open(area_path(fkey, j), encoding="utf-8") as f:
+            a = json.load(f) or {}
+        if a.get("full") or int(a.get("w") or 0) <= 0 or int(a.get("h") or 0) <= 0:
+            return False
+        return True
+    except Exception:
+        return False
+
+
 def client_rect_at(x, y):
     """그 좌표를 품은 리니지M 창 위치 (없으면 None)."""
     try:
@@ -1050,6 +1062,11 @@ def search_box(fkey, j, coord):
     try:
         with open(area_path(fkey, j), encoding="utf-8") as f:
             a = json.load(f) or {}
+        # {"full": true} = '범위를 쓰지 말고 창 전체' — 잘못 잡아둔 범위를 업데이트로
+        # 되돌리기 위한 값이다 (2026-08-28). 크기가 0 이하인 것도 같게 본다.
+        if a.get("full") or int(a.get("w") or 0) <= 0 or int(a.get("h") or 0) <= 0:
+            return rc if rc else (int(coord[0]) - 250, int(coord[1]) - 250,
+                                  int(coord[0]) + 250, int(coord[1]) + 250)
         if rc and all(k in a for k in ("dx", "dy", "w", "h")):
             x0 = rc[0] + int(a["dx"]); y0 = rc[1] + int(a["dy"])
             return (x0, y0, x0 + int(a["w"]), y0 + int(a["h"]))
@@ -5076,7 +5093,7 @@ class App(tk.Tk):
                              f"그림 {len(img_list(fkey, j2))}장"
                              f"(전용 {img_mine_count(fkey, j2)}) · "
                              f"고르기 {img_pick(fkey, j2)} · "
-                             f"범위 {'있음' if os.path.exists(area_path(fkey, j2)) else '없음'}")
+                             f"범위 {'있음' if area_is_set(fkey, j2) else '없음'}")
                 try:
                     import ctypes as _c
                     L.append("")
@@ -5153,7 +5170,7 @@ class App(tk.Tk):
                          format(img_thr(fkey, j2), ".2f") + " · 그림 " +
                          str(len(img_list(fkey, j2))) + "장(전용 " +
                          str(img_mine_count(fkey, j2)) + ") · 범위 " +
-                         ("있음" if os.path.exists(area_path(fkey, j2)) else "없음"))
+                         ("있음" if area_is_set(fkey, j2) else "없음"))
             # 클라 창 크기 (그림이 안 맞는 가장 흔한 원인)
             try:
                 key = self._dgn2_info(fkey)[0]
@@ -11169,7 +11186,7 @@ class App(tk.Tk):
                             self._del_click_image(f, c, b_))
                 # 📐 — 그 그림을 '어디에서 찾을지' 범위를 드래그로 정한다.
                 #      클라 창 기준으로 저장돼 16슬롯 전부에 그대로 적용된다.
-                _hasa = os.path.exists(area_path(fkey, j))
+                _hasa = area_is_set(fkey, j)
                 ab = tk.Button(cc, text=("📐범위" if _hasa else "📐"),
                                font=("맑은 고딕", 7), width=4, pady=0,
                                bg=("#1a5276" if _hasa else "#5d6d7e"), fg="white")
