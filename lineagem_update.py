@@ -1126,6 +1126,28 @@ def main():
                     if _need:
                         shutil.copy2(sp_, dp_); n += 1
                         log(f"   데이터 갱신: {d}/{fn}")
+            # 저장소에서 지운 파일은 로컬에도 지워준다 — `share_delete.json` 에 적은 것만.
+            # 업데이트가 '복사만' 하고 지우지 않아서, 메인에서 지운 잘못된 설정이
+            # 로컬에 영원히 남는 사고가 있었다 (dragon_05_area.json, 2026-08-28).
+            try:
+                _dl = os.path.join(REPO, "share_delete.json")
+                if os.path.exists(_dl):
+                    with open(_dl, encoding="utf-8") as _f:
+                        _items = (json.load(_f) or {}).get("files") or []
+                    for _rel in _items:
+                        _rel = str(_rel).replace("\\", "/").strip("/")
+                        # 안전장치: click_templates / reroll_templates 아래만 지운다
+                        if not _rel.startswith(("click_templates/", "reroll_templates/")):
+                            log(f"   ⚠ 지우기 건너뜀(허용 폴더 밖): {_rel}")
+                            continue
+                        if ".." in _rel:
+                            continue
+                        _t = os.path.join(DESK, *_rel.split("/"))
+                        if os.path.exists(_t):
+                            os.remove(_t); n += 1
+                            log(f"   지움: {_rel} (메인에서 없앤 설정)")
+            except Exception as e:
+                log(f"   ⚠ 지우기 목록 처리 실패: {e}")
             # 프리셋만 키 단위로 동기화 — coords.json 전체는 건드리지 않고
             # 프리셋 정의(_doll_presets 등)만 메인 것으로 맞춘다 (좌표는 로컬 유지)
             try:

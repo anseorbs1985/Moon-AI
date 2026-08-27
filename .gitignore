@@ -7,3 +7,11 @@ ocr_debug.png
 
 # 이미지 클릭 설정(범위·일치기준)은 그림과 함께 배포한다
 !click_templates/*.json
+
+# 공유 설정 파일들은 올린다 (share_*.json 은 배포 지시서)
+!share_coords.json
+!share_island.json
+!share_times.json
+!share_recs.json
+!share_delete.json
+!restore_order.json
