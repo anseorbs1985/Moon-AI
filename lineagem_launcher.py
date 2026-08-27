@@ -719,7 +719,7 @@ CLICK_LOG = os.path.join(LOCAL_DATA, "click_log.txt")   # 클릭이 어느 창�
 #   좌표 대신 '그림'을 찾아 누른다. 못 찾으면 그 슬롯은 거기서 끝낸다.
 IMG_DIR   = os.path.join(BASE, "click_templates")
 IMG_MATCH = 0.60          # 이 정도 닮으면 같은 그림으로 본다 (2026-08-27 사용자 지시)
-IMG_TRIES = 5             # 못 찾으면 1~1.5초 간격으로 몇 번까지 다시 볼지
+IMG_TRIES = 4             # 못 찾으면 1~1.5초 간격으로 몇 번까지 다시 볼지 (2026-08-27)
 
 
 def save_miss_shot(fkey, j, coord):
@@ -5337,6 +5337,16 @@ class App(tk.Tk):
                 ix, iy, sc = find_image(fkey, j, coord)
                 if ix is not None:
                     break
+                # 다음 자리의 그림(= 눌러서 뜨는 창)이 이미 보이면
+                # 이 자리는 이미 처리된 것 — 재시도하지 않고 넘어간다 (2026-08-27 사용자 지시)
+                if (not _own_coord) and has_img(fkey, j + 1):
+                    _nx, _ny, _ns = find_image(fkey, j + 1, coord)
+                    if _nx is not None:
+                        click_log(f"{fkey} [{nm}] 좌표{j+1} — 다음 창이 이미 떠 있음 "
+                                  f"(좌표{j+2} 그림 {_ns:.2f}) → 재시도 없이 넘어감")
+                        self.status.set(f"🖼 [{nm}] 좌표{j+1} 창이 이미 떴음 — 넘어감")
+                        _done.add((fkey, _slot_id))
+                        return "이미열림"
                 if _t < IMG_TRIES - 1:
                     self.status.set(f"🖼 [{nm}] 좌표{j+1} "
                                     f"{'창이 뜨기를' if _own_coord else '그림을'} "
