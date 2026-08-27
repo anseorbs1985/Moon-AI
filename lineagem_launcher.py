@@ -4922,6 +4922,12 @@ class App(tk.Tk):
             tk.Button(dr, text="📁 그림폴더", font=("맑은 고딕", 8),
                       bg="#34495e", fg="white", width=9, height=2,
                       command=self._open_img_dir).pack(side="left", padx=(3, 0))
+            # 📤 — 원인 확인에 필요한 것(기록 + 사진 + 그림)을 바탕화면 한 폴더에 모은다.
+            #      원격으로 로컬을 봐줄 때 이 폴더만 통째로 보내면 된다.
+            tk.Button(dr, text="📤 진단모으기", font=("맑은 고딕", 8, "bold"),
+                      bg="#b9770e", fg="white", width=10, height=2,
+                      command=lambda f=fkey: self._collect_diag(f)).pack(side="left",
+                                                                        padx=(3, 0))
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
         self._build_slot_grid(parent, fkey)   # 4×4 그리드 (화면 배치와 동일)
 
@@ -4937,6 +4943,67 @@ class App(tk.Tk):
                             "_못찾음_*.png 가 '그때 훑은 화면'입니다")
         except Exception as e:
             self.status.set(f"📁 열기 실패: {e}")
+
+    def _collect_diag(self, fkey):
+        """원인 확인에 필요한 것을 바탕화면 `진단_<런처>` 폴더 하나에 모은다 —
+        클릭기록, 못찾음·창안뜸·누른자리 사진, 지금 쓰는 그림과 기준.
+        원격으로 로컬을 봐줄 때 이 폴더만 통째로 보내면 된다 (2026-08-27)."""
+        import glob, shutil as _sh
+        try:
+            out = os.path.join(os.path.expanduser("~"), "Desktop", "진단_" + fkey)
+            os.makedirs(out, exist_ok=True)
+            n = 0
+            try:
+                if os.path.exists(CLICK_LOG):
+                    _sh.copy2(CLICK_LOG, os.path.join(out, "click_log.txt")); n += 1
+            except Exception:
+                pass
+            for d in (IMG_DIR, IMG_DIR_MINE):
+                if not os.path.isdir(d):
+                    continue
+                for q in glob.glob(os.path.join(d, "*")):
+                    bn = os.path.basename(q)
+                    if not (bn.startswith(("_못찾음_", "_창안뜸_", "_누른자리_"))
+                            or bn.startswith(fkey)):
+                        continue
+                    try:
+                        tag = "" if d == IMG_DIR else "전용_"
+                        _sh.copy2(q, os.path.join(out, tag + bn)); n += 1
+                    except Exception:
+                        pass
+            try:
+                nclk = self._grid_spec(fkey)["clicks"]
+                L = []
+                L.append("런처: " + fkey)
+                L.append(f"IMG_TRIES={IMG_TRIES} RECLICK_TRIES={RECLICK_TRIES}")
+                L.append(f"PEAK_MIN={PEAK_MIN} PEAK_RATIO={PEAK_RATIO} "
+                         f"GRAY_MIN={GRAY_MIN} GRAY_RATIO={GRAY_RATIO}")
+                L.append(f"RUN_BUDGET={RUN_BUDGET.get(fkey)} PACE_FLOOR={PACE_FLOOR}")
+                L.append("")
+                for j2 in range(nclk):
+                    if not has_img(fkey, j2):
+                        continue
+                    L.append(f"좌표{j2+1}: 기준 {img_thr(fkey, j2):.2f} · "
+                             f"그림 {len(img_list(fkey, j2))}장"
+                             f"(전용 {img_mine_count(fkey, j2)}) · "
+                             f"고르기 {img_pick(fkey, j2)} · "
+                             f"범위 {'있음' if os.path.exists(area_path(fkey, j2)) else '없음'}")
+                try:
+                    import ctypes as _c
+                    L.append("")
+                    L.append(f"화면 배율 {_c.windll.user32.GetDpiForSystem()*100//96}%")
+                except Exception:
+                    pass
+                with open(os.path.join(out, "설정.txt"), "w", encoding="utf-8") as f:
+                    f.write(chr(10).join(L))
+                n += 1
+            except Exception:
+                pass
+            subprocess.Popen(["explorer", out])
+            self.status.set(f"📤 바탕화면 '진단_{fkey}' 폴더에 {n}개 모았습니다 — "
+                            f"이 폴더를 통째로 보내주세요")
+        except Exception as e:
+            self.status.set(f"📤 모으기 실패: {e}")
 
     def _note(self, fkey, nm, msg):
         """실행 중 '잘 안 된 것'을 슬롯별로 모아둔다 — 끝나고 요약으로 보여준다.
