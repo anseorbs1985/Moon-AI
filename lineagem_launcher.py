@@ -740,8 +740,53 @@ def save_miss_shot(fkey, j, coord):
 
 
 def img_path(fkey, j):
-    """그 런처 · 그 좌표번호에 지정해둔 그림 파일 (좌표번호는 1부터 보여준다)."""
+    """그 런처 · 그 좌표번호에 지정해둔 그림 파일 (좌표번호는 1부터 보여준다).
+    이것은 '공용(저장소) 그림' — 업데이트로 모든 컴퓨터에 배포된다."""
     return os.path.join(IMG_DIR, f"{fkey}_{j+1:02d}.png")
+
+
+# 컴퓨터마다 해상도·클라 크기·그래픽 설정이 달라 같은 아이콘이 다르게 보인다.
+# 그래서 '이 컴퓨터 전용 그림'을 따로 둔다 — 업데이트가 절대 덮어쓰지 않는다.
+IMG_DIR_MINE = os.path.join(os.environ.get("LOCALAPPDATA", BASE),
+                            "MoonAI", "click_templates")
+IMG_MAX = 4            # 한 좌표에 그림 몇 장까지
+
+
+def img_mine_path(fkey, j, n):
+    """이 컴퓨터 전용 그림 (n = 0,1,2,3)."""
+    return os.path.join(IMG_DIR_MINE, f"{fkey}_{j+1:02d}_mine{n+1}.png")
+
+
+def img_list(fkey, j):
+    """그 자리에서 찾아볼 그림 전부 — 공용 1장 + 이 컴퓨터 전용 최대 4장.
+    실행할 때는 이 중 '가장 잘 맞는 것' 하나를 쓴다."""
+    out = []
+    try:
+        if os.path.exists(img_path(fkey, j)):
+            out.append(img_path(fkey, j))
+    except Exception:
+        pass
+    for n in range(IMG_MAX):
+        try:
+            q = img_mine_path(fkey, j, n)
+            if os.path.exists(q):
+                out.append(q)
+        except Exception:
+            pass
+    return out
+
+
+def img_mine_count(fkey, j):
+    return sum(1 for n in range(IMG_MAX)
+               if os.path.exists(img_mine_path(fkey, j, n)))
+
+
+def img_mine_free(fkey, j):
+    """비어 있는 '이 컴퓨터 전용' 자리 번호 (없으면 마지막을 덮어쓴다)."""
+    for n in range(IMG_MAX):
+        if not os.path.exists(img_mine_path(fkey, j, n)):
+            return n
+    return IMG_MAX - 1
 
 
 PICKS = ["best", "top", "bottom", "left", "right"]
@@ -809,9 +854,9 @@ def set_img_thr(fkey, j, v):
 
 
 def has_img(fkey, j):
-    """그 자리에 찾을 그림을 지정해뒀나."""
+    """그 자리에 찾을 그림을 (공용이든 이 컴퓨터 전용이든) 지정해뒀나."""
     try:
-        return os.path.exists(img_path(fkey, j))
+        return bool(img_list(fkey, j))
     except Exception:
         return False
 
@@ -870,8 +915,23 @@ def search_box(fkey, j, coord):
 
 def find_image(fkey, j, coord):
     """지정한 범위 안에서 그림을 찾는다.
-    찾으면 (x, y, 일치도), 못 찾으면 (None, None, 일치도)."""
-    path = img_path(fkey, j)
+    등록된 그림이 여러 장이면 **하나라도 잡히면 잡힌 것**으로 본다
+    (컴퓨터마다 아이콘이 달라 보이므로 — 2026-08-27).
+    찾으면 (x, y, 일치도), 못 찾으면 (None, None, 최고 일치도)."""
+    paths = img_list(fkey, j)
+    if not paths:
+        return None, None, 0.0
+    best = 0.0
+    for _p in paths:
+        x, y, sc = _find_one(fkey, j, coord, _p)
+        if x is not None:
+            return x, y, sc
+        best = max(best, sc)
+    return None, None, best
+
+
+def _find_one(fkey, j, coord, path):
+    """그림 한 장으로 찾아본다."""
     if not os.path.exists(path):
         return None, None, 0.0
     try:
@@ -5265,13 +5325,26 @@ class App(tk.Tk):
             self.status.set("🖼 너무 작습니다 — 다시 드래그해주세요"); return
         try:
             from PIL import ImageGrab
-            os.makedirs(IMG_DIR, exist_ok=True)
             im = ImageGrab.grab(bbox=(x, y, x + w, y + h), all_screens=True).convert("RGB")
-            im.save(img_path(fkey, j))
+            if os.path.exists(img_path(fkey, j)):
+                # 공용 그림이 이미 있으면 → '이 컴퓨터 전용'으로 한 장 더 추가한다.
+                # 컴퓨터마다 아이콘이 달라 보이므로, 각자 자기 화면에서 찍어 쓴다.
+                # 이 폴더는 업데이트가 절대 덮어쓰지 않는다 (2026-08-27).
+                n = img_mine_free(fkey, j)
+                os.makedirs(IMG_DIR_MINE, exist_ok=True)
+                im.save(img_mine_path(fkey, j, n))
+                _c = img_mine_count(fkey, j)
+                msg = (f"🖼 좌표{j+1} — 이 컴퓨터 전용 그림 {_c}장째 추가 ({w}×{h}). "
+                       f"공용 1장 + 전용 {_c}장 중 하나만 맞으면 찾은 것으로 봅니다")
+            else:
+                os.makedirs(IMG_DIR, exist_ok=True)
+                im.save(img_path(fkey, j))
+                msg = (f"🖼 좌표{j+1} 그림 저장 ({w}×{h}) — "
+                       f"실행 때 이 그림을 찾아 누릅니다 (못 찾으면 그 슬롯 중단)")
             if btn and btn.winfo_exists():
-                btn.config(text="🖼있음", bg="#8e44ad")
-            self.status.set(f"🖼 좌표{j+1} 그림 저장 ({w}×{h}) — "
-                            f"실행 때 이 그림을 찾아 누릅니다 (못 찾으면 그 슬롯 중단)")
+                _n = len(img_list(fkey, j))
+                btn.config(text=("🖼있음" if _n <= 1 else f"🖼{_n}장"), bg="#8e44ad")
+            self.status.set(msg)
         except Exception as e:
             self.status.set(f"🖼 저장 실패: {e}")
 
@@ -5379,7 +5452,7 @@ class App(tk.Tk):
         if not coord:
             self.status.set(f"🔍 슬롯{idx+1} — 이 슬롯에 좌표가 하나도 없습니다 "
                             f"(어느 클라인지 알 수 없어요)"); return
-        if not os.path.exists(img_path(fkey, j)):
+        if not has_img(fkey, j):
             self.status.set(f"🔍 좌표{j+1} — [🖼] 로 그림부터 지정해주세요"); return
         thr = img_thr(fkey, j)
         box = search_box(fkey, j, coord)
@@ -5396,6 +5469,11 @@ class App(tk.Tk):
         tk.Label(w, text=(f"찾은 자리: ({ix}, {iy})" if ok else
                           "기준보다 낮아서 이 자리는 건너뜁니다"),
                  font=("맑은 고딕", 11)).pack(pady=(2, 0))
+        _n = len(img_list(fkey, j))
+        tk.Label(w, text=f"등록된 그림 {_n}장 "
+                         f"(공용 {1 if os.path.exists(img_path(fkey, j)) else 0} + "
+                         f"이 컴퓨터 전용 {img_mine_count(fkey, j)})",
+                 font=("맑은 고딕", 10)).pack()
         tk.Label(w, text=f"찾은 범위: {box[2]-box[0]}×{box[3]-box[1]} "
                          f"({box[0]},{box[1]})",
                  font=("맑은 고딕", 9), fg="#888").pack()
@@ -5417,12 +5495,24 @@ class App(tk.Tk):
             pass
 
     def _del_click_image(self, fkey, j, btn=None):
-        """지정해둔 그림 지우기 (오른쪽 클릭) — 다시 좌표를 그냥 누른다."""
+        """그림 지우기 (오른쪽 클릭). '이 컴퓨터 전용'이 있으면 그것부터 전부 지우고,
+        없으면 공용 그림을 지운다 — 실수로 공용을 날리지 않게 한 단계 둔다."""
         try:
-            os.remove(img_path(fkey, j))
+            n = img_mine_count(fkey, j)
+            if n:
+                for k in range(IMG_MAX):
+                    try: os.remove(img_mine_path(fkey, j, k))
+                    except Exception: pass
+                msg = f"🖼 좌표{j+1} — 이 컴퓨터 전용 그림 {n}장 삭제 (공용은 그대로)"
+            else:
+                os.remove(img_path(fkey, j))
+                msg = f"🖼 좌표{j+1} 그림 삭제 — 이제 좌표를 그냥 누릅니다"
             if btn and btn.winfo_exists():
-                btn.config(text="🖼", bg="#5d6d7e")
-            self.status.set(f"🖼 좌표{j+1} 그림 삭제 — 이제 좌표를 그냥 누릅니다")
+                _c = len(img_list(fkey, j))
+                btn.config(text=("🖼" if not _c else
+                                 ("🖼있음" if _c == 1 else f"🖼{_c}장")),
+                           bg=("#5d6d7e" if not _c else "#8e44ad"))
+            self.status.set(msg)
         except Exception as e:
             self.status.set(f"🖼 삭제 실패: {e}")
 
@@ -5482,7 +5572,7 @@ class App(tk.Tk):
                 self._click_log(fkey, j, coord, slot, "클릭")
                 click_at(*coord)
             return "클릭"
-        if os.path.exists(img_path(fkey, j)):
+        if has_img(fkey, j):
             nm = (slot or {}).get("name", "?")
             try:      # 이 자리에 등록된 좌표가 따로 있나 (없으면 그림을 직접 누른다)
                 _cl = (slot or {}).get("coords") or []
@@ -10519,8 +10609,10 @@ class App(tk.Tk):
             if sp.get("img"):
                 # 🖼 — 이 자리에서 찾을 '그림'을 드래그로 잘라 저장한다.
                 #      그림이 있으면 실행 때 그림을 찾아 누르고, 못 찾으면 그 슬롯은 끝.
-                _has = os.path.exists(img_path(fkey, j))
-                ib = tk.Button(cc, text=("🖼있음" if _has else "🖼"),
+                _cnt = len(img_list(fkey, j))
+                _has = _cnt > 0
+                ib = tk.Button(cc, text=("🖼" if not _cnt else
+                                         ("🖼있음" if _cnt == 1 else f"🖼{_cnt}장")),
                                font=("맑은 고딕", 7), width=4, pady=0,
                                bg=("#8e44ad" if _has else "#5d6d7e"), fg="white")
                 ib.config(command=lambda x=idx, c=j, f=fkey, b_=ib:
