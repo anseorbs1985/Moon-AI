@@ -3937,6 +3937,7 @@ class App(tk.Tk):
             self._night_plus.append(pb)
         self.after(300, lambda: self._dun_switch(int(self.cfg.get("night_tab", 0) or 0)))
         self.after(1200, self._refresh_night_btns)
+        self._night_week_start()      # 토요일 00시 자동 초기화 감시
 
     def _night_sel_toggle(self, idx):
         """+ 로 고른 슬롯만 [선택실행]으로 한 번에 돌린다."""
@@ -4024,7 +4025,18 @@ class App(tk.Tk):
                     b.config(text=f"{_h}h {n}회",
                              bg=self.REP_LEFT_COLORS.get(n, "#34495e"))
                 else:
-                    b.config(text="⏰꺼짐", bg="#7f8c8d")
+                    # 예약은 없지만 **설정은 있다** — 그걸 보여준다.
+                    # 초기화만 하고 아직 실행 전인 상태가 '⏰꺼짐' 으로 보여
+                    # 설정이 안 들어간 줄 알았다는 지적 (2026-08-28).
+                    try:
+                        _sl = (self._island_cfg().get(self.NIGHT_KEY) or [])[i]
+                        _h2, _n2 = self._rep_hn(self.NIGHT_KEY, _sl)
+                        _f2 = (int(self.REPEAT_FIRST.get(self.NIGHT_KEY, _h2) or _h2)
+                               if self._night_mode(i) == "first" else _h2)
+                        _t2 = (f"{_f2}h→{_h2}h" if _f2 != _h2 else f"{_h2}h")
+                        b.config(text=f"대기 {_t2} {_n2}회", bg="#5d6d7e")
+                    except Exception:
+                        b.config(text="⏰꺼짐", bg="#7f8c8d")
             for i, b in enumerate(getattr(self, "_night_firstbtns", []) or []):
                 if not b.winfo_exists():
                     continue
@@ -4033,6 +4045,13 @@ class App(tk.Tk):
         except Exception:
             pass
         self.after(20000, self._refresh_night_btns)
+
+    def _night_week_start(self):
+        """런처가 켜지면 주간 자동 초기화 감시를 시작한다 (한 번만)."""
+        if getattr(self, "_night_week_on", False):
+            return
+        self._night_week_on = True
+        self.after(15000, self._night_week_reset)
 
     def _run_night_slot(self, slot_idx):
         """[실행]은 '대기열에 쌓기' — 누른 순서대로 하나씩 자동으로 돈다.
@@ -4140,6 +4159,43 @@ class App(tk.Tk):
             self._refresh_night_btns()
         except Exception as e:
             self._rep_log(f"⚠ 악몽의섬 #{slot_idx+1:02d} 반복 재시작 실패: {e!r}")
+
+    def _night_week_reset(self):
+        """**토요일 00시가 되면 악몽의섬 설정을 자동으로 초기화**한다
+        (4시간 → 2시간 6회). 2026-08-28 사용자 지시.
+
+        - **값만 되돌린다.** 예약(⏰)을 걸지 않고, 아무것도 실행하지 않는다.
+          반복은 예전처럼 **사용자가 [실행] 을 눌렀을 때만** 걸린다.
+        - 한 주에 한 번만 — LOCALAPPDATA/MoonAI/night_week.json 에 기록.
+        - 런처가 꺼져 있었으면 켜진 뒤 처음 확인할 때 그 주 몫을 한 번 한다."""
+        try:
+            import datetime as _dt
+            now = _dt.datetime.now()
+            # 그 주의 '토요일 00시' — 토요일 이후면 이번 주, 아니면 지난 주 토요일
+            days = (now.weekday() - 5) % 7          # 월=0 … 토=5
+            sat = (now - _dt.timedelta(days=days)).replace(
+                hour=0, minute=0, second=0, microsecond=0)
+            if now < sat:
+                sat -= _dt.timedelta(days=7)
+            tag = sat.strftime("%Y-%m-%d")
+            fp = os.path.join(LOCAL_DATA, "night_week.json")
+            try:
+                with open(fp, encoding="utf-8") as f:
+                    done = str((json.load(f) or {}).get("done") or "")
+            except Exception:
+                done = ""
+            if done != tag:
+                self._night_rearm_all_impl(True)     # 값만 — 예약 안 검
+                os.makedirs(LOCAL_DATA, exist_ok=True)
+                with open(fp, "w", encoding="utf-8") as f:
+                    json.dump({"done": tag}, f)
+                self._rep_log(f"{self.NIGHT_KEY} — 토요일({tag}) 자동 초기화: "
+                              f"4시간 → 2시간 6회 (값만, 예약·실행 없음)")
+        except Exception as e:
+            try: self._rep_log(f"⚠ 악몽의섬 주간 초기화 실패: {e!r}")
+            except Exception: pass
+        finally:
+            self.after(600000, self._night_week_reset)   # 10분마다 확인
 
     def _night_rearm_all(self, first_4h):
         if self.NIGHT_KEY != "토요일_악몽의섬":
