@@ -776,6 +776,10 @@ def zone_path(fkey, j):
 
 ZONE_MIN  = 5      # 이만큼 모여야 구역을 쓴다
 ZONE_PAD  = 35     # 구역 사방으로 이만큼 여유 (px)
+CONFIRM_MIN = 0.70  # 이 점수 밑으로 잡히면 한 번 더 보고 같은 자리인지 확인한다
+CONFIRM_PX  = 10    # 그때 이 거리(px) 안이면 '같은 자리'로 본다
+ZONE_BONUS = 0.18   # '늘 뜨던 자리' 가까이면 점수에 이만큼 얹어 고른다
+ZONE_NEAR  = 60     # 중심에서 이 거리(px) 안이면 '가깝다'
 ZONE_OUT_MIN = 0.75  # 구역 **밖**에서 찾을 때는 이 점수를 넘어야만 인정한다.
                      # 구역 밖은 엉뚱한 곳일 확률이 높아 느슨한 판정(배수·흑백)을 쓰지 않는다.
 ZONE_KEEP = 40     # 최근 이만큼만 보관
@@ -1189,6 +1193,54 @@ def find_image(fkey, j, coord):
     return None, None, best
 
 
+def _pick_near_zone(fkey, j, res, thr, mx, ml, tw, th, box):
+    """기준을 넘는 후보들 중 **늘 뜨던 자리에 가까운 것**을 고른다.
+
+    점수 1등만 믿으면 배경 무늬를 누르는 사고가 난다. 성공했던 자리(`*_zone.json`)의
+    중심에서 가까울수록 점수에 가산점을 준다 — 자료가 적으면 그냥 1등을 쓴다.
+    (2026-08-28 사용자 신고: 7번·10번이 엉뚱한 곳을 눌렀다)"""
+    try:
+        import cv2, numpy as np
+        with open(zone_path(fkey, j), encoding="utf-8") as f:
+            pts = (json.load(f) or {}).get("pts") or []
+        if len(pts) < 3:
+            return None, None, None
+        rc = client_rect_at(box[0] + tw, box[1] + th)
+        if not rc:
+            return None, None, None
+        cx = sum(q[0] for q in pts) / len(pts)      # 늘 뜨던 자리의 중심 (창 기준)
+        cy = sum(q[1] for q in pts) / len(pts)
+        ys, xs = np.where(res >= min(thr, mx))
+        if len(xs) == 0:
+            return None, None, None
+        cands = []
+        for y0, x0 in zip(ys.tolist(), xs.tolist()):
+            v = float(res[y0, x0])
+            for c in cands:
+                if abs(c[0] - x0) < tw and abs(c[1] - y0) < th:
+                    if v > c[2]:
+                        c[0], c[1], c[2] = x0, y0, v
+                    break
+            else:
+                cands.append([x0, y0, v])
+        if len(cands) < 2:
+            return None, None, None
+        best = None
+        for x0, y0, v in cands:
+            ax = box[0] + x0 + tw // 2 - rc[0]      # 창 기준 좌표
+            ay = box[1] + y0 + th // 2 - rc[1]
+            d = ((ax - cx) ** 2 + (ay - cy) ** 2) ** 0.5
+            adj = v + (ZONE_BONUS if d <= ZONE_NEAR else 0.0)
+            if best is None or adj > best[0]:
+                best = (adj, x0, y0, v, d)
+        _adj, x0, y0, v, d = best
+        if (x0, y0) != (ml[0], ml[1]):
+            click_log(f"{fkey} 좌표{j+1} — 점수 1등({mx:.2f}) 대신 "
+                      f"늘 뜨던 자리에 가까운 것({v:.2f}, {d:.0f}px)을 고름")
+        return (int(box[0] + x0 + tw // 2), int(box[1] + y0 + th // 2), float(v))
+    except Exception:
+        return None, None, None
+
 def _find_one(fkey, j, coord, path, box=None, strict=False):
     """그림 한 장으로, 지정한 화면 영역에서 찾아본다.
     strict=True 면 '늘 뜨던 구역 밖'이라는 뜻 — 점수를 높게 요구하고
@@ -1281,6 +1333,13 @@ def _find_one(fkey, j, coord, path, box=None, strict=False):
                 return None, None, float(mx)
         pick = img_pick(fkey, j)
         if pick == "best":
+            # 점수가 가장 높은 것 하나만 믿으면, 배경 무늬가 진짜보다 높게 나올 때
+            # 엉뚱한 곳을 누른다 (2026-08-28 주이 슬롯: 맨 땅을 0.61 로 눌렀는데
+            # 같은 화면에 진짜 마름모가 0.77 로 있었다).
+            # → 기준을 넘는 후보를 다 모아 **늘 뜨던 자리에 가까운 것**을 고른다.
+            _bx, _by, _bs = _pick_near_zone(fkey, j, res, thr, mx, ml, tw, th, box)
+            if _bx is not None:
+                return _bx, _by, _bs
             return (int(box[0] + ml[0] + tw // 2),
                     int(box[1] + ml[1] + th // 2), float(mx))
         # 같은 그림이 여럿일 때 — 기준을 넘는 것을 다 모아 겹치는 것끼리 묶고
@@ -6166,6 +6225,23 @@ class App(tk.Tk):
             sc = 0.0
             for _t in range(IMG_TRIES):
                 ix, iy, sc = find_image(fkey, j, coord)
+                if ix is not None and sc < CONFIRM_MIN:
+                    # 점수가 낮으면 **한 번 더 보고 같은 자리인지 확인**한다.
+                    # 화면이 아직 다 안 그려졌을 때 배경 무늬를 집는 사고가 있었다
+                    # (2026-08-28 주이 슬롯: 맨 땅을 0.61 로 눌렀다).
+                    # 진짜 아이콘은 잠시 뒤에도 같은 자리에 있고 보통 점수가 오른다.
+                    time.sleep(random.uniform(0.5, 0.8))
+                    _cx, _cy, _cs = find_image(fkey, j, coord)
+                    if (_cx is None or abs(_cx - ix) > CONFIRM_PX
+                            or abs(_cy - iy) > CONFIRM_PX):
+                        click_log(f"{fkey} [{nm}] 좌표{j+1} 낮은 점수({sc:.2f})가 "
+                                  f"다시 보니 " +
+                                  ("사라짐" if _cx is None else
+                                   f"자리가 바뀜({_cx-ix:+d},{_cy-iy:+d})") +
+                                  " → 배경으로 보고 다시 찾음")
+                        ix = None
+                    else:
+                        ix, iy, sc = _cx, _cy, max(sc, _cs)
                 if ix is not None:
                     break
                 # 다음 자리의 그림(= 눌러서 뜨는 창)이 이미 보이면
@@ -6257,7 +6333,14 @@ class App(tk.Tk):
                 _dr = ImageDraw.Draw(_im)
                 _dr.ellipse([48, 38, 72, 62], outline=(255, 0, 0), width=2)
                 os.makedirs(IMG_DIR, exist_ok=True)
-                _nm2 = re.sub(r"[^\w가-힣]", "", str((slot or {}).get("name", "?")))[:10]
+                try:      # 슬롯 이름이 전부 '미등록'이라 창 이름으로 구분한다
+                    import precise_click as _pc2
+                    _h2 = _pc2.game_window_at(int(coord[0]), int(coord[1]))
+                    _t2 = _pc2.window_title(_h2).replace("리니지M l ", "") if _h2 else ""
+                except Exception:
+                    _t2 = ""
+                _nm2 = re.sub(r"[^\w가-힣]", "",
+                              _t2 or str((slot or {}).get("name", "?")))[:10]
                 _im.save(os.path.join(
                     IMG_DIR, f"_누른자리_{fkey}_{j+1:02d}_{_nm2}.png"))
             except Exception:
@@ -6349,7 +6432,14 @@ class App(tk.Tk):
                     try:    # 그 슬롯 화면을 통째로 남긴다 (덮어쓰지 않게 이름까지)
                         from PIL import ImageGrab as _IG
                         _bx = search_box(fkey, j, coord)
-                        _n3 = re.sub(r"[^\w가-힣]", "", str(nm))[:10]
+                        try:
+                            import precise_click as _pc3
+                            _h3 = _pc3.game_window_at(int(coord[0]), int(coord[1]))
+                            _t3 = (_pc3.window_title(_h3).replace("리니지M l ", "")
+                                   if _h3 else "")
+                        except Exception:
+                            _t3 = ""
+                        _n3 = re.sub(r"[^\w가-힣]", "", _t3 or str(nm))[:10]
                         _IG.grab(bbox=_bx, all_screens=True).save(os.path.join(
                             IMG_DIR, f"_창안뜸_{fkey}_{j+1:02d}_{_n3}.png"))
                         click_log(f"{fkey} [{nm}] 좌표{j+1} 창이 끝내 안 뜸 — "
