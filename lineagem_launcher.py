@@ -152,6 +152,7 @@ ATOMIC_NEXT = {}        # (호버를 없애서 묶을 이유가 사라짐)
 # 용던고고는 좌표4부터 이미지·확인창이 이어져서, 중간에 다른 슬롯이 끼어들면
 # 그 창이 닫히거나 포커스가 바뀌어 클릭이 씹힌다 (2026-08-27 사용자 지시).
 WAVE_UNTIL = {"dragon": 3}     # 좌표1~3만 교차, 좌표4부터는 그 슬롯 완주
+EARLY_IN = 2      # 남은 좌표가 이만큼 이하면 '끝나간다'고 보고 다음 슬롯을 미리 넣는다
 # 전체를 이 시간 안에 끝낸다 (초). 남은 시간과 남은 클릭 수를 보고 간격을 스스로 줄인다.
 # 늘리지는 않는다 — 빨리 끝나면 그대로 끝난다. (2026-08-27 사용자 지시: 4분 10초)
 RUN_BUDGET = {"dragon": 270}      # 4분 30초 (2026-08-27 사용자 지시 — 여유 있게)
@@ -6526,13 +6527,18 @@ class App(tk.Tk):
         """번갈아(웨이브) 실행 — 동시 lanes개 슬롯을 섞어가며 클릭 하나씩.
         각 좌표 사이 간격은 slot마다 따로 흐르고 gap 범위에서 랜덤."""
         _t_now = time.time()
+        # 사람처럼 — 슬롯마다 **자기 속도**(tempo)를 다르게 주고, 시작도 어긋나게 한다.
+        # 전부 같은 박자로 딱딱 움직이면 기계처럼 보인다 (2026-08-28 사용자 지시).
         state = {si: {"slot": sl, "j": 0,
-                      "due": _t_now + (0.0 if keep_order else random.uniform(0, 6.0))}
+                      "due": _t_now + (0.0 if keep_order else random.uniform(0, 6.0)),
+                      "tempo": random.uniform(0.82, 1.28)}
                  for si, sl in targets}
         order = [si for si, _ in targets]
         if not keep_order:                 # 용던고고는 번호 순서대로 투입한다
             random.shuffle(order)
         active, waiting = order[:lanes], order[lanes:]
+        for _k, _si in enumerate(active):      # 처음부터 나란히 출발하지 않게 흩는다
+            state[_si]["due"] = _t_now + _k * random.uniform(0.7, 2.3)
         last_si, done = None, 0
         _t0 = time.time()
         _bud = RUN_BUDGET.get(fkey)
@@ -6542,12 +6548,16 @@ class App(tk.Tk):
         while not getattr(self, stop, False):
             for si in [x for x in active if state[x]["j"] >= nclk]:
                 active.remove(si)
-                if waiting:
-                    nx = waiting.pop(0)
-                    # 슬롯이 새로 들어올 때도 넉넉히 (10~20% 할증)
-                    state[nx]["due"] = (time.time() + random.uniform(*slot_gap)
-                                        * random.uniform(*slow))
-                    active.append(nx)
+            # 끝나가는 슬롯이 있으면 **다음 슬롯을 미리 준비**해 겹쳐 들여보낸다.
+            # 하나가 완전히 끝나야 다음이 들어오면 그 사이가 뚝 끊겨 기계 같다.
+            _almost = sum(1 for x in active if state[x]["j"] >= nclk - EARLY_IN)
+            _room = lanes + (1 if _almost else 0) - len(active)
+            while waiting and _room > 0:
+                nx = waiting.pop(0)
+                state[nx]["due"] = (time.time() + random.uniform(*slot_gap)
+                                    * random.uniform(*slow) * state[nx]["tempo"])
+                active.append(nx)
+                _room -= 1
             alive = [si for si in active if state[si]["j"] < nclk]
             if not alive:
                 break
@@ -6637,6 +6647,9 @@ class App(tk.Tk):
             st["burst"] -= 1
             if st["burst"] > 0 and _g is None:
                 _base = random.uniform(0.7, 1.4)        # 이어 누를 땐 짧게
+            _base *= st.get("tempo", 1.0)          # 슬롯마다 자기 속도
+            if random.random() < 0.10:             # 가끔 한 번씩 더 쉰다 (사람처럼)
+                _base += random.uniform(0.5, 1.6)
             st["due"] = time.time() + _base * random.uniform(*slow)   # 10~20% 할증
             time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
         _el = int(time.time() - _t0)
