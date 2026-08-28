@@ -732,20 +732,20 @@ CLICK_LOG = os.path.join(LOCAL_DATA, "click_log.txt")   # 클릭이 어느 창�
 #   좌표 대신 '그림'을 찾아 누른다. 못 찾으면 그 슬롯은 거기서 끝낸다.
 IMG_DIR   = os.path.join(BASE, "click_templates")
 IMG_MATCH = 0.60          # 이 정도 닮으면 같은 그림으로 본다 (2026-08-27 사용자 지시)
-IMG_TRIES = 6             # 못 찾으면 1~1.5초 간격으로 몇 번까지 다시 볼지.
-                          # 날개가 애니메이션이라 프레임마다 점수가 달라 — 많이 볼수록 유리
+IMG_TRIES = 3             # 못 찾으면 1~1.5초 간격으로 몇 번까지 다시 볼지.
+                          # 6번은 너무 느렸다 (2026-08-28 사용자 지시로 3번)
 PEAK_RATIO = 1.45         # '1등 ÷ 2등' 이 이만큼 크면 점수가 낮아도 찾은 것으로 본다
 PEAK_MIN   = 0.40         # 다만 이 점수 밑이면 배수와 무관하게 안 본다
 # 흑백(밝기 평준화) 대조 — 색이 달라 보여도 모양이 같으면 잡는다.
 # 잡음도 같이 올라가므로(0.37~0.45) 점수·배수를 둘 다 넘어야만 인정한다.
 GRAY_MIN   = 0.55
 GRAY_RATIO = 1.35
-RECLICK_TRIES = 4         # 눌렀는데 창이 안 뜰 때 다시 눌러보는 횟수 (2026-08-27)
+RECLICK_TRIES = 2         # 눌렀는데 창이 안 뜰 때 다시 눌러보는 횟수 (2026-08-28 — 속도)
 RECLICK_HOLD = [(0.18, 0.30), (0.35, 0.50), (0.50, 0.70), (0.70, 0.95)]  # 갈수록 길게
 # 누른 뒤 '창이 떴나' 보기까지 기다리는 시간 — 점점 길게 준다.
 # 마름모가 캐릭터에서 멀면 눌러도 바로 창이 안 뜨고 **걸어가는 시간**이 필요하다
 # (2026-08-28 실측: 실패한 두 슬롯은 마름모가 창 왼쪽·위 끝에 있었다 = 먼 거리).
-RECLICK_WAIT = [2.5, 5.0, 8.0, 12.0]
+RECLICK_WAIT = [2.0, 3.0]        # 확인까지 2초 → 3초 (전 28초는 너무 느렸다)
 DRIFT_MAX  = 40           # 그림이 이만큼(px) 안에서 움직인 건 '같은 것'으로 본다.
                           # 더 멀면 다른 마름모라 겨냥을 옮기지 않는다 (엉뚱한 층 방지)
 
@@ -6099,15 +6099,6 @@ class App(tk.Tk):
     def _do_click_or_wheel(self, fkey, j, coord, slot=None):
         """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다.
         HOVER_INDICES 에 적힌 자리는 클릭하지 않고 '마우스만 올려놓는다'."""
-        # 앞 자리에서 '이미 넘어갔다'고 표시해뒀으면 이 자리(창 확인)는 건너뛴다
-        try:
-            _sk = getattr(self, "_skip_win", None)
-            if _sk and _sk.get((fkey, id(slot))) == j:
-                _sk.pop((fkey, id(slot)), None)
-                click_log(f"{fkey} 좌표{j+1} 건너뜀 — 앞에서 이미 넘어감 (창 확인 불필요)")
-                return "건너뜀"
-        except Exception:
-            pass
         if j in HOVER_INDICES.get(fkey, ()):
             self._click_log(fkey, j, coord, slot, "마우스올림")
             move_at(*coord)                   # 커서는 그대로, 그 자리에 올림 신호만
@@ -6145,6 +6136,7 @@ class App(tk.Tk):
         # 이 자리에 그림을 지정해뒀으면 그림을 찾아 그 자리를 누른다.
         # 못 찾으면 "이미지없음" 을 돌려줘서 그 슬롯을 여기서 끝낸다 (사용자 지시).
         _img_hit = False
+        _win_fail = False        # 확인창이 끝내 안 떴나 (뜨면 다음 좌표를 안 누른다)
         # 이 슬롯에서 이미 이미지를 한 번 찾았으면 더 이상 찾지 않는다 —
         # 뒤 좌표에서 같은 그림을 또 찾아 눌러 되돌아가는 것을 막는다 (2026-08-27 사용자 지시)
         _done = getattr(self, "_img_done", None)
@@ -6331,21 +6323,12 @@ class App(tk.Tk):
                         _rx = None      # 멀리 있는 건 다른 마름모 — 그 자리를 그대로 다시
                         _rx, _ry = coord[0], coord[1]
                     if _rx is None:
-                        # 그림이 사라졌다 = 클릭이 먹어서 이미 넘어간 것.
-                        # 그런데 확인창을 못 봤으니, 다음 '창 확인' 자리에서 또 기다리다
-                        # 슬롯이 통째로 죽는다 → **그 자리만 건너뛰고 계속 간다**
-                        # (2026-08-28 실측: 발망 슬롯이 이 경우로 죽었는데
-                        #  화면을 보니 이미 다음 층으로 넘어가 있었다)
-                        click_log(f"{fkey} [{nm}] 좌표{j+1} 그림이 사라졌음 "
-                                  f"(최고 {_rs:.2f}) — 이미 넘어간 것으로 보고 "
-                                  f"좌표{j+2}(창 확인)는 건너뜀")
-                        self._note(fkey, nm, f"좌표{j+1} 창은 못 봤지만 넘어감")
-                        try:
-                            if not hasattr(self, "_skip_win"):
-                                self._skip_win = {}
-                            self._skip_win[(fkey, id(slot))] = j + 1
-                        except Exception:
-                            pass
+                        # 그림이 사라졌다 — 그래도 **확인창을 못 봤으면 여기서 끝낸다.**
+                        # 창이 안 떴는데 다음 좌표(오토 등)를 누르면 절대 안 된다
+                        # (2026-08-28 사용자 지시 — 이 규칙을 어기지 말 것).
+                        click_log(f"{fkey} [{nm}] 좌표{j+1} 그림이 사라졌으나 "
+                                  f"확인창을 못 봄 (최고 {_rs:.2f}) → 이 슬롯 중단")
+                        self._note(fkey, nm, f"좌표{j+1} 창을 못 봐서 중단")
                         break
                     if (_rx, _ry) != (coord[0], coord[1]):
                         click_log(f"{fkey} [{nm}] 좌표{j+1} 그림이 옮겨감 "
@@ -6362,14 +6345,7 @@ class App(tk.Tk):
                     time.sleep(random.uniform(0.35, 0.55))
                 else:
                     self._note(fkey, nm, f"좌표{j+1} {RECLICK_TRIES}번 눌러도 창이 안 뜸")
-                    # 방금 확인해서 창이 없는 걸 아는데, 다음 자리에서 또 6번 훑으면
-                    # 9초를 버린다 → 그 자리는 건너뛰고 슬롯을 끝낸다 (2026-08-28)
-                    try:
-                        if not hasattr(self, "_skip_win"):
-                            self._skip_win = {}
-                        self._skip_win[(fkey, id(slot))] = j + 1
-                    except Exception:
-                        pass
+                    _win_fail = True
                     try:    # 그 슬롯 화면을 통째로 남긴다 (덮어쓰지 않게 이름까지)
                         from PIL import ImageGrab as _IG
                         _bx = search_box(fkey, j, coord)
@@ -6381,6 +6357,11 @@ class App(tk.Tk):
                     except Exception:
                         pass
         self._user_focus_back(snap)                 # 곧바로 원래 창·커서로
+        if _win_fail:
+            # 확인창이 끝내 안 떴다 → **다음 좌표(오토 등)를 절대 누르지 않는다.**
+            # 이 슬롯은 여기서 끝 (2026-08-28 사용자 지시).
+            self.status.set(f"🖼 [{nm}] 좌표{j+1} 창이 안 떠서 이 슬롯 중단")
+            return "이미지없음"
         return "클릭"
 
     def _pace(self, fkey, t0, left, gap, done=0):
@@ -6594,7 +6575,6 @@ class App(tk.Tk):
         self._img_done = set()      # 실행할 때마다 '이미지 찾음' 표시를 비운다
         self._run_note = []         # 이번 실행에서 잘 안 된 것 (끝나고 요약)
         self._pace_now = 1.0        # 목표 시간에 맞추는 간격 배수 (1.0 = 그대로)
-        self._skip_win = {}         # '이미 넘어갔으니 창 확인은 건너뛰기' 표시
         key, title, icon = self._dgn2_info(fkey)
         nclk = self._grid_spec(fkey)["clicks"]
         stop = f"_{fkey}_stop"
@@ -6667,15 +6647,16 @@ class App(tk.Tk):
                 _avg = (DRAGON_GAP_MIN + DRAGON_GAP_MAX) / 2 + 0.15
                 _ex = sum((sum(v) / 2 if isinstance(v, (tuple, list)) else v)
                           for v in DRAGON_EXTRA.values())      # 2→3 같은 추가 대기
-                _est = int(len(targets) / 2 * (nclk * _avg + _ex + 1.15))
+                _est = int(len(targets) / 3 * (nclk * _avg + _ex + 1.15))
                 self.status.set(f"🐲 용던고고!!! — {len(targets)}슬롯 / 클릭 {_cl}회, "
-                                f"좌표1~3만 2슬롯 번갈아 · 좌표4부터 슬롯 완주 "
+                                f"좌표1~3만 3슬롯 번갈아 · 좌표4부터 슬롯 완주 "
                                 f"(간격 {DRAGON_GAP_MIN:.1f}~{DRAGON_GAP_MAX:.1f}초, "
                                 f"좌표2→3은 +{DRAGON_EXTRA[1][0]:.1f}~{DRAGON_EXTRA[1][1]:.1f}초, "
                                 f"약 {_est//60}분 {_est%60}초 예상)")
-                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
+                # 동시 3슬롯 · 슬롯 간격 1~2초 랜덤 (2026-08-28 사용자 지시)
+                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=3,
                                     gap=(DRAGON_GAP_MIN, DRAGON_GAP_MAX),
-                                    slot_gap=(0.8, 2.0), keep_order=True)   # 20% 단축
+                                    slot_gap=(1.0, 2.0), keep_order=True)
                 return
             if fkey in ("dragon", "knight"):
                 # F11(절전해제)이 끝난 시각부터 정해둔 시간 안에 전부 끝낸다.
