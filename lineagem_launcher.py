@@ -778,6 +778,38 @@ def grab_patch(fkey, j, coord):
         return None
 
 
+def no_path(fkey, j):
+    """**금지 그림** — 이게 보이면 그 자리를 누르지 않고 ESC 로 취소하고 슬롯을 끝낸다.
+
+    로지텍 매크로처럼 순서대로 누르다가, 재화를 쓰려는 화면이 뜨면 그냥 ESC 를 눌러
+    빠져나오는 방식 (2026-08-29 사용자 지시)."""
+    return os.path.join(IMG_DIR, f"{fkey}_{j+1:02d}_no.png")
+
+
+def has_no_img(fkey, j):
+    try:
+        return os.path.exists(no_path(fkey, j))
+    except Exception:
+        return False
+
+
+def find_no_img(fkey, j, coord):
+    """금지 그림이 지금 보이나 — 보이면 (x, y, 점수), 아니면 (None, None, 최고점수)."""
+    q = no_path(fkey, j)
+    if not os.path.exists(q):
+        return None, None, 0.0
+    box = search_box(fkey, j, coord)
+    return _find_one(fkey, j, coord, q, box)
+
+
+def press_esc():
+    """ESC 한 번 — 재화 쓰는 창을 취소한다."""
+    try:
+        pyautogui.press("esc")
+        return True
+    except Exception:
+        return False
+
 def zone_path(fkey, j):
     """성공한 자리들이 모인 구역 (이 컴퓨터 전용 — 창 배치가 다를 수 있으므로)."""
     return os.path.join(IMG_DIR_MINE, f"{fkey}_{j+1:02d}_zone.json")
@@ -6020,6 +6052,52 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"🖼 저장 실패: {e}")
 
+    def _grab_no_image(self, fkey, idx, j, btn=None):
+        """⛔ 금지 그림 지정 — 이게 보이면 누르지 않고 ESC 로 취소하고 슬롯을 끝낸다.
+        (예: '다이아로 복구하시겠습니까?' 같은 재화 쓰는 창)"""
+        self._no_target = (fkey, idx, j, btn)
+        self.status.set(f"⛔ 좌표{j+1} — '이게 뜨면 취소할 그림'을 드래그하세요 "
+                        f"(재화 쓰는 창 등 · ESC 취소)")
+        for w in self._section_wins():
+            try: w.withdraw()
+            except Exception: pass
+        self.withdraw()
+        self.after(250, lambda: _PotionAreaOverlay(self, self._on_no_image))
+
+    def _on_no_image(self, x, y, w, h):
+        self.deiconify()
+        for wn in self._section_wins():
+            try: wn.deiconify()
+            except Exception: pass
+        tgt = getattr(self, "_no_target", None)
+        if not tgt:
+            return
+        fkey, idx, j, btn = tgt
+        if w < 6 or h < 6:
+            self.status.set("⛔ 너무 작습니다 — 다시 드래그해주세요"); return
+        try:
+            from PIL import ImageGrab
+            os.makedirs(IMG_DIR, exist_ok=True)
+            im = ImageGrab.grab(bbox=(x, y, x + w, y + h),
+                                all_screens=True).convert("RGB")
+            im.save(no_path(fkey, j))
+            if btn and btn.winfo_exists():
+                btn.config(text="⛔있음", bg="#c0392b")
+            self.status.set(f"⛔ 좌표{j+1} 금지 그림 저장 ({w}×{h}) — "
+                            f"이게 보이면 누르지 않고 ESC 로 취소합니다")
+        except Exception as e:
+            self.status.set(f"⛔ 저장 실패: {e}")
+
+    def _del_no_image(self, fkey, j, btn=None):
+        """금지 그림 지우기 (오른쪽 클릭)."""
+        try:
+            os.remove(no_path(fkey, j))
+            if btn and btn.winfo_exists():
+                btn.config(text="⛔", bg="#5d6d7e")
+            self.status.set(f"⛔ 좌표{j+1} 금지 그림 삭제")
+        except Exception as e:
+            self.status.set(f"⛔ 삭제 실패: {e}")
+
     def _grab_click_area(self, fkey, idx, j, btn=None):
         """그 그림을 찾을 '범위'를 화면에서 드래그해 정한다.
         드래그한 자리가 어느 클라 창 안인지 보고, 그 창 기준 위치로 저장한다 →
@@ -6243,6 +6321,18 @@ class App(tk.Tk):
             self._click_log(fkey, j, coord, slot, "마우스올림")
             move_at(*coord)                   # 커서는 그대로, 그 자리에 올림 신호만
             return "마우스올림"
+        # ⛔ 금지 그림 — 이게 보이면 **누르지 않고 ESC 로 취소**하고 이 슬롯을 끝낸다.
+        # (재화를 쓰려는 창이 떴을 때 빠져나오는 안전장치, 2026-08-29 사용자 지시)
+        if has_no_img(fkey, j) and coord:
+            _nm0 = (slot or {}).get("name", "?")
+            _nx, _ny, _ns = find_no_img(fkey, j, coord)
+            if _nx is not None:
+                press_esc()
+                click_log(f"{fkey} [{_nm0}] 좌표{j+1} ⛔ 금지 그림 보임 "
+                          f"(일치도 {_ns:.2f}) → ESC 로 취소하고 이 슬롯 중단")
+                self.status.set(f"⛔ [{_nm0}] 좌표{j+1} — 재화 쓰는 창이라 ESC 취소")
+                self._note(fkey, _nm0, f"좌표{j+1} ⛔ 금지 그림 → ESC 취소")
+                return "이미지없음"          # 이 슬롯만 끝, 다른 슬롯은 계속
         n = self._slot_wheel(slot, j) if slot else 0
         if not n and j in WHEEL_UP_INDICES.get(fkey, ()):
             n = WHEEL_UP_NOTCH                # 슬롯 설정이 없으면 기본값
@@ -11514,6 +11604,18 @@ class App(tk.Tk):
                 if _has:      # 오른쪽 클릭 = 그 그림 지우기
                     ib.bind("<Button-3>", lambda _e, c=j, f=fkey, b_=ib:
                             self._del_click_image(f, c, b_))
+                # ⛔ — 이 그림이 보이면 누르지 않고 ESC 로 취소하고 그 슬롯을 끝낸다
+                #      (재화를 쓰려는 창을 만났을 때 빠져나오는 안전장치)
+                _hasn = has_no_img(fkey, j)
+                nb = tk.Button(cc, text=("⛔있음" if _hasn else "⛔"),
+                               font=("맑은 고딕", 7), width=4, pady=0,
+                               bg=("#c0392b" if _hasn else "#5d6d7e"), fg="white")
+                nb.config(command=lambda x=idx, c=j, f=fkey, b_=nb:
+                          self._grab_no_image(f, x, c, b_))
+                nb.pack(pady=(1, 0))
+                if _hasn:     # 오른쪽 클릭 = 금지 그림 지우기
+                    nb.bind("<Button-3>", lambda _e, c=j, f=fkey, b_=nb:
+                            self._del_no_image(f, c, b_))
                 # 📐 — 그 그림을 '어디에서 찾을지' 범위를 드래그로 정한다.
                 #      클라 창 기준으로 저장돼 16슬롯 전부에 그대로 적용된다.
                 _hasa = area_is_set(fkey, j)
