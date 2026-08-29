@@ -182,8 +182,8 @@ def dragon_extra(j):
 ITEM_SWIPE_DIST    = 250   # 아이템정리 클릭3: 누른 채 위로 쓸어올리는 거리(px) — 클라이언트 창 안에 있어야 함
 FIX_CLICKS         = 8     # 🩹 복구 — 슬롯당 좌표 8개 (안 쓰는 칸은 비워두면 건너뜀)
 FIX_SLOTS          = 16    # 🩹 복구 — 슬롯 16개
-FIX_GAP_MIN        = 0.70  # 🩹 복구 — 좌표 간 간격(초)
-FIX_GAP_MAX        = 1.90
+FIX_GAP_MIN        = 0.30  # 🩹 복구 — 좌표 간 간격(초). 손으로 3초 안에 하는 작업이라 빠르게
+FIX_GAP_MAX        = 0.60
 TJ_CLICKS          = 3     # TJ성공!! 슬롯당 좌표 수
 TJ_MIN             = 0.81  # TJ성공!! 좌표 간 클릭 간격(초) — 10~20% 완화(0.7~1.2 → 0.77~1.44)
 TJ_MAX             = 1.51
@@ -754,6 +754,7 @@ RECLICK_HOLD = [(0.18, 0.30), (0.35, 0.50), (0.50, 0.70), (0.70, 0.95)]  # 갈�
 # 누른 뒤 '창이 떴나' 보기까지 기다리는 시간 — 점점 길게 준다.
 # 마름모가 캐릭터에서 멀면 눌러도 바로 창이 안 뜨고 **걸어가는 시간**이 필요하다
 # (2026-08-28 실측: 실패한 두 슬롯은 마름모가 창 왼쪽·위 끝에 있었다 = 먼 거리).
+CHECK_TRIES = 2      # 👁 확인만 자리는 짧게 2번만 본다 (0.25~0.45초 간격)
 RECLICK_WAIT = [2.0, 3.0]        # 확인까지 2초 → 3초 (전 28초는 너무 느렸다)
 DRIFT_MAX  = 40           # 그림이 이만큼(px) 안에서 움직인 건 '같은 것'으로 본다.
                           # 더 멀면 다른 마름모라 겨냥을 옮기지 않는다 (엉뚱한 층 방지)
@@ -6435,7 +6436,9 @@ class App(tk.Tk):
             # 못 찾으면 잠깐 기다렸다 다시 본다 (최대 IMG_TRIES 번, 2026-08-27)
             ix = iy = None
             sc = 0.0
-            for _t in range(IMG_TRIES):
+            _chk_only = is_check_only(fkey, j)
+            _tries = (CHECK_TRIES if _chk_only else IMG_TRIES)
+            for _t in range(_tries):
                 ix, iy, sc = find_image(fkey, j, coord)
                 if ix is not None and sc < CONFIRM_MIN:
                     # 점수가 낮으면 **한 번 더 보고 같은 자리인지 확인**한다.
@@ -6466,11 +6469,12 @@ class App(tk.Tk):
                         self.status.set(f"🖼 [{nm}] 좌표{j+1} 창이 이미 떴음 — 넘어감")
                         _done.add((fkey, _slot_id))
                         return "이미열림"
-                if _t < IMG_TRIES - 1:
+                if _t < _tries - 1:
                     self.status.set(f"🖼 [{nm}] 좌표{j+1} "
                                     f"{'창이 뜨기를' if _own_coord else '그림을'} "
-                                    f"기다리는 중… ({_t+1}/{IMG_TRIES}, 지금 {sc:.2f})")
-                    time.sleep(random.uniform(1.0, 1.5))
+                                    f"기다리는 중… ({_t+1}/{_tries}, 지금 {sc:.2f})")
+                    time.sleep(random.uniform(0.25, 0.45) if _chk_only
+                               else random.uniform(1.0, 1.5))
             if ix is not None and is_check_only(fkey, j):
                 # 👁 확인만 — 그림이 보였으니 **누르지 않고** 다음 좌표로 넘어간다
                 click_log(f"{fkey} [{nm}] 좌표{j+1} 👁 확인만 — 그림 보임 "
@@ -6483,7 +6487,7 @@ class App(tk.Tk):
                 _rc = client_rect_at(coord[0], coord[1])
                 click_log(f"{fkey} [{nm}] 좌표{j+1} 이미지 못 찾음 "
                           f"(최고 일치도 {sc:.2f} / 기준 {img_thr(fkey, j):.2f}, "
-                          f"{IMG_TRIES}번 시도, 그림 {len(img_list(fkey, j))}장) "
+                          f"{_tries}번 시도, 그림 {len(img_list(fkey, j))}장) "
                           f"· 훑은 범위 {_bx[2]-_bx[0]}×{_bx[3]-_bx[1]} @{_bx[0]},{_bx[1]} "
                           + ("" if _rc else "· ⚠ 리니지M 창을 못 찾아 좌표 주변만 훑음 ")
                           + f"→ 이 슬롯 여기서 중단 "
@@ -7032,7 +7036,12 @@ class App(tk.Tk):
                         self.status.set(f"{icon} [{name}] {_act}{j+1}...")
                         if fkey == "coupon":
                             self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
-                    if fkey in ("dragon", "knight"):
+                    if fkey == "fix":
+                        # 🩹 복구는 **빠르게** — 사용자가 손으로 3초 안에 끝내는 작업이라
+                        # 느리면 쓸모가 없다 (2026-08-29 사용자 지시)
+                        self._wait_gap(stop, name, j,
+                                       random.uniform(FIX_GAP_MIN, FIX_GAP_MAX))
+                    elif fkey in ("dragon", "knight"):
                         # 정해둔 범위에서 랜덤 (좌표2→3은 더 쉬어준다)
                         _left -= 1
                         _mn, _mx = ((KNIGHT_GAP_MIN, KNIGHT_GAP_MAX) if fkey == "knight"
@@ -7043,8 +7052,8 @@ class App(tk.Tk):
                         if fkey == "eventshop" and j == 0:
                             # 이벤트상점: 클릭1 → 4초 × 1.15~1.30 랜덤 증가 후 클릭2
                             time.sleep(4.0 * random.uniform(1.15, 1.30))
-                        elif fkey in ("dragon", "knight"):
-                            pass                 # 아래에서 이미 쉬었다
+                        elif fkey in ("dragon", "knight", "fix"):
+                            pass                 # 위에서 이미 쉬었다
                         else:
                             _cg = self._slot_gap(slot, j)    # 칸에 적어둔 초가 있으면 그걸로
                             if _cg is not None:
