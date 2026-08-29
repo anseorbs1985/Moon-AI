@@ -754,6 +754,16 @@ RECLICK_HOLD = [(0.18, 0.30), (0.35, 0.50), (0.50, 0.70), (0.70, 0.95)]  # 갈�
 # 누른 뒤 '창이 떴나' 보기까지 기다리는 시간 — 점점 길게 준다.
 # 마름모가 캐릭터에서 멀면 눌러도 바로 창이 안 뜨고 **걸어가는 시간**이 필요하다
 # (2026-08-28 실측: 실패한 두 슬롯은 마름모가 창 왼쪽·위 끝에 있었다 = 먼 거리).
+# 실행 버튼을 눌렀을 때 첫 클릭까지의 뜸 — 짧을수록 빠릿하다
+# (2026-08-29 사용자 지시: 1.0~2.0초는 너무 느렸다)
+# 이 런처들은 실행할 때 **최소화하지 않고 맨 뒤로만** 보낸다.
+# 끝나면 앞으로 다시 올라온다 (2026-08-29 사용자 지시 — 복구는 바로 다시 눌러야 하므로)
+# 매일매일 스케줄 — 이 번호까지만 웨이브로 겹쳐 돌리고, 뒤는 한 슬롯씩 순서대로
+# (2026-08-29 사용자 지시: 겹치니 다른 창에 가려 실행이 안 되는 일이 있었다)
+SCHED_WAVE_TO = 12
+BACK_NOT_MIN = ("fix",)
+START_PAUSE_MIN = 0.20
+START_PAUSE_MAX = 0.45
 CHECK_TRIES = 2      # 👁 확인만 자리는 짧게 2번만 본다 (0.25~0.45초 간격)
 ESC_TIMES   = 2      # 취소할 때 ESC 를 몇 번 누를지 (창이 두 겹이라 두 번, 2026-08-29)
 RECLICK_WAIT = [2.0, 3.0]        # 확인까지 2초 → 3초 (전 28초는 너무 느렸다)
@@ -5882,7 +5892,12 @@ class App(tk.Tk):
         setattr(self, f"_{fkey}_stop", False)
         self._set_btn(f"btn_{fkey}_run", state="disabled")
         self._set_btn(f"btn_{fkey}_stop", state="normal")
-        self._minimize_all()
+        if fkey in BACK_NOT_MIN:
+            # 🩹 복구는 **최소화하지 않고 맨 뒤로만** 보낸다 (2026-08-29 사용자 지시).
+            # 최소화하면 다시 꺼내는 데 시간이 걸려 버퍼링처럼 느껴진다.
+            self._send_behind_only()
+        else:
+            self._minimize_all()
         self.after(300, lambda: threading.Thread(
             target=self._run_task,
             args=(title, lambda: self._run_dgn2(fkey, sel_list=sel_list)), daemon=True).start())
@@ -7101,7 +7116,10 @@ class App(tk.Tk):
             self._set_btn(f"btn_{fkey}_run", state="normal")
             self._set_btn(f"btn_{fkey}_stop", state="disabled")
             self.after(0, lambda f=fkey, t=title: self._run_summary(f, t))
-            self.after(0, self._restore_back)
+            if fkey in BACK_NOT_MIN:
+                self.after(0, self._restore_front)      # 복구는 끝나면 앞으로
+            else:
+                self.after(0, self._restore_back)
 
     def _build_past(self, parent):
         tk.Label(parent, text=f"과거의말하는섬  (3번 클릭 / {PAST_INTERVAL}초 간격)",
@@ -9228,7 +9246,7 @@ class App(tk.Tk):
             else:
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
-                # 1번부터 번호 순서대로 (2026-08-28 사용자 지시 — 섞지 않는다)
+                random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
             for si, slot in targets:
                 if self._item_stop: break
                 name   = slot.get("name", f"#{si+1}")
@@ -14061,11 +14079,20 @@ class App(tk.Tk):
             else:
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
-                random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
+                # 1번부터 번호 순서대로 — 섞지 않는다 (2026-08-28 사용자 지시)
             if slot_idx is None and len(targets) > 1:
-                # 2슬롯씩 번갈아(웨이브). '마우스 이동(좌표2) → 클릭2(좌표3)'는
-                # 한 묶음으로 처리해 사이에 다른 슬롯이 끼지 못하게 한다.
-                self._run_sched_wave(targets)
+                # 앞쪽(1~SCHED_WAVE_TO 번)만 웨이브로 겹쳐 돌리고,
+                # 뒤쪽은 **한 슬롯씩 순서대로** 돈다 (2026-08-29 사용자 지시 —
+                # 웨이브로 겹치니 다른 창에 가려 실행이 안 되는 일이 있었다).
+                _wave = [(i, sl) for i, sl in targets if i + 1 <= SCHED_WAVE_TO]
+                _tail = [(i, sl) for i, sl in targets if i + 1 > SCHED_WAVE_TO]
+                if len(_wave) > 1:
+                    self._run_sched_wave(_wave)
+                elif _wave:
+                    _tail = _wave + _tail
+                if _tail and not self._sched_stop:
+                    self.status.set(f"📅 스케줄 — 나머지 {len(_tail)}슬롯은 순서대로")
+                    self._run_sched_seq(_tail)
                 self.status.set("✔ 매일매일 스케줄 완료!")
                 return
             for si, slot in targets:
@@ -14101,13 +14128,51 @@ class App(tk.Tk):
             self._set_btn("btn_sched_run", state="normal", bg="#16a085", text="▶  실행")
             self._set_btn("btn_sched_stop", state="disabled")
 
+    def _run_sched_seq(self, targets):
+        """뒤쪽 슬롯은 **한 슬롯씩 순서대로** 돈다 (겹치지 않게).
+
+        웨이브로 겹쳐 돌리면 다른 창에 가려 클릭이 안 먹는 일이 있어서,
+        13번부터는 하나가 끝나야 다음이 시작된다 (2026-08-29 사용자 지시).
+        묶음 규칙은 그대로 — 마우스 이동(좌표2) → 클릭2(좌표3) 사이에 아무것도 안 낀다."""
+        for si, slot in targets:
+            if self._sched_stop:
+                break
+            name = slot.get("name", f"#{si+1}")
+            coords = slot.get("coords", [None] * SCHED_CLICKS)
+            if not self._wait_mouse_idle("_sched_stop"):
+                return
+            _snap = self._user_focus_snap()
+            if coords[0]:
+                self.status.set(f"📅 [{name}] #{si+1:02d} 클릭1... (순서대로)")
+                self._wait_user_free("_sched_stop")
+                click_at(*coords[0])
+                time.sleep(random.uniform(0.1, 0.6)
+                           + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+            if self._sched_stop:
+                break
+            if len(coords) > 1 and coords[1]:
+                self.status.set(f"📅 [{name}] #{si+1:02d} 마우스 이동...")
+                self._wait_user_free("_sched_stop")
+                move_at(*coords[1])
+                time.sleep(random.uniform(0.1, 0.6)
+                           + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+            if self._sched_stop:
+                break
+            if len(coords) > 2 and coords[2]:
+                self.status.set(f"📅 [{name}] #{si+1:02d} 클릭2...")
+                self._wait_user_free("_sched_stop")
+                click_at(*coords[2])
+            self._user_focus_back(_snap)
+            if self._sched_stop:
+                break
+            time.sleep(random.uniform(1.38, 1.80))     # 슬롯 사이
     def _run_sched_wave(self, targets):
         """스케줄 3슬롯 번갈아 — 한 슬롯이 기다리는 동안 다른 슬롯을 진행한다.
         '마우스 이동 → 클릭2'는 반드시 붙여서 한 묶음으로 처리한다
         (사이에 다른 클릭이 끼면 이동해둔 자리가 풀린다)."""
         LANES = 3        # 동시 3슬롯 (2026-08-28 사용자 지시 — 시간이 촉박해서)
         state = {si: {"slot": sl, "u": 0, "due": time.time()} for si, sl in targets}
-        order = [si for si, _ in targets]
+        order = sorted(si for si, _ in targets)   # 1번부터 순서대로 투입
         active, waiting = order[:LANES], order[LANES:]
         last, done = None, 0
         self.status.set(f"📅 스케줄 번갈아 실행 — 동시 {LANES}슬롯 · 1번부터 순서대로 ({len(targets)}슬롯)")
@@ -14404,6 +14469,40 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _send_behind_only(self):
+        """최소화하지 않고 **맨 뒤로만** 보낸다 (런처·서브창·클로드).
+        복구처럼 끝나고 바로 다시 눌러야 하는 작업용 (2026-08-29 사용자 지시)."""
+        try:
+            for w in self._section_wins():
+                try:
+                    w.attributes("-topmost", False)
+                    w.lower()
+                except Exception:
+                    pass
+            self._send_to_back()
+        except Exception:
+            pass
+        try:
+            self._minimize_claude()     # 클로드는 항상 위라 그대로 내린다
+        except Exception:
+            pass
+
+    def _restore_front(self):
+        """끝나면 **앞으로** 올린다 (맨 뒤로 보냈던 것만)."""
+        try:
+            self._quiet_restore = False
+            self.deiconify()
+            self.lift()
+            self.attributes("-topmost", True)
+            self.after(400, lambda: self.attributes("-topmost", False))
+            for w in self._section_wins():
+                try:
+                    w.deiconify(); w.lift()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def _restore_back_quiet(self):
         """완료 후 복원 — 앞으로 띄우지 않고 곧바로 맨 뒤로 되살린다 (모든 실행 공통)."""
         try:
@@ -14418,9 +14517,9 @@ class App(tk.Tk):
         except Exception:
             pass
         self._send_to_back()
-        self.after(200, self._send_to_back)
-        self.after(600, self._send_to_back)
-        self.after(1500, lambda: setattr(self, "_quiet_restore", False))
+        self.after(120, self._send_to_back)
+        self.after(320, self._send_to_back)
+        self.after(700, lambda: setattr(self, "_quiet_restore", False))
 
     def _show_done(self, text="완료"):
         """작업이 끝났음을 왼쪽 아래에 큰 빨간 글씨로 1시간 동안 알린다."""
@@ -15112,7 +15211,8 @@ class App(tk.Tk):
             self._busy_task = None
 
     def _start_pause(self):
-        """(2026-08-09) 실행 버튼을 눌러도 곧바로 클릭하지 않고 1~2초 뜸을 들인다.
+        """(2026-08-09) 실행 버튼을 눌러도 곧바로 클릭하지 않고 잠깐 뜸을 들인다.
+        (2026-08-29 사용자 지시로 1~2초 → 0.2~0.45초 — "런처 실행이 너무 느리다")
         바로 눌리면 어색하고, 창이 아직 정리되기 전에 클릭이 들어갈 수도 있어서.
         + 스케줄·반복으로 저절로 시작될 때 클로드나 런처가 앞에 떠 있으면 클릭을
           가리므로, 무엇이 됐든 먼저 내리고(최소화·맨뒤로) 나서 시작한다."""
@@ -15124,7 +15224,7 @@ class App(tk.Tk):
         if now - getattr(self, "_last_start_pause", 0) < 5:
             return                      # 단독실행→본체처럼 겹쳐 불릴 땐 한 번만 쉰다
         self._last_start_pause = now
-        _d = random.uniform(1.0, 2.0)
+        _d = random.uniform(START_PAUSE_MIN, START_PAUSE_MAX)
         _t0 = now
         while time.time() - _t0 < _d:
             if getattr(self, "_stop_flag", False):
