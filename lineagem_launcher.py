@@ -7236,6 +7236,32 @@ class App(tk.Tk):
             pass
         self.after(800, lambda: setattr(self, "_quiet_restore", False))
 
+    def _fix_paid_path(self):
+        """'이 슬롯은 다야(재화)를 써야 복구된다' 표시 — 이 컴퓨터에만 저장."""
+        return os.path.join(LOCAL_DATA, "fix_paid.json")
+
+    def _fix_paid_load(self):
+        try:
+            with open(self._fix_paid_path(), encoding="utf-8") as f:
+                return set(int(x) for x in (json.load(f) or {}).get("slots") or [])
+        except Exception:
+            return set()
+
+    def _fix_paid_save(self, sl):
+        try:
+            os.makedirs(LOCAL_DATA, exist_ok=True)
+            with open(self._fix_paid_path(), "w", encoding="utf-8") as f:
+                json.dump({"slots": sorted(int(x) for x in sl)}, f)
+        except Exception:
+            pass
+
+    def _fix_paid_mark(self, si, on=True):
+        """다야를 써야 하는 슬롯으로 표시(초록)하거나 해제한다."""
+        cur = self._fix_paid_load()
+        cur.add(int(si)) if on else cur.discard(int(si))
+        self._fix_paid_save(cur)
+        self._warn_refresh()
+
     def _warn_refresh(self):
         box = getattr(self, "_warn_rows", None)
         if not box or not box.winfo_exists():
@@ -7243,6 +7269,9 @@ class App(tk.Tk):
         for w in box.winfo_children():
             w.destroy()
         slots = self._warn_load()
+        _paidset = self._fix_paid_load() & set(slots)   # 목록에 없는 표시는 버린다
+        if _paidset != self._fix_paid_load():
+            self._fix_paid_save(_paidset)
         hdr = getattr(self, "_warn_hdr", None)   # 개수 표시는 쓰지 않는다 (사용자 지시)
         if hdr and hdr.winfo_exists():
             hdr.pack_forget()
@@ -7250,9 +7279,18 @@ class App(tk.Tk):
             row = tk.Frame(box); row.pack(fill="x", pady=1)
             # 누르면 그 슬롯만 복구를 돌린다 (2026-08-29 사용자 요청).
             # 좌표4 의 '무료' 확인을 통과할 때만 진행되므로 재화는 쓰이지 않는다.
-            tk.Button(row, text=f"복구해야함 {si:02d} ▶", font=("맑은 고딕", 9, "bold"),
-                      fg="white", bg="#c0392b", activebackground="#922b21",
-                      width=13, anchor="w", padx=3, pady=0, cursor="hand2",
+            # 다야(재화)를 써야 하는 슬롯은 **초록** — 무료로 안 되는 것을 한눈에
+            # (2026-08-29 사용자 요청). 무료로 되는 것은 빨강 그대로.
+            _paid = si in _paidset
+            tk.Button(row,
+                      text=(f"💎 다야!! {si:02d}" if _paid
+                            else f"복구해야함 {si:02d} ▶"),
+                      font=("맑은 고딕", 11 if _paid else 9, "bold"),
+                      fg=("#fff9c4" if _paid else "white"),      # 초록 위 노란 글씨 = 잘 보임
+                      bg=("#1e8449" if _paid else "#c0392b"),
+                      activebackground=("#186a3b" if _paid else "#922b21"),
+                      width=(11 if _paid else 13), anchor="w", padx=3, pady=0,
+                      cursor="hand2",
                       command=lambda x=si: self._run_fix_slot(x)).pack(side="left")
             tk.Button(row, text="✕", font=("맑은 고딕", 8, "bold"), width=2, pady=0,
                       bg="#7f8c8d", fg="white",
@@ -7296,10 +7334,22 @@ class App(tk.Tk):
                                 f"([🔆 절전해제] → [📷 경고영역 지정])")
                 return
             if int(si) not in set(hit):
+                self._fix_paid_mark(int(si), False)     # 무료로 됐으니 표시 해제
                 self._warn_remove(int(si))
                 click_log(f"fix #{si:02d} 복구 확인됨 — 화면에서 경고가 사라져 목록에서 지움")
                 self.status.set(f"✅ 복구 #{si:02d} 확인 — 경고가 사라져 목록에서 지웠습니다")
                 return
+            # 아직 남아 있다 — '무료' 확인에서 멈춘 것이면 **다야를 써야 하는 슬롯**이다
+            try:
+                _nt = getattr(self, "_run_note", None) or []
+                if any("👁 확인" in m for _n, m in _nt):
+                    self._fix_paid_mark(int(si), True)
+                    click_log(f"fix #{si:02d} '무료'가 아니라 취소 — 다야 필요로 표시(초록)")
+                    self.status.set(f"💎 복구 #{si:02d} — 무료가 아니라 취소했습니다. "
+                                    f"다야를 써야 하는 슬롯으로 초록 표시했습니다")
+                    return
+            except Exception:
+                pass
             self.after(2000, lambda: self._fix_verify(si, tries - 1))
         except Exception as e:
             self.status.set(f"🩹 복구 #{si:02d} 확인 실패: {e}")
