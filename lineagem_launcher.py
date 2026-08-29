@@ -7319,6 +7319,20 @@ class App(tk.Tk):
                 return
         except Exception:
             pass
+        # ── 누르기 전에 **십자가가 아직 있는지** 확인한다 (2026-08-29 사용자 지시) ──
+        # 없으면 이미 복구된 것이므로 **아무것도 누르지 않고** 목록에서 지운다.
+        # (예전엔 십자가가 없는데도 좌표1부터 눌러 엉뚱한 곳을 찍었다)
+        try:
+            hit = self._check_hits()
+            if hit is not None and int(si) not in set(hit):
+                self._fix_paid_mark(int(si), False)
+                self._warn_remove(int(si))
+                click_log(f"fix #{si:02d} 십자가가 없어 실행 취소 — 이미 복구된 것으로 보고 지움")
+                self.status.set(f"✖ 복구 #{si:02d} — 십자가가 없어 실행하지 않았습니다 "
+                                f"(이미 복구됨 · 목록에서 지웠습니다)")
+                return
+        except Exception:
+            pass
         self.status.set(f"🩹 복구 #{si:02d} 실행 — '무료'가 아니면 그 자리에서 멈춥니다")
         self._start_dgn2("fix", sel_list=[idx])
         # 끝난 뒤 **화면을 다시 봐서** 경고가 사라졌는지 확인하고 지운다
