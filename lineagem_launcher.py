@@ -778,6 +778,32 @@ def grab_patch(fkey, j, coord):
         return None
 
 
+def check_path(fkey, j):
+    """**확인만** 표시 — 그 자리는 누르지 않고 그림이 보이는지만 본다.
+
+    예: 복구 창의 '무료' 글자. 그 자리에 숫자(재화)가 들어가면 그림이 안 맞으므로
+    **다음 좌표를 누르지 않고 그 슬롯을 끝낸다** (2026-08-29 사용자 지시)."""
+    return os.path.join(IMG_DIR, f"{fkey}_{j+1:02d}_check.json")
+
+
+def is_check_only(fkey, j):
+    try:
+        return os.path.exists(check_path(fkey, j))
+    except Exception:
+        return False
+
+
+def set_check_only(fkey, j, on):
+    try:
+        if on:
+            os.makedirs(IMG_DIR, exist_ok=True)
+            with open(check_path(fkey, j), "w", encoding="utf-8") as f:
+                json.dump({"check_only": True}, f)
+        else:
+            os.remove(check_path(fkey, j))
+    except Exception:
+        pass
+
 def no_path(fkey, j):
     """**금지 그림** — 이게 보이면 그 자리를 누르지 않고 ESC 로 취소하고 슬롯을 끝낸다.
 
@@ -6053,6 +6079,20 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"🖼 저장 실패: {e}")
 
+    def _toggle_check_only(self, fkey, j, btn=None):
+        """👁 확인만 켜기/끄기 — 그 자리는 누르지 않고 그림 확인만 한다.
+        보이면 통과, 안 보이면 그 슬롯 중단 (예: 복구 창의 '무료' 글자)."""
+        on = not is_check_only(fkey, j)
+        set_check_only(fkey, j, on)
+        if btn and btn.winfo_exists():
+            btn.config(text=("👁확인만" if on else "👁"),
+                       bg=("#117a65" if on else "#5d6d7e"))
+        if on:
+            self.status.set(f"👁 좌표{j+1} — 이 자리는 **누르지 않고** 그림 확인만 합니다. "
+                            f"그림이 안 보이면 그 슬롯을 끝냅니다")
+        else:
+            self.status.set(f"👁 좌표{j+1} — 확인만 해제 (평소대로 누릅니다)")
+
     def _grab_no_image(self, fkey, idx, j, btn=None):
         """⛔ 금지 그림 지정 — 이게 보이면 누르지 않고 ESC 로 취소하고 슬롯을 끝낸다.
         (예: '다이아로 복구하시겠습니까?' 같은 재화 쓰는 창)"""
@@ -6431,6 +6471,12 @@ class App(tk.Tk):
                                     f"{'창이 뜨기를' if _own_coord else '그림을'} "
                                     f"기다리는 중… ({_t+1}/{IMG_TRIES}, 지금 {sc:.2f})")
                     time.sleep(random.uniform(1.0, 1.5))
+            if ix is not None and is_check_only(fkey, j):
+                # 👁 확인만 — 그림이 보였으니 **누르지 않고** 다음 좌표로 넘어간다
+                click_log(f"{fkey} [{nm}] 좌표{j+1} 👁 확인만 — 그림 보임 "
+                          f"(일치도 {sc:.2f}) → 누르지 않고 통과")
+                self.status.set(f"👁 [{nm}] 좌표{j+1} 확인 통과 ({sc:.2f})")
+                return "확인"
             if ix is None:
                 save_miss_shot(fkey, j, coord)      # 뭘 봤는지 사진으로 남긴다
                 _bx = search_box(fkey, j, coord)
@@ -6447,8 +6493,10 @@ class App(tk.Tk):
                 self.status.set(f"🖼 [{nm}] 좌표{j+1} 이미지 없음 — 이 슬롯 중단 "
                                 f"(일치도 {sc:.2f})")
                 self._note(fkey, nm,
-                           (f"좌표{j+1} 창이 안 뜸 (최고 {sc:.2f})" if _own_coord
-                            else f"좌표{j+1} 그림 못 찾음 (최고 {sc:.2f})"))
+                           (f"좌표{j+1} 👁 확인 실패 — 다른 화면 (최고 {sc:.2f})"
+                            if is_check_only(fkey, j) else
+                            (f"좌표{j+1} 창이 안 뜸 (최고 {sc:.2f})" if _own_coord
+                             else f"좌표{j+1} 그림 못 찾음 (최고 {sc:.2f})")))
                 return "이미지없음"
             # 좌표도 함께 등록돼 있으면 → 그림은 '창이 떴는지 확인'용.
             #   그림이 보일 때까지 기다렸다가 **등록한 좌표**를 누른다.
@@ -11605,6 +11653,15 @@ class App(tk.Tk):
                 if _has:      # 오른쪽 클릭 = 그 그림 지우기
                     ib.bind("<Button-3>", lambda _e, c=j, f=fkey, b_=ib:
                             self._del_click_image(f, c, b_))
+                # 👁 — '확인만' : 그 자리를 누르지 않고 그림이 보이는지만 본다.
+                #      보이면 통과, 안 보이면 그 슬롯 중단 (예: '무료' 글자 확인)
+                _chk = is_check_only(fkey, j)
+                kb = tk.Button(cc, text=("👁확인만" if _chk else "👁"),
+                               font=("맑은 고딕", 7), width=4, pady=0,
+                               bg=("#117a65" if _chk else "#5d6d7e"), fg="white")
+                kb.config(command=lambda c=j, f=fkey, b_=kb:
+                          self._toggle_check_only(f, c, b_))
+                kb.pack(pady=(1, 0))
                 # ⛔ — 이 그림이 보이면 누르지 않고 ESC 로 취소하고 그 슬롯을 끝낸다
                 #      (재화를 쓰려는 창을 만났을 때 빠져나오는 안전장치)
                 _hasn = has_no_img(fkey, j)
