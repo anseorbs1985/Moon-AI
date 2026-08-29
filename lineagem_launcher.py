@@ -769,6 +769,7 @@ FIX_WATCH_N = 30
 SLEEP_WAKE = ("fix",)
 SLEEP_WAKE_KEY = "z"
 SLEEP_MATCH = 0.60      # 절전 화면 판정 기준 (실측 16클라 0.73~1.00)
+SLEEP_WAKE_WAIT = (1.2, 1.8)   # Z 를 누른 뒤 화면이 돌아올 때까지 기다리는 시간
 BACK_NOT_MIN = ("fix",)
 START_PAUSE_MIN = 0.20
 START_PAUSE_MAX = 0.45
@@ -7524,12 +7525,39 @@ class App(tk.Tk):
                 return
         except Exception:
             pass
-        # ── 누르기 전에 **십자가가 아직 있는지** 확인한다 (2026-08-29 사용자 지시) ──
+        # ── ① 절전이면 **먼저 Z 를 눌러 깨운다** (2026-08-29 — 순서가 중요) ──
+        # 절전 화면이 십자가를 가려서, 깨우기 전에 십자가를 보면 '없다'고 판단해
+        # 아무것도 못 하고 목록만 지워버렸다. 그래서 깨우기가 맨 앞이다.
+        _was_sleep = False
+        try:
+            _anc = slot_anchor((self.cfg.get("fix_slots") or [])[idx])
+            if _anc and has_sleep_img("fix"):
+                _sx, _sy, _ss = find_sleep_img("fix", _anc)
+                if _sx is not None:
+                    self._focus_client_at(_anc)
+                    time.sleep(random.uniform(0.20, 0.35))
+                    press_key(SLEEP_WAKE_KEY)
+                    click_log(f"fix #{si:02d} 절전 상태 (일치도 {_ss:.2f}) → "
+                              f"'{SLEEP_WAKE_KEY.upper()}' 눌러 깨움 (십자가 확인 전)")
+                    self.status.set(f"😴 복구 #{si:02d} 절전 — "
+                                    f"{SLEEP_WAKE_KEY.upper()} 눌러 깨우는 중…")
+                    time.sleep(random.uniform(SLEEP_WAKE_WAIT[0], SLEEP_WAKE_WAIT[1]))
+                    _was_sleep = True
+        except Exception:
+            pass
+        # ── ② 깨운 뒤에 십자가가 있는지 확인한다 ──
         # 없으면 이미 복구된 것이므로 **아무것도 누르지 않고** 목록에서 지운다.
-        # (예전엔 십자가가 없는데도 좌표1부터 눌러 엉뚱한 곳을 찍었다)
         try:
             hit = self._check_hits()
             if hit is not None and int(si) not in set(hit):
+                if _was_sleep:
+                    # 절전이었다가 깨웠는데도 십자가가 안 보인다 = 아직 화면이 안 돌아왔거나
+                    # 깨우기가 안 먹은 것. **목록은 지우지 않는다** (2026-08-29).
+                    click_log(f"fix #{si:02d} 깨운 뒤에도 십자가가 안 보임 — "
+                              f"목록은 그대로 두고 실행만 취소")
+                    self.status.set(f"😴 복구 #{si:02d} — 깨웠는데 십자가가 아직 안 보입니다. "
+                                    f"잠시 뒤 다시 눌러주세요 (목록은 그대로 둡니다)")
+                    return
                 self._fix_paid_mark(int(si), False)
                 self._warn_remove(int(si))
                 click_log(f"fix #{si:02d} 십자가가 없어 실행 취소 — 이미 복구된 것으로 보고 지움")
