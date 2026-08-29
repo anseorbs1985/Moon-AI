@@ -7550,19 +7550,15 @@ class App(tk.Tk):
         try:
             hit = self._check_hits()
             if hit is not None and int(si) not in set(hit):
-                if _was_sleep:
-                    # 절전이었다가 깨웠는데도 십자가가 안 보인다 = 아직 화면이 안 돌아왔거나
-                    # 깨우기가 안 먹은 것. **목록은 지우지 않는다** (2026-08-29).
-                    click_log(f"fix #{si:02d} 깨운 뒤에도 십자가가 안 보임 — "
-                              f"목록은 그대로 두고 실행만 취소")
-                    self.status.set(f"😴 복구 #{si:02d} — 깨웠는데 십자가가 아직 안 보입니다. "
-                                    f"잠시 뒤 다시 눌러주세요 (목록은 그대로 둡니다)")
-                    return
-                self._fix_paid_mark(int(si), False)
-                self._warn_remove(int(si))
-                click_log(f"fix #{si:02d} 십자가가 없어 실행 취소 — 이미 복구된 것으로 보고 지움")
-                self.status.set(f"✖ 복구 #{si:02d} — 십자가가 없어 실행하지 않았습니다 "
-                                f"(이미 복구됨 · 목록에서 지웠습니다)")
+                # 십자가가 안 보인다 — **실행만 취소하고 목록은 그대로 둔다.**
+                # (2026-08-29 사용자 지시: "복구를 안 했으면 계속 냅둬야지")
+                # 절전·창 겹침 등으로 잠깐 안 보일 수 있어서, 안 보인다는 이유만으로
+                # 지우면 안 된다. **지우는 것은 실제로 복구를 돌린 뒤**
+                # `_fix_verify` 가 사라진 것을 확인했을 때뿐이다.
+                click_log(f"fix #{si:02d} 십자가가 안 보여 실행만 취소 "
+                          f"(목록은 그대로 둠{' · 절전에서 깨운 직후' if _was_sleep else ''})")
+                self.status.set(f"✖ 복구 #{si:02d} — 십자가가 안 보여 실행하지 않았습니다 "
+                                f"(목록은 그대로 둡니다 · 잠시 뒤 다시 눌러주세요)")
                 return
         except Exception:
             pass
@@ -7590,6 +7586,10 @@ class App(tk.Tk):
                                 f"자동 확인은 못 합니다")
                 return
             if int(si) not in set(hit):
+                if int(si) in getattr(self, "_last_sleep", set()):
+                    # 자고 있어서 십자가가 가려진 것 — 복구된 게 아니다. 지우지 않는다.
+                    self.after(3000, lambda: self._fix_verify(si, tries - 1, marked))
+                    return
                 # 십자가가 사라졌다 = 복구됨
                 self._fix_paid_mark(int(si), False)
                 self._warn_remove(int(si))
@@ -7711,17 +7711,43 @@ class App(tk.Tk):
             return None
         dx, dy, w, h = rel
         M = 20        # 클라마다 몇 픽셀씩 어긋나므로 주변까지 넓게 훑는다
-        hit = []
+        hit, slept = [], []
+        _sleep_t = None
+        try:
+            if has_sleep_img("fix"):
+                import cv2, numpy as np
+                _sleep_t = cv2.imdecode(
+                    np.fromfile(sleep_img_path("fix"), dtype=np.uint8),
+                    cv2.IMREAD_COLOR)
+        except Exception:
+            _sleep_t = None
         for i, (l, t, r, b, hwnd) in enumerate(hw):
             try:
                 W, H = r - l, b - t
                 x0, y0 = max(0, dx - M), max(0, dy - M)
                 x1, y1 = min(W, dx + w + M), min(H, dy + h + M)
-                im = self._grab_client(hwnd, W, H).crop((x0, y0, x1, y1)).convert("L")
+                _full = self._grab_client(hwnd, W, H)
+                im = _full.crop((x0, y0, x1, y1)).convert("L")
                 if self._img_match(im, ref) >= 0.60:   # 기준 그림이 그 안에 있다 = 떠 있다
                     hit.append(i + 1)
+                # 같은 캡처로 '지금 자고 있나'도 본다 — 자는 동안은 십자가가 가려서
+                # 안 보이므로, 그걸 '복구됨'으로 오해해 지우면 안 된다 (2026-08-29)
+                try:
+                    if _sleep_t is not None:
+                        import cv2, numpy as np
+                        _b = cv2.cvtColor(np.array(_full.convert("RGB")),
+                                          cv2.COLOR_RGB2BGR)
+                        if (_b.shape[0] >= _sleep_t.shape[0]
+                                and _b.shape[1] >= _sleep_t.shape[1]):
+                            _m = float(cv2.matchTemplate(
+                                _b, _sleep_t, cv2.TM_CCOEFF_NORMED).max())
+                            if _m >= SLEEP_MATCH:
+                                slept.append(i + 1)
+                except Exception:
+                    pass
             except Exception:
                 pass
+        self._last_sleep = set(slept)
         return hit
 
     def _check_scan(self, quiet=False):
@@ -7745,8 +7771,10 @@ class App(tk.Tk):
         # 마크가 있는 곳은 그대로 두고, 사라진 곳은 자동으로 지운다
         # (내가 ✕ 로 지우지 않아도 다음 F11 때 알아서 정리됨)
         before = set(self._warn_load())
-        gone = sorted(before - set(hit))
-        self._warn_save(hit)
+        _slept = getattr(self, "_last_sleep", set())
+        _keep = before & _slept          # 자는 슬롯은 십자가가 가려 안 보인다 → 유지
+        gone = sorted(before - set(hit) - _keep)
+        self._warn_save(sorted(set(hit) | _keep))
         self._warn_refresh()
         _msg = f"⚠ 경고 확인 — 뜬 곳 {len(hit)}개 {hit or ''}"
         if gone:
@@ -7775,10 +7803,12 @@ class App(tk.Tk):
             now_hit = self._check_hits()
             if now_hit is not None:
                 before = set(self._warn_load())
-                gone = sorted(before - set(now_hit))
+                _slept = getattr(self, "_last_sleep", set())
+                _keep = before & _slept      # 자는 슬롯은 유지 (십자가가 가려 안 보임)
+                gone = sorted(before - set(now_hit) - _keep)
                 new_ = sorted(set(now_hit) - before)
                 if gone or new_:
-                    self._warn_save(now_hit)
+                    self._warn_save(sorted(set(now_hit) | _keep))
                     self._warn_refresh()
                     msg = []
                     if new_:
