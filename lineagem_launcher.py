@@ -7248,12 +7248,61 @@ class App(tk.Tk):
             hdr.pack_forget()
         for si in slots:
             row = tk.Frame(box); row.pack(fill="x", pady=1)
-            tk.Label(row, text=f"복구해야함 {si:02d}", font=("맑은 고딕", 9, "bold"),
-                     fg="white", bg="#c0392b", width=11, anchor="w",
-                     padx=3).pack(side="left")
+            # 누르면 그 슬롯만 복구를 돌린다 (2026-08-29 사용자 요청).
+            # 좌표4 의 '무료' 확인을 통과할 때만 진행되므로 재화는 쓰이지 않는다.
+            tk.Button(row, text=f"복구해야함 {si:02d} ▶", font=("맑은 고딕", 9, "bold"),
+                      fg="white", bg="#c0392b", activebackground="#922b21",
+                      width=13, anchor="w", padx=3, pady=0, cursor="hand2",
+                      command=lambda x=si: self._run_fix_slot(x)).pack(side="left")
             tk.Button(row, text="✕", font=("맑은 고딕", 8, "bold"), width=2, pady=0,
                       bg="#7f8c8d", fg="white",
                       command=lambda x=si: self._warn_remove(x)).pack(side="left", padx=(2, 0))
+
+    def _run_fix_slot(self, si):
+        """'복구해야함 03' 을 누르면 **그 슬롯만** 복구를 돌린다 (2026-08-29 사용자 요청).
+
+        좌표4 의 👁 '무료' 확인을 통과할 때만 뒤 좌표를 누르므로,
+        재화가 드는 상태면 그 자리에서 멈춘다 — 눌러도 안전하다."""
+        idx = int(si) - 1
+        try:
+            slots = self.cfg.get("fix_slots") or []
+            if idx < 0 or idx >= len(slots) or not any(slots[idx].get("coords") or []):
+                self.status.set(f"🩹 복구 #{si:02d} — 좌표가 등록돼 있지 않습니다. "
+                                f"[🩹복구] 창에서 먼저 좌표를 넣어주세요")
+                return
+        except Exception:
+            pass
+        self.status.set(f"🩹 복구 #{si:02d} 실행 — '무료'가 아니면 그 자리에서 멈춥니다")
+        self._start_dgn2("fix", sel_list=[idx])
+        # 끝난 뒤 **화면을 다시 봐서** 경고가 사라졌는지 확인하고 지운다
+        self.after(3000, lambda x=si: self._fix_verify(x, 12))
+
+    def _fix_verify(self, si, tries):
+        """복구를 돌린 뒤 **정말 없어졌는지 화면으로 확인**하고 목록에서 지운다.
+
+        경고영역(`check_area_rel`)을 다시 훑어 그 슬롯의 마크가 사라졌으면 자동 삭제.
+        **화면으로 확인될 때만 지운다** — 실행했다는 이유만으로 지우지 않는다
+        (2026-08-29 사용자 요청)."""
+        try:
+            if tries <= 0:
+                self.status.set(f"🩹 복구 #{si:02d} — 아직 경고가 남아 있습니다 "
+                                f"(재화가 들어서 멈췄거나 실패). 목록은 그대로 둡니다")
+                return
+            if self._is_busy():                       # 아직 돌고 있으면 기다린다
+                self.after(2000, lambda: self._fix_verify(si, tries)); return
+            hit = self._check_hits()
+            if hit is None:                           # 경고영역 미지정 등 — 확인 불가
+                self.status.set(f"🩹 복구 #{si:02d} 끝 — 경고영역이 없어 자동 확인은 못 합니다 "
+                                f"([🔆 절전해제] → [📷 경고영역 지정])")
+                return
+            if int(si) not in set(hit):
+                self._warn_remove(int(si))
+                click_log(f"fix #{si:02d} 복구 확인됨 — 화면에서 경고가 사라져 목록에서 지움")
+                self.status.set(f"✅ 복구 #{si:02d} 확인 — 경고가 사라져 목록에서 지웠습니다")
+                return
+            self.after(2000, lambda: self._fix_verify(si, tries - 1))
+        except Exception as e:
+            self.status.set(f"🩹 복구 #{si:02d} 확인 실패: {e}")
 
     @staticmethod
     def _rect_owner(rects, x, y):
