@@ -763,6 +763,9 @@ RECLICK_HOLD = [(0.18, 0.30), (0.35, 0.50), (0.50, 0.70), (0.70, 0.95)]  # 갈�
 SCHED_WAVE_TO = 12
 # 이 런처들은 슬롯을 시작하기 전에 '절전모드 화면'을 확인하고, 절전이면 키를 눌러 깨운다
 # (2026-08-29 사용자 지시 — 늦게 하면 절전으로 들어가 Z 를 따로 눌러야 한다)
+# 복구를 누른 뒤 그 슬롯을 몇 번 더 지켜볼지 (3초 간격 → 30번 ≈ 90초)
+# F11 의 5분 감시를 '개별 복구'에도 적용한 것 (2026-08-29 사용자 지시)
+FIX_WATCH_N = 30
 SLEEP_WAKE = ("fix",)
 SLEEP_WAKE_KEY = "z"
 BACK_NOT_MIN = ("fix",)
@@ -7486,44 +7489,51 @@ class App(tk.Tk):
         self.status.set(f"🩹 복구 #{si:02d} 실행 — '무료'가 아니면 그 자리에서 멈춥니다")
         self._start_dgn2("fix", sel_list=[idx])
         # 끝난 뒤 **화면을 다시 봐서** 경고가 사라졌는지 확인하고 지운다
-        self.after(3000, lambda x=si: self._fix_verify(x, 12))
+        self.after(2500, lambda x=si: self._fix_verify(x, FIX_WATCH_N))
 
-    def _fix_verify(self, si, tries):
-        """복구를 돌린 뒤 **정말 없어졌는지 화면으로 확인**하고 목록에서 지운다.
+    def _fix_verify(self, si, tries, marked=False):
+        """복구를 돌린 뒤 **그 슬롯만 계속 지켜본다** — F11 의 5분 감시를 개별로.
 
-        경고영역(`check_area_rel`)을 다시 훑어 그 슬롯의 마크가 사라졌으면 자동 삭제.
-        **화면으로 확인될 때만 지운다** — 실행했다는 이유만으로 지우지 않는다
-        (2026-08-29 사용자 요청)."""
+        (2026-08-29 사용자 지시) `복구해야함 NN` 을 누르면 그 슬롯 화면을 반복해서 보고:
+        · 십자가가 **사라졌으면** → 목록에서 글을 지운다 ✅
+        · **남아 있으면** → 그대로 띄워둔다
+        · **다야가 들어야 하는 것**이면 → `💎 다야!! NN` 초록으로 바꾼다
+        3초마다 최대 `FIX_WATCH_N` 번(=약 90초) 본다. 실행 중이면 기다린다.
+        지켜보는 동안 사용자가 손으로 복구해도 사라지면 바로 지워진다."""
         try:
-            if tries <= 0:
-                self.status.set(f"🩹 복구 #{si:02d} — 아직 경고가 남아 있습니다 "
-                                f"(재화가 들어서 멈췄거나 실패). 목록은 그대로 둡니다")
+            if self._is_busy():                    # 아직 돌고 있으면 기다린다
+                self.after(2000, lambda: self._fix_verify(si, tries, marked))
                 return
-            if self._is_busy():                       # 아직 돌고 있으면 기다린다
-                self.after(2000, lambda: self._fix_verify(si, tries)); return
             hit = self._check_hits()
-            if hit is None:                           # 경고영역 미지정 등 — 확인 불가
-                self.status.set(f"🩹 복구 #{si:02d} 끝 — 경고영역이 없어 자동 확인은 못 합니다 "
-                                f"([🔆 절전해제] → [📷 경고영역 지정])")
+            if hit is None:
+                self.status.set(f"🩹 복구 #{si:02d} 끝 — 십자가 기준 그림이 없어 "
+                                f"자동 확인은 못 합니다")
                 return
             if int(si) not in set(hit):
-                self._fix_paid_mark(int(si), False)     # 무료로 됐으니 표시 해제
+                # 십자가가 사라졌다 = 복구됨
+                self._fix_paid_mark(int(si), False)
                 self._warn_remove(int(si))
-                click_log(f"fix #{si:02d} 복구 확인됨 — 화면에서 경고가 사라져 목록에서 지움")
-                self.status.set(f"✅ 복구 #{si:02d} 확인 — 경고가 사라져 목록에서 지웠습니다")
+                click_log(f"fix #{si:02d} 복구 확인됨 — 십자가가 사라져 목록에서 지움")
+                self.status.set(f"✅ 복구 #{si:02d} 확인 — 십자가가 사라져 지웠습니다")
                 return
-            # 아직 남아 있다 — '무료' 확인에서 멈춘 것이면 **다야를 써야 하는 슬롯**이다
-            try:
-                _nt = getattr(self, "_run_note", None) or []
-                if any("👁 확인" in m for _n, m in _nt):
-                    self._fix_paid_mark(int(si), True)
-                    click_log(f"fix #{si:02d} '무료'가 아니라 취소 — 다야 필요로 표시(초록)")
-                    self.status.set(f"💎 복구 #{si:02d} — 무료가 아니라 취소했습니다. "
-                                    f"다야를 써야 하는 슬롯으로 초록 표시했습니다")
-                    return
-            except Exception:
-                pass
-            self.after(2000, lambda: self._fix_verify(si, tries - 1))
+            # 아직 남아 있다 — 처음 한 번만 '다야 필요'인지 판단해 초록으로
+            if not marked:
+                try:
+                    _nt = getattr(self, "_run_note", None) or []
+                    if any("👁 확인" in m for _n, m in _nt):
+                        self._fix_paid_mark(int(si), True)
+                        click_log(f"fix #{si:02d} '무료'가 아니라 취소 — 다야 필요(초록)")
+                        self.status.set(f"💎 복구 #{si:02d} — 무료가 아니라 취소했습니다. "
+                                        f"다야를 써야 하는 슬롯입니다")
+                        marked = True
+                except Exception:
+                    pass
+            if tries <= 0:
+                if not marked:
+                    self.status.set(f"🩹 복구 #{si:02d} — 십자가가 아직 남아 있습니다 "
+                                    f"(목록은 그대로 둡니다)")
+                return
+            self.after(3000, lambda: self._fix_verify(si, tries - 1, marked))
         except Exception as e:
             self.status.set(f"🩹 복구 #{si:02d} 확인 실패: {e}")
 
