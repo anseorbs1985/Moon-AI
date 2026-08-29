@@ -13699,15 +13699,15 @@ class App(tk.Tk):
             self._set_btn("btn_sched_stop", state="disabled")
 
     def _run_sched_wave(self, targets):
-        """스케줄 2슬롯 번갈아 — 한 슬롯이 기다리는 동안 다른 슬롯을 진행한다.
+        """스케줄 3슬롯 번갈아 — 한 슬롯이 기다리는 동안 다른 슬롯을 진행한다.
         '마우스 이동 → 클릭2'는 반드시 붙여서 한 묶음으로 처리한다
         (사이에 다른 클릭이 끼면 이동해둔 자리가 풀린다)."""
-        LANES = 2
+        LANES = 3        # 동시 3슬롯 (2026-08-28 사용자 지시 — 시간이 촉박해서)
         state = {si: {"slot": sl, "u": 0, "due": time.time()} for si, sl in targets}
         order = [si for si, _ in targets]
         active, waiting = order[:LANES], order[LANES:]
         last, done = None, 0
-        self.status.set(f"📅 스케줄 번갈아 실행 — 동시 {LANES}슬롯 ({len(targets)}슬롯)")
+        self.status.set(f"📅 스케줄 번갈아 실행 — 동시 {LANES}슬롯 · 1번부터 순서대로 ({len(targets)}슬롯)")
         while not self._sched_stop:
             for si in [x for x in active if state[x]["u"] >= 2]:
                 active.remove(si)
