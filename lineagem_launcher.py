@@ -276,7 +276,9 @@ DEFAULT_CFG = {
     "dark_ui":       True,              # 어두운 화면 (눈 보호)
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
-    "warn_bg":       True,              # 🔁 십자가 상시확인 (45초마다 4클라씩)
+    "warn_bg":       False,             # 🔁 십자가 상시확인 — **기본 끔**
+                                        # (2026-08-29 사용자 지시: 컴퓨터가 느려질까 걱정.
+                                        #  F11 눌렀을 때만 확인한다. 필요하면 버튼으로 켠다)
     "fix_slots":     [{"name": "미등록", "coords": [None] * FIX_CLICKS}
                       for _ in range(FIX_SLOTS)],   # 🩹 복구 (그림 확인 필수)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
@@ -2490,7 +2492,8 @@ class App(tk.Tk):
         self._warn_bgbtn.pack(fill="x", pady=(1, 0))
         self._sync_warn_bgbtn()
         self.after(900, self._warn_refresh)
-        self.after(20000, self._warn_bg_tick)
+        if self.cfg.get("warn_bg", False):      # 꺼져 있으면 아예 시작도 안 한다
+            self.after(20000, self._warn_bg_tick)
 
         # 확인용 3종 묶음: 변신확인용 / 인형확인용 / 성물확인용 (세로로 한 곳에)
         chk_col = tk.Frame(front_row); chk_col.pack(side="left", padx=(4,8), anchor="n")
@@ -7277,14 +7280,16 @@ class App(tk.Tk):
         b = getattr(self, "_warn_bgbtn", None)
         if not b or not b.winfo_exists():
             return
-        on = bool(self.cfg.get("warn_bg", True))
+        on = bool(self.cfg.get("warn_bg", False))
         b.config(text=("🔁 상시확인 켬" if on else "⏸ 상시확인 끔"),
                  bg=("#1a5276" if on else "#7f8c8d"))
 
     def _toggle_warn_bg(self):
-        self.cfg["warn_bg"] = not bool(self.cfg.get("warn_bg", True))
+        self.cfg["warn_bg"] = not bool(self.cfg.get("warn_bg", False))
         save_cfg(self.cfg)
         self._sync_warn_bgbtn()
+        if self.cfg["warn_bg"]:
+            self.after(2000, self._warn_bg_tick)      # 켤 때만 루프 시작
         self.status.set("🔁 상시확인 켬 — 45초마다 4클라씩 십자가를 봅니다 (3분에 한 바퀴)"
                         if self.cfg["warn_bg"] else
                         "⏸ 상시확인 끔 — F11 눌렀을 때만 확인합니다")
