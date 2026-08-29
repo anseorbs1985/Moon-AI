@@ -768,6 +768,7 @@ SCHED_WAVE_TO = 12
 FIX_WATCH_N = 30
 SLEEP_WAKE = ("fix",)
 SLEEP_WAKE_KEY = "z"
+SLEEP_MATCH = 0.60      # 절전 화면 판정 기준 (실측 16클라 0.73~1.00)
 BACK_NOT_MIN = ("fix",)
 START_PAUSE_MIN = 0.20
 START_PAUSE_MAX = 0.45
@@ -812,15 +813,66 @@ def has_sleep_img(fkey):
         return False
 
 
+def grab_window(coord):
+    """그 좌표가 있는 클라 창을 **직접** 캡처한다 (PrintWindow).
+
+    화면을 긁으면 런처나 다른 창이 앞에 있을 때 그 창이 찍혀 잘못 판단한다
+    (2026-08-29 사용자 지적 — 실제로 16클라 중 6개가 가려져 못 잡았다).
+    이 방식은 가려져 있어도 그 창의 내용이 그대로 찍힌다."""
+    try:
+        import win32gui, win32ui, cv2, numpy as np
+        from ctypes import windll
+        from PIL import Image
+        import precise_click as _pc
+        h = _pc.game_window_at(int(coord[0]), int(coord[1]))
+        if not h:
+            return None
+        import ctypes, ctypes.wintypes
+        r = ctypes.wintypes.RECT()
+        ctypes.windll.user32.GetWindowRect(h, ctypes.byref(r))
+        w, ht = r.right - r.left, r.bottom - r.top
+        hdc = win32gui.GetWindowDC(h)
+        mfc = win32ui.CreateDCFromHandle(hdc)
+        sv = mfc.CreateCompatibleDC()
+        bmp = win32ui.CreateBitmap()
+        bmp.CreateCompatibleBitmap(mfc, w, ht)
+        sv.SelectObject(bmp)
+        windll.user32.PrintWindow(h, sv.GetSafeHdc(), 2)
+        info = bmp.GetInfo()
+        bits = bmp.GetBitmapBits(True)
+        im = Image.frombuffer("RGB", (info["bmWidth"], info["bmHeight"]),
+                              bits, "raw", "BGRX", 0, 1)
+        try:
+            win32gui.DeleteObject(bmp.GetHandle()); sv.DeleteDC()
+            mfc.DeleteDC(); win32gui.ReleaseDC(h, hdc)
+        except Exception:
+            pass
+        return cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+    except Exception:
+        return None
+
+
 def find_sleep_img(fkey, coord):
-    """그 좌표가 있는 클라 창에서 절전 화면이 보이나."""
+    """그 클라가 절전 화면인가 — **창을 직접 캡처**해서 본다(가려져도 정확)."""
     q = sleep_img_path(fkey)
     if not (q and os.path.exists(q) and coord):
         return None, None, 0.0
-    rc = client_rect_at(coord[0], coord[1])
-    box = tuple(rc) if rc else (int(coord[0]) - 250, int(coord[1]) - 250,
-                                int(coord[0]) + 250, int(coord[1]) + 250)
-    return _find_one(fkey, 0, coord, q, box)
+    try:
+        import cv2, numpy as np
+        big = grab_window(coord)
+        if big is None:
+            return None, None, 0.0
+        tpl = cv2.imdecode(np.fromfile(q, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
+            return None, None, 0.0
+        res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
+        _n, mx, _l, ml = cv2.minMaxLoc(res)
+        if mx < SLEEP_MATCH:
+            return None, None, float(mx)
+        return (int(ml[0] + tpl.shape[1] // 2),
+                int(ml[1] + tpl.shape[0] // 2), float(mx))
+    except Exception:
+        return None, None, 0.0
 
 
 def press_key(k, times=1, gap=(0.12, 0.25)):
