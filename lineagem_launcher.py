@@ -276,9 +276,6 @@ DEFAULT_CFG = {
     "dark_ui":       True,              # 어두운 화면 (눈 보호)
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
-    "warn_bg":       False,             # 🔁 십자가 상시확인 — **기본 끔**
-                                        # (2026-08-29 사용자 지시: 컴퓨터가 느려질까 걱정.
-                                        #  F11 눌렀을 때만 확인한다. 필요하면 버튼으로 켠다)
     "fix_slots":     [{"name": "미등록", "coords": [None] * FIX_CLICKS}
                       for _ in range(FIX_SLOTS)],   # 🩹 복구 (그림 확인 필수)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
@@ -2484,16 +2481,7 @@ class App(tk.Tk):
                                   fg="white", bg="#c0392b")
         self._warn_rows = tk.Frame(self._warn_box)
         self._warn_rows.pack(fill="x")
-        # 🔁 상시확인 — F11 때만이 아니라 평소에도 조금씩 십자가를 확인한다
-        # (한 번에 4클라씩만 봐서 부하를 잘게 쪼갠다, 2026-08-29 사용자 요청)
-        self._warn_bgbtn = tk.Button(
-            self._warn_box, font=("맑은 고딕", 7), fg="white", pady=0,
-            command=self._toggle_warn_bg)
-        self._warn_bgbtn.pack(fill="x", pady=(1, 0))
-        self._sync_warn_bgbtn()
         self.after(900, self._warn_refresh)
-        if self.cfg.get("warn_bg", False):      # 꺼져 있으면 아예 시작도 안 한다
-            self.after(20000, self._warn_bg_tick)
 
         # 확인용 3종 묶음: 변신확인용 / 인형확인용 / 성물확인용 (세로로 한 곳에)
         chk_col = tk.Frame(front_row); chk_col.pack(side="left", padx=(4,8), anchor="n")
@@ -7275,83 +7263,6 @@ class App(tk.Tk):
         except Exception:
             pass
         self.after(800, lambda: setattr(self, "_quiet_restore", False))
-
-    def _sync_warn_bgbtn(self):
-        b = getattr(self, "_warn_bgbtn", None)
-        if not b or not b.winfo_exists():
-            return
-        on = bool(self.cfg.get("warn_bg", False))
-        b.config(text=("🔁 상시확인 켬" if on else "⏸ 상시확인 끔"),
-                 bg=("#1a5276" if on else "#7f8c8d"))
-
-    def _toggle_warn_bg(self):
-        self.cfg["warn_bg"] = not bool(self.cfg.get("warn_bg", False))
-        save_cfg(self.cfg)
-        self._sync_warn_bgbtn()
-        if self.cfg["warn_bg"]:
-            self.after(2000, self._warn_bg_tick)      # 켤 때만 루프 시작
-        self.status.set("🔁 상시확인 켬 — 45초마다 4클라씩 십자가를 봅니다 (3분에 한 바퀴)"
-                        if self.cfg["warn_bg"] else
-                        "⏸ 상시확인 끔 — F11 눌렀을 때만 확인합니다")
-
-    def _warn_bg_tick(self):
-        """평소에도 십자가를 조금씩 확인한다 — **부하를 잘게 쪼개서**.
-
-        · 한 번에 **4클라만** 본다 (16클라 전체는 0.77초 → 4클라는 약 0.2초)
-        · **45초마다** 돌아 3분에 한 바퀴. CPU 로 치면 0.4% 남짓, 램은 늘지 않는다
-          (캡처한 그림은 즉시 버린다)
-        · **작업 중이거나 사용자가 방금 마우스·키보드를 만졌으면 건너뛴다**
-          (클릭을 방해하지 않고, 게임 중 렉을 주지 않으려고)
-        (2026-08-29 사용자 요청 — 전제조건: 부하가 없어야 함)"""
-        try:
-            if not self.cfg.get("warn_bg", True):
-                return
-            if self._is_busy():
-                return
-            try:
-                import precise_click as _pc
-                if _pc.idle_seconds() < 3.0:      # 사람이 방금 만졌다 → 다음 기회에
-                    return
-            except Exception:
-                pass
-            hw = self._client_hwnds_by_slot()
-            rel = self.cfg.get("check_area_rel")
-            ref_p = os.path.join(self._warn_dir(), "check_ref.png")
-            if not hw or not rel or not os.path.exists(ref_p):
-                return
-            from PIL import Image
-            ref = Image.open(ref_p).convert("L")
-            dx, dy, w, h = rel
-            M = 20
-            n = len(hw)
-            i0 = int(getattr(self, "_warn_bg_i", 0)) % n
-            part = [(i0 + k) % n for k in range(4)]      # 이번에 볼 4클라
-            self._warn_bg_i = (i0 + 4) % n
-            cur = set(self._warn_load())
-            ch = False
-            for i in part:
-                l, t, r, b, hwnd = hw[i]
-                try:
-                    W, H = r - l, b - t
-                    x0, y0 = max(0, dx - M), max(0, dy - M)
-                    x1, y1 = min(W, dx + w + M), min(H, dy + h + M)
-                    im = self._grab_client(hwnd, W, H).crop((x0, y0, x1, y1)).convert("L")
-                    hit = self._img_match(im, ref) >= 0.60
-                except Exception:
-                    continue
-                si = i + 1
-                if hit and si not in cur:
-                    cur.add(si); ch = True
-                elif (not hit) and si in cur:
-                    cur.discard(si); ch = True
-                    self._fix_paid_mark(si, False)
-            if ch:
-                self._warn_save(sorted(cur))
-                self._warn_refresh()
-        except Exception:
-            pass
-        finally:
-            self.after(45000, self._warn_bg_tick)
 
     def _fix_paid_path(self):
         """'이 슬롯은 다야(재화)를 써야 복구된다' 표시 — 이 컴퓨터에만 저장."""
