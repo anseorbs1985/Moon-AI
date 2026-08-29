@@ -1115,6 +1115,23 @@ def main():
             except Exception as e:
                 log(f"   ⚠ 배포 제외 목록 읽기 실패: {e}")
             import fnmatch as _fn
+            # 십자가 기준 그림 — %LOCALAPPDATA%\MoonAI\check_ref.png 로 받는다
+            # (경고영역 check_area_rel 은 share_coords 로 함께 온다, 2026-08-29)
+            try:
+                _cs = os.path.join(REPO, "check_ref.png")
+                if os.path.exists(_cs):
+                    _cd = os.path.join(os.environ.get("LOCALAPPDATA", DESK),
+                                       "MoonAI", "check_ref.png")
+                    os.makedirs(os.path.dirname(_cd), exist_ok=True)
+                    _same = False
+                    if os.path.exists(_cd):
+                        with open(_cs, "rb") as fa, open(_cd, "rb") as fb:
+                            _same = fa.read() == fb.read()
+                    if not _same:
+                        shutil.copy2(_cs, _cd); n += 1
+                        log("   십자가 기준 그림 동기화: check_ref.png ✔")
+            except Exception as e:
+                log(f"   ⚠ 십자가 기준 그림 동기화 실패: {e}")
             for d in DATA_DIRS:
                 sdir, ddir = os.path.join(REPO, d), os.path.join(DESK, d)
                 if not os.path.isdir(sdir):
