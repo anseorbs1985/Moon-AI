@@ -11651,9 +11651,15 @@ class App(tk.Tk):
             self._grid_sel = {}; self._grid_selbtns = {}
         self._grid_selbtns[fkey] = []
         st["pop"] = None; st["pop_slot"] = None
-        tk.Button(parent, text="👁 전체 좌표 보기", font=("맑은 고딕", 8),
+        _top = tk.Frame(parent); _top.pack(pady=(4, 0))
+        tk.Button(_top, text="👁 전체 좌표 보기", font=("맑은 고딕", 8),
                   bg="#566573", fg="white",
-                  command=lambda f=fkey: self._grid_preview_all(f)).pack(pady=(4, 0))
+                  command=lambda f=fkey: self._grid_preview_all(f)).pack(side="left")
+        # 📋 전체붙임 — 복사한 슬롯을 16슬롯 전부에 붙인다 (2026-08-29 사용자 요청).
+        # 붙일 때 클라이언트 창 위치를 슬롯마다 자동보정하므로 좌표가 맞는다.
+        tk.Button(_top, text="📋 전체붙임", font=("맑은 고딕", 8, "bold"),
+                  bg="#1a5276", fg="white", activebackground="#154360",
+                  command=lambda f=fkey: self._grid_paste_all(f)).pack(side="left", padx=(4, 0))
         wg = tk.Frame(parent); wg.pack(padx=6, pady=4)
         for idx in range(16):
             r, c = idx % 4, idx // 4
@@ -12024,6 +12030,52 @@ class App(tk.Tk):
                 self.cfg[sp["key"]][idx][_f] = copy.deepcopy(clip[_f])
         save_cfg(self.cfg); self._refresh_ui()
         self.status.set(f"✔ {sp['title']} #{idx+1:02d} 붙여넣기 완료 (간격·붙임 자리 포함){note}")
+
+    def _grid_paste_all(self, fkey):
+        """📋 전체붙임 — 복사한 슬롯을 **16슬롯 전부**에 붙인다 (2026-08-29 사용자 요청).
+
+        슬롯마다 클라이언트 창 위치를 자동보정하므로 좌표가 그 클라에 맞게 들어간다.
+        복사한 원본 슬롯은 건드리지 않는다. 되돌릴 수 없으니 한 번 물어본다."""
+        import copy
+        sp = self._grid_spec(fkey)
+        clip = getattr(self, "_grid_clip", None)
+        if not clip or clip.get("f") != fkey:
+            self.status.set(f"먼저 {sp['title']} 슬롯에서 [복사]를 누르세요"); return
+        src = clip["src"]
+        rects = self._client_rects_by_slot()
+        if not rects:
+            if not messagebox.askyesno(
+                    "전체붙임",
+                    "리니지M 클라이언트 16개를 못 찾았습니다. 위치 보정 없이 원본 좌표 그대로 전부 붙일까요? (좌표가 전부 같은 자리가 됩니다)"):
+                return
+        else:
+            if not messagebox.askyesno(
+                    "전체붙임",
+                    f"#{src+1:02d} 의 좌표를 16슬롯 전부에 붙입니다. 슬롯마다 클라 위치로 자동보정됩니다. 기존 좌표는 덮어써집니다. 계속할까요?"):
+                return
+        slots = self.cfg.get(sp["key"]) or []
+        cnt = 0
+        for idx in range(min(16, len(slots))):
+            if idx == src:
+                continue                     # 원본은 그대로
+            shifted = copy.deepcopy(clip["coords"])
+            if rects:
+                dx = rects[idx][0] - rects[src][0]
+                dy = rects[idx][1] - rects[src][1]
+                for c in shifted:
+                    if c:
+                        c[0] += dx; c[1] += dy
+            slots[idx]["coords"] = shifted
+            for _f in ("gap_list", "wheel_list", "paste_list"):
+                if clip.get(_f) is not None:
+                    slots[idx][_f] = copy.deepcopy(clip[_f])
+            cnt += 1
+        self.cfg[sp["key"]] = slots
+        save_cfg(self.cfg); self._refresh_ui()
+        _n = sum(1 for c in clip["coords"] if c)
+        self.status.set(f"✔ {sp['title']} 전체붙임 완료 — #{src+1:02d} 의 좌표 {_n}개를 "
+                        f"{cnt}개 슬롯에 붙였습니다"
+                        + ("" if rects else " (⚠ 클라 감지 실패 — 위치 보정 없음)"))
 
     # ── 공용 그리드 (연속클릭/주말던전끄기 — 슬롯당 좌표 1개) ──
     def _build_flat_grid(self, parent, fkey):
