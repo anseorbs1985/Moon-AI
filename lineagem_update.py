@@ -1102,12 +1102,35 @@ def main():
                         log("   다야 OCR 영역 동기화: daya_regions.json — 메인과 동일하게 반영 ✔")
             except Exception as e:
                 log(f"   ⚠ 다야 영역 동기화 실패: {e}")
+            # 배포 제외 목록 — 여기 걸리는 파일은 로컬에 **복사하지 않는다.**
+            # 로컬에서 이미 잘 돌고 있는 설정을 메인 것으로 덮어쓰지 않으려고 쓴다
+            # (2026-08-29 사용자 지시: 용던고고는 로컬에서 잘 되니 배포에서 빼라).
+            _skip = []
+            try:
+                _sp = os.path.join(REPO, "share_skip.json")
+                if os.path.exists(_sp):
+                    with open(_sp, encoding="utf-8") as _f:
+                        _skip = [str(x).replace("\\", "/")
+                                 for x in ((json.load(_f) or {}).get("files") or [])]
+            except Exception as e:
+                log(f"   ⚠ 배포 제외 목록 읽기 실패: {e}")
+            import fnmatch as _fn
             for d in DATA_DIRS:
                 sdir, ddir = os.path.join(REPO, d), os.path.join(DESK, d)
                 if not os.path.isdir(sdir):
                     continue
                 os.makedirs(ddir, exist_ok=True)
+                _sk = 0
                 for fn in os.listdir(sdir):
+                    if any(_fn.fnmatch(f"{d}/{fn}", pat) for pat in _skip):
+                        _sk += 1
+                        continue                      # 제외 목록 — 로컬 것 그대로
+                    pass
+                if _sk:
+                    log(f"   배포 제외 — {d}: {_sk}개 (로컬 것 그대로 둠)")
+                for fn in os.listdir(sdir):
+                    if any(_fn.fnmatch(f"{d}/{fn}", pat) for pat in _skip):
+                        continue
                     sp_, dp_ = os.path.join(sdir, fn), os.path.join(ddir, fn)
                     # 크기만 비교하면 '내용은 바뀌었는데 크기가 같은' 파일을 놓친다 —
                     # 예: {"thr": 0.72} 와 {"thr": 0.55} 는 둘 다 13바이트라
