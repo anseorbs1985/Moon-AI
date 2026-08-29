@@ -1130,6 +1130,11 @@ def main():
                     if not _same:
                         shutil.copy2(_cs, _cd); n += 1
                         log("   십자가 기준 그림 동기화: check_ref.png ✔")
+                    # 런처 폴더에도 하나 둔다 — 런처가 스스로 회수할 수 있게
+                    try:
+                        shutil.copy2(_cs, os.path.join(DESK, "check_ref.png"))
+                    except Exception:
+                        pass
             except Exception as e:
                 log(f"   ⚠ 십자가 기준 그림 동기화 실패: {e}")
             for d in DATA_DIRS:

@@ -7464,6 +7464,20 @@ class App(tk.Tk):
         """지금 그 영역에 '기준 그림'이 보이는 슬롯 번호들 (없으면 None = 확인 불가)."""
         rel = self.cfg.get("check_area_rel")
         ref_p = os.path.join(self._warn_dir(), "check_ref.png")
+        if not os.path.exists(ref_p):
+            # 기준 그림이 없으면 저장소·런처 폴더에서 찾아 가져온다 (2026-08-29).
+            # 업데이트가 이 파일을 %LOCALAPPDATA% 로 옮기는데, 그 기능이 들어간
+            # 판을 받기 전에는 비어 있어서 '십자가가 떠 있는데 인식 못 함'이 났다.
+            for _c in (os.path.join(BASE, "check_ref.png"),
+                       os.path.join(find_repo_dir() or "", "check_ref.png")):
+                try:
+                    if _c and os.path.exists(_c):
+                        import shutil as _sh
+                        _sh.copy2(_c, ref_p)
+                        click_log(f"[경고확인] 기준 그림을 {_c} 에서 가져왔습니다")
+                        break
+                except Exception:
+                    pass
         if not rel or not os.path.exists(ref_p):
             return None
         hw = self._client_hwnds_by_slot()
@@ -7496,8 +7510,16 @@ class App(tk.Tk):
         hit = self._check_hits()
         if hit is None:
             if not quiet:
-                self.status.set("먼저 [🔆 절전해제] 창에서 [📷 경고영역 지정]을 해주세요 "
-                                "(또는 클라 16개가 보이지 않음)")
+                _rp = os.path.join(self._warn_dir(), "check_ref.png")
+                _why = []
+                if not self.cfg.get("check_area_rel"):
+                    _why.append("경고영역(check_area_rel) 없음")
+                if not os.path.exists(_rp):
+                    _why.append("십자가 기준 그림(check_ref.png) 없음")
+                if not self._client_hwnds_by_slot():
+                    _why.append("리니지M 클라 16개가 안 보임")
+                self.status.set("⚠ 경고 확인 불가 — " + (" · ".join(_why) or "원인 불명")
+                                + " · [🔆 절전해제] 창에서 [📷 경고영역 지정]을 해주세요")
             return
         # 마크가 있는 곳은 그대로 두고, 사라진 곳은 자동으로 지운다
         # (내가 ✕ 로 지우지 않아도 다음 F11 때 알아서 정리됨)
