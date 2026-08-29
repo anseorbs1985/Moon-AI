@@ -755,6 +755,7 @@ RECLICK_HOLD = [(0.18, 0.30), (0.35, 0.50), (0.50, 0.70), (0.70, 0.95)]  # 갈�
 # 마름모가 캐릭터에서 멀면 눌러도 바로 창이 안 뜨고 **걸어가는 시간**이 필요하다
 # (2026-08-28 실측: 실패한 두 슬롯은 마름모가 창 왼쪽·위 끝에 있었다 = 먼 거리).
 CHECK_TRIES = 2      # 👁 확인만 자리는 짧게 2번만 본다 (0.25~0.45초 간격)
+ESC_TIMES   = 2      # 취소할 때 ESC 를 몇 번 누를지 (창이 두 겹이라 두 번, 2026-08-29)
 RECLICK_WAIT = [2.0, 3.0]        # 확인까지 2초 → 3초 (전 28초는 너무 느렸다)
 DRIFT_MAX  = 40           # 그림이 이만큼(px) 안에서 움직인 건 '같은 것'으로 본다.
                           # 더 멀면 다른 마름모라 겨냥을 옮기지 않는다 (엉뚱한 층 방지)
@@ -829,13 +830,19 @@ def find_no_img(fkey, j, coord):
     return _find_one(fkey, j, coord, q, box)
 
 
-def press_esc():
-    """ESC 한 번 — 재화 쓰는 창을 취소한다."""
+def press_esc(times=1, gap=(0.18, 0.32)):
+    """ESC 를 times 번 누른다 — 열려 있는 창을 닫고 원래 화면으로 빠져나온다.
+    복구처럼 창이 두 겹으로 열리는 경우가 있어 기본 두 번을 쓴다 (2026-08-29)."""
+    ok = False
     try:
-        pyautogui.press("esc")
-        return True
+        for i in range(max(1, int(times))):
+            if i:
+                time.sleep(random.uniform(*gap))
+            pyautogui.press("esc")
+            ok = True
     except Exception:
-        return False
+        pass
+    return ok
 
 def zone_path(fkey, j):
     """성공한 자리들이 모인 구역 (이 컴퓨터 전용 — 창 배치가 다를 수 있으므로)."""
@@ -6369,9 +6376,9 @@ class App(tk.Tk):
             _nm0 = (slot or {}).get("name", "?")
             _nx, _ny, _ns = find_no_img(fkey, j, coord)
             if _nx is not None:
-                press_esc()
+                press_esc(ESC_TIMES)
                 click_log(f"{fkey} [{_nm0}] 좌표{j+1} ⛔ 금지 그림 보임 "
-                          f"(일치도 {_ns:.2f}) → ESC 로 취소하고 이 슬롯 중단")
+                          f"(일치도 {_ns:.2f}) → ESC {ESC_TIMES}번 누르고 이 슬롯 중단")
                 self.status.set(f"⛔ [{_nm0}] 좌표{j+1} — 재화 쓰는 창이라 ESC 취소")
                 self._note(fkey, _nm0, f"좌표{j+1} ⛔ 금지 그림 → ESC 취소")
                 return "이미지없음"          # 이 슬롯만 끝, 다른 슬롯은 계속
@@ -6481,6 +6488,18 @@ class App(tk.Tk):
                           f"(일치도 {sc:.2f}) → 누르지 않고 통과")
                 self.status.set(f"👁 [{nm}] 좌표{j+1} 확인 통과 ({sc:.2f})")
                 return "확인"
+            if ix is None and _chk_only:
+                # 👁 확인 실패(예: '무료'가 아니라 숫자) — 열린 창을 **ESC 두 번**으로
+                # 닫고 빠져나온 뒤 이 슬롯을 끝낸다 (2026-08-29 사용자 지시).
+                # 그냥 멈추면 복구 창이 열린 채로 남는다.
+                save_miss_shot(fkey, j, coord)
+                press_esc(ESC_TIMES)
+                click_log(f"{fkey} [{nm}] 좌표{j+1} 👁 확인 실패 (최고 {sc:.2f}) "
+                          f"→ ESC {ESC_TIMES}번 누르고 이 슬롯 중단")
+                self.status.set(f"👁 [{nm}] 좌표{j+1} 다른 화면 ({sc:.2f}) — "
+                                f"ESC {ESC_TIMES}번 누르고 중단")
+                self._note(fkey, nm, f"좌표{j+1} 👁 확인 실패 — ESC 취소 (최고 {sc:.2f})")
+                return "이미지없음"
             if ix is None:
                 save_miss_shot(fkey, j, coord)      # 뭘 봤는지 사진으로 남긴다
                 _bx = search_box(fkey, j, coord)
