@@ -152,6 +152,8 @@ ATOMIC_NEXT = {}        # (호버를 없애서 묶을 이유가 사라짐)
 # 용던고고는 좌표4부터 이미지·확인창이 이어져서, 중간에 다른 슬롯이 끼어들면
 # 그 창이 닫히거나 포커스가 바뀌어 클릭이 씹힌다 (2026-08-27 사용자 지시).
 WAVE_UNTIL = {"dragon": 3}     # 좌표1~3만 교차, 좌표4부터는 그 슬롯 완주
+# 슬롯을 섞지 않고 1번부터 순서대로 도는 런처들 (2026-08-28 사용자 지시)
+KEEP_ORDER_FKEYS = ("dragon", "sched")
 EARLY_IN = 2      # 남은 좌표가 이만큼 이하면 '끝나간다'고 보고 다음 슬롯을 미리 넣는다
 # 전체를 이 시간 안에 끝낸다 (초). 남은 시간과 남은 클릭 수를 보고 간격을 스스로 줄인다.
 # 늘리지는 않는다 — 빨리 끝나면 그대로 끝난다. (2026-08-27 사용자 지시: 4분 10초)
@@ -6753,8 +6755,10 @@ class App(tk.Tk):
                 targets = [(i, slots[i]) for i in _pick
                            if i < len(slots) and any(slots[i].get("coords", []))
                            and (not _en or slots[i].get("enabled", True))]
-                if fkey != "dragon":      # 용던고고는 번호 순서대로 (섞지 않는다)
-                    random.shuffle(targets)   # 슬롯 클릭 순서 매번 랜덤
+                # 용던고고·매일매일 스케줄은 **1번부터 번호 순서대로** 돈다
+                # (2026-08-28 사용자 지시 — 스케줄도 섞지 않는다)
+                if fkey not in KEEP_ORDER_FKEYS:
+                    random.shuffle(targets)   # 그 밖의 런처는 슬롯 순서 랜덤
             if fkey == "circus" and slot_idx is None and len(targets) > 1:
                 # 서커스 이벤트등록: 동시 2슬롯, 간격·슬롯투입 모두 10~20% 할증
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
@@ -8900,7 +8904,7 @@ class App(tk.Tk):
             else:
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
-                random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
+                # 1번부터 번호 순서대로 (2026-08-28 사용자 지시 — 섞지 않는다)
             for si, slot in targets:
                 if self._item_stop: break
                 name   = slot.get("name", f"#{si+1}")
@@ -13720,7 +13724,8 @@ class App(tk.Tk):
                 nxt = min(state[si]["due"] for si in alive)
                 time.sleep(max(0.05, min(nxt - now, 0.5)))
                 continue
-            si = random.choice(ready)
+            # 준비된 것 중 **번호가 앞선 슬롯부터** (섞지 않는다, 2026-08-28)
+            si = min(ready)
             st = state[si]
             slot = st["slot"]
             name = slot.get("name", f"#{si+1}")
