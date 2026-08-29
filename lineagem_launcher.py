@@ -5130,7 +5130,8 @@ class App(tk.Tk):
 
     # ── 인형확인용/성물확인용 (변신확인용 복제 — 동일 실행 로직) ────────
     def _dgn2_info(self, fkey):
-        return {"dollchk": ("dollchk_slots", "인형확인용", "🧸"),
+        return {"fix":     ("fix_slots",     "복구",       "🩹"),
+                "dollchk": ("dollchk_slots", "인형확인용", "🧸"),
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
                 "market":  ("market_slots",  "거래소검색", "🔎"),
