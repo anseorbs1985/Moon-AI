@@ -5860,7 +5860,11 @@ class App(tk.Tk):
         self.deiconify()
 
     def _test_dgn2(self, fkey, idx):
-        self._minimize_all()
+        # 복구 등은 최소화하지 않고 맨 뒤로만 (2026-08-29 사용자 지시)
+        if fkey in BACK_NOT_MIN:
+            self._send_behind_only()
+        else:
+            self._minimize_all()
         threading.Thread(target=self._run_dgn2, args=(fkey, idx), daemon=True).start()
 
     def _del_dgn2(self, fkey, idx):
@@ -7084,7 +7088,7 @@ class App(tk.Tk):
                 pass
 
     def _run_dgn2(self, fkey, slot_idx=None, sel_list=None):
-        self._start_pause()
+        self._start_pause(fkey)
         self._img_done = set()      # 실행할 때마다 '이미지 찾음' 표시를 비운다
         self._run_note = []         # 이번 실행에서 잘 안 된 것 (끝나고 요약)
         self._pace_now = 1.0        # 목표 시간에 맞추는 간격 배수 (1.0 = 그대로)
@@ -15443,14 +15447,19 @@ class App(tk.Tk):
         if getattr(self, "_busy_task", None) == name:
             self._busy_task = None
 
-    def _start_pause(self):
+    def _start_pause(self, fkey=None):
         """(2026-08-09) 실행 버튼을 눌러도 곧바로 클릭하지 않고 잠깐 뜸을 들인다.
         (2026-08-29 사용자 지시로 1~2초 → 0.2~0.45초 — "런처 실행이 너무 느리다")
         바로 눌리면 어색하고, 창이 아직 정리되기 전에 클릭이 들어갈 수도 있어서.
         + 스케줄·반복으로 저절로 시작될 때 클로드나 런처가 앞에 떠 있으면 클릭을
           가리므로, 무엇이 됐든 먼저 내리고(최소화·맨뒤로) 나서 시작한다."""
         try:
-            self.after(0, self._minimize_all)   # 런처·서브창·클로드 전부 내림
+            if fkey in BACK_NOT_MIN:
+                # 🩹 복구 등은 **최소화하지 않고 맨 뒤로만** (2026-08-29 사용자 지시).
+                # 여기서 또 최소화하는 바람에 _start_dgn2 의 '맨 뒤로'가 덮여 있었다.
+                self.after(0, self._send_behind_only)
+            else:
+                self.after(0, self._minimize_all)   # 런처·서브창·클로드 전부 내림
         except Exception:
             pass
         now = time.time()
