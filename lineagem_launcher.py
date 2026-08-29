@@ -761,6 +761,10 @@ RECLICK_HOLD = [(0.18, 0.30), (0.35, 0.50), (0.50, 0.70), (0.70, 0.95)]  # 갈�
 # 매일매일 스케줄 — 이 번호까지만 웨이브로 겹쳐 돌리고, 뒤는 한 슬롯씩 순서대로
 # (2026-08-29 사용자 지시: 겹치니 다른 창에 가려 실행이 안 되는 일이 있었다)
 SCHED_WAVE_TO = 12
+# 이 런처들은 슬롯을 시작하기 전에 '절전모드 화면'을 확인하고, 절전이면 키를 눌러 깨운다
+# (2026-08-29 사용자 지시 — 늦게 하면 절전으로 들어가 Z 를 따로 눌러야 한다)
+SLEEP_WAKE = ("fix",)
+SLEEP_WAKE_KEY = "z"
 BACK_NOT_MIN = ("fix",)
 START_PAUSE_MIN = 0.20
 START_PAUSE_MAX = 0.45
@@ -789,6 +793,43 @@ def grab_patch(fkey, j, coord):
     except Exception:
         return None
 
+
+def sleep_img_path(fkey):
+    """**절전모드 화면** 그림 — 이게 보이면 시작 전에 Z 를 한 번 눌러 깨운다.
+
+    평소엔 F11 만으로 되는데, 늦게 하면 절전으로 들어가 Z 를 따로 눌러야 한다
+    (2026-08-29 사용자 지시)."""
+    return os.path.join(IMG_DIR, f"{fkey}_sleep.png")
+
+
+def has_sleep_img(fkey):
+    try:
+        return os.path.exists(sleep_img_path(fkey))
+    except Exception:
+        return False
+
+
+def find_sleep_img(fkey, coord):
+    """그 좌표가 있는 클라 창에서 절전 화면이 보이나."""
+    q = sleep_img_path(fkey)
+    if not (q and os.path.exists(q) and coord):
+        return None, None, 0.0
+    rc = client_rect_at(coord[0], coord[1])
+    box = tuple(rc) if rc else (int(coord[0]) - 250, int(coord[1]) - 250,
+                                int(coord[0]) + 250, int(coord[1]) + 250)
+    return _find_one(fkey, 0, coord, q, box)
+
+
+def press_key(k, times=1, gap=(0.12, 0.25)):
+    """키를 times 번 누른다 (절전 깨우기용 Z 등)."""
+    try:
+        for i in range(max(1, int(times))):
+            if i:
+                time.sleep(random.uniform(*gap))
+            pyautogui.press(k)
+        return True
+    except Exception:
+        return False
 
 def check_path(fkey, j):
     """**확인만** 표시 — 그 자리는 누르지 않고 그림이 보이는지만 본다.
@@ -5325,6 +5366,18 @@ class App(tk.Tk):
             tk.Button(dr, text="📁 그림폴더", font=("맑은 고딕", 8),
                       bg="#34495e", fg="white", width=9, height=2,
                       command=self._open_img_dir).pack(side="left", padx=(3, 0))
+            if fkey in SLEEP_WAKE:
+                # 😴 — '절전모드 화면'을 등록한다. 슬롯 시작 전에 이게 보이면
+                #      Z 를 한 번 눌러 깨우고 나서 평소대로 진행한다.
+                _hs = has_sleep_img(fkey)
+                sb2 = tk.Button(dr, text=("😴절전있음" if _hs else "😴 절전그림"),
+                                font=("맑은 고딕", 8, "bold"), width=10, height=2,
+                                bg=("#1f618d" if _hs else "#5d6d7e"), fg="white")
+                sb2.config(command=lambda f=fkey, b_=sb2: self._grab_sleep_image(f, b_))
+                sb2.pack(side="left", padx=(3, 0))
+                if _hs:
+                    sb2.bind("<Button-3>", lambda _e, f=fkey, b_=sb2:
+                             self._del_sleep_image(f, b_))
             # 📤 — 원인 확인에 필요한 것(기록 + 사진 + 그림)을 바탕화면 한 폴더에 모은다.
             #      원격으로 로컬을 봐줄 때 이 폴더만 통째로 보내면 된다.
             tk.Button(dr, text="📤 진단모으기", font=("맑은 고딕", 8, "bold"),
@@ -5346,6 +5399,50 @@ class App(tk.Tk):
                             "_못찾음_*.png 가 '그때 훑은 화면'입니다")
         except Exception as e:
             self.status.set(f"📁 열기 실패: {e}")
+
+    def _grab_sleep_image(self, fkey, btn=None):
+        """😴 절전모드 화면을 드래그해 등록한다.
+        슬롯을 시작하기 전에 이게 보이면 Z 를 한 번 눌러 깨우고 진행한다."""
+        self._sleep_target = (fkey, btn)
+        self.status.set("😴 절전모드 화면에서 '절전인 걸 알 수 있는 부분'을 드래그하세요 "
+                        "(글자·아이콘 등 · ESC 취소)")
+        for w in self._section_wins():
+            try: w.withdraw()
+            except Exception: pass
+        self.withdraw()
+        self.after(250, lambda: _PotionAreaOverlay(self, self._on_sleep_image))
+
+    def _on_sleep_image(self, x, y, w, h):
+        self.deiconify()
+        for wn in self._section_wins():
+            try: wn.deiconify()
+            except Exception: pass
+        tgt = getattr(self, "_sleep_target", None)
+        if not tgt:
+            return
+        fkey, btn = tgt
+        if w < 6 or h < 6:
+            self.status.set("😴 너무 작습니다 — 다시 드래그해주세요"); return
+        try:
+            from PIL import ImageGrab
+            os.makedirs(IMG_DIR, exist_ok=True)
+            ImageGrab.grab(bbox=(x, y, x + w, y + h),
+                           all_screens=True).convert("RGB").save(sleep_img_path(fkey))
+            if btn and btn.winfo_exists():
+                btn.config(text="😴절전있음", bg="#1f618d")
+            self.status.set(f"😴 절전 화면 저장 ({w}×{h}) — 이게 보이면 "
+                            f"'{SLEEP_WAKE_KEY.upper()}' 를 먼저 눌러 깨웁니다")
+        except Exception as e:
+            self.status.set(f"😴 저장 실패: {e}")
+
+    def _del_sleep_image(self, fkey, btn=None):
+        try:
+            os.remove(sleep_img_path(fkey))
+            if btn and btn.winfo_exists():
+                btn.config(text="😴 절전그림", bg="#5d6d7e")
+            self.status.set("😴 절전 화면 삭제 — 깨우기를 하지 않습니다")
+        except Exception as e:
+            self.status.set(f"😴 삭제 실패: {e}")
 
     def _collect_diag(self, fkey):
         """원인 확인에 필요한 것을 바탕화면 `진단_<런처>` 폴더 하나에 모은다 —
@@ -7042,6 +7139,22 @@ class App(tk.Tk):
                 # 클릭1~N을 순서대로, 클릭 사이 간격만 랜덤
                 # 좌표가 없어도 '그림'을 지정해뒀으면 그 자리도 실행한다 (2026-08-27)
                 _anchor = slot_anchor(slot)
+                # 절전모드면 **Z 를 먼저 눌러 깨운다** (2026-08-29 사용자 지시).
+                # 평소엔 F11 만으로 되는데, 늦게 하면 절전으로 들어가 Z 가 필요하다.
+                if fkey in SLEEP_WAKE and has_sleep_img(fkey) and _anchor:
+                    try:
+                        _sx, _sy, _ss = find_sleep_img(fkey, _anchor)
+                        if _sx is not None:
+                            self._focus_client_at(_anchor)
+                            time.sleep(random.uniform(0.20, 0.35))
+                            press_key(SLEEP_WAKE_KEY)
+                            time.sleep(random.uniform(0.45, 0.75))
+                            click_log(f"{fkey} [{name}] 절전 상태 (일치도 {_ss:.2f}) "
+                                      f"→ '{SLEEP_WAKE_KEY.upper()}' 눌러 깨움")
+                            self.status.set(f"😴 [{name}] 절전 — "
+                                            f"{SLEEP_WAKE_KEY.upper()} 눌러 깨우고 시작")
+                    except Exception:
+                        pass
                 order = [j for j in range(nclk)
                          if coords[j] or (has_img(fkey, j) and _anchor)]
                 # 쿠폰: 클릭5(입력칸)가 등록돼 있으면 그 직후, 없으면 클릭4 직후에 붙여넣기
