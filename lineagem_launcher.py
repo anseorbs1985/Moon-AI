@@ -153,7 +153,7 @@ ATOMIC_NEXT = {}        # (호버를 없애서 묶을 이유가 사라짐)
 # 그 창이 닫히거나 포커스가 바뀌어 클릭이 씹힌다 (2026-08-27 사용자 지시).
 WAVE_UNTIL = {"dragon": 3}     # 좌표1~3만 교차, 좌표4부터는 그 슬롯 완주
 # 슬롯을 섞지 않고 1번부터 순서대로 도는 런처들 (2026-08-28 사용자 지시)
-KEEP_ORDER_FKEYS = ("dragon", "sched")
+KEEP_ORDER_FKEYS = ("dragon", "sched", "fix")   # 섞지 않고 1번부터 순서대로
 EARLY_IN = 2      # 남은 좌표가 이만큼 이하면 '끝나간다'고 보고 다음 슬롯을 미리 넣는다
 # 전체를 이 시간 안에 끝낸다 (초). 남은 시간과 남은 클릭 수를 보고 간격을 스스로 줄인다.
 # 늘리지는 않는다 — 빨리 끝나면 그대로 끝난다. (2026-08-27 사용자 지시: 4분 10초)
@@ -180,6 +180,10 @@ def dragon_extra(j):
     """(예전 이름 유지) 용던고고의 추가 대기."""
     return extra_gap("dragon", j)
 ITEM_SWIPE_DIST    = 250   # 아이템정리 클릭3: 누른 채 위로 쓸어올리는 거리(px) — 클라이언트 창 안에 있어야 함
+FIX_CLICKS         = 8     # 🩹 복구 — 슬롯당 좌표 8개 (안 쓰는 칸은 비워두면 건너뜀)
+FIX_SLOTS          = 16    # 🩹 복구 — 슬롯 16개
+FIX_GAP_MIN        = 0.70  # 🩹 복구 — 좌표 간 간격(초)
+FIX_GAP_MAX        = 1.90
 TJ_CLICKS          = 3     # TJ성공!! 슬롯당 좌표 수
 TJ_MIN             = 0.81  # TJ성공!! 좌표 간 클릭 간격(초) — 10~20% 완화(0.7~1.2 → 0.77~1.44)
 TJ_MAX             = 1.51
@@ -272,6 +276,8 @@ DEFAULT_CFG = {
     "dark_ui":       True,              # 어두운 화면 (눈 보호)
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
+    "fix_slots":     [{"name": "미등록", "coords": [None] * FIX_CLICKS}
+                      for _ in range(FIX_SLOTS)],   # 🩹 복구 (그림 확인 필수)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
     "seq_slots":    [None]*SEQ_SLOTS,   # 연속 클릭 좌표 (각 [x,y] 또는 None)
@@ -2148,6 +2154,10 @@ class App(tk.Tk):
         tk.Button(tjcol, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
                   width=4, height=2, command=self._start_tj).pack(pady=(2, 0))
+        # 🩹 복구 — TJ성공!! 실행 바로 아래 (2026-08-29 사용자 요청)
+        tk.Button(tjcol, text="🩹" + chr(10) + "복구", font=("맑은 고딕", 8, "bold"),
+                  bg="#7d3c98", fg="white", activebackground="#5b2c6f",
+                  width=4, height=2, command=self._open_fix_win).pack(pady=(2, 0))
         # 💬 클로드 앞으로 + 그 아래 🔄 런처재시작 — TJ성공!! 바로 오른편에 붙임
         cl_col = tk.Frame(btn_row); cl_col.pack(side="left", padx=(0, 41), anchor="n")
         tk.Button(cl_col, text="💬 클로드", font=("맑은 고딕", 8, "bold"),
@@ -4942,6 +4952,18 @@ class App(tk.Tk):
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
         self._build_slot_grid(parent, "dungeon")   # 4×4 그리드 (화면 배치와 동일)
 
+    # ── 🩹 복구 (그림으로 확인하고 누른다 — 2026-08-29 사용자 요청) ───────
+    def _open_fix_win(self):
+        """🩹 복구 창 — 용던고고와 같은 틀 (좌표 + 🖼그림 + 📐범위 + 🔍기준).
+
+        **다른 재화로 복구되는 것을 막는 방법**: 확인 버튼 자리에 좌표를 등록하고,
+        그 자리에 '맞는 재화일 때의 화면'을 🖼 으로 등록해둔다. 그러면 그림이 보일 때만
+        그 좌표를 누르고, 다른 재화가 떠 있으면 그림이 안 맞아 **그 슬롯은 아무것도
+        누르지 않고 중단**한다 (용던고고에서 검증된 규칙)."""
+        self._open_section_win("_fix_win", "🩹 복구", self._build_fix, w=980, h=720)
+
+    def _build_fix(self, parent):
+        self._build_dgn2("fix", parent)
     # ── TJ성공!! (인형탐험식 실행 — 슬롯당 좌표 3개) ─────────────────────
     def _open_tj_win(self):
         self._open_section_win("_tj_win", "⭕ TJ성공!!", self._build_tj, w=470, h=600)
@@ -11330,6 +11352,12 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("dragon", i),
                             prev=lambda i: self._preview_dgn2("dragon", i),
                             delete=lambda i: self._del_dgn2("dragon", i)),
+            "fix":     dict(title="🩹 복구", key="fix_slots", clicks=FIX_CLICKS,
+                            color="#7d3c98", enable=True, sel=True, img=True,
+                            reg=lambda s, c: self._reg_dgn2_click("fix", s, c),
+                            test=lambda i: self._test_dgn2("fix", i),
+                            prev=lambda i: self._preview_dgn2("fix", i),
+                            delete=lambda i: self._del_dgn2("fix", i)),
             "market":  dict(title="거래소검색", key="market_slots", clicks=MARKET_CLICKS,
                             color="#2874a6", opts=True, paste=True, sel=True,
                             reg=lambda s, c: self._reg_dgn2_click("market", s, c),
