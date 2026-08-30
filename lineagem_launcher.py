@@ -7834,6 +7834,19 @@ class App(tk.Tk):
         지켜보는 동안 마크가 사라진 슬롯은 경고를 자동으로 지운다 —
         내가 ✕로 지우는 것도 그대로 쓸 수 있다."""
         hit = self._check_hits()
+        if hit is None and quiet:
+            try:      # 조용히 실패해도 이유는 기록해 둔다 (원격 확인용)
+                _rp = os.path.join(self._warn_dir(), "check_ref.png")
+                _w2 = []
+                if not self.cfg.get("check_area_rel"):
+                    _w2.append("경고영역 없음")
+                if not os.path.exists(_rp):
+                    _w2.append("check_ref.png 없음")
+                if not self._client_hwnds_by_slot():
+                    _w2.append("클라 16개 미감지")
+                click_log("[경고확인] 불가(조용히) — " + (" · ".join(_w2) or "원인 불명"))
+            except Exception:
+                pass
         # 자는 클라는 십자가가 가려 보이지 않는다 → **먼저 깨우고 다시 본다**
         # (2026-08-29 사용자 지시: F11 을 눌렀는데 십자가가 있어도 안 뜬다)
         # 깨우는 데 시간이 걸리므로 **백그라운드**로 돌린다 (화면이 멈추지 않게).
@@ -7863,9 +7876,29 @@ class App(tk.Tk):
                 if not os.path.exists(_rp):
                     _why.append("십자가 기준 그림(check_ref.png) 없음")
                 if not self._client_hwnds_by_slot():
-                    _why.append("리니지M 클라 16개가 안 보임")
+                    # 몇 개가 보이는지까지 알려준다 — 원격에서 원인을 바로 알 수 있게
+                    _n = 0
+                    try:
+                        import win32gui
+                        _w = []
+                        def _cb2(h, _):
+                            if (win32gui.IsWindowVisible(h)
+                                    and not win32gui.IsIconic(h)):
+                                _t = win32gui.GetWindowText(h)
+                                if (_t.startswith("리니지M")
+                                        and not _t.startswith("리니지M 자동 실행")):
+                                    l, tp, r, b = win32gui.GetWindowRect(h)
+                                    if r - l > 100 and b - tp > 100:
+                                        _w.append(_t)
+                            return True
+                        win32gui.EnumWindows(_cb2, None)
+                        _n = len(_w)
+                    except Exception:
+                        pass
+                    _why.append(f"리니지M 클라가 {_n}개만 보임 (16개 필요)")
                 self.status.set("⚠ 경고 확인 불가 — " + (" · ".join(_why) or "원인 불명")
                                 + " · [🔆 절전해제] 창에서 [📷 경고영역 지정]을 해주세요")
+                click_log("[경고확인] 불가 — " + (" · ".join(_why) or "원인 불명"))
             return
         # 마크가 있는 곳은 그대로 두고, 사라진 곳은 자동으로 지운다
         # (내가 ✕ 로 지우지 않아도 다음 F11 때 알아서 정리됨)
