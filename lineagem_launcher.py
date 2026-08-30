@@ -276,6 +276,8 @@ DEFAULT_CFG = {
     "dark_ui":       True,              # 어두운 화면 (눈 보호)
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
+    "fix_hotkey":    0x74,              # 🩹 복구 단축키 (기본 F5)
+    "fix_on":        False,             # 단축키 켬/끔 (재시작 유지)
     "fix_slots":     [{"name": "미등록", "coords": [None] * FIX_CLICKS}
                       for _ in range(FIX_SLOTS)],   # 🩹 복구 (그림 확인 필수)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
@@ -1902,6 +1904,7 @@ class App(tk.Tk):
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._wdoff_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._item_hotkey_loop, daemon=True).start()
+        threading.Thread(target=self._fix_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._popup_guard_loop, daemon=True).start()
         threading.Thread(target=self._claude_attention_loop, daemon=True).start()
         # 작업 중에는 클로드를 강제로 내리지 않는다(예전 시작 버스트 제거).
@@ -5422,6 +5425,21 @@ class App(tk.Tk):
             tk.Button(dr, text="📁 그림폴더", font=("맑은 고딕", 8),
                       bg="#34495e", fg="white", width=9, height=2,
                       command=self._open_img_dir).pack(side="left", padx=(3, 0))
+            if fkey == "fix":
+                # ⌨ 단축키 — 복구할 클라를 클릭해두고 이 키를 누르면 그 슬롯만 복구
+                _on = bool(self.cfg.get("fix_on", False))
+                self._fix_on_btn = tk.Button(
+                    dr, text=("단축키 ON" if _on else "단축키 OFF"),
+                    font=("맑은 고딕", 8, "bold"), width=8, height=2,
+                    bg=("#1e8449" if _on else "#7f8c8d"), fg="white",
+                    command=self._toggle_fix_hotkey)
+                self._fix_on_btn.pack(side="left", padx=(3, 0))
+                tk.Button(dr, text="⌨ 키지정", font=("맑은 고딕", 8),
+                          bg="#5d6d7e", fg="white", width=7, height=2,
+                          command=self._assign_fix_hotkey).pack(side="left", padx=(2, 0))
+                self._fix_hk_var = tk.StringVar(value=self._fix_hotkey_label())
+                tk.Label(dr, textvariable=self._fix_hk_var,
+                         font=("맑은 고딕", 8), fg="#888").pack(side="left", padx=(3, 0))
             if fkey in SLEEP_WAKE:
                 # 😴 — '절전모드 화면'을 등록한다. 슬롯 시작 전에 이게 보이면
                 #      Z 를 한 번 눌러 깨우고 나서 평소대로 진행한다.
@@ -7515,6 +7533,98 @@ class App(tk.Tk):
                       bg="#7f8c8d", fg="white",
                       command=lambda x=si: self._warn_remove(x)).pack(side="left", padx=(2, 0))
 
+    def _fix_slot_under_cursor(self):
+        """**지금 클릭해둔 클라(활성 창)** 가 복구 몇 번 슬롯인지 (아니면 None).
+
+        사용법: 복구할 클라를 마우스로 한 번 클릭해 그 창을 활성으로 만든 뒤 단축키를 누른다.
+        마우스 위치는 보지 않는다 — 클릭해둔 창만 본다 (2026-08-29 사용자 지시).
+        각 슬롯의 등록된 첫 좌표가 그 창 안이면 그 슬롯이다."""
+        try:
+            import ctypes
+            import precise_click as _pc
+            fg = ctypes.windll.user32.GetForegroundWindow()
+            if not fg or not _pc.is_game_window(fg):
+                return None
+            for i, sl in enumerate(self.cfg.get("fix_slots") or []):
+                anc = slot_anchor(sl)
+                if not anc:
+                    continue
+                if _pc.game_window_at(int(anc[0]), int(anc[1])) == fg:
+                    return i + 1
+        except Exception:
+            pass
+        return None
+    def _fix_hotkey_loop(self):
+        """전역 단축키 감시 — 켜져 있을 때 그 키를 누르면
+        **마우스가 올라가 있는 클라의 슬롯만** 복구한다 (2026-08-29 사용자 요청).
+        마우스가 리니지M 창 밖이면 아무 것도 하지 않는다 (전체 실행 아님)."""
+        import ctypes
+        prev = False
+        while True:
+            time.sleep(0.03)
+            vk = self.cfg.get("fix_hotkey")
+            if not self.cfg.get("fix_on", False) or not vk:
+                prev = False
+                continue
+            try:
+                down = bool(ctypes.windll.user32.GetAsyncKeyState(int(vk)) & 0x8000)
+            except Exception:
+                prev = False
+                continue
+            if down and not prev:
+                self.after(0, self._fix_hotkey_fire)
+            prev = down
+
+    def _fix_hotkey_fire(self):
+        si = self._fix_slot_under_cursor()
+        if not si:
+            self.status.set("🩹 복구 단축키 — 복구할 클라를 **클릭해서 활성으로** 만든 뒤 누르세요")
+            return
+        self.status.set(f"🩹 복구 단축키 — 클릭해둔 #{si:02d} 슬롯을 복구합니다")
+        self._run_fix_slot(si)
+
+    def _fix_hotkey_label(self):
+        return f"단축키: {self._vk_name(self.cfg.get('fix_hotkey'))}"
+
+    def _toggle_fix_hotkey(self):
+        self.cfg["fix_on"] = not bool(self.cfg.get("fix_on", False))
+        save_cfg(self.cfg)
+        b = getattr(self, "_fix_on_btn", None)
+        if b and b.winfo_exists():
+            on = self.cfg["fix_on"]
+            b.config(text=("단축키 ON" if on else "단축키 OFF"),
+                     bg=("#1e8449" if on else "#7f8c8d"))
+        self.status.set(
+            f"🩹 복구 단축키 ON — {self._vk_name(self.cfg.get('fix_hotkey'))} 를 누르면 "
+            f"**마우스가 있는 클라**만 복구합니다"
+            if self.cfg["fix_on"] else "🩹 복구 단축키 OFF")
+
+    def _assign_fix_hotkey(self):
+        self.status.set("복구에 쓸 키를 누르세요... (5초 안에)")
+        def _cap():
+            import ctypes
+            time.sleep(0.3)
+            end = time.time() + 5
+            got = None
+            while time.time() < end and got is None:
+                for vk in range(0x08, 0xFF):
+                    if vk in (0x01, 0x02, 0x04):
+                        continue
+                    if ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000:
+                        got = vk; break
+                time.sleep(0.02)
+            if got is None:
+                self.after(0, lambda: self.status.set("단축키 지정 취소 (시간초과)"))
+                return
+            self.cfg["fix_hotkey"] = got
+            save_cfg(self.cfg)
+            def _up():
+                v = getattr(self, "_fix_hk_var", None)
+                if v is not None:
+                    v.set(self._fix_hotkey_label())
+                self.status.set(f"🩹 복구 단축키 = {self._vk_name(got)}")
+            self.after(0, _up)
+        threading.Thread(target=_cap, daemon=True).start()
     def _run_fix_slot(self, si):
         """'복구해야함 03' 을 누르면 **그 슬롯만** 복구를 돌린다 (2026-08-29 사용자 요청).
 
