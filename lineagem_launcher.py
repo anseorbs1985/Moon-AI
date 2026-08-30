@@ -7834,6 +7834,26 @@ class App(tk.Tk):
         지켜보는 동안 마크가 사라진 슬롯은 경고를 자동으로 지운다 —
         내가 ✕로 지우는 것도 그대로 쓸 수 있다."""
         hit = self._check_hits()
+        # 자는 클라는 십자가가 가려 보이지 않는다 → **먼저 깨우고 다시 본다**
+        # (2026-08-29 사용자 지시: F11 을 눌렀는데 십자가가 있어도 안 뜬다)
+        # 깨우는 데 시간이 걸리므로 **백그라운드**로 돌린다 (화면이 멈추지 않게).
+        try:
+            _sl = sorted(getattr(self, "_last_sleep", set()))
+            if (_sl and has_sleep_img("fix")
+                    and not getattr(self, "_waking", False)):
+                self._waking = True
+                self.status.set(f"😴 자는 클라 {len(_sl)}개를 깨우는 중… {_sl}")
+                def _job(sl=_sl, q=quiet):
+                    try:
+                        self._wake_slots(sl)
+                    finally:
+                        self._waking = False
+                        # 깨운 뒤 다시 확인 (다시 부를 땐 깨울 게 없다)
+                        self.after(300, lambda: self._check_scan(quiet=q))
+                threading.Thread(target=_job, daemon=True).start()
+                return
+        except Exception:
+            self._waking = False
         if hit is None:
             if not quiet:
                 _rp = os.path.join(self._warn_dir(), "check_ref.png")
@@ -7861,6 +7881,51 @@ class App(tk.Tk):
             _msg += f" · 사라진 {gone} 자동 삭제"
         self.status.set(_msg + " · 5분간 지켜봅니다")
         self._check_watch_start()
+
+    def _wake_slots(self, slots):
+        """자는 클라들을 **Z 로 깨운다** (F11 확인 전에 쓴다, 2026-08-29).
+
+        각 클라를 앞으로 올리고 키를 한 번 누른 뒤, 절전 화면이 사라졌는지 확인한다.
+        전부 끝나면 사용자가 보던 창으로 돌려놓는다."""
+        try:
+            import ctypes
+            _fg0 = ctypes.windll.user32.GetForegroundWindow()
+        except Exception:
+            _fg0 = None
+        hw = self._client_hwnds_by_slot() or []
+        for si in slots:
+            i = int(si) - 1
+            if i < 0 or i >= len(hw):
+                continue
+            l, t, r, b, hwnd = hw[i]
+            cx, cy = (l + r) // 2, (t + b) // 2
+            for _w in range(SLEEP_WAKE_TRIES):
+                try:
+                    self._focus_client_at((cx, cy))
+                    time.sleep(random.uniform(0.15, 0.28))
+                    press_key(SLEEP_WAKE_KEY)
+                except Exception:
+                    break
+                _t0 = time.time()
+                _ok = False
+                while time.time() - _t0 < SLEEP_WAKE_WAIT[1]:
+                    time.sleep(0.25)
+                    _x, _y, _sc = find_sleep_img("fix", (cx, cy))
+                    if _x is None:
+                        _ok = True
+                        break
+                if _ok:
+                    click_log(f"[경고확인] #{si:02d} 절전 깨움 ({_w+1}번째)")
+                    break
+            else:
+                click_log(f"[경고확인] #{si:02d} ⚠ {SLEEP_WAKE_TRIES}번 눌러도 안 깨어남")
+        time.sleep(random.uniform(0.4, 0.7))      # 화면 안정화
+        try:
+            if _fg0:
+                import win32gui
+                win32gui.SetForegroundWindow(_fg0)
+        except Exception:
+            pass
 
     def _check_watch_start(self, minutes=5):
         """5분 동안 15초마다 다시 봐서, 마크가 사라진 슬롯의 경고를 지운다."""
