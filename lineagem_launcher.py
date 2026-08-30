@@ -776,7 +776,7 @@ BACK_NOT_MIN = ("fix",)
 START_PAUSE_MIN = 0.20
 START_PAUSE_MAX = 0.45
 CHECK_TRIES = 2      # 👁 확인만 자리는 짧게 2번만 본다 (0.25~0.45초 간격)
-ESC_TIMES   = 2      # 취소할 때 ESC 를 몇 번 누를지 (창이 두 겹이라 두 번, 2026-08-29)
+ESC_TIMES   = 1      # 취소할 때 ESC 를 몇 번 누를지 (2026-08-29 사용자 지시로 한 번)
 RECLICK_WAIT = [2.0, 3.0]        # 확인까지 2초 → 3초 (전 28초는 너무 느렸다)
 DRIFT_MAX  = 40           # 그림이 이만큼(px) 안에서 움직인 건 '같은 것'으로 본다.
                           # 더 멀면 다른 마름모라 겨냥을 옮기지 않는다 (엉뚱한 층 방지)
@@ -7537,6 +7537,7 @@ class App(tk.Tk):
             self.status.set("▶ 전부 복구 — 목록이 비어 있습니다 (F11 로 먼저 확인하세요)")
             return
         self._fix_queue = q
+        self._fix_bulk_ready = False
         self.status.set(f"▶ 전부 복구 시작 — {len(q)}개 {q} (하나씩 순서대로)")
         self._fix_run_next()
 
@@ -7554,14 +7555,27 @@ class App(tk.Tk):
             self.after(200, self._fix_run_next)
             return
         self.status.set(f"▶ 전부 복구 — #{si:02d} 차례 (남은 {len(q)}개)")
-        self._run_fix_slot(si)
+        self._run_fix_slot(si, _bulk=True)
         # 끝나고 확인까지 마칠 시간을 준 뒤 다음으로
         self.after(1500, self._fix_run_next)
-    def _run_fix_slot(self, si):
+    def _run_fix_slot(self, si, _bulk=False):
         """'복구해야함 03' 을 누르면 **그 슬롯만** 복구를 돌린다 (2026-08-29 사용자 요청).
 
         좌표4 의 👁 '무료' 확인을 통과할 때만 뒤 좌표를 누르므로,
         재화가 드는 상태면 그 자리에서 멈춘다 — 눌러도 안전하다."""
+        # F11 로 목록을 새로 만든 뒤 **첫 번째로 누르는 것은 '단체 복구'** 다.
+        # 뜬 것들을 번호 순서대로 한 번에 처리하고, 그 뒤부터는 개별로만 돈다
+        # (2026-08-29 사용자 지시).
+        if not _bulk and getattr(self, "_fix_bulk_ready", False):
+            self._fix_bulk_ready = False
+            _q = sorted(self._warn_load())
+            if len(_q) > 1:
+                self.status.set(f"▶ F11 이후 첫 실행 — {len(_q)}개 {_q} 를 "
+                                f"순서대로 단체 복구합니다")
+                click_log(f"fix F11 이후 첫 실행 → 단체 복구 {_q}")
+                self._fix_queue = _q
+                self._fix_run_next()
+                return
         idx = int(si) - 1
         try:
             slots = self.cfg.get("fix_slots") or []
@@ -7841,6 +7855,7 @@ class App(tk.Tk):
         gone = sorted(before - set(hit) - _keep)
         self._warn_save(sorted(set(hit) | _keep))
         self._warn_refresh()
+        self._fix_bulk_ready = True      # 다음 한 번은 '단체 복구'
         _msg = f"⚠ 경고 확인 — 뜬 곳 {len(hit)}개 {hit or ''}"
         if gone:
             _msg += f" · 사라진 {gone} 자동 삭제"
