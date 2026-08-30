@@ -276,8 +276,6 @@ DEFAULT_CFG = {
     "dark_ui":       True,              # 어두운 화면 (눈 보호)
     "market_text":   "",                # 거래소검색에서 붙여넣을 글
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
-    "fix_hotkey":    0x74,              # 🩹 복구 단축키 (기본 F5)
-    "fix_on":        False,             # 단축키 켬/끔 (재시작 유지)
     "fix_slots":     [{"name": "미등록", "coords": [None] * FIX_CLICKS}
                       for _ in range(FIX_SLOTS)],   # 🩹 복구 (그림 확인 필수)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
@@ -767,11 +765,13 @@ SCHED_WAVE_TO = 12
 # (2026-08-29 사용자 지시 — 늦게 하면 절전으로 들어가 Z 를 따로 눌러야 한다)
 # 복구를 누른 뒤 그 슬롯을 몇 번 더 지켜볼지 (3초 간격 → 30번 ≈ 90초)
 # F11 의 5분 감시를 '개별 복구'에도 적용한 것 (2026-08-29 사용자 지시)
-FIX_WATCH_N = 30
+FIX_WATCH_N = 60        # 1초마다 60번 ≈ 60초 지켜본다
+FIX_WATCH_MS = 1000     # 확인 간격(ms) — 짧을수록 '없앤 즉시' 사라진다
 SLEEP_WAKE = ("fix",)
 SLEEP_WAKE_KEY = "z"
 SLEEP_MATCH = 0.60      # 절전 화면 판정 기준 (실측 16클라 0.73~1.00)
-SLEEP_WAKE_WAIT = (1.2, 1.8)   # Z 를 누른 뒤 화면이 돌아올 때까지 기다리는 시간
+SLEEP_WAKE_WAIT = (1.2, 2.5)   # Z 를 누른 뒤 깨어났는지 확인하며 기다리는 시간(초)
+SLEEP_WAKE_TRIES = 3           # 안 깨어나면 몇 번까지 다시 누를지
 BACK_NOT_MIN = ("fix",)
 START_PAUSE_MIN = 0.20
 START_PAUSE_MAX = 0.45
@@ -1904,7 +1904,6 @@ class App(tk.Tk):
         threading.Thread(target=self._dc_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._wdoff_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._item_hotkey_loop, daemon=True).start()
-        threading.Thread(target=self._fix_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._popup_guard_loop, daemon=True).start()
         threading.Thread(target=self._claude_attention_loop, daemon=True).start()
         # 작업 중에는 클로드를 강제로 내리지 않는다(예전 시작 버스트 제거).
@@ -5425,21 +5424,6 @@ class App(tk.Tk):
             tk.Button(dr, text="📁 그림폴더", font=("맑은 고딕", 8),
                       bg="#34495e", fg="white", width=9, height=2,
                       command=self._open_img_dir).pack(side="left", padx=(3, 0))
-            if fkey == "fix":
-                # ⌨ 단축키 — 복구할 클라를 클릭해두고 이 키를 누르면 그 슬롯만 복구
-                _on = bool(self.cfg.get("fix_on", False))
-                self._fix_on_btn = tk.Button(
-                    dr, text=("단축키 ON" if _on else "단축키 OFF"),
-                    font=("맑은 고딕", 8, "bold"), width=8, height=2,
-                    bg=("#1e8449" if _on else "#7f8c8d"), fg="white",
-                    command=self._toggle_fix_hotkey)
-                self._fix_on_btn.pack(side="left", padx=(3, 0))
-                tk.Button(dr, text="⌨ 키지정", font=("맑은 고딕", 8),
-                          bg="#5d6d7e", fg="white", width=7, height=2,
-                          command=self._assign_fix_hotkey).pack(side="left", padx=(2, 0))
-                self._fix_hk_var = tk.StringVar(value=self._fix_hotkey_label())
-                tk.Label(dr, textvariable=self._fix_hk_var,
-                         font=("맑은 고딕", 8), fg="#888").pack(side="left", padx=(3, 0))
             if fkey in SLEEP_WAKE:
                 # 😴 — '절전모드 화면'을 등록한다. 슬롯 시작 전에 이게 보이면
                 #      Z 를 한 번 눌러 깨우고 나서 평소대로 진행한다.
@@ -7308,7 +7292,9 @@ class App(tk.Tk):
             self._set_btn(f"btn_{fkey}_stop", state="disabled")
             self.after(0, lambda f=fkey, t=title: self._run_summary(f, t))
             if fkey in BACK_NOT_MIN:
-                self.after(0, self._restore_front)      # 복구는 끝나면 앞으로
+                # 복구는 끝나도 **앞으로 나오지 않는다** (2026-08-29 사용자 지시 —
+                # 튀어나오는 것도 버퍼링이라 그냥 뒤에서 계속 작업하게 둔다).
+                pass
             else:
                 self.after(0, self._restore_back)
 
@@ -7533,98 +7519,6 @@ class App(tk.Tk):
                       bg="#7f8c8d", fg="white",
                       command=lambda x=si: self._warn_remove(x)).pack(side="left", padx=(2, 0))
 
-    def _fix_slot_under_cursor(self):
-        """**지금 클릭해둔 클라(활성 창)** 가 복구 몇 번 슬롯인지 (아니면 None).
-
-        사용법: 복구할 클라를 마우스로 한 번 클릭해 그 창을 활성으로 만든 뒤 단축키를 누른다.
-        마우스 위치는 보지 않는다 — 클릭해둔 창만 본다 (2026-08-29 사용자 지시).
-        각 슬롯의 등록된 첫 좌표가 그 창 안이면 그 슬롯이다."""
-        try:
-            import ctypes
-            import precise_click as _pc
-            fg = ctypes.windll.user32.GetForegroundWindow()
-            if not fg or not _pc.is_game_window(fg):
-                return None
-            for i, sl in enumerate(self.cfg.get("fix_slots") or []):
-                anc = slot_anchor(sl)
-                if not anc:
-                    continue
-                if _pc.game_window_at(int(anc[0]), int(anc[1])) == fg:
-                    return i + 1
-        except Exception:
-            pass
-        return None
-    def _fix_hotkey_loop(self):
-        """전역 단축키 감시 — 켜져 있을 때 그 키를 누르면
-        **마우스가 올라가 있는 클라의 슬롯만** 복구한다 (2026-08-29 사용자 요청).
-        마우스가 리니지M 창 밖이면 아무 것도 하지 않는다 (전체 실행 아님)."""
-        import ctypes
-        prev = False
-        while True:
-            time.sleep(0.03)
-            vk = self.cfg.get("fix_hotkey")
-            if not self.cfg.get("fix_on", False) or not vk:
-                prev = False
-                continue
-            try:
-                down = bool(ctypes.windll.user32.GetAsyncKeyState(int(vk)) & 0x8000)
-            except Exception:
-                prev = False
-                continue
-            if down and not prev:
-                self.after(0, self._fix_hotkey_fire)
-            prev = down
-
-    def _fix_hotkey_fire(self):
-        si = self._fix_slot_under_cursor()
-        if not si:
-            self.status.set("🩹 복구 단축키 — 복구할 클라를 **클릭해서 활성으로** 만든 뒤 누르세요")
-            return
-        self.status.set(f"🩹 복구 단축키 — 클릭해둔 #{si:02d} 슬롯을 복구합니다")
-        self._run_fix_slot(si)
-
-    def _fix_hotkey_label(self):
-        return f"단축키: {self._vk_name(self.cfg.get('fix_hotkey'))}"
-
-    def _toggle_fix_hotkey(self):
-        self.cfg["fix_on"] = not bool(self.cfg.get("fix_on", False))
-        save_cfg(self.cfg)
-        b = getattr(self, "_fix_on_btn", None)
-        if b and b.winfo_exists():
-            on = self.cfg["fix_on"]
-            b.config(text=("단축키 ON" if on else "단축키 OFF"),
-                     bg=("#1e8449" if on else "#7f8c8d"))
-        self.status.set(
-            f"🩹 복구 단축키 ON — {self._vk_name(self.cfg.get('fix_hotkey'))} 를 누르면 "
-            f"**마우스가 있는 클라**만 복구합니다"
-            if self.cfg["fix_on"] else "🩹 복구 단축키 OFF")
-
-    def _assign_fix_hotkey(self):
-        self.status.set("복구에 쓸 키를 누르세요... (5초 안에)")
-        def _cap():
-            import ctypes
-            time.sleep(0.3)
-            end = time.time() + 5
-            got = None
-            while time.time() < end and got is None:
-                for vk in range(0x08, 0xFF):
-                    if vk in (0x01, 0x02, 0x04):
-                        continue
-                    if ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000:
-                        got = vk; break
-                time.sleep(0.02)
-            if got is None:
-                self.after(0, lambda: self.status.set("단축키 지정 취소 (시간초과)"))
-                return
-            self.cfg["fix_hotkey"] = got
-            save_cfg(self.cfg)
-            def _up():
-                v = getattr(self, "_fix_hk_var", None)
-                if v is not None:
-                    v.set(self._fix_hotkey_label())
-                self.status.set(f"🩹 복구 단축키 = {self._vk_name(got)}")
-            self.after(0, _up)
-        threading.Thread(target=_cap, daemon=True).start()
     def _run_fix_slot(self, si):
         """'복구해야함 03' 을 누르면 **그 슬롯만** 복구를 돌린다 (2026-08-29 사용자 요청).
 
@@ -7648,15 +7542,34 @@ class App(tk.Tk):
             if _anc and has_sleep_img("fix"):
                 _sx, _sy, _ss = find_sleep_img("fix", _anc)
                 if _sx is not None:
-                    self._focus_client_at(_anc)
-                    time.sleep(random.uniform(0.20, 0.35))
-                    press_key(SLEEP_WAKE_KEY)
+                    _was_sleep = True
                     click_log(f"fix #{si:02d} 절전 상태 (일치도 {_ss:.2f}) → "
                               f"'{SLEEP_WAKE_KEY.upper()}' 눌러 깨움 (십자가 확인 전)")
-                    self.status.set(f"😴 복구 #{si:02d} 절전 — "
-                                    f"{SLEEP_WAKE_KEY.upper()} 눌러 깨우는 중…")
-                    time.sleep(random.uniform(SLEEP_WAKE_WAIT[0], SLEEP_WAKE_WAIT[1]))
-                    _was_sleep = True
+                    # **진짜로 깨어날 때까지** 확인하며 최대 SLEEP_WAKE_TRIES 번 누른다.
+                    # 한 번 누르고 정해진 시간만 기다리면 화면이 덜 돌아와 실패했다
+                    # (2026-08-29 사용자 신고: 절전이면 복구가 안 된다)
+                    for _w in range(SLEEP_WAKE_TRIES):
+                        self.status.set(f"😴 복구 #{si:02d} 절전 — "
+                                        f"{SLEEP_WAKE_KEY.upper()} 눌러 깨우는 중… "
+                                        f"({_w+1}/{SLEEP_WAKE_TRIES})")
+                        self._focus_client_at(_anc)
+                        time.sleep(random.uniform(0.20, 0.35))
+                        press_key(SLEEP_WAKE_KEY)
+                        _t0 = time.time()
+                        _awake = False
+                        while time.time() - _t0 < SLEEP_WAKE_WAIT[1]:
+                            time.sleep(0.25)
+                            _cx, _cy, _cs = find_sleep_img("fix", _anc)
+                            if _cx is None:            # 절전 화면이 사라졌다 = 깨어남
+                                _awake = True
+                                break
+                        if _awake:
+                            click_log(f"fix #{si:02d} 깨어남 확인 ({_w+1}번째 시도)")
+                            time.sleep(random.uniform(0.35, 0.6))   # 화면 안정화
+                            break
+                    else:
+                        click_log(f"fix #{si:02d} ⚠ {SLEEP_WAKE_TRIES}번 눌러도 "
+                                  f"절전이 안 풀림")
         except Exception:
             pass
         # ── ② 깨운 뒤에 십자가가 있는지 확인한다 ──
@@ -7679,7 +7592,7 @@ class App(tk.Tk):
         self.status.set(f"🩹 복구 #{si:02d} 실행 — '무료'가 아니면 그 자리에서 멈춥니다")
         self._start_dgn2("fix", sel_list=[idx])
         # 끝난 뒤 **화면을 다시 봐서** 경고가 사라졌는지 확인하고 지운다
-        self.after(2500, lambda x=si: self._fix_verify(x, FIX_WATCH_N))
+        self.after(300, lambda x=si: self._fix_verify(x, FIX_WATCH_N))
 
     def _fix_verify(self, si, tries, marked=False):
         """복구를 돌린 뒤 **그 슬롯만 계속 지켜본다** — F11 의 5분 감시를 개별로.
@@ -7692,7 +7605,7 @@ class App(tk.Tk):
         지켜보는 동안 사용자가 손으로 복구해도 사라지면 바로 지워진다."""
         try:
             if self._is_busy():                    # 아직 돌고 있으면 기다린다
-                self.after(2000, lambda: self._fix_verify(si, tries, marked))
+                self.after(500, lambda: self._fix_verify(si, tries, marked))
                 return
             hit = self._check_hits()
             if hit is None:
@@ -7702,7 +7615,7 @@ class App(tk.Tk):
             if int(si) not in set(hit):
                 if int(si) in getattr(self, "_last_sleep", set()):
                     # 자고 있어서 십자가가 가려진 것 — 복구된 게 아니다. 지우지 않는다.
-                    self.after(3000, lambda: self._fix_verify(si, tries - 1, marked))
+                    self.after(FIX_WATCH_MS, lambda: self._fix_verify(si, tries - 1, marked))
                     return
                 # 십자가가 사라졌다 = 복구됨
                 self._fix_paid_mark(int(si), False)
@@ -7727,7 +7640,7 @@ class App(tk.Tk):
                     self.status.set(f"🩹 복구 #{si:02d} — 십자가가 아직 남아 있습니다 "
                                     f"(목록은 그대로 둡니다)")
                 return
-            self.after(3000, lambda: self._fix_verify(si, tries - 1, marked))
+            self.after(FIX_WATCH_MS, lambda: self._fix_verify(si, tries - 1, marked))
         except Exception as e:
             self.status.set(f"🩹 복구 #{si:02d} 확인 실패: {e}")
 
@@ -8066,14 +7979,19 @@ class App(tk.Tk):
             def cb(h, _):
                 if win32gui.IsWindowVisible(h) and not win32gui.IsIconic(h):
                     t = win32gui.GetWindowText(h)
-                    if t.startswith("리니지M l"):
+                    # 캐릭터가 안 뜬 클라는 제목이 그냥 '리니지M' 이라
+                    # '리니지M l' 로만 찾으면 하나가 빠져 16개가 안 돼 전체가 멈췄다
+                    # (2026-08-29 실측: 15개만 잡혀 '복구해야함' 이 아예 안 떴다)
+                    if (t.startswith("리니지M")
+                            and not t.startswith("리니지M 자동 실행")):
                         l, tp, r, b = win32gui.GetWindowRect(h)
                         if r - l > 100 and b - tp > 100:
                             wins.append((l, tp, r, b, h))
                 return True
             win32gui.EnumWindows(cb, None)
-            if len(wins) != 16:
+            if len(wins) < 16:
                 return None
+            wins = sorted(wins, key=lambda w: w[0])[:16]
             wins.sort(key=lambda w: w[0])
             cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
             return [w for col in cols for w in col]
@@ -12672,7 +12590,11 @@ class App(tk.Tk):
             def cb(h, _):
                 if win32gui.IsWindowVisible(h) and not win32gui.IsIconic(h):
                     t = win32gui.GetWindowText(h)
-                    if t.startswith("리니지M l"):
+                    # 캐릭터가 안 뜬 클라는 제목이 그냥 '리니지M' 이라
+                    # '리니지M l' 로만 찾으면 하나가 빠져 16개가 안 돼 전체가 멈췄다
+                    # (2026-08-29 실측: 15개만 잡혀 '복구해야함' 이 아예 안 떴다)
+                    if (t.startswith("리니지M")
+                            and not t.startswith("리니지M 자동 실행")):
                         l, tp, r, b = win32gui.GetWindowRect(h)
                         if r - l > 100 and b - tp > 100:
                             wins.append((l, tp, r, b))
@@ -14831,22 +14753,6 @@ class App(tk.Tk):
             pass
         try:
             self._minimize_claude()     # 클로드는 항상 위라 그대로 내린다
-        except Exception:
-            pass
-
-    def _restore_front(self):
-        """끝나면 **앞으로** 올린다 (맨 뒤로 보냈던 것만)."""
-        try:
-            self._quiet_restore = False
-            self.deiconify()
-            self.lift()
-            self.attributes("-topmost", True)
-            self.after(400, lambda: self.attributes("-topmost", False))
-            for w in self._section_wins():
-                try:
-                    w.deiconify(); w.lift()
-                except Exception:
-                    pass
         except Exception:
             pass
 
