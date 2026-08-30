@@ -767,6 +767,9 @@ SCHED_WAVE_TO = 12
 # F11 의 5분 감시를 '개별 복구'에도 적용한 것 (2026-08-29 사용자 지시)
 FIX_WATCH_N = 60        # 1초마다 60번 ≈ 60초 지켜본다
 FIX_WATCH_MS = 1000     # 확인 간격(ms) — 짧을수록 '없앤 즉시' 사라진다
+WARN_MATCH  = 0.55      # 십자가 판정 기준 (2026-08-29: 0.60 → 0.55, 놓치는 것 줄이려고)
+WARN_MARGIN = 60        # 경고영역 주변 이만큼 더 넓게 훑는다 (전 20)
+WARN_TICK_MS = 5000     # F11 뒤 지켜보는 간격(ms) — 전 15초
 SLEEP_WAKE = ("fix",)
 SLEEP_WAKE_KEY = "z"
 SLEEP_MATCH = 0.60      # 절전 화면 판정 기준 (실측 16클라 0.73~1.00)
@@ -7789,8 +7792,9 @@ class App(tk.Tk):
         except Exception:
             return None
         dx, dy, w, h = rel
-        M = 20        # 클라마다 몇 픽셀씩 어긋나므로 주변까지 넓게 훑는다
-        hit, slept = [], []
+        M = WARN_MARGIN   # 클라마다 자리가 어긋나므로 주변까지 넓게 훑는다
+                          # (2026-08-29: 20 → 60. 10개 떠 있어도 몇 개를 놓쳤다)
+        hit, slept, _scores = [], [], []
         _sleep_t = None
         try:
             if has_sleep_img("fix"):
@@ -7807,7 +7811,9 @@ class App(tk.Tk):
                 x1, y1 = min(W, dx + w + M), min(H, dy + h + M)
                 _full = self._grab_client(hwnd, W, H)
                 im = _full.crop((x0, y0, x1, y1)).convert("L")
-                if self._img_match(im, ref) >= 0.60:   # 기준 그림이 그 안에 있다 = 떠 있다
+                _sc = self._img_match(im, ref)
+                _scores.append((i + 1, round(_sc, 2)))
+                if _sc >= WARN_MATCH:      # 기준 그림이 그 안에 있다 = 떠 있다
                     hit.append(i + 1)
                 # 같은 캡처로 '지금 자고 있나'도 본다 — 자는 동안은 십자가가 가려서
                 # 안 보이므로, 그걸 '복구됨'으로 오해해 지우면 안 된다 (2026-08-29)
@@ -7827,6 +7833,7 @@ class App(tk.Tk):
             except Exception:
                 pass
         self._last_sleep = set(slept)
+        self._last_scores = _scores      # 슬롯별 점수 (왜 못 잡았는지 확인용)
         return hit
 
     def _check_scan(self, quiet=False):
@@ -7909,6 +7916,13 @@ class App(tk.Tk):
         self._warn_save(sorted(set(hit) | _keep))
         self._warn_refresh()
         self._fix_bulk_ready = True      # 다음 한 번은 '단체 복구'
+        try:      # 슬롯별 점수를 남긴다 — 왜 몇 개를 못 잡는지 원격에서 보려고
+            _ss = getattr(self, "_last_scores", []) or []
+            click_log("[경고확인] 십자가 점수 " +
+                      " ".join(f"{a:02d}:{b:.2f}" for a, b in _ss) +
+                      f"  (기준 {WARN_MATCH}) → 뜬 곳 {hit}")
+        except Exception:
+            pass
         _msg = f"⚠ 경고 확인 — 뜬 곳 {len(hit)}개 {hit or ''}"
         if gone:
             _msg += f" · 사라진 {gone} 자동 삭제"
@@ -7966,7 +7980,7 @@ class App(tk.Tk):
         if getattr(self, "_check_watch_on", False):
             return                     # 이미 지켜보는 중이면 시간만 연장
         self._check_watch_on = True
-        self.after(15000, self._check_watch_tick)
+        self.after(WARN_TICK_MS, self._check_watch_tick)
 
     def _check_watch_tick(self):
         """15초마다 다시 봐서 목록을 화면과 맞춘다.
@@ -7997,7 +8011,7 @@ class App(tk.Tk):
                                     f" (남은 경고 {len(now_hit)}개)")
         except Exception:
             pass
-        self.after(15000, self._check_watch_tick)
+        self.after(WARN_TICK_MS, self._check_watch_tick)
 
     # ── 🧪 물약색 확인 — 16개 클라의 같은 자리 색을 한 번에 보고 빨강/주황 판정 ──
     def _open_potion_win(self):
