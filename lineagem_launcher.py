@@ -2588,6 +2588,12 @@ class App(tk.Tk):
         self._warn_box.pack(anchor="n", pady=(2, 0))
         self._warn_hdr = tk.Label(self._warn_box, text="", font=("맑은 고딕", 9, "bold"),
                                   fg="white", bg="#c0392b")
+        # ▶ 전부 복구 — 목록에 뜬 슬롯을 **번호 순서대로 하나씩** 복구한다
+        self._warn_allbtn = tk.Button(
+            self._warn_box, text="▶ 전부 복구", font=("맑은 고딕", 8, "bold"),
+            bg="#8e44ad", fg="white", activebackground="#6c3483", pady=0,
+            command=self._fix_run_all)
+        self._warn_allbtn.pack(fill="x", pady=(1, 1))
         self._warn_rows = tk.Frame(self._warn_box)
         self._warn_rows.pack(fill="x")
         self.after(900, self._warn_refresh)
@@ -7519,6 +7525,38 @@ class App(tk.Tk):
                       bg="#7f8c8d", fg="white",
                       command=lambda x=si: self._warn_remove(x)).pack(side="left", padx=(2, 0))
 
+    def _fix_run_all(self):
+        """▶ 전부 복구 — 지금 목록에 뜬 슬롯을 **번호 순서대로 하나씩** 복구한다.
+
+        하나가 끝나야 다음이 시작된다 (겹치면 클릭이 엉킨다).
+        각 슬롯은 개별로 누른 것과 **완전히 같은 경로**를 탄다:
+        절전이면 Z 로 깨우고 → 십자가 확인 → '무료' 가 아니면 ESC 취소(💎 다야!!).
+        (2026-08-29 사용자 요청)"""
+        q = sorted(self._warn_load())
+        if not q:
+            self.status.set("▶ 전부 복구 — 목록이 비어 있습니다 (F11 로 먼저 확인하세요)")
+            return
+        self._fix_queue = q
+        self.status.set(f"▶ 전부 복구 시작 — {len(q)}개 {q} (하나씩 순서대로)")
+        self._fix_run_next()
+
+    def _fix_run_next(self):
+        """대기열에서 하나씩 꺼내 돌린다 — 앞 슬롯이 끝나야 다음."""
+        q = getattr(self, "_fix_queue", None)
+        if not q:
+            self.status.set("▶ 전부 복구 완료")
+            return
+        if self._is_busy():                      # 아직 돌고 있으면 기다린다
+            self.after(700, self._fix_run_next)
+            return
+        si = q.pop(0)
+        if si not in set(self._warn_load()):     # 그 사이 사라졌으면 건너뛴다
+            self.after(200, self._fix_run_next)
+            return
+        self.status.set(f"▶ 전부 복구 — #{si:02d} 차례 (남은 {len(q)}개)")
+        self._run_fix_slot(si)
+        # 끝나고 확인까지 마칠 시간을 준 뒤 다음으로
+        self.after(1500, self._fix_run_next)
     def _run_fix_slot(self, si):
         """'복구해야함 03' 을 누르면 **그 슬롯만** 복구를 돌린다 (2026-08-29 사용자 요청).
 
