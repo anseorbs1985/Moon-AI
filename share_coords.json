@@ -1,6 +1,15 @@
 {
-  "_설명": "업데이트 때 coords.json 중 '이 항목만' 메인 것을 받는다. (2026-08-29) 복구 런처를 로컬에서도 똑같이 쓰려고 fix_slots 와 경고영역(check_area_rel)을 배포한다. 용던고고 좌표는 제외.",
+  "_설명": "업데이트 때 coords.json 중 '이 항목만' 메인 것을 받는다. (2026-08-29) 퍼플 접속·계정전환 좌표 일체 + 복구 런처. 아이디 관련(profile_target_id·기준이미지)은 머신별이라 배포하지 않는다.",
   "keys": [
+    "lineagem",
+    "game_start",
+    "multiplay",
+    "profile_btn",
+    "confirm_hover",
+    "google_acc",
+    "confirm_btn",
+    "profile_reveal_btn",
+    "char_btns",
     "fix_slots",
     "check_area_rel"
   ]

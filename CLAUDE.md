@@ -1431,3 +1431,22 @@
 순서는 네 곳 모두 동일하다:
 `profile_btn` 클릭 → **`confirm_hover` 로 마우스만 이동(두 번, 약 1초)** →
 `google_acc` `hover_click` → `confirm_btn` `hover_click`.
+
+## 퍼플 접속·계정전환 좌표 배포 (2026-08-29 사용자 요청)
+
+`share_coords.json` 의 `keys` 에 **접속 흐름 좌표 전부**를 넣었다 —
+로컬이 🔄 업데이트만 하면 여기와 똑같이 접속한다:
+`lineagem` · `game_start` · `multiplay` · `profile_btn` · **`confirm_hover`** ·
+`google_acc` · `confirm_btn` · `profile_reveal_btn` · **`char_btns`**
+(+ 복구용 `fix_slots` · `check_area_rel`)
+
+### 아이디(지정계정) 확인은 배포하지 않는다 — 지울 필요도 없다
+- 판정은 `_is_target_account()` 가 한다:
+  1. **기준 이미지가 있으면** 이미지 대조 (유사도 90% 이상)
+  2. 없으면 `profile_target_id` 로 OCR 문자 비교
+  3. **둘 다 없으면 그냥 `True`** — 확인을 건너뛴다
+- `profile_target_id` 는 **`local_config.json`(머신별)** 에 있고 GitHub 에 안 올라간다.
+  기준 이미지도 머신별 파일이다. → **로컬에 그 둘이 없으면 확인은 자동으로 통과**되고
+  캐릭터 접속에 아무 영향이 없다.
+- 그래서 **기능을 지우지 않는다.** 지우면 나중에 필요할 때 되살려야 한다.
+  로컬에서 문제가 되면 `local_config.json` 의 `profile_target_id` 만 비우면 된다.
