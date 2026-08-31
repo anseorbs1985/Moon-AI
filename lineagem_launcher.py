@@ -16063,11 +16063,18 @@ class App(tk.Tk):
                         if self.cfg.get("profile_btn"):
                             pyautogui.click(*self.cfg["profile_btn"])
                             if not self._wait(2): self.status.set("멈춤"); return
+                        # 프로필 다음에 **마우스만 올려야** 계정 목록이 뜬다
+                        # (2026-08-29 사용자 지시)
+                        _hv = self.cfg.get("confirm_hover")
+                        if _hv:
+                            pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
+                            if not self._wait(1): self.status.set("멈춤"); return
+                            pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
                         if self.cfg.get("google_acc"):
-                            pyautogui.click(*self.cfg["google_acc"])
+                            hover_click(*self.cfg["google_acc"])
                             if not self._wait(2): self.status.set("멈춤"); return
                         if self.cfg.get("confirm_btn"):
-                            pyautogui.click(*self.cfg["confirm_btn"])
+                            hover_click(*self.cfg["confirm_btn"])
                             self.status.set("계정 전환 로딩 대기 중... (약 10초)")
                             if not self._wait(10): self.status.set("멈춤"); return
 
@@ -16124,13 +16131,21 @@ class App(tk.Tk):
                 pyautogui.click(*self.cfg["profile_btn"])
                 if not self._wait(2): self.status.set("멈춤"); return
 
+                # 프로필 다음에 **마우스만 올려야** 계정 목록이 뜬다 (2026-08-29)
+                _hv = self.cfg.get("confirm_hover")
+                if _hv:
+                    self.status.set(f"[{acc_idx+1}/{total}] 마우스 올림...")
+                    pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
+                    if not self._wait(1): self.status.set("멈춤"); return
+                    pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
+
                 self.status.set(f"[{acc_idx+1}/{total}] 구글 계정 클릭...")
-                pyautogui.click(*self.cfg["google_acc"])
+                hover_click(*self.cfg["google_acc"])
                 if not self._wait(2): self.status.set("멈춤"); return
 
                 if self.cfg.get("confirm_btn"):
                     self.status.set(f"[{acc_idx+1}/{total}] 확인 클릭...")
-                    pyautogui.click(*self.cfg["confirm_btn"])
+                    hover_click(*self.cfg["confirm_btn"])
 
                 self.status.set(f"[{acc_idx+1}/{total}] 새 계정 로딩... (15초)")
                 if not self._wait(15): self.status.set("멈춤"); return
