@@ -244,8 +244,8 @@ DEFAULT_CFG = {
     "profile_btn": None,
     "google_acc":  None,
     "confirm_btn": None,
-    "confirm_hover": None,              # 확인 누르기 전에 마우스만 올려둘 자리
-                                        # (비워두면 확인 버튼 위에 올린다, 2026-08-29)
+    "confirm_hover": None,              # 프로필 버튼을 누른 뒤 마우스만 올려둘 자리
+                                        # (여기에 올려야 계정 목록이 뜬다, 2026-08-29)
     "profile_target_id": "",
     "potion_area_rel": None,
     "scroll_area_rel": None,
@@ -326,8 +326,8 @@ LABELS = {
     "game_start":  "게임 실행 버튼",
     "multiplay":   "멀티플레이 버튼",
     "profile_btn":    "프로필 버튼 (우상단)",
+    "confirm_hover":  "└ 프로필 후 마우스 올릴 자리",
     "google_acc":     "구글 계정 (프로필 클릭 후)",
-    "confirm_hover":  "└ 확인 전 마우스 올릴 자리",
     "confirm_btn":    "확인 버튼 (계정전환 팝업)",
     "profile_reveal_btn": "아이디 표시 클릭 (확인 전)",
 }
@@ -13860,15 +13860,17 @@ class App(tk.Tk):
                     f"🔍 지정 아이디 아님 → 전환 시도 {a}/{MAX_SWITCH_TRIES}..."))
                 if self.cfg.get("profile_btn"):
                     pyautogui.click(*self.cfg["profile_btn"]); time.sleep(2)
+                # 프로필을 누른 뒤 **먼저 마우스를 올려야** 계정 목록이 뜬다
+                # (2026-08-29 사용자 지시: 순서가 프로필 → 마우스올림 → 구글계정 → 확인)
+                _hv = self.cfg.get("confirm_hover")
+                if _hv:
+                    pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
+                    time.sleep(random.uniform(0.5, 0.9))
+                    pyautogui.moveTo(int(_hv[0]), int(_hv[1]))   # 한 번 더 확실히
+                    time.sleep(random.uniform(0.2, 0.4))
                 if self.cfg.get("google_acc"):
-                    pyautogui.click(*self.cfg["google_acc"]); time.sleep(2)
+                    hover_click(*self.cfg["google_acc"]); time.sleep(2)
                 if self.cfg.get("confirm_btn"):
-                    # 마우스를 올려둔 뒤 누른다 — 바로 누르면 씹히는 자리.
-                    # 올릴 자리를 따로 등록해뒀으면 거기에 먼저 올린다.
-                    _hv = self.cfg.get("confirm_hover")
-                    if _hv:
-                        pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
-                        time.sleep(random.uniform(0.35, 0.65))
                     hover_click(*self.cfg["confirm_btn"])
                     time.sleep(10)  # 계정 전환 후 로딩(약 8~10초) 대기
                 # 전환 후 재검증 — 퍼플 hwnd가 새로 생기므로 다시 찾아 앞으로 + 아이디 재표시
@@ -13967,13 +13969,15 @@ class App(tk.Tk):
                 time.sleep(1.0)
                 if self.cfg.get("profile_btn"):
                     pyautogui.click(*self.cfg["profile_btn"]); time.sleep(2)
+                _hv = self.cfg.get("confirm_hover")      # 프로필 다음에 마우스 올림
+                if _hv:
+                    pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
+                    time.sleep(random.uniform(0.5, 0.9))
+                    pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
+                    time.sleep(random.uniform(0.2, 0.4))
                 if self.cfg.get("google_acc"):
-                    pyautogui.click(*self.cfg["google_acc"]); time.sleep(2)
+                    hover_click(*self.cfg["google_acc"]); time.sleep(2)
                 if self.cfg.get("confirm_btn"):
-                    _hv = self.cfg.get("confirm_hover")
-                    if _hv:
-                        pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
-                        time.sleep(random.uniform(0.35, 0.65))
                     hover_click(*self.cfg["confirm_btn"]); time.sleep(3)
                 self.status.set("✔ 퍼플 지정계정 전환 완료")
 
