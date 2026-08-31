@@ -778,6 +778,9 @@ SLEEP_WAKE_KEY = "z"
 SLEEP_MATCH = 0.60      # 절전 화면 판정 기준 (실측 16클라 0.73~1.00)
 SLEEP_WAKE_WAIT = (1.2, 2.5)   # Z 를 누른 뒤 깨어났는지 확인하며 기다리는 시간(초)
 SLEEP_WAKE_TRIES = 3           # 안 깨어나면 몇 번까지 다시 누를지
+# 캐릭터 접속 버튼 — 너무 늦게 눌린다는 지적으로 대기를 20% 줄임 (2026-08-29)
+CHAR_WAIT_FIRST = 4.8   # 멀티플레이 클릭 → 첫 캐릭터까지 (전 6초)
+CHAR_WAIT_EACH  = 2.4   # 캐릭터 사이 (전 3초)
 BACK_NOT_MIN = ("fix",)
 START_PAUSE_MIN = 0.20
 START_PAUSE_MAX = 0.45
@@ -15984,7 +15987,8 @@ class App(tk.Tk):
 
                 self.status.set(f"[{acc_idx+1}/{total}] 멀티플레이 클릭...")
                 pyautogui.click(*self.cfg["multiplay"])
-                if not self._wait(6): self.status.set("멈춤"); return
+                # 캐릭터 접속이 너무 늦어 20% 앞당김 (6 → 4.8초, 2026-08-29 사용자 지시)
+                if not self._wait(CHAR_WAIT_FIRST): self.status.set("멈춤"); return
 
                 # 캐릭터 버튼 클릭 전 퍼플을 항상 위로 고정
                 try:
@@ -16002,7 +16006,8 @@ class App(tk.Tk):
                         self._run_char01_t = time.time()   # 캐릭터01 접속 시각 (4분30초 제한 측정)
                     self.status.set(f"[{acc_idx+1}/{total}] 캐릭터 #{i+1} 클릭...")
                     pyautogui.click(cx, cy)
-                    if not self._wait(3): self.status.set("멈춤"); return
+                    # 캐릭터 사이 간격도 20% 앞당김 (3 → 2.4초)
+                    if not self._wait(CHAR_WAIT_EACH): self.status.set("멈춤"); return
 
                 # 캐릭터 버튼 완료 후 항상 위 해제
                 try:
