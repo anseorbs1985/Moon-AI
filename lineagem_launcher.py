@@ -9799,9 +9799,24 @@ class App(tk.Tk):
         self.after(1000, lambda: _DotPreviewOverlay(self, title, dots, rereg_fn, save_fn, dot_r))
 
     def _preview_label_coord(self, key):
+        """좌표등록 항목 미리보기 — **점을 끌어 옮기면 그 자리로 저장된다.**
+
+        예전엔 저장 함수를 안 넘겨서, 옮겨도 창을 닫으면 원래대로 돌아갔다
+        (2026-08-29 사용자 신고: "전부 좌표 이동시켰는데 왜 원상복귀하냐")."""
         c = self.cfg.get(key)
         dots = [(c[0], c[1], "1")] if c else []
-        self._open_dot_preview(LABELS[key], dots, lambda _: self._reg_coord(key))
+
+        def _save(_i, nx, ny, k=key):
+            self.cfg[k] = [int(nx), int(ny)]
+            save_cfg(self.cfg)
+            try:
+                self._refresh_ui()
+            except Exception:
+                pass
+            self.status.set(f"✔ {LABELS[k]} 좌표 이동 저장 ({int(nx)},{int(ny)})")
+
+        self._open_dot_preview(LABELS[key], dots,
+                               lambda _: self._reg_coord(key), save_fn=_save)
 
     def _preview_slot(self, idx):
         pair = self.cfg["click_slots"][idx]
@@ -9836,7 +9851,18 @@ class App(tk.Tk):
             self.status.set(f"3초 후 캐릭터 #{idx+1} 위치 클릭하세요!")
             self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
                                       CoordOverlay(self, mode="char_rereg")])
-        self._open_dot_preview(f"캐릭터 #{idx+1:02d}", dots, _rereg)
+        def _save(_i, nx, ny, i=idx):
+            bl = self.cfg.setdefault("char_btns", [])
+            while len(bl) <= i:
+                bl.append(None)
+            bl[i] = [int(nx), int(ny)]
+            save_cfg(self.cfg)
+            try:
+                self._refresh_ui()
+            except Exception:
+                pass
+            self.status.set(f"✔ 캐릭터 #{i+1:02d} 좌표 이동 저장 ({int(nx)},{int(ny)})")
+        self._open_dot_preview(f"캐릭터 #{idx+1:02d}", dots, _rereg, save_fn=_save)
 
     def on_char_rereg_coord(self, x, y):
         idx = self._char_rereg_idx
