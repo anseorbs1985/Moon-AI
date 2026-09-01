@@ -555,7 +555,9 @@ class Bar(tk.Tk):
         self._arm([i])
         if ran:
             self.lbl.config(text=f"{name} #{i+1:02d} 실행")
-            self._to_back()
+        # 실행이든 **대기열에 넣은 것이든 창은 뒤로 보낸다**
+        # (2026-08-29 사용자 지시 — 앞에 있으면 그 자리 클릭을 먹는다)
+        self._to_back()
         self.after(1500, self._refresh)
 
     def _run_sel(self):
@@ -581,7 +583,7 @@ class Bar(tk.Tk):
         self.sel = set()
         if ran:
             self.lbl.config(text=f"{name} 선택실행 — {len(sel)}슬롯")
-            self._to_back()
+        self._to_back()      # 대기열에 넣은 것도 뒤로 (2026-08-29)
         self.after(1500, self._refresh)
 
     def _open_win(self):

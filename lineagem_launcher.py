@@ -4333,8 +4333,17 @@ class App(tk.Tk):
                             f"(대기 {len(self._night_queue)}개)"); return
         self._night_queue.append(slot_idx)
         self._refresh_night_queue()
-        self.status.set(f"🌑 악몽의섬 #{slot_idx+1:02d} 대기에 넣음 — "
+        self.status.set(f"🌑 #{slot_idx+1:02d} 대기에 넣음 — "
                         f"{[i+1 for i in self._night_queue]} 순서로 하나씩 실행")
+        # **대기에 넣은 것도 창을 뒤로 보낸다** (2026-08-29 사용자 지시 —
+        # 런처가 앞에 남아 있으면 그 자리 클릭을 먹는다)
+        try:
+            self._island_step_back()
+        except Exception:
+            try:
+                self._send_to_back()
+            except Exception:
+                pass
         self._night_queue_tick()
 
     def _night_queue_tick(self):
