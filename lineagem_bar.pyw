@@ -230,6 +230,9 @@ class Bar(tk.Tk):
             q = [n for n, (_a, _l, ix) in enumerate(self.queue, 1) if i in ix]
             if q:
                 run.config(text=f"대기{q[0]}", bg="#e67e22")
+            elif not slots[i].get("enabled", True):
+                # OFF 슬롯은 **회색 'OFF'** 로 보여준다 (2026-08-29 사용자 지시)
+                run.config(text=f"{i+1:02d} OFF", bg="#7f8c8d")
             else:
                 run.config(text=f"{i+1:02d} 실행", bg="#2471a3")
             e = st.get(f"{key}|{i}")

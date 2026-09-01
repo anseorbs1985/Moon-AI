@@ -4245,6 +4245,20 @@ class App(tk.Tk):
         """반복이 걸린 슬롯은 남은 횟수에 따라 색이 다르다 (꺼졌으면 회색)."""
         try:
             st = self._rep_load()
+            # 실행 버튼 — OFF 슬롯은 **회색 'OFF'** (2026-08-29 사용자 지시)
+            try:
+                _sl = self._island_cfg().get(self.NIGHT_KEY) or []
+                for i, xb in enumerate(getattr(self, "_night_runbtns", []) or []):
+                    if not xb.winfo_exists():
+                        continue
+                    _on = (i < len(_sl) and isinstance(_sl[i], dict)
+                           and _sl[i].get("enabled", True))
+                    if i < len(_sl) and not _on:
+                        xb.config(text="OFF", bg="#7f8c8d")
+                    else:
+                        xb.config(text="실행", bg="#2471a3")
+            except Exception:
+                pass
             for i, b in enumerate(self._night_btns or []):
                 if not b.winfo_exists():
                     continue
@@ -4357,6 +4371,11 @@ class App(tk.Tk):
                     continue
                 if i in q:
                     b.config(text=f"대기{q.index(i)+1}", bg="#e67e22")
+                    continue
+                # OFF 슬롯은 회색 'OFF' — 대기열 갱신이 이걸 덮어쓰지 않게 (2026-08-29)
+                _sl = self._island_cfg().get(self.NIGHT_KEY) or []
+                if i < len(_sl) and isinstance(_sl[i], dict)                         and not _sl[i].get("enabled", True):
+                    b.config(text="OFF", bg="#7f8c8d")
                 else:
                     b.config(text="실행", bg="#2471a3")
             except Exception:
