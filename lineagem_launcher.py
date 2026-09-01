@@ -1936,6 +1936,9 @@ class App(tk.Tk):
         threading.Thread(target=self._item_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._popup_guard_loop, daemon=True).start()
         threading.Thread(target=self._claude_attention_loop, daemon=True).start()
+        # 런처가 켜질 때 클로드도 같이 켠다 — 클로드는 뒤, 런처는 앞
+        # (2026-08-29 사용자 지시). 이미 떠 있으면 새로 켜지 않는다.
+        self.after(2500, self._start_claude_behind)
         # 작업 중에는 클로드를 강제로 내리지 않는다(예전 시작 버스트 제거).
         # 대신 클로드 앱을 화면 가운데로 유지 (아이디 영역 등 안 가리게, 사용자가 옮기면 중단)
         self.after(2000, self._center_claude_tick)
@@ -2268,6 +2271,65 @@ class App(tk.Tk):
             self.after(0, self._restore_back)
         # (2026-08-09) 작업이 끝나도 클로드를 앞으로 올리지 않는다 —
         # 사용자가 [💬 클로드] 버튼이나 작업표시줄로 직접 꺼낸다.
+
+    CLAUDE_AUMID = "Claude_pzs8sxrjxfjjc!Claude"   # 스토어 앱이라 이 ID 로 실행한다
+
+    def _claude_running(self):
+        """클로드 창이 떠 있나."""
+        try:
+            import win32gui
+            found = []
+            def _cb(h, _):
+                if win32gui.IsWindowVisible(h):
+                    t = win32gui.GetWindowText(h)
+                    if "claude" in t.lower():
+                        found.append(h)
+                return True
+            win32gui.EnumWindows(_cb, None)
+            return bool(found)
+        except Exception:
+            return False
+
+    def _start_claude_behind(self):
+        """런처가 켜질 때 **클로드도 같이 켠다 — 단, 뒤에** (2026-08-29 사용자 지시).
+
+        이미 떠 있으면 새로 켜지 않는다. 켠 뒤에는 뒤로 보내고
+        메인런처를 앞으로 올린다."""
+        try:
+            if self._claude_running():
+                self.after(1200, self._claude_to_back_me_front)
+                return
+            subprocess.Popen(["explorer.exe",
+                              "shell:appsFolder\\" + self.CLAUDE_AUMID])
+            # 창이 뜨는 데 시간이 걸린다 — 몇 번 확인하며 뒤로 보낸다
+            for _ms in (2500, 4000, 6000, 9000):
+                self.after(_ms, self._claude_to_back_me_front)
+        except Exception:
+            pass
+
+    def _claude_to_back_me_front(self):
+        """클로드는 뒤로, 메인런처는 앞으로."""
+        try:
+            import win32gui, win32con
+            _f = win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+            def _cb(h, _):
+                if win32gui.IsWindowVisible(h):
+                    t = win32gui.GetWindowText(h)
+                    if "claude" in t.lower():
+                        # 항상 위를 풀고 맨 뒤로 (최소화하지는 않는다)
+                        win32gui.SetWindowPos(h, win32con.HWND_NOTOPMOST,
+                                              0, 0, 0, 0, _f)
+                        win32gui.SetWindowPos(h, win32con.HWND_BOTTOM,
+                                              0, 0, 0, 0, _f)
+                return True
+            win32gui.EnumWindows(_cb, None)
+        except Exception:
+            pass
+        try:
+            self.deiconify()
+            self.lift()
+        except Exception:
+            pass
 
     def _restore_claude(self):
         try:
