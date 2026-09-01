@@ -538,6 +538,15 @@ class Bar(tk.Tk):
 
     def _run_one(self, i):
         didx, name, key, _c = self._cur()
+        # OFF 슬롯은 눌러도 실행하지 않는다 (2026-08-29 사용자 지시 — 실수 방지).
+        # 다시 돌리려면 그 던전 창에서 슬롯을 ON 으로 바꾼다.
+        try:
+            _sl = self._slots()
+            if i < len(_sl) and not _sl[i].get("enabled", True):
+                self.lbl.config(text=f"⏸ #{i+1:02d} 는 OFF — 던전 창에서 켜주세요")
+                return
+        except Exception:
+            pass
         ran = self._spawn([str(didx), "--run", "--slot", str(i + 1)],
                           f"{name} #{i+1:02d}", [i])
         self._arm([i])
@@ -549,8 +558,18 @@ class Bar(tk.Tk):
     def _run_sel(self):
         didx, name, key, _c = self._cur()
         sel = sorted(self.sel)
+        try:      # OFF 슬롯은 골라져 있어도 뺀다
+            _sl = self._slots()
+            _off = [i for i in sel if i < len(_sl)
+                    and not _sl[i].get("enabled", True)]
+            sel = [i for i in sel if i not in _off]
+            if _off:
+                self.lbl.config(text=f"⏸ OFF 슬롯 "
+                                     f"{[i+1 for i in _off]} 제외")
+        except Exception:
+            pass
         if not sel:
-            self.lbl.config(text="슬롯을 고르세요 ([+] 또는 [✔ 전체선택])")
+            self.lbl.config(text="실행할 슬롯이 없습니다 (OFF 이거나 고른 것 없음)")
             return
         ran = self._spawn([str(didx), "--run", "--slots",
                            ",".join(str(i + 1) for i in sel), "--lanes", "2"],

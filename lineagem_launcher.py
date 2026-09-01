@@ -4304,7 +4304,12 @@ class App(tk.Tk):
         try:
             slots = self._island_cfg().get(self.NIGHT_KEY, [])
             if slot_idx >= len(slots) or not any(slots[slot_idx].get("coords") or []):
-                self.status.set(f"악몽의섬 #{slot_idx+1:02d} — 등록된 좌표 없음"); return
+                self.status.set(f"#{slot_idx+1:02d} — 등록된 좌표 없음"); return
+            # OFF 슬롯은 개별로 눌러도 실행하지 않는다 (2026-08-29 사용자 지시)
+            if not slots[slot_idx].get("enabled", True):
+                self.status.set(f"⏸ #{slot_idx+1:02d} 는 OFF 입니다 — 실행하지 않습니다 "
+                                f"(켜려면 그 던전 창에서 슬롯을 ON)")
+                return
         except Exception:
             pass
         if slot_idx in self._night_queue:

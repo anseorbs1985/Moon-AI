@@ -3621,6 +3621,16 @@ class IslandApp(tk.Tk):
                     except Exception:
                         pass
             elif slot_idx is not None:
+                # **OFF 슬롯은 개별로 눌러도 실행하지 않는다** (2026-08-29 사용자 지시 —
+                # 실수로 누를 수 있으므로). 다시 돌리려면 그 던전 창에서 슬롯을 켠다.
+                if (slot_idx < len(slots)
+                        and not slots[slot_idx].get("enabled", True)):
+                    try:
+                        self._status.set(f"⏸ #{slot_idx+1:02d} 는 OFF 입니다 — "
+                                         f"실행하지 않습니다 (켜려면 이 창에서 슬롯 ON)")
+                    except Exception:
+                        pass
+                    return
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
             else:
                 targets = [(i, s) for i, s in enumerate(slots)
