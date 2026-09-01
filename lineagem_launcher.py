@@ -4180,13 +4180,21 @@ class App(tk.Tk):
             slots = self._island_cfg().get(self.NIGHT_KEY) or []
         except Exception:
             slots = []
+        # **OFF 슬롯은 전체선택에서 빠진다** (2026-08-29 사용자 지시)
         able = {i for i, s_ in enumerate(slots)
-                if isinstance(s_, dict) and any(s_.get("coords") or [])}
+                if isinstance(s_, dict) and any(s_.get("coords") or [])
+                and s_.get("enabled", True)}
+        _off = [i + 1 for i, s_ in enumerate(slots)
+                if isinstance(s_, dict) and any(s_.get("coords") or [])
+                and not s_.get("enabled", True)]
         if not able:
-            self.status.set("악몽의섬 — 좌표가 등록된 슬롯이 없습니다"); return
+            self.status.set("좌표가 등록된 (켜져 있는) 슬롯이 없습니다"); return
         cur = getattr(self, "_night_sel", set()) or set()
         self._night_sel = set() if cur >= able else set(able)
         self._refresh_night_plus()
+        if self._night_sel and _off:
+            self.status.set(f"✔ {len(self._night_sel)}개 선택 — OFF 슬롯 {_off} 는 제외")
+            return
         if self._night_sel:
             self.status.set(f"악몽의섬 {len(able)}개 슬롯 전체선택 — "
                             f"[▶ 선택실행] 을 누르면 시작합니다")

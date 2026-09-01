@@ -3607,7 +3607,19 @@ class IslandApp(tk.Tk):
             slots = self.cfg.get(key, [])
             if sel_list:
                 # +로 고른 슬롯만, 누른 순서 그대로 (셔플 없음)
-                targets = [(i, slots[i]) for i in sel_list if i < len(slots)]
+                # **OFF 슬롯은 골라도 실행하지 않는다** (2026-08-29 사용자 지시).
+                # 예전엔 선택실행이 ON/OFF 를 무시해서, 꺼둔 슬롯도 같이 돌았다.
+                _sel = [i for i in sel_list if i < len(slots)]
+                _skip = [i + 1 for i in _sel
+                         if not slots[i].get("enabled", True)]
+                targets = [(i, slots[i]) for i in _sel
+                           if slots[i].get("enabled", True)]
+                if _skip:
+                    try:
+                        self._status.set(f"⏸ OFF 슬롯 {_skip} 는 건너뜁니다 "
+                                         f"({len(targets)}개 실행)")
+                    except Exception:
+                        pass
             elif slot_idx is not None:
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
             else:

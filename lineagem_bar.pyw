@@ -299,8 +299,10 @@ class Bar(tk.Tk):
         self._refresh()
 
     def _sel_all(self):
+        # OFF 슬롯은 전체선택에서 뺀다 (2026-08-29 사용자 지시 — 골라도 안 돈다)
         able = {i for i, s in enumerate(self._slots()[:16])
-                if isinstance(s, dict) and any(s.get("coords") or [])}
+                if isinstance(s, dict) and any(s.get("coords") or [])
+                and s.get("enabled", True)}
         self.sel = set() if self.sel >= able and able else able
         self._refresh()
 
