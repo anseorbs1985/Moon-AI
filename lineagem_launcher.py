@@ -4267,7 +4267,28 @@ class App(tk.Tk):
                 b.config(text=txt, bg=col, fg="white")
         except Exception:
             pass
-        self.after(20000, self._refresh_night_btns)
+        # 반복 파일이 바뀌면 **1초 안에** 화면을 맞춘다 — 작은 런처에서 끈 것도
+        # 메인런처에 곧바로 반영된다 (2026-08-29 사용자 지시).
+        # 20초마다 통째로 새로 그리던 것을 '바뀐 때만' 으로 바꿔 부하도 줄였다.
+        try:
+            _m = os.path.getmtime(os.path.join(LOCAL_DATA, "island_repeat.json"))
+        except Exception:
+            _m = 0.0
+        if _m != getattr(self, "_night_sync_mtime", None):
+            self._night_sync_mtime = _m
+        self.after(1000, self._night_sync_tick)
+
+    def _night_sync_tick(self):
+        """반복 파일이 바뀌었을 때만 슬롯 버튼을 다시 그린다."""
+        try:
+            _m = os.path.getmtime(os.path.join(LOCAL_DATA, "island_repeat.json"))
+        except Exception:
+            _m = 0.0
+        if _m != getattr(self, "_night_sync_mtime", None):
+            self._night_sync_mtime = _m
+            self._refresh_night_btns()
+            return                      # _refresh_night_btns 가 다음 tick 을 건다
+        self.after(1000, self._night_sync_tick)
 
     def _night_week_start(self):
         """런처가 켜지면 주간 자동 초기화 감시를 시작한다 (한 번만)."""
@@ -4452,11 +4473,24 @@ class App(tk.Tk):
             st["_mode"] = md
             st["_first"] = fd
             self._rep_save(st)
-            try:                                   # 섬/던전 설정에도 2시간 6회로 남긴다
+            try:
+                # **좌표는 절대 건드리지 않는다** — 파일을 다시 읽어
+                # `repeat_h`/`repeat_n` 만 고쳐 쓴다 (2026-08-29).
+                # 예전엔 아까 읽어둔 cfg 를 통째로 덮어써서, 그 사이 섬 창에서
+                # 고친 좌표가 되돌아갈 수 있었다.
                 path = os.path.join(BASE, "island_coords.json")
+                with open(path, encoding="utf-8") as fp:
+                    _disk = json.load(fp)
+                _sl = _disk.get(self.NIGHT_KEY) or []
+                for i, sl in enumerate(slots):
+                    if i >= len(_sl):
+                        break
+                    if isinstance(_sl[i], dict) and any(_sl[i].get("coords") or []):
+                        _sl[i]["repeat_h"] = h
+                        _sl[i]["repeat_n"] = n
                 tmp = path + ".tmp"
                 with open(tmp, "w", encoding="utf-8") as fp:
-                    json.dump(cfg, fp, ensure_ascii=False, indent=2)
+                    json.dump(_disk, fp, ensure_ascii=False, indent=2)
                 os.replace(tmp, path)
             except Exception as e:
                 self._rep_log(f"⚠ 악몽의섬 설정 저장 실패: {e!r}")

@@ -247,11 +247,28 @@ class Bar(tk.Tk):
                              + (f" · 선택 {sorted(x+1 for x in self.sel)}" if self.sel else ""))
 
     def _tick(self):
+        """반복·좌표 파일이 **바뀌면 곧바로** 화면을 맞춘다 (2026-08-29 사용자 지시).
+
+        예전엔 20초마다 통째로 새로 그려서, 메인런처에서 ⏰ 를 꺼도
+        작은 런처에는 한참 뒤에야 반영됐다. 이제 **1초마다 파일 시각만 보고**,
+        바뀌었을 때만 다시 그린다 (부하 거의 없음)."""
         try:
-            self._refresh()
+            import os as _os
+            _m = 0.0
+            for _f in (REPF, COORDS):
+                try:
+                    _m += _os.path.getmtime(_f)
+                except Exception:
+                    pass
+            if _m != getattr(self, "_sync_mtime", None):
+                self._sync_mtime = _m
+                self._refresh()
         except Exception:
-            pass
-        self.after(20000, self._tick)
+            try:
+                self._refresh()
+            except Exception:
+                pass
+        self.after(1000, self._tick)
 
     def _place(self):
         self.update_idletasks()
