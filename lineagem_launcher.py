@@ -4248,18 +4248,9 @@ class App(tk.Tk):
                     b.config(text=f"{_h}h {n}회",
                              bg=self.REP_LEFT_COLORS.get(n, "#34495e"))
                 else:
-                    # 예약은 없지만 **설정은 있다** — 그걸 보여준다.
-                    # 초기화만 하고 아직 실행 전인 상태가 '⏰꺼짐' 으로 보여
-                    # 설정이 안 들어간 줄 알았다는 지적 (2026-08-28).
-                    try:
-                        _sl = (self._island_cfg().get(self.NIGHT_KEY) or [])[i]
-                        _h2, _n2 = self._rep_hn(self.NIGHT_KEY, _sl)
-                        _f2 = (int(self.REPEAT_FIRST.get(self.NIGHT_KEY, _h2) or _h2)
-                               if self._night_mode(i) == "first" else _h2)
-                        _t2 = (f"{_f2}h→{_h2}h" if _f2 != _h2 else f"{_h2}h")
-                        b.config(text=f"대기 {_t2} {_n2}회", bg="#5d6d7e")
-                    except Exception:
-                        b.config(text="⏰꺼짐", bg="#7f8c8d")
+                    # 예약이 없으면 **꺼짐**으로 보여준다 — 작은 런처와 글자·색을
+                    # 똑같이 맞춘다 (2026-08-29 사용자 지시: 한쪽에서 끄면 양쪽 다 off).
+                    b.config(text="⏰꺼짐", bg="#7f8c8d")
             for i, b in enumerate(getattr(self, "_night_firstbtns", []) or []):
                 if not b.winfo_exists():
                     continue
