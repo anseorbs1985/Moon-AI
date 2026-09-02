@@ -5021,7 +5021,7 @@
         null,
         null
       ],
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "미등록",
@@ -5157,7 +5157,7 @@
         null,
         null
       ],
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "미등록",
@@ -5293,7 +5293,7 @@
         null,
         null
       ],
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "미등록",

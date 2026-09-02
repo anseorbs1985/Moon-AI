@@ -1,16 +1,6 @@
 {
-  "_설명": "업데이트 때 coords.json 중 '이 항목만' 메인 것을 받는다. (2026-08-29) 퍼플 접속·계정전환 좌표 일체 + 복구 런처. 아이디 관련(profile_target_id·기준이미지)은 머신별이라 배포하지 않는다.",
+  "_설명": "업데이트 때 coords.json 중 '이 항목만' 받는다. (2026-09-02) 사용자 지시로 용던고고 좌표만 배포 — 다른 좌표는 로컬 것 유지.",
   "keys": [
-    "lineagem",
-    "game_start",
-    "multiplay",
-    "profile_btn",
-    "confirm_hover",
-    "google_acc",
-    "confirm_btn",
-    "profile_reveal_btn",
-    "char_btns",
-    "fix_slots",
-    "check_area_rel"
+    "dragon_slots"
   ]
 }
