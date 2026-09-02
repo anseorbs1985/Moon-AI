@@ -899,6 +899,17 @@ def main():
         if not is_main:
             # 로컬 컴퓨터: 저장소 상태가 어떻든 원격과 100% 일치시킨다 (충돌·병합 개념 없음)
             sh(["git", "fetch", "origin", "main"], REPO)
+            # ── 좌표 파일만은 reset 이 건드리지 못하게 막는다 (2026-08-29 사용자 지시) ──
+            # `git reset --hard` 가 coords.json·island_coords.json 을 원격 것으로 되돌려,
+            # 로컬에서 맞춘 좌표가 업데이트/재시작마다 날아갔다.
+            # skip-worktree 를 걸면 git 이 그 파일을 '작업트리에서 건드리지 않음' 으로 보고
+            # reset 대상에서 빼므로 **로컬 좌표가 그대로 유지**된다. 코드는 정상적으로 받는다.
+            # (메인 컴퓨터에는 절대 걸지 않는다 — 메인은 좌표 원본이라 push 를 해야 한다)
+            # 이미 걸려 있어도 다시 실행해 무해하므로 매 업데이트마다 실행한다.
+            _sw = sh(["git", "update-index", "--skip-worktree",
+                      "coords.json", "island_coords.json"], REPO)
+            log("   좌표 보호: coords.json·island_coords.json 은 원격으로 되돌리지 않음"
+                + ("" if _sw.returncode == 0 else " (⚠ 설정 실패 — 백업으로 복구 가능)"))
             r = sh(["git", "reset", "--hard", "origin/main"], REPO)
             if r.returncode != 0:
                 err = (r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "git 동기화 실패")

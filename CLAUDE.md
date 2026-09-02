@@ -1536,3 +1536,26 @@ OFF 슬롯은 **어떤 경로로도 실행되지 않는다**: 전체·선택·�
   뒤에 살아 있다. (실행 중 `_minimize_claude` 로 내리는 기존 동작은 그대로)
 - 2026-08-09 의 '클로드 창을 자동으로 앞에 띄우지 않는다' 규칙과 어긋나지 않는다 —
   **앞에 띄우는 게 아니라 뒤에 켜두는 것**이다.
+
+## 로컬 좌표가 업데이트마다 날아가던 원인 — reset --hard (2026-08-29 사용자 지시)
+
+**증상**: 로컬에서 맞춘 좌표가 **재시작/업데이트마다 원격 것으로 되돌아갔다.**
+
+**원인**: `lineagem_update.py` 의 **로컬(is_main=False) 분기**가
+`git reset --hard origin/main` 으로 저장소를 원격과 100% 일치시키는데,
+`coords.json`·`island_coords.json` 도 추적 대상이라 **같이 되돌아갔다.**
+
+**수정**: reset 직전에 좌표 파일에 **skip-worktree** 를 건다.
+```
+git update-index --skip-worktree coords.json island_coords.json
+```
+git 이 그 파일을 '작업트리에서 건드리지 않음' 으로 보고 reset 대상에서 뺀다.
+→ **코드는 최신으로 받고 좌표는 로컬 것이 유지된다.**
+
+- **로컬 분기에만** 건다. **메인에는 절대 걸지 말 것** — 메인은 좌표 원본이라
+  skip-worktree 를 걸면 좌표를 push 할 수 없게 된다.
+- 이미 걸려 있어도 다시 실행해 무해하므로 매 업데이트마다 실행한다.
+- `sync_island_keys`·`sync_coord_keys`·`restore_order` 처럼 **파일로 직접 쓰는**
+  좌표 배포는 skip-worktree 와 무관하게 그대로 동작한다.
+- 확인: `git ls-files -v coords.json` 이 **`S`(소문자 s)** 로 시작하면 걸린 것,
+  `H` 면 정상(메인). 풀려면 `git update-index --no-skip-worktree <파일>`.
