@@ -1547,6 +1547,14 @@ def _find_one(fkey, j, coord, path, box=None, strict=False):
                     return None, None, float(max(mx, mx2))
             except Exception:
                 return None, None, float(mx)
+        # ── 마지막 관문: 기준을 못 넘었으면 여기서 반드시 버린다 ──────────────
+        # 2026-09-02 실측 사고: strict=True(성공구역·창 전체) 는 위의 느슨한 판정
+        # 세 블록을 전부 건너뛰는데, 그 블록들 안에만 '못 넘으면 None' 이 있었다.
+        # 그래서 **엄격 판정이 오히려 아무거나 다 통과**시켜, 마름모가 없는
+        # 16클라 전부에서 0.30~0.49 짜리 배경을 '찾음' 으로 돌려주고 있었다
+        # (기준 0.75 인데도). 이 한 줄이 없으면 용던고고가 매 슬롯 엉뚱한 곳을 누른다.
+        if mx < thr:
+            return None, None, float(mx)
         pick = img_pick(fkey, j)
         if pick == "best":
             # 점수가 가장 높은 것 하나만 믿으면, 배경 무늬가 진짜보다 높게 나올 때
@@ -5586,6 +5594,13 @@ class App(tk.Tk):
                       bg="#6c3483", fg="white", width=10, height=2,
                       command=lambda f=fkey: self._diag_images(f)).pack(side="left",
                                                                         padx=(3, 0))
+            # 👁 — 화면 위에 '범위(📐)·찾은 자리·못 찾은 곳'을 직접 그려서 보여준다.
+            #      숫자(🩺)만으로는 '어디가 잘못됐는지'를 알 수 없어서 만든 것
+            #      (2026-09-02 사용자 요청: "잘 안 되면 제대로 됐는지 확인하게").
+            tk.Button(dr, text="👁 그림미리보기", font=("맑은 고딕", 8, "bold"),
+                      bg="#1f618d", fg="white", width=12, height=2,
+                      command=lambda f=fkey: self._preview_img(f)).pack(side="left",
+                                                                        padx=(3, 0))
             # 📁 — 그림·'못찾음' 사진이 들어 있는 폴더를 연다 (원인 확인용)
             tk.Button(dr, text="📁 그림폴더", font=("맑은 고딕", 8),
                       bg="#34495e", fg="white", width=9, height=2,
@@ -6006,6 +6021,91 @@ class App(tk.Tk):
             apply_dark(w, self._dark_on())
         except Exception:
             pass
+
+    # ──────────────────────────────────────────────────────────────────
+    # 👁 그림 미리보기 — 화면 위에 '지금 어떻게 찾고 있는지'를 그려서 보여준다
+    # ──────────────────────────────────────────────────────────────────
+    def _preview_img(self, fkey):
+        """🩺 이미지진단은 **점수만** 보여줘서 무엇이 잘못됐는지 알기 어렵다.
+
+        이건 실제 화면 위에 **범위(📐) · 성공구역 · 찾은 자리 · 못 찾은 곳**을 그려주므로
+        '범위를 잘못 잡았나 / 그림이 안 맞나 / 창을 못 찾나' 를 눈으로 바로 가른다.
+        (2026-09-02 사용자 요청: "잘 안 되면 제대로 됐는지 확인하게")
+
+        **아무것도 클릭하지 않는다 — 보기 전용이다.**"""
+        nclk = self._grid_spec(fkey)["clicks"]
+        js = [j for j in range(nclk) if has_img(fkey, j)]
+        if not js:
+            self.status.set("👁 이 런처에는 지정한 그림이 없습니다"); return
+        self.status.set("👁 미리보기 준비 중… (런처를 잠깐 숨기고 화면을 봅니다)")
+        self.update_idletasks()
+        # 런처가 앞에 있으면 그 창이 찍혀 엉뚱한 결과가 나온다 (2026-08-29 교훈).
+        hidden = []
+        for w_ in self.winfo_children():
+            try:
+                if isinstance(w_, tk.Toplevel) and w_.winfo_viewable():
+                    w_.withdraw(); hidden.append(w_)
+            except Exception:
+                pass
+        self.withdraw()
+        self.after(900, lambda: self._preview_img_scan(fkey, js, hidden))
+
+    def _preview_img_scan(self, fkey, js, hidden):
+        """16슬롯을 훑어 미리보기에 그릴 것을 모은 뒤 오버레이를 띄운다."""
+        key, title, _icon = self._dgn2_info(fkey)
+        rows = []
+        try:
+            for i, sl in enumerate(self.cfg.get(key) or []):
+                anc = slot_anchor(sl)
+                if not anc:
+                    continue
+                coords = (sl or {}).get("coords") or []
+                items = []
+                for j in js:
+                    try:
+                        box = search_box(fkey, j, anc) if area_is_set(fkey, j) else None
+                    except Exception:
+                        box = None
+                    try:
+                        zb = zone_box(fkey, j, anc)
+                    except Exception:
+                        zb = None
+                    try:
+                        x, y, sc = find_image(fkey, j, anc)
+                    except Exception:
+                        x, y, sc = None, None, 0.0
+                    items.append(dict(j=j, box=box, zone=zb, x=x, y=y, sc=sc,
+                                      thr=img_thr(fkey, j),
+                                      coord=(coords[j] if j < len(coords) else None)))
+                rows.append(dict(i=i,
+                                 name=(sl.get("name") or f"#{i+1}").strip(),
+                                 rc=client_rect_at(anc[0], anc[1]),
+                                 dots=[(c[0], c[1], n + 1)
+                                       for n, c in enumerate(coords)
+                                       if c and len(c) >= 2],
+                                 items=items))
+        except Exception as e:
+            self._preview_img_back(hidden)
+            self.status.set(f"👁 미리보기 실패: {e}")
+            return
+        if not rows:
+            self._preview_img_back(hidden)
+            self.status.set("👁 좌표가 등록된 슬롯이 없습니다")
+            return
+        try:
+            _ImgPreviewOverlay(self, title, fkey, rows, hidden)
+        except Exception as e:
+            self._preview_img_back(hidden)
+            self.status.set(f"👁 미리보기 실패: {e}")
+
+    def _preview_img_back(self, hidden):
+        """미리보기를 닫을 때 숨겼던 창을 되돌린다."""
+        self.deiconify()
+        for w_ in hidden or []:
+            try:
+                w_.deiconify()
+            except Exception:
+                pass
         self.status.set(f"🩺 진단 끝 — 잡힘 {okn}/{tot}")
 
     def _reg_dgn2_click(self, fkey, slot_idx, click_idx):
@@ -17087,6 +17187,118 @@ class _DotPreviewOverlay(tk.Toplevel):
     def _close(self):
         self.destroy()
         self.app.deiconify()
+
+
+class _ImgPreviewOverlay(tk.Toplevel):
+    """👁 그림 미리보기 — 실제 화면 위에 '그림을 어떻게 찾고 있는지'를 그린다.
+
+    보여주는 것 (슬롯마다):
+      · 회색 얇은 상자 = 그 슬롯의 리니지M 창
+      · **노란 상자**  = 📐 로 지정한 찾을 범위 (없으면 창 전체를 훑는다는 뜻)
+      · 파란 점선     = 성공했던 자리들이 모인 구역 (이 컴퓨터 전용)
+      · **초록 원**   = 지금 그림을 찾은 자리 (+ 일치도)
+      · **빨간 ✕**   = 못 찾음 (범위 한가운데에 최고 일치도를 적는다)
+      · 흰 점         = 그 슬롯에 등록된 좌표들
+
+    아무것도 클릭하지 않는다. ESC 나 아무 곳이나 누르면 닫힌다.
+    (2026-09-02 사용자 요청)"""
+
+    def __init__(self, app, title, fkey, rows, hidden):
+        super().__init__()
+        self.app     = app
+        self._hidden = hidden
+        self._rows   = rows
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        sw = self.winfo_screenwidth(); sh = self.winfo_screenheight()
+        self._sw, self._sh = sw, sh
+        self.geometry(f"{sw}x{sh}+0+0")
+
+        from PIL import ImageGrab as _IG, ImageTk as _ITk
+        self._bg_img = _ITk.PhotoImage(_IG.grab(all_screens=False).resize((sw, sh)))
+
+        self._cv = tk.Canvas(self, highlightthickness=0, cursor="arrow")
+        self._cv.pack(fill="both", expand=True)
+        self._draw(title, fkey)
+
+        self._cv.bind("<ButtonPress-1>", lambda _e: self._close())
+        self.bind("<Escape>", lambda _e: self._close())
+        self.lift(); self.focus_force()
+
+    def _draw(self, title, fkey):
+        cv = self._cv
+        cv.create_image(0, 0, anchor="nw", image=self._bg_img)
+        ok = bad = 0
+        for r in self._rows:
+            rc = r["rc"]
+            if rc:
+                cv.create_rectangle(rc[0], rc[1], rc[2], rc[3],
+                                    outline="#7f8c8d", width=1)
+                cv.create_text(rc[0] + 4, rc[1] + 4, anchor="nw",
+                               text=f"{r['i']+1:02d} {r['name'][:10]}",
+                               fill="#ecf0f1", font=("맑은 고딕", 8, "bold"))
+            # 그 슬롯에 등록된 좌표들 (작은 흰 점)
+            for x, y, num in r["dots"]:
+                cv.create_oval(x - 2, y - 2, x + 2, y + 2,
+                               fill="#ecf0f1", outline="#2c3e50")
+                cv.create_text(x + 7, y - 7, text=str(num), fill="#ecf0f1",
+                               font=("맑은 고딕", 7))
+            for it in r["items"]:
+                zb = it["zone"]
+                if zb:
+                    cv.create_rectangle(zb[0], zb[1], zb[2], zb[3],
+                                        outline="#3498db", width=1, dash=(3, 3))
+                bx = it["box"]
+                if bx:
+                    cv.create_rectangle(bx[0], bx[1], bx[2], bx[3],
+                                        outline="#f1c40f", width=2)
+                    cv.create_text(bx[0] + 3, bx[1] + 2, anchor="nw",
+                                   text=f"📐{it['j']+1}", fill="#f1c40f",
+                                   font=("맑은 고딕", 8, "bold"))
+                elif rc:
+                    # 범위를 안 잡았으면 창 전체를 훑는다 — 그것도 보여준다
+                    cv.create_rectangle(rc[0] + 1, rc[1] + 1, rc[2] - 1, rc[3] - 1,
+                                        outline="#f39c12", width=1, dash=(6, 4))
+                if it["x"] is not None:
+                    ok += 1
+                    x, y = it["x"], it["y"]
+                    cv.create_oval(x - 13, y - 13, x + 13, y + 13,
+                                   outline="#2ecc71", width=3)
+                    cv.create_text(x, y - 20, text=f"{it['sc']:.2f}", fill="#2ecc71",
+                                   font=("맑은 고딕", 9, "bold"))
+                else:
+                    bad += 1
+                    ref = bx or rc
+                    if ref:
+                        mx = (ref[0] + ref[2]) // 2; my = (ref[1] + ref[3]) // 2
+                        cv.create_line(mx - 10, my - 10, mx + 10, my + 10,
+                                       fill="#e74c3c", width=3)
+                        cv.create_line(mx + 10, my - 10, mx - 10, my + 10,
+                                       fill="#e74c3c", width=3)
+                        cv.create_text(mx, my + 20,
+                                       text=f"못찾음 {it['sc']:.2f}/{it['thr']:.2f}",
+                                       fill="#e74c3c", font=("맑은 고딕", 9, "bold"))
+        # 위 안내바 — 마지막에 그려야 상자에 안 가린다
+        cv.create_rectangle(0, 0, self._sw, 56, fill="#1a252f", outline="")
+        cv.create_text(14, 12, anchor="nw",
+                       text=f"👁 {title} 그림 미리보기 — 찾음 {ok} · 못찾음 {bad}",
+                       fill="white", font=("맑은 고딕", 12, "bold"))
+        cv.create_text(14, 33, anchor="nw",
+                       text="노란 상자 = 📐 찾을 범위 (점선 = 범위 없음·창 전체)   "
+                            "파란 점선 = 성공했던 구역   초록 원 = 지금 찾은 자리   "
+                            "빨간 ✕ = 못 찾음   흰 점 = 등록된 좌표      "
+                            "|  아무 곳이나 클릭 · ESC = 닫기",
+                       fill="#aeb6bf", font=("맑은 고딕", 9))
+
+    def _close(self):
+        self.destroy()
+        try:
+            self.app._preview_img_back(self._hidden)
+        except Exception:
+            try:
+                self.app.deiconify()
+            except Exception:
+                pass
 
 
 class _DotPreviewOverlayNav(_DotPreviewOverlay):
