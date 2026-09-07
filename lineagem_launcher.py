@@ -190,6 +190,13 @@ TJ_MAX             = 1.51
 TJ_SLOT_MIN        = 0.7   # TJ성공!! 슬롯 간 간격(초) — 0.7~2.3 랜덤
 TJ_SLOT_MAX        = 2.3
 ITEM_SWIPE_COUNT   = 1     # 같은 자리에서 쓸어올리기 반복 횟수
+# ── 끌기(드래그) — '클릭한 채로 밀어서 내리기' ──────────────────────────
+# 휠이 안 먹는 목록은 **누른 채 끌어야** 내려간다 (2026-09-02 사용자 지시:
+# "클릭을 하면서 밑으로 내려야 하거든"). 아이템정리의 쓸어올리기와 같은 방식이고,
+# 거리·방향을 칸마다 지정할 수 있게 `drag_list` 로 뺐다 (양수=아래, 음수=위).
+DRAG_STEPS         = 6     # 몇 번에 나눠 밀지 — 적을수록 빠른 '플릭'(관성 스크롤이 세짐)
+DRAG_HOLD          = 0.09  # 누르고 나서 드래그로 인식될 때까지 기다리는 시간(초)
+DRAG_STEP_WAIT     = 0.005 # 한 칸 밀 때마다의 간격(초)
 SCHED_INTERVAL     = 2.5
 PASS_SLOTS         = 16
 PASS_CLICKS        = 9
@@ -220,6 +227,34 @@ CIRCUS2_SLOTS  = 16    # 서커스 이벤트실행 슬롯 수
 CIRCUS2_CLICKS = 4     # 서커스 이벤트실행 좌표 수
 CIRCUS3_SLOTS  = 16    # 서커스 이벤트퀘스트 슬롯 수
 CIRCUS3_CLICKS = 3     # 서커스 이벤트퀘스트 좌표 수
+JAKWI_SLOTS    = 16    # 👑 작위!! — 설정 파일에는 16칸을 만들어 둔다(다른 코드 호환용)
+                       # 화면에는 `slots=1` 로 **1번 슬롯 하나만** 크게 보여준다
+                       # (2026-09-02 사용자 지시: "그냥 한개만 만들자 크게")
+# ── 작위 간격 — '최대한 빠르게 + 랜덤' (2026-09-07 사용자 요청) ──────────
+# 근거는 이 프로젝트의 **실측된 값**이다:
+#   · 🩹 복구 = 0.30~0.60초 — 창 안 메뉴를 연달아 누르는 작업에서 검증된 하한.
+#     작위 창도 같은 성격(화면 전환이 아니라 UI 클릭)이라 이 범위를 쓴다.
+#   · `PACE_FLOOR`(0.60) 은 **화면이 새로 그려지는** 자리의 하한이라 여기엔 해당 없다
+#     (용던고고에서 0.30 으로 줄였다가 '화면이 뜨기 전에 눌러' 실패했던 그 값).
+#   · 잡고 내린 뒤에는 **관성 스크롤이 멎을 시간**이 필요해 클릭보다 길게 잡았다.
+# 줄마다 '초' 를 적어두면 그 값이 **항상 우선**이다.
+# 줄마다 적어둔 '초' 에 곱하는 흔들림 — **줄었다 늘었다** 해야 사람처럼 보인다.
+# 아래쪽 0.90 은 실측값(화면이 멎기까지)보다 항상 위에 있도록 정했다:
+#   0.7×0.90=0.63 > 0.58 · 1.4×0.90=1.26 > 1.18 · 3.9×0.90=3.51 > 3.38
+#   4.9×0.90=4.41 > 4.19 · 1.3×0.90=1.17 > 1.05   → 깎여도 안 씹힌다
+# (전에는 1.00~1.10 이라 '늘어나기만' 해서 거의 일정했다 — 2026-09-07 사용자 지적)
+JAKWI_GAP_JITTER = (0.90, 1.15)
+JAKWI_GAP_CLICK = (0.30, 0.55)   # 그냥 클릭한 뒤
+JAKWI_GAP_DRAG  = (0.55, 0.85)   # 잡고 내린 뒤 (관성이 멎어야 다음 자리가 안 밀린다)
+JAKWI_GAP_ROUND = (0.60, 1.00)   # 한 바퀴 끝내고 다시 1번으로 갈 때
+# 사람처럼 보이게 하는 '멈칫' — 2026-09-07 사용자 요청 ("1~2초 랜덤을 종합적으로").
+# 기본 간격은 짧게 두고, **가끔 한 박자 쉬는 것**으로 리듬을 흩는다.
+# 매 줄 12% 이므로 5줄이면 한 바퀴에 평균 0.9초쯤 더 붙는다 (거의 안 느려진다).
+JAKWI_PAUSE   = (1.0, 2.0);  JAKWI_PAUSE_P = 0.12   # 줄 사이 멈칫
+JAKWI_REST    = (1.5, 3.0);  JAKWI_REST_P  = 0.20   # 회차 사이 긴 쉼
+JAKWI_CLICKS   = 8     # 👑 작위!! 좌표 수 — 20개는 너무 많다는 사용자 지시로 8개 (2026-09-07)
+                       # 줄마다 좌표 · 동작(클릭/잡고 내리기) · 초 · 🖼그림 을 넣는다.
+                       # 안 쓰는 줄은 비워두면 건너뛴다. 더 필요하면 이 숫자만 키운다.
 # 클릭 대신 '마우스 휠 올리기'를 할 자리 (던전키: {0부터 센 클릭번호})
 WHEEL_UP_INDICES = {"circus": {4}}     # 서커스이벤트 클릭5 = 휠 위로
 WHEEL_UP_NOTCH  = 3    # 한 번에 굴릴 칸 수
@@ -265,6 +300,7 @@ DEFAULT_CFG = {
                      for _ in range(PAST_SLOTS)],
     "sched_slots":  [{"name": "미등록", "coords": [None] * SCHED_CLICKS}
                      for _ in range(SCHED_SLOTS)],
+    "jakwi_slots":  None,               # 👑 작위!! — 16슬롯 × 좌표10 (칸마다 간격·휠)
     "item_slots":   None,               # 아이템정리 — 처음 로드 때 스케줄 슬롯을 복사해 생성
     "item_hotkey":  None,               # 아이템정리 실행 단축키 (가상키 코드)
     "item_on":      False,              # 아이템정리 단축키 활성화 상태 (재시작 유지)
@@ -646,6 +682,30 @@ def load_cfg():
                         "gap_list": [None]*CIRCUS_CLICKS,
                         "wheel_list": [0]*CIRCUS_CLICKS, "enabled": True})
         cfg["circus_slots"] = ncl[:CIRCUS_SLOTS]
+        # jakwi_slots (👑 작위!! 16슬롯 × 좌표10) — 서커스와 같은 구조.
+        # 칸마다 gap_list(다음 좌표까지 기다릴 초) · wheel_list(휠 칸수, 음수=아래) 를 갖는다.
+        jl, njl = cfg.get("jakwi_slots") or [], []
+        for s_ in jl:
+            c = s_.get("coords", [None]*JAKWI_CLICKS) if isinstance(s_, dict) else [None]*JAKWI_CLICKS
+            while len(c) < JAKWI_CLICKS: c.append(None)
+            _g = (s_.get("gap_list") or []) if isinstance(s_, dict) else []
+            _w = (s_.get("wheel_list") or []) if isinstance(s_, dict) else []
+            _d = (s_.get("drag_list") or []) if isinstance(s_, dict) else []
+            while len(_g) < JAKWI_CLICKS: _g.append(None)
+            while len(_w) < JAKWI_CLICKS: _w.append(0)
+            while len(_d) < JAKWI_CLICKS: _d.append(0)
+            njl.append({"name": s_.get("name", "미등록") if isinstance(s_, dict) else "미등록",
+                        "coords": c[:JAKWI_CLICKS],
+                        "gap_list": _g[:JAKWI_CLICKS],
+                        "wheel_list": _w[:JAKWI_CLICKS],
+                        "drag_list": _d[:JAKWI_CLICKS],   # 칸마다 끌기 거리(px, 양수=아래)
+                        "enabled": s_.get("enabled", True) if isinstance(s_, dict) else True})
+        while len(njl) < JAKWI_SLOTS:
+            njl.append({"name": "미등록", "coords": [None]*JAKWI_CLICKS,
+                        "gap_list": [None]*JAKWI_CLICKS,
+                        "wheel_list": [0]*JAKWI_CLICKS,
+                        "drag_list": [0]*JAKWI_CLICKS, "enabled": True})
+        cfg["jakwi_slots"] = njl[:JAKWI_SLOTS]
         # circus3_slots (서커스 이벤트퀘스트 16슬롯 × 3좌표)
         c3l, nc3 = cfg.get("circus3_slots", []), []
         for s_ in c3l:
@@ -783,7 +843,7 @@ SLEEP_WAKE_TRIES = 3           # 안 깨어나면 몇 번까지 다시 누를지
 # 캐릭터 접속 버튼 — 너무 늦게 눌린다는 지적으로 대기를 20% 줄임 (2026-08-29)
 CHAR_WAIT_FIRST = 4.8   # 멀티플레이 클릭 → 첫 캐릭터까지 (전 6초)
 CHAR_WAIT_EACH  = 2.4   # 캐릭터 사이 (전 3초)
-BACK_NOT_MIN = ("fix",)
+BACK_NOT_MIN = ("fix", "jakwi")   # 최소화하지 않고 맨 뒤로만 (작위는 보면서 돌린다)
 START_PAUSE_MIN = 0.20
 START_PAUSE_MAX = 0.45
 CHECK_TRIES = 2      # 👁 확인만 자리는 짧게 2번만 본다 (0.25~0.45초 간격)
@@ -2451,6 +2511,11 @@ class App(tk.Tk):
                   bg="#2c3e50", fg="white", activebackground="#1b2631",
                   width=6, height=2,
                   command=self._restart_launcher).pack(pady=(2, 0))
+        # 👑 작위!! — 런처 재시작 바로 아래 (2026-09-02 사용자 요청)
+        tk.Button(cl_col, text="👑 작위!!", font=("맑은 고딕", 8, "bold"),
+                  bg="#b7950b", fg="white", activebackground="#7d6608",
+                  width=6, height=2,
+                  command=self._open_jakwi_win).pack(pady=(2, 0))
         tk.Button(btn_row, text="🔑 계정\n관리",
             font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
             activebackground="#0e6655", width=7, height=2,
@@ -3317,6 +3382,7 @@ class App(tk.Tk):
         ("mail_slots",     "📬 우편함"),
         ("past_slots",     "🏝 과거섬"),
         ("item_slots",     "🧹 아이템정리"),
+        ("jakwi_slots",    "👑 작위!!"),
         ("pass_slots",     "🎫 패스권"),
         ("seq_slots",      "🔆 절전해제"),
         ("slp_slots",      "🌙 절전모드"),
@@ -5452,7 +5518,8 @@ class App(tk.Tk):
 
     # ── 인형확인용/성물확인용 (변신확인용 복제 — 동일 실행 로직) ────────
     def _dgn2_info(self, fkey):
-        return {"fix":     ("fix_slots",     "복구",       "🩹"),
+        return {"jakwi":   ("jakwi_slots",   "작위!!",     "👑"),
+                "fix":     ("fix_slots",     "복구",       "🩹"),
                 "dollchk": ("dollchk_slots", "인형확인용", "🧸"),
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
@@ -5464,6 +5531,367 @@ class App(tk.Tk):
                 "circus":  ("circus_slots",  "서커스 이벤트등록", "🎪"),
                 "circus2": ("circus2_slots", "서커스 이벤트실행", "🎪"),
                 "circus3": ("circus3_slots", "서커스 이벤트퀘스트", "🎪")}[fkey]
+
+    def _open_jakwi_win(self):
+        """👑 작위!! — 좌표 + 칸마다 간격(초)·휠(칸수·방향) 을 직접 넣는 런처.
+
+        작위 창은 목록을 **휠로 내려야** 해서 서커스와 같은 `opts=True` 틀을 썼다
+        (2026-09-02 사용자 요청: "좌표 입력과 휠로 내리는 걸 해야 한다").
+        휠 칸수를 넣은 자리는 클릭 대신 그 자리에서 휠을 굴린다 —
+        **아래로 내리려면 [▼] 로 바꾼다** (저장은 음수로 남는다)."""
+        self._open_section_win("_jakwi_win", "👑 작위!!", self._build_jakwi,
+                               w=520, h=330, pinnable=True)
+
+    def _build_jakwi(self, parent):
+        """👑 작위!! — **한 줄 = 한 단계**. 최대한 단순하게 (2026-09-02 사용자 지시:
+        "그냥 잡고 밑으로 내린다고 생각하고 단순하게 좀 만들어줘, 너무 복잡하다").
+
+        한 줄에 이것만 있다:
+            번호 · [좌표 찍기] · [클릭|잡고내리기] · (내리기면) [놓을 자리 찍기] · [🖼] · 초
+        칸이 작게 여러 개 흩어진 예전 그리드(6열)를 버리고 **세로 목록**으로 바꿨다.
+        실행은 기존 dgn2 그대로라 동작은 검증된 코드를 그대로 쓴다."""
+        fkey, idx = "jakwi", 0
+        sp = self._grid_spec(fkey)
+        key = sp["key"]
+        color = sp["color"]
+        slot = self.cfg[key][idx]
+
+        dr = tk.Frame(parent); dr.pack(anchor="w", padx=4, pady=(4, 2))
+        setattr(self, f"_{fkey}_stop", False)
+        # ▶ 실행 = 한 바퀴만 (연속과 같은 코드를 쓴다 — 그래야 측정도 똑같이 걸린다)
+        run = tk.Button(dr, text="▶ 실행", font=("맑은 고딕", 9, "bold"),
+                        bg=color, fg="white", width=7, height=2,
+                        command=lambda: self._start_jakwi_loop(once=True))
+        run.pack(side="left")
+        setattr(self, f"btn_{fkey}_run", run)
+        # 🔁 연속 — 1번부터 끝까지 갔다가 **다시 1번부터** 계속 돈다.
+        #    멈추는 방법은 [■ 멈춤] 뿐이다 (2026-09-07 사용자 요청).
+        loopb = tk.Button(dr, text="🔁 연속", font=("맑은 고딕", 9, "bold"),
+                          bg="#8e44ad", fg="white", activebackground="#6c3483",
+                          width=7, height=2, command=self._start_jakwi_loop)
+        loopb.pack(side="left", padx=2)
+        self._btn_jakwi_loop = loopb
+        stopb = tk.Button(dr, text="■ 멈춤", font=("맑은 고딕", 9, "bold"),
+                          bg="#c0392b", fg="white", width=7, height=2, state="disabled",
+                          command=lambda: setattr(self, f"_{fkey}_stop", True) or
+                                          self.status.set("작위 멈추는 중..."))
+        stopb.pack(side="left")
+        setattr(self, f"btn_{fkey}_stop", stopb)
+        tk.Button(dr, text="👁", font=("맑은 고딕", 9), bg="#566573", fg="white",
+                  width=3, height=2,
+                  command=lambda: self._preview_dgn2(fkey, idx)).pack(side="left", padx=(4, 0))
+        tk.Button(dr, text="📁", font=("맑은 고딕", 9), bg="#34495e", fg="white",
+                  width=3, height=2, command=self._open_img_dir).pack(side="left", padx=2)
+        # ⏱ — 켜고 한 바퀴 돌리면 '동작이 실제로 끝나는 시간' 을 기록한다
+        mb2 = tk.Button(dr, text="⏱ 측정", font=("맑은 고딕", 8, "bold"),
+                        bg="#7f8c8d", fg="white", width=6, height=2,
+                        command=self._jakwi_toggle_measure)
+        mb2.pack(side="left")
+        self._btn_jakwi_meas = mb2
+
+        # ── 간격 일괄 지정 — 20줄을 하나씩 치지 않게 (2026-09-07 사용자 요청:
+        #    "좌표간 시간을 넣게 해줘, 클릭이 너무 빠르다, 내가 설정할게") ──
+        gr = tk.Frame(parent); gr.pack(anchor="w", padx=4, pady=(0, 2))
+        tk.Label(gr, text="간격", font=("맑은 고딕", 8, "bold"), fg=color).pack(side="left")
+        self._jakwi_bulk_gap = tk.StringVar(value="0.5")
+        tk.Entry(gr, textvariable=self._jakwi_bulk_gap, font=("맑은 고딕", 9),
+                 width=4, justify="center", relief="solid", bd=1).pack(side="left", padx=2)
+        tk.Button(gr, text="전체", font=("맑은 고딕", 8, "bold"), bg=color, fg="white",
+                  width=4, command=self._jakwi_set_all_gap).pack(side="left")
+        tk.Button(gr, text="자동", font=("맑은 고딕", 8), bg="#7f8c8d", fg="white", width=4,
+                  command=lambda: self._jakwi_set_all_gap(clear=True)).pack(side="left", padx=2)
+        tk.Label(gr, text=f"자동 = 클릭 {JAKWI_GAP_CLICK[0]}~{JAKWI_GAP_CLICK[1]}s · "
+                          f"내리기 {JAKWI_GAP_DRAG[0]}~{JAKWI_GAP_DRAG[1]}s (랜덤)",
+                 font=("맑은 고딕", 7), fg="#888").pack(side="left")
+
+        # ── 머리줄 ──
+        hd = tk.Frame(parent); hd.pack(anchor="w", padx=4)
+        for t, w in (("#", 2), ("좌표", 12), ("동작", 10), ("놓을자리", 10),
+                     ("그림", 4), ("초", 4)):
+            tk.Label(hd, text=t, font=("맑은 고딕", 7, "bold"), fg="#888",
+                     width=w, anchor="w").pack(side="left")
+        tk.Frame(parent, height=1, bg="#bbb").pack(fill="x", padx=4, pady=1)
+
+        body = tk.Frame(parent); body.pack(anchor="w", padx=4)
+        self._jakwi_widgets = {}          # 줄마다 위젯 — 좌표를 찍고 오면 다시 그린다
+        for j in range(sp["clicks"]):
+            self._build_jakwi_row(body, fkey, idx, j, color)
+
+    def _build_jakwi_row(self, body, fkey, idx, j, color):
+        """작위 한 줄 — 좌표 · 동작(클릭/잡고내리기) · 놓을 자리 · 그림 · 초."""
+        sp   = self._grid_spec(fkey)
+        key  = sp["key"]
+        slot = self.cfg[key][idx]
+        row  = tk.Frame(body); row.pack(anchor="w", pady=0)
+        tk.Label(row, text=f"{j+1}", font=("맑은 고딕", 8, "bold"),
+                 fg="#555", width=2, anchor="w").pack(side="left")
+
+        coords = slot.get("coords") or []
+        c0 = coords[j] if j < len(coords) else None
+        cv = tk.StringVar(value=(f"({c0[0]},{c0[1]})" if c0 else "— 없음 —"))
+        cb = tk.Button(row, textvariable=cv, font=("맑은 고딕", 8), width=12,
+                       bg=("#27ae60" if c0 else "#7f8c8d"), fg="white",
+                       command=lambda: self._grid_spec(fkey)["reg"](idx, j))
+        cb.pack(side="left")
+
+        # 동작 — [클릭] ↔ [잡고 내리기] 토글 하나뿐이다
+        dist = self._slot_drag(slot, j)
+        mv = tk.StringVar(value=("잡고 내리기" if dist else "클릭"))
+        mb = tk.Button(row, textvariable=mv, font=("맑은 고딕", 8, "bold"), width=10,
+                       bg=("#7b241c" if dist else "#1a5276"), fg="white")
+        mb.pack(side="left", padx=1)
+
+        # 놓을 자리 — '잡고 내리기' 일 때만 쓴다. 찍으면 거리(px)를 자동 계산한다.
+        ev = tk.StringVar(value=(f"↓ {dist}px" if dist else "—"))
+        eb = tk.Button(row, textvariable=ev, font=("맑은 고딕", 8), width=10,
+                       bg=("#b7950b" if dist else "#95a5a6"), fg="white",
+                       state=("normal" if dist else "disabled"),
+                       command=lambda: self._reg_jakwi_end(idx, j))
+        eb.pack(side="left", padx=1)
+
+        def _flip():
+            now = self._slot_drag(self.cfg[key][idx], j)
+            # 잡고내리기 → 클릭 / 클릭 → 잡고내리기(기본 250px 아래)
+            self._grid_set_list(fkey, idx, "drag_list", j, 0 if now else 250)
+            self._jakwi_refresh()
+            if not now:
+                self.status.set(f"작위 {j+1}번 — [놓을 자리]를 눌러 어디까지 내릴지 찍으세요")
+        mb.config(command=_flip)
+
+        # 🖼 — 어디서 멈춰야 하는지 그림으로 잡는 자리
+        _cnt = len(img_list(fkey, j))
+        ib = tk.Button(row, text=("🖼" if not _cnt else f"🖼{_cnt}"),
+                       font=("맑은 고딕", 8), width=4,
+                       bg=("#8e44ad" if _cnt else "#5d6d7e"), fg="white")
+        ib.config(command=lambda b_=ib: self._grab_click_image(fkey, j, b_))
+        ib.pack(side="left", padx=1)
+        if _cnt:
+            ib.bind("<Button-3>", lambda _e, b_=ib: self._del_click_image(fkey, j, b_))
+
+        # 초 — 다음 줄까지 기다릴 시간 (비우면 기본)
+        gl = slot.get("gap_list") or []
+        gv = tk.StringVar(value=(str(gl[j]) if j < len(gl) and gl[j] not in (None, "") else ""))
+        tk.Entry(row, textvariable=gv, font=("맑은 고딕", 8), width=4,
+                 justify="center", relief="solid", bd=1).pack(side="left", padx=1)
+        gv.trace_add("write",
+                     lambda *_a: self._grid_set_list(fkey, idx, "gap_list", j, gv.get().strip()))
+
+        # ▶ 그 줄만 실행 — 하나씩 맞춰볼 때
+        tk.Button(row, text="▶", font=("맑은 고딕", 8), width=3,
+                  bg="#1e8449", fg="white",
+                  command=lambda: self._test_grid_click(fkey, idx, j)).pack(side="left", padx=(2, 0))
+        # 좌표를 찍고 오면 이 줄을 다시 그려야 한다 (_jakwi_refresh 가 찾아 쓴다)
+        self._jakwi_widgets[j] = dict(frame=row, cv=cv, cb=cb, mv=mv, mb=mb,
+                                      ev=ev, eb=eb, ib=ib)
+
+    def _jakwi_set_all_gap(self, clear=False):
+        """'좌표 사이 간격' 을 **모든 줄에** 한 번에 넣는다 (또는 비운다).
+        20줄을 하나씩 치는 게 번거로워서 만든 것 (2026-09-07 사용자 요청)."""
+        if clear:
+            v = ""
+        else:
+            try:
+                v = float(str(self._jakwi_bulk_gap.get()).strip())
+                if v < 0:
+                    raise ValueError
+            except Exception:
+                self.status.set("⚠ 간격은 숫자로 넣어주세요 (예: 1.5)"); return
+        for j in range(JAKWI_CLICKS):
+            self._grid_set_list("jakwi", 0, "gap_list", j, v)
+        try:
+            self._jakwi_refresh()
+        except Exception:
+            pass
+        self.status.set("✔ 작위 — 모든 줄 간격을 기본속도(1.1~2.6초)로 되돌렸습니다"
+                        if clear else f"✔ 작위 — 모든 줄 좌표 사이 간격을 {v}초로 넣었습니다")
+
+    # ── ⏱ 시간 측정 — '동작이 실제로 끝나는 때'를 재서 최적 간격을 찾는다 ──
+    @staticmethod
+    def _screen_noise(coord, n=3):
+        """가만히 있을 때의 화면 흔들림(캐릭터·이펙트 애니메이션) 크기를 잰다.
+        이걸 기준으로 삼아야 '진짜 변화가 멎은 때'를 알 수 있다."""
+        try:
+            import numpy as np
+            prev = grab_window(coord); base = []
+            for _ in range(n):
+                time.sleep(0.05)
+                cur = grab_window(coord)
+                if prev is None or cur is None or prev.shape != cur.shape:
+                    return None, None
+                base.append(float(np.mean(np.abs(cur.astype("int16") - prev.astype("int16")))))
+                prev = cur
+            return (sum(base) / len(base)), prev
+        except Exception:
+            return None, None
+
+    def _settle_time(self, coord, noise, prev, cap=6.0):
+        """누른 뒤 **화면이 멎을 때까지** 걸린 시간(초). 못 재면 None.
+        평소 흔들림(noise)의 2배 밑으로 두 번 연속 떨어지면 '멎었다'고 본다."""
+        try:
+            import numpy as np
+            if noise is None or prev is None:
+                return None
+            thr = max(noise * 2.0, 0.8)
+            t0 = time.time(); calm = 0
+            while time.time() - t0 < cap:
+                time.sleep(0.05)
+                cur = grab_window(coord)
+                if cur is None or cur.shape != prev.shape:
+                    return None
+                d = float(np.mean(np.abs(cur.astype("int16") - prev.astype("int16"))))
+                prev = cur
+                calm = calm + 1 if d <= thr else 0
+                if calm >= 2:
+                    return round(time.time() - t0, 2)
+            return round(cap, 2)
+        except Exception:
+            return None
+
+    def _jakwi_toggle_measure(self):
+        """⏱ — 켜두고 한 번 돌리면 줄마다 '동작이 끝나는 데 몇 초 걸렸는지' 를
+        `click_log.txt` 에 남긴다. 그 기록을 보고 간격을 정한다 (2026-09-07 사용자 요청)."""
+        self._jakwi_measure = not getattr(self, "_jakwi_measure", False)
+        on = self._jakwi_measure
+        try:
+            self._btn_jakwi_meas.config(bg=("#d35400" if on else "#7f8c8d"),
+                                        text=("⏱ 측정중" if on else "⏱ 측정"))
+        except Exception:
+            pass
+        self.status.set("⏱ 시간측정 ON — 한 바퀴 돌리면 클릭기록에 실제 걸린 시간이 남습니다"
+                        if on else "⏱ 시간측정 OFF")
+
+    # ── 🔁 연속 — 1~끝 → 다시 1~끝 … 멈춤을 누를 때까지 ──────────────────
+    def _start_jakwi_loop(self, once=False):
+        """[🔁 연속] — 멈출 때까지 처음부터 끝까지를 반복한다 (2026-09-07 사용자 요청).
+        멈추는 방법은 **[■ 멈춤] 뿐**이다. 사용자가 누르지 않으면 시작되지 않는다.
+        `once=True` 면 한 바퀴만 돈다 ([▶ 실행] 버튼)."""
+        self._jakwi_once = bool(once)
+        if getattr(self, "_jakwi_running", False):
+            self.status.set("👑 작위 — 이미 돌고 있습니다 ([■ 멈춤] 으로 중단)"); return
+        slot = (self.cfg.get("jakwi_slots") or [{}])[0]
+        if not any((slot.get("coords") or [])):
+            self.status.set("👑 작위 — 등록된 좌표가 없습니다"); return
+        self._jakwi_stop = False
+        self._jakwi_running = True
+        self._set_btn("btn_jakwi_run", state="disabled")
+        self._set_btn("btn_jakwi_stop", state="normal")
+        try:
+            self._btn_jakwi_loop.config(state="disabled")
+        except Exception:
+            pass
+        # 🚫 작위 창은 **내리지 않는다** (2026-09-07 사용자 지시).
+        #    연속으로 도는 동안 [■ 멈춤] 을 눌러야 하는데, 창이 뒤로 가거나
+        #    최소화되면 멈추고 싶어도 못 멈춘다. 그래서 항상 위로 띄워둔다.
+        try:
+            w = getattr(self, "_jakwi_win", None)
+            if w and w.winfo_exists():
+                w.deiconify(); w.attributes("-topmost", True); w.lift()
+        except Exception:
+            pass
+        threading.Thread(target=self._run_jakwi_loop, daemon=True).start()
+
+    def _run_jakwi_loop(self):
+        rnd = 0
+        try:
+            while not getattr(self, "_jakwi_stop", False):
+                rnd += 1
+                # 돌 때마다 설정을 다시 읽는다 — 도는 중에 고쳐도 다음 회차에 반영된다
+                slot = (self.cfg.get("jakwi_slots") or [{}])[0]
+                coords = slot.get("coords") or []
+                order = [j for j in range(JAKWI_CLICKS)
+                         if (j < len(coords) and coords[j]) or has_img("jakwi", j)]
+                if not order:
+                    self.status.set("👑 작위 — 등록된 좌표가 없습니다"); break
+                for n, j in enumerate(order):
+                    if getattr(self, "_jakwi_stop", False):
+                        break
+                    c = coords[j] if j < len(coords) else None
+                    if not c:
+                        c = slot_anchor(slot)      # 그림만 있는 자리 — 어느 클라인지 판단용
+                    if not c:
+                        continue
+                    self.status.set(f"👑 작위 {rnd}회차 — {j+1}번 ({n+1}/{len(order)})")
+                    # **첫 회차는 항상 잰다** — 버튼을 따로 눌러야 하면 잊어버린다
+                    # (2026-09-07: 측정 켜는 걸 잊어 기록이 하나도 안 남았다).
+                    # 2회차부터는 ⏱ 를 켜둔 경우에만 잰다 (재는 동안 조금 느려지므로).
+                    _meas = getattr(self, "_jakwi_measure", False) or rnd == 1
+                    _noise = _prev = None
+                    if _meas:
+                        _noise, _prev = self._screen_noise(c)   # 평소 흔들림 먼저
+                    act = self._do_click_or_wheel("jakwi", j, c, slot)
+                    if _meas:
+                        _st = self._settle_time(c, _noise, _prev)
+                        _kind = "잡고내리기" if self._slot_drag(slot, j) else "클릭"
+                        click_log(f"[측정] jakwi {j+1}번 {_kind} — 화면이 멎기까지 "
+                                  + (f"{_st:.2f}초" if _st is not None else "잴 수 없음")
+                                  + (f" (평소 흔들림 {_noise:.2f})" if _noise is not None else ""))
+                    if act == "이미지없음":
+                        # 그림을 못 봤으면 이번 회차는 여기서 끝 — 다음 회차로 넘어간다
+                        # (창을 못 봤으면 뒤 좌표를 누르지 않는다는 규칙 그대로)
+                        click_log(f"jakwi {rnd}회차 — {j+1}번에서 중단 (그림 확인 실패)")
+                        break
+                    if getattr(self, "_jakwi_stop", False):
+                        break
+                    # 간격 — 줄에 적어둔 초가 있으면 그게 우선,
+                    # 없으면 '클릭 뒤 / 잡고 내린 뒤' 를 나눠 랜덤으로 (최대한 빠르게)
+                    g = self._slot_gap(slot, j)
+                    if g is not None:
+                        time.sleep(g * random.uniform(*JAKWI_GAP_JITTER))
+                    else:
+                        lo, hi = (JAKWI_GAP_DRAG if self._slot_drag(slot, j)
+                                  else JAKWI_GAP_CLICK)
+                        time.sleep(random.uniform(lo, hi))
+                    # 사람은 가끔 화면을 보느라 멈칫한다 — 줄마다 확률로 한 박자 쉰다
+                    # (2026-09-07 사용자 요청: "1~2초 사람처럼 랜덤을 종합적으로")
+                    if random.random() < JAKWI_PAUSE_P:
+                        time.sleep(random.uniform(*JAKWI_PAUSE))
+                if getattr(self, "_jakwi_once", False):
+                    self.status.set(f"✔ 작위 한 바퀴 완료 — 걸린 시간은 [📋 클릭기록] 에 남았습니다")
+                    break
+                if not getattr(self, "_jakwi_stop", False):
+                    time.sleep(random.uniform(*JAKWI_GAP_ROUND))   # 다음 회차 전
+                    # 회차 사이에도 가끔 길게 쉰다 — 한 바퀴마다 똑같은 리듬이면 티가 난다
+                    if random.random() < JAKWI_REST_P:
+                        time.sleep(random.uniform(*JAKWI_REST))
+            else:
+                self.status.set(f"■ 작위 연속 중단 — {rnd}회차까지 돌았습니다")
+        except Exception as e:
+            self.status.set(f"작위 오류: {e}")
+        finally:
+            self._jakwi_running = False
+            self._set_btn("btn_jakwi_run", state="normal")
+            self._set_btn("btn_jakwi_stop", state="disabled")
+            try:
+                self.after(0, lambda: self._btn_jakwi_loop.config(state="normal"))
+            except Exception:
+                pass
+
+    def _reg_jakwi_end(self, idx, j):
+        """'놓을 자리' 찍기 — 시작 좌표에서 여기까지의 세로 거리를 끌기 거리로 저장한다.
+        (px 를 숫자로 적게 하니 감이 안 온다는 사용자 지적 — 그냥 찍게 했다)"""
+        self._reg_jakwi_end_j = j
+        self.status.set(f"3초 후 작위 {j+1}번 — 어디까지 내릴지(놓을 자리) 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                  CoordOverlay(self, mode="jakwiend")])
+
+    def on_jakwi_end_coord(self, x, y):
+        j = getattr(self, "_reg_jakwi_end_j", 0)
+        slot = self.cfg["jakwi_slots"][0]
+        c0 = (slot.get("coords") or [None])[j] if j < len(slot.get("coords") or []) else None
+        if not c0:
+            self.status.set(f"⚠ 작위 {j+1}번 — 먼저 [좌표]를 찍어야 거리를 잴 수 있습니다")
+            self.deiconify(); return
+        d = int(y) - int(c0[1])
+        if d == 0:
+            self.status.set("⚠ 시작 자리와 같은 높이입니다 — 더 아래(또는 위)를 찍어주세요")
+            self.deiconify(); return
+        self._grid_set_list("jakwi", 0, "drag_list", j, d)
+        try:
+            self._jakwi_refresh()
+        except Exception:
+            pass
+        self.status.set(f"✔ 작위 {j+1}번 — {'아래로' if d > 0 else '위로'} {abs(d)}px 끌기로 저장")
+        self.deiconify()
 
     def _open_coupon_win(self):
         self._open_section_win("_coupon_win", "🎟 쿠폰등록",
@@ -6373,6 +6801,16 @@ class App(tk.Tk):
             return 0
 
     @staticmethod
+    def _slot_drag(slot, j):
+        """이 칸에 지정된 **끌기 거리(px)** — 0이면 그냥 클릭.
+        양수 = 아래로, 음수 = 위로 (2026-09-02)."""
+        try:
+            dl = slot.get("drag_list") or []
+            return int(dl[j]) if j < len(dl) and dl[j] else 0
+        except Exception:
+            return 0
+
+    @staticmethod
     def _slot_gap(slot, j, default=None):
         """이 칸에 지정된 '다음 좌표까지 기다릴 초' — 없으면 None."""
         try:
@@ -6388,7 +6826,7 @@ class App(tk.Tk):
         except Exception:
             return default
 
-    LOG_FKEYS = ("knight", "dragon")      # 클릭이 어느 창에 갔는지 기록해두는 런처
+    LOG_FKEYS = ("knight", "dragon", "jakwi")   # 클릭이 어느 창에 갔는지 기록해두는 런처
     FOCUS_FIRST = ()                      # 슬롯이 바뀌면 그 클라를 먼저 앞으로 올릴 런처
     # 좌표 하나하나 누르기 직전에 '사람이 마우스를 놓았는지' 확인하는 런처
     # (사용자가 제일 중요하게 보는 것 — 겹치면 팅긴다)
@@ -6827,6 +7265,22 @@ class App(tk.Tk):
                 self.status.set(f"⛔ [{_nm0}] 좌표{j+1} — 재화 쓰는 창이라 ESC 취소")
                 self._note(fkey, _nm0, f"좌표{j+1} ⛔ 금지 그림 → ESC 취소")
                 return "이미지없음"          # 이 슬롯만 끝, 다른 슬롯은 계속
+        # ── 끌기(드래그) — '누른 채 밀어서 내리기' ────────────────────────
+        # 휠이 안 먹는 목록(작위 창 등)은 클릭한 채로 끌어야 내려간다.
+        # 휠보다 **먼저** 본다 — 둘 다 지정돼 있으면 끌기가 이긴다 (2026-09-02).
+        d = self._slot_drag(slot, j) if slot else 0
+        if d and coord:
+            sx, sy = int(coord[0]), int(coord[1])
+            ey = sy + int(d)                       # 양수 = 아래로
+            pyautogui.mouseDown(sx, sy)
+            time.sleep(DRAG_HOLD * random.uniform(0.85, 1.25))   # 드래그로 인식될 시간
+            for _st in range(1, DRAG_STEPS + 1):
+                pyautogui.moveTo(sx, sy + int(d * _st / DRAG_STEPS))
+                time.sleep(DRAG_STEP_WAIT * random.uniform(0.7, 1.6))
+            pyautogui.mouseUp(sx, ey)              # 끝에서 바로 놓기 → 관성 스크롤
+            _w = f"끌기▼{abs(d)}" if d > 0 else f"끌기▲{abs(d)}"
+            self._click_log(fkey, j, coord, slot, _w)
+            return _w
         n = self._slot_wheel(slot, j) if slot else 0
         if not n and j in WHEEL_UP_INDICES.get(fkey, ()):
             n = WHEEL_UP_NOTCH                # 슬롯 설정이 없으면 기본값
@@ -9087,13 +9541,24 @@ class App(tk.Tk):
                 _w.bind("<Button-3>", lambda e, ii=i: self._memo_menu(ii, e))
             win.geometry(f"+{int(pos[0])}+{int(pos[1])}")
             var.trace_add("write", lambda *a: self._memo_save_texts())
-            ent.bind("<Control-Button-1>", lambda e, ww=win: setattr(ww, "_d", (e.x, e.y)))
-            ent.bind("<Control-B1-Motion>", lambda e, ww=win: ww.geometry(
-                f"+{ww.winfo_x()+e.x-getattr(ww,'_d',(0,0))[0]}+{ww.winfo_y()+e.y-getattr(ww,'_d',(0,0))[1]}"))
-            # 위치 저장 — Ctrl을 먼저 떼도 저장되게 두 경우 모두 잡는다
-            # (예전엔 Ctrl+뗌 조합에서만 저장돼, Ctrl을 먼저 놓으면 위치가 안 남았다)
-            ent.bind("<Control-ButtonRelease-1>", lambda e: self._memo_save_positions())
-            ent.bind("<ButtonRelease-1>", lambda e: self._memo_save_positions())
+            # Ctrl+드래그로 옮긴다. **옮긴 그 순간에만** 위치를 저장한다 —
+            # 그냥 클릭하거나 창이 숨겨질 때는 절대 저장하지 않는다
+            # (2026-09-07 사용자 지시: "내가 이동하지 않는 한 고정이야, 초기화하지 마")
+            def _dstart(e, ww=win):
+                ww._d = (e.x, e.y); ww._moved = False
+            def _dmove(e, ww=win):
+                ww._moved = True
+                ww.geometry(f"+{ww.winfo_x()+e.x-getattr(ww,'_d',(0,0))[0]}"
+                            f"+{ww.winfo_y()+e.y-getattr(ww,'_d',(0,0))[1]}")
+            def _dend(e, ww=win):
+                if getattr(ww, "_moved", False):    # 실제로 끌었을 때만
+                    ww._moved = False
+                    self._memo_save_positions()
+            ent.bind("<Control-Button-1>", _dstart)
+            ent.bind("<Control-B1-Motion>", _dmove)
+            # Ctrl 을 먼저 떼도 저장되게 두 경우 모두 잡는다 (끌었을 때만 저장된다)
+            ent.bind("<Control-ButtonRelease-1>", _dend)
+            ent.bind("<ButtonRelease-1>", _dend)
             store[i] = (win, var)
         except Exception:
             pass
@@ -9132,15 +9597,12 @@ class App(tk.Tk):
         store = getattr(self, "_memo_wins", {}) or {}
         w = store.pop(i, None)
         if w:
-            # 숨기기 전에 지금 위치를 남긴다 — 다시 띄울 때 그 자리에 뜨게
-            try:
-                if w[0].winfo_exists():
-                    _o, _t, poss = self._memo_lists()
-                    poss[i] = [w[0].winfo_x(), w[0].winfo_y()]
-                    self.cfg["float_memo_positions"] = poss
-                    save_cfg(self.cfg)
-            except Exception:
-                pass
+            # 🚫 여기서 위치를 저장하지 않는다 (2026-09-07 — 초기화 사고의 범인).
+            #    `_memo_tick` 이 **300ms 마다** 돌면서 작업 중이면 메모를 숨기는데,
+            #    그때마다 여기서 winfo_x/y 를 읽어 저장했다. 창이 아직 화면에 안
+            #    올라간 상태(방금 만든 직후)면 Tk 가 x=1,y=1 을 돌려줘서
+            #    **사용자가 맞춰둔 자리가 (1,1) 로 덮어써졌다.**
+            #    위치는 사용자가 Ctrl+드래그로 **실제로 옮겼을 때만** 저장한다.
             try: w[0].destroy()
             except Exception: pass
 
@@ -9154,12 +9616,29 @@ class App(tk.Tk):
             pass
 
     def _memo_save_positions(self):
+        """메모 위치 저장 — **사용자가 Ctrl+드래그로 옮겼을 때만** 불린다.
+
+        안전장치: 아직 화면에 안 올라온 창은 Tk 가 x=1,y=1 을 돌려준다.
+        그 값을 저장하면 사용자가 맞춰둔 자리가 통째로 날아간다 —
+        그래서 **화면에 올라와 있고(mapped) 좌표가 멀쩡할 때만** 쓴다
+        (2026-09-07 사용자 지시: "내가 수정하지 않는 한 절대 옮기지 마")."""
         try:
             _o, _t, poss = self._memo_lists()
+            changed = False
             for i, (win, var) in self._memo_wins.items():
-                if win.winfo_exists():
-                    poss[i] = [win.winfo_x(), win.winfo_y()]
-            self.cfg["float_memo_positions"] = poss; save_cfg(self.cfg)
+                try:
+                    if not win.winfo_exists() or not win.winfo_ismapped():
+                        continue                      # 안 떠 있는 창은 건너뛴다
+                    x, y = win.winfo_x(), win.winfo_y()
+                    if x <= 1 and y <= 1:
+                        continue                      # 아직 자리를 못 잡은 창
+                    if list(poss[i]) != [x, y]:
+                        poss[i] = [x, y]; changed = True
+                except Exception:
+                    continue
+            if changed:                               # 바뀐 게 있을 때만 파일을 쓴다
+                self.cfg["float_memo_positions"] = poss
+                save_cfg(self.cfg)
         except Exception:
             pass
 
@@ -12390,6 +12869,18 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("dragon", i),
                             prev=lambda i: self._preview_dgn2("dragon", i),
                             delete=lambda i: self._del_dgn2("dragon", i)),
+            # 👑 작위!! — 좌표 + 칸마다 간격(초)·휠(칸수·▲▼) 지정 (opts=True).
+            #    작위 창은 목록을 휠로 내려야 해서 서커스와 같은 방식으로 만들었다
+            #    (2026-09-02 사용자 요청). 안 쓰는 칸은 비워두면 건너뛴다.
+            # slots=1 — 16개로 나누지 않고 **하나만 크게** 쓴다 (사용자 지시).
+            # img=True — 어디서 멈춰야 하는지 🖼 그림으로 잡아야 해서 켰다.
+            "jakwi":   dict(title="작위!!", key="jakwi_slots", clicks=JAKWI_CLICKS,
+                            color="#b7950b", opts=True, enable=True, slots=1, img=True,
+                            drag=True,   # 줄마다 '잡고 내리기' 가능 (_build_jakwi 에서 입력)
+                            reg=lambda s, c: self._reg_dgn2_click("jakwi", s, c),
+                            test=lambda i: self._test_dgn2("jakwi", i),
+                            prev=lambda i: self._preview_dgn2("jakwi", i),
+                            delete=lambda i: self._del_dgn2("jakwi", i)),
             "fix":     dict(title="🩹 복구", key="fix_slots", clicks=FIX_CLICKS,
                             color="#7d3c98", enable=True, sel=True, img=True,
                             reg=lambda s, c: self._reg_dgn2_click("fix", s, c),
@@ -12451,6 +12942,9 @@ class App(tk.Tk):
             self._grid_sel = {}; self._grid_selbtns = {}
         self._grid_selbtns[fkey] = []
         st["pop"] = None; st["pop_slot"] = None
+        # 슬롯을 몇 개 그릴지 — 기본 16, `slots=n` 을 준 런처는 그만큼만
+        # (👑 작위!! 는 1개만 크게 쓴다 — 2026-09-02 사용자 지시 "그냥 한개만 만들자")
+        n_slots = int(sp.get("slots") or 16)
         _top = tk.Frame(parent); _top.pack(pady=(4, 0))
         tk.Button(_top, text="👁 전체 좌표 보기", font=("맑은 고딕", 8),
                   bg="#566573", fg="white",
@@ -12461,7 +12955,7 @@ class App(tk.Tk):
                   bg="#1a5276", fg="white", activebackground="#154360",
                   command=lambda f=fkey: self._grid_paste_all(f)).pack(side="left", padx=(4, 0))
         wg = tk.Frame(parent); wg.pack(padx=6, pady=4)
-        for idx in range(16):
+        for idx in range(n_slots):
             r, c = idx % 4, idx // 4
             cell = tk.Frame(wg, bd=1, relief="groove", padx=3, pady=2)
             cell.grid(row=r, column=c, padx=4, pady=3, sticky="n")
@@ -12661,6 +13155,7 @@ class App(tk.Tk):
 
                     db.config(command=_flip)
                     wv.trace_add("write", _sv_wheel)
+
         bot = tk.Frame(win); bot.pack(pady=(4, 10))
         if sp.get("assign"):
             tk.Button(bot, text="🖥 창 지정", font=("맑은 고딕", 8), bg="#8e44ad", fg="white",
@@ -12725,9 +13220,14 @@ class App(tk.Tk):
         title = self._grid_spec(fkey)["title"]
         _im = " (그림을 찾아 그 자리를 클릭합니다)" if has_img(fkey, j) else ""
         self.status.set(f"{title} #{idx+1:02d} 좌표{j+1} — 0.8초 뒤 실행{_im}")
-        # 실행 중에는 런처를 내려둔다 — 창이 클릭 자리를 가리면 안 먹는다
+        # 실행 중에는 런처를 내려둔다 — 창이 클릭 자리를 가리면 안 먹는다.
+        # 단 BACK_NOT_MIN(복구·작위)은 최소화하지 않는다 — 다시 꺼내기 번거롭고,
+        # 작위는 [■ 멈춤] 을 눌러야 해서 창이 살아 있어야 한다 (2026-09-07).
         try:
-            self._minimize_all()
+            if fkey in BACK_NOT_MIN:
+                self._send_behind_only()
+            else:
+                self._minimize_all()
         except Exception:
             pass
         def _go():
@@ -12787,6 +13287,50 @@ class App(tk.Tk):
                             st["pop_btns"][j].config(bg="#27ae60" if on else "#7f8c8d")
                         except Exception:
                             pass
+        # 👑 작위 창은 자체 목록(세로 한 줄씩)이라 위 그리드 갱신에 안 걸린다.
+        # 좌표를 찍어도 글씨가 그대로라 '저장이 안 된다'고 오해했다 (2026-09-07 사용자 신고).
+        try:
+            self._jakwi_refresh()
+        except Exception:
+            pass
+
+    def _jakwi_refresh(self):
+        """작위 창의 각 줄을 지금 설정대로 다시 표시한다 (좌표·동작·놓을자리·그림)."""
+        rows = getattr(self, "_jakwi_widgets", None)
+        if not rows:
+            return
+        slot = (self.cfg.get("jakwi_slots") or [{}])[0]
+        coords = slot.get("coords") or []
+        for j, w in list(rows.items()):
+            try:
+                if not w["frame"].winfo_exists():
+                    rows.pop(j, None); continue
+            except Exception:
+                rows.pop(j, None); continue
+            c0 = coords[j] if j < len(coords) else None
+            w["cv"].set(f"({c0[0]},{c0[1]})" if c0 else "— 없음 —")
+            try:
+                w["cb"].config(bg=("#27ae60" if c0 else "#7f8c8d"))
+            except Exception:
+                pass
+            d = self._slot_drag(slot, j)
+            w["mv"].set("잡고 내리기" if d else "클릭")
+            try:
+                w["mb"].config(bg=("#7b241c" if d else "#1a5276"))
+            except Exception:
+                pass
+            w["ev"].set((("↓ " if d > 0 else "↑ ") + f"{abs(d)}px") if d else "—")
+            try:
+                w["eb"].config(bg=("#b7950b" if d else "#95a5a6"),
+                               state=("normal" if d else "disabled"))
+            except Exception:
+                pass
+            try:
+                n = len(img_list("jakwi", j))
+                w["ib"].config(text=("🖼" if not n else f"🖼{n}"),
+                               bg=("#8e44ad" if n else "#5d6d7e"))
+            except Exception:
+                pass
 
     def _grid_copy(self, fkey, idx):
         import copy
@@ -17694,6 +18238,8 @@ class CoordOverlay(tk.Toplevel):
             label = f"인형탐험 #{app._doll_reg_idx+1} 좌표{app._doll_reg_step+1} 위치"
         elif mode == "wdoff":
             label = f"주말던전끄기 #{app._wdoff_reg_idx+1} 위치"
+        elif mode == "jakwiend":
+            label = f"작위 {getattr(app, '_reg_jakwi_end_j', 0)+1}번 — 어디까지 내릴지 (놓을 자리)"
         else:
             label = LABELS.get(app._reg_target, "버튼")
 
@@ -17729,6 +18275,7 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "doll":      self.app.on_doll_coord(x, y)
         elif self.mode == "dollpreset": self.app.on_dollpreset_coord(x, y)
         elif self.mode == "wdoff":     self.app.on_wdoff_coord(x, y)
+        elif self.mode == "jakwiend":  self.app.on_jakwi_end_coord(x, y)
         else:                          self.app.on_coord(x, y)
 
 
