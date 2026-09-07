@@ -132,8 +132,10 @@ SCHED_SLOTS        = 16
 SCHED_CLICKS       = 3
 DRAGON_CLICKS      = 10    # 용던고고!!! — 슬롯당 좌표 10개
 DRAGON_BUDGET      = 144   # 전체 슬롯을 2분 24초 안에 (3분에서 20% 단축)
-DRAGON_GAP_MIN     = 0.64  # 좌표 간격 최소 (0.8초에서 20% 단축)
-DRAGON_GAP_MAX     = 1.84  # 좌표 간격 최대 (2.3초에서 20% 단축)
+DRAGON_GAP_MIN     = 0.60  # 좌표 간격 최소 (2026-09-07 0.64→0.60, PACE_FLOOR 하한)
+DRAGON_GAP_MAX     = 1.35  # 좌표 간격 최대 (2026-09-07 1.84→1.35 '10~20% 빠르게')
+                           # ⚠ DRAGON_EXTRA(좌표2→3 화면 대기)는 절대 줄이지 말 것 —
+                           #    2026-08-27 에 그걸 줄였다가 인식률이 폭락했다.
 DRAGON_EXTRA       = {1: (2.0, 3.2)}   # 좌표2→3 추가 대기 (2.5~4.0초에서 20% 단축)
 
 KNIGHT_CLICKS      = 8     # 던전끝! 흑기사!! — 슬롯당 좌표 8개 (2026-08-21 5→8)
@@ -7903,7 +7905,7 @@ class App(tk.Tk):
                 # 동시 3슬롯 · 슬롯 간격 1~2초 랜덤 (2026-08-28 사용자 지시)
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=3,
                                     gap=(DRAGON_GAP_MIN, DRAGON_GAP_MAX),
-                                    slot_gap=(1.0, 2.0), keep_order=True)
+                                    slot_gap=(0.7, 1.4), keep_order=True)
                 return
             if fkey in ("dragon", "knight"):
                 # F11(절전해제)이 끝난 시각부터 정해둔 시간 안에 전부 끝낸다.
