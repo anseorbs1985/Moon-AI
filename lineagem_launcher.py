@@ -159,7 +159,14 @@ KEEP_ORDER_FKEYS = ("dragon", "sched", "fix")   # 섞지 않고 1번부터 순�
 EARLY_IN = 2      # 남은 좌표가 이만큼 이하면 '끝나간다'고 보고 다음 슬롯을 미리 넣는다
 # 전체를 이 시간 안에 끝낸다 (초). 남은 시간과 남은 클릭 수를 보고 간격을 스스로 줄인다.
 # 늘리지는 않는다 — 빨리 끝나면 그대로 끝난다. (2026-08-27 사용자 지시: 4분 10초)
-RUN_BUDGET = {"dragon": 270}      # 4분 30초 (2026-08-27 사용자 지시 — 여유 있게)
+RUN_BUDGET = {"dragon": 270}      # 16슬롯 다 돌 때의 상한 (4분 30초)
+# 🕐 목표 시간은 **실제로 누를 클릭 수에 비례**한다 (2026-09-07 사용자 지시:
+#    "16개 하는 거랑 10개 하는 거랑 당연히 끝나는 시간이 달라야지").
+#    예전에는 슬롯이 몇 개든 270초 고정이라, 슬롯이 적으면 여유가 넘쳐
+#    페이스가 아예 안 걸리고 늘 같은 속도로만 돌았다.
+#    실측(09-06): 91클릭 / 257초 = 클릭당 2.82초. 간격을 12% 줄였으니 2.5초로 잡는다.
+#    → 목표 = 클릭수 × 2.5초 (단, RUN_BUDGET 상한을 넘지 않는다)
+RUN_PER_CLICK = {"dragon": 2.5}
 # 간격을 이보다 더 줄이지 않는다. 너무 서두르면 게임 화면이 아직 안 떠서
 # '그림 못 찾음'이 늘어난다 (2026-08-27 — 0.30 으로 뒀다가 인식률이 폭락했다).
 PACE_FLOOR = 0.60
@@ -5926,8 +5933,10 @@ class App(tk.Tk):
             self.after(0, lambda err=e: self.status.set(f"⚠ 절전해제 실패: {err}"))
         time.sleep(1.0)                      # 마지막 클릭이 먹을 시간
         self._dragon_deadline = time.time() + DRAGON_BUDGET   # 여기서부터 시간을 잰다
+        # 목표 시간은 실제 클릭 수로 정해지므로 여기서는 고정 숫자를 말하지 않는다
+        # (2026-09-07 — 슬롯이 적으면 더 빨리 끝난다)
         self.after(0, lambda: self.status.set(
-            f"🐲 용던고고!!! 시작 — {DRAGON_BUDGET}초 안에 끝냅니다"))
+            "🐲 용던고고!!! 시작 — 슬롯·좌표 수에 맞춰 시간을 잡습니다"))
         self.after(0, lambda: self._start_dgn2("dragon"))
 
     def _open_market_win(self):
@@ -7605,7 +7614,8 @@ class App(tk.Tk):
 
         줄일 수 있는 건 '간격'뿐이므로, 초과분을 간격에서 빼는 식으로 계산한다.
         **1.0 을 넘지 않고**(늦추지 않는다) **0.30 밑으로도 안 내린다**(너무 조급하면 씹힌다)."""
-        bud = RUN_BUDGET.get(fkey)
+        # 이번 실행에 맞춰 계산해둔 목표(클릭 수에 비례)를 먼저 쓴다 (2026-09-07)
+        bud = (getattr(self, "_run_budget", {}) or {}).get(fkey) or RUN_BUDGET.get(fkey)
         if not bud or left <= 0:
             return 1.0
         try:
@@ -7898,6 +7908,17 @@ class App(tk.Tk):
                 # 좌표는 하나도 빠짐없이 다 누른다. 슬롯이 적으면 그만큼 빨리 끝난다.
                 _cl = sum(1 for _si, _sl in targets
                           for _c in (_sl.get("coords") or [])[:nclk] if _c)
+                # 🕐 목표 시간을 **이번에 실제로 누를 클릭 수**로 정한다.
+                # 슬롯이 적으면 목표도 그만큼 짧아져야 페이스가 제대로 걸린다
+                # (2026-09-07 사용자 지시 — 예전엔 270초 고정이라 안 걸렸다).
+                if not hasattr(self, "_run_budget"):
+                    self._run_budget = {}
+                _per = RUN_PER_CLICK.get(fkey)
+                if _per and _cl:
+                    self._run_budget[fkey] = min(RUN_BUDGET.get(fkey, 1e9), _cl * _per)
+                    click_log(f"[시간] {fkey} 목표 {self._run_budget[fkey]:.0f}초 "
+                              f"= 클릭 {_cl}회 × {_per}초 "
+                              f"(슬롯 {len(targets)}개, 상한 {RUN_BUDGET.get(fkey)}초)")
                 _avg = (DRAGON_GAP_MIN + DRAGON_GAP_MAX) / 2 + 0.15
                 _ex = sum((sum(v) / 2 if isinstance(v, (tuple, list)) else v)
                           for v in DRAGON_EXTRA.values())      # 2→3 같은 추가 대기
@@ -8013,9 +8034,11 @@ class App(tk.Tk):
                         self._coupon_log(f"슬롯 간격 {g:.2f}초 대기")
                         time.sleep(g)
             if fkey == "dragon":
+                _bud = int((getattr(self, "_run_budget", {}) or {}).get("dragon")
+                           or RUN_BUDGET.get("dragon", DRAGON_BUDGET))
                 _el = int(time.time() - (getattr(self, "_dragon_deadline", 0) - DRAGON_BUDGET))
                 self.status.set(f"✔ {title} 완료 — {_el//60}분 {_el%60}초 걸림 "
-                                f"(목표 {DRAGON_BUDGET//60}분 {DRAGON_BUDGET%60}초)")
+                                f"(목표 {_bud//60}분 {_bud%60}초)")
             else:
                 self.status.set(f"✔ {title} 실행 완료!")
         except Exception as e:
