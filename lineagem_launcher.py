@@ -228,6 +228,14 @@ DC_TAPS_MIN    = 7     # 한 좌표당 연속 클릭 횟수(최소)
 DC_TAPS_MAX    = 9     # 한 좌표당 연속 클릭 횟수(최대)
 DC_BURST_MIN   = 1.0   # 한 좌표의 7~9회 클릭을 이 시간(초) 안에 모두 실행
 DC_BURST_MAX   = 2.0
+# ── 📬 인사이드 우편함!! — 일반던전충전과 같은 틀. 다만 **연속 클릭 횟수를
+#    슬롯마다 직접 적는다** (2026-09-07 사용자 요청: "10번 클릭한다 처럼 적게 해줘").
+IM_SLOTS       = 16    # 슬롯 수 (고정)
+IM_MIN         = 1.0   # 슬롯 간 간격(초) — 랜덤
+IM_MAX         = 2.5
+IM_TAPS        = 1     # 횟수를 안 적은 슬롯의 기본값
+IM_BURST_MIN   = 1.0   # 한 슬롯의 연속 클릭을 이 시간(초) 안에 다 실행
+IM_BURST_MAX   = 2.0
 FISH_SLOTS     = 16    # 낚시녹임 슬롯 수 (인형탐험과 동일 구조)
 FISH_CLICKS    = 19    # 낚시녹임 좌표 수 (2026-08-19 맨 앞에 하나 추가)
 CIRCUS_SLOTS   = 16    # 서커스이벤트 슬롯 수 (낚시녹임과 동일 구조)
@@ -342,6 +350,10 @@ DEFAULT_CFG = {
     "wdoff_on":     False,
     "wdoff_min":    WDOFF_MIN,
     "wdoff_max":    WDOFF_MAX,
+    "im_slots":     [None]*IM_SLOTS,    # 📬 인사이드 우편함!! 좌표 (각 [x,y] 또는 None)
+    "im_taps":      [IM_TAPS]*IM_SLOTS, # 슬롯마다 연속 클릭 횟수
+    "im_hotkey":    None,               # 인사이드 우편함 실행 단축키
+    "im_on":        False,              # 단축키 활성화 (재시작 유지)
     "dc_slots":     [None]*DC_SLOTS,    # 일반던전충전 좌표 (각 [x,y] 또는 None)
     "dc_hotkey":    None,               # 일반던전충전 실행 단축키 (가상키 코드)
     "dc_on":        False,              # 일반던전충전 단축키 활성화 상태 (재시작 유지)
@@ -644,6 +656,13 @@ def load_cfg():
         while len(dq) < DC_SLOTS:
             dq.append(None)
         cfg["dc_slots"] = dq[:DC_SLOTS]
+        # im_slots / im_taps (📬 인사이드 우편함!! — 좌표 16개 + 슬롯별 연속 클릭 횟수)
+        iq = cfg.get("im_slots") or []
+        while len(iq) < IM_SLOTS: iq.append(None)
+        cfg["im_slots"] = iq[:IM_SLOTS]
+        it = cfg.get("im_taps") or []
+        while len(it) < IM_SLOTS: it.append(IM_TAPS)
+        cfg["im_taps"] = [max(1, int(v or IM_TAPS)) for v in it[:IM_SLOTS]]
         # fish_slots (낚시녹임 16슬롯 × 19좌표)
         # (2026-08-19) 맨 앞에 좌표 하나를 새로 넣는다 — 기존 좌표는 한 칸씩 밀려
         # 클릭1→클릭2 … 순서는 그대로. 컴퓨터마다 한 번만 밀도록 표시를 남긴다.
@@ -2783,6 +2802,8 @@ class App(tk.Tk):
         # 확인용 3종 묶음: 변신확인용 / 인형확인용 / 성물확인용 (세로로 한 곳에)
         chk_col = tk.Frame(front_row); chk_col.pack(side="left", padx=(4,8), anchor="n")
         for _t, _bg, _open, _run in (
+                # 📬 인사이드 우편함!! — 변신확인용 **위**에 (2026-09-07 사용자 지시)
+                ("📬 인사이드\n우편함!!", "#1a5276", self._open_im_win, self._start_im),
                 ("🏰 변신\n확인용", "#d35400", self._open_dungeon_win, self._start_dungeon),
                 ("🧸 인형\n확인용", "#b9770e", self._open_dollchk_win, lambda: self._start_dgn2("dollchk")),
                 ("🗿 성물\n확인용", "#117864", self._open_relic_win,   lambda: self._start_dgn2("relic")),
@@ -3378,6 +3399,7 @@ class App(tk.Tk):
         ("dragon_slots",   "🐲 용던고고!!!"),
         ("sched_slots",    "📅 스케줄"),
         ("dc_slots",       "🎯 일반던전충전"),
+        ("im_slots",       "📬 인사이드 우편함!!"),
         ("doll_slots",     "🧸 인형탐험"),
         ("dollchk_slots",  "🧸 인형확인용"),
         ("relic_slots",    "🗿 성물확인용"),
@@ -12157,6 +12179,283 @@ class App(tk.Tk):
                 threading.Thread(target=self._run_wdoff, daemon=True).start()
             prev = down
 
+    # ── 📬 인사이드 우편함!! (일반던전충전과 같은 틀 · 횟수는 슬롯마다 직접 적는다) ──
+    def _open_im_win(self):
+        """클릭만 하는 런처. 슬롯마다 좌표 하나와 **연속 클릭 횟수**를 적는다.
+        (2026-09-07 사용자 요청: "10번 클릭한다 처럼 밑에 적을 수 있게")"""
+        self._open_section_win("_im_win", "📬 인사이드 우편함!!", self._build_im,
+                               w=330, h=700)
+
+    def _im_hotkey_label(self):
+        return f"단축키: {self._vk_name(self.cfg.get('im_hotkey'))}"
+
+    def _build_im(self, parent):
+        im  = self.cfg.get("im_slots") or [None] * IM_SLOTS
+        tp  = self.cfg.get("im_taps") or [IM_TAPS] * IM_SLOTS
+        col = "#1a5276"
+
+        tk.Label(parent, text="인사이드 우편함!! — 슬롯마다 '횟수'만큼 연속 클릭",
+                 font=("맑은 고딕", 9, "bold"), fg=col).pack(pady=(6, 0))
+        tk.Label(parent, text=f"횟수를 비우면 {IM_TAPS}회 · 한 슬롯의 연속 클릭은 "
+                              f"{IM_BURST_MIN:.0f}~{IM_BURST_MAX:.0f}초 안에 랜덤 간격으로",
+                 font=("맑은 고딕", 8), fg="#888").pack(pady=(0, 3))
+
+        top = tk.Frame(parent); top.pack(pady=2)
+        self._im_toggle_btn = tk.Button(top, text="OFF", font=("맑은 고딕", 9, "bold"),
+                                        bg="#7f8c8d", fg="white", width=6,
+                                        command=self._toggle_im)
+        self._im_toggle_btn.pack(side="left", padx=(0, 3))
+        tk.Button(top, text="▶ 실행", font=("맑은 고딕", 9, "bold"),
+                  bg="#27ae60", fg="white", width=6,
+                  command=self._start_im).pack(side="left", padx=3)
+        tk.Button(top, text="⌨ 단축키", font=("맑은 고딕", 8), bg="#2c3e50", fg="white",
+                  command=self._assign_im_hotkey).pack(side="left", padx=3)
+        self._im_hotkey_var = tk.StringVar(value=self._im_hotkey_label())
+        tk.Label(parent, textvariable=self._im_hotkey_var,
+                 font=("맑은 고딕", 8), fg=col).pack()
+
+        # 슬롯 간 간격 + 횟수 일괄
+        r1 = tk.Frame(parent); r1.pack(pady=2)
+        tk.Label(r1, text="슬롯간 간격(초)", font=("맑은 고딕", 8)).pack(side="left")
+        self._im_min_var = tk.StringVar(value=str(self.cfg.get("im_min", IM_MIN)))
+        self._im_max_var = tk.StringVar(value=str(self.cfg.get("im_max", IM_MAX)))
+        tk.Entry(r1, textvariable=self._im_min_var, width=4).pack(side="left", padx=2)
+        tk.Label(r1, text="~").pack(side="left")
+        tk.Entry(r1, textvariable=self._im_max_var, width=4).pack(side="left", padx=2)
+        tk.Button(r1, text="저장", font=("맑은 고딕", 7),
+                  command=self._save_im_interval).pack(side="left", padx=3)
+
+        r2 = tk.Frame(parent); r2.pack(pady=(0, 2))
+        tk.Label(r2, text="횟수 일괄", font=("맑은 고딕", 8, "bold"), fg=col).pack(side="left")
+        self._im_bulk_var = tk.StringVar(value="10")
+        tk.Entry(r2, textvariable=self._im_bulk_var, width=4,
+                 justify="center").pack(side="left", padx=2)
+        tk.Label(r2, text="회", font=("맑은 고딕", 8)).pack(side="left")
+        tk.Button(r2, text="전체 슬롯에 넣기", font=("맑은 고딕", 8, "bold"),
+                  bg=col, fg="white", command=self._im_set_all_taps).pack(side="left", padx=4)
+
+        tk.Frame(parent, height=1, bg="#ccc").pack(fill="x", padx=8, pady=3)
+        hd = tk.Frame(parent); hd.pack(fill="x", padx=5)
+        for t, w in (("#", 3), ("좌표", 12), ("횟수", 5)):
+            tk.Label(hd, text=t, font=("맑은 고딕", 7, "bold"), fg="#888",
+                     width=w, anchor="w").pack(side="left")
+
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        sb = tk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        inner = tk.Frame(canvas)
+        fid = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(fid, width=e.width))
+        def _wheel(e): canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        canvas.bind("<MouseWheel>", _wheel); inner.bind("<MouseWheel>", _wheel)
+
+        self._im_slot_vars = []
+        self._im_tap_vars  = []
+        for i in range(IM_SLOTS):
+            row = tk.Frame(inner, bd=1, relief="groove"); row.pack(fill="x", padx=3, pady=1)
+            tk.Label(row, text=f"#{i+1:02d}", font=("맑은 고딕", 8, "bold"),
+                     width=3, fg=col).pack(side="left", padx=2)
+            sv = tk.StringVar()
+            c = im[i] if i < len(im) else None
+            sv.set(f"({c[0]},{c[1]})" if c else "미등록")
+            self._im_slot_vars.append(sv)
+            tk.Label(row, textvariable=sv, font=("맑은 고딕", 8),
+                     width=12, anchor="w").pack(side="left")
+            # 횟수 — 직접 적는다 (비우면 기본값)
+            tv = tk.StringVar(value=str(tp[i] if i < len(tp) and tp[i] else IM_TAPS))
+            self._im_tap_vars.append(tv)
+            tk.Entry(row, textvariable=tv, font=("맑은 고딕", 8), width=4,
+                     justify="center", relief="solid", bd=1).pack(side="left", padx=2)
+            tk.Label(row, text="회", font=("맑은 고딕", 7), fg="#888").pack(side="left")
+            tv.trace_add("write", lambda *a, x=i: self._im_save_tap(x))
+            tk.Button(row, text="등록", font=("맑은 고딕", 7), bg=col, fg="white",
+                      command=lambda x=i: self._reg_im_coord(x)).pack(side="right", padx=2)
+            tk.Button(row, text="×", font=("맑은 고딕", 7), fg="red", width=2,
+                      command=lambda x=i: self._del_im_coord(x)).pack(side="right")
+            row.bind("<MouseWheel>", _wheel)
+        self._refresh_im_toggle()
+
+    def _im_save_tap(self, i):
+        """그 슬롯의 연속 클릭 횟수를 저장한다 (숫자가 아니면 무시)."""
+        try:
+            v = str(self._im_tap_vars[i].get()).strip()
+            n = max(1, int(v)) if v else IM_TAPS
+        except Exception:
+            return                       # 지우는 중일 수 있으니 조용히 넘어간다
+        tp = list(self.cfg.get("im_taps") or [IM_TAPS] * IM_SLOTS)
+        while len(tp) < IM_SLOTS: tp.append(IM_TAPS)
+        if tp[i] != n:
+            tp[i] = n
+            self.cfg["im_taps"] = tp
+            save_cfg(self.cfg)
+
+    def _im_set_all_taps(self):
+        """'횟수 일괄' — 16슬롯 전부에 같은 횟수를 넣는다."""
+        try:
+            n = max(1, int(str(self._im_bulk_var.get()).strip()))
+        except Exception:
+            self.status.set("⚠ 횟수는 숫자로 넣어주세요 (예: 10)"); return
+        self.cfg["im_taps"] = [n] * IM_SLOTS
+        save_cfg(self.cfg)
+        for tv in getattr(self, "_im_tap_vars", []):
+            try: tv.set(str(n))
+            except Exception: pass
+        self.status.set(f"✔ 인사이드 우편함 — 16슬롯 전부 {n}회로 넣었습니다")
+
+    def _save_im_interval(self):
+        try:
+            mn = float(self._im_min_var.get()); mx = float(self._im_max_var.get())
+            if mx < mn: mn, mx = mx, mn
+            self.cfg["im_min"], self.cfg["im_max"] = mn, mx
+            save_cfg(self.cfg)
+            self.status.set(f"✔ 인사이드 우편함 슬롯간 간격 {mn}~{mx}초")
+        except Exception:
+            self.status.set("⚠ 간격은 숫자로 넣어주세요")
+
+    def _refresh_im_toggle(self):
+        if hasattr(self, "_im_toggle_btn") and self._im_toggle_btn.winfo_exists():
+            on = getattr(self, "_im_on", False)
+            self._im_toggle_btn.config(text="ON" if on else "OFF",
+                                       bg="#27ae60" if on else "#7f8c8d")
+
+    def _toggle_im(self):
+        self._im_on = not getattr(self, "_im_on", False)
+        self.cfg["im_on"] = self._im_on
+        save_cfg(self.cfg)
+        self._refresh_im_toggle()
+        self.status.set(f"인사이드 우편함 {'ON' if self._im_on else 'OFF'}"
+                        + (f" — {self._vk_name(self.cfg.get('im_hotkey'))} 누르면 실행"
+                           if self._im_on else ""))
+
+    def _assign_im_hotkey(self):
+        """단축키 지정 — 일반던전충전과 같은 방식 (5초 안에 누른 키를 잡는다)."""
+        self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
+        def _cap():
+            import ctypes
+            time.sleep(0.3)
+            end = time.time() + 5
+            captured = None
+            while time.time() < end:
+                for vk in range(0x08, 0xFF):
+                    if vk in (0x01, 0x02, 0x04):     # 마우스 버튼 제외
+                        continue
+                    if ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000:
+                        captured = vk
+                        break
+                if captured is not None:
+                    break
+                time.sleep(0.02)
+            if captured is None:
+                self.after(0, lambda: self.status.set("단축키 지정 취소 (시간초과)"))
+                return
+            if captured == 0x1B:                      # ESC
+                self.after(0, lambda: self.status.set("단축키 지정 취소"))
+                return
+            self.cfg["im_hotkey"] = captured
+            save_cfg(self.cfg)
+            name = self._vk_name(captured)
+            def _upd():
+                if hasattr(self, "_im_hotkey_var"):
+                    self._im_hotkey_var.set(f"단축키: {name}")
+                self.status.set(f"✔ 인사이드 우편함 단축키: {name}")
+            self.after(0, _upd)
+        threading.Thread(target=_cap, daemon=True).start()
+
+    def _reg_im_coord(self, idx):
+        self._im_reg_idx = idx
+        self.status.set(f"3초 후 인사이드 우편함 #{idx+1} 위치를 클릭하세요!")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                  CoordOverlay(self, mode="im")])
+
+    def on_im_coord(self, x, y):
+        i = getattr(self, "_im_reg_idx", 0)
+        im = list(self.cfg.get("im_slots") or [None] * IM_SLOTS)
+        while len(im) < IM_SLOTS: im.append(None)
+        im[i] = [x, y]
+        self.cfg["im_slots"] = im
+        save_cfg(self.cfg)
+        try:
+            self._im_slot_vars[i].set(f"({x},{y})")
+        except Exception:
+            pass
+        self.status.set(f"✔ 인사이드 우편함 #{i+1} 등록: ({x},{y})")
+        self.deiconify()
+
+    def _del_im_coord(self, idx):
+        im = list(self.cfg.get("im_slots") or [None] * IM_SLOTS)
+        while len(im) < IM_SLOTS: im.append(None)
+        im[idx] = None
+        self.cfg["im_slots"] = im
+        save_cfg(self.cfg)
+        try:
+            self._im_slot_vars[idx].set("미등록")
+        except Exception:
+            pass
+        self.status.set(f"인사이드 우편함 #{idx+1} 좌표 삭제")
+
+    def _start_im(self):
+        threading.Thread(target=self._run_im, daemon=True).start()
+
+    def _run_im(self):
+        """슬롯마다 '적어둔 횟수'만큼 연속 클릭. 클릭만 하고 그림·끌기는 없다.
+        간격은 전부 랜덤 — 사람처럼 (상시 규칙)."""
+        self._start_pause()
+        if getattr(self, "_im_running", False):
+            return
+        im = self.cfg.get("im_slots") or []
+        tp = self.cfg.get("im_taps") or []
+        jobs = [(c, int(tp[i]) if i < len(tp) and tp[i] else IM_TAPS)
+                for i, c in enumerate(im) if c]
+        if not jobs:
+            self.after(0, lambda: self.status.set("인사이드 우편함: 등록된 좌표가 없습니다"))
+            return
+        if not self._try_busy_or_queue("인사이드 우편함", self._start_im):
+            return
+        self._im_running = True
+        try:
+            self.after(0, self._seq_hide)      # 런처가 클릭 자리를 가리지 않게
+            time.sleep(0.15)
+            mn = float(self.cfg.get("im_min", IM_MIN))
+            mx = float(self.cfg.get("im_max", IM_MAX))
+            if mx < mn: mn, mx = mx, mn
+            n = len(jobs)
+            for i, ((x, y), taps) in enumerate(jobs):
+                # 연속 클릭을 한 구간(초) 안에 **랜덤 간격**으로 흩어 넣는다
+                window = random.uniform(IM_BURST_MIN, IM_BURST_MAX) * max(1.0, taps / 8.0)
+                gaps = max(0, taps - 1)
+                if gaps:
+                    ws = [random.random() for _ in range(gaps)]
+                    ssum = sum(ws) or 1.0
+                    intervals = [window * w / ssum for w in ws]
+                else:
+                    intervals = []
+                self.after(0, lambda a=i, t=taps, w=window: self.status.set(
+                    f"📬 인사이드 우편함 {a+1}/{n} — {t}회 연속 ({w:.1f}초 내)..."))
+                for k in range(taps):
+                    if getattr(self, "_im_stop", False):
+                        break
+                    click_at(x, y)
+                    if k < taps - 1:
+                        time.sleep(intervals[k])
+                if i < n - 1:
+                    time.sleep(random.uniform(mn, mx)
+                               + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                    if random.random() < 0.10:      # 사람처럼 가끔 멈칫
+                        time.sleep(random.uniform(0.5, 1.4))
+            self.after(0, lambda: self.status.set(
+                f"✔ 인사이드 우편함 완료 ({n}개 슬롯 · 클릭 {sum(t for _c, t in jobs)}회)"))
+        except Exception as e:
+            self.after(0, lambda err=e: self.status.set(f"인사이드 우편함 오류: {err}"))
+        finally:
+            self._im_running = False
+            try:
+                self._restore_back()
+            except Exception:
+                pass
+
     # ── 일반던전충전 (연속클릭 복제 — 각 좌표를 7~9회 랜덤 연속 클릭) ──
     def _open_dc_win(self):
         self._open_section_win("_dc_win", "🎯 일반던전충전", self._build_dc, w=300, h=680)
@@ -18348,6 +18647,8 @@ class CoordOverlay(tk.Toplevel):
             label = f"TJ성공!! #{app._reg_tj_slot_idx+1} [좌표{app._reg_tj_click_idx+1}] 위치"
         elif mode == "dc":
             label = f"일반던전충전 #{app._dc_reg_idx+1} 위치"
+        elif mode == "im":
+            label = f"📬 인사이드 우편함!! #{getattr(app, '_im_reg_idx', 0)+1} 위치"
         elif mode == "dollpreset":
             label = f"인형탐험 프리셋 — 클릭 {getattr(app, '_doll_pick', {}).get('jx', 0)+1} 번 위치"
         elif mode == "doll":
@@ -18388,6 +18689,7 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "seq":       self.app.on_seq_coord(x, y)
         elif self.mode == "slp":       self.app.on_slp_coord(x, y)
         elif self.mode == "dc":        self.app.on_dc_coord(x, y)
+        elif self.mode == "im":        self.app.on_im_coord(x, y)
         elif self.mode == "doll":      self.app.on_doll_coord(x, y)
         elif self.mode == "dollpreset": self.app.on_dollpreset_coord(x, y)
         elif self.mode == "wdoff":     self.app.on_wdoff_coord(x, y)
