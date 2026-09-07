@@ -1113,6 +1113,54 @@ def main():
                         log("   다야 OCR 영역 동기화: daya_regions.json — 메인과 동일하게 반영 ✔")
             except Exception as e:
                 log(f"   ⚠ 다야 영역 동기화 실패: {e}")
+            # 📝 클라 위 메모 자리를 **마지막으로 옮겨둔 배치**로 되돌린다
+            # (2026-09-07 사용자 지시: "업데이트 버튼 누르면 내가 마지막에
+            #  움직였던 걸로 위치를 이동시켜달라").
+            # 백업은 그 컴퓨터의 `%LOCALAPPDATA%\MoonAI\memo_positions_backup.json`
+            # 이고 GitHub 와 무관하다 — 메인·로컬 각자 자기 배치로 돌아간다.
+            try:
+                _mb = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI",
+                                   "memo_positions_backup.json")
+                _cj = os.path.join(DESK, "coords.json")
+                if os.path.exists(_mb) and os.path.exists(_cj):
+                    with open(_mb, encoding="utf-8") as _f:
+                        _bak = json.load(_f) or {}
+
+                    def _ok(_p):
+                        try:
+                            if not _p:
+                                return False
+                            for _q in _p:
+                                if not _q or len(_q) < 2:
+                                    return False
+                                if int(_q[0]) <= 1 and int(_q[1]) <= 1:
+                                    return False    # (0,0)·(1,1) = 뭉개진 자리
+                            return True
+                        except Exception:
+                            return False
+
+                    _cand = [_bak.get("float_memo_positions")] + \
+                            [h.get("float_memo_positions")
+                             for h in (_bak.get("history") or [])]
+                    _use = next((p for p in _cand if _ok(p)), None)
+                    if _use:
+                        # 쓰기 직전에 다시 읽어 **메모 자리만** 고쳐 쓴다
+                        # (다른 좌표를 통째로 덮으면 남의 수정이 사라진다)
+                        with open(_cj, encoding="utf-8") as _f:
+                            _cfg = json.load(_f)
+                        if _cfg.get("float_memo_positions") != _use:
+                            _cfg["float_memo_positions"] = _use
+                            with open(_cj, "w", encoding="utf-8") as _f:
+                                json.dump(_cfg, _f, ensure_ascii=False, indent=2)
+                            log(f"   📝 메모 자리 복구: 마지막으로 옮겨둔 배치로 되돌림 "
+                                f"({_bak.get('saved')}) ✔")
+                        else:
+                            log("   📝 메모 자리 — 이미 마지막 배치와 같음")
+                    else:
+                        log("   📝 메모 자리 — 되돌릴 백업이 없습니다 "
+                            "(메모를 한 번 옮기면 그때 저장됩니다)")
+            except Exception as e:
+                log(f"   ⚠ 메모 자리 복구 실패: {e}")
             # 배포 제외 목록 — 여기 걸리는 파일은 로컬에 **복사하지 않는다.**
             # 로컬에서 이미 잘 돌고 있는 설정을 메인 것으로 덮어쓰지 않으려고 쓴다
             # (2026-08-29 사용자 지시: 용던고고는 로컬에서 잘 되니 배포에서 빼라).

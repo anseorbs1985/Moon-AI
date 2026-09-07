@@ -1985,6 +1985,7 @@ class App(tk.Tk):
         # 떠있는 클라 메모 4개 — 완전 분리 실행. 실패해도 런처엔 영향 없음.
         try:
             self._memo_wins = {}
+            self._memo_selfheal()          # 자리가 깨져 있으면 백업에서 되살린다
             self.after(3000, self._memo_tick)
         except Exception:
             pass
@@ -9615,6 +9616,90 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    # ── 메모 배치 백업·복구 (이 컴퓨터에만 저장 · 2026-09-07 사용자 요청) ──
+    @staticmethod
+    def _memo_bak_path():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        try:
+            os.makedirs(d, exist_ok=True)
+        except Exception:
+            pass
+        return os.path.join(d, "memo_positions_backup.json")
+
+    @staticmethod
+    def _memo_pos_ok(poss):
+        """자리가 멀쩡한가 — (0,0)·(1,1) 로 뭉개진 것이 하나라도 있으면 깨진 것."""
+        try:
+            if not poss:
+                return False
+            for p in poss:
+                if not p or len(p) < 2:
+                    return False
+                if int(p[0]) <= 1 and int(p[1]) <= 1:
+                    return False
+            return True
+        except Exception:
+            return False
+
+    def _memo_backup(self):
+        """사용자가 메모를 옮긴 그 순간의 배치를 남긴다 (최근 10세대 보관).
+        업데이트·재시작으로 자리가 틀어져도 여기서 되돌린다."""
+        try:
+            poss = list(self.cfg.get("float_memo_positions") or [])
+            if not self._memo_pos_ok(poss):
+                return                       # 깨진 값은 백업하지 않는다 (복구본 오염 방지)
+            p = self._memo_bak_path()
+            old = {}
+            try:
+                with open(p, encoding="utf-8") as f:
+                    old = json.load(f) or {}
+            except Exception:
+                pass
+            hist = list(old.get("history") or [])
+            if old.get("float_memo_positions") and \
+               old.get("float_memo_positions") != poss:
+                hist.insert(0, {"saved": old.get("saved"),
+                                "float_memo_positions": old.get("float_memo_positions")})
+            data = {"saved": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "float_memo_positions": poss,
+                    "float_memo_texts": list(self.cfg.get("float_memo_texts") or []),
+                    "float_memo_ons": list(self.cfg.get("float_memo_ons") or []),
+                    "history": hist[:10]}
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _memo_selfheal(self, force=False):
+        """런처가 켜질 때 — 메모 자리가 깨져 있으면 백업에서 조용히 되살린다.
+        `force=True` 면 멀쩡해도 백업본으로 되돌린다 (사용자가 복구를 요청했을 때)."""
+        try:
+            cur = list(self.cfg.get("float_memo_positions") or [])
+            if not force and self._memo_pos_ok(cur):
+                return False                 # 멀쩡하면 아무것도 안 한다
+            with open(self._memo_bak_path(), encoding="utf-8") as f:
+                bak = json.load(f) or {}
+            cand = [bak.get("float_memo_positions")] + \
+                   [h.get("float_memo_positions") for h in (bak.get("history") or [])]
+            for poss in cand:
+                if self._memo_pos_ok(poss):
+                    self.cfg["float_memo_positions"] = poss
+                    for k in ("float_memo_texts", "float_memo_ons"):
+                        if bak.get(k):
+                            self.cfg.setdefault(k, bak[k])
+                    save_cfg(self.cfg)
+                    try:
+                        click_log(f"[메모] 자리가 깨져 있어 백업에서 되살림 "
+                                  f"({bak.get('saved')}) → {poss}")
+                    except Exception:
+                        pass
+                    self.status.set(f"📝 메모 위치를 저장해둔 배치로 되살렸습니다 "
+                                    f"({bak.get('saved')})")
+                    return True
+        except Exception:
+            pass
+        return False
+
     def _memo_save_positions(self):
         """메모 위치 저장 — **사용자가 Ctrl+드래그로 옮겼을 때만** 불린다.
 
@@ -9639,6 +9724,7 @@ class App(tk.Tk):
             if changed:                               # 바뀐 게 있을 때만 파일을 쓴다
                 self.cfg["float_memo_positions"] = poss
                 save_cfg(self.cfg)
+                self._memo_backup()   # 옮긴 그 배치를 백업 (업데이트로 틀어져도 복구됨)
         except Exception:
             pass
 
