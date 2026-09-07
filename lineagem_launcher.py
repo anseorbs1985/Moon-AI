@@ -7368,16 +7368,13 @@ class App(tk.Tk):
                         ix, iy, sc = _cx, _cy, max(sc, _cs)
                 if ix is not None:
                     break
-                # 다음 자리의 그림(= 눌러서 뜨는 창)이 이미 보이면
-                # 이 자리는 이미 처리된 것 — 재시도하지 않고 넘어간다 (2026-08-27 사용자 지시)
-                if (not _own_coord) and has_img(fkey, j + 1):
-                    _nx, _ny, _ns = find_image(fkey, j + 1, coord)
-                    if _nx is not None:
-                        click_log(f"{fkey} [{nm}] 좌표{j+1} — 다음 창이 이미 떠 있음 "
-                                  f"(좌표{j+2} 그림 {_ns:.2f}) → 재시도 없이 넘어감")
-                        self.status.set(f"🖼 [{nm}] 좌표{j+1} 창이 이미 떴음 — 넘어감")
-                        _done.add((fkey, _slot_id))
-                        return "이미열림"
+                # 🚫 '다음 창이 이미 떠 있으면 넘어간다'(2026-08-27) 는 **제거했다**
+                #    (2026-09-07 사용자 지시 재확인: "이미지를 발견하지 못하면 확실히
+                #     다음 버튼을 누르지 마라 — 층 이동을 안 했는데 눌러서 곤란하다").
+                #    이 길은 '그림을 못 찾았는데도 슬롯을 계속 진행시키는' 유일한 통로였다.
+                #    다음 자리 그림이 오탐 한 번만 나도 이동하지 않은 채 오토가 눌린다.
+                #    실측(09-06 실행): 이 길로 넘어간 적은 0번 — 없애도 손해가 없다.
+                #    클로드는 이것을 다시 넣지 말 것.
                 if _t < _tries - 1:
                     self.status.set(f"🖼 [{nm}] 좌표{j+1} "
                                     f"{'창이 뜨기를' if _own_coord else '그림을'} "
@@ -7770,10 +7767,18 @@ class App(tk.Tk):
                    and not getattr(self, stop, False)):
                 time.sleep(random.uniform(0.35, 0.8))   # 올려둔 채 잠깐 뒤 바로
                 _a2 = self._do_click_or_wheel(fkey, j + 1, coords[j + 1], st["slot"])
-                self.status.set(f"{icon} [{name}] {_a2}{j+2}/{nclk}  (앞 좌표와 묶음)")
                 done += 1
+                if _a2 == "이미지없음":
+                    # 묶음 안에서도 그림을 못 봤으면 **거기서 끝** — 뒤 좌표를 누르지 않는다.
+                    # (2026-09-07: 여기에만 이 확인이 빠져 있었다. 지금은 ATOMIC_NEXT 가
+                    #  비어 있어 안 도는 길이지만, 나중에 묶음을 쓰면 그대로 사고가 난다.)
+                    st["j"] = nclk
+                    break
+                self.status.set(f"{icon} [{name}] {_a2}{j+2}/{nclk}  (앞 좌표와 묶음)")
                 j += 1
                 st["j"] = j + 1
+            if st["j"] >= nclk:
+                continue                    # 묶음에서 중단됨 — 이 슬롯 끝
             _g = self._slot_gap(st["slot"], j)          # 칸에 적어둔 초가 있으면 그걸로
             _base = _g if _g is not None else random.uniform(*gap)
             # '더 쉬어야 하는 자리'(좌표2→3)는 화면이 뜨기를 기다리는 시간이라
