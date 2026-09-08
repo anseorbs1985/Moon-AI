@@ -850,8 +850,101 @@ def ensure_shortcut_icon():
         pass
 
 
+# ── 🔐 좌표 잠금 — '허락한 것만' 받는다 (2026-09-09 사용자 지시) ──────────
+# 사용자: "내가 올리라는 것만 올리면 되는데, 로컬이 여기 좌표를 받아들이는 경우가 있다.
+#          여기에 명령한 것 딱 그것만 받아들여야 한다."
+#
+# 업데이트 안에서 coords.json 을 건드리는 길이 여러 개다 (항목 동기화·프리셋 동기화·
+# 되돌리기 지시서·유실 복구…). 하나씩 막으면 새 코드가 생길 때마다 또 샌다.
+# 그래서 **길목을 하나로** 잡는다:
+#   ① 업데이트 시작 전에 로컬 coords.json 을 통째로 찍어둔다
+#   ② 끝날 때 다시 읽어, **허락 목록에 없는 키는 전부 찍어둔 값으로 되돌린다**
+# 허락 목록 = share_coords.json 의 keys (메인이 "이것만 받아라"라고 적은 것)
+#            + 로컬 자기 데이터라 되돌리면 안 되는 것 (메모 자리)
+_GUARD_ALWAYS_OK = ("float_memo_positions",)   # 로컬 자기 백업에서 되살린 것
+
+
+def _coords_guard_path():
+    d = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        pass
+    return os.path.join(d, "_update_coords_guard.json")
+
+
+def coords_guard_snapshot(log):
+    """업데이트 시작 전 로컬 좌표를 찍어둔다 (로컬 컴퓨터에서만)."""
+    try:
+        p = os.path.join(DESK, "coords.json")
+        # 파일이 없거나 망가졌으면 잠그지 않는다 — 유실 복구가 동작해야 하므로
+        if not os.path.exists(p) or os.path.getsize(p) <= 2000:
+            log("   🔐 좌표 잠금: 로컬 좌표가 없거나 작아 잠그지 않음 (복구 우선)")
+            return
+        with open(p, encoding="utf-8") as f:
+            cur = json.load(f)
+        allow = []
+        try:
+            m = os.path.join(REPO, "share_coords.json")
+            if os.path.exists(m):
+                with open(m, encoding="utf-8") as f:
+                    allow = [str(k) for k in ((json.load(f) or {}).get("keys") or [])]
+        except Exception:
+            allow = []
+        with open(_coords_guard_path(), "w", encoding="utf-8") as f:
+            json.dump({"snap": cur, "allow": allow}, f, ensure_ascii=False)
+        log(f"   🔐 좌표 잠금: 이번에 받을 항목만 허용 — "
+            + (", ".join(allow) if allow else "없음(좌표는 하나도 안 받음)"))
+    except Exception as e:
+        log(f"   ⚠ 좌표 잠금 준비 실패: {e}")
+
+
+def coords_guard_restore(log):
+    """끝날 때 — 허락 목록에 없는 키는 전부 원래대로 되돌린다."""
+    p = _coords_guard_path()
+    try:
+        if not os.path.exists(p):
+            return
+        with open(p, encoding="utf-8") as f:
+            g = json.load(f) or {}
+        snap = g.get("snap") or {}
+        allow = set(g.get("allow") or []) | set(_GUARD_ALWAYS_OK)
+        if not snap:
+            return
+        dst = os.path.join(DESK, "coords.json")
+        with open(dst, encoding="utf-8") as f:
+            now = json.load(f)
+        changed = []
+        for k in set(snap) | set(now):
+            if k in allow:
+                continue
+            if snap.get(k) != now.get(k):
+                changed.append(k)
+                if k in snap:
+                    now[k] = snap[k]        # 원래 값으로 되돌린다
+                else:
+                    now.pop(k, None)        # 원래 없던 키는 없앤다
+        if changed:
+            with open(dst, "w", encoding="utf-8") as f:
+                json.dump(now, f, ensure_ascii=False, indent=2)
+            log(f"   🔐 좌표 잠금: 허락하지 않은 {len(changed)}개를 되돌림 — "
+                + ", ".join(sorted(changed)[:8])
+                + (" …" if len(changed) > 8 else ""))
+        else:
+            log("   🔐 좌표 잠금: 허락한 것 외에는 바뀐 게 없음 ✔")
+    except Exception as e:
+        log(f"   ⚠ 좌표 잠금 복원 실패: {e}")
+    finally:
+        try:
+            os.remove(p)
+        except Exception:
+            pass
+
+
 def finish(msg=""):
     """모든 종료 경로 공통: 런처 재시작 확인 → 창 띄워서 보여줌 → '5초 후 꺼짐' 알림 → 종료."""
+    # 🔐 런처를 되살리기 **전에** 되돌린다 — 런처가 시작하면서 좌표를 읽기 때문
+    coords_guard_restore(log)
     ensure_keepalive()               # 상시감시 예약 작업 보장 (없으면 등록)
     ensure_autostart_0450()          # 새벽 4:50 자동 시작 보장 (없으면 등록)
     ensure_shortcut_icon()           # 바로가기 아이콘 통일 (moon.ico)
@@ -894,6 +987,11 @@ def main():
                 is_main = bool(json.load(fp).get("is_main"))
         except Exception:
             pass
+        # 🔐 로컬 컴퓨터는 여기서 좌표를 통째로 찍어둔다 —
+        #    업데이트가 끝날 때(finish) '허락한 항목' 외에는 전부 되돌린다.
+        #    (메인은 좌표 원본이라 잠그지 않는다)
+        if not is_main:
+            coords_guard_snapshot(log)
         log("1) GitHub에서 최신 버전 받는 중...")
         old = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
         if not is_main:
