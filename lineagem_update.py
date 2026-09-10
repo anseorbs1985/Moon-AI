@@ -941,6 +941,106 @@ def coords_guard_restore(log):
             pass
 
 
+def _coords_guard_resnap(new_cfg):
+    """좌표를 정당하게 되돌린 뒤엔 잠금의 '원본 사진'도 그 값으로 바꿔야 한다.
+    안 그러면 finish() 의 잠금이 방금 되돌린 것을 다시 원위치시킨다."""
+    p = _coords_guard_path()
+    try:
+        if not os.path.exists(p):
+            return
+        with open(p, encoding="utf-8") as f:
+            g = json.load(f) or {}
+        g["snap"] = new_cfg
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(g, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+# 이 표시를 바꾸면 **각 컴퓨터에서 딱 한 번** 좌표 되돌리기가 다시 실행된다.
+# (사용자가 "업데이트 받을 때 좌표 전부 되돌려줘" 라고 할 때마다 날짜를 새로 적는다)
+COORDS_ROLLBACK_ID = "20260910_restore_local_coords"
+
+
+def restore_local_coords_once(log):
+    """🔁 이 컴퓨터가 **자기 백업**으로 좌표를 통째로 되돌린다 — 한 번만.
+
+    2026-09-10 사용자 지시: "업데이트 받을 때 다시 좌표 전부 되돌려줘."
+    (save_cfg 가 파일을 통째로 덮어써서 낡은 런처가 좌표를 되돌려놓던 사고 뒤처리)
+
+    가져오는 곳은 **그 컴퓨터 자기 것뿐이다** — 메인 좌표는 절대 쓰지 않는다:
+      1순위 usersave/coords.json ([💾 좌표저장] 로 직접 저장해둔 것)
+      2순위 usersave/history/*coords.json
+      3순위 backups/*coords.json
+    좌표 개수가 가장 많은 정상본을 고른다."""
+    ldir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
+    done_p = os.path.join(ldir, "restore_done.json")
+    try:
+        done = json.load(open(done_p, encoding="utf-8")) if os.path.exists(done_p) else {}
+    except Exception:
+        done = {}
+    if done.get(COORDS_ROLLBACK_ID):
+        return                                   # 이 컴퓨터에서 이미 했다
+    dst = os.path.join(DESK, "coords.json")
+    cands = []
+    try:
+        us = os.path.join(ldir, "usersave", "coords.json")
+        if os.path.exists(us):
+            cands.append(("💾 좌표저장", us))
+        hd = os.path.join(ldir, "usersave", "history")
+        if os.path.isdir(hd):
+            for fn in sorted(os.listdir(hd), reverse=True):
+                if fn.endswith("coords.json") and "island" not in fn and "local" not in fn:
+                    cands.append(("저장 이력", os.path.join(hd, fn)))
+        bd = os.path.join(ldir, "backups")
+        if os.path.isdir(bd):
+            for fn in sorted(os.listdir(bd), reverse=True):
+                if fn.endswith("coords.json") and "island" not in fn:
+                    cands.append(("자동 백업", os.path.join(bd, fn)))
+    except Exception as e:
+        log(f"   ⚠ 좌표 되돌리기: 백업을 찾지 못했습니다 ({e})")
+        return
+    # 순서대로 보고 **처음 만나는 정상본**을 쓴다 (CLAUDE.md 규칙):
+    #   usersave([💾 좌표저장] — 사용자가 직접 저장한 것) → 저장 이력 → 자동 백업
+    # '개수가 제일 많은 것'을 고르면 오래되고 엉뚱한 백업이 뽑힐 수 있다.
+    best = None                                   # (좌표개수, 이름, 경로, 내용)
+    for tag, p in cands[:40]:
+        try:
+            if os.path.getsize(p) <= 2000:
+                continue
+            with open(p, encoding="utf-8") as f:
+                d = json.load(f)
+            c = _count_coords(p)
+            if c <= 0:
+                continue                          # 비었거나 깨진 것은 건너뛴다
+            best = (c, tag, p, d)
+            break
+        except Exception:
+            continue
+    if not best:
+        log("   🔁 좌표 되돌리기: 쓸 만한 백업이 없어 건너뜁니다 (좌표는 그대로)")
+        return
+    cnt, tag, path, data = best
+    try:
+        now_cnt = _count_coords(dst) if os.path.exists(dst) else 0
+        # 되돌리기 직전 현재 상태도 남긴다
+        if os.path.exists(dst):
+            st = time.strftime("%Y%m%d_%H%M%S")
+            shutil.copy2(dst, os.path.join(ldir, "backups",
+                                           f"{st}_before_rollback_coords.json"))
+        with open(dst, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        _coords_guard_resnap(data)               # 잠금이 이걸 되돌리지 않게
+        done[COORDS_ROLLBACK_ID] = time.strftime("%Y-%m-%d %H:%M:%S")
+        os.makedirs(ldir, exist_ok=True)
+        with open(done_p, "w", encoding="utf-8") as f:
+            json.dump(done, f, ensure_ascii=False, indent=2)
+        log(f"   🔁 좌표 되돌리기 ✔ {tag} 에서 복원 — 좌표 {now_cnt}개 → {cnt}개 "
+            f"({os.path.basename(path)}) · 직전 상태는 backups 에 보관")
+    except Exception as e:
+        log(f"   ⚠ 좌표 되돌리기 실패: {e}")
+
+
 def finish(msg=""):
     """모든 종료 경로 공통: 런처 재시작 확인 → 창 띄워서 보여줌 → '5초 후 꺼짐' 알림 → 종료."""
     # 🔐 런처를 되살리기 **전에** 되돌린다 — 런처가 시작하면서 좌표를 읽기 때문
@@ -1150,6 +1250,9 @@ def main():
                 else:
                     log(f"   ⚠ {f} 복사 검증 실패 — 업데이트를 한 번 더 실행해주세요")
             if not is_main:
+                # 🔁 먼저 이 컴퓨터 자기 백업으로 좌표를 되돌린다 (한 번만).
+                #    그 위에 아래 동기화(허락한 항목)가 얹힌다.
+                restore_local_coords_once(log)
                 sync_times(log)          # 좌표는 그대로, 시간만 메인과 맞춤
                 sync_coord_keys(log)     # 지정한 항목(낚시녹임 등)만 좌표도 받음
                 sync_island_keys(log)    # 지정한 던전은 통째로 받음

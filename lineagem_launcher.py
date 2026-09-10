@@ -453,6 +453,10 @@ def load_cfg():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, encoding="utf-8") as f:
             data = json.load(f)
+        # 방금 읽은 '디스크 내용'을 기억해둔다 — save_cfg 가 이걸 기준으로
+        # **내가 바꾼 키만** 저장한다 (남의 수정을 덮지 않게, 2026-09-10)
+        global _CFG_DISK
+        _CFG_DISK = json.loads(json.dumps(data, ensure_ascii=False))
         cfg = dict(DEFAULT_CFG)
         cfg.update(data)
         # char_btns
@@ -807,6 +811,11 @@ def load_cfg():
         return _apply_local(cfg)
     return _apply_local(dict(DEFAULT_CFG))
 
+# 이 프로세스가 **마지막으로 디스크에서 본** coords.json 내용.
+# save_cfg 가 '내가 바꾼 키'를 가려내는 기준이다 (통째로 덮어쓰기 방지, 2026-09-10).
+_CFG_DISK = {}
+
+
 def save_cfg(cfg):
     # 머신별 키는 로컬 파일에만 저장하고, 공유되는 coords.json에서는 제외
     local = load_local()
@@ -829,8 +838,37 @@ def save_cfg(cfg):
             {**h, "enabled": prev[i].get("enabled", True)
                    if i < len(prev) and isinstance(prev[i], dict) else True}
             for i, h in enumerate(slots)]
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(shared, f, ensure_ascii=False, indent=2)
+    # ── 🚨 통째로 덮어쓰지 않는다 — '내가 바꾼 키만' 얹는다 (2026-09-10 사고 수정) ──
+    # 사용자 신고: "로컬에서 재시작만 하면 좌표가 전부 돌아가버린다."
+    # 원인: 여기서 메모리의 cfg 로 파일 전체를 갈아엎었다. 런처가 잠깐이라도 두 개
+    # 떠 있으면(재시작 순간·워치독 중복 기동) **오래된 쪽이 저장하는 순간**
+    # 그 프로세스가 켜질 때 읽은 옛 좌표로 파일이 통째로 되돌아간다.
+    # CLAUDE.md 규칙("쓰기 직전에 다시 읽어 필요한 키만 고쳐 쓴다")을 이 함수만 어기고 있었다.
+    #
+    # 이제: 디스크를 다시 읽고, **이 프로세스가 실제로 바꾼 키만** 그 위에 얹는다.
+    # 그래서 낡은 프로세스가 저장해도 자기가 만진 것 외에는 남의 수정을 못 지운다.
+    global _CFG_DISK
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            disk = json.load(f)
+    except Exception:
+        disk = {}
+    if _CFG_DISK:
+        out = dict(disk)
+        for k, v in shared.items():
+            if v != _CFG_DISK.get(k):        # 내가 바꾼 것만
+                out[k] = v
+        for k in _CFG_DISK:                  # 내가 지운 것만
+            if k not in shared:
+                out.pop(k, None)
+    else:
+        out = {**disk, **shared}             # 첫 저장 — 디스크 위에 얹는다
+    # 쓰다가 죽어도 파일이 깨지지 않게 임시파일 → 교체
+    _tmp = CONFIG_FILE + ".tmp"
+    with open(_tmp, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=2)
+    os.replace(_tmp, CONFIG_FILE)
+    _CFG_DISK = json.loads(json.dumps(out, ensure_ascii=False))
 
 def find_purple():
     for w in gw.getAllWindows():
