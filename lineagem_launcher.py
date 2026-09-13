@@ -5724,8 +5724,13 @@ class App(tk.Tk):
                      width=3, fg=color, anchor="e").pack(side="left")
             sv = tk.StringVar(value=cur[i])
             self._memo_vars[fkey].append(sv)
-            tk.Entry(row, textvariable=sv, font=("맑은 고딕", 9),
-                     relief="solid", bd=1).pack(side="left", fill="x", expand=True, padx=(3, 0))
+            ent = tk.Entry(row, textvariable=sv, font=("맑은 고딕", 9),
+                           relief="solid", bd=1)
+            ent.pack(side="left", fill="x", expand=True, padx=(3, 0))
+            # 칸에서 Ctrl+V 로 여러 줄을 붙여넣으면 그 칸부터 아래로 나눠 넣는다
+            _pf = lambda e=None, f=fkey, k=i: self._memo_entry_paste(f, k)
+            for _seq in ("<<Paste>>", "<Control-v>", "<Control-V>"):
+                ent.bind(_seq, _pf)
             sv.trace_add("write", lambda *a, f=fkey: self._memo_save_lines(f))
         return box
 
@@ -5738,23 +5743,67 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    @staticmethod
+    def _memo_split_lines(raw):
+        """클립보드 글을 '줄 목록'으로 나눈다.
+
+        엑셀에서 칸을 복사하면 줄은 `\\r\\n`, 칸은 탭(`\\t`)으로 온다.
+        탭이 있으면 **앞쪽의 순수 숫자 칸(1,2,3… 번호열)은 버리고** 그 다음
+        내용이 있는 칸을 쓴다 — `1<TAB>ABCD1234` 처럼 번호를 같이 복사해도 맞게 들어간다.
+        (2026-09-13 사용자 신고: "엑셀에서 16줄을 복사하면 1번 줄에 다 붙는다")"""
+        out = []
+        for ln in str(raw).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+            if "\t" in ln:
+                cells = [c.strip() for c in ln.split("\t")]
+                cells = [c for c in cells if c != ""]
+                while len(cells) > 1 and cells[0].isdigit():
+                    cells.pop(0)                 # 앞의 번호열 버리기
+                ln = cells[0] if cells else ""
+            ln = ln.strip()
+            if ln:
+                out.append(ln)
+            elif out:
+                out.append("")                   # 중간 빈 줄은 자리를 지킨다
+        while out and out[-1] == "":
+            out.pop()                            # 끝의 빈 줄만 잘라낸다
+        return out
+
+    def _memo_fill_from(self, fkey, start, lines, how=""):
+        """`start` 번째 줄부터 아래로 순서대로 채운다."""
+        vs = (getattr(self, "_memo_vars", {}) or {}).get(fkey) or []
+        if not vs or not lines:
+            self.status.set("📋 붙여넣을 글이 없습니다"); return
+        put = 0
+        for k, txt in enumerate(lines):
+            i = start + k
+            if i >= len(vs):
+                break
+            vs[i].set(txt); put += 1
+        self._memo_save_lines(fkey)
+        over = len(lines) - put
+        self.status.set(f"📋 {put}줄을 {start+1}번부터 채웠습니다{how}"
+                        + (f" — {over}줄은 칸이 모자라 못 넣었습니다" if over > 0 else ""))
+
     def _memo_paste_lines(self, fkey):
-        """클립보드의 여러 줄을 1번부터 순서대로 채운다."""
+        """[📋 붙여넣기] — 클립보드의 여러 줄을 **1번부터** 순서대로."""
         try:
             raw = self.clipboard_get()
         except Exception:
             self.status.set("📋 클립보드가 비어 있습니다"); return
-        lines = [ln.strip() for ln in str(raw).replace("\r\n", "\n").split("\n")]
-        lines = [ln for ln in lines if ln != ""]        # 빈 줄은 빼고 순서대로
-        if not lines:
-            self.status.set("📋 붙여넣을 글이 없습니다"); return
-        vs = (getattr(self, "_memo_vars", {}) or {}).get(fkey) or []
-        for i, v in enumerate(vs):
-            v.set(lines[i] if i < len(lines) else "")
-        self._memo_save_lines(fkey)
-        self.status.set(f"📋 {min(len(lines), len(vs))}줄을 1번부터 채웠습니다"
-                        + (f" (클립보드 {len(lines)}줄 중 앞 {len(vs)}줄만)"
-                           if len(lines) > len(vs) else ""))
+        self._memo_fill_from(fkey, 0, self._memo_split_lines(raw))
+
+    def _memo_entry_paste(self, fkey, idx):
+        """칸에서 **Ctrl+V** 로 붙여넣을 때 — 여러 줄이면 그 칸부터 아래로 나눠 넣는다.
+        한 줄이면 평소대로 그 칸에만 붙는다 (기본 동작 유지)."""
+        try:
+            raw = self.clipboard_get()
+        except Exception:
+            return                                # 클립보드가 비면 기본 동작에 맡긴다
+        lines = self._memo_split_lines(raw)
+        if len(lines) <= 1:
+            return                                # 한 줄 → tkinter 기본 붙여넣기
+        self._memo_fill_from(fkey, idx, lines, how=" (Ctrl+V)")
+        return "break"                            # 기본 붙여넣기는 막는다
 
     def _memo_clear_lines(self, fkey):
         vs = (getattr(self, "_memo_vars", {}) or {}).get(fkey) or []
