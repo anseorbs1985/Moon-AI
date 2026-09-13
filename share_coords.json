@@ -1,7 +1,8 @@
 {
-  "_설명": "업데이트 때 coords.json 중 '이 항목만' 받는다. 2026-09-09: 사용자 지시로 **pre_click1·pre_click2 두 개만** 넣었다 — 퍼플 확대 직후 리니지M 전에 먼저 누를 자리. 이 둘은 [x,y] 값 하나씩이라 슬롯 ON/OFF 같은 게 딸려가지 않는다. 다른 좌표는 로컬 것을 그대로 지킨다.",
+  "_설명": "업데이트 때 coords.json 중 '이 항목만' 받는다. 2026-09-13: 사용자 지시로 **🎟 인사이드 쿠폰등록!! 하나만** 남겼다 — 좌표(incoupon_slots, 16슬롯×19칸)와 16줄 메모(incoupon_texts), 공통 글(incoupon_text). 여기 없는 좌표는 로컬 것을 그대로 지킨다(업데이트 끝에 전부 되돌림). 이전의 pre_click1·pre_click2 는 '이거 하나만 받게 해달라'는 지시로 뺐다 — 다시 보내려면 keys 에 도로 넣으면 된다.",
   "keys": [
-    "pre_click1",
-    "pre_click2"
+    "incoupon_slots",
+    "incoupon_texts",
+    "incoupon_text"
   ]
 }
