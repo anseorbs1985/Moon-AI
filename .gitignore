@@ -10,6 +10,7 @@ ocr_debug.png
 
 # 공유 설정 파일들은 올린다 (share_*.json 은 배포 지시서)
 !share_coords.json
+!share_coords_data.json
 !share_island.json
 !share_times.json
 !share_recs.json

@@ -567,13 +567,30 @@ def sync_coord_keys(log):
             keys = (json.load(f) or {}).get("keys") or []
         if not keys:
             return
+        # ── 보낼 값은 **share_coords_data.json** 에서 읽는다 (2026-09-14) ──────
+        # 예전엔 저장소의 coords.json 에서 읽었는데, 그러려면 메인이 coords.json 을
+        # push 해야 했다. 그런데 로컬은 그 파일에 skip-worktree 가 걸려 있어서
+        # **그 파일이 바뀐 커밋이 오면 `git reset --hard` 자체가 거부**당했다
+        # (error: Entry 'coords.json' not uptodate) → 업데이트가 통째로 막혔다.
+        # 이제 좌표는 전용 파일로만 보낸다 — 저장소의 coords.json 은 다시 건드리지 않는다.
+        dat_p = os.path.join(REPO, "share_coords_data.json")
         src_p = os.path.join(REPO, "coords.json")
         dst_p = os.path.join(DESK, "coords.json")
-        if not (os.path.exists(src_p) and os.path.exists(dst_p)):
-            log("   항목 좌표 동기화: coords.json 이 없어 건너뜁니다")
+        if not os.path.exists(dst_p):
+            log("   항목 좌표 동기화: 이 컴퓨터 coords.json 이 없어 건너뜁니다")
             return
-        with open(src_p, encoding="utf-8") as f:
-            src = json.load(f)
+        src = {}
+        if os.path.exists(dat_p):
+            with open(dat_p, encoding="utf-8") as f:
+                src = {k: v for k, v in (json.load(f) or {}).items()
+                       if not k.startswith("_")}
+        if os.path.exists(src_p):                 # 예전 방식 — 전용 파일에 없는 키만
+            with open(src_p, encoding="utf-8") as f:
+                for k, v in (json.load(f) or {}).items():
+                    src.setdefault(k, v)
+        if not src:
+            log("   항목 좌표 동기화: 보낼 좌표가 없어 건너뜁니다")
+            return
         with open(dst_p, encoding="utf-8") as f:
             dst = json.load(f)
         lock_k, _ = load_coord_lock()
@@ -645,7 +662,137 @@ def sh(args, cwd=None):
                           creationflags=0x08000000)  # CREATE_NO_WINDOW
 
 
-CLAUDE_AUMID = "Claude_pzs8sxrjxfjjc!Claude"   # 클로드 데스크톱 앱 실행 ID
+REPO_URL = "https://github.com/anseorbs1985/Moon-AI.git"
+
+
+# ── 🔧 업데이트는 스스로 끝낸다 — 클로드에게 넘기지 않는다 (2026-09-14 사용자 지시) ──
+# 사용자: "업데이트 버튼 마련한 게 무의미하잖아. 무조건 업데이트가 될 수 있게 해줘야지."
+# 그래서 git 이 막히면 아래 단계로 **스스로** 뚫는다. 사람 손은 필요 없다.
+
+def _skip_worktree(on):
+    """로컬 저장소의 좌표 파일을 git 이 건드리지 않게 걸거나(on) 잠깐 풀어준다(off).
+
+    ⚠ 이것이 2026-09-13 로컬 업데이트가 통째로 막힌 원인이었다 —
+    skip-worktree 가 걸린 파일이 **새 커밋에서 바뀌면** `git reset --hard` 가
+    `error: Entry 'coords.json' not uptodate. Cannot merge.` 로 거부한다.
+    그래서 reset 직전에 풀고, reset 뒤에 다시 건다.
+    저장소 안의 coords.json 은 **로컬 좌표가 아니다**(로컬 좌표는 바탕화면 파일).
+    업데이트는 좌표를 통째로 복사하지 않으므로(아래 MERGE_FILES 분기) 안전하다."""
+    flag = "--skip-worktree" if on else "--no-skip-worktree"
+    ok = True
+    for f in ("coords.json", "island_coords.json"):
+        if not os.path.exists(os.path.join(REPO, f)):
+            continue
+        if sh(["git", "update-index", flag, f], REPO).returncode != 0:
+            ok = False
+    return ok
+
+
+def _git_unlock():
+    """멈춘 git 이 남긴 잠금 파일을 치운다 (업데이트가 여기서 막히는 흔한 원인)."""
+    for p in ("index.lock", "HEAD.lock", "ORIG_HEAD.lock",
+              os.path.join("refs", "heads", "main.lock")):
+        try:
+            f = os.path.join(REPO, ".git", p)
+            if os.path.exists(f):
+                os.remove(f)
+        except Exception:
+            pass
+
+
+def _repo_ok(p):
+    """저장소가 쓸 만한지 — .git 과 런처 코드가 둘 다 있어야 한다."""
+    return (_is_repo(p) and os.path.exists(os.path.join(p, "lineagem_launcher.py")))
+
+
+def clone_repo(dest, log, tries=3):
+    """저장소를 새로 받는다 — 실패해도 몇 번 더 해본다."""
+    for i in range(1, tries + 1):
+        if os.path.isdir(dest):
+            try:
+                shutil.rmtree(dest, ignore_errors=True)
+            except Exception:
+                pass
+        r = sh(["git", "clone", REPO_URL, dest])
+        if r.returncode == 0 and _repo_ok(dest):
+            return True
+        log(f"   clone {i}/{tries} 실패 — 다시 시도합니다")
+        time.sleep(2)
+    return False
+
+
+def reclone_in_place(log):
+    """어떤 수를 써도 저장소가 안 될 때 — 옆에 새로 받아 **통째로 바꿔 끼운다**.
+
+    좌표는 바탕화면 파일이 원본이라 저장소를 갈아끼워도 로컬 좌표는 그대로다."""
+    global REPO
+    tmp = REPO.rstrip("\\/") + "_new"
+    log("   저장소를 새로 받아 바꿔 끼웁니다 (좌표는 바탕화면 것이라 영향 없음)...")
+    if not clone_repo(tmp, log):
+        log("   ⚠ 새로 받기 실패 — 인터넷 연결을 확인해주세요")
+        return False
+    old = REPO.rstrip("\\/") + "_old_" + time.strftime("%Y%m%d_%H%M%S")
+    try:
+        os.rename(REPO, old)
+        os.rename(tmp, REPO)
+    except Exception as e:
+        log(f"   ⚠ 폴더 교체 실패: {e}")
+        return False
+    log(f"   ✔ 저장소 교체 완료 (이전 것은 {os.path.basename(old)} 에 남겨둠)")
+    return True
+
+
+def sync_repo(log, is_main):
+    """저장소를 최신으로 맞춘다. **끝까지 스스로 해결한다** (클로드에게 넘기지 않음).
+
+    로컬: 원격과 100% 일치 / 메인: ff-only pull → stash → 강제 동기화.
+    단계마다 막히면 잠금 해제 → 다시 시도 → 마지막엔 저장소를 새로 받아 바꿔 낀다."""
+    _git_unlock()
+    if is_main:
+        r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
+        log("   " + (r.stdout.strip().splitlines()[-1] if r.stdout.strip()
+                     else r.stderr.strip().splitlines()[-1] if r.stderr.strip() else ""))
+        if r.returncode == 0:
+            return True
+        log("⚠ git pull 실패 — 로컬 변경을 백업(stash)하고 재시도...")
+        sh(["git", "stash", "push", "--include-untracked", "-m", "업데이트 자동백업"], REPO)
+        if sh(["git", "pull", "--ff-only", "origin", "main"], REPO).returncode == 0:
+            log("   ✔ 로컬 변경은 stash로 백업했고 최신 버전을 받았습니다")
+            return True
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        log(f"⚠ 재시도도 실패 — 원격 기준 강제 동기화 (이전 상태는 backup_{stamp} 브랜치 보관)")
+        sh(["git", "branch", f"backup_{stamp}"], REPO)
+
+    # ── 로컬(그리고 메인의 마지막 수단): 원격과 100% 일치시킨다 ──────────────
+    for i in range(1, 4):
+        sh(["git", "fetch", "origin", "main"], REPO)
+        if not is_main:
+            # 좌표 보호를 **잠깐 풀고** reset 한다 — 안 풀면 좌표가 바뀐 커밋에서 reset 이 거부된다
+            _skip_worktree(False)
+        r = sh(["git", "reset", "--hard", "origin/main"], REPO)
+        if not is_main:
+            _skip_worktree(True)      # 다시 걸어둔다 (로컬 좌표 보호는 그대로)
+        if r.returncode == 0:
+            if not is_main:
+                log("   ✔ 저장소를 원격(메인)과 100% 일치시켰습니다 "
+                    "(좌표 보호는 다시 걸어둠)")
+            else:
+                log("   ✔ 강제 동기화 완료")
+            return True
+        err = (r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "git 동기화 실패")
+        log(f"   동기화 {i}/3 실패: {err}")
+        _git_unlock()
+        sh(["git", "checkout", "--", "."], REPO)      # 건드려진 파일 되돌리기
+        sh(["git", "clean", "-fd"], REPO)             # 방해되는 새 파일 치우기
+        time.sleep(1.5)
+
+    # ── 마지막 수단: 저장소를 새로 받아 바꿔 낀다 ────────────────────────────
+    if reclone_in_place(log):
+        if not is_main:
+            _skip_worktree(True)
+        return True
+    log("⚠ 저장소 동기화에 실패했지만, 지금 있는 파일로 배포와 재시작은 계속합니다")
+    return False
 
 
 def backup_coords():
@@ -690,68 +837,18 @@ def _launcher_running():
     return bool(found)
 
 
-def _find_claude_hwnd():
-    import ctypes
-    u = ctypes.windll.user32
-    found = []
-    def cb(h, _):
-        if u.IsWindowVisible(h):
-            buf = ctypes.create_unicode_buffer(256)
-            u.GetWindowTextW(h, buf, 256)
-            if buf.value.strip().lower() == "claude":
-                found.append(h)
-        return True
-    WN = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
-    u.EnumWindows(WN(cb), 0)
-    return found[0] if found else None
+def log_trouble(reason):
+    """막혔던 것을 **기록만** 한다 — 클로드를 부르지 않는다 (2026-09-14 사용자 지시).
 
-
-def ask_claude(reason):
-    """업데이트 실패 시 클로드 앱을 열고 'git pull'을 입력+엔터 — 클로드가 바로 실행하게 한다.
-    (CLAUDE.md 지침: 'git pull' = 로컬우선 병합·배포·런처 재시작까지 전체 업데이트 절차)
-    성공적으로 넘겼으면 True."""
-    import ctypes
-    u = ctypes.windll.user32
-    log(f"   실패 원인: {reason}")
+    예전엔 여기서 클로드 앱을 열고 'git pull' 을 자동으로 쳐 넣었다.
+    사용자: "업데이트 버튼 하나로 다 되게 만들어놨는데 왜 자꾸 클로드를 부르냐."
+    그래서 **부르는 코드를 통째로 없앴다. 클로드는 이 함수를 되살리지 말 것.**"""
+    log(f"   막혔던 것: {reason}")
     try:
-        st = sh(["git", "status", "--short"], REPO).stdout.strip().splitlines()[:10]
-        for s in st:
+        for s in sh(["git", "status", "--short"], REPO).stdout.strip().splitlines()[:6]:
             log("   " + s)
     except Exception:
         pass
-    prompt = "git pull"
-    # 1) 지시문을 클립보드에
-    root.clipboard_clear(); root.clipboard_append(prompt); root.update()
-    # 2) 클로드 앱 찾기(없으면 실행)
-    h = _find_claude_hwnd()
-    if not h:
-        log("   클로드 앱 실행 중...")
-        subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{CLAUDE_AUMID}"])
-        for _ in range(20):
-            time.sleep(1)
-            h = _find_claude_hwnd()
-            if h:
-                break
-    if not h:
-        log("⚠ 클로드 앱을 열지 못했습니다 — 직접 클로드에 '업데이트 실패 해결해줘'라고 말해주세요")
-        return False
-    # 3) 앞으로 올리고 지시문 붙여넣기 + 전송
-    u.ShowWindow(h, 9)   # SW_RESTORE
-    try:
-        u.SetForegroundWindow(h)
-    except Exception:
-        pass
-    time.sleep(2.0)      # 입력창 포커스 잡힐 시간
-    KEYUP = 0x0002
-    u.keybd_event(0x11, 0, 0, 0)        # Ctrl down
-    u.keybd_event(0x56, 0, 0, 0)        # V down
-    u.keybd_event(0x56, 0, KEYUP, 0)    # V up
-    u.keybd_event(0x11, 0, KEYUP, 0)    # Ctrl up
-    time.sleep(0.6)
-    u.keybd_event(0x0D, 0, 0, 0)        # Enter
-    u.keybd_event(0x0D, 0, KEYUP, 0)
-    log("✔ 클로드에게 해결을 요청했습니다 — 클로드 창에서 진행 상황을 확인하세요")
-    return True
 
 
 def ensure_launcher():
@@ -1066,14 +1163,13 @@ def main():
             # 자동복구: 저장소가 없으면 바로 새로 받는다
             dest = os.path.join(HERE, "Moon-AI")
             log("⚠ Moon-AI 저장소가 없습니다 — git clone으로 새로 받는 중...")
-            r = sh(["git", "clone", "https://github.com/anseorbs1985/Moon-AI.git", dest])
-            if r.returncode == 0 and _is_repo(dest):
+            if clone_repo(dest, log):
                 REPO = dest
                 log(f"   ✔ clone 완료: {dest}")
             else:
-                err = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "clone 실패"
-                ask_claude(f"저장소 없음 + clone 실패: {err}")
-                finish()
+                log_trouble("저장소 없음 + clone 실패 (인터넷/깃 확인)")
+                log("⚠ 저장소를 받지 못했습니다 — 런처만 다시 띄웁니다")
+                finish("⚠ 저장소를 못 받았습니다 (런처는 살려둠)")
                 return
         log(f"저장소: {REPO}")
         _bn = backup_coords()
@@ -1094,53 +1190,11 @@ def main():
             coords_guard_snapshot(log)
         log("1) GitHub에서 최신 버전 받는 중...")
         old = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
-        if not is_main:
-            # 로컬 컴퓨터: 저장소 상태가 어떻든 원격과 100% 일치시킨다 (충돌·병합 개념 없음)
-            sh(["git", "fetch", "origin", "main"], REPO)
-            # ── 좌표 파일만은 reset 이 건드리지 못하게 막는다 (2026-08-29 사용자 지시) ──
-            # `git reset --hard` 가 coords.json·island_coords.json 을 원격 것으로 되돌려,
-            # 로컬에서 맞춘 좌표가 업데이트/재시작마다 날아갔다.
-            # skip-worktree 를 걸면 git 이 그 파일을 '작업트리에서 건드리지 않음' 으로 보고
-            # reset 대상에서 빼므로 **로컬 좌표가 그대로 유지**된다. 코드는 정상적으로 받는다.
-            # (메인 컴퓨터에는 절대 걸지 않는다 — 메인은 좌표 원본이라 push 를 해야 한다)
-            # 이미 걸려 있어도 다시 실행해 무해하므로 매 업데이트마다 실행한다.
-            _sw = sh(["git", "update-index", "--skip-worktree",
-                      "coords.json", "island_coords.json"], REPO)
-            log("   좌표 보호: coords.json·island_coords.json 은 원격으로 되돌리지 않음"
-                + ("" if _sw.returncode == 0 else " (⚠ 설정 실패 — 백업으로 복구 가능)"))
-            r = sh(["git", "reset", "--hard", "origin/main"], REPO)
-            if r.returncode != 0:
-                err = (r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "git 동기화 실패")
-                log("⚠ 원격 동기화 실패 — 클로드에게 넘깁니다")
-                ask_claude(err)
-                finish()
-                return
-            log("   ✔ 저장소를 원격(메인)과 100% 일치시켰습니다")
-        else:
-            r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
-            log("   " + (r.stdout.strip().splitlines()[-1] if r.stdout.strip() else r.stderr.strip()))
-            if r.returncode != 0:
-                # 1차 자동복구: 로컬 변경을 stash로 백업하고 재시도 (대부분 여기서 해결)
-                log("⚠ git pull 실패 — 로컬 변경을 백업(stash)하고 재시도...")
-                sh(["git", "stash", "push", "--include-untracked", "-m", "업데이트 자동백업"], REPO)
-                r = sh(["git", "pull", "--ff-only", "origin", "main"], REPO)
-                if r.returncode != 0:
-                    # 2차 자동복구: 원격 기준으로 강제 동기화 (기존 상태는 백업 브랜치에 보관)
-                    stamp = time.strftime("%Y%m%d_%H%M%S")
-                    log("⚠ 재시도도 실패 — 원격 기준 강제 동기화 (이전 상태는 backup_" + stamp + " 브랜치 보관)")
-                    sh(["git", "branch", f"backup_{stamp}"], REPO)
-                    sh(["git", "fetch", "origin", "main"], REPO)
-                    r = sh(["git", "reset", "--hard", "origin/main"], REPO)
-                    if r.returncode != 0:
-                        # 3차: 클로드에 'git pull' 입력해 즉시 실행시킴
-                        err = (r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "git 동기화 실패")
-                        log("⚠ 강제 동기화도 실패 — 클로드에게 넘깁니다")
-                        ask_claude(err)
-                        finish()
-                        return
-                    log("   ✔ 강제 동기화 완료")
-                else:
-                    log("   ✔ 로컬 변경은 stash로 백업했고 최신 버전을 받았습니다")
+        # 저장소 맞추기는 sync_repo 가 **끝까지 스스로** 한다 (잠금 해제 → 재시도 →
+        # 마지막엔 새로 받아 바꿔 끼움). 실패해도 멈추지 않고 배포·재시작까지 간다.
+        git_ok = sync_repo(log, is_main)
+        if not git_ok:
+            log_trouble("저장소 동기화 실패 — 지금 있는 파일로 계속 진행")
         new = sh(["git", "rev-parse", "HEAD"], REPO).stdout.strip()
         changed = []
         if old != new:
@@ -1541,19 +1595,23 @@ def main():
 
         log("5) 런처 재시작...")
         ok = ensure_launcher()
-        if ok and copy_err is None:
+        if ok and copy_err is None and git_ok:
             finish("✔ 업데이트 완료!")
-        elif ok:                                  # 런처는 살렸지만 복사 실패 → 클로드에 마무리 요청
-            log("⚠ 파일 복사가 실패했습니다 — 클로드에게 마무리를 요청합니다")
-            ask_claude(f"업데이트 중 파일 복사 실패: {copy_err}")
-            finish()
+        elif ok and copy_err is None:
+            finish("✔ 배포·재시작 완료 (저장소만 못 맞춤 — 다시 눌러보세요)")
+        elif ok:
+            log_trouble(f"파일 복사 실패: {copy_err}")
+            log("⚠ 일부 파일을 복사하지 못했습니다 — 🔄 를 한 번 더 눌러주세요")
+            finish("⚠ 일부 파일 복사 실패 (런처는 정상 — 🔄 한 번 더)")
         else:
-            log("⚠ 런처가 재시작되지 않았습니다 — 클로드에게 확인을 요청합니다")
-            ask_claude("업데이트 후 메인런처가 재시작되지 않음 (워치독 실행과 직접 실행 모두 창이 안 뜸 — "
-                       "런처가 시작 직후 죽는 오류일 수 있으니 python으로 직접 실행해 에러를 확인해줘)")
-            finish()
+            log_trouble("메인런처가 재시작되지 않음")
+            finish("⚠ 런처 재시작 실패 — 워치독을 다시 실행해주세요")
     except Exception as e:
         log(f"오류: {e}")
+        try:
+            ensure_launcher()
+        except Exception:
+            pass
         finish("⚠ 오류가 있었지만 메인런처는 다시 띄웁니다")
 
 

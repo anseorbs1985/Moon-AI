@@ -1790,3 +1790,42 @@ A 가 바꾼 값(탭)만 반영된다.
   안 그러면 `finish()` 의 잠금이 방금 되돌린 것을 도로 원위치시킨다.
 - 로그: `🔁 좌표 되돌리기 ✔ 💾 좌표저장 에서 복원 — 좌표 2219개 → 2217개`
 - **다시 한 번 돌리고 싶으면** `COORDS_ROLLBACK_ID` 의 날짜를 새로 적어 push 한다.
+
+## 🔄 업데이트 버튼은 스스로 끝낸다 — 클로드를 부르지 않는다 (2026-09-14 사용자 지시 — 절대 규칙)
+
+사용자: **"내가 업데이트 버튼까지 만들고 두 번 할 것도 한 번 버튼으로 다 해결하게 했는데
+왜 자꾸 로컬에서 클로드한테 깃풀을 시키냐. 그러면 업데이트 버튼 마련한 게 무의미하잖아.
+업데이트 버튼에서 무조건 업데이트가 될 수 있게 해줘야지."**
+
+- **`ask_claude()` 는 삭제했다.** 업데이트가 클로드 앱을 열거나 'git pull' 을 쳐 넣는 코드는
+  `lineagem_update.py` 에 **하나도 없다. 클로드는 이것을 되살리지 말 것.**
+  막힌 내용은 `log_trouble()` 로 **업데이트 창에 기록만** 한다.
+- 저장소 맞추기는 `sync_repo()` 하나가 **끝까지 스스로** 한다:
+  1. `.git` 잠금 파일 치우기 → 2. `fetch` + `reset --hard` (최대 3회,
+  사이사이 `checkout -- .` · `clean -fd`) → 3. 그래도 안 되면
+  **저장소를 옆에 새로 clone 해서 통째로 바꿔 끼운다**(`reclone_in_place`).
+- **git 이 끝내 실패해도 멈추지 않는다** — 지금 있는 파일로 배포하고 런처를 반드시 재시작한다.
+  예전엔 여기서 `return` 해버려 런처가 꺼진 채 남았다.
+
+### 원인 — skip-worktree 가 걸린 파일이 바뀌면 reset 이 통째로 거부된다 (2026-09-13 사고)
+
+로컬은 좌표 파일에 `skip-worktree` 가 걸려 있다. 그런데 **메인이 `coords.json` 을 push 하면**
+로컬의 `git reset --hard origin/main` 이 이렇게 거부한다 (실측 재현):
+
+```
+error: Entry 'coords.json' not uptodate. Cannot merge.
+fatal: Could not reset index file to revision 'origin/main'.
+→ 코드가 하나도 안 넘어온다. 업데이트가 통째로 막힌다.
+```
+
+**대책 두 가지 — 둘 다 유지할 것**
+1. `sync_repo` 는 reset 직전에 `_skip_worktree(False)` 로 **잠깐 풀고**, reset 뒤에
+   `_skip_worktree(True)` 로 **다시 건다**. 저장소 안의 `coords.json` 은 로컬 좌표가 아니다
+   (로컬 좌표는 바탕화면 파일이고, 업데이트는 좌표를 통째로 복사하지 않는다).
+2. **좌표 배포는 `share_coords_data.json` 으로만 한다 — 저장소의 `coords.json` 은 다시
+   push 하지 않는다.** `sync_coord_keys` 가 이 전용 파일에서 값을 읽는다
+   (없는 키만 옛 방식대로 `coords.json` 에서 읽어 호환 유지).
+   - 보내는 법: 메인에서 `share_coords_data.json` 에 **보낼 항목만** 담고,
+     `share_coords.json` 의 `keys` 에 그 항목 이름을 적어 push.
+   - 적용 규칙은 그대로 — `share_coords.json` 에 없는 키는 로컬이 받지 않고,
+     🔒 좌표잠금이 우선이며, `coords_guard_restore` 가 허락 목록 밖은 되돌린다.
