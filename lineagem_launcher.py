@@ -155,7 +155,9 @@ ATOMIC_NEXT = {}        # (호버를 없애서 묶을 이유가 사라짐)
 # 그 창이 닫히거나 포커스가 바뀌어 클릭이 씹힌다 (2026-08-27 사용자 지시).
 WAVE_UNTIL = {"dragon": 3}     # 좌표1~3만 교차, 좌표4부터는 그 슬롯 완주
 # 슬롯을 섞지 않고 1번부터 순서대로 도는 런처들 (2026-08-28 사용자 지시)
-KEEP_ORDER_FKEYS = ("dragon", "sched", "fix")   # 섞지 않고 1번부터 순서대로
+# 인사이드 쿠폰등록도 순서대로 — 메모 1~16번과 슬롯 1~16번이 짝이라
+# 섞이면 "어디까지 넣었는지"를 알 수 없다 (2026-09-13 중복등록 사고)
+KEEP_ORDER_FKEYS = ("dragon", "sched", "fix", "incoupon")   # 섞지 않고 1번부터 순서대로
 EARLY_IN = 2      # 남은 좌표가 이만큼 이하면 '끝나간다'고 보고 다음 슬롯을 미리 넣는다
 # 전체를 이 시간 안에 끝낸다 (초). 남은 시간과 남은 클릭 수를 보고 간격을 스스로 줄인다.
 # 늘리지는 않는다 — 빨리 끝나면 그대로 끝난다. (2026-08-27 사용자 지시: 4분 10초)
@@ -5681,6 +5683,76 @@ class App(tk.Tk):
                                lambda p: self._build_dgn2("incoupon", p),
                                w=560, h=760, pinnable=True)
 
+    # ── 🎟 인사이드 쿠폰등록 — 이미 넣은 쿠폰 기록 ───────────────────────
+    # 쿠폰은 한 번 쓰면 끝이라, 멈췄다 다시 돌릴 때 같은 코드를 또 넣으면
+    # '이미 사용한 쿠폰'으로 튕긴다 (2026-09-13 사고). 넣은 코드를 적어두고
+    # 다음 실행 때 그 슬롯을 통째로 건너뛴다. 이 컴퓨터에만 남는 기록.
+    @staticmethod
+    def _incoupon_done_path():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", ""), "MoonAI")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "incoupon_done.json")
+
+    def _incoupon_done(self):
+        """이미 넣은 쿠폰 코드 집합."""
+        try:
+            with open(self._incoupon_done_path(), encoding="utf-8") as f:
+                d = json.load(f)
+            return {str(k) for k in (d.get("codes") or [])}
+        except Exception:
+            return set()
+
+    def _incoupon_mark(self, code, si=None):
+        """넣은 코드를 기록에 더한다 (언제·몇 번 슬롯인지도 같이)."""
+        code = str(code or "").strip()
+        if not code:
+            return False
+        try:
+            p = self._incoupon_done_path()
+            try:
+                with open(p, encoding="utf-8") as f:
+                    d = json.load(f)
+            except Exception:
+                d = {}
+            codes = list(d.get("codes") or [])
+            log = list(d.get("log") or [])
+            if code not in codes:
+                codes.append(code)
+                log.append({"code": code, "slot": (si + 1) if si is not None else 0,
+                            "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+            d["codes"], d["log"] = codes, log[-200:]
+            tmp = p + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, p)
+            return True
+        except Exception as e:
+            self._coupon_log(f"[incoupon] 기록 저장 실패: {e!r}")
+            return False
+
+    def _incoupon_clear_done(self):
+        """넣은 기록을 비운다 — 같은 코드를 일부러 다시 넣고 싶을 때만."""
+        try:
+            p = self._incoupon_done_path()
+            if os.path.exists(p):
+                os.remove(p)
+            self.status.set("🎟 넣은 쿠폰 기록을 비웠습니다 — 다음 실행 때 16개 전부 넣습니다")
+        except Exception as e:
+            self.status.set(f"🎟 기록 비우기 실패: {e}")
+        self._incoupon_refresh_done()
+
+    def _incoupon_refresh_done(self):
+        """창 위의 '넣음 N/16' 표시를 새로 고친다."""
+        try:
+            v = getattr(self, "_incoupon_done_var", None)
+            if v is None:
+                return
+            done = self._incoupon_done()
+            n = sum(1 for t in self._slot_texts("incoupon") if t.strip() and t.strip() in done)
+            v.set(f"넣음 {n}/{INCOUPON_SLOTS} — 다음 실행 때 {INCOUPON_SLOTS - n}개만 넣습니다")
+        except Exception:
+            pass
+
     # ── 슬롯마다 다른 '붙여넣을 글' (16줄 메모장) ────────────────────────
     def _slot_texts(self, fkey):
         """그 런처의 16줄 글 목록 (없으면 빈 줄로 채워 만든다)."""
@@ -5720,6 +5792,17 @@ class App(tk.Tk):
         tk.Label(top, text="비운 줄은 그 슬롯이 '공통 글'을 씁니다",
                  font=("맑은 고딕", 7), fg="#888").pack(side="left", padx=(6, 0))
 
+        if fkey == "incoupon":
+            # 이미 넣은 쿠폰은 다음 실행 때 건너뛴다 — 몇 개 넣었는지 보여준다
+            dn = tk.Frame(box); dn.pack(fill="x", padx=4, pady=(2, 0))
+            self._incoupon_done_var = tk.StringVar(value="")
+            tk.Label(dn, textvariable=self._incoupon_done_var,
+                     font=("맑은 고딕", 8, "bold"), fg="#117a8b").pack(side="left")
+            tk.Button(dn, text="✖ 넣은 기록 비우기", font=("맑은 고딕", 7),
+                      bg="#c0392b", fg="white",
+                      command=self._incoupon_clear_done).pack(side="right")
+            self._incoupon_refresh_done()
+
         body = tk.Frame(box); body.pack(fill="x", padx=4, pady=3)
         self._memo_vars = getattr(self, "_memo_vars", {})
         self._memo_vars[fkey] = []
@@ -5746,6 +5829,8 @@ class App(tk.Tk):
             vs = (getattr(self, "_memo_vars", {}) or {}).get(fkey) or []
             self.cfg[f"{fkey}_texts"] = [str(v.get()) for v in vs]
             save_cfg(self.cfg)
+            if fkey == "incoupon":
+                self._incoupon_refresh_done()   # 새 코드를 넣으면 '넣음 N' 도 줄어든다
         except Exception:
             pass
 
@@ -7147,7 +7232,9 @@ class App(tk.Tk):
         except Exception:
             return default
 
-    LOG_FKEYS = ("knight", "dragon", "jakwi")   # 클릭이 어느 창에 갔는지 기록해두는 런처
+    # 클릭이 어느 창에 갔는지 기록해두는 런처
+    # (인사이드 쿠폰등록은 "몇 번 슬롯이 됐나"를 나중에 봐야 해서 추가, 2026-09-13)
+    LOG_FKEYS = ("knight", "dragon", "jakwi", "incoupon")
     FOCUS_FIRST = ()                      # 슬롯이 바뀌면 그 클라를 먼저 앞으로 올릴 런처
     # 좌표 하나하나 누르기 직전에 '사람이 마우스를 놓았는지' 확인하는 런처
     # (사용자가 제일 중요하게 보는 것 — 겹치면 팅긴다)
@@ -8269,12 +8356,33 @@ class App(tk.Tk):
                             else (DRAGON_GAP_MIN, DRAGON_GAP_MAX))
                 self.status.set(f"{_tt} — {len(targets)}슬롯 / 클릭 {_left}회, "
                                 f"한 슬롯씩 차례로 (간격 {_mn:.1f}~{_mx:.1f}초)")
+            _n_skip = 0          # 이미 넣어서 건너뛴 슬롯 수 (인사이드 쿠폰등록)
+            if fkey == "incoupon":
+                _dn = self._incoupon_done()
+                _todo = [si + 1 for si, _ in targets
+                         if self._slot_text(fkey, si).strip() not in _dn]
+                click_log(f"incoupon 실행 — 넣을 슬롯 {_todo} / "
+                          f"이미 넣어서 건너뜀 {len(targets) - len(_todo)}개")
+                self.status.set(f"{icon} 슬롯 {_todo} 넣습니다"
+                                + (f" · 이미 넣은 {len(targets)-len(_todo)}개는 건너뜀"
+                                   if len(_todo) < len(targets) else ""))
             for tn, (si, slot) in enumerate(targets):
                 if getattr(self, stop, False): break
                 name = slot.get("name", f"#{si+1}")
                 coords = slot.get("coords", [])
                 while len(coords) < nclk:
                     coords.append(None)
+                # 🎟 인사이드 쿠폰등록 — **이미 넣은 쿠폰은 건너뛴다**.
+                # 멈췄다 다시 돌리면 같은 코드를 또 넣어 '이미 사용한 쿠폰'으로
+                # 튕기던 사고를 막는다 (2026-09-13). 코드 글자가 바뀌면 다시 넣는다.
+                if fkey == "incoupon":
+                    _code = self._slot_text(fkey, si).strip()
+                    if _code and _code in self._incoupon_done():
+                        _n_skip += 1
+                        click_log(f"incoupon 슬롯{si+1} 건너뜀 — 이미 넣은 쿠폰 ({_code})")
+                        self._coupon_log(f"[incoupon] 슬롯{si+1} 건너뜀 — 이미 넣음 {_code!r}")
+                        self.status.set(f"{icon} 슬롯{si+1} 건너뜀 — 이미 넣은 쿠폰")
+                        continue
                 if not self._wait_mouse_idle(stop, fkey=fkey): return
                 # 쿠폰: 슬롯마다 클릭 간격 배수를 새로 뽑음 (기본의 -5%~+20%)
                 c_mult = random.uniform(0.95, 1.20) if fkey in self.PASTE_FKEYS else 1.0
@@ -8316,8 +8424,11 @@ class App(tk.Tk):
                             self._coupon_log(f"[{name}] 붙여넣을 글이 비어 있어 건너뜀 (슬롯 {si+1})")
                             self.status.set(f"{icon} [{name}] 글이 비어 있어 붙여넣기 건너뜀")
                             continue
-                        self._paste_at(coords[j], _t, f"[{name}]")
-                        self.status.set(f"{icon} [{name}] 붙여넣기 완료 (클릭{j+1} 다음)")
+                        _ok = self._paste_at(coords[j], _t, f"슬롯{si+1} [{name}]")
+                        if _ok and fkey == "incoupon":
+                            # 넣은 코드를 적어둔다 → 다시 돌려도 같은 코드를 또 넣지 않는다
+                            self._incoupon_mark(_t.strip(), si)
+                        self.status.set(f"{icon} 슬롯{si+1} 붙여넣기 완료 (클릭{j+1} 다음)")
                     else:
                         _act = self._do_click_or_wheel(
                             fkey, j, coords[j] or _anchor, slot)
@@ -8372,6 +8483,11 @@ class App(tk.Tk):
                 _el = int(time.time() - (getattr(self, "_dragon_deadline", 0) - DRAGON_BUDGET))
                 self.status.set(f"✔ {title} 완료 — {_el//60}분 {_el%60}초 걸림 "
                                 f"(목표 {_bud//60}분 {_bud%60}초)")
+            elif fkey == "incoupon":
+                _dn = len(self._incoupon_done())
+                self.status.set(f"✔ {title} 완료! — 넣음 {_dn}/{INCOUPON_SLOTS}"
+                                + (f" · 이미 넣어서 건너뜀 {_n_skip}개" if _n_skip else ""))
+                self.after(0, self._incoupon_refresh_done)
             else:
                 self.status.set(f"✔ {title} 실행 완료!")
         except Exception as e:
