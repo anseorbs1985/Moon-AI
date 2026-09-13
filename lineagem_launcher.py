@@ -232,7 +232,13 @@ DC_BURST_MAX   = 2.0
 #    (2026-09-13 사용자 요청: "16개를 슬롯별로 하나씩 다르게 넣고 싶다")
 #    글은 `incoupon_texts` 에 16줄로 저장하고, 창 위 메모장에서 번호별로 적는다.
 INCOUPON_SLOTS  = 16
-INCOUPON_CLICKS = COUPON_CLICKS   # 쿠폰등록과 같은 좌표 수 (클릭5에서 붙여넣기)
+# 좌표 수 — 쿠폰등록(9) + 10개 (2026-09-13 사용자 요청: "뒤에 좌표를 10개 더")
+# 앞의 1~9는 그대로, 10~19가 뒤에 순서대로 붙는다.
+INCOUPON_CLICKS = COUPON_CLICKS + 10
+# 슬롯을 시작할 때 **먼저 한 번 눌러줄 키** (2026-09-13 사용자 요청: "제일 앞에 z 하나")
+# 좌표는 그대로 두고, 키만 먼저 누른 뒤 클릭1부터 순서대로 간다.
+PREKEY_FKEYS = {"incoupon": "z"}
+PREKEY_WAIT  = (0.45, 0.90)      # 키를 누른 뒤 쉬는 시간(초) — 사람처럼 랜덤
 
 # ── 📬 인사이드 우편함!! — **용던고고와 같은 틀**(16슬롯 × 좌표 여러 개).
 #    다만 클릭만 하고, 좌표마다 **연속 클릭 횟수**를 직접 적는다
@@ -6903,6 +6909,26 @@ class App(tk.Tk):
         inp.u.ki = KEYBDINPUT(0, scan, flags, 0, None)
         ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
 
+    def _press_prekey(self, fkey, anchor, name="", icon=""):
+        """슬롯을 시작하기 전에 **키를 한 번** 누른다 (인사이드 쿠폰등록의 'z').
+
+        좌표는 전혀 건드리지 않는다 — 그 클라 창을 앞으로 가져와 키만 누르고,
+        사람처럼 잠깐 쉰 뒤 클릭1부터 순서대로 간다. (2026-09-13 사용자 요청)"""
+        k = (PREKEY_FKEYS or {}).get(fkey)
+        if not k or not anchor:
+            return False
+        try:
+            self._focus_client_at(anchor)
+            time.sleep(random.uniform(0.20, 0.40))
+            press_key(k)
+            time.sleep(random.uniform(*PREKEY_WAIT))
+            click_log(f"{fkey} [{name}] 시작 전 '{k.upper()}' 한 번 누름")
+            self.status.set(f"{icon} [{name}] '{k.upper()}' 누르고 시작")
+            return True
+        except Exception as e:
+            click_log(f"{fkey} [{name}] 시작 전 키 누르기 실패: {e}")
+            return False
+
     def _focus_client_at(self, coord):
         """그 좌표에 있는 리니지M 창을 앞으로 가져온다.
         커서 없는 클릭(메시지 전달)은 창을 활성화하지 않아서, 그대로 Ctrl+V를 보내면
@@ -8017,6 +8043,10 @@ class App(tk.Tk):
             coords = st["slot"].get("coords", [])
             st["j"] = j + 1
             _anc = slot_anchor(st["slot"])
+            if j == 0 and not st.get("prekey"):
+                # 슬롯 맨 앞에서 키 한 번 (좌표는 그대로, 키만 먼저)
+                st["prekey"] = True
+                self._press_prekey(fkey, _anc, st["slot"].get("name", f"#{si+1}"), icon)
             _cd = coords[j] if (j < len(coords) and coords[j]) else None
             if _cd is None and has_img(fkey, j) and _anc:
                 _cd = _anc                        # 그림만 지정한 자리 — 창은 이 좌표로 찾는다
@@ -8267,6 +8297,8 @@ class App(tk.Tk):
                                             f"{SLEEP_WAKE_KEY.upper()} 눌러 깨우고 시작")
                     except Exception:
                         pass
+                # 슬롯 맨 앞에서 키 한 번 (인사이드 쿠폰등록의 'z')
+                self._press_prekey(fkey, _anchor, name, icon)
                 order = [j for j in range(nclk)
                          if coords[j] or (has_img(fkey, j) and _anchor)]
                 # 쿠폰: 클릭5(입력칸)가 등록돼 있으면 그 직후, 없으면 클릭4 직후에 붙여넣기
