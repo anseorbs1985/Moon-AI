@@ -2165,13 +2165,16 @@ class App(tk.Tk):
         threading.Thread(target=self._wdoff_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._item_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._popup_guard_loop, daemon=True).start()
-        threading.Thread(target=self._claude_attention_loop, daemon=True).start()
         # 런처가 켜질 때 클로드도 같이 켠다 — 클로드는 뒤, 런처는 앞
         # (2026-08-29 사용자 지시). 이미 떠 있으면 새로 켜지 않는다.
         self.after(2500, self._start_claude_behind)
+        # 클로드 창을 런처가 챙기는 동작(주목 감시 + 화면 가운데 유지)은
+        # local_config.json 의 manage_claude 로 끌 수 있다 (머신별, 기본 켬).
         # 작업 중에는 클로드를 강제로 내리지 않는다(예전 시작 버스트 제거).
         # 대신 클로드 앱을 화면 가운데로 유지 (아이디 영역 등 안 가리게, 사용자가 옮기면 중단)
-        self.after(2000, self._center_claude_tick)
+        if load_local().get("manage_claude", True):
+            threading.Thread(target=self._claude_attention_loop, daemon=True).start()
+            self.after(2000, self._center_claude_tick)
         self.after(3000, self._claude_minimize_tick)
         self.after(20000, self._idle_minimize_tick)         # 2분 무조작 시 메인런처 자동 최소화
         self.after(30000, self._claude_idle_minimize_tick)  # 3분 무입력 시 클로드 앱 최소화
