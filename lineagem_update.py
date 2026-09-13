@@ -593,21 +593,40 @@ def sync_coord_keys(log):
             return
         with open(dst_p, encoding="utf-8") as f:
             dst = json.load(f)
+        # 🚧 이미 이 컴퓨터에 찍어둔 좌표는 **덮어쓰지 않는다** (2026-09-14 사용자 지시)
+        #    "로컬에 있는 좌표들을 그대로 기억하고 새로 온 것들만 업데이트해야 하는데,
+        #     몇몇 로컬은 다시 입혀버려서 내가 저장한 거랑 달라진다."
+        #    → 그 항목에 **등록된 좌표가 하나라도 있으면 손대지 않는다.**
+        #      비어 있는 항목(=새로 만든 런처)만 메인 것을 받는다.
+        #    일부러 갈아끼우고 싶을 때만 share_coords.json 의 "force" 에 그 항목을 적는다.
+        try:
+            with open(man, encoding="utf-8") as f:
+                force = set((json.load(f) or {}).get("force") or [])
+        except Exception:
+            force = set()
         lock_k, _ = load_coord_lock()
-        got, locked = [], []
+        got, locked, kept = [], [], []
         for k in keys:
             if k in lock_k:                 # 🔒 잠근 항목은 건너뛴다
                 locked.append(k); continue
             v = src.get(k)
             if v is None:
                 continue
-            if dst.get(k) != v:
-                dst[k] = v
-                got.append(f"{k}({_count_in(v)}좌표)")
+            if dst.get(k) == v:
+                continue
+            have = _count_in(dst.get(k)) if k in dst else 0
+            if have > 0 and k not in force:
+                kept.append(f"{k}({have}좌표)")     # 이미 찍어둔 것 — 그대로 둔다
+                continue
+            dst[k] = v
+            got.append(f"{k}({_count_in(v)}좌표)"
+                       + (" ⟲갈아끼움" if k in force else " ✚새로"))
         if locked:
             log(f"   🔒 잠금 — 건드리지 않음: {', '.join(locked)}")
+        if kept:
+            log("   🛡 이미 찍어둔 좌표는 그대로 둡니다: " + ", ".join(kept))
         if not got:
-            log("   항목 좌표 동기화: 이미 메인과 같습니다")
+            log("   항목 좌표 동기화: 새로 받을 것이 없습니다 (로컬 좌표 그대로)")
             return
         tmp = dst_p + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -1056,7 +1075,13 @@ def _coords_guard_resnap(new_cfg):
 
 # 이 표시를 바꾸면 **각 컴퓨터에서 딱 한 번** 좌표 되돌리기가 다시 실행된다.
 # (사용자가 "업데이트 받을 때 좌표 전부 되돌려줘" 라고 할 때마다 날짜를 새로 적는다)
-COORDS_ROLLBACK_ID = "20260910_restore_local_coords"
+#
+# ⚠ 비워두는 것이 기본이다 (2026-09-14). 이것이 켜져 있으면 **아직 한 번도 안 돌린
+#   로컬**이 업데이트할 때 자기 coords.json 을 옛 백업으로 통째로 갈아끼운다 —
+#   사용자 신고 "몇몇 로컬은 다시 입혀버려서 내가 저장한 거랑 달라진다" 의 범인이었다.
+#   CLAUDE.md 규칙: **되돌리기 지시서는 쓰고 나면 반드시 비운다.**
+#   (20260910_restore_local_coords 는 할 일을 마쳐서 껐다)
+COORDS_ROLLBACK_ID = ""
 
 
 def restore_local_coords_once(log):
@@ -1070,6 +1095,8 @@ def restore_local_coords_once(log):
       2순위 usersave/history/*coords.json
       3순위 backups/*coords.json
     좌표 개수가 가장 많은 정상본을 고른다."""
+    if not COORDS_ROLLBACK_ID:
+        return          # 지시서가 비어 있으면 아무것도 하지 않는다 (기본값)
     ldir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
     done_p = os.path.join(ldir, "restore_done.json")
     try:
@@ -1517,7 +1544,16 @@ def main():
                         _rem = json.load(_f)
                     with open(_dst, encoding="utf-8") as _f:
                         _loc = json.load(_f)
-                    _keys = [k for k in _rem if k.startswith("_")]   # _doll_presets 등
+                    # 프리셋(_doll_presets 등)도 **허락 목록에 적힌 것만** 받는다.
+                    # 프리셋 안에는 좌표가 들어 있어서, 무조건 받으면 로컬 좌표가 바뀐다
+                    # (2026-09-09 에 확인된 누수 통로 — 2026-09-14 여기서 막는다).
+                    try:
+                        with open(os.path.join(REPO, "share_coords.json"),
+                                  encoding="utf-8") as _mf:
+                            _allow = set((json.load(_mf) or {}).get("keys") or [])
+                    except Exception:
+                        _allow = set()
+                    _keys = [k for k in _rem if k.startswith("_") and k in _allow]
                     _ch = [k for k in _keys if _loc.get(k) != _rem[k]]
                     if _ch:
                         for k in _ch:
@@ -1526,7 +1562,7 @@ def main():
                             json.dump(_loc, _f, ensure_ascii=False, indent=2)
                         log(f"   프리셋 동기화: {', '.join(_ch)} — 메인 것으로 반영 ✔")
                     else:
-                        log("   프리셋: 이미 메인과 동일")
+                        log("   프리셋: 받을 것 없음 (허락 목록에 적힌 것만 받습니다)")
             except Exception as _e:
                 log(f"   ⚠ 프리셋 동기화 실패: {_e}")
 

@@ -1,5 +1,5 @@
 {
-  "_설명": "업데이트 때 로컬로 보낼 좌표 값. share_coords.json 의 keys 에 적힌 항목만 실제로 적용된다. 저장소의 coords.json 은 더 이상 배포에 쓰지 않는다 — 그 파일을 push 하면 로컬의 skip-worktree 때문에 git reset 이 거부돼 업데이트가 통째로 막힌다 (2026-09-14 사고).",
+  "_설명": "업데이트 때 로컬로 보낼 좌표 값. share_coords.json 의 keys 에 적힌 항목만 적용되고, force 에 적힌 항목만 로컬이 이미 찍어둔 것을 갈아끼운다. 저장소의 coords.json 은 배포에 쓰지 않는다 (그 파일을 push 하면 로컬의 skip-worktree 때문에 git reset 이 거부돼 업데이트가 통째로 막힌다 — 2026-09-13 사고).",
   "incoupon_slots": [
     {
       "name": "미등록",

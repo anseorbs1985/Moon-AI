@@ -469,10 +469,9 @@ def load_cfg():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, encoding="utf-8") as f:
             data = json.load(f)
-        # 방금 읽은 '디스크 내용'을 기억해둔다 — save_cfg 가 이걸 기준으로
-        # **내가 바꾼 키만** 저장한다 (남의 수정을 덮지 않게, 2026-09-10)
-        global _CFG_DISK
-        _CFG_DISK = json.loads(json.dumps(data, ensure_ascii=False))
+        # 출발점(_CFG_DISK)은 **아래 마이그레이션이 다 끝난 뒤** 잡는다
+        # (_cfg_disk_mark). 여기서 날것으로 잡으면 '손본 것'까지 내 수정으로
+        # 오해해 낡은 런처가 남의 좌표를 되돌려버린다 (2026-09-14 수정).
         cfg = dict(DEFAULT_CFG)
         cfg.update(data)
         # char_btns
@@ -847,8 +846,28 @@ def load_cfg():
         while len(ndl) < DOLL_SLOTS:
             ndl.append({"name": "미등록", "coords": [None]*DOLL_CLICKS, "enabled": True})
         cfg["doll_slots"] = ndl[:DOLL_SLOTS]
+        _cfg_disk_mark(cfg)
         return _apply_local(cfg)
+    _cfg_disk_mark(dict(DEFAULT_CFG))
     return _apply_local(dict(DEFAULT_CFG))
+
+
+def _cfg_disk_mark(cfg):
+    """이 프로세스의 '출발점'을 **마이그레이션까지 끝난 값**으로 잡는다 (2026-09-14).
+
+    ⚠ 예전엔 파일에서 막 읽은 **날것**(migration 전)을 기준으로 삼았다. 그런데
+    load_cfg 는 읽자마자 슬롯 칸수를 맞추는 등 값을 손본다(예: 좌표칸 9 → 19 패딩).
+    그러면 아무것도 안 바꿨는데도 `cfg[k] != _CFG_DISK[k]` 가 되어,
+    **낡은 런처가 무언가 저장하는 순간 그 키를 자기 옛 값으로 되돌려 썼다.**
+    → "재시작하면 가끔 예전 좌표로 돌아간다" 의 남은 원인.
+    이제 출발점도 마이그레이션 뒤 값이라, 정말로 바꾼 키만 저장된다."""
+    global _CFG_DISK
+    try:
+        _CFG_DISK = json.loads(json.dumps(
+            {k: v for k, v in cfg.items() if k not in LOCAL_KEYS},
+            ensure_ascii=False))
+    except Exception:
+        _CFG_DISK = {}
 
 # 이 프로세스가 **마지막으로 디스크에서 본** coords.json 내용.
 # save_cfg 가 '내가 바꾼 키'를 가려내는 기준이다 (통째로 덮어쓰기 방지, 2026-09-10).
@@ -900,8 +919,17 @@ def save_cfg(cfg):
         for k in _CFG_DISK:                  # 내가 지운 것만
             if k not in shared:
                 out.pop(k, None)
+    elif not disk:
+        out = dict(shared)                   # 파일이 아예 없다 — 처음 만드는 것
     else:
-        out = {**disk, **shared}             # 첫 저장 — 디스크 위에 얹는다
+        # 출발점을 모르는데 디스크에는 내용이 있다 = 이 프로세스가 제대로 읽지 못한 것.
+        # 이때 통째로 얹으면 남의 좌표를 지운다 → **디스크를 그대로 두고 저장을 포기한다.**
+        # (2026-09-14 — '가끔 예전 좌표로 돌아간다' 의 마지막 구멍)
+        try:
+            click_log("[좌표] 기준값이 없어 저장을 건너뜀 — 디스크 좌표를 지킵니다")
+        except Exception:
+            pass
+        return
     # 쓰다가 죽어도 파일이 깨지지 않게 임시파일 → 교체
     _tmp = CONFIG_FILE + ".tmp"
     with open(_tmp, "w", encoding="utf-8") as f:
