@@ -8357,7 +8357,17 @@ class App(tk.Tk):
                 self.status.set(f"{_tt} — {len(targets)}슬롯 / 클릭 {_left}회, "
                                 f"한 슬롯씩 차례로 (간격 {_mn:.1f}~{_mx:.1f}초)")
             _n_skip = 0          # 이미 넣어서 건너뛴 슬롯 수 (인사이드 쿠폰등록)
-            if fkey == "incoupon":
+            # '이미 넣음' 건너뛰기는 **전체 ▶실행에서만** 한다.
+            # 선택실행·슬롯 직접 실행은 사용자가 콕 집은 것이라 무조건 넣는다
+            # (2026-09-13 — 선택실행이 전부 건너뛰어져 아무것도 안 돌던 문제)
+            _use_done = (fkey == "incoupon" and slot_idx is None and not sel_list)
+            if fkey == "incoupon" and not _use_done:
+                click_log(f"incoupon {'선택실행' if sel_list else '슬롯 직접 실행'} — "
+                          f"고른 슬롯 {[si+1 for si, _ in targets]} 은 "
+                          f"이미 넣었어도 그대로 넣습니다")
+                self.status.set(f"{icon} 고른 슬롯 {[si+1 for si, _ in targets]} — "
+                                f"이미 넣었어도 그대로 넣습니다")
+            if _use_done:
                 _dn = self._incoupon_done()
                 _todo = [si + 1 for si, _ in targets
                          if self._slot_text(fkey, si).strip() not in _dn]
@@ -8375,7 +8385,7 @@ class App(tk.Tk):
                 # 🎟 인사이드 쿠폰등록 — **이미 넣은 쿠폰은 건너뛴다**.
                 # 멈췄다 다시 돌리면 같은 코드를 또 넣어 '이미 사용한 쿠폰'으로
                 # 튕기던 사고를 막는다 (2026-09-13). 코드 글자가 바뀌면 다시 넣는다.
-                if fkey == "incoupon":
+                if _use_done:
                     _code = self._slot_text(fkey, si).strip()
                     if _code and _code in self._incoupon_done():
                         _n_skip += 1
