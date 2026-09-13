@@ -228,6 +228,12 @@ DC_TAPS_MIN    = 7     # 한 좌표당 연속 클릭 횟수(최소)
 DC_TAPS_MAX    = 9     # 한 좌표당 연속 클릭 횟수(최대)
 DC_BURST_MIN   = 1.0   # 한 좌표의 7~9회 클릭을 이 시간(초) 안에 모두 실행
 DC_BURST_MAX   = 2.0
+# ── 🎟 인사이드 쿠폰등록!! — 쿠폰등록과 같은 틀인데, **슬롯마다 붙여넣을 글이 다르다**.
+#    (2026-09-13 사용자 요청: "16개를 슬롯별로 하나씩 다르게 넣고 싶다")
+#    글은 `incoupon_texts` 에 16줄로 저장하고, 창 위 메모장에서 번호별로 적는다.
+INCOUPON_SLOTS  = 16
+INCOUPON_CLICKS = COUPON_CLICKS   # 쿠폰등록과 같은 좌표 수 (클릭5에서 붙여넣기)
+
 # ── 📬 인사이드 우편함!! — **용던고고와 같은 틀**(16슬롯 × 좌표 여러 개).
 #    다만 클릭만 하고, 좌표마다 **연속 클릭 횟수**를 직접 적는다
 #    (2026-09-07 사용자 요청: "슬롯 16개를 계속 돌릴 거야 · 10번 클릭처럼 적게 해줘").
@@ -356,6 +362,8 @@ DEFAULT_CFG = {
     "wdoff_on":     False,
     "wdoff_min":    WDOFF_MIN,
     "wdoff_max":    WDOFF_MAX,
+    "incoupon_slots": None,             # 🎟 인사이드 쿠폰등록!! — 16슬롯 × 좌표9
+    "incoupon_texts": [""]*INCOUPON_SLOTS,  # 슬롯마다 붙여넣을 글 (16줄)
     "inmail_slots": None,               # 📬 인사이드 우편함!! — 16슬롯 × 좌표8 (횟수 포함)
     "dc_slots":     [None]*DC_SLOTS,    # 일반던전충전 좌표 (각 [x,y] 또는 None)
     "dc_hotkey":    None,               # 일반던전충전 실행 단축키 (가상키 코드)
@@ -759,6 +767,29 @@ def load_cfg():
                         "gap_list": [None]*INMAIL_CLICKS,
                         "rep_list": [INMAIL_REP]*INMAIL_CLICKS, "enabled": True})
         cfg["inmail_slots"] = nml[:INMAIL_SLOTS]
+        # incoupon_slots (🎟 인사이드 쿠폰등록!! 16슬롯 × 좌표9) — 쿠폰등록과 같은 구조.
+        # 글은 슬롯마다 다르다 → incoupon_texts 에 16줄.
+        cl2, ncl2 = cfg.get("incoupon_slots") or [], []
+        for s_ in cl2:
+            c = s_.get("coords", [None]*INCOUPON_CLICKS) if isinstance(s_, dict) else [None]*INCOUPON_CLICKS
+            while len(c) < INCOUPON_CLICKS: c.append(None)
+            _g = (s_.get("gap_list") or []) if isinstance(s_, dict) else []
+            _p = (s_.get("paste_list") or []) if isinstance(s_, dict) else []
+            while len(_g) < INCOUPON_CLICKS: _g.append(None)
+            while len(_p) < INCOUPON_CLICKS: _p.append(None)
+            ncl2.append({"name": s_.get("name", "미등록") if isinstance(s_, dict) else "미등록",
+                         "coords": c[:INCOUPON_CLICKS],
+                         "gap_list": _g[:INCOUPON_CLICKS],
+                         "paste_list": _p[:INCOUPON_CLICKS],
+                         "enabled": s_.get("enabled", True) if isinstance(s_, dict) else True})
+        while len(ncl2) < INCOUPON_SLOTS:
+            ncl2.append({"name": "미등록", "coords": [None]*INCOUPON_CLICKS,
+                         "gap_list": [None]*INCOUPON_CLICKS,
+                         "paste_list": [None]*INCOUPON_CLICKS, "enabled": True})
+        cfg["incoupon_slots"] = ncl2[:INCOUPON_SLOTS]
+        _tx = cfg.get("incoupon_texts") or []
+        while len(_tx) < INCOUPON_SLOTS: _tx.append("")
+        cfg["incoupon_texts"] = [str(v or "") for v in _tx[:INCOUPON_SLOTS]]
         # circus3_slots (서커스 이벤트퀘스트 16슬롯 × 3좌표)
         c3l, nc3 = cfg.get("circus3_slots", []), []
         for s_ in c3l:
@@ -2861,6 +2892,9 @@ class App(tk.Tk):
         # 확인용 3종 묶음: 변신확인용 / 인형확인용 / 성물확인용 (세로로 한 곳에)
         chk_col = tk.Frame(front_row); chk_col.pack(side="left", padx=(4,8), anchor="n")
         for _t, _bg, _open, _run in (
+                # 🎟 인사이드 쿠폰등록!! — 인사이드 우편함 **위**에 (2026-09-13 사용자 지시)
+                ("🎟 인사이드" + chr(10) + "쿠폰등록!!", "#117a8b", self._open_incoupon_win,
+                 lambda: self._start_dgn2("incoupon")),
                 # 📬 인사이드 우편함!! — 변신확인용 **위**에 (2026-09-07 사용자 지시)
                 ("📬 인사이드\n우편함!!", "#1a5276", self._open_inmail_win,
                  lambda: self._start_dgn2("inmail")),
@@ -3459,6 +3493,7 @@ class App(tk.Tk):
         ("dragon_slots",   "🐲 용던고고!!!"),
         ("sched_slots",    "📅 스케줄"),
         ("dc_slots",       "🎯 일반던전충전"),
+        ("incoupon_slots", "🎟 인사이드 쿠폰등록!!"),
         ("inmail_slots",   "📬 인사이드 우편함!!"),
         ("doll_slots",     "🧸 인형탐험"),
         ("dollchk_slots",  "🧸 인형확인용"),
@@ -5610,7 +5645,8 @@ class App(tk.Tk):
 
     # ── 인형확인용/성물확인용 (변신확인용 복제 — 동일 실행 로직) ────────
     def _dgn2_info(self, fkey):
-        return {"inmail":  ("inmail_slots",  "인사이드 우편함!!", "📬"),
+        return {"incoupon": ("incoupon_slots", "인사이드 쿠폰등록!!", "🎟"),
+                "inmail":  ("inmail_slots",  "인사이드 우편함!!", "📬"),
                 "jakwi":   ("jakwi_slots",   "작위!!",     "👑"),
                 "fix":     ("fix_slots",     "복구",       "🩹"),
                 "dollchk": ("dollchk_slots", "인형확인용", "🧸"),
@@ -5631,6 +5667,101 @@ class App(tk.Tk):
         self._open_section_win("_inmail_win", "📬 인사이드 우편함!!",
                                lambda p: self._build_dgn2("inmail", p),
                                w=470, h=640, pinnable=True)
+
+    def _open_incoupon_win(self):
+        """🎟 인사이드 쿠폰등록!! — 쿠폰등록과 같은 16슬롯 틀.
+        다른 점은 **슬롯마다 붙여넣을 글이 다르다** (2026-09-13 사용자 요청)."""
+        self._open_section_win("_incoupon_win", "🎟 인사이드 쿠폰등록!!",
+                               lambda p: self._build_dgn2("incoupon", p),
+                               w=560, h=760, pinnable=True)
+
+    # ── 슬롯마다 다른 '붙여넣을 글' (16줄 메모장) ────────────────────────
+    def _slot_texts(self, fkey):
+        """그 런처의 16줄 글 목록 (없으면 빈 줄로 채워 만든다)."""
+        n = INCOUPON_SLOTS
+        t = list(self.cfg.get(f"{fkey}_texts") or [])
+        while len(t) < n:
+            t.append("")
+        return [str(v or "") for v in t[:n]]
+
+    def _slot_text(self, fkey, idx):
+        """슬롯 하나가 붙여넣을 글.
+        슬롯별 글이 있으면 그것을, 비어 있으면 **예전 '모든 슬롯 공통' 글**을 쓴다
+        (쿠폰등록 등 기존 런처는 그대로 돌아가게 하는 되돌림 장치)."""
+        try:
+            t = self._slot_texts(fkey)
+            if 0 <= idx < len(t) and t[idx].strip():
+                return t[idx]
+        except Exception:
+            pass
+        return str(self.cfg.get(f"{fkey}_text", "") or "")
+
+    def _build_slot_memo(self, parent, fkey, color):
+        """16줄 메모장 — 번호 1~16 옆에 글을 적는다.
+        [📋 붙여넣기] 는 클립보드의 여러 줄을 **위에서부터 순서대로** 채운다
+        (2026-09-13 사용자 요청: "복사해와서 붙여넣기가 가능했으면")."""
+        box = tk.LabelFrame(parent, text=" 슬롯마다 붙여넣을 글 (16줄) ",
+                            font=("맑은 고딕", 9, "bold"), fg=color, bd=2, relief="groove")
+        box.pack(fill="x", padx=6, pady=(2, 4))
+
+        top = tk.Frame(box); top.pack(fill="x", padx=4, pady=(2, 0))
+        tk.Button(top, text="📋 붙여넣기 (여러 줄 → 1번부터 채움)",
+                  font=("맑은 고딕", 8, "bold"), bg=color, fg="white",
+                  command=lambda f=fkey: self._memo_paste_lines(f)).pack(side="left")
+        tk.Button(top, text="✖ 전부 비우기", font=("맑은 고딕", 8),
+                  bg="#7f8c8d", fg="white",
+                  command=lambda f=fkey: self._memo_clear_lines(f)).pack(side="left", padx=4)
+        tk.Label(top, text="비운 줄은 그 슬롯이 '공통 글'을 씁니다",
+                 font=("맑은 고딕", 7), fg="#888").pack(side="left", padx=(6, 0))
+
+        body = tk.Frame(box); body.pack(fill="x", padx=4, pady=3)
+        self._memo_vars = getattr(self, "_memo_vars", {})
+        self._memo_vars[fkey] = []
+        cur = self._slot_texts(fkey)
+        for i in range(INCOUPON_SLOTS):
+            row = tk.Frame(body); row.pack(fill="x", pady=0)
+            tk.Label(row, text=f"{i+1:2d}", font=("맑은 고딕", 8, "bold"),
+                     width=3, fg=color, anchor="e").pack(side="left")
+            sv = tk.StringVar(value=cur[i])
+            self._memo_vars[fkey].append(sv)
+            tk.Entry(row, textvariable=sv, font=("맑은 고딕", 9),
+                     relief="solid", bd=1).pack(side="left", fill="x", expand=True, padx=(3, 0))
+            sv.trace_add("write", lambda *a, f=fkey: self._memo_save_lines(f))
+        return box
+
+    def _memo_save_lines(self, fkey):
+        """16줄을 그대로 저장한다 (치는 즉시)."""
+        try:
+            vs = (getattr(self, "_memo_vars", {}) or {}).get(fkey) or []
+            self.cfg[f"{fkey}_texts"] = [str(v.get()) for v in vs]
+            save_cfg(self.cfg)
+        except Exception:
+            pass
+
+    def _memo_paste_lines(self, fkey):
+        """클립보드의 여러 줄을 1번부터 순서대로 채운다."""
+        try:
+            raw = self.clipboard_get()
+        except Exception:
+            self.status.set("📋 클립보드가 비어 있습니다"); return
+        lines = [ln.strip() for ln in str(raw).replace("\r\n", "\n").split("\n")]
+        lines = [ln for ln in lines if ln != ""]        # 빈 줄은 빼고 순서대로
+        if not lines:
+            self.status.set("📋 붙여넣을 글이 없습니다"); return
+        vs = (getattr(self, "_memo_vars", {}) or {}).get(fkey) or []
+        for i, v in enumerate(vs):
+            v.set(lines[i] if i < len(lines) else "")
+        self._memo_save_lines(fkey)
+        self.status.set(f"📋 {min(len(lines), len(vs))}줄을 1번부터 채웠습니다"
+                        + (f" (클립보드 {len(lines)}줄 중 앞 {len(vs)}줄만)"
+                           if len(lines) > len(vs) else ""))
+
+    def _memo_clear_lines(self, fkey):
+        vs = (getattr(self, "_memo_vars", {}) or {}).get(fkey) or []
+        for v in vs:
+            v.set("")
+        self._memo_save_lines(fkey)
+        self.status.set("✖ 16줄을 전부 비웠습니다")
 
     def _open_jakwi_win(self):
         """👑 작위!! — 좌표 + 칸마다 간격(초)·휠(칸수·방향) 을 직접 넣는 런처.
@@ -6062,7 +6193,7 @@ class App(tk.Tk):
                                lambda p: self._build_dgn2("relic", p), w=470, h=600, pinnable=True)
 
     # 좌표를 누른 뒤 '적어둔 글'을 붙여넣는 런처들 (쿠폰등록·거래소검색)
-    PASTE_FKEYS = ("coupon", "market")
+    PASTE_FKEYS = ("coupon", "market", "incoupon")
 
     def _build_dgn2(self, fkey, parent):
         key, title, icon = self._dgn2_info(fkey)
@@ -6092,6 +6223,10 @@ class App(tk.Tk):
                 self.status.set("붙여넣을 글을 지웠습니다")
             tk.Button(tr, text="✖", font=("맑은 고딕", 9, "bold"), width=3,
                       bg="#c0392b", fg="white", command=_clr_txt).pack(side="left")
+            # 🎟 인사이드 쿠폰등록!! 은 **슬롯마다 글이 다르다** — 16줄 메모장을 더 붙인다.
+            # (위 '붙여넣을 글' 은 그 줄이 비어 있을 때 쓰는 공통값으로 남는다)
+            if fkey == "incoupon":
+                self._build_slot_memo(parent, fkey, color)
         dr = tk.Frame(parent); dr.pack(pady=3)
         setattr(self, f"_{fkey}_stop", False)
         run = tk.Button(dr, text="▶  실행",
@@ -7865,8 +8000,7 @@ class App(tk.Tk):
             if (fkey in self.PASTE_FKEYS
                     and j == self._paste_idx_or_default(fkey, st["slot"])
                     and (j < len(coords) and coords[j])):
-                self._paste_at(coords[j], str(self.cfg.get(f"{fkey}_text", "") or ""),
-                               f"[{name}]")
+                self._paste_at(coords[j], self._slot_text(fkey, si), f"[{name}]")
                 _act = "붙임"
             else:
                 _act = self._do_click_or_wheel(fkey, j, _cd, st["slot"])
@@ -7952,11 +8086,15 @@ class App(tk.Tk):
         try:
             slots = self.cfg.get(key, [])
             if fkey in self.PASTE_FKEYS:
+                # 슬롯마다 글이 다를 수 있다 — 16줄 중 하나라도 있으면 진행한다
+                # (붙여넣기는 슬롯마다 그때그때 클립보드에 올린다, 2026-09-13)
                 txt = str(self.cfg.get(f"{fkey}_text", "") or "")
-                if not txt.strip():
+                _any = any(t.strip() for t in self._slot_texts(fkey))
+                if not txt.strip() and not _any:
                     self.status.set(f"{icon} {title}: 붙여넣을 글이 비어 있습니다 — 창에서 글을 먼저 적어주세요")
                     return
-                self._set_clipboard_text(txt)
+                if txt.strip():
+                    self._set_clipboard_text(txt)
             if slot_idx is not None:
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
             else:
@@ -8092,7 +8230,12 @@ class App(tk.Tk):
                         if fkey == "coupon": self._coupon_log(f"멈춤 플래그로 중단 (클릭{j+1} 직전)")
                         break
                     if fkey in self.PASTE_FKEYS and j == paste_after and coords[j]:
-                        self._paste_at(coords[j], txt, f"[{name}]")
+                        _t = self._slot_text(fkey, si)      # 그 슬롯의 글
+                        if not _t.strip():
+                            self._coupon_log(f"[{name}] 붙여넣을 글이 비어 있어 건너뜀 (슬롯 {si+1})")
+                            self.status.set(f"{icon} [{name}] 글이 비어 있어 붙여넣기 건너뜀")
+                            continue
+                        self._paste_at(coords[j], _t, f"[{name}]")
                         self.status.set(f"{icon} [{name}] 붙여넣기 완료 (클릭{j+1} 다음)")
                     else:
                         _act = self._do_click_or_wheel(
@@ -13101,6 +13244,15 @@ class App(tk.Tk):
             # 👑 작위!! — 좌표 + 칸마다 간격(초)·휠(칸수·▲▼) 지정 (opts=True).
             #    작위 창은 목록을 휠로 내려야 해서 서커스와 같은 방식으로 만들었다
             #    (2026-09-02 사용자 요청). 안 쓰는 칸은 비워두면 건너뛴다.
+            # 🎟 인사이드 쿠폰등록!! — 쿠폰등록과 같은 틀. 다른 점은 **슬롯마다 글이 다르다**
+            #    (창 위 16줄 메모장에서 번호별로 적는다 — 2026-09-13 사용자 요청).
+            "incoupon": dict(title="인사이드 쿠폰등록!!", key="incoupon_slots",
+                             clicks=INCOUPON_CLICKS, color="#117a8b",
+                             opts=True, paste=True, enable=True, sel=True,
+                             reg=lambda s, c: self._reg_dgn2_click("incoupon", s, c),
+                             test=lambda i: self._test_dgn2("incoupon", i),
+                             prev=lambda i: self._preview_dgn2("incoupon", i),
+                             delete=lambda i: self._del_dgn2("incoupon", i)),
             # 📬 인사이드 우편함!! — 용던고고와 같은 16슬롯 틀. 클릭만 하고,
             #    좌표마다 '횟수'(rep_list)만큼 연속으로 누른다. rep=True 가 그 칸을 만든다.
             "inmail":  dict(title="인사이드 우편함!!", key="inmail_slots",
