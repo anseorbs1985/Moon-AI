@@ -13,6 +13,7 @@ lineagem_bar.pyw — 요약 런처 (2026-08-24 사용자 요청)
 import os
 import json
 import time
+import datetime
 import random
 import subprocess
 import tkinter as tk
@@ -34,6 +35,12 @@ DUNS = [(1, "악몽의섬", "토요일_악몽의섬", "#8e44ad"),
         (0, "오만의탑", "수금_오만의탑",   "#e67e22")]
 NIGHT = "토요일_악몽의섬"
 NH, NN = 2, 6                       # 악몽의섬 — 2시간 6회
+# 📅 요일마다 그 날 던전으로 연다 — **메인런처의 DAY_DUNGEON 과 같은 값** (2026-09-15).
+#    월 잊혀진섬 · 화 에카 · 수목금 오만의탑 · 토일 악몽의섬.
+#    한쪽만 고치면 두 창이 다른 던전을 보여주므로 **바꿀 때는 양쪽 다** 고칠 것.
+DAY_DUNGEON = {0: "월요일_잊혀진섬", 1: "화요일_에카",
+               2: "수금_오만의탑", 3: "수금_오만의탑", 4: "수금_오만의탑",
+               5: "토요일_악몽의섬", 6: "토요일_악몽의섬"}
 ALPHAS = [1.0, 0.85, 0.7, 0.55, 0.4]
 LEFT_COLORS = {6: "#1e8449", 5: "#27ae60", 4: "#16a085",
                3: "#2980b9", 2: "#8e44ad", 1: "#c0392b"}
@@ -78,7 +85,7 @@ class Bar(tk.Tk):
         # 다시 보고 싶으면 메인런처의 [📏 요약런처] 버튼을 누른다.
         self.attributes("-topmost", False)
         self.configure(bg=self.BG)
-        self.tab = int(self.cfg.get("tab", 0) or 0)
+        self.tab = self._day_tab(int(self.cfg.get("tab", 0) or 0))
         self.sel = set()
         self.queue = []           # 실행 중이면 여기에 쌓아둔다
         self.proc = None
@@ -90,8 +97,36 @@ class Bar(tk.Tk):
         self._place()
         self.after(20000, self._tick)
         self.after(1000, self._raise_watch)
+        self._day_seen = datetime.date.today()
+        self.after(300000, self._day_tick)     # 5분마다 날짜만 확인
         self.bind("<Button-1>", self._touch, add="+")
         self.bind("<FocusOut>", lambda _e: self._maybe_back(), add="+")
+
+    # ── 📅 요일마다 그 날 던전으로 ──────────────────────────────────
+    @staticmethod
+    def _day_tab(default=0):
+        """오늘 요일에 맞는 탭 번호 (못 찾으면 준 값 그대로)."""
+        try:
+            want = DAY_DUNGEON.get(datetime.datetime.now().weekday())
+            for i, (_d, _nm, k, _c) in enumerate(DUNS):
+                if k == want:
+                    return i
+        except Exception:
+            pass
+        return default
+
+    def _day_tick(self):
+        """날짜가 넘어가면 그 날 던전으로 바꿔준다.
+        **사용자가 손으로 고른 탭은 그 날 안에는 건드리지 않는다.**"""
+        try:
+            today = datetime.date.today()
+            if getattr(self, "_day_seen", None) != today:
+                self._day_seen = today
+                self._show(self._day_tab(self.tab))
+        except Exception:
+            pass
+        finally:
+            self.after(300000, self._day_tick)
 
     # ── 화면 ────────────────────────────────────────────────────────
     def _build(self):

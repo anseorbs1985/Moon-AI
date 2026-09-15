@@ -4561,10 +4561,20 @@ class App(tk.Tk):
 
     def _build_night_grid(self, parent):
         """악몽의섬 슬롯별 [실행] + [⏰끄기] + [+선택] — 좌표·반복은 섬/던전 실행기에서 관리."""
+        # 📤 이 판 전체를 한 덩어리로 묶는다 — 통째로 '독립 창' 으로 뗄 수 있게
+        #    (2026-09-16 사용자 요청: "판만 앞으로 띄우고 메인런처 나머지는 안 부르게").
+        #    한 창 안의 프레임은 따로 앞에 못 오므로, Tk 의 `wm manage` 로 진짜 창을 만든다.
+        panel = tk.Frame(parent); panel.pack(anchor="w", fill="both", expand=True)
+        self._night_panel = panel
+        parent = panel                     # 아래는 전부 이 판 안에 그린다
         hd = tk.Frame(parent); hd.pack(anchor="w", pady=(0, 2))
         self._night_title = tk.Label(hd, text="🏝 악몽의섬",
                                      font=("맑은 고딕", 9, "bold"), fg="#8e44ad")
         self._night_title.pack(side="left")
+        self._night_dbtn = tk.Button(hd, text="📤 따로", font=("맑은 고딕", 8, "bold"),
+                                     bg="#5d6d7e", fg="white",
+                                     command=self._night_detach_toggle)
+        self._night_dbtn.pack(side="left", padx=(6, 0))
         tk.Button(hd, text="✔ 전체선택", font=("맑은 고딕", 8, "bold"),
                   bg="#e67e22", fg="white", activebackground="#ca6f1e",
                   command=self._night_sel_all).pack(side="left", padx=(6, 0))
@@ -4652,6 +4662,8 @@ class App(tk.Tk):
         # 📅 오늘 요일에 맞는 던전으로 연다 (월 잊섬 · 화 에카 · 수목금 오만 · 토일 악몽)
         self.after(300, self._day_tab_tick)
         self.after(1200, self._refresh_night_btns)
+        # 지난번에 판을 따로 떼어뒀으면 그대로 다시 뗀다 (자리도 그대로)
+        self.after(1500, self._night_detach_restore)
         self._night_week_start()      # 금요일 23:50 자동 초기화 감시
 
     def _night_sel_toggle(self, idx):
@@ -5027,6 +5039,94 @@ class App(tk.Tk):
             pass
         finally:
             self.after(300000, self._day_tab_tick)     # 5분마다 날짜만 확인
+
+    # ── 📤 슬롯판 따로 떼기 (2026-09-16 사용자 요청) ──────────────────────
+    # "오만의탑/에카 칸을 클릭했을 때 메인런처 전체가 앞으로 나오지 말고
+    #  그 판만 앞으로 왔으면 좋겠다. 몸땡이가 하나라 어려울까?"
+    # → 한 창 안의 프레임은 따로 앞에 못 온다. 그래서 Tk 의 `wm manage` 로
+    #   **그 판을 진짜 독립 창으로 승격**시킨다. 그러면 클릭해도 그 창만 올라오고
+    #   메인런처 본체는 뒤에 그대로 있다. [📥 붙이기] 로 언제든 되돌린다.
+    def _night_detached(self):
+        p = getattr(self, "_night_panel", None)
+        try:
+            return bool(p is not None and p.winfo_exists()
+                        and p.winfo_manager() == "wm")
+        except Exception:
+            return False
+
+    def _night_detach_toggle(self):
+        if self._night_detached():
+            self._night_attach()
+        else:
+            self._night_detach()
+
+    def _night_detach(self, x=None, y=None):
+        """판을 독립 창으로 뗀다."""
+        p = getattr(self, "_night_panel", None)
+        if p is None or not p.winfo_exists() or self._night_detached():
+            return
+        try:
+            if x is None or y is None:
+                x, y = p.winfo_rootx(), p.winfo_rooty()
+            self.tk.call("wm", "manage", p._w)
+            self.tk.call("wm", "title", p._w, "🏝 슬롯판 (던전 4개)")
+            self.tk.call("wm", "geometry", p._w, f"+{int(x)}+{int(y)}")
+            # ✕ 로 닫으면 사라지는 게 아니라 **메인런처로 되돌아간다**
+            self.tk.call("wm", "protocol", p._w, "WM_DELETE_WINDOW",
+                         self.register(self._night_attach))
+            p.bind("<Configure>", self._night_detach_moved, add="+")
+            d = dict(self.cfg.get("night_detach") or {})
+            d.update({"on": True, "x": int(x), "y": int(y)})
+            self.cfg["night_detach"] = d; save_cfg(self.cfg)
+            if getattr(self, "_night_dbtn", None) is not None:
+                self._night_dbtn.config(text="📥 붙이기", bg="#117864")
+            self.status.set("📤 슬롯판을 따로 뗐습니다 — 이 창만 앞으로 옵니다 "
+                            "(✕ 나 [📥 붙이기] 로 되돌림)")
+        except Exception as e:
+            self.status.set(f"📤 따로 떼기 실패: {e}")
+
+    def _night_attach(self):
+        """뗀 판을 메인런처 안으로 되돌린다."""
+        p = getattr(self, "_night_panel", None)
+        if p is None or not p.winfo_exists() or not self._night_detached():
+            return
+        try:
+            self.tk.call("wm", "forget", p._w)
+            p.pack(anchor="w", fill="both", expand=True)
+            d = dict(self.cfg.get("night_detach") or {})
+            d["on"] = False
+            self.cfg["night_detach"] = d; save_cfg(self.cfg)
+            if getattr(self, "_night_dbtn", None) is not None:
+                self._night_dbtn.config(text="📤 따로", bg="#5d6d7e")
+            self.status.set("📥 슬롯판을 메인런처 안으로 되돌렸습니다")
+        except Exception as e:
+            self.status.set(f"📥 붙이기 실패: {e}")
+
+    def _night_detach_moved(self, _e=None):
+        """뗀 창을 옮기면 그 자리를 기억해둔다 (다음에 켤 때 그 자리로)."""
+        if not self._night_detached():
+            return
+        try:
+            p = self._night_panel
+            x, y = p.winfo_rootx(), p.winfo_rooty()
+            d = dict(self.cfg.get("night_detach") or {})
+            if d.get("x") == x and d.get("y") == y:
+                return                      # 안 바뀌었으면 저장하지 않는다
+            if x <= 1 and y <= 1:
+                return                      # 아직 자리가 안 잡힌 상태
+            d.update({"on": True, "x": int(x), "y": int(y)})
+            self.cfg["night_detach"] = d; save_cfg(self.cfg)
+        except Exception:
+            pass
+
+    def _night_detach_restore(self):
+        """런처를 켤 때 — 지난번에 떼어둔 상태면 그대로 다시 뗀다."""
+        try:
+            d = self.cfg.get("night_detach") or {}
+            if d.get("on"):
+                self._night_detach(d.get("x"), d.get("y"))
+        except Exception:
+            pass
 
     def _night_reset_pick(self):
         """드롭다운에서 고른 초기화 값을 저장한다 (금요일 자동 초기화도 이 값을 쓴다)."""
