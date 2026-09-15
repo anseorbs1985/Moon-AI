@@ -1444,6 +1444,22 @@ def img_mine_free(fkey, j):
     return IMG_MAX - 1
 
 
+# ── 📅 요일마다 슬롯판이 '그 날 던전' 으로 열린다 (2026-09-15 사용자 지시) ────
+# 사용자: "토요일엔 악몽의섬, 월요일엔 잊혀진섬, 수목금은 오만의탑, 화요일은 에카가
+#          뜨게 해줘. 지금은 악몽의섬이 계속 앞에 있어서 그것만 떠 있다."
+# 월=0 … 일=6. 일요일은 주말이라 악몽의섬으로 둔다 (바꾸려면 이 줄만 고치면 된다).
+DAY_DUNGEON = {0: "월요일_잊혀진섬", 1: "화요일_에카",
+               2: "수금_오만의탑", 3: "수금_오만의탑", 4: "수금_오만의탑",
+               5: "토요일_악몽의섬", 6: "토요일_악몽의섬"}
+
+# ── 🔄 악몽의섬 주간 초기화 시각 (2026-09-15 사용자 지시) ────────────────────
+# "항상 금요일 저녁 11시 50분에 4시간 1회 + 2시간 5회로 맞춰줘."
+# **값만** 되돌린다 — 예약(⏰)은 걸지 않는다 (2026-08-23 절대 규칙 그대로).
+NIGHT_RESET_KEY = "토요일_악몽의섬"
+NIGHT_RESET_DAY = 4      # 월=0 … 금=4
+NIGHT_RESET_HH  = 23
+NIGHT_RESET_MM  = 50
+
 # ── 🏢 층 확인 — 오토를 누르기 전에 '그 캐릭이 갈 층' 이 맞는지 본다 ─────────
 # 2026-09-15 사용자 신고: 용의 계곡 던전은 5·6·7층이 있고 캐릭마다 갈 층이 정해져
 # 있는데, 좌표6 이 확인하던 그림(`dragon_06.png`)은 **"이동하시겠습니까? 취소/확인"**
@@ -4569,15 +4585,34 @@ class App(tk.Tk):
             self._dun_tabs.append(b_)
 
         # 반복을 16슬롯 전부 '지금부터' 다시 건다 (실행은 하지 않는다) — 제목 아랫줄
+        # 🔄 초기화 값을 **여기서 고른다** (2026-09-15 사용자 요청:
+        #    "4시간1회 2시간5회 이것도 메인에서 선택할 수 있게 해줘").
+        #    고른 값은 저장돼서 **금요일 23:50 자동 초기화에도 그대로 쓰인다.**
+        _fst, _h, _n = self._night_reset_setting()
         rr2 = tk.Frame(parent); rr2.pack(anchor="w", pady=(0, 3))
-        tk.Button(rr2, text="🔄 초기화 (4h→2h 6회)", font=("맑은 고딕", 8, "bold"),
+        tk.Label(rr2, text="첫", font=("맑은 고딕", 8), fg="#888").pack(side="left")
+        self._nrs_first = tk.StringVar(value=("4시간 1회" if _fst else "없음"))
+        _om1 = tk.OptionMenu(rr2, self._nrs_first, "4시간 1회", "없음")
+        _om1.config(font=("맑은 고딕", 7), width=7, pady=0, highlightthickness=0)
+        _om1.pack(side="left", padx=(2, 4))
+        tk.Label(rr2, text="그 뒤", font=("맑은 고딕", 8), fg="#888").pack(side="left")
+        self._nrs_h = tk.StringVar(value=f"{_h}시간")
+        _om2 = tk.OptionMenu(rr2, self._nrs_h, *[f"{x}시간" for x in range(1, 7)])
+        _om2.config(font=("맑은 고딕", 7), width=5, pady=0, highlightthickness=0)
+        _om2.pack(side="left", padx=(2, 2))
+        self._nrs_n = tk.StringVar(value=f"{_n}회")
+        _om3 = tk.OptionMenu(rr2, self._nrs_n, *[f"{x}회" for x in range(1, 10)])
+        _om3.config(font=("맑은 고딕", 7), width=4, pady=0, highlightthickness=0)
+        _om3.pack(side="left", padx=(0, 4))
+        for _v in (self._nrs_first, self._nrs_h, self._nrs_n):
+            _v.trace_add("write", lambda *_a: self._night_reset_pick())
+        tk.Button(rr2, text="🔄 16슬롯 적용", font=("맑은 고딕", 8, "bold"),
                   bg="#196f3d", fg="white", activebackground="#145a32",
-                  command=lambda: self._night_rearm_all(True)).pack(side="left")
-        tk.Button(rr2, text="⏰ 2h 6회", font=("맑은 고딕", 8, "bold"),
-                  bg="#1f618d", fg="white", activebackground="#154360",
-                  command=lambda: self._night_rearm_all(False)).pack(side="left", padx=(3, 0))
-        tk.Label(parent, text="16슬롯 전부 기본값으로 (토요일 지나면 자동으로도) · "
-                              "슬롯 하나만은 아래 칸 클릭",
+                  command=self._night_rearm_pick).pack(side="left")
+        tk.Label(parent,
+                 text=f"값만 바꾼다 (반복은 [실행] 때 걸림) · 금요일 "
+                      f"{NIGHT_RESET_HH}:{NIGHT_RESET_MM:02d} 에 이 값으로 자동 초기화 · "
+                      f"슬롯 하나만은 아래 칸 클릭",
                  font=("맑은 고딕", 7), fg="#888").pack(anchor="w", pady=(0, 3))
         wg = tk.Frame(parent); wg.pack(anchor="w")
         self._night_btns = []; self._night_plus = []; self._night_runbtns = []
@@ -4614,9 +4649,10 @@ class App(tk.Tk):
                            command=lambda x=idx: self._night_sel_toggle(x))
             pb.pack(pady=(1, 0))
             self._night_plus.append(pb)
-        self.after(300, lambda: self._dun_switch(int(self.cfg.get("night_tab", 0) or 0)))
+        # 📅 오늘 요일에 맞는 던전으로 연다 (월 잊섬 · 화 에카 · 수목금 오만 · 토일 악몽)
+        self.after(300, self._day_tab_tick)
         self.after(1200, self._refresh_night_btns)
-        self._night_week_start()      # 토요일 00시 자동 초기화 감시
+        self._night_week_start()      # 금요일 23:50 자동 초기화 감시
 
     def _night_sel_toggle(self, idx):
         """+ 로 고른 슬롯만 [선택실행]으로 한 번에 돌린다."""
@@ -4903,13 +4939,14 @@ class App(tk.Tk):
         try:
             import datetime as _dt
             now = _dt.datetime.now()
-            # 그 주의 '토요일 00시' — 토요일 이후면 이번 주, 아니면 지난 주 토요일
-            days = (now.weekday() - 5) % 7          # 월=0 … 토=5
-            sat = (now - _dt.timedelta(days=days)).replace(
-                hour=0, minute=0, second=0, microsecond=0)
-            if now < sat:
-                sat -= _dt.timedelta(days=7)
-            tag = sat.strftime("%Y-%m-%d")
+            # 기준 시각 = 가장 최근의 **금요일 23:50** (2026-09-15 사용자 지시)
+            days = (now.weekday() - NIGHT_RESET_DAY) % 7     # 월=0 … 금=4
+            fri = (now - _dt.timedelta(days=days)).replace(
+                hour=NIGHT_RESET_HH, minute=NIGHT_RESET_MM,
+                second=0, microsecond=0)
+            if now < fri:
+                fri -= _dt.timedelta(days=7)
+            tag = fri.strftime("%Y-%m-%d %H:%M")
             fp = os.path.join(LOCAL_DATA, "night_week.json")
             try:
                 with open(fp, encoding="utf-8") as f:
@@ -4917,17 +4954,101 @@ class App(tk.Tk):
             except Exception:
                 done = ""
             if done != tag:
-                self._night_rearm_all_impl(True)     # 값만 — 예약 안 검
+                # 🚨 **악몽의섬을 콕 집어서** 초기화한다.
+                #    예전엔 self.NIGHT_KEY(지금 보고 있는 탭)를 썼다 —
+                #    탭이 오만의탑이면 오만의탑이 초기화되고 그 주는 '했음'으로
+                #    기록돼서, 정작 악몽의섬은 영영 초기화되지 않았다
+                #    (사용자 신고 "악몽의섬은 초기화가 안 되더라").
+                first, h, n = self._night_reset_setting()
+                self._night_rearm_all_impl(first, key=NIGHT_RESET_KEY, h=h, n=n)
                 os.makedirs(LOCAL_DATA, exist_ok=True)
                 with open(fp, "w", encoding="utf-8") as f:
                     json.dump({"done": tag}, f)
-                self._rep_log(f"{self.NIGHT_KEY} — 토요일({tag}) 자동 초기화: "
-                              f"4시간 → 2시간 6회 (값만, 예약·실행 없음)")
+                _t = (f"{self.REPEAT_FIRST.get(NIGHT_RESET_KEY, h)}시간 → {h}시간"
+                      if first else f"{h}시간")
+                self._rep_log(f"{NIGHT_RESET_KEY} — 금요일 {NIGHT_RESET_HH}:"
+                              f"{NIGHT_RESET_MM:02d}({tag}) 자동 초기화: "
+                              f"{_t} {n}회 (값만, 예약·실행 없음)")
         except Exception as e:
             try: self._rep_log(f"⚠ 악몽의섬 주간 초기화 실패: {e!r}")
             except Exception: pass
         finally:
-            self.after(600000, self._night_week_reset)   # 10분마다 확인
+            # 1분마다 확인 — 금 23:50 을 놓치지 않게 (확인 자체는 거의 공짜)
+            self.after(60000, self._night_week_reset)
+
+    def _night_reset_setting(self):
+        """금요일 자동 초기화에 쓸 값 — 메인런처에서 고른 것 (없으면 4시간→2시간 6회).
+        (first_4h, 반복시간, 횟수)"""
+        try:
+            d = self.cfg.get("night_reset") or {}
+            return (bool(d.get("first", True)),
+                    int(d.get("h") or 2), int(d.get("n") or 6))
+        except Exception:
+            return (True, 2, 6)
+
+    def _night_reset_save(self, first=None, h=None, n=None):
+        d = dict(self.cfg.get("night_reset") or {})
+        if first is not None: d["first"] = bool(first)
+        if h is not None:     d["h"] = int(h)
+        if n is not None:     d["n"] = int(n)
+        self.cfg["night_reset"] = d
+        save_cfg(self.cfg)
+
+    # ── 📅 요일마다 그 날 던전 탭으로 ────────────────────────────────────
+    def _day_tab_index(self, when=None):
+        """오늘(또는 준 날짜) 요일에 맞는 슬롯판 탭 번호."""
+        try:
+            import datetime as _dt
+            wd = (when or _dt.datetime.now()).weekday()
+            want = DAY_DUNGEON.get(wd)
+            for i, (_d, _lb, k, _c) in enumerate(self.DUN_TABS):
+                if k == want:
+                    return i
+        except Exception:
+            pass
+        return 0
+
+    def _day_tab_tick(self):
+        """날짜가 바뀌면 그 날 던전 탭으로 바꿔준다.
+
+        **사용자가 손으로 바꾼 탭은 그 날 안에는 건드리지 않는다** —
+        요일이 넘어갔을 때만 자동으로 옮긴다."""
+        try:
+            import datetime as _dt
+            today = _dt.date.today()
+            if getattr(self, "_day_tab_day", None) != today:
+                self._day_tab_day = today
+                i = self._day_tab_index()
+                self._dun_switch(i)
+                _lb = self.DUN_TABS[i][1]
+                self._rep_log(f"📅 {['월','화','수','목','금','토','일'][today.weekday()]}"
+                              f"요일 — 슬롯판을 '{_lb}' 로 열었습니다")
+        except Exception:
+            pass
+        finally:
+            self.after(300000, self._day_tab_tick)     # 5분마다 날짜만 확인
+
+    def _night_reset_pick(self):
+        """드롭다운에서 고른 초기화 값을 저장한다 (금요일 자동 초기화도 이 값을 쓴다)."""
+        try:
+            first = (self._nrs_first.get() != "없음")
+            h = int(self._nrs_h.get().replace("시간", "") or 2)
+            n = int(self._nrs_n.get().replace("회", "") or 6)
+            self._night_reset_save(first, h, n)
+            _t = (f"{self.REPEAT_FIRST.get(NIGHT_RESET_KEY, h)}시간 1회 + {h}시간 {n-1}회"
+                  if first and n > 1 else f"{h}시간 {n}회")
+            self.status.set(f"🔄 초기화 값: {_t} — [🔄 16슬롯 적용] 을 누르면 지금 반영, "
+                            f"금요일 {NIGHT_RESET_HH}:{NIGHT_RESET_MM:02d} 에도 이 값으로")
+        except Exception:
+            pass
+
+    def _night_rearm_pick(self):
+        """고른 값으로 16슬롯 설정을 지금 초기화한다 (예약은 걸지 않는다)."""
+        if self.NIGHT_KEY != NIGHT_RESET_KEY:
+            self.status.set("이 버튼은 악몽의섬에서만 씁니다 (탭을 악몽의섬으로)")
+            return
+        first, h, n = self._night_reset_setting()
+        self._night_rearm_all_impl(first, key=NIGHT_RESET_KEY, h=h, n=n)
 
     def _night_rearm_all(self, first_4h):
         if self.NIGHT_KEY != "토요일_악몽의섬":
@@ -4935,17 +5056,19 @@ class App(tk.Tk):
             return
         return self._night_rearm_all_impl(first_4h)
 
-    def _night_rearm_all_impl(self, first_4h):
+    def _night_rearm_all_impl(self, first_4h, key=None, h=None, n=None):
         """악몽의섬 16슬롯의 '설정만' 기본값으로 되돌린다.
         first_4h=True  → 4시간 → 2시간 6회 (기본값)
         first_4h=False → 처음부터 2시간 6회
         **반복(⏰)을 켜지는 않는다** — 반복은 사용자가 실행했을 때만 걸린다
         (2026-08-23 사용자 지시, 절대 규칙)."""
+        key = key or self.NIGHT_KEY      # 부르는 쪽이 던전을 콕 집어줄 수 있다
         try:
-            h, n = self._rep_hn(self.NIGHT_KEY)          # 코드 기본값 2시간 6회
-            f = int(self.REPEAT_FIRST.get(self.NIGHT_KEY, h) or h) if first_4h else h
+            _h, _n = self._rep_hn(key)   # 코드 기본값 2시간 6회
+            h = int(h or _h); n = int(n or _n)          # 코드 기본값 2시간 6회
+            f = int(self.REPEAT_FIRST.get(key, h) or h) if first_4h else h
             cfg = self._island_cfg()
-            slots = cfg.get(self.NIGHT_KEY) or []
+            slots = cfg.get(key) or []
             st = self._rep_load()
             md = st.get("_mode") or {}
             fd = st.get("_first") or {}
@@ -4954,9 +5077,9 @@ class App(tk.Tk):
                 if not (isinstance(sl, dict) and any(sl.get("coords") or [])):
                     continue
                 sl["repeat_h"] = h; sl["repeat_n"] = n     # 주기는 항상 2시간
-                md[f"{self.NIGHT_KEY}|{i}"] = "first" if first_4h else "h2"
-                fd[f"{self.NIGHT_KEY}|{i}"] = bool(first_4h)
-                st.pop(f"{self.NIGHT_KEY}|{i}", None)      # 걸려 있던 예약은 지운다
+                md[f"{key}|{i}"] = "first" if first_4h else "h2"
+                fd[f"{key}|{i}"] = bool(first_4h)
+                st.pop(f"{key}|{i}", None)      # 걸려 있던 예약은 지운다
                 cnt += 1
             st["_mode"] = md
             st["_first"] = fd
@@ -4969,7 +5092,7 @@ class App(tk.Tk):
                 path = os.path.join(BASE, "island_coords.json")
                 with open(path, encoding="utf-8") as fp:
                     _disk = json.load(fp)
-                _sl = _disk.get(self.NIGHT_KEY) or []
+                _sl = _disk.get(key) or []
                 for i, sl in enumerate(slots):
                     if i >= len(_sl):
                         break
@@ -4983,7 +5106,7 @@ class App(tk.Tk):
             except Exception as e:
                 self._rep_log(f"⚠ 악몽의섬 설정 저장 실패: {e!r}")
             _t = f"{f}시간 → {h}시간" if f != h else f"{h}시간"
-            self._rep_log(f"{self.NIGHT_KEY} — {cnt}개 슬롯 설정 초기화 "
+            self._rep_log(f"{key} — {cnt}개 슬롯 설정 초기화 "
                           f"({_t} {n}회). 반복은 켜지 않음 (사용자)")
             self.status.set(f"🔄 악몽의섬 {cnt}개 슬롯 설정 초기화 — {_t} {n}회. "
                             f"반복은 [실행] 을 눌렀을 때 걸립니다")
