@@ -1480,9 +1480,18 @@ NIGHT_RESET_MM  = 50
 # **그 층이 보일 때만** 오토를 누른다. 안 보이면 그 슬롯은 거기서 끝.
 FLOOR_GATE  = {"dragon": 7}    # 이 좌표번호(1부터)를 누르기 **직전** 에 층을 확인
 FLOOR_LIST  = (5, 6, 7)        # 고를 수 있는 층
-FLOOR_MATCH = 0.70             # 층 글씨 기준 (작은 글씨라 조금 높게 잡는다)
-FLOOR_RATIO = 1.06             # 1등이 2등보다 이만큼은 높아야 그 층으로 인정
+# 층 글씨 기준. **층을 가리는 것은 이 값이 아니라 아래 '겨루기'다.**
+# 이 값은 '글씨가 보이기는 하는가' 만 본다 — 너무 높으면 진짜 층도 버린다.
+# 실측 2026-09-16 (진짜 7층 화면): 5층 0.644 · 6층 0.595 · 7층 0.691
+#   → 0.70 이면 **진짜 7층도 기준 미만으로 막혔다.** 그래서 0.60 으로 내렸다.
+#   0.60 에서도 5층(0.644)은 '1등이 아니라서' 걸러진다 (겨루기가 막아준다).
+FLOOR_MATCH = 0.60
+FLOOR_RATIO = 1.06             # 1등이 2등보다 이만큼은 높아야 그 층으로 인정 (실측 1.074배)
 FLOOR_TRIES = 3                # 못 보면 몇 번까지 다시 볼지
+# 🚫 이 층으로 지정된 슬롯은 **층이 맞더라도 오토(FLOOR_GATE 좌표)를 절대 누르지 않는다.**
+# 2026-09-16 사용자 지시: "특히 용의계곡 7층에서는 좌표를 눌러서는 안 돼, 절대 오토를 누르면 안 돼."
+# 좌표1~6 까지만 하고 그 슬롯은 거기서 끝난다 (다른 슬롯은 계속).
+FLOOR_NO_AUTO = {"dragon": (7,)}
 FLOOR_WAIT  = (0.6, 1.0)       # 다시 보기까지 쉬는 시간(초) — 사람처럼 랜덤
 FLOOR_PAD   = 12               # 저장해둔 자리 둘레로 이만큼 더 넓게 훑는다(px)
 FLOOR_MIN_STD = 3.0            # 이보다 밋밋한(무늬 없는) 그림은 쓰지 않는다 — 아래 설명
@@ -8308,22 +8317,32 @@ class App(tk.Tk):
         """슬롯이 갈 층을 고르는 드롭다운 (오만 주문서 고르는 것과 같은 방식).
 
         고르는 즉시 저장된다. '안함' 이면 층 확인을 하지 않는다(예전과 동일)."""
-        names = [self.FLOOR_NONE] + [f"{f}층" for f in FLOOR_LIST]
+        # 오토 금지 층은 이름 뒤에 🚫 를 붙여 한눈에 보이게 한다
+        _no = FLOOR_NO_AUTO.get(fkey, ())
+        names = [self.FLOOR_NONE] + [f"{f}층" + ("🚫" if f in _no else "")
+                                     for f in FLOOR_LIST]
         cur = self._slot_floor(fkey, si)
-        v = tk.StringVar(value=(f"{cur}층" if cur else self.FLOOR_NONE))
+        # 보이는 이름에서 숫자만 뽑는다 — 🚫 가 붙어 있어도 제대로 읽어야 한다
+        # (안 그러면 '7층🚫' 를 골랐을 때 '안함' 으로 저장되는 사고가 난다)
+        def _num(t):
+            m = re.match(r"\s*(\d+)\s*층", str(t))
+            return int(m.group(1)) if m else 0
+        v = tk.StringVar(value=next((n for n in names if _num(n) == cur and cur),
+                                    self.FLOOR_NONE))
         om = tk.OptionMenu(parent, v, *names)
         om.config(font=("맑은 고딕", 7), width=width, pady=0, highlightthickness=0)
 
         def _save(*_a, f=fkey, i=si, var=v, w=om):
-            t = var.get()
-            fl = int(t[:-1]) if t.endswith("층") and t[:-1].isdigit() else 0
+            fl = _num(var.get())
             self._set_slot_floor(f, i, fl)
             try:
                 w.config(fg=("#117864" if fl else "#7f8c8d"))
             except Exception:
                 pass
             self.status.set(f"🏢 #{i+1:02d} — "
-                            + (f"{fl}층일 때만 오토를 누릅니다" if fl
+                            + ("오토를 누르지 않습니다 (오토 금지 층)"
+                               if fl in FLOOR_NO_AUTO.get(f, ())
+                               else f"{fl}층일 때만 오토를 누릅니다" if fl
                                else "층 확인 안 함"))
         v.trace_add("write", _save)
         om.config(fg=("#117864" if cur else "#7f8c8d"))
@@ -8345,9 +8364,16 @@ class App(tk.Tk):
             fl = self._slot_floor(fkey, si) if si >= 0 else 0
             if not fl:
                 return True                       # 이 슬롯은 층 확인을 안 쓴다
+            nm = (slot or {}).get("name", f"#{si+1}")
+            # 🚫 오토 금지 층 — 층이 맞든 아니든 **여기서 무조건 끝낸다.**
+            #    (2026-09-16 사용자 지시: 용의계곡 7층은 절대 오토를 누르면 안 된다)
+            if fl in FLOOR_NO_AUTO.get(fkey, ()):
+                click_log(f"{fkey} [{nm}] 🚫 {fl}층은 오토 금지 — "
+                          f"좌표{j+1}(오토)를 누르지 않고 이 슬롯 끝")
+                self.status.set(f"🚫 [{nm}] {fl}층 — 오토를 누르지 않습니다")
+                return False
             if not floor_img_list(fkey, fl):
                 return True                       # 그 층 그림이 아직 없다
-            nm = (slot or {}).get("name", f"#{si+1}")
             best, why, last = 0.0, "", {}
             for t in range(FLOOR_TRIES):
                 last = floor_scores(fkey, coord)
