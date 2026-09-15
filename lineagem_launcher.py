@@ -1485,6 +1485,7 @@ FLOOR_RATIO = 1.06             # 1등이 2등보다 이만큼은 높아야 그 �
 FLOOR_TRIES = 3                # 못 보면 몇 번까지 다시 볼지
 FLOOR_WAIT  = (0.6, 1.0)       # 다시 보기까지 쉬는 시간(초) — 사람처럼 랜덤
 FLOOR_PAD   = 12               # 저장해둔 자리 둘레로 이만큼 더 넓게 훑는다(px)
+FLOOR_MIN_STD = 3.0            # 이보다 밋밋한(무늬 없는) 그림은 쓰지 않는다 — 아래 설명
 
 
 def floor_img_path(fkey, fl):
@@ -1557,11 +1558,32 @@ def _floor_grab(fkey, coord):
     return big
 
 
+def floor_img_flat(path):
+    """그 그림이 **무늬가 없는지**(단색에 가까운지). 그런 그림은 쓰면 안 된다.
+
+    ⚠ 2026-09-16 실측: 빈 화면을 잘라 등록한 `dragon_floor05.png`(단색)이
+    **아무 화면에서나 1.000** 이 나왔다. 그러면 그 층으로 지정한 슬롯은
+    엉뚱한 층에서도 오토를 누르고, 반대로 진짜 층은 1등을 못 잡아 영영 막힌다.
+    (단색 템플릿은 분산이 0이라 어디든 완벽히 맞는 것으로 계산된다)"""
+    try:
+        import cv2, numpy as np
+        im = cv2.imdecode(np.fromfile(path, np.uint8), cv2.IMREAD_COLOR)
+        if im is None:
+            return True
+        return float(im.std()) < FLOOR_MIN_STD
+    except Exception:
+        return False
+
+
 def _floor_score(big, fkey, fl):
     """그 화면에서 'N층' 그림이 얼마나 맞는지 (0.0~1.0). 여러 장이면 제일 높은 값."""
     import cv2, numpy as np
     best = 0.0
     for p in floor_img_list(fkey, fl):
+        if floor_img_flat(p):
+            click_log(f"🏢 {os.path.basename(p)} 는 무늬가 없어(단색) 쓰지 않습니다 "
+                      f"— 그 층 글씨를 다시 등록해주세요")
+            continue                              # 단색 그림은 아예 쓰지 않는다
         tpl = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
         if tpl is None:
             continue
@@ -6909,7 +6931,9 @@ class App(tk.Tk):
             row = tk.Frame(body); row.pack(fill="x", pady=2)
             tk.Label(row, text=f"{fl}층", font=("맑은 고딕", 10, "bold"),
                      width=5, fg="#117864").pack(side="left")
-            n = len(floor_img_list(fkey, fl))
+            _lst = floor_img_list(fkey, fl)
+            _bad = [p for p in _lst if floor_img_flat(p)]
+            n = len(_lst) - len(_bad)
             b = tk.Button(row, font=("맑은 고딕", 8, "bold"), width=14,
                           text=(f"🏢 {n}장 — 더 넣기" if n else "🏢 등록 (드래그)"),
                           bg=("#117864" if n else "#5d6d7e"), fg="white")
@@ -6919,6 +6943,9 @@ class App(tk.Tk):
             tk.Button(row, text="✖ 삭제", font=("맑은 고딕", 8), bg="#c0392b", fg="white",
                       command=lambda f=fkey, l=fl: self._del_floor_image(f, l)
                       ).pack(side="left", padx=2)
+            if _bad:
+                tk.Label(row, text="⚠ 무늬 없는 그림 — 다시 등록", font=("맑은 고딕", 7),
+                         fg="#c0392b").pack(side="left", padx=(4, 0))
         ar = floor_area(fkey)
         tk.Label(win, font=("맑은 고딕", 8), fg="#888",
                  text=(f"훑을 자리: 창 기준 {ar[0]},{ar[1]} · {ar[2]}×{ar[3]} (+{FLOOR_PAD}px)"
@@ -6959,18 +6986,31 @@ class App(tk.Tk):
             from PIL import ImageGrab
             im = ImageGrab.grab(bbox=(x, y, x + w, y + h),
                                 all_screens=True).convert("RGB")
-            if os.path.exists(floor_img_path(fkey, fl)):
+            # 공용 그림이 **무늬 없는 것(못 쓰는 것)** 이면 '없는 셈' 치고 그 자리를 덮어쓴다.
+            # 안 그러면 다시 찍은 그림이 '전용 추가분' 으로 밀려나고 망가진 공용이 남는다.
+            if (os.path.exists(floor_img_path(fkey, fl))
+                    and not floor_img_flat(floor_img_path(fkey, fl))):
                 # 공용이 이미 있으면 이 컴퓨터 전용으로 한 장 더 (다른 배경 대비)
                 n = 0
                 while n < IMG_MAX - 1 and os.path.exists(floor_mine_path(fkey, fl, n)):
                     n += 1
                 os.makedirs(IMG_DIR_MINE, exist_ok=True)
-                im.save(floor_mine_path(fkey, fl, n))
+                saved = floor_mine_path(fkey, fl, n)
+                im.save(saved)
                 msg = f"🏢 {fl}층 — 이 컴퓨터 전용으로 한 장 더 추가 ({w}×{h})"
             else:
                 os.makedirs(IMG_DIR, exist_ok=True)
-                im.save(floor_img_path(fkey, fl))
+                saved = floor_img_path(fkey, fl)
+                im.save(saved)
                 msg = f"🏢 {fl}층 그림 저장 ({w}×{h})"
+            # 무늬 없는 곳을 잘랐으면 **바로 알려준다** — 그대로 두면 아무 층에서나 1.00 이 나와
+            # 엉뚱한 층에서 오토가 눌린다 (2026-09-16 실측 사고).
+            if floor_img_flat(saved):
+                try: os.remove(saved)          # 위험하므로 저장하지 않는다
+                except Exception: pass
+                self.status.set(f"⚠ {fl}층 — 무늬가 없는 자리를 잘랐습니다 (저장 안 함). "
+                                f"'{fl}층' 글씨가 들어가게 다시 드래그해주세요")
+                self._open_floor_win(fkey); return
             # 그 자리를 '클라 창 기준' 으로 기억해둔다 — 다음부터 그 둘레만 훑는다
             try:
                 rc = client_rect_at(x + w // 2, y + h // 2)
