@@ -6545,9 +6545,6 @@ class App(tk.Tk):
             # (위 '붙여넣을 글' 은 그 줄이 비어 있을 때 쓰는 공통값으로 남는다)
             if fkey == "incoupon":
                 self._build_slot_memo(parent, fkey, color)
-        if fkey in FLOOR_GATE:
-            # 🏢 슬롯마다 갈 층 — 오토 누르기 직전에 이 층이 맞는지 확인한다
-            self._build_floor_rows(parent, fkey, color)
         dr = tk.Frame(parent); dr.pack(pady=3)
         setattr(self, f"_{fkey}_stop", False)
         run = tk.Button(dr, text="▶  실행",
@@ -8033,7 +8030,7 @@ class App(tk.Tk):
 
     FLOOR_NONE = "안함"
 
-    def _floor_menu(self, parent, fkey, si, width=5):
+    def _floor_menu(self, parent, fkey, si, width=5, side="left"):
         """슬롯이 갈 층을 고르는 드롭다운 (오만 주문서 고르는 것과 같은 방식).
 
         고르는 즉시 저장된다. '안함' 이면 층 확인을 하지 않는다(예전과 동일)."""
@@ -8041,7 +8038,7 @@ class App(tk.Tk):
         cur = self._slot_floor(fkey, si)
         v = tk.StringVar(value=(f"{cur}층" if cur else self.FLOOR_NONE))
         om = tk.OptionMenu(parent, v, *names)
-        om.config(font=("맑은 고딕", 8), width=width, pady=0, highlightthickness=0)
+        om.config(font=("맑은 고딕", 7), width=width, pady=0, highlightthickness=0)
 
         def _save(*_a, f=fkey, i=si, var=v, w=om):
             t = var.get()
@@ -8056,27 +8053,11 @@ class App(tk.Tk):
                                else "층 확인 안 함"))
         v.trace_add("write", _save)
         om.config(fg=("#117864" if cur else "#7f8c8d"))
-        om.pack(side="left", padx=3)
+        if side == "top":
+            om.pack(pady=(2, 0))
+        else:
+            om.pack(side="left", padx=3)
         return om
-
-    def _build_floor_rows(self, parent, fkey, color):
-        """16슬롯의 '갈 층' 을 한 판에서 고른다 (2026-09-15 사용자 요청)."""
-        box = tk.LabelFrame(parent, text=" 🏢 슬롯마다 갈 층 (그 층일 때만 오토) ",
-                            font=("맑은 고딕", 9, "bold"), fg=color, bd=2, relief="groove")
-        box.pack(fill="x", padx=6, pady=(2, 4))
-        body = tk.Frame(box); body.pack(fill="x", padx=4, pady=3)
-        key = self._grid_spec(fkey)["key"]
-        slots = self.cfg.get(key) or []
-        n = max(len(slots), 16)
-        for i in range(n):
-            col = tk.Frame(body)
-            col.grid(row=i % ((n + 1) // 2), column=i // ((n + 1) // 2),
-                     sticky="w", padx=(0, 10))
-            nm = (slots[i].get("name", "미등록") if i < len(slots) else "미등록")
-            tk.Label(col, text=f"{i+1:02d} {nm[:7]}", font=("맑은 고딕", 8),
-                     width=11, anchor="w").pack(side="left")
-            self._floor_menu(col, fkey, i, width=4)
-        return box
 
     def _floor_ok(self, fkey, j, coord, slot):
         """이 자리가 '층 확인 관문'이면 그 슬롯의 층이 보이는지 확인한다.
@@ -14034,6 +14015,11 @@ class App(tk.Tk):
             tk.Button(cell, textvariable=sv, font=("맑은 고딕", 8, "bold"),
                       bg=sp["color"], fg="white", width=10,
                       command=lambda x=idx, f=fkey: self._open_grid_slot(f, x)).pack(pady=(3, 0))
+            if fkey in FLOOR_GATE:
+                # 🏢 그 슬롯이 갈 층 — **좌표 바로 밑**에 둔다 (2026-09-15 사용자 지시:
+                # "각각 좌표 밑에 넣어줘, 왜 위로 따로 두냐 관리 힘들게").
+                # 여기서 고른 층일 때만 오토를 누른다. '안함' 이면 예전과 동일.
+                self._floor_menu(cell, fkey, idx, width=6, side="top")
             tk.Button(cell, text="▶ 실행", font=("맑은 고딕", 7), bg="#1e8449", fg="white", width=10,
                       command=lambda x=idx, f=fkey: self._grid_spec(f)["test"](x)).pack(pady=(2, 1))
             row3 = tk.Frame(cell); row3.pack(pady=(0, 1))
@@ -14076,18 +14062,16 @@ class App(tk.Tk):
             save_cfg(self.cfg)
         ent.bind("<FocusOut>", _save_name); ent.bind("<Return>", _save_name)
         if fkey in FLOOR_GATE:
-            # 🏢 이 캐릭이 갈 층 — 오토(좌표N) 누르기 직전에 이 층이 맞는지 확인한다.
-            #     '안함' 이면 확인하지 않는다 (예전과 똑같이 동작).
-            fr = tk.Frame(win); fr.pack(fill="x", padx=10, pady=(0, 4))
-            tk.Label(fr, text="🏢 갈 층:", font=("맑은 고딕", 9, "bold"),
-                     fg="#117864").pack(side="left")
-            self._floor_menu(fr, fkey, idx)
-            tk.Label(fr, text="그 층일 때만 오토를 누릅니다", font=("맑은 고딕", 8),
-                     fg="#888").pack(side="left", padx=(4, 0))
+            # 🏢 갈 층은 **슬롯 칸의 좌표 바로 밑** 한 군데서만 고른다 (2026-09-15 지시).
+            #    여기서 또 고르게 하면 관리가 두 군데로 갈려서 안내만 남긴다.
+            _fl = self._slot_floor(fkey, idx)
             _miss = [f for f in FLOOR_LIST if not floor_img_list(fkey, f)]
-            if _miss:
-                tk.Label(fr, text="그림 없음: " + ",".join(f"{f}층" for f in _miss),
-                         font=("맑은 고딕", 7), fg="#c0392b").pack(side="left", padx=(6, 0))
+            tk.Label(win, font=("맑은 고딕", 8), fg=("#117864" if _fl else "#888"),
+                     text=("🏢 갈 층: " + (f"{_fl}층 — 그 층일 때만 오토를 누릅니다"
+                                           if _fl else "안함 (슬롯 칸의 좌표 밑에서 고릅니다)")
+                           + (" · 그림 없음: " + ",".join(f"{f}층" for f in _miss)
+                              if _miss else ""))
+                     ).pack(padx=10, pady=(0, 2))
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         st["pop_vars"] = []; st["pop_btns"] = []; st["pop_pvars"] = []
         locked = sp.get("locked", ())
