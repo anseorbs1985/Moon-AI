@@ -1444,6 +1444,15 @@ def img_mine_free(fkey, j):
     return IMG_MAX - 1
 
 
+# ── 🐢 버퍼링 없애기 (2026-09-16 사용자 신고: "메인런처 클릭·창 띄우기가 너무 버벅인다") ──
+# 원인 실측: 퍼플 팝업 감시가 **UI 스레드에서** 화면을 긁었다 — 한 번 64ms × 2초마다.
+#   = 1분에 1.9초 동안 창이 멈춘다. 로컬(더 느린 PC·큰 화면)은 훨씬 심하다.
+# 게다가 판정 허용오차가 ±30 이라 어두운 화면을 팝업으로 오인해 **제멋대로 클릭**했다.
+# → ① 기본 꺼짐 ② 켜도 백그라운드에서 ③ 허용오차 ±8 ④ 주기 4초.
+PURPLE_POPUP_MS  = 4000    # 감시 주기(ms) — 켰을 때만
+PURPLE_POPUP_TOL = 8       # 색 허용오차. 키우면 또 오인한다 (±30 이 사고의 원인이었다)
+PURPLE_AD_MS     = 5000    # 퍼플 광고창 닫기 주기(ms) — 창만 닫아 커서와 무관
+
 # ── 📅 요일마다 슬롯판이 '그 날 던전' 으로 열린다 (2026-09-15 사용자 지시) ────
 # 사용자: "토요일엔 악몽의섬, 월요일엔 잊혀진섬, 수목금은 오만의탑, 화요일은 에카가
 #          뜨게 해줘. 지금은 악몽의섬이 계속 앞에 있어서 그것만 떠 있다."
@@ -10668,6 +10677,11 @@ class App(tk.Tk):
     def _memo_tick(self):
         try:
             ons, txts, poss = self._memo_lists()
+            # 켜둔 메모가 하나도 없고 떠 있는 것도 없으면 **아무 일도 하지 않는다.**
+            # 0.3초마다 도는 틱이라, 할 일이 없을 때 쉬는 것만으로 부담이 크게 준다.
+            if not any(ons) and not (getattr(self, "_memo_wins", None) or {}):
+                self.after(1000, self._memo_tick)
+                return
             if getattr(self, "_memo_wins", None) is None:
                 self._memo_wins = {}
             # 매크로/작업 실행 중엔 메모를 아예 숨김 — 자동 클릭을 가로채지 않게
@@ -11088,30 +11102,49 @@ class App(tk.Tk):
         """(2026-08-11) 퍼플을 켜면 아래에 뜨는 팝업을 상시 감시해서 바로 닫는다.
         · 다른 작업이 돌고 있으면 건드리지 않는다 (클릭 충돌 방지)
         · 사용자가 마우스를 쓰는 중이면 다음 기회에 (커서를 뺏지 않게)"""
+        # 🚫 기본은 **꺼짐** (2026-09-16 — 버퍼링·오클릭의 주범이었다).
+        #    켜려면 coords.json 의 `purple_popup_on` 을 true 로.
+        if not self.cfg.get("purple_popup_on", False):
+            self.after(5000, self._purple_popup_tick)   # 꺼져 있으면 비용 0
+            return
         try:
             det = self.cfg.get("purple_popup_detect")
             col = self.cfg.get("purple_popup_color")
             cls = self.cfg.get("purple_popup_close")
             if det and col and cls and not self._is_busy():
-                from PIL import ImageGrab
-                x, y = int(det[0]), int(det[1])
-                px = ImageGrab.grab(bbox=(x, y, x + 1, y + 1)).convert("RGB").getpixel((0, 0))
-                if (abs(px[0] - col[0]) <= 30 and abs(px[1] - col[1]) <= 30
-                        and abs(px[2] - col[2]) <= 30):
-                    p0 = pyautogui.position()
-                    time.sleep(0.15)
-                    if pyautogui.position() == p0:      # 마우스가 멈춰 있을 때만
-                        back = pyautogui.position()
-                        chk = self.cfg.get("purple_popup_checkbox")
-                        if chk:
-                            pyautogui.click(*chk); time.sleep(0.35)
-                        pyautogui.click(*cls); time.sleep(0.2)
-                        try: pyautogui.moveTo(*back)    # 커서 원위치
-                        except Exception: pass
-                        self.status.set("✔ 퍼플 팝업 자동으로 닫음")
+                # 화면 긁기는 **백그라운드에서** — UI 스레드에서 하면 그때마다 창이 멈춘다
+                # (실측 64ms × 2초마다 = 1분에 1.9초 멈춤. 로컬은 더 느리다.)
+                threading.Thread(target=self._purple_popup_check,
+                                 args=(det, col, cls), daemon=True).start()
         except Exception:
             pass
-        self.after(2000, self._purple_popup_tick)
+        self.after(PURPLE_POPUP_MS, self._purple_popup_tick)
+
+    def _purple_popup_check(self, det, col, cls):
+        """퍼플 팝업인지 보고 맞으면 닫는다 — **백그라운드 스레드**에서 돈다."""
+        try:
+            from PIL import ImageGrab
+            x, y = int(det[0]), int(det[1])
+            px = ImageGrab.grab(bbox=(x, y, x + 1, y + 1)).convert("RGB").getpixel((0, 0))
+            # ⚠ 허용오차가 ±30 이라 **어두운 화면이면 거의 다 통과**했다.
+            #    실측 2026-09-16: 기준색 [13,15,18] · 실제 [30,31,33] → 오인 → 자동 클릭.
+            #    그래서 ±8 로 좁혔다. 이 값을 다시 키우지 말 것.
+            if not all(abs(px[i] - col[i]) <= PURPLE_POPUP_TOL for i in range(3)):
+                return
+            p0 = pyautogui.position()
+            time.sleep(0.15)
+            if pyautogui.position() != p0:      # 마우스를 쓰는 중이면 다음 기회에
+                return
+            back = pyautogui.position()
+            chk = self.cfg.get("purple_popup_checkbox")
+            if chk:
+                pyautogui.click(*chk); time.sleep(0.35)
+            pyautogui.click(*cls); time.sleep(0.2)
+            try: pyautogui.moveTo(*back)        # 커서 원위치
+            except Exception: pass
+            self.after(0, lambda: self.status.set("✔ 퍼플 팝업 자동으로 닫음"))
+        except Exception:
+            pass
 
     def _purple_ad_tick(self):
         """(2026-08-13) 퍼플 광고창('소식')이 뜨면 마우스를 전혀 쓰지 않고 그 창만 닫는다.
@@ -11136,14 +11169,15 @@ class App(tk.Tk):
             win32gui.EnumWindows(_cb, None)
             for hwnd, t in targets:
                 try:
-                    win32gui.SendMessageTimeout(hwnd, win32con.WM_CLOSE, 0, 0,
-                                                win32con.SMTO_ABORTIFHUNG, 1500)
+                    # **PostMessage** — 보내고 바로 돌아온다. 예전엔 SendMessageTimeout(1500ms)
+                    # 이라 퍼플 창이 멈춰 있으면 **런처가 1.5초 얼어붙었다** (2026-09-16).
+                    win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
                     self.status.set(f"✔ 퍼플 광고창 '{t}' 자동으로 닫음")
                 except Exception:
                     pass
         except Exception:
             pass
-        self.after(3000, self._purple_ad_tick)   # 3초마다 (부하 절반)
+        self.after(PURPLE_AD_MS, self._purple_ad_tick)
 
     def _auto_back_check(self, _e=None):
         """(2026-08-11) 메인런처 말고 다른 창(리니지M 클라·바탕화면 등)이 앞으로 오면

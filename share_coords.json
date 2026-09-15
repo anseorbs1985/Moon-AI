@@ -1,16 +1,35 @@
 {
-  "_설명": "로컬이 받을 좌표 항목. 값은 share_coords_data.json 에서 온다 (저장소 coords.json 은 더 이상 배포에 쓰지 않는다).",
-  "_keys": "받을 항목 이름. 단, 로컬에 **이미 찍어둔 좌표가 있으면 덮어쓰지 않는다** — 비어 있는 항목(새 런처)만 받는다.",
-  "_force": "일부러 갈아끼울 항목만 여기에 적는다. 로컬이 찍어둔 좌표를 지우고 메인 것으로 바꾼다 — 사용자가 콕 집어 말했을 때만 쓰고, 쓰고 나면 반드시 비운다.",
-  "_이번지시": "2026-09-14 사용자: '인사이드 쿠폰등록 런처만 전부 100% 여기랑 똑같이 강제로 가져와줘.' → 그래서 incoupon 세 항목을 force 에 넣었다. 로컬이 이미 찍어둔 incoupon 좌표가 있어도 메인 것으로 갈아끼운다. 다른 런처 좌표는 손대지 않는다. **적용이 확인되면 force 를 다시 비운다.**",
+  "_설명": "로컬이 받을 좌표 항목. 값은 share_coords_data.json 에서 온다.",
+  "_keys": "받을 항목. 로컬에 이미 찍어둔 좌표가 있으면 덮어쓰지 않는다 (비어 있는 항목만 받는다).",
+  "_force": "일부러 갈아끼울 항목. 로컬이 찍어둔 것을 지우고 메인 것으로 바꾼다. 쓰고 나면 비운다.",
+  "_이번지시": "2026-09-16 사용자: \"좌표등록에 대한 100% 똑같이 올려줘. 다른 곳에서 전혀 접속이 안 되고 다른 것들 클릭하고 난리다.\" → 접속 흐름 좌표 전부를 force 로 보낸다.",
   "keys": [
+    "pre_click1",
+    "pre_click2",
+    "lineagem",
+    "game_start",
+    "multiplay",
+    "profile_btn",
+    "confirm_hover",
+    "google_acc",
+    "confirm_btn",
+    "profile_reveal_btn",
+    "char_btns",
     "incoupon_slots",
     "incoupon_texts",
     "incoupon_text"
   ],
   "force": [
-    "incoupon_slots",
-    "incoupon_texts",
-    "incoupon_text"
+    "pre_click1",
+    "pre_click2",
+    "lineagem",
+    "game_start",
+    "multiplay",
+    "profile_btn",
+    "confirm_hover",
+    "google_acc",
+    "confirm_btn",
+    "profile_reveal_btn",
+    "char_btns"
   ]
 }
