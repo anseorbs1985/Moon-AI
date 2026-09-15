@@ -4567,31 +4567,34 @@ class App(tk.Tk):
         panel = tk.Frame(parent); panel.pack(anchor="w", fill="both", expand=True)
         self._night_panel = panel
         parent = panel                     # 아래는 전부 이 판 안에 그린다
-        hd = tk.Frame(parent); hd.pack(anchor="w", pady=(0, 2))
+        # 🎨 위 버튼줄은 얇게, 아래 16칸은 가운데로 — '중형 포켓' 처럼 (2026-09-16 요청).
+        #    모든 줄을 anchor 없이 pack 하면 **가장 넓은 것(16칸 판) 기준으로 가운데**에 놓인다.
+        hd = tk.Frame(parent); hd.pack(pady=(0, 2))
         self._night_title = tk.Label(hd, text="🏝 악몽의섬",
                                      font=("맑은 고딕", 9, "bold"), fg="#8e44ad")
         self._night_title.pack(side="left")
-        self._night_dbtn = tk.Button(hd, text="📤 따로", font=("맑은 고딕", 8, "bold"),
-                                     bg="#5d6d7e", fg="white",
+        self._night_dbtn = tk.Button(hd, text="📤", font=("맑은 고딕", 8, "bold"),
+                                     bg="#5d6d7e", fg="white", bd=0, padx=5, pady=1,
                                      command=self._night_detach_toggle)
-        self._night_dbtn.pack(side="left", padx=(6, 0))
-        tk.Button(hd, text="✔ 전체선택", font=("맑은 고딕", 8, "bold"),
+        self._night_dbtn.pack(side="left", padx=(5, 0))
+        tk.Button(hd, text="✔전체", font=("맑은 고딕", 7, "bold"),
                   bg="#e67e22", fg="white", activebackground="#ca6f1e",
-                  command=self._night_sel_all).pack(side="left", padx=(6, 0))
-        tk.Button(hd, text="▶ 선택실행", font=("맑은 고딕", 8, "bold"),
-                  bg="#1e8449", fg="white",
-                  command=self._run_night_sel).pack(side="left", padx=(4, 0))
-        tk.Button(hd, text="선택해제", font=("맑은 고딕", 8),
-                  bg="#95a5a6", fg="white",
-                  command=lambda: self._night_sel_clear()).pack(side="left", padx=(4, 0))
+                  bd=0, padx=5, pady=1,
+                  command=self._night_sel_all).pack(side="left", padx=(5, 0))
+        tk.Button(hd, text="▶선택실행", font=("맑은 고딕", 7, "bold"),
+                  bg="#1e8449", fg="white", bd=0, padx=5, pady=1,
+                  command=self._run_night_sel).pack(side="left", padx=(3, 0))
+        tk.Button(hd, text="해제", font=("맑은 고딕", 7),
+                  bg="#95a5a6", fg="white", bd=0, padx=5, pady=1,
+                  command=lambda: self._night_sel_clear()).pack(side="left", padx=(3, 0))
         # 던전 고르기 탭 — 넷 다 슬롯별로 실행할 수 있다 (2026-08-24)
-        tb = tk.Frame(parent); tb.pack(anchor="w", pady=(0, 2))
+        tb = tk.Frame(parent); tb.pack(pady=(0, 2))
         self._dun_tabs = []
         for i, (didx, label, key, col) in enumerate(self.DUN_TABS):
-            b_ = tk.Button(tb, text=label, font=("맑은 고딕", 8, "bold"),
-                           bg="#3a4149", fg="#9aa4b0", bd=0, padx=6, pady=2,
+            b_ = tk.Button(tb, text=label, font=("맑은 고딕", 7, "bold"),
+                           bg="#3a4149", fg="#9aa4b0", bd=0, padx=7, pady=2,
                            command=lambda k=i: self._dun_switch(k))
-            b_.pack(side="left", padx=(0, 3))
+            b_.pack(side="left", padx=(0, 2))
             self._dun_tabs.append(b_)
 
         # 반복을 16슬롯 전부 '지금부터' 다시 건다 (실행은 하지 않는다) — 제목 아랫줄
@@ -4599,32 +4602,31 @@ class App(tk.Tk):
         #    "4시간1회 2시간5회 이것도 메인에서 선택할 수 있게 해줘").
         #    고른 값은 저장돼서 **금요일 23:50 자동 초기화에도 그대로 쓰인다.**
         _fst, _h, _n = self._night_reset_setting()
-        rr2 = tk.Frame(parent); rr2.pack(anchor="w", pady=(0, 3))
-        tk.Label(rr2, text="첫", font=("맑은 고딕", 8), fg="#888").pack(side="left")
+        rr2 = tk.Frame(parent); rr2.pack(pady=(0, 2))
+        tk.Label(rr2, text="첫", font=("맑은 고딕", 7), fg="#888").pack(side="left")
         self._nrs_first = tk.StringVar(value=("4시간 1회" if _fst else "없음"))
         _om1 = tk.OptionMenu(rr2, self._nrs_first, "4시간 1회", "없음")
-        _om1.config(font=("맑은 고딕", 7), width=7, pady=0, highlightthickness=0)
-        _om1.pack(side="left", padx=(2, 4))
-        tk.Label(rr2, text="그 뒤", font=("맑은 고딕", 8), fg="#888").pack(side="left")
+        _om1.config(font=("맑은 고딕", 7), width=6, pady=0, bd=0, highlightthickness=0)
+        _om1.pack(side="left", padx=(2, 3))
+        tk.Label(rr2, text="뒤", font=("맑은 고딕", 7), fg="#888").pack(side="left")
         self._nrs_h = tk.StringVar(value=f"{_h}시간")
         _om2 = tk.OptionMenu(rr2, self._nrs_h, *[f"{x}시간" for x in range(1, 7)])
-        _om2.config(font=("맑은 고딕", 7), width=5, pady=0, highlightthickness=0)
-        _om2.pack(side="left", padx=(2, 2))
+        _om2.config(font=("맑은 고딕", 7), width=4, pady=0, bd=0, highlightthickness=0)
+        _om2.pack(side="left", padx=(2, 1))
         self._nrs_n = tk.StringVar(value=f"{_n}회")
         _om3 = tk.OptionMenu(rr2, self._nrs_n, *[f"{x}회" for x in range(1, 10)])
-        _om3.config(font=("맑은 고딕", 7), width=4, pady=0, highlightthickness=0)
-        _om3.pack(side="left", padx=(0, 4))
+        _om3.config(font=("맑은 고딕", 7), width=3, pady=0, bd=0, highlightthickness=0)
+        _om3.pack(side="left", padx=(0, 3))
         for _v in (self._nrs_first, self._nrs_h, self._nrs_n):
             _v.trace_add("write", lambda *_a: self._night_reset_pick())
-        tk.Button(rr2, text="🔄 16슬롯 적용", font=("맑은 고딕", 8, "bold"),
+        tk.Button(rr2, text="🔄 적용", font=("맑은 고딕", 7, "bold"),
                   bg="#196f3d", fg="white", activebackground="#145a32",
+                  bd=0, padx=6, pady=1,
                   command=self._night_rearm_pick).pack(side="left")
         tk.Label(parent,
-                 text=f"값만 바꾼다 (반복은 [실행] 때 걸림) · 금요일 "
-                      f"{NIGHT_RESET_HH}:{NIGHT_RESET_MM:02d} 에 이 값으로 자동 초기화 · "
-                      f"슬롯 하나만은 아래 칸 클릭",
-                 font=("맑은 고딕", 7), fg="#888").pack(anchor="w", pady=(0, 3))
-        wg = tk.Frame(parent); wg.pack(anchor="w")
+                 text=f"값만 바꿉니다 · 금 {NIGHT_RESET_HH}:{NIGHT_RESET_MM:02d} 자동 초기화",
+                 font=("맑은 고딕", 7), fg="#888").pack(pady=(0, 3))
+        wg = tk.Frame(parent); wg.pack()
         self._night_btns = []; self._night_plus = []; self._night_runbtns = []
         self._night_firstbtns = []      # 첫 회차 4시간/2시간 선택
         self._night_sel = set()
@@ -5079,7 +5081,7 @@ class App(tk.Tk):
             d.update({"on": True, "x": int(x), "y": int(y)})
             self.cfg["night_detach"] = d; save_cfg(self.cfg)
             if getattr(self, "_night_dbtn", None) is not None:
-                self._night_dbtn.config(text="📥 붙이기", bg="#117864")
+                self._night_dbtn.config(text="📥", bg="#117864")
             self.status.set("📤 슬롯판을 따로 뗐습니다 — 이 창만 앞으로 옵니다 "
                             "(✕ 나 [📥 붙이기] 로 되돌림)")
         except Exception as e:
@@ -5097,7 +5099,7 @@ class App(tk.Tk):
             d["on"] = False
             self.cfg["night_detach"] = d; save_cfg(self.cfg)
             if getattr(self, "_night_dbtn", None) is not None:
-                self._night_dbtn.config(text="📤 따로", bg="#5d6d7e")
+                self._night_dbtn.config(text="📤", bg="#5d6d7e")
             self.status.set("📥 슬롯판을 메인런처 안으로 되돌렸습니다")
         except Exception as e:
             self.status.set(f"📥 붙이기 실패: {e}")
