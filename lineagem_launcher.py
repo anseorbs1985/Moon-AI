@@ -1444,6 +1444,153 @@ def img_mine_free(fkey, j):
     return IMG_MAX - 1
 
 
+# ── 🏢 층 확인 — 오토를 누르기 전에 '그 캐릭이 갈 층' 이 맞는지 본다 ─────────
+# 2026-09-15 사용자 신고: 용의 계곡 던전은 5·6·7층이 있고 캐릭마다 갈 층이 정해져
+# 있는데, 좌표6 이 확인하던 그림(`dragon_06.png`)은 **"이동하시겠습니까? 취소/확인"**
+# 뿐이라 **층 정보가 한 글자도 없다.** 그래서 층이 틀려도 '확인됨' 이 되어
+# 오토(좌표7)가 눌리고 퀘스트가 깨졌다. 규칙이 아니라 '그림'이 문제였다.
+#
+# 화면 오른쪽 위 **'용의 계곡 던전 N층'** 은 자리가 고정이라 잡기 쉽다.
+# 층마다 그림 한 장씩 등록해두고, 슬롯마다 갈 층을 지정하면
+# **그 층이 보일 때만** 오토를 누른다. 안 보이면 그 슬롯은 거기서 끝.
+FLOOR_GATE  = {"dragon": 7}    # 이 좌표번호(1부터)를 누르기 **직전** 에 층을 확인
+FLOOR_LIST  = (5, 6, 7)        # 고를 수 있는 층
+FLOOR_MATCH = 0.70             # 층 글씨 기준 (작은 글씨라 조금 높게 잡는다)
+FLOOR_RATIO = 1.06             # 1등이 2등보다 이만큼은 높아야 그 층으로 인정
+FLOOR_TRIES = 3                # 못 보면 몇 번까지 다시 볼지
+FLOOR_WAIT  = (0.6, 1.0)       # 다시 보기까지 쉬는 시간(초) — 사람처럼 랜덤
+FLOOR_PAD   = 12               # 저장해둔 자리 둘레로 이만큼 더 넓게 훑는다(px)
+
+
+def floor_img_path(fkey, fl):
+    """층 그림 (공용 — 업데이트로 모든 컴퓨터에 배포된다)."""
+    return os.path.join(IMG_DIR, f"{fkey}_floor{int(fl):02d}.png")
+
+
+def floor_mine_path(fkey, fl, n):
+    """이 컴퓨터 전용 층 그림 — 업데이트가 덮어쓰지 않는다."""
+    return os.path.join(IMG_DIR_MINE, f"{fkey}_floor{int(fl):02d}_mine{n+1}.png")
+
+
+def floor_img_list(fkey, fl):
+    """그 층에서 찾아볼 그림 전부 (공용 1장 + 이 컴퓨터 전용 최대 4장)."""
+    out = []
+    try:
+        if os.path.exists(floor_img_path(fkey, fl)):
+            out.append(floor_img_path(fkey, fl))
+        for n in range(IMG_MAX):
+            p = floor_mine_path(fkey, fl, n)
+            if os.path.exists(p):
+                out.append(p)
+    except Exception:
+        pass
+    return out
+
+
+def floor_area_path(fkey):
+    """층 글씨가 뜨는 자리 (클라 창 왼쪽위 기준 dx,dy,w,h). 등록할 때 자동으로 잡힌다."""
+    return os.path.join(IMG_DIR, f"{fkey}_floor_area.json")
+
+
+def floor_area(fkey):
+    try:
+        with open(floor_area_path(fkey), encoding="utf-8") as f:
+            d = json.load(f) or {}
+        if int(d.get("w", 0)) > 0 and int(d.get("h", 0)) > 0:
+            return (int(d["dx"]), int(d["dy"]), int(d["w"]), int(d["h"]))
+    except Exception:
+        pass
+    return None
+
+
+def floor_area_save(fkey, dx, dy, w, h):
+    try:
+        os.makedirs(IMG_DIR, exist_ok=True)
+        with open(floor_area_path(fkey), "w", encoding="utf-8") as f:
+            json.dump({"dx": int(dx), "dy": int(dy),
+                       "w": int(w), "h": int(h)}, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def _floor_grab(fkey, coord):
+    """그 클라 창을 캡처하고, 등록해둔 '층 글씨 자리' 둘레만 잘라 돌려준다.
+
+    창을 **직접 캡처**(PrintWindow)하므로 런처가 앞에 있어도 정확하다 (2026-08-29 교훈)."""
+    big = grab_window(coord)
+    if big is None:
+        return None
+    ar = floor_area(fkey)
+    if ar:
+        dx, dy, w, h = ar
+        x1 = max(0, dx - FLOOR_PAD); y1 = max(0, dy - FLOOR_PAD)
+        x2 = min(big.shape[1], dx + w + FLOOR_PAD)
+        y2 = min(big.shape[0], dy + h + FLOOR_PAD)
+        if x2 - x1 > 4 and y2 - y1 > 4:
+            big = big[y1:y2, x1:x2]
+    return big
+
+
+def _floor_score(big, fkey, fl):
+    """그 화면에서 'N층' 그림이 얼마나 맞는지 (0.0~1.0). 여러 장이면 제일 높은 값."""
+    import cv2, numpy as np
+    best = 0.0
+    for p in floor_img_list(fkey, fl):
+        tpl = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+        if tpl is None:
+            continue
+        for sc in (1.00, 0.92, 1.08):            # 컴퓨터마다 창 크기가 달라서
+            t = (tpl if sc == 1.00 else
+                 cv2.resize(tpl, None, fx=sc, fy=sc, interpolation=cv2.INTER_AREA))
+            if t.shape[0] > big.shape[0] or t.shape[1] > big.shape[1]:
+                continue
+            v = float(cv2.minMaxLoc(cv2.matchTemplate(
+                big, t, cv2.TM_CCOEFF_NORMED))[1])
+            if v > best:
+                best = v
+    return best
+
+
+def floor_scores(fkey, coord):
+    """등록된 층 전부의 점수를 한 화면에서 재서 {층: 점수} 로 돌려준다.
+
+    ⚠ **절대 점수만으로 층을 가리면 안 된다.** '5층'과 '7층'은 '층' 글자가 같아서
+    틀린 층도 점수가 꽤 높게 나온다. 그래서 **같은 화면에서 세 층을 겨루게 하고
+    1등만 인정**한다 (이 저장소에서 이미 검증된 '배수 판정'과 같은 생각)."""
+    try:
+        big = _floor_grab(fkey, coord)
+        if big is None:
+            return {}
+        return {fl: _floor_score(big, fkey, fl)
+                for fl in FLOOR_LIST if floor_img_list(fkey, fl)}
+    except Exception:
+        return {}
+
+
+def floor_seen(fkey, fl, coord, sc_map=None):
+    """지금 화면이 **그 층이 맞는지**. (맞음?, 그 층 점수, 왜)
+
+    - 그 층 점수가 기준(FLOOR_MATCH) 을 넘어야 하고
+    - 등록된 층이 둘 이상이면 **그 층이 1등**이어야 하며 2등과 FLOOR_RATIO 배 차이가 나야 한다.
+    """
+    sc = floor_scores(fkey, coord) if sc_map is None else sc_map
+    if not sc or fl not in sc:
+        return False, 0.0, "그 층 그림이 없음"
+    mine = sc[fl]
+    if mine < FLOOR_MATCH:
+        return False, mine, f"기준 {FLOOR_MATCH} 미만"
+    others = [v for k, v in sc.items() if k != fl]
+    if others:
+        sec = max(others)
+        top = max(sc, key=lambda k: sc[k])
+        if top != fl:
+            return False, mine, f"{top}층이 더 높음({sec:.2f})"
+        if sec > 0 and mine < sec * FLOOR_RATIO:
+            return False, mine, f"{sec:.2f} 와 너무 비슷함"
+    return True, mine, "확인"
+
+
 PICKS = ["best", "top", "bottom", "left", "right"]
 PICK_TXT = {"best": "최고일치", "top": "맨위", "bottom": "맨아래",
             "left": "맨왼쪽", "right": "맨오른쪽"}
@@ -6398,6 +6545,9 @@ class App(tk.Tk):
             # (위 '붙여넣을 글' 은 그 줄이 비어 있을 때 쓰는 공통값으로 남는다)
             if fkey == "incoupon":
                 self._build_slot_memo(parent, fkey, color)
+        if fkey in FLOOR_GATE:
+            # 🏢 슬롯마다 갈 층 — 오토 누르기 직전에 이 층이 맞는지 확인한다
+            self._build_floor_rows(parent, fkey, color)
         dr = tk.Frame(parent); dr.pack(pady=3)
         setattr(self, f"_{fkey}_stop", False)
         run = tk.Button(dr, text="▶  실행",
@@ -6446,6 +6596,16 @@ class App(tk.Tk):
             tk.Button(dr, text="📁 그림폴더", font=("맑은 고딕", 8),
                       bg="#34495e", fg="white", width=9, height=2,
                       command=self._open_img_dir).pack(side="left", padx=(3, 0))
+            if fkey in FLOOR_GATE:
+                # 🏢 — 층마다 그림 한 장씩 등록한다 (오른쪽 위 '… N층' 글씨).
+                #      슬롯마다 갈 층을 정해두면 그 층일 때만 오토를 누른다.
+                _fn = sum(1 for _f in FLOOR_LIST if floor_img_list(fkey, _f))
+                fb = tk.Button(dr, text=(f"🏢 층그림 {_fn}/{len(FLOOR_LIST)}"
+                                         if _fn else "🏢 층그림"),
+                               font=("맑은 고딕", 8, "bold"), width=11, height=2,
+                               bg=("#117864" if _fn else "#5d6d7e"), fg="white")
+                fb.config(command=lambda f=fkey: self._open_floor_win(f))
+                fb.pack(side="left", padx=(3, 0))
             if fkey in SLEEP_WAKE:
                 # 😴 — '절전모드 화면'을 등록한다. 슬롯 시작 전에 이게 보이면
                 #      Z 를 한 번 눌러 깨우고 나서 평소대로 진행한다.
@@ -6479,6 +6639,158 @@ class App(tk.Tk):
                             "_못찾음_*.png 가 '그때 훑은 화면'입니다")
         except Exception as e:
             self.status.set(f"📁 열기 실패: {e}")
+
+    def _show_text_win(self, title, body):
+        """사용자가 직접 누른 버튼의 결과를 글로 보여주는 작은 창.
+        (실행 결과는 창을 띄우지 않는다 — 2026-08-27 규칙. 이건 누른 사람이 기다리는 것)"""
+        try:
+            w = tk.Toplevel(self); w.title(title); w.attributes("-topmost", True)
+            t = tk.Text(w, font=("맑은 고딕", 9), width=54, height=20)
+            t.pack(fill="both", expand=True, padx=8, pady=8)
+            t.insert("end", str(body)); t.config(state="disabled")
+            tk.Button(w, text="닫기", font=("맑은 고딕", 9), width=10,
+                      command=w.destroy).pack(pady=(0, 8))
+            apply_dark(w, bool(self.cfg.get("dark_ui", True)))
+        except Exception as e:
+            self.status.set(f"{title}: {e}")
+
+    # ── 🏢 층 그림 창 (2026-09-15) ──────────────────────────────────────
+    def _open_floor_win(self, fkey):
+        """층마다 그림 한 장씩 등록하는 창.
+
+        화면 오른쪽 위 **'용의 계곡 던전 N층'** 의 **'N층' 부분만** 작게 드래그한다.
+        글씨가 작아도 자리가 고정이라 잘 잡힌다 — 처음 등록할 때 그 자리를
+        클라 창 기준으로 함께 저장해서, 다음부터는 그 둘레만 훑는다(오탐 방지)."""
+        old = getattr(self, "_floor_win", None)
+        if old is not None and old.winfo_exists():
+            try: old.destroy()
+            except Exception: pass
+        win = tk.Toplevel(self); self._floor_win = win
+        win.title("🏢 층 그림 등록"); win.attributes("-topmost", True)
+        tk.Label(win, text="오른쪽 위 '용의 계곡 던전 N층' 의 **N층 글씨만** 드래그하세요",
+                 font=("맑은 고딕", 9, "bold"), fg="#117864").pack(padx=10, pady=(10, 2))
+        tk.Label(win, text="층마다 한 번씩. 슬롯 창에서 그 캐릭이 갈 층을 고르면,\n"
+                           "그 층이 보일 때만 오토를 누릅니다 (안 보이면 그 슬롯 중단).",
+                 font=("맑은 고딕", 8), fg="#888").pack(padx=10, pady=(0, 6))
+        body = tk.Frame(win); body.pack(padx=10, pady=4)
+        self._floor_btns = {}
+        for fl in FLOOR_LIST:
+            row = tk.Frame(body); row.pack(fill="x", pady=2)
+            tk.Label(row, text=f"{fl}층", font=("맑은 고딕", 10, "bold"),
+                     width=5, fg="#117864").pack(side="left")
+            n = len(floor_img_list(fkey, fl))
+            b = tk.Button(row, font=("맑은 고딕", 8, "bold"), width=14,
+                          text=(f"🏢 {n}장 — 더 넣기" if n else "🏢 등록 (드래그)"),
+                          bg=("#117864" if n else "#5d6d7e"), fg="white")
+            b.config(command=lambda f=fkey, l=fl, b_=b: self._grab_floor_image(f, l, b_))
+            b.pack(side="left", padx=3)
+            self._floor_btns[fl] = b
+            tk.Button(row, text="✖ 삭제", font=("맑은 고딕", 8), bg="#c0392b", fg="white",
+                      command=lambda f=fkey, l=fl: self._del_floor_image(f, l)
+                      ).pack(side="left", padx=2)
+        ar = floor_area(fkey)
+        tk.Label(win, font=("맑은 고딕", 8), fg="#888",
+                 text=(f"훑을 자리: 창 기준 {ar[0]},{ar[1]} · {ar[2]}×{ar[3]} (+{FLOOR_PAD}px)"
+                       if ar else "훑을 자리: 아직 없음 — 창 전체를 훑습니다")
+                 ).pack(padx=10, pady=(6, 2))
+        tk.Button(win, text="🔍 지금 16클라가 몇 층인지 확인", font=("맑은 고딕", 9, "bold"),
+                  bg="#1f618d", fg="white",
+                  command=lambda f=fkey: self._floor_check_all(f)).pack(padx=10, pady=(4, 10))
+        apply_dark(win, bool(self.cfg.get("dark_ui", True)))
+
+    def _grab_floor_image(self, fkey, fl, btn=None):
+        self._floor_target = (fkey, fl, btn)
+        self.status.set(f"🏢 {fl}층 — 오른쪽 위 '{fl}층' 글씨만 드래그하세요 (ESC 취소)")
+        for w in self._section_wins():
+            try: w.withdraw()
+            except Exception: pass
+        try:
+            if getattr(self, "_floor_win", None) is not None:
+                self._floor_win.withdraw()
+        except Exception:
+            pass
+        self.withdraw()
+        self.after(250, lambda: _PotionAreaOverlay(self, self._on_floor_image))
+
+    def _on_floor_image(self, x, y, w, h):
+        self.deiconify()
+        for wn in self._section_wins():
+            try: wn.deiconify()
+            except Exception: pass
+        tgt = getattr(self, "_floor_target", None)
+        if not tgt:
+            return
+        fkey, fl, btn = tgt
+        if w < 5 or h < 5:
+            self.status.set("🏢 너무 작습니다 — 다시 드래그해주세요")
+            self._open_floor_win(fkey); return
+        try:
+            from PIL import ImageGrab
+            im = ImageGrab.grab(bbox=(x, y, x + w, y + h),
+                                all_screens=True).convert("RGB")
+            if os.path.exists(floor_img_path(fkey, fl)):
+                # 공용이 이미 있으면 이 컴퓨터 전용으로 한 장 더 (다른 배경 대비)
+                n = 0
+                while n < IMG_MAX - 1 and os.path.exists(floor_mine_path(fkey, fl, n)):
+                    n += 1
+                os.makedirs(IMG_DIR_MINE, exist_ok=True)
+                im.save(floor_mine_path(fkey, fl, n))
+                msg = f"🏢 {fl}층 — 이 컴퓨터 전용으로 한 장 더 추가 ({w}×{h})"
+            else:
+                os.makedirs(IMG_DIR, exist_ok=True)
+                im.save(floor_img_path(fkey, fl))
+                msg = f"🏢 {fl}층 그림 저장 ({w}×{h})"
+            # 그 자리를 '클라 창 기준' 으로 기억해둔다 — 다음부터 그 둘레만 훑는다
+            try:
+                rc = client_rect_at(x + w // 2, y + h // 2)
+                if rc:
+                    floor_area_save(fkey, x - rc[0], y - rc[1], w, h)
+                    msg += " · 훑을 자리도 함께 저장"
+            except Exception:
+                pass
+            self.status.set(msg)
+        except Exception as e:
+            self.status.set(f"🏢 저장 실패: {e}")
+        self._open_floor_win(fkey)
+
+    def _del_floor_image(self, fkey, fl):
+        n = 0
+        for p in floor_img_list(fkey, fl):
+            try:
+                os.remove(p); n += 1
+            except Exception:
+                pass
+        self.status.set(f"🏢 {fl}층 그림 {n}장 삭제 — 이 층은 확인하지 않습니다")
+        self._open_floor_win(fkey)
+
+    def _floor_check_all(self, fkey):
+        """지금 16클라가 각각 몇 층으로 보이는지 — 등록한 층 그림으로 맞춰본다."""
+        try:
+            key = self._grid_spec(fkey)["key"]
+            slots = self.cfg.get(key) or []
+            lines, ok = [], 0
+            for i, s in enumerate(slots):
+                anc = slot_anchor(s)
+                if not anc:
+                    continue
+                want = self._slot_floor(fkey, i)
+                sc = floor_scores(fkey, anc)
+                top = max(sc, key=lambda k: sc[k]) if sc else 0
+                seen = (floor_seen(fkey, want, anc, sc)[0] if want else False)
+                mark = "✔" if seen else ("·" if not want else "✘")
+                if seen:
+                    ok += 1
+                lines.append(f"{mark} {i+1:02d} {s.get('name','미등록')[:8]:<8} "
+                             f"지정 {str(want)+'층' if want else '안함':<4} "
+                             f"1등 {str(top)+'층' if top else '없음':<4} "
+                             + " ".join(f"{k}:{v:.2f}" for k, v in sorted(sc.items())))
+            click_log(f"[층확인] {fkey} — " + " / ".join(l.strip() for l in lines))
+            self._show_text_win("🏢 층 확인 결과",
+                                chr(10).join(lines) +
+                                f"{chr(10)}{chr(10)}지정한 층과 맞는 슬롯: {ok}개 "
+                                f"(기준 {FLOOR_MATCH})")
+        except Exception as e:
+            self.status.set(f"🏢 층 확인 실패: {e}")
 
     def _grab_sleep_image(self, fkey, btn=None):
         """😴 절전모드 화면을 드래그해 등록한다.
@@ -7685,6 +7997,123 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"🖼 삭제 실패: {e}")
 
+    # ── 🏢 슬롯마다 갈 층 (2026-09-15) ──────────────────────────────────
+    def _slot_index(self, fkey, slot):
+        """그 슬롯이 몇 번째인지 — 슬롯 딕셔너리를 그대로 찾아본다(같은 객체)."""
+        try:
+            key = self._grid_spec(fkey)["key"]
+            for i, s in enumerate(self.cfg.get(key) or []):
+                if s is slot:
+                    return i
+        except Exception:
+            pass
+        return -1
+
+    def _slot_floor(self, fkey, si):
+        """그 슬롯이 갈 층 (0 = 층 확인 안 함)."""
+        try:
+            v = list(self.cfg.get(f"{fkey}_floor") or [])
+            return int(v[si]) if 0 <= si < len(v) else 0
+        except Exception:
+            return 0
+
+    def _set_slot_floor(self, fkey, si, fl):
+        try:
+            key = self._grid_spec(fkey)["key"]
+            n = max(len(self.cfg.get(key) or []), si + 1, 16)
+            v = list(self.cfg.get(f"{fkey}_floor") or [])
+            while len(v) < n:
+                v.append(0)
+            v[si] = int(fl)
+            self.cfg[f"{fkey}_floor"] = v[:n]
+            save_cfg(self.cfg)
+            return True
+        except Exception:
+            return False
+
+    FLOOR_NONE = "안함"
+
+    def _floor_menu(self, parent, fkey, si, width=5):
+        """슬롯이 갈 층을 고르는 드롭다운 (오만 주문서 고르는 것과 같은 방식).
+
+        고르는 즉시 저장된다. '안함' 이면 층 확인을 하지 않는다(예전과 동일)."""
+        names = [self.FLOOR_NONE] + [f"{f}층" for f in FLOOR_LIST]
+        cur = self._slot_floor(fkey, si)
+        v = tk.StringVar(value=(f"{cur}층" if cur else self.FLOOR_NONE))
+        om = tk.OptionMenu(parent, v, *names)
+        om.config(font=("맑은 고딕", 8), width=width, pady=0, highlightthickness=0)
+
+        def _save(*_a, f=fkey, i=si, var=v, w=om):
+            t = var.get()
+            fl = int(t[:-1]) if t.endswith("층") and t[:-1].isdigit() else 0
+            self._set_slot_floor(f, i, fl)
+            try:
+                w.config(fg=("#117864" if fl else "#7f8c8d"))
+            except Exception:
+                pass
+            self.status.set(f"🏢 #{i+1:02d} — "
+                            + (f"{fl}층일 때만 오토를 누릅니다" if fl
+                               else "층 확인 안 함"))
+        v.trace_add("write", _save)
+        om.config(fg=("#117864" if cur else "#7f8c8d"))
+        om.pack(side="left", padx=3)
+        return om
+
+    def _build_floor_rows(self, parent, fkey, color):
+        """16슬롯의 '갈 층' 을 한 판에서 고른다 (2026-09-15 사용자 요청)."""
+        box = tk.LabelFrame(parent, text=" 🏢 슬롯마다 갈 층 (그 층일 때만 오토) ",
+                            font=("맑은 고딕", 9, "bold"), fg=color, bd=2, relief="groove")
+        box.pack(fill="x", padx=6, pady=(2, 4))
+        body = tk.Frame(box); body.pack(fill="x", padx=4, pady=3)
+        key = self._grid_spec(fkey)["key"]
+        slots = self.cfg.get(key) or []
+        n = max(len(slots), 16)
+        for i in range(n):
+            col = tk.Frame(body)
+            col.grid(row=i % ((n + 1) // 2), column=i // ((n + 1) // 2),
+                     sticky="w", padx=(0, 10))
+            nm = (slots[i].get("name", "미등록") if i < len(slots) else "미등록")
+            tk.Label(col, text=f"{i+1:02d} {nm[:7]}", font=("맑은 고딕", 8),
+                     width=11, anchor="w").pack(side="left")
+            self._floor_menu(col, fkey, i, width=4)
+        return box
+
+    def _floor_ok(self, fkey, j, coord, slot):
+        """이 자리가 '층 확인 관문'이면 그 슬롯의 층이 보이는지 확인한다.
+
+        관문이 아니거나·층을 안 정했거나·층 그림이 없으면 **그냥 통과**한다
+        (기능을 켜지 않은 사람에게는 아무 영향이 없다)."""
+        try:
+            if FLOOR_GATE.get(fkey) != j + 1 or not coord or slot is None:
+                return True
+            si = self._slot_index(fkey, slot)
+            fl = self._slot_floor(fkey, si) if si >= 0 else 0
+            if not fl:
+                return True                       # 이 슬롯은 층 확인을 안 쓴다
+            if not floor_img_list(fkey, fl):
+                return True                       # 그 층 그림이 아직 없다
+            nm = (slot or {}).get("name", f"#{si+1}")
+            best, why, last = 0.0, "", {}
+            for t in range(FLOOR_TRIES):
+                last = floor_scores(fkey, coord)
+                ok, sc, why = floor_seen(fkey, fl, coord, last)
+                best = max(best, sc)
+                if ok:
+                    click_log(f"{fkey} [{nm}] 🏢 {fl}층 확인됨 (일치도 {sc:.2f}) "
+                              f"→ 좌표{j+1} 진행")
+                    return True
+                if t < FLOOR_TRIES - 1:
+                    time.sleep(random.uniform(*FLOOR_WAIT))
+            _all = " ".join(f"{k}층 {v:.2f}" for k, v in sorted(last.items()))
+            click_log(f"{fkey} [{nm}] 🏢 {fl}층이 아님 — {why} "
+                      f"(점수: {_all} / 기준 {FLOOR_MATCH}, {FLOOR_TRIES}번 확인) "
+                      f"→ 좌표{j+1}(오토)를 누르지 않고 이 슬롯 중단")
+            self.status.set(f"🏢 [{nm}] {fl}층이 아니라 오토를 누르지 않았습니다 ({why})")
+            self._note(fkey, nm, f"{fl}층 확인 실패 — {why} ({_all}) → 오토 안 누름")
+            return False
+        except Exception:
+            return True                           # 확인이 불가능하면 막지 않는다
+
     def _do_click_or_wheel(self, fkey, j, coord, slot=None):
         """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다.
         HOVER_INDICES 에 적힌 자리는 클릭하지 않고 '마우스만 올려놓는다'."""
@@ -7692,6 +8121,11 @@ class App(tk.Tk):
             self._click_log(fkey, j, coord, slot, "마우스올림")
             move_at(*coord)                   # 커서는 그대로, 그 자리에 올림 신호만
             return "마우스올림"
+        # 🏢 층 확인 — 오토를 누르기 **직전**에 '이 캐릭이 갈 층' 이 맞는지 본다.
+        # 이동 확인창 그림에는 층이 안 나와서 층이 틀려도 통과됐다 (2026-09-15 사고).
+        # 그 층이 안 보이면 **오토를 누르지 않고 이 슬롯만 끝낸다.**
+        if not self._floor_ok(fkey, j, coord, slot):
+            return "이미지없음"              # 이 슬롯만 끝, 다른 슬롯은 계속
         # ⛔ 금지 그림 — 이게 보이면 **누르지 않고 ESC 로 취소**하고 이 슬롯을 끝낸다.
         # (재화를 쓰려는 창이 떴을 때 빠져나오는 안전장치, 2026-08-29 사용자 지시)
         if has_no_img(fkey, j) and coord:
@@ -13641,6 +14075,19 @@ class App(tk.Tk):
             self.cfg[sp["key"]][idx]["name"] = nv.get().strip() or "미등록"
             save_cfg(self.cfg)
         ent.bind("<FocusOut>", _save_name); ent.bind("<Return>", _save_name)
+        if fkey in FLOOR_GATE:
+            # 🏢 이 캐릭이 갈 층 — 오토(좌표N) 누르기 직전에 이 층이 맞는지 확인한다.
+            #     '안함' 이면 확인하지 않는다 (예전과 똑같이 동작).
+            fr = tk.Frame(win); fr.pack(fill="x", padx=10, pady=(0, 4))
+            tk.Label(fr, text="🏢 갈 층:", font=("맑은 고딕", 9, "bold"),
+                     fg="#117864").pack(side="left")
+            self._floor_menu(fr, fkey, idx)
+            tk.Label(fr, text="그 층일 때만 오토를 누릅니다", font=("맑은 고딕", 8),
+                     fg="#888").pack(side="left", padx=(4, 0))
+            _miss = [f for f in FLOOR_LIST if not floor_img_list(fkey, f)]
+            if _miss:
+                tk.Label(fr, text="그림 없음: " + ",".join(f"{f}층" for f in _miss),
+                         font=("맑은 고딕", 7), fg="#c0392b").pack(side="left", padx=(6, 0))
         grid = tk.Frame(win); grid.pack(padx=10, pady=6)
         st["pop_vars"] = []; st["pop_btns"] = []; st["pop_pvars"] = []
         locked = sp.get("locked", ())
