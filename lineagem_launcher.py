@@ -13736,11 +13736,12 @@ class App(tk.Tk):
         box.pack(fill="x", padx=6, pady=(8, 4))
         hd2 = tk.Frame(box); hd2.pack(fill="x", padx=4)
         for t, w in (("", 2), ("키", 5), ("누름", 6), ("다음까지", 8),
-                     ("보여야", 6), ("보이면멈춤", 8), ("", 3)):
+                     ("보여야", 5), ("0원멈춤", 6), ("범위", 4), ("", 3)):
             tk.Label(hd2, text=t, font=("맑은 고딕", 7), fg="#888",
                      width=w).pack(side="left")
         self._itemreg_kv, self._itemreg_hv, self._itemreg_wv = {}, {}, {}
         self._itemreg_ibtns, self._itemreg_nbtns, self._itemreg_thumbs = {}, {}, {}
+        self._itemreg_abtns = {}
         self._itemreg_photo = {}          # PhotoImage 참조 유지 (안 하면 그림이 사라진다)
         steps = self._itemreg_steps()
         for i2 in range(ITEMREG_STEPS):
@@ -13772,14 +13773,24 @@ class App(tk.Tk):
                     self._del_no_image("itemreg", x, b_))
             nb.pack(side="left", padx=1)
             self._itemreg_nbtns[i2] = nb
+            # 📐 찾을 범위 — '0' 같은 흔한 글자는 범위를 좁혀야 엉뚱한 데서 안 잡힌다
+            ab = tk.Button(row, font=("맑은 고딕", 8, "bold"), width=2, fg="white")
+            ab.config(command=lambda x=i2, b_=ab:
+                      self._grab_click_area("itemreg", 0, x, b_))
+            ab.bind("<Button-3>", lambda _e, x=i2: self._itemreg_del_area(x))
+            ab.pack(side="left", padx=1)
+            self._itemreg_abtns[i2] = ab
             th = tk.Label(row, bd=1, relief="flat")      # 그림 미리보기
             th.pack(side="left", padx=(2, 0))
             self._itemreg_thumbs[i2] = th
         tk.Label(parent, font=("맑은 고딕", 8), fg="#888", justify="left",
                  text="키는 지금 앞에 있는 창으로 갑니다 — 좌표가 필요 없어 16클라 전부 동작합니다."
                       + chr(10) +
-                      "[🖼] 이게 보여야 진행 · [⛔] 이게 보이면 그 자리에서 멈춤 "
-                      "(최저가 0원 → 직접 올리기). 오른쪽 클릭 = 그림 삭제"
+                      "▶ 최저가가 0원일 때 멈추려면 — 5번 키가 최저가를 누르므로, "
+                      "그 다음 칸인 3번(첫 Y)의 [⛔] 에 '0원 화면' 을 넣으세요."
+                      + chr(10) +
+                      "[🖼] 이게 보여야 진행 · [⛔] 이게 보이면 멈춤 · [📐] 찾을 범위(좁힐수록 정확) "
+                      "· 오른쪽 클릭 = 지우기"
                  ).pack(anchor="w", padx=8)
         sb = tk.Frame(parent); sb.pack(fill="x", padx=6, pady=(8, 2))
         _has = os.path.exists(itemreg_shop_path())
@@ -13899,7 +13910,23 @@ class App(tk.Tk):
                               bg=("#c0392b" if _no else "#7f8c8d"))
             except Exception:
                 pass
+            ab = (getattr(self, "_itemreg_abtns", {}) or {}).get(k)
+            try:
+                if ab is not None and ab.winfo_exists():
+                    _ar = area_is_set("itemreg", k)
+                    ab.config(text="📐", bg=("#b9770e" if _ar else "#7f8c8d"))
+            except Exception:
+                pass
             self._itemreg_thumb(k)
+
+    def _itemreg_del_area(self, k):
+        """오른쪽 클릭 — 그 칸의 찾을 범위를 지운다 (창 전체를 훑게 된다)."""
+        try:
+            os.remove(area_path("itemreg", k))
+        except Exception:
+            pass
+        self._itemreg_show_spots()
+        self.status.set(f"📐 {k+1}번 범위를 지웠습니다 (창 전체를 훑습니다)")
 
     def _itemreg_step_save(self, idx):
         """키·시간 칸을 고치면 바로 저장한다."""
