@@ -8085,6 +8085,10 @@ class App(tk.Tk):
             if btn and btn.winfo_exists():
                 _n = len(img_list(fkey, j))
                 btn.config(text=("🖼있음" if _n <= 1 else f"🖼{_n}장"), bg="#8e44ad")
+            # 🏷 아이템 등록 창은 **미리보기까지** 바로 갱신한다 (등록됐는지 눈으로 확인)
+            if fkey == "itemreg":
+                try: self._itemreg_show_spots()
+                except Exception: pass
             self.status.set(msg)
         except Exception as e:
             self.status.set(f"🖼 저장 실패: {e}")
@@ -13721,27 +13725,33 @@ class App(tk.Tk):
         box = tk.LabelFrame(parent, text=" 좌표 — 번호 순서대로 누릅니다 (안 쓰는 칸은 비워둠) ",
                             font=("맑은 고딕", 9, "bold"), fg="#117a8b", bd=2, relief="groove")
         box.pack(fill="x", padx=6, pady=(8, 4))
+        # 등록됐는지 **한눈에** 보이게 — 좌표는 색+값, 그림은 실제 미리보기 (2026-09-16 지시)
         self._itemreg_lbls, self._itemreg_gapvars = {}, {}
-        rels, gaps = self._itemreg_rels(), self._itemreg_gaps()
+        self._itemreg_pbtns, self._itemreg_ibtns, self._itemreg_thumbs = {}, {}, {}
+        self._itemreg_photo = {}          # PhotoImage 참조 유지 (안 하면 그림이 사라진다)
+        gaps = self._itemreg_gaps()
         for i2 in range(ITEMREG_CLICKS):
             row = tk.Frame(box); row.pack(fill="x", padx=4, pady=1)
             tk.Label(row, text=f"{i2+1}", font=("맑은 고딕", 8, "bold"),
                      width=2, fg="#117a8b").pack(side="left")
+            pb = tk.Button(row, text="📍", font=("맑은 고딕", 8, "bold"), width=2,
+                           fg="white", command=lambda x=i2: self._itemreg_grab(x))
+            pb.pack(side="left", padx=1)
+            self._itemreg_pbtns[i2] = pb
             v = tk.StringVar(); self._itemreg_lbls[i2] = v
-            tk.Label(row, textvariable=v, font=("맑은 고딕", 8),
-                     width=12, anchor="w").pack(side="left")
-            tk.Button(row, text="📍", font=("맑은 고딕", 8, "bold"), width=2,
-                      bg="#2471a3", fg="white",
-                      command=lambda x=i2: self._itemreg_grab(x)).pack(side="left", padx=1)
-            # 🖼 그림 — 그 자리에 이 화면이 보일 때까지 기다렸다 누른다 (안 보이면 중단)
-            _n = len(img_list("itemreg", i2))
-            ib = tk.Button(row, text=("🖼" if not _n else f"🖼{_n}"),
-                           font=("맑은 고딕", 8, "bold"), width=3, fg="white",
-                           bg=("#8e44ad" if _n else "#7f8c8d"))
+            lb = tk.Label(row, textvariable=v, font=("맑은 고딕", 8, "bold"),
+                          width=13, anchor="w")
+            lb.pack(side="left")
+            self._itemreg_lbls[str(i2)] = lb          # 색을 바꾸려고 라벨도 들고 있는다
+            ib = tk.Button(row, font=("맑은 고딕", 8, "bold"), width=3, fg="white")
             ib.config(command=lambda x=i2, b_=ib:
                       self._grab_click_image("itemreg", 0, x, b_))
-            ib.bind("<Button-3>", lambda _e, x=i2, b_=ib: self._del_click_image("itemreg", x, b_))
+            ib.bind("<Button-3>", lambda _e, x=i2: self._itemreg_del_img(x))
             ib.pack(side="left", padx=1)
+            self._itemreg_ibtns[i2] = ib
+            th = tk.Label(row, bd=1, relief="solid")   # 그림 미리보기
+            th.pack(side="left", padx=(2, 0))
+            self._itemreg_thumbs[i2] = th
             gv = tk.StringVar(value=("" if gaps[i2] in (None, "") else str(gaps[i2])))
             self._itemreg_gapvars[i2] = gv
             tk.Entry(row, textvariable=gv, width=4, justify="center",
@@ -13764,9 +13774,12 @@ class App(tk.Tk):
             font=("맑은 고딕", 9, "bold"), fg="white",
             bg=("#117864" if _has else "#c0392b"), command=self._itemreg_grab_shop)
         self._itemreg_shopbtn.pack(side="left")
+        self._itemreg_shopthumb = tk.Label(sb, bd=1, relief=("solid" if _has else "flat"))
+        self._itemreg_shopthumb.pack(side="left", padx=(4, 0))
         tk.Button(sb, text="🔍 지금 거래소인지 확인", font=("맑은 고딕", 8),
                   bg="#1f618d", fg="white",
                   command=self._itemreg_check_shop).pack(side="left", padx=(6, 0))
+        self._itemreg_shop_thumb()
         tk.Label(parent, font=("맑은 고딕", 8), fg="#888", justify="left",
                  text="거래소 화면에서만 동작합니다 — 다른 화면에서는 클릭해도 아무 일도 없습니다.\n"
                       "거래소 안에서 직접 올리고 싶을 때만 위 버튼(또는 단축키)으로 끄세요."
@@ -13820,6 +13833,7 @@ class App(tk.Tk):
                                                  bg="#117864")
                 except Exception:
                     pass
+            self._itemreg_shop_thumb()          # 미리보기 바로 갱신
         except Exception as e:
             self.status.set(f"🛒 저장 실패: {e}")
 
@@ -13853,10 +13867,99 @@ class App(tk.Tk):
                         f"(누를 때마다 다음 키로 바뀝니다)")
 
     def _itemreg_show_spots(self):
+        """등록됐는지 **한눈에** 보이게 — 좌표는 값+초록, 그림은 실제 미리보기.
+        (2026-09-16 사용자 지시: "등록이 됐는지 안 됐는지 모르잖아")"""
         rels = self._itemreg_rels()
-        for k, v in (getattr(self, "_itemreg_lbls", {}) or {}).items():
+        for k in range(ITEMREG_CLICKS):
             r = rels[k] if k < len(rels) else None
-            v.set(f"창+{int(r[0])},{int(r[1])}" if r else "없음")
+            # ① 좌표 — 값이 보이고, 등록되면 초록 굵게 / 없으면 회색
+            v = (getattr(self, "_itemreg_lbls", {}) or {}).get(k)
+            lb = (getattr(self, "_itemreg_lbls", {}) or {}).get(str(k))
+            if v is not None:
+                v.set(f"＋{int(r[0])},{int(r[1])}" if r else "— 없음")
+            try:
+                if lb is not None and lb.winfo_exists():
+                    lb.config(fg=("#117864" if r else "#95a5a6"))
+            except Exception:
+                pass
+            pb = (getattr(self, "_itemreg_pbtns", {}) or {}).get(k)
+            try:
+                if pb is not None and pb.winfo_exists():
+                    pb.config(bg=("#117864" if r else "#7f8c8d"))
+            except Exception:
+                pass
+            # ② 그림 — 장수 + 미리보기 (없으면 '없음' 글자)
+            n = len(img_list("itemreg", k))
+            ib = (getattr(self, "_itemreg_ibtns", {}) or {}).get(k)
+            try:
+                if ib is not None and ib.winfo_exists():
+                    ib.config(text=("🖼" if not n else f"🖼{n}"),
+                              bg=("#8e44ad" if n else "#7f8c8d"))
+            except Exception:
+                pass
+            self._itemreg_thumb(k)
+
+    def _itemreg_thumb(self, k):
+        """그 칸 그림의 작은 미리보기를 보여준다 (없으면 비운다)."""
+        th = (getattr(self, "_itemreg_thumbs", {}) or {}).get(k)
+        if th is None:
+            return
+        try:
+            if not th.winfo_exists():
+                return
+            ps = img_list("itemreg", k)
+            if not ps:
+                th.config(image="", text="", width=0, height=0, relief="flat")
+                self._itemreg_photo.pop(k, None)
+                return
+            from PIL import Image, ImageTk
+            im = Image.open(ps[0]).convert("RGB")
+            # 높이 20px 에 맞춰 줄이되, 너무 길면 60px 에서 자른다
+            h = 20
+            w = max(8, min(60, int(im.width * h / max(im.height, 1))))
+            ph = ImageTk.PhotoImage(im.resize((w, h), Image.LANCZOS))
+            self._itemreg_photo[k] = ph          # 참조를 안 들고 있으면 그림이 사라진다
+            th.config(image=ph, text="", relief="solid")
+        except Exception:
+            try:
+                th.config(image="", text="?", fg="#c0392b", relief="flat")
+            except Exception:
+                pass
+
+    def _itemreg_shop_thumb(self):
+        """거래소 그림 미리보기 (등록됐는지 눈으로 확인)."""
+        th = getattr(self, "_itemreg_shopthumb", None)
+        if th is None:
+            return
+        try:
+            if not th.winfo_exists():
+                return
+            p = itemreg_shop_path()
+            if not os.path.exists(p):
+                th.config(image="", text="등록 안 됨", font=("맑은 고딕", 7),
+                          fg="#c0392b", relief="flat")
+                self._itemreg_shopphoto = None
+                return
+            from PIL import Image, ImageTk
+            im = Image.open(p).convert("RGB")
+            h = 26
+            w = max(10, min(120, int(im.width * h / max(im.height, 1))))
+            ph = ImageTk.PhotoImage(im.resize((w, h), Image.LANCZOS))
+            self._itemreg_shopphoto = ph          # 참조 유지
+            th.config(image=ph, text="", relief="solid")
+        except Exception:
+            pass
+
+    def _itemreg_del_img(self, k):
+        """오른쪽 클릭 — 그 칸 그림을 지운다 (공용·전용 전부)."""
+        n = 0
+        for p in img_list("itemreg", k):
+            try:
+                os.remove(p); n += 1
+            except Exception:
+                pass
+        self._itemreg_show_spots()
+        self.status.set(f"🖼 {k+1}번 그림 {n}장 삭제")
 
     def _itemreg_gap_save(self, idx):
         try:
