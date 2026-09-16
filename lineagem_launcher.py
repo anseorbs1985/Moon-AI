@@ -1461,10 +1461,13 @@ def img_mine_free(fkey, j):
 #   → 거래소 그림이 보이면 **자동으로 동작**하고, 다른 화면에서는 클릭해도 아무 일 없다.
 #      F6 은 '거래소 안에서 잠깐 끄는' 수동 스위치다 (최저가가 없어 직접 올릴 때).
 ITEMREG_SHOP_MATCH = 0.70        # 거래소 그림 기준
-ITEMREG_HOTKEY   = 0x75          # 기본 F6 (창의 [⌨ 키지정] 으로 바꿀 수 있다)
+ITEMREG_HOTKEY   = 0x75          # 기본 F6 (창의 [단축키] 으로 바꿀 수 있다)
 ITEMREG_WAIT     = (0.35, 0.60)  # 내가 클릭한 뒤 화면이 뜨기를 기다리는 시간(초)
-ITEMREG_GAP      = (0.12, 0.28)  # 최저가 → 등록 → 확인 사이 간격(초) — 사람처럼 랜덤
+ITEMREG_GAP      = (0.25, 0.45)  # 좌표 사이 기본 간격(초) — 칸에 적으면 그 값이 이긴다
 ITEMREG_COOLDOWN = 1.5           # 한 번 돌고 다음까지 최소 시간(초) — 연속 오발 방지
+# 좌표는 **번호 순서대로** 누른다 (2026-09-16 사용자 지시: "순서대로 해야 해").
+# 다른 런처와 같은 방식 — 안 쓰는 칸은 비워두면 건너뛴다.
+ITEMREG_CLICKS   = 8
 
 # ── 🐢 버퍼링 없애기 (2026-09-16 사용자 신고: "메인런처 클릭·창 띄우기가 너무 버벅인다") ──
 # 원인 실측: 퍼플 팝업 감시가 **UI 스레드에서** 화면을 긁었다 — 한 번 64ms × 2초마다.
@@ -13715,25 +13718,44 @@ class App(tk.Tk):
                   bg="#5d6d7e", fg="white", width=12, height=2,
                   command=self._itemreg_pick_key).pack(side="left", padx=(6, 0))
 
-        box = tk.LabelFrame(parent, text=" 좌표 (클라 창 기준) ",
+        box = tk.LabelFrame(parent, text=" 좌표 — 번호 순서대로 누릅니다 (안 쓰는 칸은 비워둠) ",
                             font=("맑은 고딕", 9, "bold"), fg="#117a8b", bd=2, relief="groove")
         box.pack(fill="x", padx=6, pady=(8, 4))
-        self._itemreg_lbls = {}
-        for k, lb, need in self.ITEMREG_SPOTS:
-            row = tk.Frame(box); row.pack(fill="x", padx=5, pady=3)
-            tk.Label(row, text=lb + ("" if need else " (없으면 비워둠)"),
-                     font=("맑은 고딕", 9), width=20, anchor="w").pack(side="left")
-            v = tk.StringVar(); self._itemreg_lbls[k] = v
+        self._itemreg_lbls, self._itemreg_gapvars = {}, {}
+        rels, gaps = self._itemreg_rels(), self._itemreg_gaps()
+        for i2 in range(ITEMREG_CLICKS):
+            row = tk.Frame(box); row.pack(fill="x", padx=4, pady=1)
+            tk.Label(row, text=f"{i2+1}", font=("맑은 고딕", 8, "bold"),
+                     width=2, fg="#117a8b").pack(side="left")
+            v = tk.StringVar(); self._itemreg_lbls[i2] = v
             tk.Label(row, textvariable=v, font=("맑은 고딕", 8),
                      width=12, anchor="w").pack(side="left")
-            tk.Button(row, text="📍 등록", font=("맑은 고딕", 8, "bold"),
+            tk.Button(row, text="📍", font=("맑은 고딕", 8, "bold"), width=2,
                       bg="#2471a3", fg="white",
-                      command=lambda x=k: self._itemreg_grab(x)).pack(side="left", padx=2)
+                      command=lambda x=i2: self._itemreg_grab(x)).pack(side="left", padx=1)
+            # 🖼 그림 — 그 자리에 이 화면이 보일 때까지 기다렸다 누른다 (안 보이면 중단)
+            _n = len(img_list("itemreg", i2))
+            ib = tk.Button(row, text=("🖼" if not _n else f"🖼{_n}"),
+                           font=("맑은 고딕", 8, "bold"), width=3, fg="white",
+                           bg=("#8e44ad" if _n else "#7f8c8d"))
+            ib.config(command=lambda x=i2, b_=ib:
+                      self._grab_click_image("itemreg", 0, x, b_))
+            ib.bind("<Button-3>", lambda _e, x=i2, b_=ib: self._del_click_image("itemreg", x, b_))
+            ib.pack(side="left", padx=1)
+            gv = tk.StringVar(value=("" if gaps[i2] in (None, "") else str(gaps[i2])))
+            self._itemreg_gapvars[i2] = gv
+            tk.Entry(row, textvariable=gv, width=4, justify="center",
+                     font=("맑은 고딕", 8)).pack(side="left", padx=(4, 0))
+            tk.Label(row, text="초", font=("맑은 고딕", 7), fg="#888").pack(side="left")
+            gv.trace_add("write", lambda *_a, x=i2: self._itemreg_gap_save(x))
             tk.Button(row, text="✖", font=("맑은 고딕", 8), bg="#c0392b", fg="white",
                       width=2,
-                      command=lambda x=k: self._itemreg_clear(x)).pack(side="left")
+                      command=lambda x=i2: self._itemreg_clear(x)).pack(side="left", padx=(3, 0))
         tk.Label(parent, font=("맑은 고딕", 8), fg="#888", justify="left",
-                 text="[📍 등록] 을 누르고 게임에서 그 버튼을 클릭하면 그 자리가 저장됩니다."
+                 text="[📍] 를 누르고 게임에서 그 버튼을 클릭하면 그 자리가 저장됩니다."
+                      + chr(10) +
+                      "[🖼] 는 '이 화면이 보일 때만 누른다' — 안 보이면 거기서 멈춥니다 "
+                      "(오른쪽 클릭 = 그림 삭제). 초 칸은 비우면 기본 간격."
                  ).pack(anchor="w", padx=8)
         sb = tk.Frame(parent); sb.pack(fill="x", padx=6, pady=(8, 2))
         _has = os.path.exists(itemreg_shop_path())
@@ -13818,11 +13840,6 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"🔍 실패: {e}")
 
-    def _vk_name(self, vk):
-        return {0x70: "F1", 0x71: "F2", 0x72: "F3", 0x73: "F4", 0x74: "F5",
-                0x75: "F6", 0x76: "F7", 0x77: "F8", 0x78: "F9", 0x79: "F10",
-                0x7A: "F11", 0x7B: "F12"}.get(int(vk), f"키({vk})")
-
     def _itemreg_pick_key(self):
         """F1~F12 중에서 켜고 끄는 키를 고른다."""
         cur = int(self.cfg.get("itemreg_hotkey") or ITEMREG_HOTKEY)
@@ -13836,22 +13853,25 @@ class App(tk.Tk):
                         f"(누를 때마다 다음 키로 바뀝니다)")
 
     def _itemreg_show_spots(self):
-        for k, lb, _n in self.ITEMREG_SPOTS:
-            v = self._itemreg_lbls.get(k)
-            if v is None:
-                continue
-            r = self._itemreg_spot(k)
-            v.set(f"창+{r[0]},{r[1]}" if r else "없음")
+        rels = self._itemreg_rels()
+        for k, v in (getattr(self, "_itemreg_lbls", {}) or {}).items():
+            r = rels[k] if k < len(rels) else None
+            v.set(f"창+{int(r[0])},{int(r[1])}" if r else "없음")
 
-    def _itemreg_grab(self, key):
+    def _itemreg_gap_save(self, idx):
+        try:
+            t = self._itemreg_gapvars[idx].get().strip()
+            self._itemreg_set(idx, gap=(float(t) if t else None))
+        except Exception:
+            pass
+
+    def _itemreg_grab(self, idx):
         """그 버튼을 게임에서 클릭하면 **클라 창 기준 자리**로 저장한다."""
-        self._itemreg_wait = key
-        lb = dict((k, l) for k, l, _n in self.ITEMREG_SPOTS)[key]
-        self.status.set(f"📍 게임에서 '{lb}' 을 클릭하세요 (3초 안에 · ESC 로 취소)")
-        threading.Thread(target=self._itemreg_grab_worker, args=(key,),
+        self.status.set(f"📍 게임에서 {idx+1}번으로 누를 자리를 클릭하세요 (ESC 취소)")
+        threading.Thread(target=self._itemreg_grab_worker, args=(idx,),
                          daemon=True).start()
 
-    def _itemreg_grab_worker(self, key):
+    def _itemreg_grab_worker(self, idx):
         import precise_click as _pc, ctypes
         _pc.start_input_watch()
         n0, _ = _pc.last_click()
@@ -13867,24 +13887,22 @@ class App(tk.Tk):
             rc = client_rect_at(int(xy[0]), int(xy[1]))
             if not rc:
                 self.after(0, lambda: self.status.set(
-                    "📍 리니지M 창 안을 클릭해주세요 — 다시 [📍 등록] 을 눌러주세요"))
+                    "📍 리니지M 창 안을 클릭해주세요 — 다시 [📍] 를 눌러주세요"))
                 return
-            rel = (int(xy[0]) - rc[0], int(xy[1]) - rc[1])
-            self.cfg[f"itemreg_{key}_rel"] = [rel[0], rel[1]]
-            save_cfg(self.cfg)
-            lb = dict((k, l) for k, l, _n in self.ITEMREG_SPOTS)[key]
+            rel = [int(xy[0]) - rc[0], int(xy[1]) - rc[1],
+                   rc[2] - rc[0], rc[3] - rc[1]]      # 창 크기도 함께 (비율 보정용)
+            self._itemreg_set(idx, rel=rel)
             self.after(0, lambda: (self._itemreg_show_spots(),
                                    self.status.set(
-                                       f"📍 {lb} 저장 — 창 기준 +{rel[0]},{rel[1]} "
+                                       f"📍 {idx+1}번 저장 — 창 기준 +{rel[0]},{rel[1]} "
                                        f"(16클라 어디서나 이 자리)")))
             return
         self.after(0, lambda: self.status.set("📍 시간이 지나 취소했습니다"))
 
-    def _itemreg_clear(self, key):
-        self.cfg.pop(f"itemreg_{key}_rel", None)
-        save_cfg(self.cfg)
+    def _itemreg_clear(self, idx):
+        self._itemreg_set(idx, rel=None)
         self._itemreg_show_spots()
-        self.status.set("📍 지웠습니다")
+        self.status.set(f"📍 {idx+1}번을 지웠습니다")
 
     def _itemreg_try(self):
         """마지막에 클릭한 창에서 한 번만 해본다 (켜지 않아도 확인용)."""
@@ -13899,14 +13917,44 @@ class App(tk.Tk):
             self.status.set(f"🔍 실패: {e}")
 
     # ── 🏷 아이템 등록 (2026-09-16 사용자 요청) ────────────────────────────
-    ITEMREG_SPOTS = [("low", "최저가 버튼", True),
-                     ("reg", "등록 버튼",   True),
-                     ("ok",  "확인 버튼",   False)]   # 확인은 없으면 비워둔다
+    # 좌표는 **번호 순서대로** 누른다. 칸마다 그림(🖼)과 간격(초)을 따로 줄 수 있다.
+    # 저장 형태: [dx, dy, w0, h0] — 등록할 때의 **창 크기(w0,h0)도 함께** 남긴다.
+    #   클라 16개가 490×276 ~ 496×279 로 1% 쯤 다르기 때문에(2026-09-16 실측),
+    #   누를 때 지금 창 크기와의 **비율로 보정**해야 정확히 맞는다.
+    #   → 그래서 **메인에서 한 번만 등록하면 16클라 전부** 맞는다.
+    def _itemreg_rels(self):
+        v = list(self.cfg.get("itemreg_rels") or [])
+        while len(v) < ITEMREG_CLICKS:
+            v.append(None)
+        return v[:ITEMREG_CLICKS]
 
-    def _itemreg_spot(self, name):
-        v = self.cfg.get(f"itemreg_{name}_rel")
+    def _itemreg_gaps(self):
+        v = list(self.cfg.get("itemreg_gaps") or [])
+        while len(v) < ITEMREG_CLICKS:
+            v.append(None)
+        return v[:ITEMREG_CLICKS]
+
+    def _itemreg_set(self, idx, rel=None, gap=None):
+        if rel is not None or gap is None:
+            v = self._itemreg_rels(); v[idx] = rel
+            self.cfg["itemreg_rels"] = v
+        if gap is not None or rel is None:
+            g = self._itemreg_gaps(); g[idx] = gap
+            self.cfg["itemreg_gaps"] = g
+        save_cfg(self.cfg)
+
+    @staticmethod
+    def _itemreg_abs(rel, rc):
+        """등록해둔 자리를 **지금 그 창 크기에 맞춰** 실제 좌표로 바꾼다."""
         try:
-            return (int(v[0]), int(v[1])) if v else None
+            dx, dy = int(rel[0]), int(rel[1])
+            w0 = int(rel[2]) if len(rel) > 2 and rel[2] else 0
+            h0 = int(rel[3]) if len(rel) > 3 and rel[3] else 0
+            w, h = rc[2] - rc[0], rc[3] - rc[1]
+            if w0 > 0 and h0 > 0:               # 창 크기가 다르면 비율로 보정
+                dx = int(round(dx * w / w0))
+                dy = int(round(dy * h / h0))
+            return rc[0] + dx, rc[1] + dy
         except Exception:
             return None
 
@@ -13920,11 +13968,13 @@ class App(tk.Tk):
         self.cfg["itemreg_on"] = on
         save_cfg(self.cfg)
         self._itemreg_refresh()
-        miss = [lb for k, lb, need in self.ITEMREG_SPOTS
-                if need and not self._itemreg_spot(k)]
-        if on and miss:
-            self.status.set("🏷 아이템 등록 ON — 그런데 " + ", ".join(miss) +
-                            " 좌표가 없습니다. 창에서 먼저 등록해주세요")
+        n = sum(1 for r in self._itemreg_rels() if r)
+        if on and not n:
+            self.status.set("🏷 아이템 등록 ON — 그런데 좌표가 하나도 없습니다. "
+                            "창에서 순서대로 등록해주세요")
+        elif on and not os.path.exists(itemreg_shop_path()):
+            self.status.set("🏷 아이템 등록 ON — 그런데 거래소 그림이 없습니다. "
+                            "등록 전에는 동작하지 않습니다")
         else:
             self.status.set("🏷 아이템 등록 " + ("ON — 아이템을 클릭하면 최저가로 올립니다"
                                                 if on else "OFF (수동으로 올리세요)"))
@@ -14010,24 +14060,46 @@ class App(tk.Tk):
                 return
             if not seen:
                 return                            # 거래소가 아니다 — 조용히 무시
-            spots = [(lb, self._itemreg_spot(k)) for k, lb, _n in self.ITEMREG_SPOTS]
-            if not spots[0][1] or not spots[1][1]:
+            rels, gaps = self._itemreg_rels(), self._itemreg_gaps()
+            order = [k for k in range(ITEMREG_CLICKS) if rels[k]]
+            if not order:
                 self.after(0, lambda: self.status.set(
-                    "🏷 최저가·등록 좌표가 없습니다 — [🏷 아이템 등록] 창에서 등록해주세요"))
+                    "🏷 좌표가 없습니다 — [🏷 아이템 등록] 창에서 순서대로 등록해주세요"))
                 return
             time.sleep(random.uniform(*ITEMREG_WAIT))   # 화면이 뜨기를 기다린다
             done = []
-            for lb, rel in spots:
-                if not rel:
-                    continue                      # 확인 버튼이 없는 화면이면 건너뛴다
-                x, y = rc[0] + rel[0], rc[1] + rel[1]
-                click_at(x, y)
-                done.append(lb)
-                time.sleep(random.uniform(*ITEMREG_GAP))
+            for k in order:                        # **번호 순서대로**
+                ab = self._itemreg_abs(rels[k], rc)
+                if not ab:
+                    continue
+                # 🖼 그 자리에 그림을 걸어뒀으면 **보일 때까지 기다렸다가** 누른다.
+                #    안 보이면 거기서 끝 — 다음 좌표를 누르지 않는다 (기존 절대 규칙과 동일).
+                if has_img("itemreg", k):
+                    ix, iy, sc = None, None, 0.0
+                    for _t in range(IMG_TRIES):
+                        ix, iy, sc = find_image("itemreg", k, ab)
+                        if ix is not None:
+                            break
+                        time.sleep(random.uniform(0.25, 0.45))
+                    if ix is None:
+                        click_log(f"[아이템등록] {k+1}번 그림이 안 보여 중단 "
+                                  f"(최고 {sc:.2f}) — 여기까지: {' → '.join(done) or '없음'}")
+                        self.after(0, lambda kk=k: self.status.set(
+                            f"🏷 {kk+1}번 화면이 안 보여 멈췄습니다 (뒤는 안 누름)"))
+                        return
+                click_at(*ab)
+                done.append(str(k + 1))
+                g = gaps[k]
+                try:
+                    g = float(g) if g not in (None, "") else None
+                except Exception:
+                    g = None
+                time.sleep(g * random.uniform(0.9, 1.15) if g
+                           else random.uniform(*ITEMREG_GAP))
             click_log(f"[아이템등록] 클릭 {tuple(xy)} → 창({rc[0]},{rc[1]}) "
-                      f"에서 {' → '.join(done)} 누름")
+                      f"에서 좌표 {' → '.join(done)} 누름")
             self.after(0, lambda: self.status.set(
-                "🏷 최저가로 등록했습니다 (" + " → ".join(done) + ")"))
+                "🏷 최저가로 등록했습니다 (좌표 " + " → ".join(done) + ")"))
         except Exception as e:
             click_log(f"[아이템등록] 실패: {e!r}")
         finally:
