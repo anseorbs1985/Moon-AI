@@ -1444,6 +1444,28 @@ def img_mine_free(fkey, j):
     return IMG_MAX - 1
 
 
+# ── 🏷 아이템 등록 — 내가 아이템을 클릭하면 '최저가 → 등록' 을 대신 눌러준다 ──────
+# (2026-09-16 사용자 요청) "F6 으로 켜고 끄고, 내가 마우스로 클릭하면 최저가로 올려줘.
+#  최저가가 없으면 수동으로 해야 하니까 끌 수 있어야 해."
+#
+# 게임에 **'최저가' 버튼이 이미 있으므로 가격을 읽을 필요가 없다** (사용자 확인).
+# 그래서 OCR 로 숫자를 읽지 않는다 — 잘못 읽어 엉뚱한 값에 올리는 사고가 아예 없다.
+#
+# 좌표는 **클라 창 왼쪽위 기준(dx, dy)** 으로 저장한다. 한 번만 등록하면
+# **16클라 어디를 클릭하든** 그 창에 맞춰 눌린다 (G허브 매크로는 고정 화면좌표라
+# 클라 하나에서만 맞는다 — 이것이 런처가 직접 누르는 쪽을 고른 결정적 이유).
+#
+# 🛒 **거래소 화면일 때만 동작한다** (2026-09-16 사용자 추가 요청):
+#   "거래소에 내가 클릭하면 자동으로 켜지는 거야. 거래소는 내가 이미지로 올려둘게.
+#    그리고 이 안에서 수동으로 올리고 싶을 때 온오프로 작동하는 거지."
+#   → 거래소 그림이 보이면 **자동으로 동작**하고, 다른 화면에서는 클릭해도 아무 일 없다.
+#      F6 은 '거래소 안에서 잠깐 끄는' 수동 스위치다 (최저가가 없어 직접 올릴 때).
+ITEMREG_SHOP_MATCH = 0.70        # 거래소 그림 기준
+ITEMREG_HOTKEY   = 0x75          # 기본 F6 (창의 [⌨ 키지정] 으로 바꿀 수 있다)
+ITEMREG_WAIT     = (0.35, 0.60)  # 내가 클릭한 뒤 화면이 뜨기를 기다리는 시간(초)
+ITEMREG_GAP      = (0.12, 0.28)  # 최저가 → 등록 → 확인 사이 간격(초) — 사람처럼 랜덤
+ITEMREG_COOLDOWN = 1.5           # 한 번 돌고 다음까지 최소 시간(초) — 연속 오발 방지
+
 # ── 🐢 버퍼링 없애기 (2026-09-16 사용자 신고: "메인런처 클릭·창 띄우기가 너무 버벅인다") ──
 # 원인 실측: 퍼플 팝업 감시가 **UI 스레드에서** 화면을 긁었다 — 한 번 64ms × 2초마다.
 #   = 1분에 1.9초 동안 창이 멈춘다. 로컬(더 느린 PC·큰 화면)은 훨씬 심하다.
@@ -1547,6 +1569,54 @@ def floor_area_save(fkey, dx, dy, w, h):
         return True
     except Exception:
         return False
+
+
+def itemreg_shop_path():
+    """거래소 화면 그림 (공용 — 업데이트로 배포된다)."""
+    return os.path.join(IMG_DIR, "itemreg_shop.png")
+
+
+def itemreg_shop_area():
+    """거래소 그림이 있는 자리 (클라 창 기준). 등록할 때 함께 저장된다."""
+    try:
+        with open(os.path.join(IMG_DIR, "itemreg_shop_area.json"), encoding="utf-8") as f:
+            d = json.load(f) or {}
+        if int(d.get("w", 0)) > 0 and int(d.get("h", 0)) > 0:
+            return (int(d["dx"]), int(d["dy"]), int(d["w"]), int(d["h"]))
+    except Exception:
+        pass
+    return None
+
+
+def itemreg_shop_seen(coord):
+    """지금 그 창이 **거래소 화면인지**. (보임?, 점수)
+
+    창을 직접 캡처하므로 런처가 앞에 있어도 정확하다.
+    그림을 등록하지 않았으면 (False, -1) 을 돌려 '확인 불가' 를 구분한다."""
+    p = itemreg_shop_path()
+    if not os.path.exists(p):
+        return False, -1.0
+    try:
+        import cv2, numpy as np
+        big = grab_window(coord)
+        if big is None:
+            return False, 0.0
+        ar = itemreg_shop_area()
+        if ar:
+            dx, dy, w, h = ar
+            x1 = max(0, dx - FLOOR_PAD); y1 = max(0, dy - FLOOR_PAD)
+            x2 = min(big.shape[1], dx + w + FLOOR_PAD)
+            y2 = min(big.shape[0], dy + h + FLOOR_PAD)
+            if x2 - x1 > 4 and y2 - y1 > 4:
+                big = big[y1:y2, x1:x2]
+        tpl = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+        if tpl is None or tpl.shape[0] > big.shape[0] or tpl.shape[1] > big.shape[1]:
+            return False, 0.0
+        v = float(cv2.minMaxLoc(cv2.matchTemplate(big, tpl,
+                                                  cv2.TM_CCOEFF_NORMED))[1])
+        return (v >= ITEMREG_SHOP_MATCH), v
+    except Exception:
+        return False, 0.0
 
 
 def _floor_grab(fkey, coord):
@@ -2368,6 +2438,10 @@ class App(tk.Tk):
         threading.Thread(target=self._wdoff_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._item_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._popup_guard_loop, daemon=True).start()
+        # 🏷 아이템 등록 — 켜고 끄는 키(F6) + '내가 클릭했나' 감시
+        threading.Thread(target=self._itemreg_hotkey_loop, daemon=True).start()
+        threading.Thread(target=self._itemreg_click_loop, daemon=True).start()
+        self.after(1800, self._itemreg_refresh)
         # 런처가 켜질 때 클로드도 같이 켠다 — 클로드는 뒤, 런처는 앞
         # (2026-08-29 사용자 지시). 이미 떠 있으면 새로 켜지 않는다.
         self.after(2500, self._start_claude_behind)
@@ -2949,6 +3023,17 @@ class App(tk.Tk):
         tk.Button(eg, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
                   bg="#0b5345", fg="white", width=9, height=1, pady=2,
                   command=lambda: self._start_dgn2("eventshop")).pack(side="top", pady=(1, 0))
+
+        # 🏷 아이템 등록 — 거래소에서 아이템을 클릭하면 '최저가 → 등록' 을 대신 눌러준다
+        #    (2026-09-16 사용자 요청. 위=창 열기, 아래=켜짐/꺼짐 한눈에)
+        ig = tk.Frame(btn_row); ig.pack(side="left", padx=(6, 0))
+        tk.Button(ig, text="🏷 아이템\n등록", font=("맑은 고딕", 10, "bold"),
+                  bg="#117a8b", fg="white", activebackground="#0e6674",
+                  width=7, height=2, command=self._open_itemreg_win).pack(side="top")
+        self._itemreg_btn2 = tk.Button(ig, font=("맑은 고딕", 8, "bold"),
+                                       fg="white", width=9, height=1, pady=2,
+                                       command=self._itemreg_toggle)
+        self._itemreg_btn2.pack(side="top", pady=(1, 0))
 
         # 🎟 쿠폰등록 (위=창 열기, 아래=▶ 바로 실행)
         cg = tk.Frame(btn_row); cg.pack(side="left", padx=(6, 0))
@@ -13605,6 +13690,348 @@ class App(tk.Tk):
                 self.status.set(f"✔ 단축키 지정: {name}")
             self.after(0, _upd)
         threading.Thread(target=_cap, daemon=True).start()
+
+    def _open_itemreg_win(self):
+        """🏷 아이템 등록 — 켜고 끄기 + 좌표 3개 등록."""
+        self._open_section_win("_itemreg_win", "🏷 아이템 등록",
+                               self._build_itemreg, w=430, h=430, pinnable=True)
+
+    def _build_itemreg(self, parent):
+        tk.Label(parent, text="아이템 등록  (켜두면 아이템을 클릭할 때마다 최저가로 올립니다)",
+                 font=("맑은 고딕", 9, "bold"), fg="#117a8b").pack(anchor="w", padx=6, pady=(6, 2))
+        tk.Label(parent, font=("맑은 고딕", 8), fg="#888", justify="left",
+                 text="게임의 '최저가' 버튼을 대신 눌러주는 것이라 가격을 읽지 않습니다.\n"
+                      "좌표는 클라 창 기준으로 저장돼 16클라 어디서나 그대로 동작합니다."
+                 ).pack(anchor="w", padx=6, pady=(0, 6))
+
+        hr = tk.Frame(parent); hr.pack(pady=4)
+        self._itemreg_btn = tk.Button(hr, font=("맑은 고딕", 11, "bold"),
+                                      fg="white", width=14, height=2,
+                                      command=self._itemreg_toggle)
+        self._itemreg_btn.pack(side="left")
+        _vk = int(self.cfg.get("itemreg_hotkey") or ITEMREG_HOTKEY)
+        self._itemreg_keylbl = tk.StringVar(value=f"단축키 {self._vk_name(_vk)}")
+        tk.Button(hr, textvariable=self._itemreg_keylbl, font=("맑은 고딕", 8),
+                  bg="#5d6d7e", fg="white", width=12, height=2,
+                  command=self._itemreg_pick_key).pack(side="left", padx=(6, 0))
+
+        box = tk.LabelFrame(parent, text=" 좌표 (클라 창 기준) ",
+                            font=("맑은 고딕", 9, "bold"), fg="#117a8b", bd=2, relief="groove")
+        box.pack(fill="x", padx=6, pady=(8, 4))
+        self._itemreg_lbls = {}
+        for k, lb, need in self.ITEMREG_SPOTS:
+            row = tk.Frame(box); row.pack(fill="x", padx=5, pady=3)
+            tk.Label(row, text=lb + ("" if need else " (없으면 비워둠)"),
+                     font=("맑은 고딕", 9), width=20, anchor="w").pack(side="left")
+            v = tk.StringVar(); self._itemreg_lbls[k] = v
+            tk.Label(row, textvariable=v, font=("맑은 고딕", 8),
+                     width=12, anchor="w").pack(side="left")
+            tk.Button(row, text="📍 등록", font=("맑은 고딕", 8, "bold"),
+                      bg="#2471a3", fg="white",
+                      command=lambda x=k: self._itemreg_grab(x)).pack(side="left", padx=2)
+            tk.Button(row, text="✖", font=("맑은 고딕", 8), bg="#c0392b", fg="white",
+                      width=2,
+                      command=lambda x=k: self._itemreg_clear(x)).pack(side="left")
+        tk.Label(parent, font=("맑은 고딕", 8), fg="#888", justify="left",
+                 text="[📍 등록] 을 누르고 게임에서 그 버튼을 클릭하면 그 자리가 저장됩니다."
+                 ).pack(anchor="w", padx=8)
+        sb = tk.Frame(parent); sb.pack(fill="x", padx=6, pady=(8, 2))
+        _has = os.path.exists(itemreg_shop_path())
+        self._itemreg_shopbtn = tk.Button(
+            sb, text=("🛒 거래소 그림 있음 — 다시 등록" if _has else "🛒 거래소 그림 등록 (드래그)"),
+            font=("맑은 고딕", 9, "bold"), fg="white",
+            bg=("#117864" if _has else "#c0392b"), command=self._itemreg_grab_shop)
+        self._itemreg_shopbtn.pack(side="left")
+        tk.Button(sb, text="🔍 지금 거래소인지 확인", font=("맑은 고딕", 8),
+                  bg="#1f618d", fg="white",
+                  command=self._itemreg_check_shop).pack(side="left", padx=(6, 0))
+        tk.Label(parent, font=("맑은 고딕", 8), fg="#888", justify="left",
+                 text="거래소 화면에서만 동작합니다 — 다른 화면에서는 클릭해도 아무 일도 없습니다.\n"
+                      "거래소 안에서 직접 올리고 싶을 때만 위 버튼(또는 단축키)으로 끄세요."
+                 ).pack(anchor="w", padx=8, pady=(2, 0))
+        tk.Button(parent, text="🔍 지금 한 번 해보기 (마지막에 클릭한 창에서)",
+                  font=("맑은 고딕", 9, "bold"), bg="#1f618d", fg="white",
+                  command=self._itemreg_try).pack(pady=(8, 4))
+        self._itemreg_refresh()
+        self._itemreg_show_spots()
+
+    def _itemreg_grab_shop(self):
+        """거래소 화면에서 '거래소일 때만 보이는 부분' 을 드래그해 등록한다."""
+        self.status.set("🛒 거래소 화면에서 **거래소일 때만 보이는 글자·아이콘**을 "
+                        "드래그하세요 (ESC 취소)")
+        for w in self._section_wins():
+            try: w.withdraw()
+            except Exception: pass
+        self.withdraw()
+        self.after(250, lambda: _PotionAreaOverlay(self, self._on_itemreg_shop))
+
+    def _on_itemreg_shop(self, x, y, w, h):
+        self.deiconify()
+        for wn in self._section_wins():
+            try: wn.deiconify()
+            except Exception: pass
+        if w < 8 or h < 8:
+            self.status.set("🛒 너무 작습니다 — 다시 드래그해주세요"); return
+        try:
+            from PIL import ImageGrab
+            os.makedirs(IMG_DIR, exist_ok=True)
+            im = ImageGrab.grab(bbox=(x, y, x + w, y + h),
+                                all_screens=True).convert("RGB")
+            im.save(itemreg_shop_path())
+            msg = f"🛒 거래소 그림 저장 ({w}×{h})"
+            if floor_img_flat(itemreg_shop_path()):
+                os.remove(itemreg_shop_path())
+                self.status.set("🛒 무늬가 없는 자리입니다 (저장 안 함) — "
+                                "글자나 아이콘이 들어가게 다시 드래그해주세요")
+                return
+            rc = client_rect_at(x + w // 2, y + h // 2)
+            if rc:
+                with open(os.path.join(IMG_DIR, "itemreg_shop_area.json"),
+                          "w", encoding="utf-8") as f:
+                    json.dump({"dx": x - rc[0], "dy": y - rc[1], "w": w, "h": h},
+                              f, ensure_ascii=False, indent=2)
+                msg += " · 그 자리도 함께 저장 (16클라 공통)"
+            self.status.set(msg)
+            if getattr(self, "_itemreg_shopbtn", None) is not None:
+                try:
+                    self._itemreg_shopbtn.config(text="🛒 거래소 그림 있음 — 다시 등록",
+                                                 bg="#117864")
+                except Exception:
+                    pass
+        except Exception as e:
+            self.status.set(f"🛒 저장 실패: {e}")
+
+    def _itemreg_check_shop(self):
+        """지금 마지막으로 클릭한 창이 거래소로 보이는지 점수와 함께 알려준다."""
+        try:
+            import precise_click as _pc
+            _pc.start_input_watch()
+            _n, xy = _pc.last_click()
+            if not xy or xy == (0, 0):
+                self.status.set("🔍 먼저 게임 창을 한 번 클릭한 뒤 눌러주세요"); return
+            seen, sc = itemreg_shop_seen(xy)
+            if sc < 0:
+                self.status.set("🔍 거래소 그림이 아직 없습니다 — 먼저 등록해주세요")
+            else:
+                self.status.set(f"🔍 거래소 {'맞음 ✔' if seen else '아님 ✘'} "
+                                f"(점수 {sc:.2f} / 기준 {ITEMREG_SHOP_MATCH})")
+        except Exception as e:
+            self.status.set(f"🔍 실패: {e}")
+
+    def _vk_name(self, vk):
+        return {0x70: "F1", 0x71: "F2", 0x72: "F3", 0x73: "F4", 0x74: "F5",
+                0x75: "F6", 0x76: "F7", 0x77: "F8", 0x78: "F9", 0x79: "F10",
+                0x7A: "F11", 0x7B: "F12"}.get(int(vk), f"키({vk})")
+
+    def _itemreg_pick_key(self):
+        """F1~F12 중에서 켜고 끄는 키를 고른다."""
+        cur = int(self.cfg.get("itemreg_hotkey") or ITEMREG_HOTKEY)
+        ks = list(range(0x70, 0x7C))
+        nxt = ks[(ks.index(cur) + 1) % len(ks)] if cur in ks else ITEMREG_HOTKEY
+        self.cfg["itemreg_hotkey"] = nxt
+        save_cfg(self.cfg)
+        try: self._itemreg_keylbl.set(f"단축키 {self._vk_name(nxt)}")
+        except Exception: pass
+        self.status.set(f"🏷 켜고 끄는 키를 {self._vk_name(nxt)} 로 바꿨습니다 "
+                        f"(누를 때마다 다음 키로 바뀝니다)")
+
+    def _itemreg_show_spots(self):
+        for k, lb, _n in self.ITEMREG_SPOTS:
+            v = self._itemreg_lbls.get(k)
+            if v is None:
+                continue
+            r = self._itemreg_spot(k)
+            v.set(f"창+{r[0]},{r[1]}" if r else "없음")
+
+    def _itemreg_grab(self, key):
+        """그 버튼을 게임에서 클릭하면 **클라 창 기준 자리**로 저장한다."""
+        self._itemreg_wait = key
+        lb = dict((k, l) for k, l, _n in self.ITEMREG_SPOTS)[key]
+        self.status.set(f"📍 게임에서 '{lb}' 을 클릭하세요 (3초 안에 · ESC 로 취소)")
+        threading.Thread(target=self._itemreg_grab_worker, args=(key,),
+                         daemon=True).start()
+
+    def _itemreg_grab_worker(self, key):
+        import precise_click as _pc, ctypes
+        _pc.start_input_watch()
+        n0, _ = _pc.last_click()
+        t0 = time.time()
+        while time.time() - t0 < 15:
+            time.sleep(0.03)
+            if ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8000:   # ESC
+                self.after(0, lambda: self.status.set("📍 취소했습니다"))
+                return
+            n, xy = _pc.last_click()
+            if n == n0:
+                continue
+            rc = client_rect_at(int(xy[0]), int(xy[1]))
+            if not rc:
+                self.after(0, lambda: self.status.set(
+                    "📍 리니지M 창 안을 클릭해주세요 — 다시 [📍 등록] 을 눌러주세요"))
+                return
+            rel = (int(xy[0]) - rc[0], int(xy[1]) - rc[1])
+            self.cfg[f"itemreg_{key}_rel"] = [rel[0], rel[1]]
+            save_cfg(self.cfg)
+            lb = dict((k, l) for k, l, _n in self.ITEMREG_SPOTS)[key]
+            self.after(0, lambda: (self._itemreg_show_spots(),
+                                   self.status.set(
+                                       f"📍 {lb} 저장 — 창 기준 +{rel[0]},{rel[1]} "
+                                       f"(16클라 어디서나 이 자리)")))
+            return
+        self.after(0, lambda: self.status.set("📍 시간이 지나 취소했습니다"))
+
+    def _itemreg_clear(self, key):
+        self.cfg.pop(f"itemreg_{key}_rel", None)
+        save_cfg(self.cfg)
+        self._itemreg_show_spots()
+        self.status.set("📍 지웠습니다")
+
+    def _itemreg_try(self):
+        """마지막에 클릭한 창에서 한 번만 해본다 (켜지 않아도 확인용)."""
+        try:
+            import precise_click as _pc
+            _pc.start_input_watch()
+            _n, xy = _pc.last_click()
+            if not xy or xy == (0, 0):
+                self.status.set("🔍 먼저 게임 창을 한 번 클릭한 뒤 눌러주세요"); return
+            threading.Thread(target=self._itemreg_run, args=(xy,), daemon=True).start()
+        except Exception as e:
+            self.status.set(f"🔍 실패: {e}")
+
+    # ── 🏷 아이템 등록 (2026-09-16 사용자 요청) ────────────────────────────
+    ITEMREG_SPOTS = [("low", "최저가 버튼", True),
+                     ("reg", "등록 버튼",   True),
+                     ("ok",  "확인 버튼",   False)]   # 확인은 없으면 비워둔다
+
+    def _itemreg_spot(self, name):
+        v = self.cfg.get(f"itemreg_{name}_rel")
+        try:
+            return (int(v[0]), int(v[1])) if v else None
+        except Exception:
+            return None
+
+    def _itemreg_on(self):
+        # 기본은 **켜짐** — 거래소 그림이 관문이라, 거래소 밖에서는 어차피 안 돈다.
+        # (사용자: "거래소에 클릭하면 자동으로 켜지는 거야")
+        return bool(self.cfg.get("itemreg_on", True))
+
+    def _itemreg_toggle(self, on=None):
+        on = (not self._itemreg_on()) if on is None else bool(on)
+        self.cfg["itemreg_on"] = on
+        save_cfg(self.cfg)
+        self._itemreg_refresh()
+        miss = [lb for k, lb, need in self.ITEMREG_SPOTS
+                if need and not self._itemreg_spot(k)]
+        if on and miss:
+            self.status.set("🏷 아이템 등록 ON — 그런데 " + ", ".join(miss) +
+                            " 좌표가 없습니다. 창에서 먼저 등록해주세요")
+        else:
+            self.status.set("🏷 아이템 등록 " + ("ON — 아이템을 클릭하면 최저가로 올립니다"
+                                                if on else "OFF (수동으로 올리세요)"))
+        click_log(f"[아이템등록] {'켬' if on else '끔'} (사용자)")
+
+    def _itemreg_refresh(self):
+        """켜짐/꺼짐을 버튼에 크게 보여준다 — 켜진 줄 모르고 클릭하면 안 되므로."""
+        on = self._itemreg_on()
+        for b in (getattr(self, "_itemreg_btn", None),
+                  getattr(self, "_itemreg_btn2", None)):
+            try:
+                if b is not None and b.winfo_exists():
+                    b.config(text=("🏷 켜짐 (ON)" if on else "🏷 꺼짐 (OFF)"),
+                             bg=("#1e8449" if on else "#7f8c8d"))
+            except Exception:
+                pass
+
+    def _itemreg_hotkey_loop(self):
+        """F6(기본) 을 누르면 아이템 등록을 켜고 끈다."""
+        import ctypes
+        prev = False
+        while True:
+            time.sleep(0.03)
+            vk = int(self.cfg.get("itemreg_hotkey") or ITEMREG_HOTKEY)
+            try:
+                down = bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)
+            except Exception:
+                prev = False
+                continue
+            if down and not prev:
+                self.after(0, self._itemreg_toggle)
+            prev = down
+
+    def _itemreg_click_loop(self):
+        """켜져 있을 때 **내가 직접 누른 클릭**을 보고 '최저가 → 등록' 을 대신 눌러준다.
+
+        우리가 보낸 클릭은 injected 라 세지 않으므로 자기 자신을 다시 부르지 않는다."""
+        try:
+            import precise_click as _pc
+            _pc.start_input_watch()
+        except Exception:
+            return
+        seen, last_run = None, 0.0
+        while True:
+            time.sleep(0.03)
+            try:
+                if not self._itemreg_on():
+                    seen = None
+                    continue
+                n, xy = _pc.last_click()
+                if seen is None:
+                    seen = n                      # 켜는 순간의 클릭은 세지 않는다
+                    continue
+                if n == seen:
+                    continue
+                seen = n
+                if time.time() - last_run < ITEMREG_COOLDOWN:
+                    continue                      # 연달아 누른 것은 한 번만
+                if self._is_busy() or getattr(self, "_itemreg_busy", False):
+                    continue                      # 다른 작업 중이면 건드리지 않는다
+                last_run = time.time()
+                threading.Thread(target=self._itemreg_run, args=(xy,),
+                                 daemon=True).start()
+            except Exception:
+                continue
+
+    def _itemreg_run(self, xy):
+        """내가 클릭한 그 클라 창에서 최저가 → 등록 → (확인) 을 누른다."""
+        if getattr(self, "_itemreg_busy", False):
+            return
+        self._itemreg_busy = True
+        try:
+            rc = client_rect_at(int(xy[0]), int(xy[1]))
+            if not rc:
+                return                            # 리니지M 창 밖을 클릭한 것 — 무시
+            # 🛒 **거래소 화면일 때만** 누른다. 다른 화면에서는 조용히 아무 일도 안 한다.
+            #    (사용자: "거래소에 클릭하면 자동으로 켜지는 거야")
+            seen, sc = itemreg_shop_seen(xy)
+            if sc < 0:
+                self.after(0, lambda: self.status.set(
+                    "🛒 거래소 그림이 없습니다 — [🏷 아이템 등록] 창에서 등록해주세요 "
+                    "(등록 전에는 동작하지 않습니다)"))
+                return
+            if not seen:
+                return                            # 거래소가 아니다 — 조용히 무시
+            spots = [(lb, self._itemreg_spot(k)) for k, lb, _n in self.ITEMREG_SPOTS]
+            if not spots[0][1] or not spots[1][1]:
+                self.after(0, lambda: self.status.set(
+                    "🏷 최저가·등록 좌표가 없습니다 — [🏷 아이템 등록] 창에서 등록해주세요"))
+                return
+            time.sleep(random.uniform(*ITEMREG_WAIT))   # 화면이 뜨기를 기다린다
+            done = []
+            for lb, rel in spots:
+                if not rel:
+                    continue                      # 확인 버튼이 없는 화면이면 건너뛴다
+                x, y = rc[0] + rel[0], rc[1] + rel[1]
+                click_at(x, y)
+                done.append(lb)
+                time.sleep(random.uniform(*ITEMREG_GAP))
+            click_log(f"[아이템등록] 클릭 {tuple(xy)} → 창({rc[0]},{rc[1]}) "
+                      f"에서 {' → '.join(done)} 누름")
+            self.after(0, lambda: self.status.set(
+                "🏷 최저가로 등록했습니다 (" + " → ".join(done) + ")"))
+        except Exception as e:
+            click_log(f"[아이템등록] 실패: {e!r}")
+        finally:
+            self._itemreg_busy = False
 
     def _dc_hotkey_loop(self):
         """전역 단축키 감시 — ON 상태에서 지정키가 눌리면 일반던전충전 실행."""

@@ -268,7 +268,10 @@ def post_wheel(x, y, notches):
 # 감지하지 못하고 그 위에 자동 클릭이 겹쳐 들어갔다(= 팅김).
 # 저수준 훅으로 물리 마우스 이벤트만 골라 본다 (우리가 보낸 SendInput 은 injected
 # 표시가 붙어 있어 제외된다).
-_WATCH = {"on": False, "ts": 0.0, "down": False, "keys": set()}
+_WATCH = {"on": False, "ts": 0.0, "down": False, "keys": set(),
+          # 사람이 **직접** 누른 마지막 클릭 (우리가 보낸 클릭은 injected 라 안 센다).
+          # 🏷 아이템 등록이 '내가 클릭한 그 자리/그 창'을 알아내는 데 쓴다 (2026-09-16).
+          "click_n": 0, "click_xy": (0, 0)}
 _LLMHF_INJECTED = 0x00000001
 _LLMHF_LOWER_IL_INJECTED = 0x00000002
 _LLKHF_INJECTED = 0x00000010          # 키보드 — 우리가 보낸 키에 붙는 표시
@@ -307,6 +310,10 @@ def _watch_thread():
                     _WATCH["ts"] = time.time()          # 사람이 만진 시각
                     if wparam in (0x0201, 0x0204, 0x0207):      # L/R/M 버튼 누름
                         _WATCH["down"] = True
+                        if wparam == 0x0201:                    # 왼쪽 버튼만 기억
+                            _WATCH["click_n"] = _WATCH.get("click_n", 0) + 1
+                            _WATCH["click_xy"] = (int(lparam.contents.pt.x),
+                                                  int(lparam.contents.pt.y))
                     elif wparam in (0x0202, 0x0205, 0x0208):    # 버튼 뗌
                         _WATCH["down"] = False
         except Exception:
@@ -365,6 +372,16 @@ def start_input_watch():
     except Exception:
         _WATCH["on"] = False
         return False
+
+
+def last_click():
+    """사람이 **직접** 누른 마지막 왼쪽 클릭 — (횟수, (x, y)).
+
+    횟수가 늘었으면 '새로 눌렀다'는 뜻이다. 우리가 보낸 클릭은 injected 표시가
+    붙어 세지 않으므로, 자동 클릭이 자기 자신을 다시 부르는 일이 없다."""
+    if not _WATCH["on"]:
+        return 0, (0, 0)
+    return int(_WATCH.get("click_n", 0)), tuple(_WATCH.get("click_xy", (0, 0)))
 
 
 def idle_seconds():
