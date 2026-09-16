@@ -1468,6 +1468,7 @@ ITEMREG_COOLDOWN = 1.5           # 한 번 돌고 다음까지 최소 시간(초
 # 좌표는 **번호 순서대로** 누른다 (2026-09-16 사용자 지시: "순서대로 해야 해").
 # 다른 런처와 같은 방식 — 안 쓰는 칸은 비워두면 건너뛴다.
 ITEMREG_CLICKS   = 8
+ITEMREG_GRAB_SEC = 30    # [📍] 누른 뒤 게임을 클릭할 때까지 기다리는 시간(초)
 
 # ── 🐢 버퍼링 없애기 (2026-09-16 사용자 신고: "메인런처 클릭·창 띄우기가 너무 버벅인다") ──
 # 원인 실측: 퍼플 팝업 감시가 **UI 스레드에서** 화면을 긁었다 — 한 번 64ms × 2초마다.
@@ -13728,6 +13729,7 @@ class App(tk.Tk):
         # 등록됐는지 **한눈에** 보이게 — 좌표는 색+값, 그림은 실제 미리보기 (2026-09-16 지시)
         self._itemreg_lbls, self._itemreg_gapvars = {}, {}
         self._itemreg_pbtns, self._itemreg_ibtns, self._itemreg_thumbs = {}, {}, {}
+        self._itemreg_nbtns = {}
         self._itemreg_photo = {}          # PhotoImage 참조 유지 (안 하면 그림이 사라진다)
         gaps = self._itemreg_gaps()
         for i2 in range(ITEMREG_CLICKS):
@@ -13749,6 +13751,16 @@ class App(tk.Tk):
             ib.bind("<Button-3>", lambda _e, x=i2: self._itemreg_del_img(x))
             ib.pack(side="left", padx=1)
             self._itemreg_ibtns[i2] = ib
+            # ⛔ 이게 보이면 **누르지 않고 그 자리에서 멈춘다** (예: 최저가가 0원일 때).
+            #    사용자 지시 2026-09-16: "0원이면 그 상태에서 정지, 내가 수동으로 올릴게"
+            nb = tk.Button(row, text="⛔", font=("맑은 고딕", 8, "bold"), width=2,
+                           fg="white")
+            nb.config(command=lambda x=i2, b_=nb:
+                      self._grab_no_image("itemreg", 0, x, b_))
+            nb.bind("<Button-3>", lambda _e, x=i2, b_=nb:
+                    self._del_no_image("itemreg", x, b_))
+            nb.pack(side="left", padx=1)
+            self._itemreg_nbtns[i2] = nb
             th = tk.Label(row, bd=1, relief="solid")   # 그림 미리보기
             th.pack(side="left", padx=(2, 0))
             self._itemreg_thumbs[i2] = th
@@ -13897,6 +13909,12 @@ class App(tk.Tk):
                               bg=("#8e44ad" if n else "#7f8c8d"))
             except Exception:
                 pass
+            nb = (getattr(self, "_itemreg_nbtns", {}) or {}).get(k)
+            try:
+                if nb is not None and nb.winfo_exists():
+                    nb.config(bg=("#c0392b" if has_no_img("itemreg", k) else "#7f8c8d"))
+            except Exception:
+                pass
             self._itemreg_thumb(k)
 
     def _itemreg_thumb(self, k):
@@ -13975,22 +13993,47 @@ class App(tk.Tk):
                          daemon=True).start()
 
     def _itemreg_grab_worker(self, idx):
-        import precise_click as _pc, ctypes
-        _pc.start_input_watch()
-        n0, _ = _pc.last_click()
-        t0 = time.time()
-        while time.time() - t0 < 15:
-            time.sleep(0.03)
-            if ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8000:   # ESC
+        """게임에서 누를 자리를 클릭할 때까지 기다린다.
+
+        ⚠ **마우스 버튼을 직접 본다** (`GetAsyncKeyState`) — 저수준 훅에 기대지 않는다.
+        2026-09-16: 훅으로 만들었더니 **등록이 아예 안 됐다**(파일에 키조차 안 생김).
+        훅이 안 켜졌거나 이 프로세스에서 안 잡히면 `last_click()` 이 영영 그대로라
+        15초 뒤 조용히 취소됐다. 등록은 사용자가 일부러 누르는 것이라
+        '내 클릭인지' 가릴 필요가 없으므로 이 방식이 확실하다."""
+        import ctypes, ctypes.wintypes          # wintypes 는 따로 불러와야 한다
+        u = ctypes.windll.user32
+        u.GetAsyncKeyState(0x01); u.GetAsyncKeyState(0x1B)   # 눌린 흔적 비우기
+        try:                                # 훅도 같이 본다 (둘 중 먼저 잡히는 쪽)
+            import precise_click as _pc
+            _pc.start_input_watch()
+            n0 = _pc.last_click()[0]
+        except Exception:
+            _pc, n0 = None, 0
+        t0, was = time.time(), True        # 버튼에서 손을 뗄 때까지 기다렸다 시작
+        pt = ctypes.wintypes.POINT()
+        while time.time() - t0 < ITEMREG_GRAB_SEC:
+            time.sleep(0.02)
+            if u.GetAsyncKeyState(0x1B) & 0x8000:            # ESC
                 self.after(0, lambda: self.status.set("📍 취소했습니다"))
                 return
-            n, xy = _pc.last_click()
-            if n == n0:
+            xy = None
+            down = bool(u.GetAsyncKeyState(0x01) & 0x8000)
+            if was:                        # [📍] 를 누른 손을 뗄 때까지 무시
+                was = down
+            elif down:
+                u.GetCursorPos(ctypes.byref(pt))
+                xy = (pt.x, pt.y)
+            if xy is None and _pc is not None:     # 훅이 먼저 잡았을 수도 있다
+                _n, _xy = _pc.last_click()
+                if _n != n0 and _xy != (0, 0):
+                    xy = _xy
+            if xy is None:
                 continue
             rc = client_rect_at(int(xy[0]), int(xy[1]))
             if not rc:
                 self.after(0, lambda: self.status.set(
-                    "📍 리니지M 창 안을 클릭해주세요 — 다시 [📍] 를 눌러주세요"))
+                    f"📍 여기는 리니지M 창이 아닙니다 {xy} — 게임 창 안을 클릭해주세요 "
+                    f"(다시 [📍] 를 눌러주세요)"))
                 return
             rel = [int(xy[0]) - rc[0], int(xy[1]) - rc[1],
                    rc[2] - rc[0], rc[3] - rc[1]]      # 창 크기도 함께 (비율 보정용)
@@ -14000,7 +14043,8 @@ class App(tk.Tk):
                                        f"📍 {idx+1}번 저장 — 창 기준 +{rel[0]},{rel[1]} "
                                        f"(16클라 어디서나 이 자리)")))
             return
-        self.after(0, lambda: self.status.set("📍 시간이 지나 취소했습니다"))
+        self.after(0, lambda: self.status.set(
+            f"📍 {ITEMREG_GRAB_SEC}초 안에 클릭이 없어 취소했습니다 — 다시 [📍] 를 눌러주세요"))
 
     def _itemreg_clear(self, idx):
         self._itemreg_set(idx, rel=None)
@@ -14175,6 +14219,18 @@ class App(tk.Tk):
                 ab = self._itemreg_abs(rels[k], rc)
                 if not ab:
                     continue
+                # ⛔ 이게 보이면 **누르지 않고 그 자리에서 멈춘다** — ESC 도 누르지 않는다.
+                #    (2026-09-16 사용자 지시: "최저가가 0원이면 그 상태에서 정지시켜줘.
+                #     다음 좌표 클릭하지 말고 내가 수동으로 올릴게")
+                if has_no_img("itemreg", k):
+                    _nx, _ny, _ns = find_no_img("itemreg", k, ab)
+                    if _nx is not None:
+                        click_log(f"[아이템등록] {k+1}번 ⛔ 멈춤 그림 보임 "
+                                  f"(일치도 {_ns:.2f}) — 여기서 정지. "
+                                  f"누른 것: {' → '.join(done) or '없음'}")
+                        self.after(0, lambda kk=k: self.status.set(
+                            f"⛔ {kk+1}번에서 멈췄습니다 (최저가 0원 등) — 직접 올려주세요"))
+                        return
                 # 🖼 그 자리에 그림을 걸어뒀으면 **보일 때까지 기다렸다가** 누른다.
                 #    안 보이면 거기서 끝 — 다음 좌표를 누르지 않는다 (기존 절대 규칙과 동일).
                 if has_img("itemreg", k):
