@@ -1176,13 +1176,17 @@ def has_no_img(fkey, j):
         return False
 
 
-def find_no_img(fkey, j, coord):
-    """금지 그림이 지금 보이나 — 보이면 (x, y, 점수), 아니면 (None, None, 최고점수)."""
+def find_no_img(fkey, j, coord, strict=False):
+    """금지 그림이 지금 보이나 — 보이면 (x, y, 점수), 아니면 (None, None, 최고점수).
+
+    strict=True 면 **느슨한 판정(배수·흑백·윤곽선)을 쓰지 않고 기준 점수만** 본다.
+    '비슷하게 생겼지만 값이 다른 화면'(예: 최저가 0.00 vs 50.00)을 가려야 할 때 쓴다 —
+    느슨한 판정은 0.87 짜리도 통과시켜 멈추지 말아야 할 때 멈춘다 (2026-09-16 실측)."""
     q = no_path(fkey, j)
     if not os.path.exists(q):
         return None, None, 0.0
     box = search_box(fkey, j, coord)
-    return _find_one(fkey, j, coord, q, box)
+    return _find_one(fkey, j, coord, q, box, strict=strict)
 
 
 def press_esc(times=1, gap=(0.18, 0.32)):
@@ -1462,9 +1466,21 @@ def img_mine_free(fkey, j):
 #      F6 은 '거래소 안에서 잠깐 끄는' 수동 스위치다 (최저가가 없어 직접 올릴 때).
 ITEMREG_SHOP_MATCH = 0.70        # 거래소 그림 기준
 ITEMREG_HOTKEY   = 0x75          # 기본 F6 (창의 [단축키] 으로 바꿀 수 있다)
-ITEMREG_WAIT     = (0.35, 0.60)  # 내가 클릭한 뒤 화면이 뜨기를 기다리는 시간(초)
-ITEMREG_GAP      = (0.25, 0.45)  # 좌표 사이 기본 간격(초) — 칸에 적으면 그 값이 이긴다
-ITEMREG_COOLDOWN = 1.5           # 한 번 돌고 다음까지 최소 시간(초) — 연속 오발 방지
+# 2026-09-16 사용자 요청 "속도를 30프로만 당겨줘" — 기다리는 시간을 전부 ×0.7.
+# 줄여도 되는 이유: 2·3번 칸의 🖼('등록 창이 떠 있나') 확인이 **화면이 뜰 때까지
+# 기다렸다가** 누르므로, 고정 대기가 짧아도 헛발질하지 않는다.
+# 랜덤 폭은 없애지 않고 범위만 좁혔다 (사람처럼 규칙).
+# 🖼 확인은 **창이 뜨는 순간** 넘어가도록 촘촘히 본다 — 이래야 '딱 딱 딱' 이 된다.
+ITEMREG_SEE_GAP  = (0.05, 0.09)  # 다시 볼 때까지(초) — 한 번 보는 데 몇 ms 밖에 안 든다
+ITEMREG_SEE_MAX  = 1.6           # 이 시간 안에 안 뜨면 중단 (뒤 키는 안 누른다)
+ITEMREG_SETTLE   = (0.22, 0.32)  # 창이 보인 뒤 '키를 받을 수 있게' 되기까지(초)
+# 내가 클릭한 뒤 **게임이 그 아이템을 고를 때까지** 기다리는 시간(초).
+# ⚠ 여기는 줄이면 안 된다 — 0.15~0.25 로 줄였더니 아이템이 골라지기 전에 `4` 가 눌려
+#   등록 창이 안 열리는 일이 생겼다 (2026-09-16 실측: '2번 그림이 안 보여 중단' 0.29).
+#   이 앞에는 확인할 그림이 없어서(아직 창이 없다) 시간으로 버틸 수밖에 없다.
+ITEMREG_WAIT     = (0.34, 0.46)
+ITEMREG_GAP      = (0.18, 0.32)  # 좌표 사이 기본 간격(초) — 칸에 적으면 그 값이 이긴다
+ITEMREG_COOLDOWN = 1.0           # 한 번 돌고 다음까지 최소 시간(초) — 연속 오발 방지
 # 좌표는 **번호 순서대로** 누른다 (2026-09-16 사용자 지시: "순서대로 해야 해").
 # 다른 런처와 같은 방식 — 안 쓰는 칸은 비워두면 건너뛴다.
 # ⌨ **좌표가 아니라 '키 순서'다** (2026-09-16 — 사용자가 G허브 매크로를 보여줌).
@@ -1474,9 +1490,22 @@ ITEMREG_COOLDOWN = 1.5           # 한 번 돌고 다음까지 최소 시간(초
 # 키는 **지금 앞에 있는 창**으로 가므로 클라 위치·창 크기와 전혀 무관하다.
 # (사용자가 아이템을 클릭하면 그 클라가 앞으로 오고, 그 다음 키가 거기로 간다)
 ITEMREG_STEPS = 8                # 최대 단계 수 (안 쓰는 칸은 비워둔다)
-ITEMREG_DEFAULT = [("4", 25, 600), ("5", 25, 900),
-                   ("Y", 25, 800), ("Y", 25, 0)]     # G허브에서 그대로 가져온 값
-ITEMREG_JITTER = (0.90, 1.15)    # 사람처럼 — 적어둔 시간에 이만큼 곱한다
+# ⚠ G허브의 25ms 를 그대로 쓰면 안 된다 (2026-09-16). G허브는 드라이버로 보내서
+#   25ms 도 먹지만, 우리가 보내는 키는 **너무 짧으면 게임이 무시한다** — 마우스 클릭에
+#   이미 있던 교훈("60~110ms 로 사람처럼")이 키에도 그대로 적용된다.
+#   그래서 누르는 시간을 80ms 로 늘리고, 화면이 바뀌기를 기다리는 시간도 넉넉히 준다
+#   (클라 16개 + 원격이라 여기가 G허브 환경보다 느리다).
+#   (2026-09-16 "30프로만 당겨줘" → 기다리는 시간 ×0.7. **누르는 시간 80ms 는 그대로** —
+#    그게 게임이 키를 먹게 만든 부분이라 줄이면 다시 안 눌린다.)
+#   `4` 뒤는 180ms 만 쉰다 — 그 다음 칸의 🖼 이 **창이 뜨는 순간**을 잡아주므로
+#   길게 기다릴 필요가 없다. 반대로 `5` 뒤(840ms)는 줄이면 안 된다 — 최저가가
+#   값에 반영되기를 기다리는 시간이라, 짧으면 엉뚱한 값으로 등록된다.
+ITEMREG_DEFAULT = [("4", 80, 180), ("5", 80, 840),
+                   ("y", 80, 840), ("y", 80, 0)]
+# 사람처럼 — 적어둔 시간에 이만큼 곱한다. 2026-09-16 사용자가 "딱 딱 딱 해줬으면
+# 좋겠는데 불안정하다" 고 해서 폭을 좁혔다 (±15% → ±5%). **0 으로 만들지는 않는다**
+# — 랜덤 폭은 없애지 말고 좁히라는 기존 규칙 그대로.
+ITEMREG_JITTER = (0.95, 1.05)
 
 # ── 🐢 버퍼링 없애기 (2026-09-16 사용자 신고: "메인런처 클릭·창 띄우기가 너무 버벅인다") ──
 # 원인 실측: 퍼플 팝업 감시가 **UI 스레드에서** 화면을 긁었다 — 한 번 64ms × 2초마다.
@@ -1598,6 +1627,152 @@ def itemreg_shop_area():
     except Exception:
         pass
     return None
+
+
+# ── 🏷 '최저 거래 단가 = 0원' 판정 (2026-09-16 실측 — 그림 대조로는 못 가린다) ──
+# 숫자가 **오른쪽 정렬**이라 '50.00' 의 뒤쪽 네 글자가 '0.00' 과 **픽셀까지 같다.**
+# 실측: 정상(50.00) 화면에서도 '0.00' 일치도가 0.988 로 나온다 → ⛔ 그림으로는 불가능.
+# 클라마다 렌더링 차이까지 겹쳐 0원 0.91 · 정상 0.87 로 여유가 0.04 밖에 안 됐고,
+# 그 탓에 **최저가 0원인데 등록되는 사고**가 났다.
+# 그래서 두 가지를 같이 본다 (검증: 0원 → 잉크 0 · 정상 50.00 → 잉크 9):
+#   ① 네 글자 자리 **왼쪽**(추가 숫자가 들어갈 자리)이 비었나  ← 50.00 을 가른다
+#   ② 그 네 글자가 '0.00' 과 맞나                          ← 5.00 을 가른다
+ITEMREG_ZERO_STEP  = 2      # 0부터 — 3번 칸(첫 y)을 누르기 직전에 본다
+ITEMREG_LBL_MATCH  = 0.70   # '최저 거래 단가' 라벨을 찾는 기준
+ITEMREG_ZERO_MATCH = 0.90   # 네 글자가 '0.00' 인가
+ITEMREG_INK        = 140    # 이 밝기 이상이면 글자로 본다
+ITEMREG_INK_MAX    = 3      # 왼쪽 자리 잉크가 이보다 적으면 '비었다'
+# 라벨 왼쪽위 기준: 값(네 글자) 자리 dxv,wv,hv · 그 왼쪽 '추가 숫자' 자리 dxe,we
+ITEMREG_ZERO_GEO   = (132, 14, 15, 124, 8)
+
+
+def itemreg_zero_price(coord):
+    """지금 등록 창의 '최저 거래 단가' 가 0 인가 — (0원인가, 설명).
+
+    등록 창(라벨)을 못 찾으면 (None, 이유) — '판단 불가' 라 멈추지 않는다
+    (그건 바로 뒤 🖼 확인이 맡는다)."""
+    try:
+        import cv2, numpy as np
+        lbls = img_list("itemreg", ITEMREG_ZERO_STEP)
+        zp = os.path.join(IMG_DIR, "itemreg_zero.png")
+        if not lbls or not os.path.exists(zp):
+            return None, "기준 그림 없음"
+        big = grab_window(coord)
+        if big is None:
+            return None, "창 캡처 실패"
+        lbl = cv2.imdecode(np.fromfile(lbls[0], np.uint8), cv2.IMREAD_COLOR)
+        zero = cv2.imdecode(np.fromfile(zp, np.uint8), cv2.IMREAD_COLOR)
+        if lbl is None or zero is None:
+            return None, "기준 그림 읽기 실패"
+        box = None
+        try:
+            with open(area_path("itemreg", ITEMREG_ZERO_STEP), encoding="utf-8") as f:
+                d = json.load(f) or {}
+            if int(d.get("w", 0)) > 0:
+                box = (int(d["dx"]), int(d["dy"]), int(d["w"]), int(d["h"]))
+        except Exception:
+            box = None
+        if box:
+            x0, y0 = max(0, box[0]), max(0, box[1])
+            sub = big[y0:min(big.shape[0], y0 + box[3]),
+                      x0:min(big.shape[1], x0 + box[2])]
+        else:
+            x0 = y0 = 0; sub = big
+        if lbl.shape[0] > sub.shape[0] or lbl.shape[1] > sub.shape[1]:
+            return None, "범위가 라벨보다 작음"
+        sc = cv2.minMaxLoc(cv2.matchTemplate(sub, lbl, cv2.TM_CCOEFF_NORMED))
+        v, loc = float(sc[1]), sc[3]
+        if v < ITEMREG_LBL_MATCH:
+            return None, f"등록 창 아님 (라벨 {v:.2f})"
+        lx, ly = x0 + loc[0], y0 + loc[1]
+        dxv, wv, hv, dxe, we = ITEMREG_ZERO_GEO
+        ex = big[ly:ly + hv, lx + dxe:lx + dxe + we]
+        vx = big[ly:ly + hv, lx + dxv:lx + dxv + wv]
+        if ex.size == 0 or vx.shape[0] < zero.shape[0] or vx.shape[1] < zero.shape[1]:
+            return None, "값 칸을 못 읽음"
+        ink = int((cv2.cvtColor(ex, cv2.COLOR_BGR2GRAY) >= ITEMREG_INK).sum())
+        m = float(cv2.minMaxLoc(cv2.matchTemplate(vx, zero,
+                                                  cv2.TM_CCOEFF_NORMED))[1])
+        # 판단은 **왼쪽 잉크 하나로만** 한다 (2026-09-16 사용자 지시).
+        #   "9.00 이어도 어차피 안 올라가니까 괜찮지 않아?" — 맞는 말이다.
+        # '0.00' 일치도(②)를 조건에 넣으면, 다른 클라에서 0.00 이 조금 다르게 그려져
+        # 0.88 이 나오는 순간 **안 멈추고 0원에 등록해버린다**(실제로 난 사고).
+        # 빼면 최악이 '싼 아이템에서 괜히 멈춤' — 사용자가 직접 올리면 그만이라
+        # 실패해도 안전한 쪽이다. ②는 참고용으로 기록에만 남긴다.
+        is_zero = (ink < ITEMREG_INK_MAX)
+        return is_zero, f"라벨 {v:.2f} · 왼쪽잉크 {ink} · 참고 '0.00' {m:.2f}"
+    except Exception as e:
+        return None, f"확인 실패 {e!r}"
+
+
+def itemreg_img_seen(k, coord):
+    """그 칸의 🖼 이 지금 보이나 — (보임?, 점수).
+
+    **창을 직접 캡처(PrintWindow)** 한다. 일반 `find_image` 는 화면을 긁어서
+    (`ImageGrab`) 보기 때문에, 런처나 다른 클라가 그 창을 덮으면 엉뚱한 픽셀을 읽어
+    '안 보임' 이 된다 — 2026-09-16 실측: 같은 순간 🛒(창 캡처) 1.000 · 🖼(화면 긁기) 0.53.
+    (절전 확인 때 겪은 것과 같은 문제 — 그때도 PrintWindow 로 바꿔 해결했다)"""
+    try:
+        import cv2, numpy as np
+        paths = img_list("itemreg", k)
+        if not paths:
+            return False, -1.0
+        big = grab_window(coord)
+        if big is None:
+            return False, 0.0
+        try:
+            with open(area_path("itemreg", k), encoding="utf-8") as f:
+                d = json.load(f) or {}
+            if int(d.get("w", 0)) > 0 and not d.get("full"):
+                x0, y0 = max(0, int(d["dx"])), max(0, int(d["dy"]))
+                big = big[y0:min(big.shape[0], y0 + int(d["h"])),
+                          x0:min(big.shape[1], x0 + int(d["w"]))]
+        except Exception:
+            pass
+        thr = 0.70
+        try:
+            with open(thr_path("itemreg", k), encoding="utf-8") as f:
+                thr = float((json.load(f) or {}).get("thr", thr))
+        except Exception:
+            pass
+        best = 0.0
+        for p in paths:
+            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            if t is None or t.shape[0] > big.shape[0] or t.shape[1] > big.shape[1]:
+                continue
+            v = float(cv2.minMaxLoc(cv2.matchTemplate(big, t,
+                                                      cv2.TM_CCOEFF_NORMED))[1])
+            best = max(best, v)
+            if best >= thr:
+                break
+        return (best >= thr), best
+    except Exception:
+        return False, 0.0
+
+
+def itemreg_hit_area():
+    """**여기를 클릭했을 때만** 동작한다 (클라 창 왼쪽위 기준 dx,dy,w,h).
+
+    ✕(닫기)·탭처럼 아이템이 아닌 곳을 눌러도 화면 뒤에 목록이 보여서 🛒 가 통과해
+    엉뚱하게 키가 눌리는 문제를 막는다 (2026-09-16 사용자 신고: "내가 x를 누르면
+    왜 뒤에 반응을 하냐"). 파일이 없으면 제한 없음(예전 동작)."""
+    허용, 제외 = None, []
+    try:
+        with open(os.path.join(IMG_DIR, "itemreg_hit_area.json"), encoding="utf-8") as f:
+            d = json.load(f) or {}
+        if int(d.get("w", 0)) > 0 and int(d.get("h", 0)) > 0:
+            허용 = (int(d["dx"]), int(d["dy"]), int(d["w"]), int(d["h"]))
+        # 허용 범위 **안에 있지만 눌러선 안 되는 곳** (아이템 설명창의 ✕ 등).
+        for n in (d.get("not") or []):
+            try:
+                if int(n.get("w", 0)) > 0 and int(n.get("h", 0)) > 0:
+                    제외.append((int(n["dx"]), int(n["dy"]),
+                                 int(n["w"]), int(n["h"])))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return (허용, 제외) if 허용 else None
 
 
 def itemreg_shop_seen(coord):
@@ -14115,9 +14290,19 @@ class App(tk.Tk):
                 if n == seen:
                     continue
                 seen = n
+                # 클릭이 감지됐다는 것부터 기록한다 — 이게 없으면 '훅이 못 봤는지,
+                # 뒤에서 막혔는지' 를 구분할 수 없다 (2026-09-16). 2초에 한 줄만.
+                if time.time() - getattr(self, "_itemreg_seen_log", 0.0) > 2.0:
+                    self._itemreg_seen_log = time.time()
+                    click_log(f"[아이템등록] 클릭 감지 {tuple(xy)}")
                 if time.time() - last_run < ITEMREG_COOLDOWN:
                     continue                      # 연달아 누른 것은 한 번만
                 if self._is_busy() or getattr(self, "_itemreg_busy", False):
+                    click_log("[아이템등록] 다른 작업이 도는 중이라 건너뜀 "
+                              f"· 클릭 {tuple(xy)}")
+                    # 조용히 사라지면 '불안정하다' 고 느낀다 — 건너뛴 것을 보여준다.
+                    self.after(0, lambda: self.status.set(
+                        "🏷 앞 아이템을 올리는 중 — 이 클릭은 건너뜁니다 (잠깐 뒤 다시)"))
                     continue                      # 다른 작업 중이면 건드리지 않는다
                 last_run = time.time()
                 threading.Thread(target=self._itemreg_run, args=(xy,),
@@ -14133,7 +14318,27 @@ class App(tk.Tk):
         try:
             rc = client_rect_at(int(xy[0]), int(xy[1]))
             if not rc:
+                if time.time() - getattr(self, "_itemreg_out_log", 0.0) > 2.0:
+                    self._itemreg_out_log = time.time()
+                    click_log(f"[아이템등록] 리니지M 창 밖 클릭 {tuple(xy)} — 무시")
                 return                            # 리니지M 창 밖을 클릭한 것 — 무시
+            # ✕(닫기)·탭 같은 곳을 누른 것은 아이템 클릭이 아니다 — 무시한다.
+            _hh = itemreg_hit_area()
+            if _hh:
+                _ha, _hn = _hh
+                _cx, _cy = int(xy[0]) - rc[0], int(xy[1]) - rc[1]
+                _in = (_ha[0] <= _cx < _ha[0] + _ha[2]
+                       and _ha[1] <= _cy < _ha[1] + _ha[3])
+                for _nx0, _ny0, _nw, _nh in _hn:       # 제외 구역 (✕ 등)
+                    if _nx0 <= _cx < _nx0 + _nw and _ny0 <= _cy < _ny0 + _nh:
+                        _in = False
+                        break
+                if not _in:
+                    if time.time() - getattr(self, "_itemreg_hit_log", 0.0) > 2.0:
+                        self._itemreg_hit_log = time.time()
+                        click_log(f"[아이템등록] 아이템 자리가 아님 — 창 안 ({_cx},{_cy}) "
+                                  f"· 허용 {_ha} — 아무 키도 누르지 않음")
+                    return
             # 🛒 **거래소 화면일 때만** 누른다. 다른 화면에서는 조용히 아무 일도 안 한다.
             #    (사용자: "거래소에 클릭하면 자동으로 켜지는 거야")
             seen, sc = itemreg_shop_seen(xy)
@@ -14143,21 +14348,65 @@ class App(tk.Tk):
                     "(등록 전에는 동작하지 않습니다)"))
                 return
             if not seen:
+                # 왜 안 눌렸는지 기록이 없으면 원격에서 짚을 수가 없다 (2026-09-16).
+                # 게임 중에는 클릭이 잦으므로 **2초에 한 줄만** 남긴다.
+                if time.time() - getattr(self, "_itemreg_miss_log", 0.0) > 2.0:
+                    self._itemreg_miss_log = time.time()
+                    click_log(f"[아이템등록] 🛒 거래소 화면이 아님 — 일치도 {sc:.3f} "
+                              f"(기준 {ITEMREG_SHOP_MATCH:.2f}) · 클릭 {tuple(xy)} "
+                              f"· 창({rc[0]},{rc[1]}) — 아무 키도 누르지 않음")
                 return                            # 거래소가 아니다 — 조용히 무시
+            click_log(f"[아이템등록] 🛒 거래소 확인 (일치도 {sc:.3f}) "
+                      f"— 클릭 {tuple(xy)} · 창({rc[0]},{rc[1]})")
             steps = self._itemreg_steps()
             order = [k for k in range(ITEMREG_STEPS) if steps[k]["key"]]
             if not order:
                 self.after(0, lambda: self.status.set(
                     "🏷 누를 키가 없습니다 — [🏷 아이템 등록] 창에서 키 순서를 적어주세요"))
                 return
+            # 🚫 키는 **지금 앞에 있는 창**으로 간다. 도중에 다른 창으로 넘어가면
+            #    남은 키가 엉뚱한 곳에 눌린다 → 시작한 창을 기억해두고 키를 누르기
+            #    직전마다 확인한다. 달라졌으면 그 자리에서 멈춘다 (2026-09-16 사용자 지시).
+            try:
+                _h0 = win32gui.GetForegroundWindow()
+            except Exception:
+                _h0 = None
             time.sleep(random.uniform(*ITEMREG_WAIT))   # 화면이 뜨기를 기다린다
             done = []
+            _trace = []
             for k in order:                        # **적어둔 순서 그대로**
                 st = steps[k]
+                if _h0:
+                    try:
+                        _hn = win32gui.GetForegroundWindow()
+                    except Exception:
+                        _hn = _h0
+                    if _hn != _h0:
+                        click_log(f"[아이템등록] 창이 바뀌어 {k+1}번({st['key']}) 앞에서 중단 "
+                                  f"— 누른 키: {' → '.join(done) or '없음'}")
+                        self.after(0, lambda: self.status.set(
+                            "🏷 다른 창으로 넘어가서 멈췄습니다 (뒤는 안 누름)"))
+                        return
                 # ⛔ 이게 보이면 **누르지 않고 그 자리에서 멈춘다. ESC 도 안 누른다.**
                 #    (2026-09-16: "최저가가 0원이면 그 상태에서 정지, 내가 수동으로 올릴게")
+                # 🏷 '최저 거래 단가 0원' — 그림 대조가 아니라 **숫자 자리**로 판단한다.
+                #    (오른쪽 정렬이라 '50.00' 뒤 네 글자가 '0.00' 과 픽셀까지 같다)
+                if k == ITEMREG_ZERO_STEP:
+                    _z, _zd = itemreg_zero_price(xy)
+                    _trace.append(f"0원?{_zd}")
+                    if _z:
+                        click_log(f"[아이템등록] {k+1}번({st['key']}) 최저가가 0원 "
+                                  f"— 여기서 정지 ({_zd}). "
+                                  f"누른 키: {' → '.join(done) or '없음'}")
+                        self.after(0, lambda: self.status.set(
+                            "⛔ 최저가가 0원이라 멈췄습니다 — 직접 올려주세요"))
+                        return
                 if has_no_img("itemreg", k):
-                    _nx, _ny, _ns = find_no_img("itemreg", k, xy)
+                    # strict — '0.00' 과 '50.00' 처럼 **생김새는 같고 값만 다른** 화면을
+                    # 가려야 하므로 느슨한 판정을 쓰면 안 된다. 실측: 정상 아이템 0.87 이
+                    # 느슨한 판정으로 통과해 멈추지 말아야 할 때 멈췄다 (2026-09-16).
+                    _nx, _ny, _ns = find_no_img("itemreg", k, xy, strict=True)
+                    _trace.append(f"⛔{k+1}={_ns:.2f}")
                     if _nx is not None:
                         click_log(f"[아이템등록] {k+1}번({st['key']}) ⛔ 멈춤 그림 보임 "
                                   f"(일치도 {_ns:.2f}) — 여기서 정지. "
@@ -14167,23 +14416,46 @@ class App(tk.Tk):
                         return
                 # 🖼 걸어뒀으면 그 화면이 보일 때까지 기다린다. 안 보이면 거기서 끝.
                 if has_img("itemreg", k):
-                    ix = None
-                    for _t in range(IMG_TRIES):
-                        ix, _iy, _sc = find_image("itemreg", k, xy)
-                        if ix is not None:
+                    # 창이 뜨는 **그 순간** 넘어가게 촘촘히 본다 (2026-09-16 사용자:
+                    # "딱 딱 딱 해줘야 하는데 불안정해"). 예전엔 0.25~0.45초씩 3번만
+                    # 봐서, 창이 일찍 떠도 한 박자씩 늦고 편차가 컸다.
+                    _ok, _sc = False, 0.0
+                    _dead = time.time() + ITEMREG_SEE_MAX
+                    while True:
+                        _ok, _sc = itemreg_img_seen(k, xy)
+                        if _ok or time.time() >= _dead:
                             break
-                        time.sleep(random.uniform(0.25, 0.45))
-                    if ix is None:
+                        time.sleep(random.uniform(*ITEMREG_SEE_GAP))
+                    _trace.append(f"🖼{k+1}={_sc:.2f}")
+                    if _ok:
+                        # 창이 '보이는' 것과 '키를 받는' 것은 다르다 — 뜨자마자 누르면
+                        # 열리는 중이라 씹힌다 (2026-09-16: "최저가를 안 찍고 눌러버린다").
+                        time.sleep(random.uniform(*ITEMREG_SETTLE))
+                    if not _ok:
                         click_log(f"[아이템등록] {k+1}번({st['key']}) 그림이 안 보여 중단 "
-                                  f"— 누른 키: {' → '.join(done) or '없음'}")
+                                  f"(최고 {_sc:.2f}) — 누른 키: "
+                                  f"{' → '.join(done) or '없음'}")
                         self.after(0, lambda kk=k: self.status.set(
                             f"🏷 {kk+1}번 화면이 안 보여 멈췄습니다 (뒤는 안 누름)"))
                         return
                 # ⌨ 키를 누른다 — 누르는 시간·다음까지 시간 모두 사람처럼 흔든다
                 try:
-                    pyautogui.keyDown(st["key"])
+                    # ⚠ pyautogui 는 **대문자를 Shift+글자로** 보낸다 (2026-09-16 실측).
+                    #    G허브의 'Y' 는 그냥 y 키라, 대문자로 보내면 게임이 무시한다
+                    #    (숫자 4·5 는 시프트가 없어 먹히고 Y 만 안 먹던 원인).
+                    _kk = st["key"]
+                    if len(_kk) == 1 and _kk.isalpha():
+                        _kk = _kk.lower()
+                    # 키가 **어느 창으로 갔는지** 남긴다 — 'y 만 안 먹는다' 같은 증상은
+                    # 키가 엉뚱한 창으로 가는 것일 수 있어 이것 없이는 짚을 수 없다.
+                    try:
+                        _fg = win32gui.GetWindowText(win32gui.GetForegroundWindow()) or "?"
+                    except Exception:
+                        _fg = "?"
+                    _trace.append(f"{_kk}→[{_fg[:18]}]")
+                    pyautogui.keyDown(_kk)
                     time.sleep(st["hold"] / 1000.0 * random.uniform(*ITEMREG_JITTER))
-                    pyautogui.keyUp(st["key"])
+                    pyautogui.keyUp(_kk)
                 except Exception as _e:
                     click_log(f"[아이템등록] {k+1}번 키 '{st['key']}' 실패: {_e!r}")
                     return
@@ -14191,7 +14463,8 @@ class App(tk.Tk):
                 if st["wait"]:
                     time.sleep(st["wait"] / 1000.0 * random.uniform(*ITEMREG_JITTER))
             click_log(f"[아이템등록] 클릭 {tuple(xy)} → 창({rc[0]},{rc[1]}) "
-                      f"에서 키 {' → '.join(done)} 누름")
+                      f"에서 키 {' → '.join(done)} 누름  |  받은 창: "
+                      f"{' · '.join(_trace)}")
             self.after(0, lambda: self.status.set(
                 "🏷 최저가로 등록했습니다 (키 " + " → ".join(done) + ")"))
         except Exception as e:

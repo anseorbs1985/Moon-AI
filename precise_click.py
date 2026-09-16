@@ -44,6 +44,14 @@ def _abs_xy(x, y):
     return nx, ny
 
 
+# 우리가 보낸 입력에 찍는 표식 (dwExtraInfo). 'MOON' 의 아스키.
+# 원격 데스크톱에서는 **사람의 입력도 injected 로 들어오기 때문에**(2026-09-16 실측:
+# 움직임 3577번·클릭 4번이 전부 flags=0x01) injected 표시만으로는 '우리 것'과
+# '사람 것'을 구분할 수 없다. 그래서 우리가 보낸 것에만 이 표식을 찍어 구분한다.
+# 사람의 입력은 extra=0 으로 들어온다(실측).
+_OURS = 0x4D4F4F4E
+
+
 def _send(x, y, btn_flags):
     """btn_flags 의 각 이벤트를 지정 좌표 고정(이동+절대좌표)으로 한 번에 전송."""
     u = ctypes.windll.user32
@@ -55,7 +63,7 @@ def _send(x, y, btn_flags):
         arr[i].mi.dx = nx; arr[i].mi.dy = ny
         arr[i].mi.mouseData = 0
         arr[i].mi.dwFlags = _MOVE | _ABS | _VDESK | fl
-        arr[i].mi.time = 0; arr[i].mi.dwExtraInfo = 0
+        arr[i].mi.time = 0; arr[i].mi.dwExtraInfo = _OURS
     return u.SendInput(n, ctypes.byref(arr), ctypes.sizeof(_INPUT)) == n
 
 
@@ -306,14 +314,20 @@ def _watch_thread():
         try:
             if code >= 0:
                 fl = lparam.contents.flags
+                ours = (int(lparam.contents.dwExtraInfo) == _OURS)
+                # 🏷 아이템 등록 — '사람이 누른 클릭' 은 **우리 표식이 없는 것**으로 본다.
+                # injected 로 거르면 원격 데스크톱에서는 사용자의 클릭까지 사라진다
+                # (2026-09-16 실측). 자동 클릭이 자기를 다시 부르는 것은 표식으로 막힌다.
+                if wparam == 0x0201 and not ours:           # 왼쪽 버튼 누름
+                    _WATCH["click_n"] = _WATCH.get("click_n", 0) + 1
+                    _WATCH["click_xy"] = (int(lparam.contents.pt.x),
+                                          int(lparam.contents.pt.y))
+                # ts·down·keys 는 예전 규칙(injected 제외) 그대로 둔다 —
+                # 용던고고의 '사람 손을 기다린다' 동작을 바꾸지 않기 위해서다.
                 if not (fl & (_LLMHF_INJECTED | _LLMHF_LOWER_IL_INJECTED)):
                     _WATCH["ts"] = time.time()          # 사람이 만진 시각
                     if wparam in (0x0201, 0x0204, 0x0207):      # L/R/M 버튼 누름
                         _WATCH["down"] = True
-                        if wparam == 0x0201:                    # 왼쪽 버튼만 기억
-                            _WATCH["click_n"] = _WATCH.get("click_n", 0) + 1
-                            _WATCH["click_xy"] = (int(lparam.contents.pt.x),
-                                                  int(lparam.contents.pt.y))
                     elif wparam in (0x0202, 0x0205, 0x0208):    # 버튼 뗌
                         _WATCH["down"] = False
         except Exception:
