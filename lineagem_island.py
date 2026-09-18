@@ -3409,6 +3409,31 @@ class IslandApp(tk.Tk):
 
     _last_focus = None      # 마지막으로 앞으로 올린 클라 (같은 창이면 다시 안 올린다)
 
+    @staticmethod
+    def _slot_anchor(slot):
+        """그 슬롯이 어느 클라인지 알려주는 기준 좌표 — 등록된 첫 좌표."""
+        for c in ((slot or {}).get("coords") or []):
+            if c:
+                return c
+        return None
+
+    def _client_alive(self, slot):
+        """그 슬롯의 리니지M 창이 아직 살아 있나 (2026-09-19 사용자 요청).
+
+        클라가 팅기면 그 자리가 비는데, 그대로 좌표를 누르면 **뒤에 있던 다른 창**이
+        눌려서 엉뚱한 일이 벌어진다. 그래서 누르기 전에 창이 있는지 보고,
+        없으면 그 슬롯만 건너뛴다 (다른 슬롯은 그대로 계속).
+
+        확인이 불가능하면 True — 막지 않는다 (기존 안전 규칙과 같다)."""
+        c = self._slot_anchor(slot)
+        if not c:
+            return True
+        try:
+            from precise_click import game_window_at
+            return game_window_at(int(c[0]), int(c[1])) is not None
+        except Exception:
+            return True
+
     def _do_one_click(self, key, si, slot, j, lbl, move_set, tag=""):
         """슬롯의 j번째 자리 1개 실행 (드래그/방향키/클릭/녹화). 실행했으면 True."""
         name   = slot.get("name", f"#{si+1}")
@@ -3605,6 +3630,16 @@ class IslandApp(tk.Tk):
                 last_si = si
             if not wait_mouse_idle(stop_fn, status_fn): return
             if self._stop_flag: break
+            # 🚫 클라가 팅겨서 창이 사라졌으면 **그 자리를 누르지 않는다.**
+            #    그대로 누르면 뒤에 있던 다른 창이 눌려 엉뚱한 일이 벌어진다.
+            #    이 슬롯만 끝내고 다음 슬롯으로 넘어간다 (2026-09-19 사용자 요청).
+            if not self._client_alive(st["slot"]):
+                st["j"] = total
+                self._status.set(f"🚫 #{si+1:02d} 클라가 없어졌습니다 — "
+                                 f"{j+1}번째에서 중단하고 다음 슬롯으로")
+                self._rlog(f"🚫 {key} #{si+1:02d} 클라 창 없음(팅김) → 좌표{j+1} "
+                           f"이후를 누르지 않고 이 슬롯 중단")
+                continue
             did = self._do_one_click(key, si, st["slot"], j, labels[j], move_set,
                                      tag=f"  (#{si+1:02d} {j+1}/{total})")
             st["j"] = j + 1
