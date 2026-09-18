@@ -4355,13 +4355,32 @@ class App(tk.Tk):
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
 
     def _island_step_back(self):
-        """섬/던전 실행 시작 — 최소화하지 말고 '맨 뒤'로만 물러난다 (2026-08-09 사용자 지시).
-        최소화하면 다시 꺼내기가 번거로워서, 메인런처도 섬 실행기도 맨 뒤로만 간다."""
+        """섬/던전 실행 시작 — **메인런처를 최소화**한다 (2026-09-19 사용자 지시).
+
+        예전에는 '맨 뒤로만' 보냈는데(2026-08-09), ⏰ 반복 도중 클라가 팅기면 런처가
+        화면에 남아 있다가 좌표 클릭을 먹어 엉뚱한 곳이 눌렸다. 그래서 최소화로 바꿨다.
+        **사용자가 다시 올리면 그대로 둔다** — 여기서 한 번만 내리고 계속 누르지 않는다."""
         for w in self._section_wins():
             try: w.iconify()
             except Exception: pass
-        self._send_to_back()
+        # 떼어낸 슬롯판(wm manage 로 독립 창이 된 것)도 같이 내린다.
+        # 이게 빠져 있어서, 떼어낸 상태로 실행하면 그 판만 앞에 남아 클릭을 먹었다
+        # (2026-09-19 사용자 신고). _section_wins 에는 들어 있지 않다.
+        self._night_panel_iconify()
+        try:
+            self.iconify()
+        except Exception:
+            self._send_to_back()
         self._minimize_claude()
+
+    def _night_panel_iconify(self):
+        """떼어낸 슬롯판이 있으면 최소화한다 (붙어 있으면 아무 일도 안 한다)."""
+        p = getattr(self, "_night_panel", None)
+        try:
+            if p and p.winfo_exists() and p.winfo_manager() == "wm":
+                self.tk.call("wm", "iconify", p._w)
+        except Exception:
+            pass
 
     def _run_island_slot(self, idx):
         """해당 던전 단독창 열고 자동 실행."""

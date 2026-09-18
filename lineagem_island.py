@@ -137,6 +137,21 @@ SLOTS        = 16
 CLICKS       = 6
 HOVER_WAIT   = 2.0
 CLICK_INTERVAL = 2.0  # 클릭 간격(초) — 현재 2초
+
+# ── 클라가 못 버티고 팅기는 문제 (2026-09-19 사용자 지시) ─────────────────────
+# "너무 빠르게 클릭들을 하니까 웨이브로 이게 못버티고 팅긴다.
+#  각 슬롯별로 완벽하게 끝나면 1분 주고, 웨이브는 2개씩만."
+# 클릭 '간격' 자체는 원래 등록한 값 그대로다(_calc_pace 의 최소 배속이 1.0 이라
+# 빠르게는 절대 안 된다). 부하를 만드는 건 **동시에 도는 슬롯 수**와
+# **한 슬롯이 끝나자마자 다음이 바로 들어오는 것** 두 가지다.
+WAVE_LANES     = 2            # 동시에 돌릴 슬롯 수 (전 3개) ← 부하의 주원인
+SLOT_GAP_AFTER = (4.0, 8.0)   # 슬롯 하나가 끝난 뒤 다음 슬롯을 넣기까지(초)
+# 시간 계산 (16슬롯 × 좌표 22개 = 클릭 작업 합계 1312초, 2026-09-19 실측):
+#   2슬롯이면 클릭 작업만 1312÷2 = 656초(10.9분) — **이게 하한이다.**
+#   여기에 (16-2)÷2 = 7번의 슬롯 쉼이 더해진다.
+#     쉼  6초 → 11.6분   쉼 10초 → 12.1분   쉼 60초 → 18.2분
+#   사용자가 "약 11분에 맞추자" 고 해서 6초로 잡았다. 팅김이 남으면 이 값을 올린다
+#   (쉼을 늘리는 것보다 WAVE_LANES 를 줄이는 쪽이 부하에 더 효과가 크다).
 CLICK_LABELS = ["클릭1", "클릭2", "추가", "클릭3", "클릭4", "클릭5"]
 
 # 던전별 좌표 개수 (기본 6개, 예외만 지정)
@@ -3443,7 +3458,7 @@ class IslandApp(tk.Tk):
         except Exception:
             return CLICK_INTERVAL
 
-    def _sim_total(self, state, total, pace, lanes=4):
+    def _sim_total(self, state, total, pace, lanes=WAVE_LANES):
         """실제 클릭 없이 스케줄만 돌려 예상 소요시간(초)을 계산 (동시 lanes개 제한 포함)."""
         prog = {si: {"j": 0, "due": st["due"] - min(x["due"] for x in state.values()),
                      "sp": st["sp"], "slot": st["slot"]} for si, st in state.items()}
@@ -3458,7 +3473,9 @@ class IslandApp(tk.Tk):
                 active.remove(si)
                 if waiting:
                     nx = waiting.pop(0)
-                    prog[nx]["due"] = t + 1.2
+                    # 실제 실행과 같은 텀을 넣어야 예상 시간이 맞는다. 여기가 1.2초로
+                    # 남아 있으면 '금방 끝난다'고 오판해 클릭 간격을 늘려버린다.
+                    prog[nx]["due"] = t + sum(SLOT_GAP_AFTER) / 2.0
                     active.append(nx)
             alive = [si for si in active if prog[si]["j"] < total]
             if not alive:
@@ -3480,7 +3497,7 @@ class IslandApp(tk.Tk):
                 p["due"] = t
         return t
 
-    def _calc_pace(self, state, total, target_sec, lanes=4):
+    def _calc_pace(self, state, total, target_sec, lanes=WAVE_LANES):
         """목표 시간에 맞는 배속을 이분 탐색으로 찾는다 (최소 배속 1.0 = 등록한 간격 그대로)."""
         try:
             lo, hi = 1.0, 8.0
@@ -3515,10 +3532,11 @@ class IslandApp(tk.Tk):
         total = len(labels)
         # 목표 소요시간 랜덤 — 실행 전에 내부 시뮬레이션으로 배속을 맞춘다
         target_sec = random.uniform(252, 284) * slow_factor()   # 전체 12~17% 지연 (약 4:42~5:32)
-        pace = self._calc_pace(state, total, target_sec, lanes=lanes or 3)
+        pace = self._calc_pace(state, total, target_sec,
+                               lanes=lanes or WAVE_LANES)
         # 동시에 진행할 슬롯 수 제한 — 하나가 끝나면 다음 슬롯 투입
         # (2026-08-09) 처음 전체 실행은 3개씩, ⏰ 반복 실행은 2개씩(--lanes 2)
-        LANES = lanes or 3
+        LANES = lanes or WAVE_LANES
         order = [si for si, _s in targets]
         if not keep_order:
             random.shuffle(order)      # 평소(전체 실행)는 순서 랜덤
@@ -3536,9 +3554,11 @@ class IslandApp(tk.Tk):
                 if waiting:
                     nx = (waiting.pop(0) if keep_order
                           else waiting.pop(random.randrange(len(waiting))))
-                    state[nx]["due"] = time.time() + random.uniform(0.5, 4.0)
+                    _sg = random.uniform(*SLOT_GAP_AFTER)
+                    state[nx]["due"] = time.time() + _sg
                     active.append(nx)
-                    self._status.set(f"➡ #{si+1:02d} 완료 — #{nx+1:02d} 투입 "
+                    self._status.set(f"➡ #{si+1:02d} 완료 — {_sg:.0f}초 쉬고 "
+                                     f"#{nx+1:02d} 투입 "
                                      f"(진행 {done_cnt}회 / 남은 {len(waiting)}슬롯)")
             alive = [si for si in active if state[si]["j"] < total]
             if not alive:
