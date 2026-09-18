@@ -145,7 +145,19 @@ CLICK_INTERVAL = 2.0  # 클릭 간격(초) — 현재 2초
 # 빠르게는 절대 안 된다). 부하를 만드는 건 **동시에 도는 슬롯 수**와
 # **한 슬롯이 끝나자마자 다음이 바로 들어오는 것** 두 가지다.
 WAVE_LANES     = 2            # 동시에 돌릴 슬롯 수 (전 3개) ← 부하의 주원인
-SLOT_GAP_AFTER = (4.0, 8.0)   # 슬롯 하나가 끝난 뒤 다음 슬롯을 넣기까지(초)
+# 슬롯 하나가 끝난 뒤 다음 슬롯을 넣기까지(초) — 2026-09-19 사용자 지시로 14초.
+# 팅기는 진짜 이유가 **절전이 풀리는 순간의 부하**라서, 다음 클라를 깨우기 전에
+# 앞 클라가 가라앉을 시간을 준다. 값 하나로 굳히지 않고 범위 랜덤(사람처럼 규칙).
+SLOT_GAP_AFTER = (12.5, 15.5)
+# 클릭 간격을 전체적으로 이만큼 늘린다 (2026-09-19 사용자 지시: 클릭 간격 +20%).
+# 칸마다 적어둔 gap_list 값과 기본값(CLICK_INTERVAL) 둘 다에 곱해지고,
+# 예상시간 계산(_sim_total)도 같은 값을 쓰므로 목표 시간이 어긋나지 않는다.
+CLICK_SLOW     = 1.20
+# 한 슬롯씩 도는 ⏰ 반복에서는 쉼을 길게 준다 (2026-09-19 사용자 설명):
+#   팅기는 진짜 이유는 클릭이 빨라서가 아니라 **절전이 풀리는 순간의 부하**다.
+#   여러 클라가 동시에 깨어 있으면 컴퓨터가 못 버틴다.
+#   그래서 다음 클라를 깨우기 전에 **앞 클라가 다시 가라앉을 시간**을 준다.
+SLOT_GAP_SOLO  = (25.0, 40.0) # 동시 1슬롯일 때의 슬롯 쉼(초)
 # 시간 계산 (16슬롯 × 좌표 22개 = 클릭 작업 합계 1312초, 2026-09-19 실측):
 #   2슬롯이면 클릭 작업만 1312÷2 = 656초(10.9분) — **이게 하한이다.**
 #   여기에 (16-2)÷2 = 7번의 슬롯 쉼이 더해진다.
@@ -3446,17 +3458,17 @@ class IslandApp(tk.Tk):
     def _gap_seconds(g):
         """gap_list 값을 초로 — 숫자면 그 값, '8~10'이면 그 범위 랜덤, 비면 기본."""
         if g is None or g == "":
-            return CLICK_INTERVAL
+            return CLICK_INTERVAL * CLICK_SLOW
         if isinstance(g, (int, float)):
-            return float(g)
+            return float(g) * CLICK_SLOW
         t = str(g).strip()
         try:
             if "~" in t:
                 a, b = t.split("~")
-                return random.uniform(float(a), float(b))
-            return float(t)
+                return random.uniform(float(a), float(b)) * CLICK_SLOW
+            return float(t) * CLICK_SLOW
         except Exception:
-            return CLICK_INTERVAL
+            return CLICK_INTERVAL * CLICK_SLOW
 
     def _sim_total(self, state, total, pace, lanes=WAVE_LANES):
         """실제 클릭 없이 스케줄만 돌려 예상 소요시간(초)을 계산 (동시 lanes개 제한 포함)."""
@@ -3475,7 +3487,8 @@ class IslandApp(tk.Tk):
                     nx = waiting.pop(0)
                     # 실제 실행과 같은 텀을 넣어야 예상 시간이 맞는다. 여기가 1.2초로
                     # 남아 있으면 '금방 끝난다'고 오판해 클릭 간격을 늘려버린다.
-                    prog[nx]["due"] = t + sum(SLOT_GAP_AFTER) / 2.0
+                    prog[nx]["due"] = t + sum(SLOT_GAP_SOLO if lanes <= 1
+                                              else SLOT_GAP_AFTER) / 2.0
                     active.append(nx)
             alive = [si for si in active if prog[si]["j"] < total]
             if not alive:
@@ -3554,7 +3567,9 @@ class IslandApp(tk.Tk):
                 if waiting:
                     nx = (waiting.pop(0) if keep_order
                           else waiting.pop(random.randrange(len(waiting))))
-                    _sg = random.uniform(*SLOT_GAP_AFTER)
+                    # 1슬롯씩 돌 때(⏰ 반복)는 앞 클라가 가라앉을 시간을 길게 준다
+                    _sg = random.uniform(*(SLOT_GAP_SOLO if LANES <= 1
+                                           else SLOT_GAP_AFTER))
                     state[nx]["due"] = time.time() + _sg
                     active.append(nx)
                     self._status.set(f"➡ #{si+1:02d} 완료 — {_sg:.0f}초 쉬고 "

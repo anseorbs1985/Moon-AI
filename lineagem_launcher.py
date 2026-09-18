@@ -4346,7 +4346,9 @@ class App(tk.Tk):
         self._island_step_back()
         cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(didx), "--run"]
         if len(sidxs) > 1:
-            # 반복은 슬롯 번호 순서 그대로 '2개씩' — 동시에 도는 창을 줄여 더 안전하게
+            # ⏰ 반복도 **2개씩** 웨이브 (2026-09-19 사용자 최종 지시).
+            # 1개씩(23~30분)은 너무 느려서, 2개씩 유지하고 대신 속도를 늦췄다 —
+            # 클릭 간격 +20%(`CLICK_SLOW`), 슬롯 사이 +15%(`SLOT_GAP_AFTER`).
             cmd += ["--slots", ",".join(str(i + 1) for i in sorted(sidxs)), "--lanes", "2"]
         else:
             cmd += ["--slot", str(sidxs[0] + 1)]
