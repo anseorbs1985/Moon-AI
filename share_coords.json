@@ -2,7 +2,7 @@
   "_설명": "로컬이 받을 좌표 항목. 값은 share_coords_data.json 에서 온다.",
   "_keys": "받을 항목. 로컬에 이미 찍어둔 좌표가 있으면 덮어쓰지 않는다 (비어 있는 항목만 받는다).",
   "_force": "일부러 갈아끼울 항목. 로컬이 찍어둔 것을 지우고 메인 것으로 바꾼다. 쓰고 나면 비운다.",
-  "_이번지시": "2026-09-16 사용자: \"좌표등록에 대한 100% 똑같이 올려줘. 다른 곳에서 전혀 접속이 안 되고 다른 것들 클릭하고 난리다.\" → 접속 흐름 좌표 전부를 force 로 보낸다.",
+  "_이번지시": "2026-09-18 사용자: \"작위도 전부 내용 올려줘야지 100% 똑같이\" → \"덮어쓰기로 올려죠\". jakwi_slots 를 force 로 배포 (1번 슬롯 좌표 5개 — 확대하면서 쓰는 방식이라 1번만 쓰는 게 맞음).",
   "keys": [
     "pre_click1",
     "pre_click2",
@@ -17,7 +17,8 @@
     "char_btns",
     "incoupon_slots",
     "incoupon_texts",
-    "incoupon_text"
+    "incoupon_text",
+    "jakwi_slots"
   ],
   "force": [
     "pre_click1",
@@ -30,6 +31,7 @@
     "google_acc",
     "confirm_btn",
     "profile_reveal_btn",
-    "char_btns"
+    "char_btns",
+    "jakwi_slots"
   ]
 }
