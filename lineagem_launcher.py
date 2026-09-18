@@ -168,7 +168,14 @@ RUN_BUDGET = {"dragon": 270}      # 16슬롯 다 돌 때의 상한 (4분 30초)
 #    페이스가 아예 안 걸리고 늘 같은 속도로만 돌았다.
 #    실측(09-06): 91클릭 / 257초 = 클릭당 2.82초. 간격을 12% 줄였으니 2.5초로 잡는다.
 #    → 목표 = 클릭수 × 2.5초 (단, RUN_BUDGET 상한을 넘지 않는다)
-RUN_PER_CLICK = {"dragon": 2.5}
+#    2026-09-18 재측정 — 2.5초는 **한 번도 지켜진 적이 없는 숫자**였다.
+#    6회 실측(09-12~17, 매번 클릭 76회): 219 · 228 · 261 · 233 · 237 · 234초
+#    = 클릭당 2.88~3.43초, 평균 3.05초. 목표 190초를 늘 40~70초 넘겼다.
+#    페이스는 '간격'만 줄일 수 있고(클릭당 2.9초 중 간격은 1.2초뿐), 그림 찾기·확인창
+#    기다리기는 성공률 때문에 못 줄인다 → 190초는 애초에 도달 불가능한 목표였다.
+#    그래서 **실측에 맞춰 3.0초**로 올린다. 이러면 좌표를 줄인 만큼 목표도 정확히 줄고,
+#    헛된 '초과' 경고가 사라진다. (사용자 지시 — 성공률을 깎아 시간을 맞추지는 않는다)
+RUN_PER_CLICK = {"dragon": 3.0}
 # 간격을 이보다 더 줄이지 않는다. 너무 서두르면 게임 화면이 아직 안 떠서
 # '그림 못 찾음'이 늘어난다 (2026-08-27 — 0.30 으로 뒀다가 인식률이 폭락했다).
 PACE_FLOOR = 0.60
@@ -9120,7 +9127,10 @@ class App(tk.Tk):
             state[_si]["due"] = _t_now + _k * random.uniform(0.7, 2.3)
         last_si, done = None, 0
         _t0 = time.time()
-        _bud = RUN_BUDGET.get(fkey)
+        # 이번 실행의 목표(= 클릭 수 × RUN_PER_CLICK)를 쓴다. RUN_BUDGET 은 **상한**일 뿐인데
+        # 예전엔 여기서 상한을 보여줘서, 좌표를 줄여도 목표가 그대로인 것처럼 보였다.
+        _bud = int((getattr(self, "_run_budget", {}) or {}).get(fkey)
+                   or RUN_BUDGET.get(fkey) or 0) or None
         self.status.set(f"{icon} 번갈아 실행 — 동시 {lanes}슬롯 (좌표 간격 "
                         f"{gap[0]:.0f}~{gap[1]:.0f}초"
                         + (f" · 목표 {_bud//60}분 {_bud%60}초 안에" if _bud else "") + ")")
@@ -9243,7 +9253,10 @@ class App(tk.Tk):
             st["due"] = time.time() + _base * random.uniform(*slow)   # 10~20% 할증
             time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
         _el = int(time.time() - _t0)
-        _bud2 = RUN_BUDGET.get(fkey)
+        # 상한(RUN_BUDGET)이 아니라 **이번 실행의 목표**와 비교해야 한다 — 상한과 비교하면
+        # 목표를 44초 넘겨도 늘 '✔ 안에 끝남' 이 찍혀 문제가 보이지 않는다 (2026-09-18).
+        _bud2 = int((getattr(self, "_run_budget", {}) or {}).get(fkey)
+                    or RUN_BUDGET.get(fkey) or 0) or None
         self.status.set(f"{icon} 번갈아 실행 완료 — 클릭 {done}회, "
                         f"{_el//60}분 {_el%60}초 걸림"
                         + (f" (목표 {_bud2//60}분 {_bud2%60}초)" if _bud2 else ""))
