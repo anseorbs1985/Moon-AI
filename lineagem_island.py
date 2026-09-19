@@ -168,7 +168,26 @@ CLICK_LABELS = ["클릭1", "클릭2", "추가", "클릭3", "클릭4", "클릭5"]
 
 # 던전별 좌표 개수 (기본 6개, 예외만 지정)
 CLICKS_BY_KEY = {"월요일_잊혀진섬": 27, "수금_오만의탑": 30,   # 오만 30 · 잊섬 27 · 에카 27
-                 "토요일_악몽의섬": 26, "화요일_에카": 27}
+                 # 악몽의섬 31 — 19~23 은 2026-09-19 에 끼워 넣은 창고 동선 자리
+                 "토요일_악몽의섬": 31, "화요일_에카": 27}
+
+# ⏰ 반복에서만 누르는 좌표 **구간** (던전키: (시작, 끝), 1부터·양끝 포함).
+# 2026-09-19 사용자: "첫 번째는 상관없는데 두 번째 반복부터는 창고에 들려야 한다."
+# 이 구간의 좌표는 **사용자가 직접 실행할 때는 건너뛰고**, ⏰ 반복이 자동으로 돌 때만 누른다.
+# ⚠ '시작 번호부터 끝까지' 가 아니라 **구간**이어야 한다 — 창고 동선이 가운데(19~23)에
+#   들어가 있어서, 뒤쪽(24~)에는 원래 좌표가 그대로 있다. 구간을 벗어나면 늘 누른다.
+REPEAT_ONLY_RANGE = {"토요일_악몽의섬": (19, 23)}
+
+
+def repeat_only_range(key):
+    return REPEAT_ONLY_RANGE.get(key)
+
+
+def is_repeat_only(key, n):
+    """n번(1부터) 좌표가 '반복에서만 누르는' 자리인가."""
+    r = repeat_only_range(key)
+    return bool(r) and r[0] <= n <= r[1]
+
 
 def clicks_for(key):
     return CLICKS_BY_KEY.get(key, CLICKS)
@@ -177,7 +196,9 @@ def labels_for(key):
     n = clicks_for(key)
     if n == CLICKS:
         return CLICK_LABELS
-    return [f"클릭{i+1}" for i in range(n)]
+    # 반복에서만 누르는 칸은 🏦 를 붙여 좌표 등록 화면에서 바로 구분되게 한다
+    return [(f"🏦창고{i+1}" if is_repeat_only(key, i + 1) else f"클릭{i+1}")
+            for i in range(n)]
 
 DUNGEONS = [
     {"key": "수금_오만의탑",   "label": "수~금\n오만의탑",   "color": "#e67e22"},
@@ -533,6 +554,9 @@ class IslandApp(tk.Tk):
                 self._auto_lanes = max(1, int(sys.argv[sys.argv.index("--lanes") + 1]))
             except Exception:
                 self._auto_lanes = None
+        # --repeat : ⏰ 반복이 자동으로 돌린 실행. 이때만 '반복 전용 좌표'(창고 등)를 누른다.
+        #            사용자가 직접 누른 실행에는 이 표시가 없어서 그 좌표를 건너뛴다.
+        self._is_repeat_run = "--repeat" in sys.argv
         # --slots 1,7,14 : 그 슬롯들만 웨이브(번갈아)로 한 번에 실행
         self._auto_slots = None
         if "--slots" in sys.argv:
@@ -3568,6 +3592,7 @@ class IslandApp(tk.Tk):
                          "due": now + random.uniform(0, 20.0),     # 시작 시점 넓게 흩뿌림
                          "sp": random.uniform(1.10, 1.20)}         # 이 슬롯 전체 10~20% 완화
         total = len(labels)
+        _ronly = repeat_only_range(key)     # 이 구간은 ⏰ 반복에서만 누른다
         # 목표 소요시간 랜덤 — 실행 전에 내부 시뮬레이션으로 배속을 맞춘다
         target_sec = random.uniform(252, 284) * slow_factor()   # 전체 12~17% 지연 (약 4:42~5:32)
         pace = self._calc_pace(state, total, target_sec,
@@ -3615,6 +3640,13 @@ class IslandApp(tk.Tk):
             si = random.choice(ready)          # 차례가 된 것 중 무작위 선택
             st = state[si]
             j  = st["j"]
+            # 🏦 반복 전용 좌표(창고 등) — 사용자가 직접 실행한 경우엔 **그 칸만** 건너뛴다.
+            #    빈 칸과 똑같이 기다림 없이 통과시킨다 (슬롯을 끝내면 안 된다 —
+            #    구간 뒤쪽에 원래 좌표가 그대로 남아 있다).
+            if (_ronly and not getattr(self, "_is_repeat_run", False)
+                    and _ronly[0] <= j + 1 <= _ronly[1]):
+                st["j"] = j + 1
+                continue
             # 다른 클라이언트로 넘어가는 클릭이면 창이 앞으로 올라올 시간을 더 준다 —
             # 바로 누르면 첫 클릭이 '창 활성화'로만 먹히고 사라질 수 있다
             if si != last_si:

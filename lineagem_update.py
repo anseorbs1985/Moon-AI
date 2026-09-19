@@ -522,22 +522,63 @@ def sync_island_keys(log):
         with_presets = bool(cfgm.get("presets"))
         if not keys and not only_p:
             return
-        src_p = os.path.join(REPO, "island_coords.json")
-        dst_p = os.path.join(DESK, "island_coords.json")
-        if not (os.path.exists(src_p) and os.path.exists(dst_p)):
+        # 값은 **전용 파일에서** 먼저 읽는다 (2026-09-19).
+        #   island_coords.json 에는 슬롯 이름이 들어 있고, 그 이름이 곧 '고른 물약'이다
+        #   (`_potion_of(name)` 이 '빨갱이/주홍이'를 이름에서 뽑는다).
+        #   사용자 지시: "절대 물약 선택 올리면 안 돼, 무조건 좌표만."
+        #   그래서 보낼 항목만 담은 share_island_data.json 을 쓰고,
+        #   그 파일에는 name 이 아예 들어 있지 않다.
+        data_p = os.path.join(REPO, "share_island_data.json")
+        src_p  = os.path.join(REPO, "island_coords.json")
+        dst_p  = os.path.join(DESK, "island_coords.json")
+        if not os.path.exists(dst_p):
             log("   던전 동기화: island_coords.json 이 없어 건너뜁니다")
             return
-        with open(src_p, encoding="utf-8") as f:
-            src = json.load(f)
+        src = {}
+        if os.path.exists(data_p):
+            try:
+                with open(data_p, encoding="utf-8") as f:
+                    src = json.load(f) or {}
+            except Exception:
+                src = {}
+        if os.path.exists(src_p):                    # 옛 방식 호환 — 전용 파일에 없는 키만
+            try:
+                with open(src_p, encoding="utf-8") as f:
+                    old = json.load(f) or {}
+                for k, v in old.items():
+                    src.setdefault(k, v)
+            except Exception:
+                pass
         with open(dst_p, encoding="utf-8") as f:
             dst = json.load(f)
+        # 로컬 것을 그대로 두는 항목 — 물약(이름)·ON/OFF·반복 설정은 컴퓨터마다 다르다
+        keep = cfgm.get("keep_local") or []
         got = []
         for k in keys:
             v = src.get(k)
-            if v is None or dst.get(k) == v:
+            if v is None:
+                continue
+            if isinstance(v, list) and all(isinstance(x, dict) for x in v):
+                # **로컬 슬롯 위에 보내온 항목만 얹는다.** 통째로 갈아끼우지 않는다 —
+                # 그래야 보내지 않은 것(슬롯 이름=물약, ON/OFF, 반복, pasted 등)이
+                # 자동으로 로컬 것 그대로 남는다. 새 항목이 생겨도 안전하다.
+                cur = dst.get(k) or []
+                merged = []
+                for i, s in enumerate(v):
+                    old_s = cur[i] if (i < len(cur) and isinstance(cur[i], dict)) else {}
+                    ns = json.loads(json.dumps(old_s, ensure_ascii=False))
+                    ns.update(json.loads(json.dumps(s, ensure_ascii=False)))
+                    for fld in keep:          # 혹시 섞여 와도 로컬 것으로 되돌린다
+                        ns.pop(fld, None)
+                        if fld in old_s:
+                            ns[fld] = old_s[fld]
+                    merged.append(ns)
+                v = merged
+            if dst.get(k) == v:
                 continue
             dst[k] = v
-            got.append(f"{k}({_count_in(v)}좌표)")
+            got.append(f"{k}({_count_in(v)}좌표"
+                       + (f", {'·'.join(keep)} 는 로컬 것 유지" if keep else "") + ")")
         sp = (src.get("_presets") or {})
         dp = dst.setdefault("_presets", {})
         for k in (list(keys) if with_presets else []) + list(only_p):

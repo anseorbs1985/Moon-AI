@@ -4344,7 +4344,11 @@ class App(tk.Tk):
         """반복 차례가 된 슬롯들을 섬/던전 실행기로 돌린다.
         여러 개면 --slots 로 넘겨 웨이브(번갈아)로 한 번에 처리한다."""
         self._island_step_back()
-        cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(didx), "--run"]
+        # --repeat : 이 실행은 ⏰ 반복이 자동으로 돌린 것이라는 표시.
+        # 섬 실행기는 이 표시가 있을 때만 '반복 전용 좌표'(창고 동선)를 누른다.
+        # 사용자가 직접 누른 실행에는 없어서 그 칸을 건너뛴다 (2026-09-19 사용자 요청).
+        cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(didx),
+               "--run", "--repeat"]
         if len(sidxs) > 1:
             # ⏰ 반복도 **2개씩** 웨이브 (2026-09-19 사용자 최종 지시).
             # 1개씩(23~30분)은 너무 느려서, 2개씩 유지하고 대신 속도를 늦췄다 —
@@ -5400,10 +5404,27 @@ class App(tk.Tk):
         if self._night_detached():
             self._night_attach()
         else:
-            self._night_detach()
+            self._night_detach(front_only=True)
 
-    def _night_detach(self, x=None, y=None):
-        """판을 독립 창으로 뗀다."""
+    def _night_front_only(self):
+        """떼어낸 판만 앞에 두고 **메인런처는 맨 뒤로** 물린다 (2026-09-19 사용자 지시).
+
+        최소화는 하지 않는다 — 다시 꺼내기가 번거로우므로 z순서만 내린다.
+        사용자가 메인런처를 클릭하면 당연히 다시 앞으로 올라온다."""
+        try:
+            self._send_to_back()
+        except Exception:
+            pass
+        p = getattr(self, "_night_panel", None)
+        try:
+            if p and p.winfo_exists() and p.winfo_manager() == "wm":
+                self.tk.call("raise", p._w)      # 포커스는 뺏지 않는다(게임 방해 금지)
+        except Exception:
+            pass
+
+    def _night_detach(self, x=None, y=None, front_only=False):
+        """판을 독립 창으로 뗀다. front_only 면 메인런처를 맨 뒤로 보낸다.
+        (런처가 켜질 때 자동으로 되살리는 경우는 False — 시작 화면을 가리지 않게)"""
         p = getattr(self, "_night_panel", None)
         if p is None or not p.winfo_exists() or self._night_detached():
             return
@@ -5424,6 +5445,8 @@ class App(tk.Tk):
                 self._night_dbtn.config(text="📥", bg="#117864")
             self.status.set("📤 슬롯판을 따로 뗐습니다 — 이 창만 앞으로 옵니다 "
                             "(✕ 나 [📥 붙이기] 로 되돌림)")
+            if front_only:      # 메인런처는 맨 뒤로, 뗀 판만 앞에
+                self.after(120, self._night_front_only)
         except Exception as e:
             self.status.set(f"📤 따로 떼기 실패: {e}")
 
