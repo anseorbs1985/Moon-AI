@@ -1480,14 +1480,14 @@ ITEMREG_HOTKEY   = 0x75          # 기본 F6 (창의 [단축키] 으로 바꿀 �
 # 🖼 확인은 **창이 뜨는 순간** 넘어가도록 촘촘히 본다 — 이래야 '딱 딱 딱' 이 된다.
 ITEMREG_SEE_GAP  = (0.05, 0.09)  # 다시 볼 때까지(초) — 한 번 보는 데 몇 ms 밖에 안 든다
 ITEMREG_SEE_MAX  = 1.6           # 이 시간 안에 안 뜨면 중단 (뒤 키는 안 누른다)
-ITEMREG_SETTLE   = (0.22, 0.32)  # 창이 보인 뒤 '키를 받을 수 있게' 되기까지(초)
+ITEMREG_SETTLE   = (0.15, 0.22)  # 창이 보인 뒤 '키를 받을 수 있게' 되기까지(초)
 # 내가 클릭한 뒤 **게임이 그 아이템을 고를 때까지** 기다리는 시간(초).
 # ⚠ 여기는 줄이면 안 된다 — 0.15~0.25 로 줄였더니 아이템이 골라지기 전에 `4` 가 눌려
 #   등록 창이 안 열리는 일이 생겼다 (2026-09-16 실측: '2번 그림이 안 보여 중단' 0.29).
 #   이 앞에는 확인할 그림이 없어서(아직 창이 없다) 시간으로 버틸 수밖에 없다.
-ITEMREG_WAIT     = (0.34, 0.46)
+ITEMREG_WAIT     = (0.26, 0.36)   # 2026-09-19 더 빠르게 (전 0.34~0.46)
 ITEMREG_GAP      = (0.18, 0.32)  # 좌표 사이 기본 간격(초) — 칸에 적으면 그 값이 이긴다
-ITEMREG_COOLDOWN = 1.0           # 한 번 돌고 다음까지 최소 시간(초) — 연속 오발 방지
+ITEMREG_COOLDOWN = 0.8           # 한 번 돌고 다음까지 최소 시간(초) — 연속 오발 방지
 # 좌표는 **번호 순서대로** 누른다 (2026-09-16 사용자 지시: "순서대로 해야 해").
 # 다른 런처와 같은 방식 — 안 쓰는 칸은 비워두면 건너뛴다.
 # ⌨ **좌표가 아니라 '키 순서'다** (2026-09-16 — 사용자가 G허브 매크로를 보여줌).
@@ -1507,8 +1507,11 @@ ITEMREG_STEPS = 8                # 최대 단계 수 (안 쓰는 칸은 비워�
 #   `4` 뒤는 180ms 만 쉰다 — 그 다음 칸의 🖼 이 **창이 뜨는 순간**을 잡아주므로
 #   길게 기다릴 필요가 없다. 반대로 `5` 뒤(840ms)는 줄이면 안 된다 — 최저가가
 #   값에 반영되기를 기다리는 시간이라, 짧으면 엉뚱한 값으로 등록된다.
-ITEMREG_DEFAULT = [("4", 80, 180), ("5", 80, 840),
-                   ("y", 80, 840), ("y", 80, 0)]
+#   (2026-09-19 "속도는 좀 더 빠르게" → 840 → 620ms. `5` 뒤는 최저가가 값에 반영되기를
+#    기다리는 시간이라 **여기가 짧으면 엉뚱한 값으로 등록된다** — 더 줄이지 말 것.
+#    등록이 어긋나기 시작하면 이 두 숫자부터 840 으로 되돌린다.)
+ITEMREG_DEFAULT = [("4", 80, 180), ("5", 80, 620),
+                   ("y", 80, 620), ("y", 80, 0)]
 # 사람처럼 — 적어둔 시간에 이만큼 곱한다. 2026-09-16 사용자가 "딱 딱 딱 해줬으면
 # 좋겠는데 불안정하다" 고 해서 폭을 좁혔다 (±15% → ±5%). **0 으로 만들지는 않는다**
 # — 랜덤 폭은 없애지 말고 좁히라는 기존 규칙 그대로.
@@ -1667,8 +1670,11 @@ def itemreg_zero_price(coord):
         big = grab_window(coord)
         if big is None:
             return None, "창 캡처 실패"
-        lbl = cv2.imdecode(np.fromfile(lbls[0], np.uint8), cv2.IMREAD_COLOR)
-        zero = cv2.imdecode(np.fromfile(zp, np.uint8), cv2.IMREAD_COLOR)
+        _k = itemreg_geom(big)[0]
+        lbl = itemreg_tpl(cv2.imdecode(np.fromfile(lbls[0], np.uint8),
+                                       cv2.IMREAD_COLOR), _k)
+        zero = itemreg_tpl(cv2.imdecode(np.fromfile(zp, np.uint8),
+                                        cv2.IMREAD_COLOR), _k)
         if lbl is None or zero is None:
             return None, "기준 그림 읽기 실패"
         box = None
@@ -1680,9 +1686,8 @@ def itemreg_zero_price(coord):
         except Exception:
             box = None
         if box:
-            x0, y0 = max(0, box[0]), max(0, box[1])
-            sub = big[y0:min(big.shape[0], y0 + box[3]),
-                      x0:min(big.shape[1], x0 + box[2])]
+            x0, y0, x2, y2 = itemreg_box(big, *box)
+            sub = big[y0:y2, x0:x2]
         else:
             x0 = y0 = 0; sub = big
         if lbl.shape[0] > sub.shape[0] or lbl.shape[1] > sub.shape[1]:
@@ -1692,12 +1697,16 @@ def itemreg_zero_price(coord):
         if v < ITEMREG_LBL_MATCH:
             return None, f"등록 창 아님 (라벨 {v:.2f})"
         lx, ly = x0 + loc[0], y0 + loc[1]
-        dxv, wv, hv, dxe, we = ITEMREG_ZERO_GEO
+        # 라벨 기준 오프셋도 같은 배율로 늘린다
+        _s = lambda v: int(round(v * _k))
+        dxv, wv, hv, dxe, we = [_s(v) for v in ITEMREG_ZERO_GEO]
         ex = big[ly:ly + hv, lx + dxe:lx + dxe + we]
         vx = big[ly:ly + hv, lx + dxv:lx + dxv + wv]
         if ex.size == 0 or vx.shape[0] < zero.shape[0] or vx.shape[1] < zero.shape[1]:
             return None, "값 칸을 못 읽음"
         ink = int((cv2.cvtColor(ex, cv2.COLOR_BGR2GRAY) >= ITEMREG_INK).sum())
+        # 칸이 커지면 잉크 픽셀도 넓이(배율²)만큼 늘어난다 — 기준도 같이 올린다
+        ink_max = max(ITEMREG_INK_MAX, int(round(ITEMREG_INK_MAX * _k * _k)))
         m = float(cv2.minMaxLoc(cv2.matchTemplate(vx, zero,
                                                   cv2.TM_CCOEFF_NORMED))[1])
         # 판단은 **왼쪽 잉크 하나로만** 한다 (2026-09-16 사용자 지시).
@@ -1706,8 +1715,9 @@ def itemreg_zero_price(coord):
         # 0.88 이 나오는 순간 **안 멈추고 0원에 등록해버린다**(실제로 난 사고).
         # 빼면 최악이 '싼 아이템에서 괜히 멈춤' — 사용자가 직접 올리면 그만이라
         # 실패해도 안전한 쪽이다. ②는 참고용으로 기록에만 남긴다.
-        is_zero = (ink < ITEMREG_INK_MAX)
-        return is_zero, f"라벨 {v:.2f} · 왼쪽잉크 {ink} · 참고 '0.00' {m:.2f}"
+        is_zero = (ink < ink_max)
+        return is_zero, (f"라벨 {v:.2f} · 왼쪽잉크 {ink}/{ink_max} · "
+                         f"참고 '0.00' {m:.2f}" + (f" · 배율 {_k:.2f}" if _k > 1.05 else ""))
     except Exception as e:
         return None, f"확인 실패 {e!r}"
 
@@ -1727,13 +1737,15 @@ def itemreg_img_seen(k, coord):
         big = grab_window(coord)
         if big is None:
             return False, 0.0
+        _k = itemreg_geom(big)[0]
         try:
             with open(area_path("itemreg", k), encoding="utf-8") as f:
                 d = json.load(f) or {}
             if int(d.get("w", 0)) > 0 and not d.get("full"):
-                x0, y0 = max(0, int(d["dx"])), max(0, int(d["dy"]))
-                big = big[y0:min(big.shape[0], y0 + int(d["h"])),
-                          x0:min(big.shape[1], x0 + int(d["w"]))]
+                x1, y1, x2, y2 = itemreg_box(big, int(d["dx"]), int(d["dy"]),
+                                             int(d["w"]), int(d["h"]))
+                if x2 - x1 > 4 and y2 - y1 > 4:
+                    big = big[y1:y2, x1:x2]
         except Exception:
             pass
         thr = 0.70
@@ -1744,7 +1756,8 @@ def itemreg_img_seen(k, coord):
             pass
         best = 0.0
         for p in paths:
-            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            t = itemreg_tpl(cv2.imdecode(np.fromfile(p, np.uint8),
+                                         cv2.IMREAD_COLOR), _k)
             if t is None or t.shape[0] > big.shape[0] or t.shape[1] > big.shape[1]:
                 continue
             v = float(cv2.minMaxLoc(cv2.matchTemplate(big, t,
@@ -1755,6 +1768,53 @@ def itemreg_img_seen(k, coord):
         return (best >= thr), best
     except Exception:
         return False, 0.0
+
+
+# 🏷 아이템 등록의 그림·범위는 **이 크기의 창**에서 잡은 것이다.
+# 창을 키워도 다시 찍을 필요가 없게, 실행할 때 창 크기를 보고 환산한다.
+ITEMREG_REF = (492, 277)
+
+
+def itemreg_geom(big):
+    """큰 화면 환산 — (배율, 가로여백, 세로여백).
+
+    2026-09-19 실측(492x277 → 2504x1352, 5개 지점): 게임은 **세로 배율로 균일 확대**하고
+    가로는 **가운데 정렬**(좌우 여백)한다. 이 식으로 예측한 자리와 실제 자리의
+    오차가 최대 5px(작은 창 기준 1px) 였다.
+        배율 k = 창높이 ÷ 277,  가로여백 = (창너비 − 492×k) ÷ 2
+    창이 원래 크기면 k≈1·여백≈0 이라 예전과 똑같이 동작한다."""
+    rw, rh = ITEMREG_REF
+    try:
+        h, w = big.shape[0], big.shape[1]
+    except Exception:
+        return 1.0, 0.0, 0.0
+    if not h or not w:
+        return 1.0, 0.0, 0.0
+    k = h / float(rh)
+    if k <= 0.2 or k > 12:
+        return 1.0, 0.0, 0.0
+    return k, max(0.0, (w - rw * k) / 2.0), 0.0
+
+
+def itemreg_box(big, dx, dy, w, h, pad=0):
+    """작은 창 기준 상자를 지금 창 크기에 맞게 옮긴다 → (x1, y1, x2, y2)."""
+    k, ox, oy = itemreg_geom(big)
+    x1 = int(round(ox + dx * k)) - int(round(pad * k))
+    y1 = int(round(oy + dy * k)) - int(round(pad * k))
+    x2 = int(round(ox + (dx + w) * k)) + int(round(pad * k))
+    y2 = int(round(oy + (dy + h) * k)) + int(round(pad * k))
+    return (max(0, x1), max(0, y1),
+            min(big.shape[1], x2), min(big.shape[0], y2))
+
+
+def itemreg_tpl(tpl, k):
+    """그림도 같은 배율로 키운다 (작은 창이면 그대로)."""
+    if tpl is None or abs(k - 1.0) < 0.03:
+        return tpl
+    import cv2
+    w, h = max(3, int(round(tpl.shape[1] * k))), max(3, int(round(tpl.shape[0] * k)))
+    return cv2.resize(tpl, (w, h),
+                      interpolation=cv2.INTER_CUBIC if k > 1 else cv2.INTER_AREA)
 
 
 def itemreg_hit_area():
@@ -1795,15 +1855,15 @@ def itemreg_shop_seen(coord):
         big = grab_window(coord)
         if big is None:
             return False, 0.0
+        _k = itemreg_geom(big)[0]
         ar = itemreg_shop_area()
         if ar:
             dx, dy, w, h = ar
-            x1 = max(0, dx - FLOOR_PAD); y1 = max(0, dy - FLOOR_PAD)
-            x2 = min(big.shape[1], dx + w + FLOOR_PAD)
-            y2 = min(big.shape[0], dy + h + FLOOR_PAD)
+            x1, y1, x2, y2 = itemreg_box(big, dx, dy, w, h, pad=FLOOR_PAD)
             if x2 - x1 > 4 and y2 - y1 > 4:
                 big = big[y1:y2, x1:x2]
-        tpl = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+        tpl = itemreg_tpl(cv2.imdecode(np.fromfile(p, np.uint8),
+                                       cv2.IMREAD_COLOR), _k)
         if tpl is None or tpl.shape[0] > big.shape[0] or tpl.shape[1] > big.shape[1]:
             return False, 0.0
         v = float(cv2.minMaxLoc(cv2.matchTemplate(big, tpl,
@@ -6694,7 +6754,9 @@ class App(tk.Tk):
         slot = self.cfg[key][idx]
 
         dr = tk.Frame(parent); dr.pack(anchor="w", padx=4, pady=(4, 2))
-        setattr(self, f"_{fkey}_stop", False)
+        # ⚠ 돌고 있는 중에 창을 다시 열면 여기서 멈춤이 취소돼 계속 돌았다 (2026-09-19).
+        if not getattr(self, "_jakwi_running", False):
+            setattr(self, f"_{fkey}_stop", False)
         # ▶ 실행 = 한 바퀴만 (연속과 같은 코드를 쓴다 — 그래야 측정도 똑같이 걸린다)
         run = tk.Button(dr, text="▶ 실행", font=("맑은 고딕", 9, "bold"),
                         bg=color, fg="white", width=7, height=2,
@@ -6710,8 +6772,7 @@ class App(tk.Tk):
         self._btn_jakwi_loop = loopb
         stopb = tk.Button(dr, text="■ 멈춤", font=("맑은 고딕", 9, "bold"),
                           bg="#c0392b", fg="white", width=7, height=2, state="disabled",
-                          command=lambda: setattr(self, f"_{fkey}_stop", True) or
-                                          self.status.set("작위 멈추는 중..."))
+                          command=self._jakwi_halt)
         stopb.pack(side="left")
         setattr(self, f"btn_{fkey}_stop", stopb)
         tk.Button(dr, text="👁", font=("맑은 고딕", 9), bg="#566573", fg="white",
@@ -6909,6 +6970,8 @@ class App(tk.Tk):
         if not any((slot.get("coords") or [])):
             self.status.set("👑 작위 — 등록된 좌표가 없습니다"); return
         self._jakwi_stop = False
+        # 새 회차는 새 세대 번호를 받는다 — 앞 회차가 아직 정리 중이어도 서로 안 엉킨다
+        self._jakwi_gen = getattr(self, "_jakwi_gen", 0) + 1
         self._jakwi_running = True
         self._set_btn("btn_jakwi_run", state="disabled")
         self._set_btn("btn_jakwi_stop", state="normal")
@@ -6927,10 +6990,39 @@ class App(tk.Tk):
             pass
         threading.Thread(target=self._run_jakwi_loop, daemon=True).start()
 
+    def _jakwi_halt(self):
+        """작위 멈춤 — 플래그만으로는 부족하다 (2026-09-19 사용자: "멈춰도 계속 돈다").
+
+        `_jakwi_stop = False` 로 되돌리는 곳이 **세 군데**(_build_jakwi · _start_jakwi_loop ·
+        _start_dgn2) 라, 멈춘 뒤에 그중 하나라도 돌면 멈춤이 취소돼 계속 돌았다.
+        그래서 **세대 번호**를 같이 올린다 — 지금 도는 회차는 자기 번호가 바뀐 것을 보고
+        무조건 끝낸다. 나중에 누가 플래그를 되돌려도 살아나지 않는다."""
+        self._jakwi_stop = True
+        self._jakwi_gen = getattr(self, "_jakwi_gen", 0) + 1
+        try:
+            self.status.set("■ 작위 멈추는 중…")
+        except Exception:
+            pass
+
+    def _jakwi_nap(self, sec, alive):
+        """멈춤을 바로 알아채도록 잘게 나눠 쉰다 (통으로 자면 그만큼 늦게 멈춘다)."""
+        end = time.time() + max(0.0, sec)
+        while time.time() < end:
+            if not alive():
+                return False
+            time.sleep(min(0.15, end - time.time()))
+        return True
+
     def _run_jakwi_loop(self):
         rnd = 0
+        _gen = getattr(self, "_jakwi_gen", 0)      # 이 회차의 세대 번호
+
+        def alive():
+            return (not getattr(self, "_jakwi_stop", False)
+                    and getattr(self, "_jakwi_gen", 0) == _gen)
+
         try:
-            while not getattr(self, "_jakwi_stop", False):
+            while alive():
                 rnd += 1
                 # 돌 때마다 설정을 다시 읽는다 — 도는 중에 고쳐도 다음 회차에 반영된다
                 slot = (self.cfg.get("jakwi_slots") or [{}])[0]
@@ -6940,7 +7032,7 @@ class App(tk.Tk):
                 if not order:
                     self.status.set("👑 작위 — 등록된 좌표가 없습니다"); break
                 for n, j in enumerate(order):
-                    if getattr(self, "_jakwi_stop", False):
+                    if not alive():
                         break
                     c = coords[j] if j < len(coords) else None
                     if not c:
@@ -6967,41 +7059,47 @@ class App(tk.Tk):
                         # (창을 못 봤으면 뒤 좌표를 누르지 않는다는 규칙 그대로)
                         click_log(f"jakwi {rnd}회차 — {j+1}번에서 중단 (그림 확인 실패)")
                         break
-                    if getattr(self, "_jakwi_stop", False):
+                    if not alive():
                         break
                     # 간격 — 줄에 적어둔 초가 있으면 그게 우선,
                     # 없으면 '클릭 뒤 / 잡고 내린 뒤' 를 나눠 랜덤으로 (최대한 빠르게)
                     g = self._slot_gap(slot, j)
                     if g is not None:
-                        time.sleep(g * random.uniform(*JAKWI_GAP_JITTER))
+                        _d = g * random.uniform(*JAKWI_GAP_JITTER)
                     else:
                         lo, hi = (JAKWI_GAP_DRAG if self._slot_drag(slot, j)
                                   else JAKWI_GAP_CLICK)
-                        time.sleep(random.uniform(lo, hi))
+                        _d = random.uniform(lo, hi)
+                    if not self._jakwi_nap(_d, alive):
+                        break
                     # 사람은 가끔 화면을 보느라 멈칫한다 — 줄마다 확률로 한 박자 쉰다
                     # (2026-09-07 사용자 요청: "1~2초 사람처럼 랜덤을 종합적으로")
                     if random.random() < JAKWI_PAUSE_P:
-                        time.sleep(random.uniform(*JAKWI_PAUSE))
+                        if not self._jakwi_nap(random.uniform(*JAKWI_PAUSE), alive):
+                            break
                 if getattr(self, "_jakwi_once", False):
                     self.status.set(f"✔ 작위 한 바퀴 완료 — 걸린 시간은 [📋 클릭기록] 에 남았습니다")
                     break
-                if not getattr(self, "_jakwi_stop", False):
-                    time.sleep(random.uniform(*JAKWI_GAP_ROUND))   # 다음 회차 전
+                if alive():
+                    self._jakwi_nap(random.uniform(*JAKWI_GAP_ROUND), alive)
                     # 회차 사이에도 가끔 길게 쉰다 — 한 바퀴마다 똑같은 리듬이면 티가 난다
                     if random.random() < JAKWI_REST_P:
-                        time.sleep(random.uniform(*JAKWI_REST))
+                        self._jakwi_nap(random.uniform(*JAKWI_REST), alive)
             else:
                 self.status.set(f"■ 작위 연속 중단 — {rnd}회차까지 돌았습니다")
         except Exception as e:
             self.status.set(f"작위 오류: {e}")
         finally:
-            self._jakwi_running = False
-            self._set_btn("btn_jakwi_run", state="normal")
-            self._set_btn("btn_jakwi_stop", state="disabled")
-            try:
-                self.after(0, lambda: self._btn_jakwi_loop.config(state="normal"))
-            except Exception:
-                pass
+            # 내 세대가 아직 최신일 때만 정리한다 — 이미 새 회차가 시작됐는데
+            # 앞 회차가 버튼을 되살리면, 두 개가 동시에 도는 것처럼 보인다.
+            if getattr(self, "_jakwi_gen", 0) == _gen:
+                self._jakwi_running = False
+                self._set_btn("btn_jakwi_run", state="normal")
+                self._set_btn("btn_jakwi_stop", state="disabled")
+                try:
+                    self.after(0, lambda: self._btn_jakwi_loop.config(state="normal"))
+                except Exception:
+                    pass
 
     def _reg_jakwi_end(self, idx, j):
         """'놓을 자리' 찍기 — 시작 좌표에서 여기까지의 세로 거리를 끌기 거리로 저장한다.
@@ -8089,6 +8187,11 @@ class App(tk.Tk):
 
     def _start_dgn2(self, fkey, sel_list=None):
         key, title, _ = self._dgn2_info(fkey)
+        # 👑 작위는 [🔁 연속] 이 따로 돈다. 그게 도는 중에 여기로 또 시작하면
+        #    아래 `_jakwi_stop = False` 가 **멈춤을 취소해버려** 계속 돌았다 (2026-09-19).
+        if fkey == "jakwi" and getattr(self, "_jakwi_running", False):
+            self.status.set("👑 작위 — 이미 돌고 있습니다 ([■ 멈춤] 으로 먼저 중단)")
+            return
         if not self._try_busy_or_queue(title, lambda: self._start_dgn2(fkey, sel_list)): return
         setattr(self, f"_{fkey}_stop", False)
         self._set_btn(f"btn_{fkey}_run", state="disabled")
@@ -14384,6 +14487,11 @@ class App(tk.Tk):
             if _hh:
                 _ha, _hn = _hh
                 _cx, _cy = int(xy[0]) - rc[0], int(xy[1]) - rc[1]
+                # 창을 키웠으면 클릭 자리를 **작은 창 기준으로 되돌려** 비교한다
+                _kk = (rc[3] - rc[1]) / float(ITEMREG_REF[1]) if len(rc) > 3 else 1.0
+                if _kk > 1.05:
+                    _ox = ((rc[2] - rc[0]) - ITEMREG_REF[0] * _kk) / 2.0
+                    _cx = int(round((_cx - _ox) / _kk)); _cy = int(round(_cy / _kk))
                 _in = (_ha[0] <= _cx < _ha[0] + _ha[2]
                        and _ha[1] <= _cy < _ha[1] + _ha[3])
                 for _nx0, _ny0, _nw, _nh in _hn:       # 제외 구역 (✕ 등)
