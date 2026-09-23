@@ -1,0 +1,27 @@
+{
+  "_설명": "👑 작위 단계 판정 — 다이아(로마숫자)+글자를 같이 자른 것. 창 491x276 기준, 줄 간격 약 34.8px. 활성인 줄은 배경이 2배 밝다.",
+  "ref": [
+    491,
+    276
+  ],
+  "gap": 34.8,
+  "order": [
+    "hero1",
+    "hero2",
+    "hero3",
+    "knight1",
+    "knight2",
+    "knight3"
+  ],
+  "label": {
+    "hero1": "용사I",
+    "hero2": "용사II",
+    "hero3": "용사III",
+    "knight1": "기사I",
+    "knight2": "기사II",
+    "knight3": "기사III"
+  },
+  "stop_at": "knight1",
+  "click_x": 250,
+  "bright_min": 32.0
+}
