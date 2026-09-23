@@ -209,6 +209,12 @@ DUNGEONS = [
     {"key": "카매사오기",      "label": "카매\n사오기",       "color": "#1a5276"},
 ]
 
+# 🚫 지금 안 쓰는 던전 — 탭을 만들지 않는다 (2026-09-20 사용자 지시).
+# ⚠ DUNGEONS 목록 자체에서 빼면 **번호가 밀려** 런처가 부르는 던전이 달라진다
+#   (런처는 던전을 번호로 넘긴다). 그래서 목록은 그대로 두고 '안 그리기'만 한다.
+#   던전을 콕 집어 열면(번호 지정) 숨긴 것도 열린다.
+HIDE_DUNGEONS = ("귀환주문서", "카매사오기")
+
 # 클릭 대신 마우스 이동만 할 좌표 인덱스 (던전키: {인덱스, ...})
 MOVE_ONLY_INDICES = {
     "카매사오기": {1},  # 클릭2는 이동만
@@ -455,7 +461,9 @@ class IslandApp(tk.Tk):
     def __init__(self, focus_idx=None):
         super().__init__()
         self._focus_idx = focus_idx  # None=전체, 0~3=해당 던전만
-        dungeons_to_show = [DUNGEONS[focus_idx]] if focus_idx is not None else DUNGEONS
+        dungeons_to_show = ([DUNGEONS[focus_idx]] if focus_idx is not None
+                            else [d for d in DUNGEONS
+                                  if d["key"] not in HIDE_DUNGEONS])
         self._dungeons_to_show = dungeons_to_show
         if focus_idx is not None:
             global SAVE_KEYS
