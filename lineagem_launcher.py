@@ -1590,6 +1590,24 @@ FLOOR_WAIT  = (0.6, 1.0)       # 다시 보기까지 쉬는 시간(초) — 사�
 FLOOR_PAD   = 12               # 저장해둔 자리 둘레로 이만큼 더 넓게 훑는다(px)
 FLOOR_MIN_STD = 3.0            # 이보다 밋밋한(무늬 없는) 그림은 쓰지 않는다 — 아래 설명
 
+# ── 🔢 층 '숫자만' 보기 (2026-09-23) ────────────────────────────────────────
+# 왜 바꿨나 — 실측으로 원인이 나왔다.
+#   ① 클라 창 크기가 **전부 다르다** (실측 490x276 ~ 496x279). 게임이 창에 맞춰
+#      UI를 늘리므로, 높이 8px짜리 층 글씨는 1~2% 배율 차이만으로 어긋난다.
+#      옛 코드는 배율을 0.92/1.00/1.08 세 단계만 시도해 1.007·1.011 을 놓쳤다.
+#   ② '용의 계곡 던전 5층' 통째로 맞추면 **다른 건 숫자 하나뿐**이라 층끼리
+#      점수가 1.01~1.02배밖에 안 벌어진다 (겨루기 기준 1.06 에 전부 걸러졌다).
+# 그래서 **숫자 칸만** 잘라 쓴다. 창 크기로 배율을 정확히 환산하고, 층마다
+# 견본을 여러 장 둔다. 실측(12클라, 자기 견본 제외): 12/12 정답 · 배수 평균 1.123.
+FLOOR_DIG_SPAN  = 0.060           # '층' 글자를 찾을 때 배율을 ± 이만큼 훑는다
+FLOOR_DIG_STEP  = 0.005           # 훑는 간격 (옛 0.08 단계로는 못 맞춘다)
+FLOOR_CHUNG_MIN = 0.55            # '층' 글자를 이만큼은 찾아야 숫자를 읽는다
+                                  #   (실측 던전 화면 0.70~1.00)
+# 숫자 방식은 **기준이 따로**다. 진짜 던전 화면은 실측 12개 모두 1.00 이 나오고,
+# 던전이 아닌 화면(절전·기지 등)은 0.58~0.64 다. 옛 기준 0.60 을 그대로 쓰면
+# 던전이 아닌 클라를 '6층' 으로 잘못 읽는다 — 실측으로 1·5·8번이 그랬다.
+FLOOR_DIG_MATCH = 0.80
+
 
 def floor_img_path(fkey, fl):
     """층 그림 (공용 — 업데이트로 모든 컴퓨터에 배포된다)."""
@@ -2301,34 +2319,150 @@ def _floor_score(big, fkey, fl):
     return best
 
 
+def floor_dig_list(fkey, fl):
+    """그 층의 '숫자만' 견본 전부 (여러 장). 없으면 빈 목록."""
+    out = []
+    try:
+        for n in range(1, 21):
+            p = os.path.join(IMG_DIR, f"{fkey}_dig{int(fl):02d}_{n}.png")
+            if os.path.exists(p):
+                out.append(p)
+    except Exception:
+        pass
+    return out
+
+
+def floor_dig_cut(coord):
+    """그 화면에서 **층 숫자 칸**을 잘라 낸다 → (숫자그림 16x22 흑백, '층' 일치도).
+
+    ⚠ 자리를 **'층' 글자를 찾아서** 정한다. 창 왼쪽부터 배율로 계산하면 안 된다 —
+    층 패널은 화면 **오른쪽 끝에 붙어** 있어서(실측: '층' 이 늘 오른쪽 끝에서 31~32px)
+    창 크기가 다른 클라에서 1~2px씩 어긋나고, 숫자가 7px이라 그건 치명적이다.
+    2026-09-23 실측: 그 어긋남 때문에 엉뚱한 글자를 잘라 층이 아니라 **창 크기별로**
+    묶이는 일이 있었다."""
+    try:
+        import cv2, numpy as np
+        big = grab_window(coord)
+        if big is None:
+            return None, 0.0
+        W, H = big.shape[1], big.shape[0]
+        ky = H / 276.0
+        p = os.path.join(IMG_DIR, "dragon_chung.png")
+        if not os.path.exists(p):
+            return None, 0.0
+        ch = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+        if ch is None:
+            return None, 0.0
+        reg = big[int(100*ky):int(130*ky), max(0, W-70):max(1, W-18)]
+        if reg.size == 0:
+            return None, 0.0
+        bv, bx, by, bs = -1.0, 0, 0, 1.0
+        s = 1.0 - FLOOR_DIG_SPAN
+        while s <= 1.0 + FLOOR_DIG_SPAN + 1e-9:
+            t = cv2.resize(ch, None, fx=s, fy=s, interpolation=cv2.INTER_CUBIC)
+            if t.shape[0] <= reg.shape[0] and t.shape[1] <= reg.shape[1]:
+                _, v, _, lo = cv2.minMaxLoc(
+                    cv2.matchTemplate(reg, t, cv2.TM_CCOEFF_NORMED))
+                if v > bv:
+                    bv, bx, by, bs = v, (W-70)+lo[0], int(100*ky)+lo[1], s
+            s += FLOOR_DIG_STEP
+        if bv < FLOOR_CHUNG_MIN:
+            return None, bv
+        x0 = bx - int(round(9*bs)) - 1
+        d = big[by:by+int(round(13*bs)), max(0, x0):max(1, bx-1)]
+        if d.size == 0:
+            return None, bv
+        return cv2.resize(cv2.cvtColor(d, cv2.COLOR_BGR2GRAY), (16, 22),
+                          interpolation=cv2.INTER_CUBIC), bv
+    except Exception:
+        return None, 0.0
+
+
+def _dig_match(a, b):
+    """같은 크기 두 숫자 그림이 얼마나 닮았나 → 0.0~1.0.
+
+    닮은 정도를 그대로 쓰면 맞는 층 1.00 · 틀린 층 0.96 처럼 **차이가 1.04배**밖에
+    안 나서 겨루기 기준(1.06배)에 맞는 층까지 걸러졌다. 0.5 아래를 잘라 버리고
+    남은 폭을 늘려 **차이를 벌린다** (0.96 → 0.92, 0.70 → 0.40).
+    순서는 그대로라 판정이 뒤집히지 않는다 (2026-09-23 실측)."""
+    import numpy as np
+    x = a.astype(np.float32); y = b.astype(np.float32)
+    x = (x - x.mean()) / (x.std() + 1e-6)
+    y = (y - y.mean()) / (y.std() + 1e-6)
+    return max(0.0, (float((x * y).mean()) - 0.5) * 2.0)
+
+
+def floor_dig_scores(fkey, coord):
+    """숫자 칸만 보고 층별 점수를 잰다 → {층: 점수}. 견본이 없으면 {}."""
+    try:
+        import cv2, numpy as np
+        d, _cv = floor_dig_cut(coord)
+        if d is None:
+            return {}
+        out = {}
+        for fl in FLOOR_LIST:
+            ps = floor_dig_list(fkey, fl)
+            if not ps:
+                continue
+            best = -2.0
+            for p in ps:
+                t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_GRAYSCALE)
+                if t is None or float(t.std()) < FLOOR_MIN_STD:
+                    continue
+                if t.shape != d.shape:
+                    t = cv2.resize(t, (d.shape[1], d.shape[0]),
+                                   interpolation=cv2.INTER_CUBIC)
+                best = max(best, _dig_match(d, t))
+            if best >= 0.0:
+                out[fl] = best
+        return out
+    except Exception:
+        return {}
+
+
 def floor_scores(fkey, coord):
     """등록된 층 전부의 점수를 한 화면에서 재서 {층: 점수} 로 돌려준다.
 
     ⚠ **절대 점수만으로 층을 가리면 안 된다.** '5층'과 '7층'은 '층' 글자가 같아서
     틀린 층도 점수가 꽤 높게 나온다. 그래서 **같은 화면에서 세 층을 겨루게 하고
     1등만 인정**한다 (이 저장소에서 이미 검증된 '배수 판정'과 같은 생각)."""
+    return floor_scores2(fkey, coord)[0]
+
+
+def floor_scores2(fkey, coord):
+    """위와 같되 **숫자 견본으로 잰 것인지**도 알려준다 → (점수맵, 숫자방식?).
+    기준값이 방식마다 다르기 때문에 이 구분이 필요하다."""
     try:
+        # 숫자 견본이 있으면 **그걸 먼저 쓴다** — 층끼리 훨씬 크게 벌어진다
+        dig = floor_dig_scores(fkey, coord)
+        if len(dig) >= 2:
+            return dig, True
         big = _floor_grab(fkey, coord)
         if big is None:
-            return {}
-        return {fl: _floor_score(big, fkey, fl)
-                for fl in FLOOR_LIST if floor_img_list(fkey, fl)}
+            return dig, bool(dig)
+        old = {fl: _floor_score(big, fkey, fl)
+               for fl in FLOOR_LIST if floor_img_list(fkey, fl)}
+        return (old, False) if old else (dig, bool(dig))
     except Exception:
-        return {}
+        return {}, False
 
 
-def floor_seen(fkey, fl, coord, sc_map=None):
+def floor_seen(fkey, fl, coord, sc_map=None, dig=None):
     """지금 화면이 **그 층이 맞는지**. (맞음?, 그 층 점수, 왜)
 
     - 그 층 점수가 기준(FLOOR_MATCH) 을 넘어야 하고
     - 등록된 층이 둘 이상이면 **그 층이 1등**이어야 하며 2등과 FLOOR_RATIO 배 차이가 나야 한다.
     """
-    sc = floor_scores(fkey, coord) if sc_map is None else sc_map
+    if sc_map is None:
+        sc, dig = floor_scores2(fkey, coord)
+    else:
+        sc = sc_map
     if not sc or fl not in sc:
         return False, 0.0, "그 층 그림이 없음"
+    need = FLOOR_DIG_MATCH if dig else FLOOR_MATCH
     mine = sc[fl]
-    if mine < FLOOR_MATCH:
-        return False, mine, f"기준 {FLOOR_MATCH} 미만"
+    if mine < need:
+        return False, mine, f"기준 {need} 미만"
     others = [v for k, v in sc.items() if k != fl]
     if others:
         sec = max(others)
@@ -2338,6 +2472,28 @@ def floor_seen(fkey, fl, coord, sc_map=None):
         if sec > 0 and mine < sec * FLOOR_RATIO:
             return False, mine, f"{sec:.2f} 와 너무 비슷함"
     return True, mine, "확인"
+
+
+def floor_read(fkey, coord):
+    """지금 화면이 **몇 층인지** 읽는다 → (층 또는 None, 점수맵, 설명).
+
+    2026-09-23 — `floor_seen` 과 같은 '겨루기' 규칙을 쓰되, 층을 **미리 정해두지 않고**
+    화면에서 읽어 온다. [🏢 층 자동채우기] 가 이걸로 16클라를 한 번에 읽는다.
+    애매하면 (None, …) 을 돌려 **아무것도 채우지 않는다** — 틀린 층을 넣는 것보다
+    비워두는 게 낫다 (틀린 층은 오토를 잘못 눌러 퀘스트를 깬다)."""
+    sc, dig = floor_scores2(fkey, coord)
+    if not sc:
+        return None, {}, "층 글씨를 못 읽음"
+    need = FLOOR_DIG_MATCH if dig else FLOOR_MATCH
+    top = max(sc, key=lambda k: sc[k])
+    if sc[top] < need:
+        return None, sc, f"가장 높은 {top}층도 기준 {need} 미만 ({sc[top]:.2f})"
+    others = [v for k, v in sc.items() if k != top]
+    sec = max(others) if others else 0.0
+    if sec > 0 and sc[top] < sec * FLOOR_RATIO:
+        return None, sc, (f"{top}층 {sc[top]:.2f} 과 2등 {sec:.2f} 가 너무 비슷함 "
+                          f"(≥{FLOOR_RATIO}배 필요)")
+    return top, sc, f"{top}층 (1등 {sc[top]:.2f} · 2등 {sec:.2f})"
 
 
 PICKS = ["best", "top", "bottom", "left", "right"]
@@ -8209,7 +8365,15 @@ class App(tk.Tk):
                  ).pack(padx=10, pady=(6, 2))
         tk.Button(win, text="🔍 지금 16클라가 몇 층인지 확인", font=("맑은 고딕", 9, "bold"),
                   bg="#1f618d", fg="white",
-                  command=lambda f=fkey: self._floor_check_all(f)).pack(padx=10, pady=(4, 10))
+                  command=lambda f=fkey: self._floor_check_all(f)).pack(padx=10, pady=(4, 2))
+        # 2026-09-23 사용자 요청 — "일일이 층 확인해서 넣으려니 너무 힘들다"
+        tk.Button(win, text="🏢 층 자동채우기 (읽어서 슬롯에 넣기)",
+                  font=("맑은 고딕", 9, "bold"), bg="#117864", fg="white",
+                  command=lambda f=fkey: self._floor_autofill(f)).pack(padx=10, pady=(2, 2))
+        tk.Label(win, font=("맑은 고딕", 8), fg="#888", justify="left",
+                 text="애매하게 읽힌 슬롯은 건드리지 않습니다 — "
+                      "틀린 층을 넣는 것보다 비워두는 편이 안전합니다"
+                 ).pack(padx=10, pady=(0, 10))
         apply_dark(win, bool(self.cfg.get("dark_ui", True)))
 
     def _grab_floor_image(self, fkey, fl, btn=None):
@@ -8301,9 +8465,9 @@ class App(tk.Tk):
                 if not anc:
                     continue
                 want = self._slot_floor(fkey, i)
-                sc = floor_scores(fkey, anc)
+                sc, _dg = floor_scores2(fkey, anc)
                 top = max(sc, key=lambda k: sc[k]) if sc else 0
-                seen = (floor_seen(fkey, want, anc, sc)[0] if want else False)
+                seen = (floor_seen(fkey, want, anc, sc, _dg)[0] if want else False)
                 mark = "✔" if seen else ("·" if not want else "✘")
                 if seen:
                     ok += 1
@@ -8318,6 +8482,63 @@ class App(tk.Tk):
                                 f"(기준 {FLOOR_MATCH})")
         except Exception as e:
             self.status.set(f"🏢 층 확인 실패: {e}")
+
+    def _floor_autofill(self, fkey):
+        """🏢 층 자동채우기 — 16클라를 한 번에 읽어 **슬롯마다 갈 층을 채운다.**
+
+        2026-09-23 사용자 요청: "일일이 전부 몇 층 확인해서 넣으려니 너무 힘들다".
+        규칙:
+          · 확실히 읽힌 슬롯만 채운다. 애매하면 **건드리지 않는다** —
+            틀린 층을 넣으면 엉뚱한 곳에서 오토를 눌러 퀘스트가 깨진다.
+          · 이미 지정돼 있고 읽은 값과 같으면 그대로 둔다(로그만).
+          · 바꾼 것·못 읽은 것을 표로 보여주니 눈으로 확인만 하면 된다."""
+        def _go():
+            try:
+                key = self._grid_spec(fkey)["key"]
+                slots = self.cfg.get(key) or []
+                lines, filled, kept, skipped = [], 0, 0, 0
+                for i, s in enumerate(slots):
+                    anc = slot_anchor(s)
+                    nm = (s.get("name") or "미등록")[:8]
+                    if not anc:
+                        lines.append(f"·  {i+1:02d} {nm:<8} 창을 못 찾음")
+                        skipped += 1
+                        continue
+                    fl, sc, why = floor_read(fkey, anc)
+                    was = self._slot_floor(fkey, i)
+                    if fl is None:
+                        lines.append(f"?  {i+1:02d} {nm:<8} "
+                                     f"지정 {str(was)+'층' if was else '안함':<5} "
+                                     f"— 그대로 둠 ({why})")
+                        skipped += 1
+                    elif fl == was:
+                        lines.append(f"=  {i+1:02d} {nm:<8} {fl}층 (이미 맞음)")
+                        kept += 1
+                    else:
+                        self._set_slot_floor(fkey, i, fl)
+                        lines.append(f"✔  {i+1:02d} {nm:<8} "
+                                     f"{str(was)+'층' if was else '안함'} → {fl}층   {why}")
+                        filled += 1
+                click_log(f"[층자동채우기] {fkey} — 채움 {filled} · 그대로 {kept} · "
+                          f"못읽음 {skipped}")
+                _no = FLOOR_NO_AUTO.get(fkey, ())
+                txt = ("🏢 층 자동채우기 — 화면을 읽어 슬롯마다 갈 층을 넣었습니다" + chr(10)
+                       + "애매하게 읽힌 슬롯은 **건드리지 않았습니다** "
+                         "(틀린 층을 넣는 것보다 비워두는 편이 안전)" + chr(10)
+                       + (f"🚫 {'·'.join(str(f) for f in _no)}층으로 채워진 슬롯은 "
+                          f"오토를 누르지 않고 거기서 끝납니다{chr(10)}" if _no else "")
+                       + "-" * 60 + chr(10) + chr(10).join(lines) + chr(10) + chr(10)
+                       + f"채움 {filled}개 · 이미 맞음 {kept}개 · 못 읽음 {skipped}개")
+                # 화면의 드롭다운을 먼저 갱신한 뒤 결과를 보여준다
+                self.after(0, lambda f=fkey: self._floor_menu_sync(f))
+                self.after(0, lambda: self._show_text_win("🏢 층 자동채우기", txt))
+                self.after(0, lambda: self.status.set(
+                    f"🏢 층 자동채우기 — {filled}개 채움 · {skipped}개는 "
+                    f"못 읽어 그대로 뒀습니다"))
+            except Exception as e:
+                self.after(0, lambda: self.status.set(f"🏢 층 자동채우기 실패: {e}"))
+        self.status.set("🏢 층을 읽는 중…")
+        threading.Thread(target=_go, daemon=True).start()
 
     def _grab_sleep_image(self, fkey, btn=None):
         """😴 절전모드 화면을 드래그해 등록한다.
@@ -9602,11 +9823,32 @@ class App(tk.Tk):
                                else "층 확인 안 함"))
         v.trace_add("write", _save)
         om.config(fg=("#117864" if cur else "#7f8c8d"))
+        # [🏢 층 자동채우기] 가 값을 바꿨을 때 **이 드롭다운도 같이 바뀌도록** 등록해둔다.
+        # (2026-09-23: 값은 제대로 채워졌는데 화면이 그대로라 "안 채우는데?" 라는
+        #  신고가 왔다 — 창을 닫았다 열어야만 보였다.)
+        if not hasattr(self, "_floor_menus"):
+            self._floor_menus = {}
+        self._floor_menus[(fkey, si)] = (v, names, _num)
         if side == "top":
             om.pack(pady=(2, 0))
         else:
             om.pack(side="left", padx=3)
         return om
+
+    def _floor_menu_sync(self, fkey):
+        """저장된 층 값을 화면의 드롭다운에 다시 그린다 (자동채우기 뒤에 부른다)."""
+        try:
+            for (f, si), (var, names, num) in list(
+                    getattr(self, "_floor_menus", {}).items()):
+                if f != fkey:
+                    continue
+                fl = self._slot_floor(f, si)
+                want = next((n for n in names if num(n) == fl and fl),
+                            self.FLOOR_NONE)
+                if var.get() != want:
+                    var.set(want)
+        except Exception:
+            pass
 
     def _floor_ok(self, fkey, j, coord, slot):
         """이 자리가 '층 확인 관문'이면 그 슬롯의 층이 보이는지 확인한다.
@@ -9628,12 +9870,12 @@ class App(tk.Tk):
                           f"좌표{j+1}(오토)를 누르지 않고 이 슬롯 끝")
                 self.status.set(f"🚫 [{nm}] {fl}층 — 오토를 누르지 않습니다")
                 return False
-            if not floor_img_list(fkey, fl):
+            if not floor_img_list(fkey, fl) and not floor_dig_list(fkey, fl):
                 return True                       # 그 층 그림이 아직 없다
             best, why, last = 0.0, "", {}
             for t in range(FLOOR_TRIES):
-                last = floor_scores(fkey, coord)
-                ok, sc, why = floor_seen(fkey, fl, coord, last)
+                last, _dg = floor_scores2(fkey, coord)
+                ok, sc, why = floor_seen(fkey, fl, coord, last, _dg)
                 best = max(best, sc)
                 if ok:
                     click_log(f"{fkey} [{nm}] 🏢 {fl}층 확인됨 (일치도 {sc:.2f}) "
