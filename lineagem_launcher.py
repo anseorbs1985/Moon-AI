@@ -31,6 +31,7 @@ except Exception:
 import tkinter as tk
 from tkinter import messagebox
 import subprocess, time, threading, json, random, re
+import io                      # 🎬 녹화 배포 — 한글 경로도 안전하게 읽고 쓰려고
 import pyautogui
 import pygetwindow as gw
 import os
@@ -946,6 +947,35 @@ def save_cfg(cfg):
     os.replace(_tmp, CONFIG_FILE)
     _CFG_DISK = json.loads(json.dumps(out, ensure_ascii=False))
 
+def cfg_stamp():
+    """좌표 파일의 '지금 모습'을 한 줄로 — 크기·수정시각·내용지문·좌표 개수.
+
+    재시작 전후로 이 줄을 견주면 **파일이 정말 바뀌었는지**를 눈으로 가릴 수 있다.
+    (2026-09-27 — '한 번 재시작하면 옛 좌표, 두 번째에 제대로' 신고의 증거용)"""
+    try:
+        import hashlib
+        raw = open(CONFIG_FILE, "rb").read()
+        d = json.loads(raw.decode("utf-8"))
+        n = 0
+
+        def _walk(v):
+            nonlocal n
+            if isinstance(v, list):
+                if len(v) == 2 and all(isinstance(x, (int, float)) for x in v):
+                    n += 1
+                else:
+                    for x in v:
+                        _walk(x)
+            elif isinstance(v, dict):
+                for x in v.values():
+                    _walk(x)
+        _walk(d)
+        return (f"{len(raw):,}B · {time.strftime('%m-%d %H:%M:%S', time.localtime(os.path.getmtime(CONFIG_FILE)))}"
+                f" · 지문 {hashlib.md5(raw).hexdigest()[:8]} · 좌표 {n}개")
+    except Exception as e:
+        return f"좌표 파일을 못 읽음 ({e!r})"
+
+
 def find_purple():
     for w in gw.getAllWindows():
         if "purple" in w.title.lower() or "lineage" in w.title.lower():
@@ -1493,6 +1523,12 @@ def img_mine_free(fkey, j):
 #      F6 은 '거래소 안에서 잠깐 끄는' 수동 스위치다 (최저가가 없어 직접 올릴 때).
 ITEMREG_SHOP_MATCH = 0.70        # 거래소 그림 기준
 ITEMREG_HOLD_KEY = 0x76          # F7 — 최저가 말고 내가 정한 값으로 올릴 때 (2026-09-21)
+# 💰 '값넣기 모드' (2026-09-27 사용자 요청)
+#   사용자: "내가 금액을 넣어서 등록하고 싶은데 너가 순식간에 해버리니까 좀 힘듦"
+#   F7 로 끊는 방식은 **전체가 2초 남짓이라 반응할 시간이 없다.** 그래서 반응속도가
+#   아니라 **미리 정해두는 모드**로 바꿨다. 값넣기 모드면 최저가(아래 칸)를 누르기
+#   **직전에 멈춰** 창을 열어둔 채 기다린다 → 사용자가 수량·가격을 넣고 F7 로 마무리.
+ITEMREG_PRICE_STEP = 1           # 이 칸이 '최저가' — 값넣기 모드는 여기 **앞에서** 멈춘다
 ITEMREG_HOTKEY   = 0x75          # 기본 F6 (창의 [단축키] 으로 바꿀 수 있다)
 # 2026-09-16 사용자 요청 "속도를 30프로만 당겨줘" — 기다리는 시간을 전부 ×0.7.
 # 줄여도 되는 이유: 2·3번 칸의 🖼('등록 창이 떠 있나') 확인이 **화면이 뜰 때까지
@@ -3137,6 +3173,14 @@ class App(tk.Tk):
         self.after(20000, lambda: setattr(self, "_unmap_couple_ok", True))
 
         self.cfg = load_cfg()
+        # 🔎 켜질 때 '어느 좌표 파일을 읽었는지' 기록한다 (2026-09-27 사용자 신고
+        #    "재시작하면 옛날 좌표가 뜨고, 한 번 더 재시작해야 제대로 들어온다").
+        #    끄기 직전에도 같은 줄을 남기므로, 두 줄을 견주면 **재시작 사이에
+        #    파일이 바뀌었는지 / 같은 파일인데 화면만 옛것인지** 가 바로 갈린다.
+        try:
+            click_log("[재시작] 켜짐 — " + cfg_stamp() + f" · PID {os.getpid()}")
+        except Exception:
+            pass
         self._accounts = load_accounts()
         while len(self._accounts) < 20:
             self._accounts.append({"type": "구글", "f1": "", "f2": "", "f3": "", "f4": "", "f5": ""})
@@ -3774,6 +3818,11 @@ class App(tk.Tk):
             font=("맑은 고딕", 8, "bold"), bg="#117a8b", fg="white",
             activebackground="#0e6270", pady=2,
             command=self._open_bar).pack(fill="x", pady=(2, 0))
+        # 🎬 퍼플 '마우스-키 녹화' 파일을 16클라에 똑같이 넣는다 (2026-09-24)
+        tk.Button(_isl_col, text="🎬 녹화 배포 (16클라)",
+            font=("맑은 고딕", 8, "bold"), bg="#7d3c98", fg="white",
+            activebackground="#5b2c6f", pady=2,
+            command=self._open_rec_win).pack(fill="x", pady=(2, 0))
         tk.Button(btn_row, text="🎫 패스권\n새로운 등록",
             font=("맑은 고딕", 10, "bold"), bg="#6c3483", fg="white",
             width=10, height=2,
@@ -3819,6 +3868,11 @@ class App(tk.Tk):
                                        fg="white", width=9, height=1, pady=2,
                                        command=self._itemreg_toggle)
         self._itemreg_btn2.pack(side="top", pady=(1, 0))
+        # 💰 최저가 ↔ 값넣기 (2026-09-27) — 반응속도로 끊는 대신 미리 정해둔다
+        self._itemreg_mbtn2 = tk.Button(ig, font=("맑은 고딕", 8, "bold"),
+                                        fg="white", width=9, height=1, pady=2,
+                                        command=self._itemreg_mode_toggle)
+        self._itemreg_mbtn2.pack(side="top", pady=(1, 0))
 
         # 🎟 쿠폰등록 (위=창 열기, 아래=▶ 바로 실행)
         cg = tk.Frame(btn_row); cg.pack(side="left", padx=(6, 0))
@@ -4467,6 +4521,304 @@ class App(tk.Tk):
             except Exception:
                 pass
         self._refresh_dark_btn()
+
+    # ── 🎬 퍼플 '마우스-키 녹화' 파일 배포 (2026-09-24 사용자 요청) ──────────
+    #
+    # 사용자: "내가 파일을 올리면 너가 똑같이 옮겨주면 되는데 — 모두 동일하게."
+    # 퍼플은 클라(zone)마다 녹화를 이 파일 하나에 담는다:
+    #     %LOCALAPPDATA%\\Purple\\zone\\<GUID>\\lm\\records\\records.json
+    # 어느 GUID 가 몇 번 슬롯인지는 **그 클라 프로세스의 명령줄**에 있다
+    # (`-subUserId:"<GUID>"`). 창 위치로 슬롯 번호를 정하고 PID 로 이어 붙인다.
+    #
+    # 실측으로 확인한 것 (2026-09-24):
+    #   · 파일이 **잠겨 있지 않다** — 클라를 켜둔 채로 바꿔 쓸 수 있다
+    #   · 게임이 계속 덮어쓰지 않는다 (마지막 수정이 두 달 전이었다)
+    #   · 좌표가 **0~1 비율**(`x: "0.4417"`)이라 창 위치·크기와 무관하다
+    #     → 한 클라의 녹화를 다른 클라에 그대로 넣어도 자리가 어긋나지 않는다
+    #   · `psutil` 로는 명령줄을 못 읽는다(권한) → WMI(`Win32_Process`) 로 읽는다
+
+    REC_REL = os.path.join("lm", "records", "records.json")
+
+    def _rec_zone_root(self):
+        return os.path.join(os.environ.get("LOCALAPPDATA", ""), "Purple", "zone")
+
+    def _rec_pid_zone(self):
+        """리니지M 프로세스 PID → zone GUID (WMI 로 명령줄을 읽는다)."""
+        out = {}
+        try:
+            import subprocess
+            ps = ("Get-CimInstance Win32_Process -Filter \"Name='LineageM.exe'\" | "
+                  "ForEach-Object { if ($_.CommandLine -match "
+                  "'-subUserId:\"([0-9A-Fa-f-]{36})\"') "
+                  "{ \"$($_.ProcessId)=$($Matches[1])\" } }")
+            r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                               capture_output=True, text=True, timeout=25,
+                               creationflags=0x08000000)
+            for ln in (r.stdout or "").splitlines():
+                if "=" in ln:
+                    a, b = ln.strip().split("=", 1)
+                    out[a.strip()] = b.strip()
+        except Exception:
+            pass
+        return out
+
+    def _rec_slots(self):
+        """슬롯 1~16 → {slot, name, guid, path, size, n, titles}. 못 찾으면 빈 목록."""
+        import win32process
+        wins = []
+
+        def _cb(h, _):
+            try:
+                if not win32gui.IsWindowVisible(h) or win32gui.IsIconic(h):
+                    return True
+                t = win32gui.GetWindowText(h) or ""
+                if t.startswith("리니지M") and not t.startswith("리니지M 자동 실행"):
+                    l, tp, r, b = win32gui.GetWindowRect(h)
+                    if r - l > 100:
+                        _, pid = win32process.GetWindowThreadProcessId(h)
+                        wins.append((l, tp, pid, t))
+            except Exception:
+                pass
+            return True
+        win32gui.EnumWindows(_cb, None)
+        wins.sort(key=lambda z: z[0])
+        cols = [sorted(wins[i*4:(i+1)*4], key=lambda z: z[1]) for i in range(4)]
+        order = [x for c in cols for x in c]
+        p2z = self._rec_pid_zone()
+        root = self._rec_zone_root()
+        out = []
+        for i, (l, tp, pid, title) in enumerate(order):
+            g = p2z.get(str(pid))
+            p = os.path.join(root, g, self.REC_REL) if g else ""
+            nm = title.split("l")[-1].strip() if " l " in title else title
+            d = {"slot": i + 1, "name": nm[:12], "guid": g or "", "path": p,
+                 "size": 0, "n": 0, "titles": []}
+            if p and os.path.exists(p):
+                try:
+                    d["size"] = os.path.getsize(p)
+                    rs = (json.load(io.open(p, encoding="utf-8")) or {}).get("records") or {}
+                    d["n"] = len(rs)
+                    d["titles"] = [str((v or {}).get("title", "?"))
+                                   for v in list(rs.values())[:4]]
+                except Exception:
+                    pass
+            out.append(d)
+        return out
+
+    def _rec_backup_dir(self):
+        return os.path.join(os.environ.get("LOCALAPPDATA", ""), "MoonAI",
+                            "records_backup")
+
+    def _rec_put(self, src, targets):
+        """src(records.json)를 targets 의 각 슬롯에 넣는다 → (성공수, 메시지들).
+        넣기 전에 **전부 백업**하고, 넣은 뒤 **바이트로 검증**한다."""
+        import shutil
+        msgs, ok = [], 0
+        try:
+            raw = io.open(src, "rb").read()
+            d = json.loads(raw.decode("utf-8"))
+            rs = (d or {}).get("records")
+            if not isinstance(rs, dict) or not rs:
+                return 0, ["✘ 고른 파일에 녹화가 없습니다 — records 가 비었습니다"]
+        except Exception as e:
+            return 0, [f"✘ 고른 파일을 읽지 못했습니다: {e}"]
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        bdir = os.path.join(self._rec_backup_dir(), stamp)
+        os.makedirs(bdir, exist_ok=True)
+        for t in targets:
+            p = t.get("path")
+            if not p:
+                msgs.append(f"✘ {t['slot']:02d} {t['name']} — zone 을 못 찾음")
+                continue
+            try:
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                if os.path.exists(p):          # 있던 것은 반드시 백업
+                    shutil.copy2(p, os.path.join(bdir, f"{t['slot']:02d}_{t['guid']}.json"))
+                tmp = p + ".tmp"
+                with io.open(tmp, "wb") as f:
+                    f.write(raw)
+                os.replace(tmp, p)
+                if io.open(p, "rb").read() != raw:      # 바이트 검증
+                    msgs.append(f"✘ {t['slot']:02d} {t['name']} — 복사 후 내용이 다름")
+                    continue
+                ok += 1
+                msgs.append(f"✔ {t['slot']:02d} {t['name']} — 녹화 {len(rs)}개 넣음")
+            except Exception as e:
+                msgs.append(f"✘ {t['slot']:02d} {t['name']} — {e}")
+        msgs.append("")
+        msgs.append(f"이전 파일은 여기에 백업됨: {bdir}")
+        click_log(f"[녹화배포] {ok}/{len(targets)}개 · 원본 {os.path.basename(src)} "
+                  f"(녹화 {len(rs)}개) · 백업 {stamp}")
+        return ok, msgs
+
+    def _open_rec_win(self):
+        """🎬 녹화 배포 — 16클라의 records.json 을 한 번에 맞춘다."""
+        self.status.set("🎬 클라를 확인하는 중…")
+
+        def _go():
+            slots = self._rec_slots()
+            self.after(0, lambda: self._build_rec_win(slots))
+        threading.Thread(target=_go, daemon=True).start()
+
+    def _build_rec_win(self, slots):
+        import tkinter.filedialog as fd
+        win = getattr(self, "_rec_win", None)
+        if win and win.winfo_exists():
+            try: win.destroy()
+            except Exception: pass
+        win = tk.Toplevel(self); self._rec_win = win
+        win.title("🎬 녹화 배포 — 16클라 똑같이")
+        win.geometry("760x620"); win.attributes("-topmost", True)
+        if not hasattr(self, "_section_attrs"):
+            self._section_attrs = set()
+        self._section_attrs.add("_rec_win")
+
+        tk.Label(win, font=("맑은 고딕", 9), justify="left", anchor="w",
+                 text=("퍼플 [마우스-키 녹화] 목록을 담은 파일을 16클라에 똑같이 넣습니다."
+                       + chr(10) +
+                       "좌표가 0~1 비율이라 창 크기·위치가 달라도 그대로 맞습니다. "
+                       "클라를 끄지 않아도 됩니다.")
+                 ).pack(fill="x", padx=10, pady=(8, 2))
+
+        body = tk.Frame(win); body.pack(fill="both", expand=True, padx=10)
+        cvs = tk.Canvas(body, highlightthickness=0, height=330)
+        sb = tk.Scrollbar(body, orient="vertical", command=cvs.yview)
+        inner = tk.Frame(cvs)
+        inner.bind("<Configure>",
+                   lambda e: cvs.configure(scrollregion=cvs.bbox("all")))
+        cvs.create_window((0, 0), window=inner, anchor="nw")
+        cvs.configure(yscrollcommand=sb.set)
+        cvs.pack(side="left", fill="both", expand=True); sb.pack(side="right", fill="y")
+
+        self._rec_vars = {}
+        hdr = tk.Frame(inner); hdr.pack(fill="x")
+        for txt, w in (("쓸것", 5), ("번호", 5), ("이름", 13), ("녹화", 6),
+                       ("크기", 11), ("담긴 녹화 이름", 40)):
+            tk.Label(hdr, text=txt, font=("맑은 고딕", 8, "bold"),
+                     width=w, anchor="w").pack(side="left")
+        for s in slots:
+            row = tk.Frame(inner); row.pack(fill="x")
+            v = tk.BooleanVar(value=bool(s["path"]))
+            self._rec_vars[s["slot"]] = (v, s)
+            tk.Checkbutton(row, variable=v, width=3).pack(side="left")
+            tk.Label(row, text=f"{s['slot']:02d}", font=("맑은 고딕", 8),
+                     width=5, anchor="w").pack(side="left")
+            tk.Label(row, text=s["name"], font=("맑은 고딕", 8),
+                     width=13, anchor="w").pack(side="left")
+            tk.Label(row, text=(f"{s['n']}개" if s["path"] else "—"),
+                     font=("맑은 고딕", 8), width=6, anchor="w",
+                     fg=("#117864" if s["n"] else "#c0392b")).pack(side="left")
+            tk.Label(row, text=(f"{s['size']:,}B" if s["size"] else "없음"),
+                     font=("맑은 고딕", 8), width=11, anchor="w").pack(side="left")
+            tk.Label(row, text=" · ".join(s["titles"])[:52],
+                     font=("맑은 고딕", 8), anchor="w", fg="#7f8c8d").pack(side="left")
+
+        info = tk.Label(win, font=("맑은 고딕", 9, "bold"), fg="#7d3c98",
+                        text=f"클라 {len(slots)}개 확인됨")
+        info.pack(pady=(6, 2))
+
+        srcv = tk.StringVar(value="")
+
+        def _targets():
+            return [s for n, (v, s) in sorted(self._rec_vars.items())
+                    if v.get() and s.get("path")]
+
+        def _from_file():
+            p = fd.askopenfilename(parent=win, title="넣을 records.json 고르기",
+                                   filetypes=[("녹화 파일", "*.json"), ("모두", "*.*")])
+            if p:
+                srcv.set(p); _apply(p)
+
+        def _from_slot():
+            try:
+                n = int(pick.get().split("번")[0])
+            except Exception:
+                self.status.set("🎬 원본 슬롯을 골라주세요"); return
+            s = dict(self._rec_vars.get(n, (None, {}))[1] or {})
+            if not s.get("path"):
+                self.status.set(f"🎬 {n}번은 파일이 없습니다"); return
+            _apply(s["path"], skip=n)
+
+        def _apply(src, skip=None):
+            ts = [t for t in _targets() if t["slot"] != skip]
+            if not ts:
+                self.status.set("🎬 넣을 슬롯이 없습니다 — 왼쪽 칸을 체크하세요"); return
+            if not messagebox.askyesno(
+                    "🎬 녹화 배포",
+                    f"{len(ts)}개 슬롯의 녹화를 이 파일로 바꿉니다.{chr(10)}{chr(10)}"
+                    f"원본: {os.path.basename(src)}{chr(10)}"
+                    f"대상: {', '.join(str(t['slot']) for t in ts)}{chr(10)}{chr(10)}"
+                    f"이전 파일은 자동 백업됩니다. 진행할까요?", parent=win):
+                return
+            ok, msgs = self._rec_put(src, ts)
+            self.status.set(f"🎬 녹화 배포 — {ok}/{len(ts)}개 완료")
+            self._show_text_win("🎬 녹화 배포 결과", chr(10).join(msgs))
+            self._open_rec_win()          # 표를 새로 읽어 반영
+
+        def _restore():
+            base = self._rec_backup_dir()
+            if not os.path.isdir(base):
+                self.status.set("🎬 백업이 없습니다"); return
+            ds = sorted([d for d in os.listdir(base)
+                         if os.path.isdir(os.path.join(base, d))], reverse=True)
+            if not ds:
+                self.status.set("🎬 백업이 없습니다"); return
+            d = os.path.join(base, ds[0])
+            if not messagebox.askyesno(
+                    "♻ 되돌리기",
+                    f"가장 최근 백업으로 되돌립니다.{chr(10)}{chr(10)}{ds[0]}{chr(10)}{chr(10)}"
+                    f"진행할까요?", parent=win):
+                return
+            import shutil
+            n = 0
+            for f in os.listdir(d):
+                try:
+                    sl = int(f.split("_")[0])
+                    s = self._rec_vars.get(sl, (None, {}))[1] or {}
+                    if s.get("path"):
+                        shutil.copy2(os.path.join(d, f), s["path"]); n += 1
+                except Exception:
+                    pass
+            click_log(f"[녹화배포] ♻ 되돌림 {n}개 ({ds[0]})")
+            self.status.set(f"♻ {n}개 되돌렸습니다 ({ds[0]})")
+            self._open_rec_win()
+
+        r1 = tk.Frame(win); r1.pack(pady=(4, 2))
+        tk.Button(r1, text="📂 파일 골라서 넣기", font=("맑은 고딕", 10, "bold"),
+                  bg="#7d3c98", fg="white", width=18, height=2,
+                  command=_from_file).pack(side="left", padx=3)
+        names = [f"{s['slot']}번 {s['name']}" for s in slots if s.get("path")]
+        pick = tk.StringVar(value=(names[0] if names else ""))
+        if names:
+            om = tk.OptionMenu(r1, pick, *names)
+            om.config(font=("맑은 고딕", 8), width=14)
+            om.pack(side="left", padx=(12, 2))
+        tk.Button(r1, text="↗ 이 슬롯 것을\n나머지에 뿌리기", font=("맑은 고딕", 9, "bold"),
+                  bg="#1f618d", fg="white", width=16, height=2,
+                  command=_from_slot).pack(side="left", padx=3)
+
+        r2 = tk.Frame(win); r2.pack(pady=(2, 6))
+        tk.Button(r2, text="☑ 전체선택", font=("맑은 고딕", 8), width=10,
+                  command=lambda: [v.set(True) for v, s in self._rec_vars.values()
+                                   if s.get("path")]).pack(side="left", padx=2)
+        tk.Button(r2, text="☐ 전체해제", font=("맑은 고딕", 8), width=10,
+                  command=lambda: [v.set(False) for v, _ in self._rec_vars.values()]
+                  ).pack(side="left", padx=2)
+        tk.Button(r2, text="♻ 되돌리기 (최근 백업)", font=("맑은 고딕", 8, "bold"),
+                  bg="#b9770e", fg="white", width=20,
+                  command=_restore).pack(side="left", padx=8)
+        tk.Button(r2, text="📁 백업폴더", font=("맑은 고딕", 8), width=10,
+                  command=lambda: os.startfile(self._rec_backup_dir())
+                  if os.path.isdir(self._rec_backup_dir()) else
+                  self.status.set("🎬 백업이 아직 없습니다")).pack(side="left", padx=2)
+
+        tk.Label(win, font=("맑은 고딕", 8), fg="#888", justify="left",
+                 text=("넣은 뒤 게임에서 [마우스-키 녹화] 창을 닫았다 다시 열면 목록이 바뀝니다."
+                       + chr(10) +
+                       "이전 파일은 %LOCALAPPDATA%\\MoonAI\\records_backup 에 시각별로 쌓입니다.")
+                 ).pack(padx=10, pady=(0, 8))
+        apply_dark(win, bool(self.cfg.get("dark_ui", True)))
+        self.status.set(f"🎬 녹화 배포 — 클라 {len(slots)}개 확인됨")
 
     def _open_bar(self):
         """요약 런처(작은 창)를 띄운다 — 별도 프로세스라 메인런처·작업과 무관하다.
@@ -10852,7 +11204,11 @@ class App(tk.Tk):
             me = os.path.join(BASE, "lineagem_launcher.py")
             # 이 프로세스가 죽은 뒤 확실히 다시 띄운다 —
             # 20초 동안 지켜보며 안 떠 있으면 직접 실행 (워치독 실패해도 살아남)
-            ps = ("Start-Sleep -Milliseconds 1200; "
+            # ⚠ 아래 _bye() 가 900ms 에 저장·기록까지 하고 나간다.
+            #    워치독이 그보다 먼저 돌면 **옛 런처가 아직 살아 있어** 단일 실행
+            #    잠금에 걸려 새 런처가 조용히 죽는다 (= 재시작이 안 된 것처럼 보임).
+            #    그래서 넉넉히 뒤로 미룬다 (900 → 1800, 여유 900ms).
+            ps = ("Start-Sleep -Milliseconds 1800; "
                   "schtasks /Run /TN 'LineageM_Watchdog' | Out-Null; "
                   "for ($i=0; $i -lt 20; $i++) { "
                   "  Start-Sleep -Seconds 1; "
@@ -10870,12 +11226,26 @@ class App(tk.Tk):
             return
 
         def _bye():
+            # 💾 나가기 전에 **확실히 저장한다** — 화면에서 고친 것이 아직 디스크에
+            #    안 갔으면 그대로 사라져, 다시 켰을 때 '옛 좌표' 로 보인다
+            #    (2026-09-27 사용자 신고). save_cfg 는 '내가 바꾼 키만' 얹으므로
+            #    남의 수정을 지우지 않는다.
+            try:
+                save_cfg(self.cfg)
+            except Exception as e:
+                try: click_log(f"[재시작] ⚠ 끄기 전 저장 실패: {e!r}")
+                except Exception: pass
+            try:
+                click_log("[재시작] 꺼짐 — " + cfg_stamp() + f" · PID {os.getpid()}")
+            except Exception:
+                pass
             try:
                 self.destroy()
             except Exception:
                 pass
             os._exit(0)          # tkinter 정리에서 막히지 않게 확실히 종료
-        self.after(600, _bye)
+        # 저장·기록까지 하고 나가도록 여유를 조금 더 준다 (전 600ms)
+        self.after(900, _bye)
 
     def _raise_claude(self):
         import win32gui, win32con
@@ -15169,7 +15539,9 @@ class App(tk.Tk):
                  font=("맑은 고딕", 9, "bold"), fg="#117a8b").pack(anchor="w", padx=6, pady=(6, 2))
         tk.Label(parent, font=("맑은 고딕", 8), fg="#888", justify="left",
                  text="게임의 '최저가' 버튼을 대신 눌러주는 것이라 가격을 읽지 않습니다.\n"
-                      "좌표는 클라 창 기준으로 저장돼 16클라 어디서나 그대로 동작합니다."
+                      "좌표는 클라 창 기준으로 저장돼 16클라 어디서나 그대로 동작합니다.\n"
+                      "💰 값넣기 = 최저가를 누르지 않고 창만 열어둡니다 → "
+                      "수량·가격을 넣고 F7 로 등록."
                  ).pack(anchor="w", padx=6, pady=(0, 6))
 
         hr = tk.Frame(parent); hr.pack(pady=4)
@@ -15177,6 +15549,10 @@ class App(tk.Tk):
                                       fg="white", width=14, height=2,
                                       command=self._itemreg_toggle)
         self._itemreg_btn.pack(side="left")
+        self._itemreg_mbtn = tk.Button(hr, font=("맑은 고딕", 10, "bold"),
+                                       fg="white", width=10, height=2,
+                                       command=self._itemreg_mode_toggle)
+        self._itemreg_mbtn.pack(side="left", padx=(6, 0))
         _vk = int(self.cfg.get("itemreg_hotkey") or ITEMREG_HOTKEY)
         self._itemreg_keylbl = tk.StringVar(value=f"단축키 {self._vk_name(_vk)}")
         tk.Button(hr, textvariable=self._itemreg_keylbl, font=("맑은 고딕", 8),
@@ -15499,6 +15875,21 @@ class App(tk.Tk):
         # (사용자: "거래소에 클릭하면 자동으로 켜지는 거야")
         return bool(self.cfg.get("itemreg_on", True))
 
+    def _itemreg_mode(self):
+        """'auto' = 최저가로 끝까지 / 'manual' = 값을 직접 넣게 멈춘다."""
+        return "manual" if self.cfg.get("itemreg_mode") == "manual" else "auto"
+
+    def _itemreg_mode_toggle(self):
+        m = "auto" if self._itemreg_mode() == "manual" else "manual"
+        self.cfg["itemreg_mode"] = m
+        save_cfg(self.cfg)
+        self._itemreg_refresh()
+        self.status.set(
+            "💰 값넣기 — 최저가를 누르지 않고 멈춥니다. 수량·가격을 넣고 F7 로 등록하세요"
+            if m == "manual" else
+            "🏷 최저가 — 아이템을 클릭하면 최저가로 바로 올립니다")
+        click_log(f"[아이템등록] 모드 {'값넣기' if m == 'manual' else '최저가'} (사용자)")
+
     def _itemreg_toggle(self, on=None):
         on = (not self._itemreg_on()) if on is None else bool(on)
         self.cfg["itemreg_on"] = on
@@ -15525,6 +15916,15 @@ class App(tk.Tk):
                 if b is not None and b.winfo_exists():
                     b.config(text=("🏷 켜짐 (ON)" if on else "🏷 꺼짐 (OFF)"),
                              bg=("#1e8449" if on else "#7f8c8d"))
+            except Exception:
+                pass
+        man = (self._itemreg_mode() == "manual")
+        for b in (getattr(self, "_itemreg_mbtn", None),
+                  getattr(self, "_itemreg_mbtn2", None)):
+            try:
+                if b is not None and b.winfo_exists():
+                    b.config(text=("💰 값넣기" if man else "🏷 최저가"),
+                             bg=("#b9770e" if man else "#1f618d"))
             except Exception:
                 pass
 
@@ -15730,6 +16130,16 @@ class App(tk.Tk):
             _trace = []
             for k in order:                        # **적어둔 순서 그대로**
                 st = steps[k]
+                # 💰 값넣기 모드 — **최저가를 누르기 직전에 멈춘다** (2026-09-27).
+                #    창은 열어둔 채 그대로 두니 수량·가격을 직접 넣을 수 있다.
+                #    다 넣고 F7 을 누르면 확인(y·y)만 눌러 끝낸다.
+                if self._itemreg_mode() == "manual" and k >= ITEMREG_PRICE_STEP:
+                    click_log(f"[아이템등록] 💰 값넣기 모드 — {k+1}번({st['key']}) "
+                              f"앞에서 멈춤. 누른 키: {' → '.join(done) or '없음'} "
+                              f"(값을 넣고 F7 을 누르면 등록)")
+                    self.after(0, lambda: self.status.set(
+                        "💰 값넣기 모드 — 수량·가격을 넣고 F7 을 누르면 등록합니다"))
+                    return
                 # ✋ F7 — 여기서 멈추고 값을 직접 넣게 한다 (ESC 안 누름, 화면 그대로)
                 if getattr(self, "_itemreg_hold", False):
                     self._itemreg_hold = False
