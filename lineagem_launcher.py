@@ -333,6 +333,9 @@ AWAKEN_ROUND   = (0.9, 1.5)     # 한 바퀴 끝내고 다음 바퀴까지
 AWAKEN_MAX     = 40    # 안전장치 — 이 횟수를 넘기면 멈춘다 (창에서 바꿀 수 있다)
 AWAKEN_SEE     = 8     # 버튼이 켜지기를 몇 번까지 기다릴지 (0.4~0.7초 간격)
 AWAKEN_JITTER  = (0.90, 1.15)   # 사람처럼 — 간격을 매번 조금씩 흔든다
+AWAKEN_TEMPO   = (0.85, 1.25)   # 이번 실행의 '자기 속도' — 시작할 때 한 번 뽑아 내내 곱한다
+AWAKEN_PAUSE_P = 0.12           # 이 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
+AWAKEN_PAUSE   = (0.7, 2.0)     # 그때 더 쉬는 시간(초)
                        # 줄마다 좌표 · 동작(클릭/잡고 내리기) · 초 · 🖼그림 을 넣는다.
                        # 안 쓰는 줄은 비워두면 건너뛴다. 더 필요하면 이 숫자만 키운다.
 # 클릭 대신 '마우스 휠 올리기'를 할 자리 (던전키: {0부터 센 클릭번호})
@@ -5046,11 +5049,18 @@ class App(tk.Tk):
 
         def _go():
             done = 0
+            # 🧍 사람처럼 — 이번 실행의 '자기 속도'를 한 번 뽑아 내내 곱한다.
+            #    돌릴 때마다 리듬이 달라진다 (2026-09-07 상시 규칙).
+            tempo = random.uniform(*AWAKEN_TEMPO)
+
+            def _nap(lo, hi):
+                time.sleep(random.uniform(lo, hi)
+                           * random.uniform(*AWAKEN_JITTER) * tempo)
             try:
                 click_log(f"[각성강화] 시작 — {rect[5]} ({rect[3]}x{rect[4]}) "
-                          f"· 최대 {n_max}회")
+                          f"· 최대 {n_max}회 · 이번 속도 {tempo:.2f}배")
                 self._focus_client_at((rect[1] + 40, rect[2] + 40))
-                time.sleep(random.uniform(0.3, 0.5))
+                _nap(0.3, 0.5)
                 for t in range(n_max):
                     if getattr(self, "_awaken_stop", False):
                         break
@@ -5065,7 +5075,7 @@ class App(tk.Tk):
                             "✨ [자동 등록] 을 못 찾았습니다 — 각성 화면이 맞나요?"))
                         break
                     click_hold(ax, ay, ms=random.uniform(60, 110))
-                    time.sleep(random.uniform(*AWAKEN_GAP) * random.uniform(*AWAKEN_JITTER))
+                    _nap(*AWAKEN_GAP)
                     # ② 빨간 [각성] 이 **뜰 때까지** 기다렸다 누른다.
                     #    안 뜨면 재료가 떨어진 것 → 그 자리에서 멈춘다
                     #    (🚫 그림을 못 보면 다음을 누르지 않는다 — 이 저장소의 절대 규칙)
@@ -5080,7 +5090,7 @@ class App(tk.Tk):
                         if gx is not None and gl >= AWAKEN_LIT:
                             break
                         gx = None
-                        time.sleep(random.uniform(0.4, 0.7))
+                        _nap(0.4, 0.7)
                     if gx is None:
                         click_log(f"[각성강화] {t+1}회째 [각성] 버튼이 안 뜸 "
                                   f"(일치도 {gv:.2f} · 밝기 {gl:.0f}/{AWAKEN_LIT:.0f}) "
@@ -5101,7 +5111,7 @@ class App(tk.Tk):
                             tx, ty, tv, _tl = self._awaken_find(AWAKEN_TOUCH, rect)
                             if tx is not None:
                                 break
-                            time.sleep(random.uniform(0.4, 0.7))
+                            _nap(0.4, 0.7)
                         if bad:
                             break
                         if tx is None:
@@ -5116,7 +5126,7 @@ class App(tk.Tk):
                             ok = fv < AWAKEN_MATCH      # 실패 글자가 없으면 성공
                         click_hold(rect[1] + rect[3]//2, rect[2] + int(rect[4]*0.42),
                                    ms=random.uniform(60, 110))
-                        time.sleep(random.uniform(0.5, 0.9))
+                        _nap(0.5, 0.9)
                     if bad:
                         break
                     done += 1
@@ -5128,7 +5138,9 @@ class App(tk.Tk):
                             f"✨ 각성 성공! ({t+1}회째) — 멈춥니다"))
                         click_log(f"[각성강화] ✔ {t+1}회째에 성공 — 멈춤")
                         return
-                    time.sleep(random.uniform(*AWAKEN_ROUND) * random.uniform(*AWAKEN_JITTER))
+                    _nap(*AWAKEN_ROUND)
+                    if random.random() < AWAKEN_PAUSE_P:   # 가끔 한 박자 더 쉰다
+                        _nap(*AWAKEN_PAUSE)
                 click_log(f"[각성강화] 끝 — {done}회 합성")
                 self.after(0, lambda: self.status.set(
                     ("✨ 각성강화 멈춤 — " if getattr(self, "_awaken_stop", False)
