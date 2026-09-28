@@ -294,6 +294,45 @@ JAKWI_GAP_ROUND = (0.60, 1.00)   # 한 바퀴 끝내고 다시 1번으로 갈 �
 JAKWI_PAUSE   = (1.0, 2.0);  JAKWI_PAUSE_P = 0.12   # 줄 사이 멈칫
 JAKWI_REST    = (1.5, 3.0);  JAKWI_REST_P  = 0.20   # 회차 사이 긴 쉼
 JAKWI_CLICKS   = 8     # 👑 작위!! 좌표 수 — 20개는 너무 많다는 사용자 지시로 8개 (2026-09-07)
+
+# ── ✨ 각성강화!! (2026-09-28 사용자 요청) ───────────────────────────────
+# 사용자: "작위처럼 만들고 싶은데 이건 내리는 건 아니고 누르기만 하면 돼",
+#         "클라 16개씩 안 하고 그냥 확장해놨을 때 하자."
+# 그래서 **16슬롯 격자를 쓰지 않는다** — 지금 화면에서 제일 큰 리니지M 창
+# 하나에만 돌린다. 좌표는 **그 창 기준 비율(0~1)** 로 저장하므로 창을 옮기거나
+# 크기를 바꿔도 그대로 맞는다 (퍼플 녹화 파일이 쓰는 방식과 같다).
+# 좌표를 찍지 않는다 — **화면을 읽어서 버튼을 찾아 누른다** (사용자 지시:
+# "내가 화면을 각성할 수 있게 띄워놓으면 너가 알아서 해줬으면 좋겠다").
+# 버튼은 글자라서 그림으로 확실히 잡힌다. 창을 키운 정도가 달라도 되게
+# 크기를 바꿔가며 찾는다.
+# 실측으로 확인한 한 바퀴 (2026-09-28):
+#   [자동 등록] → 재료가 채워지고 Exp 100%
+#   → 버튼 **글자가 바뀐다**: 회색 '경험치 합성' → 빨강 '각성'
+#   → [각성] 을 누르면 확인창이 아니라 **연출**이 돌고
+#   → "화면을 터치해 주세요." 가 뜬다 → **아무 데나 한 번 누르면** 결과가 나온다
+# ⚠ 그래서 '경험치 합성' 그림으로는 정작 눌러야 할 때를 못 잡는다 — '각성' 을 본다.
+AWAKEN_AUTO    = "awaken_auto"   # [자동 등록] 글자
+AWAKEN_FUSE    = "awaken_fuse"   # [경험치 합성] 글자 (재료 없을 때의 회색 상태)
+AWAKEN_GO      = "awaken_go"     # [각성] 빨간 글자 — **이게 보여야 누른다**
+AWAKEN_TOUCH   = "awaken_touch"  # "화면을 터치해 주세요."
+AWAKEN_FAIL    = "awaken_fail"   # "각성에 실패 하였습니다."
+AWAKEN_MATCH   = 0.72  # 버튼 글자 기준
+AWAKEN_LIT     = 60.0  # (참고용) 버튼 자리 밝기 — 회색 34 · 빨강 106
+# ⚠ 찾을 구역을 **창 기준 비율**로 제한한다. 안 그러면 '각성' 글자가 결과 화면의
+#    엉뚱한 자리에서 0.88 로 잡혀 '버튼이 있다' 고 오인한다 (2026-09-28 실측).
+#    창을 얼마나 키웠든 비율이라 그대로 맞는다.
+AWAKEN_BOX = {
+    AWAKEN_AUTO:  (0.74, 0.77, 0.97, 0.93),   # [자동 등록] — 오른쪽 아래
+    AWAKEN_GO:    (0.38, 0.77, 0.64, 0.93),   # [각성] — 가운데 아래
+    AWAKEN_FUSE:  (0.38, 0.77, 0.64, 0.93),   # [경험치 합성] — 같은 자리
+    AWAKEN_TOUCH: (0.30, 0.62, 0.70, 0.82),   # "화면을 터치해 주세요."
+    AWAKEN_FAIL:  (0.30, 0.20, 0.70, 0.42),   # "각성에 실패 하였습니다."
+}
+AWAKEN_GAP     = (0.5, 0.9)     # 버튼 하나 누르고 다음까지
+AWAKEN_ROUND   = (0.9, 1.5)     # 한 바퀴 끝내고 다음 바퀴까지
+AWAKEN_MAX     = 40    # 안전장치 — 이 횟수를 넘기면 멈춘다 (창에서 바꿀 수 있다)
+AWAKEN_SEE     = 8     # 버튼이 켜지기를 몇 번까지 기다릴지 (0.4~0.7초 간격)
+AWAKEN_JITTER  = (0.90, 1.15)   # 사람처럼 — 간격을 매번 조금씩 흔든다
                        # 줄마다 좌표 · 동작(클릭/잡고 내리기) · 초 · 🖼그림 을 넣는다.
                        # 안 쓰는 줄은 비워두면 건너뛴다. 더 필요하면 이 숫자만 키운다.
 # 클릭 대신 '마우스 휠 올리기'를 할 자리 (던전키: {0부터 센 클릭번호})
@@ -1554,6 +1593,13 @@ ITEMREG_HOLD_KEY = 0x76          # F7 — 최저가 말고 내가 정한 값으�
 #   아니라 **미리 정해두는 모드**로 바꿨다. 값넣기 모드면 최저가(아래 칸)를 누르기
 #   **직전에 멈춰** 창을 열어둔 채 기다린다 → 사용자가 수량·가격을 넣고 F7 로 마무리.
 ITEMREG_PRICE_STEP = 1           # 이 칸이 '최저가' — 값넣기 모드는 여기 **앞에서** 멈춘다
+# 📦 수량이 있는 아이템은 **자동으로 안 올린다** (2026-09-28 사용자 지시:
+#    "수량이 많은 게 계속 올라가서 힘들다 · 수량 없는 건 너가 올려주고").
+#    등록 창에 **'판매 수량'** 줄이 있으면 쌓이는 아이템이다 → 그 자리에서 멈춰
+#    사용자가 수량·금액을 넣고 F7 로 마무리한다. 없으면 예전처럼 최저가로 끝까지.
+ITEMREG_QTY_IMG  = "itemreg_qty"   # '판매 수량' 글자
+ITEMREG_QTY_BASE = 1352.0          # 그 그림을 자른 창 높이 (다른 크기면 비율로 환산)
+ITEMREG_QTY_MIN  = 0.70            # 이만큼 닮으면 '수량칸이 있다'
 ITEMREG_HOTKEY   = 0x75          # 기본 F6 (창의 [단축키] 으로 바꿀 수 있다)
 # 2026-09-16 사용자 요청 "속도를 30프로만 당겨줘" — 기다리는 시간을 전부 ×0.7.
 # 줄여도 되는 이유: 2·3번 칸의 🖼('등록 창이 떠 있나') 확인이 **화면이 뜰 때까지
@@ -1905,6 +1951,35 @@ def itemreg_box(big, dx, dy, w, h, pad=0):
     y2 = int(round(oy + (dy + h) * k)) + int(round(pad * k))
     return (max(0, x1), max(0, y1),
             min(big.shape[1], x2), min(big.shape[0], y2))
+
+
+def itemreg_has_qty(xy):
+    """등록 창에 **'판매 수량'** 줄이 있나 → (있음?, 일치도).
+
+    있으면 **쌓이는 아이템**이라 자동으로 올리지 않는다(2026-09-28 사용자 지시).
+    그림을 자른 창 높이를 기억해뒀다가 **지금 창 높이에 맞춰 환산**한다 —
+    작은 창(277)에서도 큰 창(1352)에서도 같은 그림 하나로 쓴다.
+    창을 **직접 캡처**(PrintWindow)하므로 런처가 앞에 있어도 정확하다."""
+    try:
+        import cv2, numpy as np
+        p = os.path.join(IMG_DIR, f"{ITEMREG_QTY_IMG}.png")
+        if not os.path.exists(p):
+            return False, -1.0
+        t0 = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+        big = grab_window(xy)
+        if t0 is None or big is None:
+            return False, 0.0
+        k = big.shape[0] / ITEMREG_QTY_BASE
+        best = 0.0
+        for s in (k, k * 0.94, k * 1.06):        # 창 크기가 조금 달라도
+            t = itemreg_tpl(t0, s)
+            if t is None or t.shape[0] > big.shape[0] or t.shape[1] > big.shape[1]:
+                continue
+            best = max(best, float(cv2.minMaxLoc(
+                cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED))[1]))
+        return best >= ITEMREG_QTY_MIN, best
+    except Exception:
+        return False, 0.0
 
 
 def itemreg_tpl(tpl, k):
@@ -3811,10 +3886,25 @@ class App(tk.Tk):
                   width=6, height=2,
                   command=self._restart_launcher).pack(pady=(2, 0))
         # 👑 작위!! — 런처 재시작 바로 아래 (2026-09-02 사용자 요청)
-        tk.Button(cl_col, text="👑 작위!!", font=("맑은 고딕", 8, "bold"),
+        # ✨ 각성강화!! 는 그 **바로 아래**, 둘 다 **옆에 ▶실행** (2026-09-28 사용자 요청)
+        _jk = tk.Frame(cl_col); _jk.pack(pady=(2, 0))
+        tk.Button(_jk, text="👑 작위!!", font=("맑은 고딕", 8, "bold"),
                   bg="#b7950b", fg="white", activebackground="#7d6608",
                   width=6, height=2,
-                  command=self._open_jakwi_win).pack(pady=(2, 0))
+                  command=self._open_jakwi_win).pack(side="left")
+        tk.Button(_jk, text="▶", font=("맑은 고딕", 11, "bold"),
+                  bg="#7d6608", fg="white", activebackground="#5b4a06",
+                  width=2, height=2,
+                  command=lambda: self._start_dgn2("jakwi")).pack(side="left", padx=(2, 0))
+        _aw = tk.Frame(cl_col); _aw.pack(pady=(2, 0))
+        tk.Button(_aw, text="✨ 각성" + chr(10) + "강화!!", font=("맑은 고딕", 8, "bold"),
+                  bg="#8e44ad", fg="white", activebackground="#6c3483",
+                  width=6, height=2,
+                  command=self._open_awaken_win).pack(side="left")
+        tk.Button(_aw, text="▶", font=("맑은 고딕", 11, "bold"),
+                  bg="#6c3483", fg="white", activebackground="#512e5f",
+                  width=2, height=2,
+                  command=lambda: self._run_awaken()).pack(side="left", padx=(2, 0))
         tk.Button(btn_row, text="🔑 계정\n관리",
             font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
             activebackground="#0e6655", width=7, height=2,
@@ -3863,6 +3953,7 @@ class App(tk.Tk):
             font=("맑은 고딕", 8, "bold"), bg="#6c3483", fg="white",
             activebackground="#512e5f", pady=2,
             command=self._open_keycfg_win).pack(fill="x", pady=(2, 0))
+        # (✨ 각성강화!! 는 작위 바로 아래로 옮겼다 — 2026-09-28 사용자 지시)
         tk.Button(btn_row, text="🎫 패스권\n새로운 등록",
             font=("맑은 고딕", 10, "bold"), bg="#6c3483", fg="white",
             width=10, height=2,
@@ -4859,6 +4950,283 @@ class App(tk.Tk):
                  ).pack(padx=10, pady=(0, 8))
         apply_dark(win, bool(self.cfg.get("dark_ui", True)))
         self.status.set(f"🎬 녹화 배포 — 클라 {len(slots)}개 확인됨")
+
+    # ── ✨ 각성강화!! — 크게 띄운 창 하나에만 돌린다 ──────────────────────
+    def _awaken_win_rect(self):
+        """지금 화면에서 **제일 큰 리니지M 창** → (hwnd, x, y, w, h, 이름).
+        16슬롯을 쓰지 않는 이유: 사용자가 '확장해놨을 때만' 쓰겠다고 했다."""
+        best = None
+        def _cb(h, _):
+            nonlocal best
+            try:
+                if not win32gui.IsWindowVisible(h) or win32gui.IsIconic(h):
+                    return True
+                t = win32gui.GetWindowText(h) or ""
+                if not t.startswith("리니지M") or t.startswith("리니지M 자동 실행"):
+                    return True
+                l, tp, r, b = win32gui.GetWindowRect(h)
+                if (r - l) < 200:
+                    return True
+                if best is None or (r - l) * (b - tp) > best[3] * best[4]:
+                    nm = t.split("l")[-1].strip() if " l " in t else t
+                    best = (h, l, tp, r - l, b - tp, nm)
+            except Exception:
+                pass
+            return True
+        win32gui.EnumWindows(_cb, None)
+        return best
+
+    def _awaken_find(self, nm, rect, thr=None):
+        """그 창 안에서 버튼 글자를 찾는다 → (화면x, 화면y, 점수, 밝기).
+        창을 **직접 캡처**(PrintWindow)하므로 런처가 앞에 있어도 정확하다.
+        밝기는 그 자리가 **켜졌는지**(회색 비활성인지) 가리는 데 쓴다."""
+        try:
+            import cv2, numpy as np
+            p = os.path.join(IMG_DIR, f"{nm}.png")
+            if not os.path.exists(p):
+                return None, None, -1.0, 0.0
+            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            big = grab_window((rect[1] + 40, rect[2] + 40))
+            if t is None or big is None:
+                return None, None, 0.0, 0.0
+            # 찾을 구역을 비율로 좁힌다 — 다른 데서 잡히는 오탐을 막는다
+            ox = oy = 0
+            bx = AWAKEN_BOX.get(nm)
+            if bx:
+                hh0, ww0 = big.shape[0], big.shape[1]
+                ox, oy = int(bx[0]*ww0), int(bx[1]*hh0)
+                x2, y2 = int(bx[2]*ww0), int(bx[3]*hh0)
+                sub = big[oy:y2, ox:x2]
+                if sub.size and sub.shape[0] > 8 and sub.shape[1] > 8:
+                    big = sub
+                else:
+                    ox = oy = 0
+            bv, bloc, bt = 0.0, None, t
+            for s in (1.00, 0.92, 0.85, 1.08, 1.15):   # 창을 키운 정도가 달라도
+                tt = (t if s == 1.00 else cv2.resize(t, None, fx=s, fy=s,
+                      interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_CUBIC))
+                if tt.shape[0] > big.shape[0] or tt.shape[1] > big.shape[1]:
+                    continue
+                _, v, _, lo = cv2.minMaxLoc(
+                    cv2.matchTemplate(big, tt, cv2.TM_CCOEFF_NORMED))
+                if v > bv:
+                    bv, bloc, bt = v, lo, tt
+            if bloc is None:
+                return None, None, float(bv), 0.0
+            # 자리·밝기는 **점수와 상관없이** 늘 계산해 돌려준다 —
+            # 확인(🔍) 버튼이 '못 찾았을 때도 얼마나 닮았나'를 보여줘야 하기 때문.
+            hh, ww = bt.shape[0], bt.shape[1]
+            band = big[bloc[1]:bloc[1]+hh, bloc[0]:bloc[0]+ww]
+            lit = float(cv2.cvtColor(band, cv2.COLOR_BGR2GRAY).mean()) if band.size else 0.0
+            if bv < (AWAKEN_MATCH if thr is None else thr):
+                return None, None, float(bv), lit
+            return (rect[1] + ox + bloc[0] + ww//2,
+                    rect[2] + oy + bloc[1] + hh//2, float(bv), lit)
+        except Exception:
+            return None, None, 0.0, 0.0
+
+    def _run_awaken(self, times=None):
+        """✨ 각성강화 — 화면을 읽어 [자동 등록] → [경험치 합성] 을 반복한다.
+
+        좌표를 찍지 않는다. 지금 화면에서 **제일 큰 리니지M 창**을 찾아
+        그 안에서 버튼 글자를 찾아 누른다 (창을 키운 정도가 달라도 된다).
+        [경험치 합성] 은 재료가 없으면 **회색**이라, 글자를 찾은 자리의 **밝기**로
+        켜졌는지 가린다 — 가루 체크칸에서 검증된 방법과 같다."""
+        if getattr(self, "_awaken_busy", False):
+            self.status.set("✨ 이미 돌고 있습니다"); return
+        rect = self._awaken_win_rect()
+        if not rect:
+            self.status.set("✨ 리니지M 창을 못 찾았습니다"); return
+        for nm in (AWAKEN_AUTO, AWAKEN_GO, AWAKEN_TOUCH):
+            if not os.path.exists(os.path.join(IMG_DIR, f"{nm}.png")):
+                self.status.set(f"✨ 버튼 그림이 없습니다 ({nm}.png)"); return
+        self._awaken_stop = False
+        self._awaken_busy = True
+        n_max = int(times or self.cfg.get("awaken_times") or AWAKEN_MAX)
+
+        def _go():
+            done = 0
+            try:
+                click_log(f"[각성강화] 시작 — {rect[5]} ({rect[3]}x{rect[4]}) "
+                          f"· 최대 {n_max}회")
+                self._focus_client_at((rect[1] + 40, rect[2] + 40))
+                time.sleep(random.uniform(0.3, 0.5))
+                for t in range(n_max):
+                    if getattr(self, "_awaken_stop", False):
+                        break
+                    self.after(0, lambda t=t: self.status.set(
+                        f"✨ 각성강화 — {t+1}/{n_max}회째"))
+                    # ① [자동 등록] — 재료를 채운다
+                    ax, ay, av, _al = self._awaken_find(AWAKEN_AUTO, rect)
+                    if ax is None:
+                        click_log(f"[각성강화] {t+1}회째 [자동 등록] 을 못 찾음 "
+                                  f"(최고 {av:.2f}) → 중단")
+                        self.after(0, lambda: self.status.set(
+                            "✨ [자동 등록] 을 못 찾았습니다 — 각성 화면이 맞나요?"))
+                        break
+                    click_hold(ax, ay, ms=random.uniform(60, 110))
+                    time.sleep(random.uniform(*AWAKEN_GAP) * random.uniform(*AWAKEN_JITTER))
+                    # ② 빨간 [각성] 이 **뜰 때까지** 기다렸다 누른다.
+                    #    안 뜨면 재료가 떨어진 것 → 그 자리에서 멈춘다
+                    #    (🚫 그림을 못 보면 다음을 누르지 않는다 — 이 저장소의 절대 규칙)
+                    #    ⚠ 그림만 보면 안 된다 — 회색 '경험치 합성' 화면에서도 '성' 자가
+                    #      겹쳐 0.77 로 잡힌다(실측). **밝기까지** 넘어야 진짜 빨간
+                    #      [각성] 이다 (빨강 106 · 회색 43).
+                    gx = gy = None; gv = gl = 0.0
+                    for _ in range(AWAKEN_SEE):
+                        if getattr(self, "_awaken_stop", False):
+                            break
+                        gx, gy, gv, gl = self._awaken_find(AWAKEN_GO, rect)
+                        if gx is not None and gl >= AWAKEN_LIT:
+                            break
+                        gx = None
+                        time.sleep(random.uniform(0.4, 0.7))
+                    if gx is None:
+                        click_log(f"[각성강화] {t+1}회째 [각성] 버튼이 안 뜸 "
+                                  f"(일치도 {gv:.2f} · 밝기 {gl:.0f}/{AWAKEN_LIT:.0f}) "
+                                  f"— 재료가 떨어진 듯 → 중단")
+                        self.after(0, lambda: self.status.set(
+                            "✨ [각성] 버튼이 안 뜹니다 — 재료가 떨어진 것 같습니다"))
+                        break
+                    click_hold(gx, gy, ms=random.uniform(60, 110))
+                    # ③ "화면을 터치해 주세요." 가 **두 번** 뜬다 —
+                    #    한 번은 연출 뒤, 한 번은 성공/실패 결과 뒤 (실측 2026-09-28).
+                    #    글자 자리를 누르면 아래 버튼을 건드릴 수 있어 가운데 위쪽을 누른다.
+                    bad = False
+                    for step in (1, 2):
+                        tx = None; tv = 0.0
+                        for _ in range(AWAKEN_SEE * 2):      # 연출이 길 수 있다
+                            if getattr(self, "_awaken_stop", False):
+                                bad = True; break
+                            tx, ty, tv, _tl = self._awaken_find(AWAKEN_TOUCH, rect)
+                            if tx is not None:
+                                break
+                            time.sleep(random.uniform(0.4, 0.7))
+                        if bad:
+                            break
+                        if tx is None:
+                            click_log(f"[각성강화] {t+1}회째 터치 안내가 안 뜸 "
+                                      f"({step}번째, 최고 {tv:.2f}) → 중단")
+                            self.after(0, lambda: self.status.set(
+                                "✨ 터치 안내가 안 떴습니다 — 화면을 확인해주세요"))
+                            bad = True; break
+                        if step == 2:
+                            # 두 번째 터치 안내 = 결과가 떠 있다. 누르기 전에 읽는다.
+                            _, _, fv, _ = self._awaken_find(AWAKEN_FAIL, rect)
+                            ok = fv < AWAKEN_MATCH      # 실패 글자가 없으면 성공
+                        click_hold(rect[1] + rect[3]//2, rect[2] + int(rect[4]*0.42),
+                                   ms=random.uniform(60, 110))
+                        time.sleep(random.uniform(0.5, 0.9))
+                    if bad:
+                        break
+                    done += 1
+                    click_log(f"[각성강화] {t+1}회째 "
+                              + ("✨ 성공!" if ok else "실패")
+                              + f" — 자동등록 {av:.2f} · 각성 {gv:.2f} · 실패글자 {fv:.2f}")
+                    if ok:
+                        self.after(0, lambda t=t: self.status.set(
+                            f"✨ 각성 성공! ({t+1}회째) — 멈춥니다"))
+                        click_log(f"[각성강화] ✔ {t+1}회째에 성공 — 멈춤")
+                        return
+                    time.sleep(random.uniform(*AWAKEN_ROUND) * random.uniform(*AWAKEN_JITTER))
+                click_log(f"[각성강화] 끝 — {done}회 합성")
+                self.after(0, lambda: self.status.set(
+                    ("✨ 각성강화 멈춤 — " if getattr(self, "_awaken_stop", False)
+                     else "✨ 각성강화 끝 — ") + f"{done}회 합성했습니다"))
+            except Exception as e:
+                click_log(f"[각성강화] 오류 {e!r}")
+                self.after(0, lambda: self.status.set(f"✨ 각성강화 오류: {e}"))
+            finally:
+                self._awaken_busy = False
+        threading.Thread(target=_go, daemon=True).start()
+
+    def _open_awaken_win(self):
+        """✨ 각성강화 — 크게 띄운 창 하나에만 돌린다 (좌표 등록 없음)."""
+        win = getattr(self, "_awaken_win", None)
+        if win and win.winfo_exists():
+            try: win.destroy()
+            except Exception: pass
+        win = tk.Toplevel(self); self._awaken_win = win
+        win.title("✨ 각성강화!!"); win.geometry("520x330")
+        win.attributes("-topmost", True)
+        if not hasattr(self, "_section_attrs"):
+            self._section_attrs = set()
+        self._section_attrs.add("_awaken_win")
+
+        tk.Label(win, font=("맑은 고딕", 10, "bold"), fg="#8e44ad",
+                 text="각성 화면을 크게 띄워두면 알아서 돌립니다").pack(pady=(10, 2))
+        tk.Label(win, font=("맑은 고딕", 9), justify="left", fg="#888",
+                 text=("좌표를 찍지 않습니다 — 화면에서 버튼 글자를 찾아 누릅니다."
+                       + chr(10) +
+                       "[자동 등록] → [경험치 합성] 을 정한 횟수만큼 되풀이하고,"
+                       + chr(10) +
+                       "[경험치 합성] 이 회색이 되면(재료 떨어짐) 스스로 멈춥니다.")
+                 ).pack(padx=12, pady=(0, 6))
+
+        info = tk.Label(win, font=("맑은 고딕", 9, "bold"), fg="#117864")
+        info.pack(pady=(0, 4))
+
+        def _refresh():
+            r = self._awaken_win_rect()
+            if not r:
+                info.config(text="⚠ 리니지M 창을 못 찾았습니다", fg="#c0392b"); return
+            small = r[3] < 900
+            info.config(text=f"대상: {r[5]}  ({r[3]}×{r[4]})"
+                             + ("   ⚠ 창이 작습니다 — 크게 띄워주세요" if small else ""),
+                        fg=("#c0392b" if small else "#117864"))
+        _refresh()
+
+        rw = tk.Frame(win); rw.pack(pady=(2, 4))
+        tk.Label(rw, text="몇 번 돌릴까:", font=("맑은 고딕", 9)).pack(side="left")
+        tv = tk.StringVar(value=str(self.cfg.get("awaken_times") or AWAKEN_MAX))
+        tk.Entry(rw, textvariable=tv, width=6, justify="center",
+                 font=("맑은 고딕", 10, "bold")).pack(side="left", padx=4)
+        tk.Label(rw, text="회", font=("맑은 고딕", 9)).pack(side="left")
+        tk.Button(rw, text="🔄 대상 다시 보기", font=("맑은 고딕", 8),
+                  command=_refresh).pack(side="left", padx=(12, 0))
+
+        def _start():
+            try:
+                n = max(1, min(999, int(tv.get().strip())))
+            except Exception:
+                n = AWAKEN_MAX
+            self.cfg["awaken_times"] = n; save_cfg(self.cfg)
+            _refresh()
+            self._run_awaken(n)
+
+        br = tk.Frame(win); br.pack(pady=(8, 4))
+        tk.Button(br, text="▶ 각성 시작", font=("맑은 고딕", 12, "bold"),
+                  bg="#8e44ad", fg="white", width=14, height=2,
+                  command=_start).pack(side="left", padx=4)
+        tk.Button(br, text="■ 멈춤", font=("맑은 고딕", 11, "bold"),
+                  bg="#c0392b", fg="white", width=8, height=2,
+                  command=lambda: (setattr(self, "_awaken_stop", True),
+                                   self.status.set("✨ 멈추는 중…"))).pack(side="left", padx=4)
+        tk.Button(win, text="🔍 지금 버튼이 보이나 확인", font=("맑은 고딕", 9),
+                  bg="#1f618d", fg="white",
+                  command=self._awaken_probe).pack(pady=(4, 8))
+        apply_dark(win, bool(self.cfg.get("dark_ui", True)))
+
+    def _awaken_probe(self):
+        """🔍 버튼 두 개가 지금 보이는지 점수만 본다 — 아무것도 누르지 않는다."""
+        def _go():
+            r = self._awaken_win_rect()
+            if not r:
+                self.after(0, lambda: self.status.set("🔍 리니지M 창을 못 찾음")); return
+            ax, ay, av, al = self._awaken_find(AWAKEN_AUTO, r, thr=2.0)
+            fx, fy, fv, fl = self._awaken_find(AWAKEN_FUSE, r, thr=2.0)
+            txt = (f"🔍 {r[5]} ({r[3]}×{r[4]}) 에서 버튼 찾기"
+                   + chr(10) + "-"*46 + chr(10)
+                   + f"  [자동 등록]    일치도 {av:.2f}  "
+                   + ("찾음 ✔" if av >= AWAKEN_MATCH else "못 찾음 ✘") + chr(10)
+                   + f"  [경험치 합성]  일치도 {fv:.2f}  "
+                   + ("찾음 ✔" if fv >= AWAKEN_MATCH else "못 찾음 ✘") + chr(10)*2
+                   + f"기준 {AWAKEN_MATCH}")
+            click_log(f"[각성강화] 🔍 확인 — 자동등록 {av:.2f} · 합성 {fv:.2f}")
+            self.after(0, lambda: self._show_text_win("🔍 각성 버튼 확인", txt))
+            self.after(0, lambda: self.status.set(
+                f"🔍 자동등록 {av:.2f} · 합성 {fv:.2f} (기준 {AWAKEN_MATCH})"))
+        threading.Thread(target=_go, daemon=True).start()
 
     # ── ⌨ 조작키 설정(.cfg) 배포 ─────────────────────────────────────────
     def _keycfg_path(self):
@@ -16495,13 +16863,22 @@ class App(tk.Tk):
                 # 💰 값넣기 모드 — **최저가를 누르기 직전에 멈춘다** (2026-09-27).
                 #    창은 열어둔 채 그대로 두니 수량·가격을 직접 넣을 수 있다.
                 #    다 넣고 F7 을 누르면 확인(y·y)만 눌러 끝낸다.
-                if self._itemreg_mode() == "manual" and k >= ITEMREG_PRICE_STEP:
-                    click_log(f"[아이템등록] 💰 값넣기 모드 — {k+1}번({st['key']}) "
-                              f"앞에서 멈춤. 누른 키: {' → '.join(done) or '없음'} "
-                              f"(값을 넣고 F7 을 누르면 등록)")
-                    self.after(0, lambda: self.status.set(
-                        "💰 값넣기 모드 — 수량·가격을 넣고 F7 을 누르면 등록합니다"))
-                    return
+                if k >= ITEMREG_PRICE_STEP:
+                    _man = (self._itemreg_mode() == "manual")
+                    _q, _qv = (False, -1.0)
+                    if not _man:
+                        # 📦 수량이 있는 아이템이면 여기서 멈춘다 (사용자 지시)
+                        _q, _qv = itemreg_has_qty(xy)
+                    if _man or _q:
+                        _why = ("💰 값넣기 모드" if _man
+                                else f"📦 수량 있는 아이템 (판매 수량 {_qv:.2f})")
+                        click_log(f"[아이템등록] {_why} — {k+1}번({st['key']}) "
+                                  f"앞에서 멈춤. 누른 키: {' → '.join(done) or '없음'} "
+                                  f"(값을 넣고 F7 을 누르면 등록)")
+                        self.after(0, lambda w=_why: self.status.set(
+                            f"{w} — 수량·가격을 넣고 F7 을 누르면 등록합니다"))
+                        return
+                    _trace.append(f"수량칸없음 {_qv:.2f}")
                 # ✋ F7 — 여기서 멈추고 값을 직접 넣게 한다 (ESC 안 누름, 화면 그대로)
                 if getattr(self, "_itemreg_hold", False):
                     self._itemreg_hold = False
