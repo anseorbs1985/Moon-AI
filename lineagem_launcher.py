@@ -1034,6 +1034,31 @@ SLEEP_MATCH = 0.68      # 절전 화면 판정 기준.
                         # 0.60 은 깨어 있는 0.59 와 너무 붙어 위험했다 (2026-09-02)
 SLEEP_WAKE_WAIT = (1.2, 2.5)   # Z 를 누른 뒤 깨어났는지 확인하며 기다리는 시간(초)
 SLEEP_WAKE_TRIES = 3           # 안 깨어나면 몇 번까지 다시 누를지
+
+# ── ⌨ 조작키 설정(.cfg) 배포 (2026-09-27 사용자 요청) ─────────────────────
+# 게임의 [마우스·키 녹화 설정] 패널 안 **[가져오기]** 를 대신 눌러 .cfg 를 적용한다.
+# 파일을 직접 복사하는 녹화 배포(🎬)와 달리 **게임 UI 를 거치는** 방식이다.
+#
+# 친구 프로젝트(sun.ai)의 추출본에서 **그림 2장과 '이렇게 하면 망한다' 목록만**
+# 가져왔다. 코드는 우리 런처의 것(창 찾기·그림 찾기·클릭·절전 깨우기)을 쓴다.
+# 실측으로 확인된 함정 — 순서를 바꾸지 말 것:
+#   ① 절전이면 패널 클릭이 아예 안 먹는다 → 먼저 깨운다
+#   ② 창을 **최대화**해야 패널·버튼이 보인다 (491x276 에서는 너무 작다)
+#   ③ 아이콘을 누른 뒤 **커서를 치우지 않으면 툴팁이 [가져오기] 를 가린다**
+#   ④ 불러온 뒤 **Esc 로 '조작키 표시'를 꺼야 한다** — 안 끄면 키 동그라미가
+#      화면에 남고, 그 상태에서는 **다음 계정의 최대화도 안 먹는다**
+#   ⑤ Esc 는 반드시 **그 창에 포커스를 준 뒤**에 — 아니면 게임 '종료 확인창' 이 뜬다
+KEYCFG_ICON   = "keycfg_icon"      # [마우스·키 녹화 설정] 아이콘
+KEYCFG_IMPORT = "keycfg_import"    # [가져오기] 버튼
+KEYCFG_MATCH  = 0.70               # 그림 기준 (네 화면에서 재보고 조정)
+KEYCFG_MAX_TRIES   = 3             # 최대화가 안 되면 몇 번까지 다시
+KEYCFG_MAX_WAIT    = (0.8, 1.2)    # 최대화/복귀 뒤 자리잡는 시간
+KEYCFG_PANEL_WAIT  = (0.9, 1.3)    # 아이콘 누른 뒤 패널이 열리는 시간
+KEYCFG_DIALOG_WAIT = (1.1, 1.6)    # [가져오기] 뒤 파일창이 뜨는 시간
+KEYCFG_LOAD_WAIT   = (1.3, 1.8)    # Enter 뒤 불러오는 시간
+KEYCFG_FOCUS_WAIT  = (0.5, 0.8)    # Esc 전에 포커스가 잡히는 시간
+KEYCFG_CLOSE_WAIT  = (0.7, 1.1)    # Esc 뒤 표시가 꺼지는 시간
+KEYCFG_BIG_W       = 1000          # 이 폭을 넘으면 '최대화됨' 으로 본다
 # 캐릭터 접속 버튼 — 너무 늦게 눌린다는 지적으로 대기를 20% 줄임 (2026-08-29)
 CHAR_WAIT_FIRST = 4.8   # 멀티플레이 클릭 → 첫 캐릭터까지 (전 6초)
 CHAR_WAIT_EACH  = 2.4   # 캐릭터 사이 (전 3초)
@@ -2195,6 +2220,16 @@ def jakwi_rank_read(coord):
         med = sorted(brs)[len(brs)//2]
         lit = [n for n in range(6) if brs[n] >= med + JAKWI_ACT_LIFT]
         if not lit:
+            # 🆕 **아직 아무 작위도 없는 캐릭** — 밝은 줄이 하나도 없다.
+            #    예전엔 여기서 '읽기 실패' 로 보고 그 슬롯을 끝내버려서,
+            #    용사I 을 아직 못 딴 캐릭은 영영 시작조차 못 했다
+            #    (2026-09-28 사용자 신고: "용사1이 활성화가 안 돼 있는데 꺼버린다").
+            #    이때 다음에 도전할 것은 **맨 아래 줄 = 가장 낮은 단계(용사I)** 다.
+            #    ai 를 줄 개수로 돌려주면 아래 클릭 코드(rows[ai-1])가 그대로 맨 아래를 누른다.
+            if len(rows) >= 2:
+                return ("미달성", rows, k,
+                        f"아직 딴 작위가 없음 — 맨 아래({len(rows)}번째 줄)부터 도전 "
+                        f"(가장 밝은 {max(brs):.1f}, 중앙 {med:.1f})", len(rows))
             return None, rows, k, (f"달성한 줄이 없음 "
                                    f"(가장 밝은 {max(brs):.1f}, 중앙 {med:.1f})"), None
         a = min(lit)                       # 목록은 위가 높은 단계
@@ -2229,7 +2264,7 @@ def jakwi_next_click(coord):
     act, rows, k, why, ai = jakwi_rank_read(coord)
     if not act:
         return None, None, why
-    if not act.startswith("용사"):        # 기사 이상이면 다 올린 것
+    if act != "미달성" and not act.startswith("용사"):   # 기사 이상이면 다 올린 것
         return None, None, f"{act} — 여기서 끝 (더 안 누름)"
     if ai is None or ai < 1:
         return None, None, f"{act} — 위쪽 줄이 안 보임 (목록을 올려야 함)"
@@ -3823,6 +3858,11 @@ class App(tk.Tk):
             font=("맑은 고딕", 8, "bold"), bg="#7d3c98", fg="white",
             activebackground="#5b2c6f", pady=2,
             command=self._open_rec_win).pack(fill="x", pady=(2, 0))
+        # ⌨ 조작키 설정(.cfg) 배포 — 게임의 [가져오기] 를 대신 눌러준다 (2026-09-27)
+        tk.Button(_isl_col, text="⌨ 단축키 배포 (.cfg)",
+            font=("맑은 고딕", 8, "bold"), bg="#6c3483", fg="white",
+            activebackground="#512e5f", pady=2,
+            command=self._open_keycfg_win).pack(fill="x", pady=(2, 0))
         tk.Button(btn_row, text="🎫 패스권\n새로운 등록",
             font=("맑은 고딕", 10, "bold"), bg="#6c3483", fg="white",
             width=10, height=2,
@@ -4819,6 +4859,325 @@ class App(tk.Tk):
                  ).pack(padx=10, pady=(0, 8))
         apply_dark(win, bool(self.cfg.get("dark_ui", True)))
         self.status.set(f"🎬 녹화 배포 — 클라 {len(slots)}개 확인됨")
+
+    # ── ⌨ 조작키 설정(.cfg) 배포 ─────────────────────────────────────────
+    def _keycfg_path(self):
+        """고른 .cfg 를 런처 옆에 복사해 둔다 — 원본이 사라져도 계속 쓸 수 있게."""
+        return os.path.join(BASE, "shortcut_config.cfg")
+
+    def _keycfg_find(self, nm, rect, thr=None):
+        """최대화된 그 창 안에서 그림을 찾는다 → (화면x, 화면y, 점수).
+        창을 **직접 캡처**(PrintWindow)하므로 런처가 앞에 있어도 정확하다."""
+        try:
+            import cv2, numpy as np
+            p = os.path.join(IMG_DIR, f"{nm}.png")
+            if not os.path.exists(p):
+                return None, None, -1.0
+            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            big = grab_window((rect[0] + 40, rect[1] + 40))
+            if t is None or big is None:
+                return None, None, 0.0
+            best = (0.0, None)
+            for s in (1.00, 0.92, 0.85, 1.08, 1.15):    # 해상도가 달라도 잡히게
+                tt = (t if s == 1.00 else
+                      cv2.resize(t, None, fx=s, fy=s,
+                                 interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_CUBIC))
+                if tt.shape[0] > big.shape[0] or tt.shape[1] > big.shape[1]:
+                    continue
+                _, v, _, lo = cv2.minMaxLoc(
+                    cv2.matchTemplate(big, tt, cv2.TM_CCOEFF_NORMED))
+                if v > best[0]:
+                    best = (v, (lo[0] + tt.shape[1]//2, lo[1] + tt.shape[0]//2))
+            if best[0] < (KEYCFG_MATCH if thr is None else thr) or not best[1]:
+                return None, None, float(best[0])
+            return rect[0] + best[1][0], rect[1] + best[1][1], float(best[0])
+        except Exception:
+            return None, None, 0.0
+
+    def _keycfg_maximize(self, hwnd, want_big=True):
+        """그 클라 창을 최대화(또는 복귀)한다 → 성공?
+        게임 창이라 ShowWindow 만으로는 안 먹는 경우가 있어 결과를 직접 확인한다."""
+        import win32con
+        for _ in range(KEYCFG_MAX_TRIES):
+            try:
+                win32gui.ShowWindow(hwnd,
+                                    win32con.SW_MAXIMIZE if want_big else win32con.SW_RESTORE)
+            except Exception:
+                pass
+            time.sleep(random.uniform(*KEYCFG_MAX_WAIT))
+            try:
+                l, t, r, b = win32gui.GetWindowRect(hwnd)
+            except Exception:
+                return False
+            big = (r - l) >= KEYCFG_BIG_W
+            if big == want_big:
+                return True
+        return False
+
+    def _keycfg_one(self, si, rect, hwnd, name, stop="_keycfg_stop"):
+        """계정 한 개에 .cfg 를 적용한다 → (성공?, 설명).
+        위 상수 주석의 ①~⑤ 순서를 그대로 따른다 — 바꾸면 사고가 난다."""
+        _st = lambda: bool(getattr(self, stop, False))
+        src = self._keycfg_path()
+        anc = (rect[0] + 40, rect[1] + 40)
+        try:
+            self._focus_client_at(anc)
+            time.sleep(random.uniform(0.25, 0.4))
+            # ① 절전이면 먼저 깨운다 (우리 런처의 검증된 방식 그대로)
+            try:
+                if has_sleep_img("jakwi"):
+                    sx, sy, ss = find_sleep_img("jakwi", anc)
+                    if sx is not None:
+                        press_key(SLEEP_WAKE_KEY)
+                        time.sleep(random.uniform(*SLEEP_WAKE_WAIT))
+                        click_log(f"[단축키] {si+1:02d} {name} 절전 ({ss:.2f}) → 깨움")
+            except Exception:
+                pass
+            if _st(): return None, "멈춤"
+            # ② 최대화 — 패널·버튼이 보이려면 반드시 필요하다
+            if not self._keycfg_maximize(hwnd, True):
+                return False, "창을 최대화하지 못함"
+            time.sleep(random.uniform(0.3, 0.5))
+            big = win32gui.GetWindowRect(hwnd)
+            brect = (big[0], big[1], big[2]-big[0], big[3]-big[1])
+            if _st(): return None, "멈춤"
+            # ⌨ 조작키 아이콘
+            ix, iy, iv = self._keycfg_find(KEYCFG_ICON, brect)
+            if ix is None:
+                return False, f"조작키 아이콘을 못 찾음 (최고 {iv:.2f})"
+            click_hold(ix, iy, ms=random.uniform(60, 110))
+            time.sleep(random.uniform(*KEYCFG_PANEL_WAIT))
+            # ③ 커서를 치운다 — 그 자리에 두면 툴팁이 [가져오기] 를 가린다
+            move_at(brect[0] + brect[2]//3, brect[1] + brect[3]//2)
+            time.sleep(random.uniform(0.18, 0.28))
+            if _st(): return None, "멈춤"
+            px, py, pv = self._keycfg_find(KEYCFG_IMPORT, brect)
+            if px is None:
+                return False, f"[가져오기] 를 못 찾음 (최고 {pv:.2f})"
+            click_hold(px, py, ms=random.uniform(60, 110))
+            time.sleep(random.uniform(*KEYCFG_DIALOG_WAIT))
+            # 파일창에 경로를 붙여넣는다 (한글 경로도 안전하게)
+            self._set_clipboard_text(src)
+            time.sleep(0.15)
+            pyautogui.hotkey("ctrl", "a")
+            time.sleep(0.1)
+            self._paste_ctrl_v()
+            time.sleep(0.2)
+            pyautogui.press("enter")
+            time.sleep(random.uniform(*KEYCFG_LOAD_WAIT))
+            # ④⑤ 포커스를 준 뒤 Esc — '조작키 표시' 를 꺼야 다음 계정이 최대화된다
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+            time.sleep(random.uniform(*KEYCFG_FOCUS_WAIT))
+            pyautogui.press("esc")
+            time.sleep(random.uniform(*KEYCFG_CLOSE_WAIT))
+            if not win32gui.IsWindow(hwnd):
+                return False, "Esc 뒤 창이 사라짐 — 게임이 종료됐을 수 있습니다"
+            return True, f"적용함 (아이콘 {iv:.2f} · 가져오기 {pv:.2f})"
+        except Exception as e:
+            return False, f"오류 {e!r}"
+        finally:
+            # 창 크기는 반드시 되돌린다 (실패했더라도)
+            try:
+                if win32gui.IsWindow(hwnd):
+                    self._keycfg_maximize(hwnd, False)
+            except Exception:
+                pass
+
+    def _open_keycfg_win(self):
+        """⌨ 단축키 배포 — 조작키 설정(.cfg)을 16클라에 순서대로 적용한다."""
+        import tkinter.filedialog as fd
+        win = getattr(self, "_keycfg_win", None)
+        if win and win.winfo_exists():
+            try: win.destroy()
+            except Exception: pass
+        win = tk.Toplevel(self); self._keycfg_win = win
+        win.title("⌨ 단축키 배포 — 조작키 설정(.cfg)")
+        win.geometry("700x600"); win.attributes("-topmost", True)
+        if not hasattr(self, "_section_attrs"):
+            self._section_attrs = set()
+        self._section_attrs.add("_keycfg_win")
+
+        tk.Label(win, font=("맑은 고딕", 9), justify="left", anchor="w",
+                 text=("게임의 [마우스·키 녹화 설정] → [가져오기] 를 대신 눌러 "
+                       ".cfg 를 적용합니다." + chr(10) +
+                       "계정마다 창을 잠깐 최대화했다가 되돌립니다 — "
+                       "도는 동안 화면이 계속 바뀝니다.")
+                 ).pack(fill="x", padx=10, pady=(8, 2))
+
+        srcv = tk.StringVar(value=(os.path.basename(self._keycfg_path())
+                                   if os.path.exists(self._keycfg_path())
+                                   else "— 아직 고르지 않았습니다 —"))
+        fr = tk.Frame(win); fr.pack(fill="x", padx=10, pady=(4, 2))
+        tk.Label(fr, text="쓸 파일:", font=("맑은 고딕", 9, "bold")).pack(side="left")
+        tk.Label(fr, textvariable=srcv, font=("맑은 고딕", 9),
+                 fg="#117864").pack(side="left", padx=(4, 0))
+
+        def _pick():
+            p = fd.askopenfilename(parent=win, title="조작키 설정(.cfg) 고르기",
+                                   filetypes=[("조작키 설정", "*.cfg"),
+                                              ("모두", "*.*")])
+            if not p:
+                return
+            try:
+                import shutil
+                shutil.copyfile(p, self._keycfg_path())
+                srcv.set(os.path.basename(p))
+                self.status.set(f"⌨ 파일을 가져왔습니다 — {os.path.basename(p)}")
+                click_log(f"[단축키] 파일 가져옴: {p}")
+            except Exception as e:
+                self.status.set(f"⌨ 파일 복사 실패: {e}")
+
+        tk.Button(fr, text="📂 .cfg 고르기", font=("맑은 고딕", 9, "bold"),
+                  bg="#7d3c98", fg="white", command=_pick).pack(side="right")
+
+        body = tk.Frame(win); body.pack(fill="both", expand=True, padx=10)
+        cvs = tk.Canvas(body, highlightthickness=0, height=300)
+        sb = tk.Scrollbar(body, orient="vertical", command=cvs.yview)
+        inner = tk.Frame(cvs)
+        inner.bind("<Configure>",
+                   lambda e: cvs.configure(scrollregion=cvs.bbox("all")))
+        cvs.create_window((0, 0), window=inner, anchor="nw")
+        cvs.configure(yscrollcommand=sb.set)
+        cvs.pack(side="left", fill="both", expand=True); sb.pack(side="right", fill="y")
+
+        rects = self._client_rects_by_slot() or []
+        hwnds = self._client_hwnds_by_slot() or []
+        self._keycfg_vars, self._keycfg_lbl = {}, {}
+        for i, rc in enumerate(rects):
+            row = tk.Frame(inner); row.pack(fill="x")
+            v = tk.BooleanVar(value=True)
+            self._keycfg_vars[i] = (v, rc, (hwnds[i] if i < len(hwnds) else None))
+            tk.Checkbutton(row, variable=v, width=3).pack(side="left")
+            tk.Label(row, text=f"{i+1:02d}", font=("맑은 고딕", 9, "bold"),
+                     width=4, anchor="w").pack(side="left")
+            nm = ""
+            try:
+                nm = (win32gui.GetWindowText(hwnds[i]) or "").split("l")[-1].strip()[:12]
+            except Exception:
+                pass
+            tk.Label(row, text=nm, font=("맑은 고딕", 9),
+                     width=14, anchor="w").pack(side="left")
+            lb = tk.Label(row, text="대기", font=("맑은 고딕", 9),
+                          fg="#7f8c8d", anchor="w")
+            lb.pack(side="left", fill="x", expand=True)
+            self._keycfg_lbl[i] = lb
+
+        def _run():
+            if not os.path.exists(self._keycfg_path()):
+                self.status.set("⌨ 먼저 [📂 .cfg 고르기] 로 파일을 골라주세요"); return
+            ts = [(i, rc, h) for i, (v, rc, h) in sorted(self._keycfg_vars.items())
+                  if v.get() and h]
+            if not ts:
+                self.status.set("⌨ 고른 슬롯이 없습니다"); return
+            if not messagebox.askyesno(
+                    "⌨ 단축키 배포",
+                    f"{len(ts)}개 계정의 조작키 설정을 이 파일로 바꿉니다.{chr(10)}{chr(10)}"
+                    f"{srcv.get()}{chr(10)}{chr(10)}"
+                    f"계정마다 창을 최대화했다 되돌립니다 (약 {len(ts)*12//60}분 "
+                    f"{len(ts)*12%60}초 예상).{chr(10)}진행할까요?", parent=win):
+                return
+            self._keycfg_stop = False
+
+            def _go():
+                ok = 0
+                for n, (i, rc, h) in enumerate(ts):
+                    if getattr(self, "_keycfg_stop", False):
+                        self.after(0, lambda: self.status.set("⌨ 멈췄습니다")); break
+                    nm = self._keycfg_lbl[i].master.winfo_children()[2].cget("text")
+                    self.after(0, lambda i=i: self._keycfg_lbl[i].config(
+                        text="… 적용하는 중", fg="#b9770e"))
+                    self.after(0, lambda n=n: self.status.set(
+                        f"⌨ 단축키 배포 — {n+1}/{len(ts)}번째"))
+                    r, why = self._keycfg_one(i, rc, h, nm)
+                    ok += 1 if r else 0
+                    click_log(f"[단축키] {i+1:02d} {nm} — "
+                              + ("✔ " if r else ("· " if r is None else "✘ ")) + why)
+                    self.after(0, lambda i=i, r=r, why=why: self._keycfg_lbl[i].config(
+                        text=("✔ " if r else ("· " if r is None else "✘ ")) + why,
+                        fg=("#117864" if r else ("#7f8c8d" if r is None else "#c0392b"))))
+                    time.sleep(random.uniform(0.8, 1.4))   # 사람처럼 한 박자
+                self.after(0, lambda: self.status.set(
+                    f"⌨ 단축키 배포 끝 — {ok}/{len(ts)}개 적용"))
+                click_log(f"[단축키] 끝 — {ok}/{len(ts)}개 적용")
+            threading.Thread(target=_go, daemon=True).start()
+
+        r2 = tk.Frame(win); r2.pack(pady=(6, 4))
+        tk.Button(r2, text="▶ 고른 계정에 적용", font=("맑은 고딕", 11, "bold"),
+                  bg="#7d3c98", fg="white", width=18, height=2,
+                  command=_run).pack(side="left", padx=3)
+        tk.Button(r2, text="■ 멈춤", font=("맑은 고딕", 10, "bold"),
+                  bg="#c0392b", fg="white", width=8, height=2,
+                  command=lambda: (setattr(self, "_keycfg_stop", True),
+                                   self.status.set("⌨ 멈추는 중…"))).pack(side="left", padx=3)
+        r3 = tk.Frame(win); r3.pack(pady=(0, 4))
+        tk.Button(r3, text="☑ 전체선택", font=("맑은 고딕", 8), width=10,
+                  command=lambda: [v.set(True) for v, _, _ in self._keycfg_vars.values()]
+                  ).pack(side="left", padx=2)
+        tk.Button(r3, text="☐ 전체해제", font=("맑은 고딕", 8), width=10,
+                  command=lambda: [v.set(False) for v, _, _ in self._keycfg_vars.values()]
+                  ).pack(side="left", padx=2)
+        tk.Button(r3, text="🔍 1번에서 그림 맞나 보기", font=("맑은 고딕", 8, "bold"),
+                  bg="#1f618d", fg="white", width=22,
+                  command=self._keycfg_probe).pack(side="left", padx=8)
+
+        tk.Label(win, font=("맑은 고딕", 8), fg="#888", justify="left",
+                 text=("그림(아이콘·가져오기)은 친구 화면에서 가져온 것이라 "
+                       "안 맞을 수 있습니다." + chr(10) +
+                       "먼저 [🔍 1번에서 그림 맞나 보기] 로 확인하세요 — "
+                       "아무것도 클릭하지 않고 점수만 봅니다.")
+                 ).pack(padx=10, pady=(0, 8))
+        apply_dark(win, bool(self.cfg.get("dark_ui", True)))
+
+    def _keycfg_probe(self):
+        """🔍 1번 클라를 잠깐 최대화해 **그림이 맞는지 점수만** 본다 (클릭 없음)."""
+        def _go():
+            try:
+                rects = self._client_rects_by_slot() or []
+                hwnds = self._client_hwnds_by_slot() or []
+                if not rects or not hwnds:
+                    self.after(0, lambda: self.status.set("⌨ 클라를 못 찾았습니다")); return
+                rc, h = rects[0], hwnds[0]
+                self.after(0, lambda: self.status.set("🔍 1번을 최대화해 확인합니다…"))
+                self._focus_client_at((rc[0]+40, rc[1]+40))
+                time.sleep(0.3)
+                if not self._keycfg_maximize(h, True):
+                    self.after(0, lambda: self.status.set("🔍 1번 최대화 실패")); return
+                time.sleep(0.5)
+                big = win32gui.GetWindowRect(h)
+                br = (big[0], big[1], big[2]-big[0], big[3]-big[1])
+                _, _, v1 = self._keycfg_find(KEYCFG_ICON, br, thr=2.0)
+                _, _, v2 = self._keycfg_find(KEYCFG_IMPORT, br, thr=2.0)
+                try:
+                    import cv2, numpy as np
+                    im = grab_window((rc[0]+40, rc[1]+40))
+                    if im is not None:
+                        cv2.imencode(".png", im)[1].tofile(
+                            os.path.join(IMG_DIR, "_단축키_1번최대화.png"))
+                except Exception:
+                    pass
+                self._keycfg_maximize(h, False)
+                txt = (f"🔍 1번 최대화 화면에서 그림 점수 (기준 {KEYCFG_MATCH})"
+                       + chr(10) + "-"*46 + chr(10)
+                       + f"  ⌨ 조작키 아이콘   {v1:.2f}   "
+                       + ("찾음 ✔" if v1 >= KEYCFG_MATCH else "못 찾음 ✘") + chr(10)
+                       + f"  📂 가져오기 버튼   {v2:.2f}   "
+                       + ("찾음 ✔" if v2 >= KEYCFG_MATCH else "못 찾음 ✘") + chr(10)*2
+                       + ("둘 다 찾았습니다 — 바로 적용해도 됩니다."
+                          if min(v1, v2) >= KEYCFG_MATCH else
+                          "못 찾은 것이 있습니다. 친구 화면에서 가져온 그림이라 "
+                          "네 해상도와 다를 수 있습니다." + chr(10) +
+                          "click_templates\\_단축키_1번최대화.png 에 그 화면을 "
+                          "저장해뒀으니, 거기서 다시 잘라 넣으면 됩니다."))
+                click_log(f"[단축키] 🔍 확인 — 아이콘 {v1:.2f} · 가져오기 {v2:.2f}")
+                self.after(0, lambda: self._show_text_win("🔍 단축키 그림 확인", txt))
+                self.after(0, lambda: self.status.set(
+                    f"🔍 아이콘 {v1:.2f} · 가져오기 {v2:.2f} (기준 {KEYCFG_MATCH})"))
+            except Exception as e:
+                self.after(0, lambda: self.status.set(f"🔍 확인 실패: {e}"))
+        threading.Thread(target=_go, daemon=True).start()
 
     def _open_bar(self):
         """요약 런처(작은 창)를 띄운다 — 별도 프로세스라 메인런처·작업과 무관하다.
@@ -7893,7 +8252,8 @@ class App(tk.Tk):
                     return why
             # 🛑 활성 줄이 **기사** 면 다 올린 것 — 여기서 멈춘다 (기사II 는 안 건드린다).
             #   등급 글자로만 판단한다 — 목록이 스크롤돼도 흔들리지 않는다.
-            if not act.startswith("용사"):
+            #   '미달성'(아직 아무 작위도 없음)은 **멈추는 게 아니라 맨 아래부터 시작**한다.
+            if act != "미달성" and not act.startswith("용사"):
                 m = f"{act} — 끝" + (f" · 올린 것 {' → '.join(got)}" if got else "")
                 click_log(f"jakwi [{name}] {m}")
                 self.status.set(f"👑 [{name}] {m}")
@@ -7902,8 +8262,8 @@ class App(tk.Tk):
                 m = f"{act} — 위쪽 줄이 안 보여 멈춤 (목록을 올려야 함)"
                 click_log(f"jakwi [{name}] {m}")
                 return m
-            if not got or got[-1] != act:
-                got.append(act)
+            if act != "미달성" and (not got or got[-1] != act):
+                got.append(act)          # '미달성' 은 올린 단계가 아니다
             rc = client_rect_at(int(anchor[0]), int(anchor[1]))
             if not rc:
                 click_log(f"jakwi [{name}] 클라 창을 못 찾음 → 중단")
@@ -7912,7 +8272,9 @@ class App(tk.Tk):
             time.sleep(random.uniform(0.2, 0.35))
             click_hold(rc[0] + int(JAKWI_CLICK_X*k), rc[1] + rows[ai-1],
                        ms=random.uniform(60, 110))
-            self.status.set(f"👑 [{name}] {act} → 한 단계 위 도전")
+            self.status.set(f"👑 [{name}] "
+                            + ("아직 작위 없음 → 맨 아래(용사I)부터 도전"
+                               if act == "미달성" else f"{act} → 한 단계 위 도전"))
             # 승급 심사 화면이 **뜰 때까지** 기다린다 — 그냥 한 박자 쉬고 넘어가면
             # 아직 안 뜬 화면을 '작위 창 밖'으로 보고 좌표로 다시 들어가버린다
             # (2026-09-22 실측: 그 헛걸음이 다섯 번 반복돼 20초를 버렸다)
