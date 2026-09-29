@@ -21689,7 +21689,21 @@ class App(tk.Tk):
                     #     "처음 로그인해 두었던 아이디(지정계정)"로 확실히 되돌려 놓는다.
                     #     예전엔 전환을 1번만 하고 실패해도 그냥 넘어갔다 → 최대 2번까지 재시도.
                     _matched3, _oid3, _r3 = False, "", 0.0
-                    for _try in range(1, 3):
+                    # 🚫 2026-09-29 사용자 지시로 **끔** — "로그인 작업할 때 퍼플을 다시
+                    #    한 번 더 로그인하는 작업을 하지 말자. 시간이 계속 오버돼서
+                    #    재접속이 떠버린다."
+                    #    되돌리기는 최대 2회 × (전환 + 로딩 10초 + 아이디 확인)이라
+                    #    맨 마지막에 30초 넘게 더 걸렸다. 그 시간이 다음 작업을 밀어
+                    #    재접속 창이 뜨는 원인이었다.
+                    #    켜고 싶으면 coords.json 에 "acc_restore": true 를 넣는다.
+                    #    (퍼플 최소화는 아래에서 그대로 한다 — 그건 꼭 필요하다)
+                    _do_restore = bool(self.cfg.get("acc_restore", False))
+                    if not _do_restore:
+                        self.status.set("지정계정 되돌리기는 건너뜁니다 (시간 절약)")
+                        try: _dbg.write("[SWITCH] 지정계정 되돌리기 건너뜀 "
+                                        "(acc_restore=False)" + chr(10)); _dbg.flush()
+                        except Exception: pass
+                    for _try in range(1, 3 if _do_restore else 1):
                         self.status.set(f"지정 계정으로 전환 중... ({_try}/2)")
                         try: _dbg.write(f"[SWITCH] 전환 {_try}/2 시작" + chr(10)); _dbg.flush()
                         except Exception: pass
@@ -21731,7 +21745,9 @@ class App(tk.Tk):
 
                     # ③ 퍼플 최소화 — 확인 성공/실패와 무관하게 항상 최소화
                     #    (다음 좌표 클릭이 퍼플 위에서 눌리지 않도록 반드시 최소화)
-                    if _matched3:
+                    if not _do_restore:
+                        self.status.set("퍼플 최소화")
+                    elif _matched3:
                         self.status.set("✔ 지정계정 확인 → 퍼플 최소화")
                     else:
                         self.status.set(f"⚠ 지정계정 확인 실패('{_oid3}') — 그래도 최소화 진행")
