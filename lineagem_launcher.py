@@ -210,10 +210,10 @@ FIX_GAP_MAX        = 1.25
 # 슬롯의 **첫 좌표를 누르기 전에** 그 창을 앞으로 올리고 이만큼 기다린다.
 # 비활성 창의 첫 클릭은 '창 띄우기'로만 먹히고 사라진다 (2026-08-24 에 이미 겪은 것).
 FIX_FOCUS_WAIT     = (0.35, 0.60)
-# 📤 떼어낸 슬롯판(오만의탑·악몽의섬 …)을 메인런처 **바로 아래**에 붙여 둔다
-# (2026-09-30 사용자 지시: "배치도 항상 같게 해줘 — 위아래 배치")
-NIGHT_DOCK_GAP     = 4     # 메인런처와의 틈(px)
-NIGHT_DOCK_MS      = 1000  # 자리·앞뒤를 맞추는 간격(ms) — 창 두 개만 보므로 거의 공짜
+# 📤 떼어낸 슬롯판(오만의탑·악몽의섬 …)의 **앞뒤와 최소화만** 메인런처에 맞춘다.
+# 자리는 건드리지 않는다 — 떼었을 때 그 자리, 사용자가 옮긴 자리가 전부다
+# (2026-09-30 사용자 재지시: "떼면 그 자리에 그대로 올라오게 해주라")
+NIGHT_DOCK_MS      = 1000  # 앞뒤·최소화를 맞추는 간격(ms) — 창 두 개만 보므로 거의 공짜
 TJ_CLICKS          = 3     # TJ성공!! 슬롯당 좌표 수
 TJ_MIN             = 0.81  # TJ성공!! 좌표 간 클릭 간격(초) — 10~20% 완화(0.7~1.2 → 0.77~1.44)
 TJ_MAX             = 1.51
@@ -7217,21 +7217,27 @@ class App(tk.Tk):
             return 0
 
     # (`_night_front_only` — 메인런처를 맨 뒤로 물리고 판만 올리던 것, 2026-09-19 —
-    #  은 **삭제했다**. 2026-09-30 부터 판은 메인런처 바로 아래·바로 앞에 붙어
-    #  **함께** 움직이므로, 메인런처를 뒤로 물리면 판도 같이 내려가 뜻이 사라진다.
-    #  자리·앞뒤 맞추기는 `_night_dock_now` 하나가 맡는다.)
+    #  은 **삭제했다**. 2026-09-30 부터 판은 메인런처 **바로 앞**에 붙어 함께
+    #  올라오고 내려가므로, 메인런처를 뒤로 물리면 판도 같이 내려가 뜻이 사라진다.
+    #  앞뒤·최소화 맞추기는 `_night_dock_now` 하나가 맡는다.)
     def _night_dock_now(self):
-        """떼어낸 슬롯판을 **항상 메인런처 바로 아래 · 메인런처 바로 앞**에 둔다.
+        """떼어낸 슬롯판의 **앞뒤와 최소화만** 메인런처에 맞춘다.
 
         (2026-09-30 사용자 지시) *"이 런처는 항상 메인런처 앞에 리니지 클라 뒤에
-        배치하게 해줘. 최소화에서도 올라올 때 같이 올라오고 배치도 항상 같게 해줘 —
-        위아래 배치"*
+        배치하게 해줘. 최소화에서도 올라올 때 같이 올라오고."*
 
-        · **자리** — 메인런처 왼쪽 끝을 맞추고 **바로 아래**. 화면 아래를 넘으면 위로 붙인다.
-        · **앞뒤** — `SetWindowPos(판, 메인런처, …NOACTIVATE)` 로 **메인런처 바로 위**에
-          끼운다. 그래서 메인런처보다는 앞이고, **리니지 클라보다는 뒤**다
-          (클라는 런처보다 위에 있으므로). 포커스는 빼앗지 않는다 — 게임 중에 끼어들면 안 된다.
+        · **앞뒤** — 판을 **메인런처 바로 앞**에 끼운다. 메인런처는 건드리지 않으므로
+          **리니지 클라와의 앞뒤는 그대로** = 판은 클라보다 뒤.
+          포커스는 빼앗지 않는다 — 게임 중에 끼어들면 안 된다.
         · **최소화** — 메인런처가 내려가면 같이 내려가고, 올라오면 같이 올라온다.
+
+        ⚠ **자리(위치)는 절대 건드리지 않는다** (2026-09-30 사용자 재지시).
+        잠깐 '메인런처 바로 아래로 끌어다 붙이기' 를 넣었는데, 떼자마자 판이 딴 데로
+        옮겨가고 사용자가 손으로 옮겨도 1초 뒤 되돌아가 버렸다.
+        사용자: *"판을 떼면 그 자리에서 그대로 떼져야지, 왜 위로 올라가버리냐.
+        그럼 내가 또 이동을 해야 하잖아."*
+        → 자리는 **떼었을 때 그 자리**, 그리고 **사용자가 옮긴 자리**가 전부다.
+        **클로드는 여기에 위치 강제를 다시 넣지 말 것.**
 
         **돌고 있는 작업이 있으면 아무것도 건드리지 않는다** — 클릭 중에 창을 움직이면
         엉킨다 (이 저장소가 여러 번 데인 부분)."""
@@ -7255,23 +7261,7 @@ class App(tk.Tk):
             h_p, h_me = self._hwnd_of(p), self._hwnd_of(self)
             if not (h_p and h_me):
                 return
-            # ── 위아래 배치 ──
-            # ⚠ `wm geometry +x+y` 는 **창 테두리** 기준이고 `winfo_rootx` 는 **내부**
-            #    기준이라 섞어 쓰면 제목줄·테두리만큼(여기선 x+8 · y+31) 어긋난다.
-            #    그래서 둘 다 `GetWindowRect`(테두리 기준)로 통일한다.
-            class _R(ctypes.Structure):
-                _fields_ = [("l", ctypes.c_long), ("t", ctypes.c_long),
-                            ("r", ctypes.c_long), ("b", ctypes.c_long)]
-            rm, rp = _R(), _R()
-            ctypes.windll.user32.GetWindowRect(h_me, ctypes.byref(rm))
-            ctypes.windll.user32.GetWindowRect(h_p, ctypes.byref(rp))
-            x, y = rm.l, rm.b + NIGHT_DOCK_GAP
-            ph = rp.b - rp.t
-            if y + ph > self.winfo_screenheight():      # 아래가 모자라면 위로 붙인다
-                y = max(0, rm.t - ph - NIGHT_DOCK_GAP)
-            if abs(rp.l - x) > 2 or abs(rp.t - y) > 2:
-                self.tk.call("wm", "geometry", p._w, f"+{int(x)}+{int(y)}")
-            # ── 앞뒤: 메인런처 **바로 앞** (클라보다는 뒤) ──
+            # ── 앞뒤: 메인런처 **바로 앞** (클라보다는 뒤) ── *자리는 손대지 않는다*
             # ⚠ `SetWindowPos(창, 기준창, …)` 의 기준창은 '그 창 **뒤**에 놓아라' 는 뜻이다
             #    (MSDN: "a handle to the window to **precede** the positioned window").
             #    그래서 기준창에 메인런처를 주면 판이 메인런처 **뒤**로 간다 — 반대다.
@@ -7287,7 +7277,7 @@ class App(tk.Tk):
             pass
 
     def _night_dock_tick(self):
-        """1초마다 자리·앞뒤·최소화를 맞춘다 (창 두 개만 보므로 부하가 거의 없다).
+        """1초마다 앞뒤·최소화를 맞춘다 (창 두 개만 보므로 부하가 거의 없다).
         붙어 있으면 `_night_dock_now` 가 즉시 빠져나오므로 평소 비용은 0 이다."""
         try:
             self._night_dock_now()
@@ -7312,17 +7302,34 @@ class App(tk.Tk):
             pass
 
     def _night_detach(self, x=None, y=None, front_only=False):
-        """판을 독립 창으로 뗀다. front_only 면 메인런처를 맨 뒤로 보낸다.
-        (런처가 켜질 때 자동으로 되살리는 경우는 False — 시작 화면을 가리지 않게)"""
+        """판을 독립 창으로 뗀다 — **보이던 그 자리에 그대로** 뜬다.
+
+        (2026-09-30 사용자 지시) *"판을 떼면 그 자리에서 그대로 떼져야지, 왜 위로
+        올라가버리냐. 그럼 내가 또 이동을 해야 하잖아."*
+
+        ⚠ 위로 튀던 원인: `wm geometry +x+y` 는 **창 테두리** 기준인데,
+        판이 보이던 자리(`winfo_rootx/rooty`)는 **내부** 기준이다. 그대로 넣으면
+        제목줄·테두리만큼(실측 x+8 · y+31) **왼쪽 위로 올라간다.**
+        → 떼고 나서 실제로 얼마나 어긋났는지 **재서 그만큼 되돌린다.**"""
         p = getattr(self, "_night_panel", None)
         if p is None or not p.winfo_exists() or self._night_detached():
             return
         try:
             if x is None or y is None:
                 x, y = p.winfo_rootx(), p.winfo_rooty()
+            x, y = int(x), int(y)
             self.tk.call("wm", "manage", p._w)
             self.tk.call("wm", "title", p._w, "🏝 슬롯판 (던전 4개)")
-            self.tk.call("wm", "geometry", p._w, f"+{int(x)}+{int(y)}")
+            self.tk.call("wm", "geometry", p._w, f"+{x}+{y}")
+            # 테두리·제목줄 때문에 어긋난 만큼 보정 → 판 내용이 **원래 자리**에 남는다
+            try:
+                p.update_idletasks()
+                dx, dy = p.winfo_rootx() - x, p.winfo_rooty() - y
+                if dx or dy:
+                    self.tk.call("wm", "geometry", p._w,
+                                 f"+{max(0, x - dx)}+{max(0, y - dy)}")
+            except Exception:
+                pass
             # ✕ 로 닫으면 사라지는 게 아니라 **메인런처로 되돌아간다**
             self.tk.call("wm", "protocol", p._w, "WM_DELETE_WINDOW",
                          self.register(self._night_attach))
@@ -7335,7 +7342,7 @@ class App(tk.Tk):
             self._night_backbtn_sync()
             self.status.set("📤 슬롯판을 따로 뗐습니다 — 메인런처 바로 아래에 붙어 "
                             "함께 움직입니다 (✕ 나 [📥 슬롯판 붙이기] 로 되돌림)")
-            self.after(120, self._night_dock_now)     # 자리·앞뒤를 바로 맞춘다
+            self.after(120, self._night_dock_now)     # 앞뒤를 바로 맞춘다 (자리는 그대로)
         except Exception as e:
             self.status.set(f"📤 따로 떼기 실패: {e}")
 
