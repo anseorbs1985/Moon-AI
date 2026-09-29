@@ -1596,13 +1596,22 @@ ITEMREG_HOLD_KEY = 0x76          # F7 — 최저가 말고 내가 정한 값으�
 #   아니라 **미리 정해두는 모드**로 바꿨다. 값넣기 모드면 최저가(아래 칸)를 누르기
 #   **직전에 멈춰** 창을 열어둔 채 기다린다 → 사용자가 수량·가격을 넣고 F7 로 마무리.
 ITEMREG_PRICE_STEP = 1           # 이 칸이 '최저가' — 값넣기 모드는 여기 **앞에서** 멈춘다
-# 📦 수량이 있는 아이템은 **자동으로 안 올린다** (2026-09-28 사용자 지시:
-#    "수량이 많은 게 계속 올라가서 힘들다 · 수량 없는 건 너가 올려주고").
-#    등록 창에 **'판매 수량'** 줄이 있으면 쌓이는 아이템이다 → 그 자리에서 멈춰
-#    사용자가 수량·금액을 넣고 F7 로 마무리한다. 없으면 예전처럼 최저가로 끝까지.
-ITEMREG_QTY_IMG  = "itemreg_qty"   # '판매 수량' 글자
+# 🎨 **아이템 이름 글자색**으로 가른다 (2026-09-29 사용자 지시).
+#    처음엔 '판매 수량' 칸이 있나로 갈랐는데, 실제로는 **거의 모든 아이템에 그 칸이
+#    있어서** 아무것도 자동으로 안 올라갔다. 사용자: "갯수·수량 올릴 때는 내가 가격을
+#    조정하고, 파란색 아이템 같은 건 너가 그냥 최저가에 등록해줬으면."
+#    실측(2026-09-29) — 이름 글자의 B-R(파랑빼기빨강):
+#        흰색 '오만의 탑 6층 이동 주문서'   +2.1
+#        파란색 '광풍의 도끼'              +249.3      ← 여유 247
+#    '판매 수량' 그림은 이제 **이름 자리를 잡는 기준점**으로 쓴다.
+ITEMREG_QTY_IMG  = "itemreg_qty"   # '판매 수량' 글자 — 이름 위치의 기준점
 ITEMREG_QTY_BASE = 1352.0          # 그 그림을 자른 창 높이 (다른 크기면 비율로 환산)
-ITEMREG_QTY_MIN  = 0.70            # 이만큼 닮으면 '수량칸이 있다'
+ITEMREG_QTY_MIN  = 0.70            # 이만큼 닮아야 '등록 창' 으로 본다
+# 기준점에서 **이름 글자칸**까지 (1352 기준 dx1, dy1, dx2, dy2)
+ITEMREG_NAME_OFF = (165, -172, 520, -138)
+ITEMREG_NAME_INK = 120   # 이 밝기 위를 '글자'로 본다
+ITEMREG_NAME_MIN = 5     # 글자 점이 이만큼도 없으면 '못 읽음' → 안전하게 멈춘다
+ITEMREG_BLUE     = 40.0  # B-R 이 이보다 크면 파란색(고급 이상) → 최저가로 자동
 ITEMREG_HOTKEY   = 0x75          # 기본 F6 (창의 [단축키] 으로 바꿀 수 있다)
 # 2026-09-16 사용자 요청 "속도를 30프로만 당겨줘" — 기다리는 시간을 전부 ×0.7.
 # 줄여도 되는 이유: 2·3번 칸의 🖼('등록 창이 떠 있나') 확인이 **화면이 뜰 때까지
@@ -1956,33 +1965,51 @@ def itemreg_box(big, dx, dy, w, h, pad=0):
             min(big.shape[1], x2), min(big.shape[0], y2))
 
 
-def itemreg_has_qty(xy):
-    """등록 창에 **'판매 수량'** 줄이 있나 → (있음?, 일치도).
+def itemreg_name_blue(xy):
+    """등록 창의 **아이템 이름이 파란색(고급 이상)인가** → (파랑?, B-R, 설명).
 
-    있으면 **쌓이는 아이템**이라 자동으로 올리지 않는다(2026-09-28 사용자 지시).
-    그림을 자른 창 높이를 기억해뒀다가 **지금 창 높이에 맞춰 환산**한다 —
-    작은 창(277)에서도 큰 창(1352)에서도 같은 그림 하나로 쓴다.
-    창을 **직접 캡처**(PrintWindow)하므로 런처가 앞에 있어도 정확하다."""
+    파란색이면 최저가로 그냥 올린다. 흰색(주문서·잡템)이면 멈춰서 사용자가
+    수량·금액을 넣는다 (2026-09-29 사용자 지시).
+    '판매 수량' 글자를 찾아 **이름 칸의 자리를 잡고**, 그 칸의 글자 화소만 골라
+    B-R 을 잰다. 색 판정은 이 저장소에서 여러 번 검증된 방법이다
+    (가루 체크칸 100/48 · 각성 버튼 106/43 — 한 번도 안 틀렸다).
+    **못 읽으면 (None, …) 을 돌려 멈추는 쪽으로 간다** — 실수로 비싼 것을
+    최저가에 던지는 것보다 한 번 더 손이 가는 편이 낫다."""
     try:
         import cv2, numpy as np
         p = os.path.join(IMG_DIR, f"{ITEMREG_QTY_IMG}.png")
         if not os.path.exists(p):
-            return False, -1.0
+            return None, 0.0, "기준 그림 없음"
         t0 = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
         big = grab_window(xy)
         if t0 is None or big is None:
-            return False, 0.0
+            return None, 0.0, "창 캡처 실패"
         k = big.shape[0] / ITEMREG_QTY_BASE
-        best = 0.0
+        bv, bloc = 0.0, None
         for s in (k, k * 0.94, k * 1.06):        # 창 크기가 조금 달라도
             t = itemreg_tpl(t0, s)
             if t is None or t.shape[0] > big.shape[0] or t.shape[1] > big.shape[1]:
                 continue
-            best = max(best, float(cv2.minMaxLoc(
-                cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED))[1]))
-        return best >= ITEMREG_QTY_MIN, best
-    except Exception:
-        return False, 0.0
+            _, v, _, lo = cv2.minMaxLoc(
+                cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED))
+            if v > bv:
+                bv, bloc = v, lo
+        if bloc is None or bv < ITEMREG_QTY_MIN:
+            return None, 0.0, f"등록 창이 아님 ({bv:.2f})"
+        a, b, c, d = ITEMREG_NAME_OFF
+        x1 = max(0, bloc[0] + int(a*k)); y1 = max(0, bloc[1] + int(b*k))
+        x2 = min(big.shape[1], bloc[0] + int(c*k))
+        y2 = min(big.shape[0], bloc[1] + int(d*k))
+        z = big[y1:y2, x1:x2]
+        if z.size == 0:
+            return None, 0.0, "이름 칸이 화면 밖"
+        m = cv2.cvtColor(z, cv2.COLOR_BGR2GRAY) > ITEMREG_NAME_INK
+        if int(m.sum()) < ITEMREG_NAME_MIN:
+            return None, 0.0, f"이름 글자를 못 읽음 (점 {int(m.sum())})"
+        br = float((z[:, :, 0].astype(int) - z[:, :, 2].astype(int))[m].mean())
+        return (br >= ITEMREG_BLUE), br, f"B-R {br:+.0f} (점 {int(m.sum())})"
+    except Exception as e:
+        return None, 0.0, f"확인 실패 {e!r}"
 
 
 def itemreg_tpl(tpl, k):
@@ -16877,20 +16904,22 @@ class App(tk.Tk):
                 #    다 넣고 F7 을 누르면 확인(y·y)만 눌러 끝낸다.
                 if k >= ITEMREG_PRICE_STEP:
                     _man = (self._itemreg_mode() == "manual")
-                    _q, _qv = (False, -1.0)
+                    _blue, _br, _bw = (None, 0.0, "")
                     if not _man:
-                        # 📦 수량이 있는 아이템이면 여기서 멈춘다 (사용자 지시)
-                        _q, _qv = itemreg_has_qty(xy)
-                    if _man or _q:
-                        _why = ("💰 값넣기 모드" if _man
-                                else f"📦 수량 있는 아이템 (판매 수량 {_qv:.2f})")
-                        click_log(f"[아이템등록] {_why} — {k+1}번({st['key']}) "
+                        # 🎨 파란색(고급 이상)만 최저가로 자동. 흰색이거나
+                        #    못 읽으면 멈춰서 사용자가 값을 넣는다 (사용자 지시)
+                        _blue, _br, _bw = itemreg_name_blue(xy)
+                    if _man or not _blue:
+                        _why = ("💰 값넣기 모드" if _man else
+                                ("⚪ 흰색 아이템" if _blue is False
+                                 else "⚠ 이름을 못 읽음") + f" — {_bw}")
+                        click_log(f"[아이템등록] {_why} → {k+1}번({st['key']}) "
                                   f"앞에서 멈춤. 누른 키: {' → '.join(done) or '없음'} "
                                   f"(값을 넣고 F7 을 누르면 등록)")
                         self.after(0, lambda w=_why: self.status.set(
                             f"{w} — 수량·가격을 넣고 F7 을 누르면 등록합니다"))
                         return
-                    _trace.append(f"수량칸없음 {_qv:.2f}")
+                    _trace.append(f"파랑 {_br:+.0f}")
                 # ✋ F7 — 여기서 멈추고 값을 직접 넣게 한다 (ESC 안 누름, 화면 그대로)
                 if getattr(self, "_itemreg_hold", False):
                     self._itemreg_hold = False
