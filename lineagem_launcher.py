@@ -1068,6 +1068,16 @@ FIX_WATCH_MS = 1000     # 확인 간격(ms) — 짧을수록 '없앤 즉시' 사
 WARN_MATCH  = 0.55      # 십자가 판정 기준 (2026-08-29: 0.60 → 0.55, 놓치는 것 줄이려고)
 WARN_MARGIN = 60        # 경고영역 주변 이만큼 더 넓게 훑는다 (전 20)
 WARN_TICK_MS = 5000     # F11 뒤 지켜보는 간격(ms) — 전 15초
+# 십자가가 '안 보인다'는 이유로 목록에서 지우기 전에 **연속 몇 번** 확인할지
+# (2026-09-29 사용자 신고: "내가 복구를 안 했는데 십자가가 안 보인다고 없애는 경우가 있더라")
+# 한 번 놓친 것(점수가 잠깐 기준 밑으로 · 창이 가려짐 · 화면 전환 중)과
+# 진짜 복구된 것을 가르는 유일한 방법이다. 실제로 복구를 돌린 슬롯은 예외(한 번에 지움).
+WARN_GONE_N = 3
+# 😴 사람이 컴퓨터를 이만큼 안 만지면, 목록에 남은 복구를 스스로 돌린다
+# (2026-09-29 사용자 요청: "5분 동안 아무런 작업이 없을 때 내가 놓친 복구가 있으면 해줘")
+# 다야(재화) 복구는 하지 않는다 — 좌표4 의 👁 '무료' 확인이 그대로 막는다.
+FIX_IDLE_SEC     = 300      # 5분
+FIX_IDLE_TICK_MS = 20000    # 20초마다 '마지막 입력 이후 몇 초' 만 본다 (거의 공짜)
 # 2026-09-21 작위 추가 — 3슬롯씩 들어갈 때마다 그 클라를 Z 로 깨우고 시작한다
 SLEEP_WAKE = ("fix", "jakwi")
 SLEEP_WAKE_KEY = "z"
@@ -4213,6 +4223,12 @@ class App(tk.Tk):
             bg="#8e44ad", fg="white", activebackground="#6c3483", pady=0,
             command=self._fix_run_all)
         self._warn_allbtn.pack(fill="x", pady=(1, 1))
+        # 😴 5분 유휴 자동 복구 켬/끔 (2026-09-29 사용자 요청) — 끄면 목록에만 쌓인다
+        self._warn_idlebtn = tk.Button(
+            self._warn_box, text="", font=("맑은 고딕", 8, "bold"), pady=0,
+            command=self._fix_idle_toggle)
+        self._warn_idlebtn.pack(fill="x", pady=(0, 1))
+        self._fix_idle_btn_paint()
         self._warn_rows = tk.Frame(self._warn_box)
         self._warn_rows.pack(fill="x")
         self.after(900, self._warn_refresh)
@@ -5338,6 +5354,7 @@ class App(tk.Tk):
                         press_key(SLEEP_WAKE_KEY)
                         time.sleep(random.uniform(*SLEEP_WAKE_WAIT))
                         click_log(f"[단축키] {si+1:02d} {name} 절전 ({ss:.2f}) → 깨움")
+                        self._after_wake_fix(anc, "단축키 배포")
             except Exception:
                 pass
             if _st(): return None, "멈춤"
@@ -6765,6 +6782,9 @@ class App(tk.Tk):
         # 지난번에 판을 따로 떼어뒀으면 그대로 다시 뗀다 (자리도 그대로)
         self.after(1500, self._night_detach_restore)
         self._night_week_start()      # 금요일 23:50 자동 초기화 감시
+        # 😴 사람이 5분간 컴퓨터를 안 만지면, 목록에 남은 복구를 스스로 돌린다
+        # (2026-09-29 사용자 요청 — 다야는 '무료' 확인이 그대로 막는다)
+        self.after(FIX_IDLE_TICK_MS, self._fix_idle_tick)
 
     def _night_sel_toggle(self, idx):
         """+ 로 고른 슬롯만 [선택실행]으로 한 번에 돌린다."""
@@ -8469,6 +8489,7 @@ class App(tk.Tk):
             time.sleep(random.uniform(*SLEEP_WAKE_WAIT))
             click_log(f"jakwi [{name}] 절전 (일치도 {ss:.2f}) → "
                       f"'{SLEEP_WAKE_KEY.upper()}' 눌러 깨움")
+            self._after_wake_fix(anchor, "작위")
             return True
         except Exception:
             return False
@@ -11526,6 +11547,7 @@ class App(tk.Tk):
                                       f"'{SLEEP_WAKE_KEY.upper()}' 눌러 깨우고 시작")
                             self.status.set(f"😴 [{_nm0}] 절전 — "
                                             f"{SLEEP_WAKE_KEY.upper()} 눌러 깨움")
+                            self._after_wake_fix(_anc, f"{fkey} 웨이브")
                 except Exception:
                     pass
             if j == 0 and not st.get("prekey"):
@@ -11825,6 +11847,7 @@ class App(tk.Tk):
                                       f"→ '{SLEEP_WAKE_KEY.upper()}' 눌러 깨움")
                             self.status.set(f"😴 [{name}] 절전 — "
                                             f"{SLEEP_WAKE_KEY.upper()} 눌러 깨우고 시작")
+                            self._after_wake_fix(_anchor, f"{fkey} 순차")
                     except Exception:
                         pass
                 # 슬롯 맨 앞에서 키 한 번 (인사이드 쿠폰등록의 'z')
@@ -12203,6 +12226,137 @@ class App(tk.Tk):
         self._run_fix_slot(si, _bulk=True)
         # 끝나고 확인까지 마칠 시간을 준 뒤 다음으로
         self.after(1500, self._fix_run_next)
+    def _after_wake_fix(self, anchor, why=""):
+        """😴 **깨운 직후 그 클라 하나만** 십자가를 본다 — 확인만 한다 (2026-09-29).
+
+        사용자: "수시로 쳐다보라는 게 아니라, 개별로 절전을 해제했을 때만 확인해줘."
+        그래서 상시 감시를 만들지 않는다 — 런처가 Z 를 눌러 깨운 **그 순간**,
+        **그 클라 하나만** 본다. 16개 한 바퀴가 0.81초인데 한 개는 0.05초라 공짜다.
+
+        ⚠ **여기서는 복구를 시작하지 않는다 — 목록에 올리기만 한다.**
+        사용자 지시: "현재 좌표가 같이 눌려버리면 꼬일 수도 있으니, 차라리
+        Z 가 눌러졌을 때 확인만 해줄래." 맞는 걱정이다 — Z 를 누르는 시점은
+        작위·웨이브·순차가 한창 도는 중이라, 복구가 커서를 쓰고 창을 앞으로
+        올리면 그 슬롯의 좌표 클릭과 엉킨다.
+        실제 복구는 ① 사용자가 목록을 누를 때 ② `_fix_idle_tick`(5분 유휴)이 한다."""
+        try:
+            if not anchor or not self.cfg.get("check_area_rel"):
+                return
+            si = self._slot_of_anchor(anchor)
+            if si is None:
+                return
+            hit = self._check_hits(only={si})
+            if not hit or si not in set(hit):
+                return
+            cur = set(self._warn_load())
+            if si in cur:
+                return
+            cur.add(si)
+            self._warn_save(sorted(cur))
+            self.after(0, self._warn_refresh)
+            click_log(f"[깨움확인] #{si:02d} 십자가 보임{(' · ' + why) if why else ''}"
+                      f" → 목록에만 올림 (복구는 누르거나 5분 유휴 때)")
+            self.after(0, lambda s=si: self.status.set(
+                f"🩹 #{si:02d} 복구해야함 — 목록에 올렸습니다 "
+                f"(누르거나, 컴퓨터를 {FIX_IDLE_SEC//60}분 쉬면 자동으로 복구합니다)"))
+        except Exception as e:
+            click_log(f"[깨움확인] 실패 {e!r}")
+
+    # ── 😴 5분 유휴 자동 복구 (2026-09-29 사용자 요청) ─────────────────────────
+    # 사용자: "5분 동안 아무런 컴퓨터에 작업이 없을 때 내가 놓친 복구가 있으면
+    #          너가 복구해줄래? 다야복구는 하지 않고."
+    # · 사람이 마우스·키보드를 FIX_IDLE_SEC 초 동안 안 만졌을 때만 돈다
+    #   (`_system_idle_seconds` = Windows GetLastInputInfo — 원격 데스크톱에서도
+    #    사람 입력이 잡힌다. precise_click 의 idle 은 injected 를 빼므로 원격에서
+    #    늘 '유휴'로 보여 위험하다 — 여기서는 쓰지 않는다)
+    # · 돌고 나면 **사람이 다시 만지기 전까지 두 번 걸리지 않는다**
+    # · 다야는 좌표4 의 👁 '무료' 확인이 그대로 막는다 — 재화를 쓰는 일은 없다
+    def _fix_idle_tick(self):
+        try:
+            if not self.cfg.get("fix_idle_on", True):
+                self._fix_idle_done = False
+            else:
+                idle = self._system_idle_seconds()
+                if idle < FIX_IDLE_SEC:
+                    self._fix_idle_done = False        # 사람이 만졌다 → 다시 무장
+                elif not getattr(self, "_fix_idle_done", False):
+                    q = sorted(self._warn_load())
+                    if q and not self._is_busy():
+                        self._fix_idle_done = True
+                        click_log(f"[유휴복구] {int(idle)}초 동안 입력 없음 → "
+                                  f"놓친 복구 {len(q)}개 {q} 를 순서대로 (다야는 안 함)")
+                        self.status.set(
+                            f"😴 {int(idle)//60}분째 조용 — 놓친 복구 {len(q)}개 "
+                            f"{q} 를 순서대로 돌립니다 (다야는 하지 않습니다)")
+                        self._fix_queue = q
+                        self._fix_bulk_ready = False
+                        self._fix_run_next()
+        except Exception:
+            pass
+        self.after(FIX_IDLE_TICK_MS, self._fix_idle_tick)
+
+    def _fix_idle_btn_paint(self):
+        b = getattr(self, "_warn_idlebtn", None)
+        if not b or not b.winfo_exists():
+            return
+        on = bool(self.cfg.get("fix_idle_on", True))
+        b.config(text=(f"😴 {FIX_IDLE_SEC//60}분 쉬면 자동복구 ON" if on
+                       else f"😴 {FIX_IDLE_SEC//60}분 자동복구 OFF"),
+                 bg=("#1e8449" if on else "#7f8c8d"), fg="white",
+                 activebackground=("#186a3b" if on else "#626e6e"))
+
+    def _fix_idle_toggle(self):
+        on = not bool(self.cfg.get("fix_idle_on", True))
+        self.cfg["fix_idle_on"] = on
+        save_cfg(self.cfg)
+        self._fix_idle_done = False
+        self._fix_idle_btn_paint()
+        self.status.set(f"😴 유휴 자동복구 {'켬' if on else '끔'} — "
+                        + (f"컴퓨터를 {FIX_IDLE_SEC//60}분 안 만지면 목록에 남은 복구를 "
+                           f"순서대로 돌립니다 (다야는 하지 않습니다)" if on
+                           else "목록에만 쌓이고 자동으로 돌지 않습니다"))
+        click_log(f"[유휴복구] 사용자가 {'켬' if on else '끔'}")
+
+    def _warn_gone_filter(self, now_hit, before, keep=()):
+        """십자가가 안 보인다고 **바로 지우지 않는다** (2026-09-29 사용자 신고).
+
+        사용자: "내가 복구를 안 했는데 십자가가 안 보인다고 없애는 경우가 있더라."
+
+        점수가 잠깐 기준 밑으로 내려가거나(실측 0.37~0.91 로 흔들린다) 창이 겹치면
+        한 번씩 놓친다. 그래서 **연속 `WARN_GONE_N` 번** 안 보였을 때만 지운다.
+        진짜로 복구돼서 사라진 것은 계속 안 보이므로 곧 지워진다.
+        **실제로 복구를 돌린 슬롯(`_fix_ran`)은 한 번에 지운다** — 그건 확인된 것이다.
+
+        돌려주는 것: 지워도 되는 슬롯 집합."""
+        miss = getattr(self, "_warn_miss", None)
+        if miss is None:
+            miss = self._warn_miss = {}
+        ran = getattr(self, "_fix_ran", set())
+        gone = set()
+        for si in before:
+            if si in now_hit or si in keep:
+                miss.pop(si, None)
+                continue
+            miss[si] = miss.get(si, 0) + 1
+            if si in ran or miss[si] >= WARN_GONE_N:
+                gone.add(si)
+                miss.pop(si, None)
+        for si in list(miss):                      # 목록에 없는 기록은 버린다
+            if si not in before:
+                miss.pop(si, None)
+        return gone
+
+    def _slot_of_anchor(self, anchor):
+        """화면 좌표가 몇 번 클라 안인지 (1부터). 못 찾으면 None."""
+        try:
+            for i, rc in enumerate(self._client_rects_by_slot() or []):
+                if rc[0] <= anchor[0] <= rc[0] + rc[2] and \
+                   rc[1] <= anchor[1] <= rc[1] + rc[3]:
+                    return i + 1
+        except Exception:
+            pass
+        return None
+
     def _run_fix_slot(self, si, _bulk=False):
         """'복구해야함 03' 을 누르면 **그 슬롯만** 복구를 돌린다 (2026-08-29 사용자 요청).
 
@@ -12287,6 +12441,12 @@ class App(tk.Tk):
         except Exception:
             pass
         self.status.set(f"🩹 복구 #{si:02d} 실행 — '무료'가 아니면 그 자리에서 멈춥니다")
+        # **실제로 복구를 돌린 슬롯**으로 표시해둔다 — 이 슬롯만 십자가가 사라지면
+        # 한 번에 목록에서 지운다 (`_warn_gone_filter`). 안 돌린 것은 연속 확인이 필요.
+        try:
+            self._fix_ran = getattr(self, "_fix_ran", set()) | {int(si)}
+        except Exception:
+            pass
         self._start_dgn2("fix", sel_list=[idx])
         # 끝난 뒤 **화면을 다시 봐서** 경고가 사라졌는지 확인하고 지운다
         self.after(300, lambda x=si: self._fix_verify(x, FIX_WATCH_N))
@@ -12405,8 +12565,11 @@ class App(tk.Tk):
         except Exception:
             return 0.0
 
-    def _check_hits(self):
-        """지금 그 영역에 '기준 그림'이 보이는 슬롯 번호들 (없으면 None = 확인 불가)."""
+    def _check_hits(self, only=None):
+        """지금 그 영역에 '기준 그림'이 보이는 슬롯 번호들 (없으면 None = 확인 불가).
+
+        `only` 에 슬롯번호(1부터) 집합을 주면 **그것만** 본다 —
+        깨운 클라 하나만 확인할 때 쓴다 (16개 0.81초 → 한 개 0.05초)."""
         rel = self.cfg.get("check_area_rel")
         ref_p = os.path.join(self._warn_dir(), "check_ref.png")
         if not os.path.exists(ref_p):
@@ -12446,7 +12609,10 @@ class App(tk.Tk):
                     cv2.IMREAD_COLOR)
         except Exception:
             _sleep_t = None
+        _only = set(int(x) for x in only) if only else None
         for i, (l, t, r, b, hwnd) in enumerate(hw):
+            if _only is not None and (i + 1) not in _only:
+                continue
             try:
                 W, H = r - l, b - t
                 x0, y0 = max(0, dx - M), max(0, dy - M)
@@ -12554,8 +12720,9 @@ class App(tk.Tk):
         before = set(self._warn_load())
         _slept = getattr(self, "_last_sleep", set())
         _keep = before & _slept          # 자는 슬롯은 십자가가 가려 안 보인다 → 유지
-        gone = sorted(before - set(hit) - _keep)
-        self._warn_save(sorted(set(hit) | _keep))
+        # 안 보인다고 바로 지우지 않는다 — 연속 WARN_GONE_N 번 확인 (2026-09-29)
+        gone = sorted(self._warn_gone_filter(set(hit), before, _keep))
+        self._warn_save(sorted((before - set(gone)) | set(hit)))
         self._warn_refresh()
         self._fix_bulk_ready = True      # 다음 한 번은 '단체 복구'
         try:      # 슬롯별 점수를 남긴다 — 왜 몇 개를 못 잡는지 원격에서 보려고
@@ -12639,10 +12806,11 @@ class App(tk.Tk):
                 before = set(self._warn_load())
                 _slept = getattr(self, "_last_sleep", set())
                 _keep = before & _slept      # 자는 슬롯은 유지 (십자가가 가려 안 보임)
-                gone = sorted(before - set(now_hit) - _keep)
+                # 안 보인다고 바로 지우지 않는다 (2026-09-29 사용자 신고)
+                gone = sorted(self._warn_gone_filter(set(now_hit), before, _keep))
                 new_ = sorted(set(now_hit) - before)
                 if gone or new_:
-                    self._warn_save(sorted(set(now_hit) | _keep))
+                    self._warn_save(sorted((before - set(gone)) | set(now_hit)))
                     self._warn_refresh()
                     msg = []
                     if new_:
@@ -12650,7 +12818,7 @@ class App(tk.Tk):
                     if gone:
                         msg.append(f"복구됨 {gone} 삭제")
                     self.status.set("⚠ 확인 중 — " + " · ".join(msg) +
-                                    f" (남은 경고 {len(now_hit)}개)")
+                                    f" (남은 경고 {len(self._warn_load())}개)")
         except Exception:
             pass
         self.after(WARN_TICK_MS, self._check_watch_tick)
