@@ -210,6 +210,10 @@ FIX_GAP_MAX        = 1.25
 # 슬롯의 **첫 좌표를 누르기 전에** 그 창을 앞으로 올리고 이만큼 기다린다.
 # 비활성 창의 첫 클릭은 '창 띄우기'로만 먹히고 사라진다 (2026-08-24 에 이미 겪은 것).
 FIX_FOCUS_WAIT     = (0.35, 0.60)
+# 📤 떼어낸 슬롯판(오만의탑·악몽의섬 …)을 메인런처 **바로 아래**에 붙여 둔다
+# (2026-09-30 사용자 지시: "배치도 항상 같게 해줘 — 위아래 배치")
+NIGHT_DOCK_GAP     = 4     # 메인런처와의 틈(px)
+NIGHT_DOCK_MS      = 1000  # 자리·앞뒤를 맞추는 간격(ms) — 창 두 개만 보므로 거의 공짜
 TJ_CLICKS          = 3     # TJ성공!! 슬롯당 좌표 수
 TJ_MIN             = 0.81  # TJ성공!! 좌표 간 클릭 간격(초) — 10~20% 완화(0.7~1.2 → 0.77~1.44)
 TJ_MAX             = 1.51
@@ -6684,6 +6688,15 @@ class App(tk.Tk):
         #    한 창 안의 프레임은 따로 앞에 못 오므로, Tk 의 `wm manage` 로 진짜 창을 만든다.
         panel = tk.Frame(parent); panel.pack(anchor="w", fill="both", expand=True)
         self._night_panel = panel
+        # 📥 되돌리는 버튼은 **판 밖(메인런처 쪽)** 에 둔다 (2026-09-30 사용자 요청).
+        #    판 안의 [📥] 는 떼어지면 그 창으로 따라가 버려서, 그 창을 잃어버리면
+        #    되돌릴 방법이 없었다. 이 버튼은 **떼어져 있을 때만** 보인다
+        #    (`_night_backbtn_sync`). ⚠ 판에 들어가는 위젯은 반드시 `panel` 안에 —
+        #    이 버튼만 예외로 일부러 밖에 둔 것이다.
+        self._night_backbtn = tk.Button(
+            parent, text="📥 슬롯판 붙이기", font=("맑은 고딕", 8, "bold"),
+            bg="#117864", fg="white", activebackground="#0e6252",
+            bd=0, padx=5, pady=2, command=self._night_attach)
         parent = panel                     # 아래는 전부 이 판 안에 그린다
         # 🎨 위 버튼줄은 얇게, 아래 16칸은 가운데로 — '중형 포켓' 처럼 (2026-09-16 요청).
         #    모든 줄을 anchor 없이 pack 하면 **가장 넓은 것(16칸 판) 기준으로 가운데**에 놓인다.
@@ -6792,8 +6805,10 @@ class App(tk.Tk):
         # 📅 오늘 요일에 맞는 던전으로 연다 (월 잊섬 · 화 에카 · 수목금 오만 · 토일 악몽)
         self.after(300, self._day_tab_tick)
         self.after(1200, self._refresh_night_btns)
-        # 지난번에 판을 따로 떼어뒀으면 그대로 다시 뗀다 (자리도 그대로)
+        # 켜질 때는 **항상 붙은 채로** 시작한다 (2026-09-30 사용자 지시)
         self.after(1500, self._night_detach_restore)
+        # 📤 떼어낸 판을 메인런처 바로 아래·바로 앞에 붙여 두고, 최소화도 같이 따라간다
+        self.after(1800, self._night_dock_tick)
         self._night_week_start()      # 금요일 23:50 자동 초기화 감시
         # 😴 사람이 5분간 컴퓨터를 안 만지면, 목록에 남은 복구를 스스로 돌린다
         # (2026-09-29 사용자 요청 — 다야는 '무료' 확인이 그대로 막는다)
@@ -7193,19 +7208,106 @@ class App(tk.Tk):
         else:
             self._night_detach(front_only=True)
 
-    def _night_front_only(self):
-        """떼어낸 판만 앞에 두고 **메인런처는 맨 뒤로** 물린다 (2026-09-19 사용자 지시).
-
-        최소화는 하지 않는다 — 다시 꺼내기가 번거로우므로 z순서만 내린다.
-        사용자가 메인런처를 클릭하면 당연히 다시 앞으로 올라온다."""
+    def _hwnd_of(self, w):
+        """Tk 위젯이 속한 '진짜 창'(top-level) 핸들. `wm manage` 한 판도 이걸로 잡힌다."""
         try:
-            self._send_to_back()
+            import ctypes
+            return int(ctypes.windll.user32.GetAncestor(int(w.winfo_id()), 2))  # GA_ROOT
         except Exception:
-            pass
+            return 0
+
+    # (`_night_front_only` — 메인런처를 맨 뒤로 물리고 판만 올리던 것, 2026-09-19 —
+    #  은 **삭제했다**. 2026-09-30 부터 판은 메인런처 바로 아래·바로 앞에 붙어
+    #  **함께** 움직이므로, 메인런처를 뒤로 물리면 판도 같이 내려가 뜻이 사라진다.
+    #  자리·앞뒤 맞추기는 `_night_dock_now` 하나가 맡는다.)
+    def _night_dock_now(self):
+        """떼어낸 슬롯판을 **항상 메인런처 바로 아래 · 메인런처 바로 앞**에 둔다.
+
+        (2026-09-30 사용자 지시) *"이 런처는 항상 메인런처 앞에 리니지 클라 뒤에
+        배치하게 해줘. 최소화에서도 올라올 때 같이 올라오고 배치도 항상 같게 해줘 —
+        위아래 배치"*
+
+        · **자리** — 메인런처 왼쪽 끝을 맞추고 **바로 아래**. 화면 아래를 넘으면 위로 붙인다.
+        · **앞뒤** — `SetWindowPos(판, 메인런처, …NOACTIVATE)` 로 **메인런처 바로 위**에
+          끼운다. 그래서 메인런처보다는 앞이고, **리니지 클라보다는 뒤**다
+          (클라는 런처보다 위에 있으므로). 포커스는 빼앗지 않는다 — 게임 중에 끼어들면 안 된다.
+        · **최소화** — 메인런처가 내려가면 같이 내려가고, 올라오면 같이 올라온다.
+
+        **돌고 있는 작업이 있으면 아무것도 건드리지 않는다** — 클릭 중에 창을 움직이면
+        엉킨다 (이 저장소가 여러 번 데인 부분)."""
         p = getattr(self, "_night_panel", None)
         try:
-            if p and p.winfo_exists() and p.winfo_manager() == "wm":
-                self.tk.call("raise", p._w)      # 포커스는 뺏지 않는다(게임 방해 금지)
+            if (p is None or not p.winfo_exists()
+                    or p.winfo_manager() != "wm" or self._is_busy()):
+                return
+        except Exception:
+            return
+        try:
+            _me_ico = (self.state() == "iconic")
+            _p_ico = (self.tk.call("wm", "state", p._w) == "iconic")
+            if _me_ico:                       # 메인런처가 내려갔다 → 판도 같이
+                if not _p_ico:
+                    self.tk.call("wm", "iconify", p._w)
+                return
+            if _p_ico:                        # 메인런처가 올라왔다 → 판도 같이
+                self.tk.call("wm", "deiconify", p._w)
+            import ctypes
+            h_p, h_me = self._hwnd_of(p), self._hwnd_of(self)
+            if not (h_p and h_me):
+                return
+            # ── 위아래 배치 ──
+            # ⚠ `wm geometry +x+y` 는 **창 테두리** 기준이고 `winfo_rootx` 는 **내부**
+            #    기준이라 섞어 쓰면 제목줄·테두리만큼(여기선 x+8 · y+31) 어긋난다.
+            #    그래서 둘 다 `GetWindowRect`(테두리 기준)로 통일한다.
+            class _R(ctypes.Structure):
+                _fields_ = [("l", ctypes.c_long), ("t", ctypes.c_long),
+                            ("r", ctypes.c_long), ("b", ctypes.c_long)]
+            rm, rp = _R(), _R()
+            ctypes.windll.user32.GetWindowRect(h_me, ctypes.byref(rm))
+            ctypes.windll.user32.GetWindowRect(h_p, ctypes.byref(rp))
+            x, y = rm.l, rm.b + NIGHT_DOCK_GAP
+            ph = rp.b - rp.t
+            if y + ph > self.winfo_screenheight():      # 아래가 모자라면 위로 붙인다
+                y = max(0, rm.t - ph - NIGHT_DOCK_GAP)
+            if abs(rp.l - x) > 2 or abs(rp.t - y) > 2:
+                self.tk.call("wm", "geometry", p._w, f"+{int(x)}+{int(y)}")
+            # ── 앞뒤: 메인런처 **바로 앞** (클라보다는 뒤) ──
+            # ⚠ `SetWindowPos(창, 기준창, …)` 의 기준창은 '그 창 **뒤**에 놓아라' 는 뜻이다
+            #    (MSDN: "a handle to the window to **precede** the positioned window").
+            #    그래서 기준창에 메인런처를 주면 판이 메인런처 **뒤**로 간다 — 반대다.
+            #    메인런처 바로 앞에 끼우려면 **메인런처보다 한 칸 앞에 있는 창**을 기준으로
+            #    준다. 메인런처가 맨 앞이면 0(HWND_TOP).
+            #    메인런처는 건드리지 않으므로 클라들과의 앞뒤는 그대로 유지된다.
+            _u = ctypes.windll.user32
+            h_prev = _u.GetWindow(h_me, 3)            # GW_HWNDPREV
+            if h_prev != h_p:                         # 이미 바로 앞이면 그냥 둔다
+                # SWP_NOSIZE(0x01) | SWP_NOMOVE(0x02) | SWP_NOACTIVATE(0x10)
+                _u.SetWindowPos(h_p, h_prev or 0, 0, 0, 0, 0, 0x13)
+        except Exception:
+            pass
+
+    def _night_dock_tick(self):
+        """1초마다 자리·앞뒤·최소화를 맞춘다 (창 두 개만 보므로 부하가 거의 없다).
+        붙어 있으면 `_night_dock_now` 가 즉시 빠져나오므로 평소 비용은 0 이다."""
+        try:
+            self._night_dock_now()
+            self._night_backbtn_sync()
+        except Exception:
+            pass
+        self.after(NIGHT_DOCK_MS, self._night_dock_tick)
+
+    def _night_backbtn_sync(self):
+        """메인런처 쪽 [📥 슬롯판 붙이기] 는 **떼어져 있을 때만** 보인다.
+        (판 안에 두면 떼어질 때 같이 따라가서, 정작 필요할 때 못 누른다)"""
+        b = getattr(self, "_night_backbtn", None)
+        if b is None or not b.winfo_exists():
+            return
+        try:
+            on = self._night_detached()
+            if on and not b.winfo_ismapped():
+                b.pack(anchor="w", fill="x", pady=(2, 0))
+            elif not on and b.winfo_ismapped():
+                b.pack_forget()
         except Exception:
             pass
 
@@ -7230,10 +7332,10 @@ class App(tk.Tk):
             self.cfg["night_detach"] = d; save_cfg(self.cfg)
             if getattr(self, "_night_dbtn", None) is not None:
                 self._night_dbtn.config(text="📥", bg="#117864")
-            self.status.set("📤 슬롯판을 따로 뗐습니다 — 이 창만 앞으로 옵니다 "
-                            "(✕ 나 [📥 붙이기] 로 되돌림)")
-            if front_only:      # 메인런처는 맨 뒤로, 뗀 판만 앞에
-                self.after(120, self._night_front_only)
+            self._night_backbtn_sync()
+            self.status.set("📤 슬롯판을 따로 뗐습니다 — 메인런처 바로 아래에 붙어 "
+                            "함께 움직입니다 (✕ 나 [📥 슬롯판 붙이기] 로 되돌림)")
+            self.after(120, self._night_dock_now)     # 자리·앞뒤를 바로 맞춘다
         except Exception as e:
             self.status.set(f"📤 따로 떼기 실패: {e}")
 
@@ -7250,35 +7352,39 @@ class App(tk.Tk):
             self.cfg["night_detach"] = d; save_cfg(self.cfg)
             if getattr(self, "_night_dbtn", None) is not None:
                 self._night_dbtn.config(text="📤", bg="#5d6d7e")
+            self._night_backbtn_sync()
             self.status.set("📥 슬롯판을 메인런처 안으로 되돌렸습니다")
         except Exception as e:
             self.status.set(f"📥 붙이기 실패: {e}")
 
     def _night_detach_moved(self, _e=None):
-        """뗀 창을 옮기면 그 자리를 기억해둔다 (다음에 켤 때 그 자리로)."""
-        if not self._night_detached():
-            return
-        try:
-            p = self._night_panel
-            x, y = p.winfo_rootx(), p.winfo_rooty()
-            d = dict(self.cfg.get("night_detach") or {})
-            if d.get("x") == x and d.get("y") == y:
-                return                      # 안 바뀌었으면 저장하지 않는다
-            if x <= 1 and y <= 1:
-                return                      # 아직 자리가 안 잡힌 상태
-            d.update({"on": True, "x": int(x), "y": int(y)})
-            self.cfg["night_detach"] = d; save_cfg(self.cfg)
-        except Exception:
-            pass
+        """자리는 **기억하지 않는다** (2026-09-30 사용자 지시 — '배치도 항상 같게').
+
+        떼어낸 판의 자리는 `_night_dock_now` 가 메인런처 위치로 그때그때 계산한다.
+        그래서 옮겨도 1초 안에 제자리로 돌아온다 — 사용자가 원한 동작이다.
+        (예전에는 옮긴 자리를 `night_detach.x/y` 에 저장해 다음에 켤 때 썼다)"""
+        return
 
     def _night_detach_restore(self):
-        """런처를 켤 때 — 지난번에 떼어둔 상태면 그대로 다시 뗀다."""
+        """런처를 켤 때 — **항상 붙은 상태로 시작한다** (2026-09-30 사용자 지시).
+
+        예전에는 지난번에 떼어둔 상태를 그대로 되살렸다(2026-09-16). 그런데 재시작마다
+        판이 독립 창으로 떠서 자리를 다시 잡아야 했다. 사용자 지시: *"재시작하면
+        자동으로 붙게 해줘."* 그래서 켜질 때는 무조건 붙어 있고, 떼는 것은
+        **사용자가 [📤] 를 누를 때만** 이다.
+        (떼어둔 상태로 저장돼 있었으면 그 표시도 꺼서 다음에도 붙은 채로 뜬다)"""
         try:
-            d = self.cfg.get("night_detach") or {}
+            d = dict(self.cfg.get("night_detach") or {})
             if d.get("on"):
-                self._night_detach(d.get("x"), d.get("y"))
+                d["on"] = False
+                self.cfg["night_detach"] = d
+                save_cfg(self.cfg)
+                click_log("[슬롯판] 재시작 — 떼어둔 상태였지만 붙은 채로 시작합니다")
+            if self._night_detached():        # 혹시 이미 떨어져 있으면 되돌린다
+                self._night_attach()
         except Exception:
             pass
+        self._night_backbtn_sync()
 
     def _night_reset_pick(self):
         """드롭다운에서 고른 초기화 값을 저장한다 (금요일 자동 초기화도 이 값을 쓴다)."""
