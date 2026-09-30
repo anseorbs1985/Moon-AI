@@ -1089,6 +1089,13 @@ WARN_GONE_N = 3
 # 다야(재화) 복구는 하지 않는다 — 좌표4 의 👁 '무료' 확인이 그대로 막는다.
 FIX_IDLE_SEC     = 300      # 5분
 FIX_IDLE_TICK_MS = 20000    # 20초마다 '마지막 입력 이후 몇 초' 만 본다 (거의 공짜)
+# 🖱 사람이 리니지M 창을 클릭하면 **그 슬롯 하나만** 십자가를 확인한다
+# (2026-09-30 사용자 요청: "내가 마우스로 절전모드 해제를 누르면 자동으로 십자가 인식을
+#  해줄 순 없나?") — 손으로 깨운 그 순간이 십자가가 드러나는 순간이다.
+# 한 슬롯 확인 = 0.070초 (16개 한 바퀴 0.859초). 확인만 하고 복구는 시작하지 않는다.
+FIX_CLICK_DELAY  = (1.4, 2.0)   # 클릭 뒤 화면이 돌아오기를 기다리는 시간(초)
+FIX_CLICK_RETRY  = (1.3, 1.9)   # 못 봤으면 한 번 더 (절전 해제가 느릴 때)
+FIX_CLICK_COOL   = 6.0          # 같은 슬롯은 이 시간 안에 다시 보지 않는다
 # 2026-09-21 작위 추가 — 3슬롯씩 들어갈 때마다 그 클라를 Z 로 깨우고 시작한다
 SLEEP_WAKE = ("fix", "jakwi")
 SLEEP_WAKE_KEY = "z"
@@ -3437,6 +3444,8 @@ class App(tk.Tk):
         threading.Thread(target=self._itemreg_hotkey_loop, daemon=True).start()
         threading.Thread(target=self._itemreg_hold_loop, daemon=True).start()
         threading.Thread(target=self._itemreg_click_loop, daemon=True).start()
+        # 🖱 사람이 리니지M 창을 클릭하면 그 클라의 십자가를 확인한다 (확인만)
+        threading.Thread(target=self._fix_clickwatch_loop, daemon=True).start()
         self.after(1800, self._itemreg_refresh)
         # 런처가 켜질 때 클로드도 같이 켠다 — 클로드는 뒤, 런처는 앞
         # (2026-08-29 사용자 지시). 이미 떠 있으면 새로 켜지 않는다.
@@ -4246,6 +4255,12 @@ class App(tk.Tk):
             command=self._fix_idle_toggle)
         self._warn_idlebtn.pack(fill="x", pady=(0, 1))
         self._fix_idle_btn_paint()
+        # 🖱 리니지M 창을 클릭하면 그 클라의 십자가를 확인 (2026-09-30 사용자 요청)
+        self._warn_clickbtn = tk.Button(
+            self._warn_box, text="", font=("맑은 고딕", 8, "bold"), pady=0,
+            command=self._fix_click_toggle)
+        self._warn_clickbtn.pack(fill="x", pady=(0, 1))
+        self._fix_click_btn_paint()
         self._warn_rows = tk.Frame(self._warn_box)
         self._warn_rows.pack(fill="x")
         self.after(900, self._warn_refresh)
@@ -12455,6 +12470,161 @@ class App(tk.Tk):
                            else "목록에만 쌓이고 자동으로 돌지 않습니다"))
         click_log(f"[유휴복구] 사용자가 {'켬' if on else '끔'}")
 
+    def _sleep_wake_click(self, anchor, fkey="fix"):
+        """'절전모드 해제' 글자를 **찾아서 그 자리를 클릭**해 깨운다 (2026-09-30).
+
+        사용자: *"z도 안 되고 그러네."* Z 키를 안 먹는 클라가 있는데, 사람은 그 글자를
+        마우스로 눌러 깨운다 — 그걸 그대로 한다.
+
+        ⚠ `find_sleep_img` 가 돌려주는 자리는 **그 창 안(창 왼쪽위 기준)** 이다
+        (창을 직접 캡처해서 찾으므로). **화면 좌표로 바꿔야** 클릭이 맞는 자리에 간다.
+        돌려주는 값 — (눌렀나, 일치도)"""
+        try:
+            x, y, sc = find_sleep_img(fkey, anchor)
+            if x is None:
+                return False, float(sc)            # 글자가 없다 = 이미 깨어 있다
+            rc = client_rect_at(anchor[0], anchor[1])
+            if not rc:
+                return False, float(sc)
+            sx, sy = rc[0] + int(x), rc[1] + int(y)
+            self._focus_client_at(anchor)
+            time.sleep(random.uniform(0.18, 0.32))
+            click_hold(sx, sy, ms=random.uniform(0.07, 0.13))
+            return True, float(sc)
+        except Exception:
+            return False, 0.0
+
+    def _wake_until(self, anchor, si=None, tag="fix", fkey="fix"):
+        """절전 화면이 사라질 때까지 깨운다 — **1번째는 Z, 2번째부터는 글자 클릭**.
+
+        (2026-09-30 사용자: "z도 안 되고 그러네") Z 를 안 먹는 클라가 있어서,
+        두 번째 시도부터는 사람이 하듯 **'절전모드 해제' 글자를 눌러** 깨운다.
+        `_run_fix_slot`(개별 복구)과 `_wake_slots`(F11 스캔) 둘 다 이걸 쓴다 —
+        같은 코드를 두 군데 두면 한쪽만 고치는 사고가 난다 (이 저장소의 반복된 교훈).
+
+        돌려주는 값 — 깨어났으면 True."""
+        _who = f"#{si:02d} " if si else ""
+        for w in range(SLEEP_WAKE_TRIES):
+            try:
+                if w == 0:
+                    self._focus_client_at(anchor)
+                    time.sleep(random.uniform(0.20, 0.35))
+                    press_key(SLEEP_WAKE_KEY)
+                    _how = f"'{SLEEP_WAKE_KEY.upper()}' 키"
+                else:
+                    ok, sc = self._sleep_wake_click(anchor, fkey)
+                    if not ok:
+                        return True              # 글자가 없다 = 이미 깨어났다
+                    _how = f"'절전모드 해제' 글자 클릭 (일치도 {sc:.2f})"
+            except Exception:
+                return False
+            _t0 = time.time()
+            while time.time() - _t0 < SLEEP_WAKE_WAIT[1]:
+                time.sleep(0.25)
+                if find_sleep_img(fkey, anchor)[0] is None:
+                    click_log(f"[{tag}] {_who}깨어남 — {_how} ({w+1}번째)")
+                    time.sleep(random.uniform(0.35, 0.6))     # 화면 안정화
+                    return True
+        click_log(f"[{tag}] {_who}⚠ {SLEEP_WAKE_TRIES}번(Z + 글자 클릭) 해도 안 깨어남")
+        return False
+
+    # ── 🖱 사람이 클라를 클릭하면 그 슬롯만 십자가를 본다 (2026-09-30 사용자 요청) ──
+    def _fix_clickwatch_loop(self):
+        """사람이 리니지M 창을 클릭하면 **그 슬롯 하나만** 십자가를 확인한다.
+
+        사용자: *"내가 마우스로 절전모드 해제를 누르면 너가 자동으로 십자가 인식을
+        해줄 순 없나? z도 안 되고 그러네."*
+        → 손으로 절전을 깨운 **그 순간**이 십자가가 드러나는 순간이다. 그래서
+        **사람 클릭**을 신호로 쓴다. 절전 버튼을 눌렀는지 따지지 않는다 —
+        어느 자리를 눌렀든 그 클라를 한 번 보는 것이 가장 단순하고 확실하다.
+
+        · 한 슬롯 확인 = **0.070초** (16개 한 바퀴 0.859초). 같은 슬롯은
+          `FIX_CLICK_COOL`(6초)에 한 번만. 백그라운드 스레드라 화면이 멈추지 않는다.
+        · 절전 해제 직후엔 화면이 덜 그려져 십자가가 안 보이므로
+          **1.4~2.0초 뒤에 보고, 못 보면 1.3~1.9초 뒤 한 번 더** 본다.
+        · **확인만 한다 — 목록에 올리기만 하고 복구는 시작하지 않는다**
+          (Z 로 깨울 때와 같은 규칙, 2026-09-29). 복구는 사용자가 누르거나 5분 유휴 때.
+        · **목록에서 지우지는 절대 않는다** — 안 보인다고 지우면 사용자가 복구를
+          안 했는데 사라지는 사고가 난다 (2026-09-29 절대 규칙).
+        · 돌고 있는 작업이 있으면 건너뛴다."""
+        try:
+            import precise_click as _pc
+            _pc.start_input_watch()
+        except Exception:
+            return
+        seen, last = None, {}
+        while True:
+            time.sleep(0.05)
+            try:
+                if not self.cfg.get("fix_click_on", True):
+                    seen = None
+                    continue
+                n, xy = _pc.last_click()
+                if seen is None:
+                    seen = n                      # 켜는 순간의 클릭은 세지 않는다
+                    continue
+                if n == seen:
+                    continue
+                seen = n
+                if not self.cfg.get("check_area_rel"):
+                    continue                      # 경고영역이 없으면 볼 수가 없다
+                if self._is_busy():
+                    continue
+                si = self._slot_of_anchor(xy)
+                if not si:
+                    continue                      # 리니지M 창 밖을 클릭한 것
+                if time.time() - last.get(si, 0.0) < FIX_CLICK_COOL:
+                    continue
+                last[si] = time.time()
+                threading.Thread(target=self._fix_click_check, args=(si,),
+                                 daemon=True).start()
+            except Exception:
+                continue
+
+    def _fix_click_check(self, si):
+        """클릭한 그 슬롯 하나만 십자가를 본다 — 보이면 목록에 올리고 끝."""
+        try:
+            for k, _d in enumerate((FIX_CLICK_DELAY, FIX_CLICK_RETRY)):
+                time.sleep(random.uniform(*_d))
+                if self._is_busy():
+                    return
+                hit = self._check_hits(only={si})
+                if hit and si in set(hit):
+                    cur = set(self._warn_load())
+                    if si in cur:
+                        return                    # 이미 목록에 있다
+                    cur.add(si)
+                    self._warn_save(sorted(cur))
+                    self.after(0, self._warn_refresh)
+                    click_log(f"[클릭확인] #{si:02d} 십자가 보임 → 목록에 올림 "
+                              f"({k+1}번째 확인)")
+                    self.after(0, lambda s=si: self.status.set(
+                        f"🩹 #{s:02d} 복구해야함 — 클릭한 클라에서 십자가를 봤습니다 "
+                        f"(누르거나, {FIX_IDLE_SEC//60}분 쉬면 자동 복구)"))
+                    return
+        except Exception:
+            pass
+
+    def _fix_click_btn_paint(self):
+        b = getattr(self, "_warn_clickbtn", None)
+        if not b or not b.winfo_exists():
+            return
+        on = bool(self.cfg.get("fix_click_on", True))
+        b.config(text=("🖱 클릭하면 십자가 확인 ON" if on
+                       else "🖱 클릭 확인 OFF"),
+                 bg=("#2471a3" if on else "#7f8c8d"), fg="white",
+                 activebackground=("#1b5480" if on else "#626e6e"))
+
+    def _fix_click_toggle(self):
+        on = not bool(self.cfg.get("fix_click_on", True))
+        self.cfg["fix_click_on"] = on
+        save_cfg(self.cfg)
+        self._fix_click_btn_paint()
+        self.status.set("🖱 클릭 확인 " + ("켬 — 리니지M 창을 클릭하면 그 클라의 "
+                                          "십자가를 확인해 목록에 올립니다 (복구는 안 함)"
+                                          if on else "끔"))
+        click_log(f"[클릭확인] 사용자가 {'켬' if on else '끔'}")
+
     def _warn_gone_filter(self, now_hit, before, keep=()):
         """십자가가 안 보인다고 **바로 지우지 않는다** (2026-09-29 사용자 신고).
 
@@ -12485,11 +12655,16 @@ class App(tk.Tk):
         return gone
 
     def _slot_of_anchor(self, anchor):
-        """화면 좌표가 몇 번 클라 안인지 (1부터). 못 찾으면 None."""
+        """화면 좌표가 몇 번 클라 안인지 (1부터). 못 찾으면 None.
+
+        ⚠ `_client_rects_by_slot()` 은 **(왼쪽, 위, 오른쪽, 아래)** 를 돌려준다
+        (`GetWindowRect` 그대로). 이것을 `(x, y, 폭, 높이)` 로 잘못 읽으면
+        오른쪽·아래 끝이 화면 밖까지 늘어나 **아래 칸 클릭이 위 칸으로 잡힌다** —
+        실측(2026-09-30): 16개 중 **4·8·12·16번(각 열 맨 아래)이 3·7·11·15로** 잡혔다.
+        클로드는 이 형식을 헷갈리지 말 것."""
         try:
             for i, rc in enumerate(self._client_rects_by_slot() or []):
-                if rc[0] <= anchor[0] <= rc[0] + rc[2] and \
-                   rc[1] <= anchor[1] <= rc[1] + rc[3]:
+                if rc[0] <= anchor[0] <= rc[2] and rc[1] <= anchor[1] <= rc[3]:
                     return i + 1
         except Exception:
             pass
@@ -12533,32 +12708,12 @@ class App(tk.Tk):
                 if _sx is not None:
                     _was_sleep = True
                     click_log(f"fix #{si:02d} 절전 상태 (일치도 {_ss:.2f}) → "
-                              f"'{SLEEP_WAKE_KEY.upper()}' 눌러 깨움 (십자가 확인 전)")
-                    # **진짜로 깨어날 때까지** 확인하며 최대 SLEEP_WAKE_TRIES 번 누른다.
-                    # 한 번 누르고 정해진 시간만 기다리면 화면이 덜 돌아와 실패했다
-                    # (2026-08-29 사용자 신고: 절전이면 복구가 안 된다)
-                    for _w in range(SLEEP_WAKE_TRIES):
-                        self.status.set(f"😴 복구 #{si:02d} 절전 — "
-                                        f"{SLEEP_WAKE_KEY.upper()} 눌러 깨우는 중… "
-                                        f"({_w+1}/{SLEEP_WAKE_TRIES})")
-                        self._focus_client_at(_anc)
-                        time.sleep(random.uniform(0.20, 0.35))
-                        press_key(SLEEP_WAKE_KEY)
-                        _t0 = time.time()
-                        _awake = False
-                        while time.time() - _t0 < SLEEP_WAKE_WAIT[1]:
-                            time.sleep(0.25)
-                            _cx, _cy, _cs = find_sleep_img("fix", _anc)
-                            if _cx is None:            # 절전 화면이 사라졌다 = 깨어남
-                                _awake = True
-                                break
-                        if _awake:
-                            click_log(f"fix #{si:02d} 깨어남 확인 ({_w+1}번째 시도)")
-                            time.sleep(random.uniform(0.35, 0.6))   # 화면 안정화
-                            break
-                    else:
-                        click_log(f"fix #{si:02d} ⚠ {SLEEP_WAKE_TRIES}번 눌러도 "
-                                  f"절전이 안 풀림")
+                              f"깨우는 중 (십자가 확인 전)")
+                    self.status.set(f"😴 복구 #{si:02d} 절전 — 깨우는 중… "
+                                    f"(Z → 안 되면 '절전모드 해제' 글자 클릭)")
+                    # 1번째는 Z, 2번째부터는 '절전모드 해제' 글자를 눌러 깨운다
+                    # (2026-09-30 사용자: "z도 안 되고 그러네")
+                    self._wake_until(_anc, si, tag="fix")
         except Exception:
             pass
         # ── ② 깨운 뒤에 십자가가 있는지 확인한다 ──
@@ -12877,9 +13032,11 @@ class App(tk.Tk):
         self._check_watch_start()
 
     def _wake_slots(self, slots):
-        """자는 클라들을 **Z 로 깨운다** (F11 확인 전에 쓴다, 2026-08-29).
+        """자는 클라들을 깨운다 (F11 확인 전에 쓴다, 2026-08-29).
 
-        각 클라를 앞으로 올리고 키를 한 번 누른 뒤, 절전 화면이 사라졌는지 확인한다.
+        **1번째는 Z, 2번째부터는 '절전모드 해제' 글자를 클릭**한다 — Z 를 안 먹는
+        클라가 있어서 (2026-09-30 사용자: "z도 안 되고 그러네").
+        `_run_fix_slot` 과 **같은 함수(`_wake_until`)** 를 쓴다.
         전부 끝나면 사용자가 보던 창으로 돌려놓는다."""
         try:
             import ctypes
@@ -12893,26 +13050,7 @@ class App(tk.Tk):
                 continue
             l, t, r, b, hwnd = hw[i]
             cx, cy = (l + r) // 2, (t + b) // 2
-            for _w in range(SLEEP_WAKE_TRIES):
-                try:
-                    self._focus_client_at((cx, cy))
-                    time.sleep(random.uniform(0.15, 0.28))
-                    press_key(SLEEP_WAKE_KEY)
-                except Exception:
-                    break
-                _t0 = time.time()
-                _ok = False
-                while time.time() - _t0 < SLEEP_WAKE_WAIT[1]:
-                    time.sleep(0.25)
-                    _x, _y, _sc = find_sleep_img("fix", (cx, cy))
-                    if _x is None:
-                        _ok = True
-                        break
-                if _ok:
-                    click_log(f"[경고확인] #{si:02d} 절전 깨움 ({_w+1}번째)")
-                    break
-            else:
-                click_log(f"[경고확인] #{si:02d} ⚠ {SLEEP_WAKE_TRIES}번 눌러도 안 깨어남")
+            self._wake_until((cx, cy), si, tag="경고확인")
         time.sleep(random.uniform(0.4, 0.7))      # 화면 안정화
         try:
             if _fg0:
