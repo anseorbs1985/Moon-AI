@@ -2,36 +2,7 @@
   "_설명": "로컬이 받을 좌표 항목. 값은 share_coords_data.json 에서 온다.",
   "_keys": "받을 항목. 로컬에 이미 찍어둔 좌표가 있으면 덮어쓰지 않는다 (비어 있는 항목만 받는다).",
   "_force": "일부러 갈아끼울 항목. 로컬이 찍어둔 것을 지우고 메인 것으로 바꾼다. 쓰고 나면 비운다.",
-  "_이번지시": "2026-09-23 사용자: \"작위랑 좌표등록 100% 똑같이 올려죠 다른곳에서 받을수있게\" (접속 좌표등록 런처 포함) → keys 전부를 메인 것으로 갱신. 접속 흐름 11개는 force 라 로컬 것을 덮어쓴다. 작위 그림 21장도 함께.",
-  "keys": [
-    "pre_click1",
-    "pre_click2",
-    "lineagem",
-    "game_start",
-    "multiplay",
-    "profile_btn",
-    "confirm_hover",
-    "google_acc",
-    "confirm_btn",
-    "profile_reveal_btn",
-    "char_btns",
-    "incoupon_slots",
-    "incoupon_texts",
-    "incoupon_text",
-    "jakwi_slots"
-  ],
-  "force": [
-    "pre_click1",
-    "pre_click2",
-    "lineagem",
-    "game_start",
-    "multiplay",
-    "profile_btn",
-    "confirm_hover",
-    "google_acc",
-    "confirm_btn",
-    "profile_reveal_btn",
-    "char_btns",
-    "jakwi_slots"
-  ]
+  "_이번지시": "2026-09-30 사용자 신고: '로컬에 업데이트하면 좌표가 전부 돌아가버린다'. 원인 — 9/22 '작위·접속 좌표 100% 배포' 때 넣은 force 12개를 작업이 끝난 뒤 비우지 않아서, 로컬이 업데이트할 때마다 그 좌표를 메인 것으로 갈아끼웠다 (force 는 '로컬이 찍어둔 좌표도 덮어쓴다'는 뜻). keys·force 를 전부 비웠다 — 이제 좌표는 하나도 배포하지 않는다. 필요할 때만 사용자가 콕 집어 말한 항목을 넣고, 끝나면 반드시 다시 비운다.",
+  "keys": [],
+  "force": []
 }

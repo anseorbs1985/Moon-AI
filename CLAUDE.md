@@ -2562,3 +2562,47 @@ if e is not None and getattr(e, "widget", None) is not self:
   사라질 때마다 그 핸들러가 돈다.
 - 이 함정은 `_night_detach_moved`(`<Configure>`)에도 있었다 — 지금은 즉시 `return` 하므로
   무해하지만, 거기에 코드를 되살릴 때는 같은 확인을 넣을 것.
+
+## 🚨 로컬 좌표가 업데이트마다 돌아간 진짜 원인 — `force` 를 안 비웠다 (2026-09-30)
+
+사용자: *"진짜 로컬에 업데이트하면은 좌표가 전부 돌아가버리는데, 어떻게 하라는 거냐 도대체가"*
+
+### 원인
+2026-09-22 **'작위·접속 좌표 100% 배포'** (사용자가 콕 집어 요청) 를 하려고
+`share_coords.json` 의 **`force`** 에 12개 항목을 적었다. 그런데 **작업이 끝난 뒤 비우지
+않았다.** `sync_coord_keys` 는 이렇게 판단한다:
+
+```python
+if have > 0 and k not in force:
+    kept.append(...)        # 이미 찍어둔 것 → 그대로 둔다
+```
+
+즉 **`force` 에 적힌 항목은 로컬이 찍어둔 좌표까지 갈아끼운다.**
+그래서 그날부터 로컬은 🔄 를 누를 때마다 아래가 메인 것으로 되돌아갔다:
+
+```
+force 12개 = pre_click1 · pre_click2 · lineagem · game_start · multiplay ·
+             profile_btn · confirm_hover · google_acc · confirm_btn ·
+             profile_reveal_btn · char_btns · jakwi_slots(작위 16슬롯)
+keys  15개 = 위 + incoupon_slots · incoupon_texts · incoupon_text
+```
+
+CLAUDE.md 에 *"`force` 는 쓰고 나면 반드시 비운다"* 규칙이 **이미 있었는데 지키지 않았다.**
+(2026-09-14 항목에 그대로 적혀 있다.) 통째 복사·되돌리기 지시서·프리셋 같은 다른 통로는
+전부 이미 막혀 있었고, **새는 곳은 여기 하나였다.**
+
+### 조치
+1. `share_coords.json` 의 **`keys`·`force` 를 전부 비웠다** — **좌표는 지금 하나도
+   배포하지 않는다.** (`share_coords_data.json` 의 값은 남겨뒀지만 `keys` 가 비어 있어 무효다)
+2. **`check_share.py` 를 만들었다** — 좌표를 건드릴 수 있는 통로 11개를 한 화면에 보여준다.
+   ```
+   py check_share.py      →  전부 ✔ 면 "로컬 좌표를 하나도 건드리지 않는다"
+   ```
+   종료코드 0 = 안전, 1 = 열려 있는 통로가 있음.
+
+### 클로드가 지켜야 할 절차 (이제부터 예외 없음)
+- 좌표를 배포하는 작업을 하면 **같은 대화 안에서** `keys`·`force`·`restore_order.id`·
+  `COORDS_ROLLBACK_ID` 를 **되돌려 비우고**, **`py check_share.py` 를 돌려 전부 ✔ 인 것을
+  확인한 뒤** 커밋한다. 확인 없이 끝내지 말 것.
+- 배포가 아닌 작업(코드 수정·그림 등)을 커밋할 때도 **한 번 돌려보는 것이 싸다** (즉시 끝난다).
+- 사용자가 "좌표가 돌아간다" 고 신고하면 **이 스크립트부터** 돌린다 — 짐작하지 말 것.
