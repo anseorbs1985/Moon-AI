@@ -1052,6 +1052,29 @@ def coords_guard_snapshot(log):
             json.dump({"snap": cur, "allow": allow}, f, ensure_ascii=False)
         log(f"   🔐 좌표 잠금: 이번에 받을 항목만 허용 — "
             + (", ".join(allow) if allow else "없음(좌표는 하나도 안 받음)"))
+        # 📦 **덮어쓰기 직전 좌표를 파일로도 남긴다** (2026-09-30).
+        # `restore_coords.py` 는 예전부터 `*_before_update_coords.json` 을 찾는데,
+        # **그 파일을 만드는 코드가 아예 없었다** — 그래서 사고가 났을 때
+        # '업데이트 직전' 시점으로 되돌릴 수가 없고 하루 1회 백업에 의존해야 했다.
+        # 잠금 스냅샷(json 한 덩어리)만으로는 사용자가 손으로 꺼낼 수 없으므로
+        # 복구 도구들이 바로 쓸 수 있는 이름으로 함께 남긴다.
+        try:
+            import shutil as _sh
+            _bd = os.path.join(os.environ.get("LOCALAPPDATA", DESK),
+                               "MoonAI", "backups")
+            os.makedirs(_bd, exist_ok=True)
+            _now = time.strftime("%Y%m%d_%H%M%S")
+            _kept = []
+            for _f in ("coords.json", "island_coords.json"):
+                _src = os.path.join(DESK, _f)
+                if os.path.exists(_src) and os.path.getsize(_src) > 2000:
+                    _sh.copy2(_src, os.path.join(_bd, f"{_now}_before_update_{_f}"))
+                    _kept.append(_f)
+            if _kept:
+                log(f"   📦 업데이트 직전 좌표 백업: backups\\{_now}_before_update_* "
+                    f"({', '.join(_kept)}) — 되돌리려면 py restore_coords.py")
+        except Exception as _e:
+            log(f"   ⚠ 업데이트 직전 좌표 백업 실패: {_e}")
     except Exception as e:
         log(f"   ⚠ 좌표 잠금 준비 실패: {e}")
 
