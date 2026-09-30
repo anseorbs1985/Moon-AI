@@ -12433,7 +12433,15 @@ class App(tk.Tk):
                 if idle < FIX_IDLE_SEC:
                     self._fix_idle_done = False        # 사람이 만졌다 → 다시 무장
                 elif not getattr(self, "_fix_idle_done", False):
-                    q = sorted(self._warn_load())
+                    # 💎 다야 슬롯은 건너뛴다 (2026-09-30 사용자 지시).
+                    # 다야가 드는 것은 '무료' 확인에서 반드시 멈추므로, 자동복구가
+                    # 5분마다 그 클라를 깨워 헛수고만 한다 —
+                    # 사용자: "계속해서 절전모드를 해제해서 복구를 시도하냐. 답답하다."
+                    _paid = self._fix_paid_load()
+                    q = [s for s in sorted(self._warn_load()) if s not in _paid]
+                    if _paid:
+                        click_log(f"[유휴복구] 💎 다야 슬롯 {sorted(_paid)} 는 건너뜀 "
+                                  f"(사람이 직접 써야 한다)")
                     if q and not self._is_busy():
                         self._fix_idle_done = True
                         click_log(f"[유휴복구] {int(idle)}초 동안 입력 없음 → "
@@ -12700,7 +12708,7 @@ class App(tk.Tk):
         # ── ① 절전이면 **먼저 Z 를 눌러 깨운다** (2026-08-29 — 순서가 중요) ──
         # 절전 화면이 십자가를 가려서, 깨우기 전에 십자가를 보면 '없다'고 판단해
         # 아무것도 못 하고 목록만 지워버렸다. 그래서 깨우기가 맨 앞이다.
-        _was_sleep = False
+        _was_sleep, _woke = False, True
         try:
             _anc = slot_anchor((self.cfg.get("fix_slots") or [])[idx])
             if _anc and has_sleep_img("fix"):
@@ -12713,23 +12721,42 @@ class App(tk.Tk):
                                     f"(Z → 안 되면 '절전모드 해제' 글자 클릭)")
                     # 1번째는 Z, 2번째부터는 '절전모드 해제' 글자를 눌러 깨운다
                     # (2026-09-30 사용자: "z도 안 되고 그러네")
-                    self._wake_until(_anc, si, tag="fix")
+                    _woke = self._wake_until(_anc, si, tag="fix")
         except Exception:
             pass
         # ── ② 깨운 뒤에 십자가가 있는지 확인한다 ──
-        # 없으면 이미 복구된 것이므로 **아무것도 누르지 않고** 목록에서 지운다.
+        # **깨어 있는 화면에서 십자가가 없으면 = 이미 복구된 것 → 목록에서 지운다.**
+        # (2026-09-30 사용자 지시: "복구해서 십자가가 없어졌으면 알아서 지워야지,
+        #  계속해서 절전모드를 해제해서 복구를 시도하냐. 확인하고 없으면 지워.")
+        #
+        # ⚠ 2026-08-29 의 '안 보인다고 지우지 않는다' 규칙과 어긋나지 않는다 —
+        #    그 규칙은 **절전 화면이 십자가를 가려서** 생긴 오판을 막으려는 것이었다.
+        #    여기서는 바로 위에서 **깨운 것을 확인한 뒤** 보므로 가려짐이 없다.
+        #    그래서 **깨우기에 성공했을 때만** 지운다. 못 깨웠으면(`_woke` False)
+        #    화면을 볼 수 없으니 예전처럼 **그대로 둔다.**
+        #
+        # 이 고리가 사용자를 괴롭힌 원인이다: 손으로 복구해 십자가가 사라져도
+        # 목록에 남고 → 5분 유휴 자동복구가 그 클라를 깨워 또 시도하고 →
+        # 또 '안 보이니 취소' → 목록에 그대로 … 영원히 반복.
         try:
             hit = self._check_hits()
             if hit is not None and int(si) not in set(hit):
-                # 십자가가 안 보인다 — **실행만 취소하고 목록은 그대로 둔다.**
-                # (2026-08-29 사용자 지시: "복구를 안 했으면 계속 냅둬야지")
-                # 절전·창 겹침 등으로 잠깐 안 보일 수 있어서, 안 보인다는 이유만으로
-                # 지우면 안 된다. **지우는 것은 실제로 복구를 돌린 뒤**
-                # `_fix_verify` 가 사라진 것을 확인했을 때뿐이다.
-                click_log(f"fix #{si:02d} 십자가가 안 보여 실행만 취소 "
-                          f"(목록은 그대로 둠{' · 절전에서 깨운 직후' if _was_sleep else ''})")
-                self.status.set(f"✖ 복구 #{si:02d} — 십자가가 안 보여 실행하지 않았습니다 "
-                                f"(목록은 그대로 둡니다 · 잠시 뒤 다시 눌러주세요)")
+                _still_sleep = int(si) in getattr(self, "_last_sleep", set())
+                if _woke and not _still_sleep:
+                    self._warn_save(sorted(set(self._warn_load()) - {int(si)}))
+                    self._fix_paid_mark(int(si), False)     # 💎 다야 표시도 해제
+                    self.after(0, self._warn_refresh)
+                    click_log(f"fix #{si:02d} 십자가가 없다 — 이미 복구된 것으로 보고 "
+                              f"목록에서 지웠다"
+                              + (" (절전에서 깨운 뒤 확인)" if _was_sleep else ""))
+                    self.status.set(f"✅ #{si:02d} 십자가가 없어 목록에서 지웠습니다 "
+                                    f"(이미 복구된 것 — 아무것도 누르지 않았습니다)")
+                else:
+                    click_log(f"fix #{si:02d} 십자가가 안 보이지만 "
+                              f"{'깨우기 실패' if not _woke else '아직 절전'} — "
+                              f"화면을 못 봤으므로 목록은 그대로 둔다")
+                    self.status.set(f"✖ 복구 #{si:02d} — 아직 절전이라 화면을 못 봤습니다 "
+                                    f"(목록은 그대로 둡니다)")
                 return
         except Exception:
             pass
