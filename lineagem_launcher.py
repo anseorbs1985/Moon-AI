@@ -14445,7 +14445,11 @@ class App(tk.Tk):
     def _on_main_unmap(self, e=None):
         """메인런처가 최소화되면 클로드 앱도 같이 최소화.
         (복원은 클로드를 직접 클릭해서 따로 열 수 있음 — 자동 복원 안 함)
-        단, 시작 직후 워치독이 런처를 최소화하는 건 제외(배포/시작 시 클로드 안 내리게)."""
+        단, 시작 직후 워치독이 런처를 최소화하는 건 제외(배포/시작 시 클로드 안 내리게).
+        (Map 과 같은 이유로 **자식 위젯의 Unmap 은 무시한다** — `pack_forget`·`destroy`
+         때마다 불린다. 아래에서 `state()` 도 보므로 이중으로 막힌다.)"""
+        if e is not None and getattr(e, "widget", None) is not self:
+            return
         if not getattr(self, "_unmap_couple_ok", False):
             return
         def _chk():
@@ -14456,8 +14460,24 @@ class App(tk.Tk):
                 pass
         self.after(120, _chk)
 
-    def _on_main_map(self, e):
-        """패스권 창이 켜져 있으면 메인 런처 최소화 유지 (섬/던전은 사용자가 직접 복원 가능)"""
+    def _on_main_map(self, e=None):
+        """패스권 창이 켜져 있으면 메인 런처 최소화 유지 (섬/던전은 사용자가 직접 복원 가능)
+
+        🚨 **자식 위젯이 map 될 때 불린 것은 무시한다** (2026-09-30 사용자 신고:
+        *"작업 끝나면 맨 뒤로 보내달라니까 / 왜 앞으로 계속 나오게 하는 거냐고"*).
+
+        Tk 의 함정 — 위젯의 `bindtags` 에는 **그 위젯이 속한 toplevel 이 들어 있어서**,
+        `self.bind("<Map>")` 은 **자식 위젯 하나가 pack 될 때도 그대로 불린다.**
+        실측(순수 Tk): 자식 4개를 pack 하니 Map 이 4번, 전부 루트가 아닌 위젯이었다.
+        그래서 `_warn_refresh`(경고 버튼을 지우고 다시 만든다)가 돌 때마다
+        **`_bring_to_front()` → `lift()` 가 걸려 런처가 앞으로 튀어나왔다.**
+        `_warn_refresh` 는 F11 뒤 5초마다·클릭 확인·복구 확인 때마다 돌기 때문에
+        '계속' 앞으로 나온 것이다. `_last_activity` 도 매번 초기화돼
+        **10분 유휴 자동 최소화까지 영영 걸리지 않았다.**
+
+        → **이 창 자신의 Map 만 처리한다.** 클로드는 이 확인을 없애지 말 것."""
+        if e is not None and getattr(e, "widget", None) is not self:
+            return
         pass_open = self._pass_win and self._pass_win.winfo_exists()
         if pass_open:
             self.after(50, self._send_to_back)
