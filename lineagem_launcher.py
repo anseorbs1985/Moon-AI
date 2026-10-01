@@ -359,6 +359,44 @@ AWAKEN_SEE_COOL  = 2.0          # '각성 화면인가' 를 다시 보기까지�
 #    왜 안 가져오냐"). 각성 화면을 **여는 그 클릭** 직후에는 화면이 아직 안 그려져
 #    있어서 못 찾고, 그대로 조용히 끝났다. 그래서 **늦게, 여러 번** 본다.
 AWAKEN_SEE_WAIT  = (0.7, 1.1, 1.6)   # 클릭 뒤 이 시각들(초)에 한 번씩 본다
+# 🚨 '각성 화면인가' 판정은 **버튼을 누르는 기준(AWAKEN_MATCH 0.72)보다 엄격해야** 한다.
+#    실측 기록(2026-10-01 17:25~17:32):
+#        진짜 각성 화면   awaken_auto 1.00
+#        다른 화면        awaken_auto 0.66 · awaken_go 0.67 · **awaken_auto 0.72**
+#    → 0.72 는 잡음 속에 있어서 **아무 데서나 창이 떴다**
+#      (사용자: "각성하는 화면에서만 띄워주라니까 왜 아무데나 다 띄우냐").
+#    0.90 이면 진짜(1.00)는 넉넉히 통과하고 잡음(≤0.72)과 여유 0.18.
+#    ⚠ `AWAKEN_MATCH` 는 건드리지 말 것 — 그건 **버튼을 누를 때** 쓰는 기준이고,
+#      글자가 반쯤 켜진 상태도 잡아야 해서 낮게 두는 것이 맞다.
+AWAKEN_SEEN_MATCH = 0.90
+# 🖼 사용자가 "이게 각성화면이다" 라고 직접 잘라 등록하는 그림 (2026-10-01 사용자 제안:
+#    "내가 어떤 게 각성화면인지 알려줄까?"). 이게 있으면 **이것만** 보고 판정한다 —
+#    `awaken_auto` 는 다른 화면에서도 0.72 가 나와 오탐을 냈다.
+#    드래그한 자리를 **창 왼쪽위 기준**으로 함께 저장해 그 둘레만 훑는다(오탐 차단).
+AWAKEN_SCREEN     = "awaken_screen"
+AWAKEN_SCREEN_PAD = 25          # 그 자리 둘레 이만큼만 훑는다(px)
+
+
+def awaken_screen_img_path():
+    return os.path.join(IMG_DIR, f"{AWAKEN_SCREEN}.png")
+
+
+def awaken_screen_area_path():
+    return os.path.join(IMG_DIR, f"{AWAKEN_SCREEN}_area.json")
+
+
+def awaken_screen_area():
+    """등록해둔 '각성화면 표시' 자리 — 창 왼쪽위 기준 (dx, dy, w, h). 없으면 None."""
+    try:
+        with open(awaken_screen_area_path(), encoding="utf-8") as f:
+            d = json.load(f) or {}
+        if d.get("full"):
+            return None
+        dx, dy, w, h = (int(d.get("dx", 0)), int(d.get("dy", 0)),
+                        int(d.get("w", 0)), int(d.get("h", 0)))
+        return (dx, dy, w, h) if w > 0 and h > 0 else None
+    except Exception:
+        return None
                        # 줄마다 좌표 · 동작(클릭/잡고 내리기) · 초 · 🖼그림 을 넣는다.
                        # 안 쓰는 줄은 비워두면 건너뛴다. 더 필요하면 이 숫자만 키운다.
 # 클릭 대신 '마우스 휠 올리기'를 할 자리 (던전키: {0부터 센 클릭번호})
@@ -5274,6 +5312,14 @@ class App(tk.Tk):
                   font=("맑은 고딕", 8, "bold"), pady=1,
                   bg="#2471a3", fg="white", activebackground="#1b5480",
                   command=self._awaken_probe_screen).pack(side="left", padx=(3, 0))
+        # 🖼 사용자가 "이게 각성화면이다" 라고 직접 알려주는 버튼 (가장 확실하다)
+        _gb = tk.Button(_arow, text=("🖼 각성화면 다시 알려주기"
+                                     if os.path.exists(awaken_screen_img_path())
+                                     else "🖼 이게 각성화면이다"),
+                        font=("맑은 고딕", 8, "bold"), pady=1,
+                        bg="#8e44ad", fg="white", activebackground="#6c3483",
+                        command=self._grab_awaken_screen)
+        _gb.pack(side="left", padx=(3, 0))
         self._awaken_open_btn_paint()
         tk.Label(win, font=("맑은 고딕", 9), justify="left", fg="#888",
                  text=("좌표를 찍지 않습니다 — 화면에서 버튼 글자를 찾아 누릅니다."
@@ -12668,15 +12714,26 @@ class App(tk.Tk):
             #    그 그림이 없는 컴퓨터에서만 [각성]·[경험치 합성] 으로 넘어간다.
             # 각성 그림은 `IMG_DIR` 에서 직접 읽는다 (`_awaken_find` 와 같은 길).
             # ⚠ `has_img(fkey, 좌표번호)` 는 dgn2 런처용이라 여기선 쓸 수 없다.
+            # 🖼 사용자가 직접 등록한 '각성화면 표시' 가 있으면 **그것만** 본다
+            if os.path.exists(awaken_screen_img_path()):
+                return self._awaken_seen_by_img(rect)
+
             def _have(nm):
                 return os.path.exists(os.path.join(IMG_DIR, f"{nm}.png"))
             # `자동 등록` 을 먼저 보고, 못 찾으면 [각성]·[경험치 합성] 으로도 본다.
             # (처음엔 AUTO 만 봤는데, 그 글자가 가려지거나 조금 다른 판이면
             #  각성 화면인데도 영영 못 알아봤다 — 2026-10-01)
-            order = [n for n in (AWAKEN_AUTO, AWAKEN_GO, AWAKEN_FUSE) if _have(n)]
+            # ⚠ **[각성]·[경험치 합성] 으로는 판정하지 않는다** (2026-10-01 되돌림).
+            #    '각성' 과 '경험치 합성' 은 **'성' 글자를 공유**해 서로 0.7대까지 올라가고
+            #    (2026-09-16 에 이미 0.77 오탐으로 데인 곳), 실측에서도 각성 화면이
+            #    아닐 때 `awaken_go` 가 **0.67** 까지 나왔다. 화면 판정에 쓰면
+            #    아무 데서나 창이 뜬다. `awaken_auto` 가 없을 때만 마지막 수단으로 쓴다.
+            order = ([AWAKEN_AUTO] if _have(AWAKEN_AUTO)
+                     else [n for n in (AWAKEN_GO, AWAKEN_FUSE) if _have(n)])
             best = ("", 0.0)
             for nm in order:
-                x, y, v, _l = self._awaken_find(nm, rect)
+                # 화면 판정은 **엄격한 기준**으로 본다 (버튼 누르는 기준보다 높다)
+                x, y, v, _l = self._awaken_find(nm, rect, thr=AWAKEN_SEEN_MATCH)
                 if v > best[1]:
                     best = (nm, float(v))
                 if x is not None:
@@ -12684,6 +12741,100 @@ class App(tk.Tk):
             return False, best[0], best[1]
         except Exception:
             return False, "", 0.0
+
+    def _awaken_seen_by_img(self, rect):
+        """🖼 사용자가 등록한 '각성화면 표시' 로 판정한다 → (맞나, 이름, 점수).
+
+        등록할 때 **드래그한 자리를 창 왼쪽위 기준으로** 함께 저장해뒀으므로
+        그 둘레(±`AWAKEN_SCREEN_PAD`)만 훑는다 — 화면 다른 곳의 비슷한 글씨에
+        걸리지 않는다. 창을 **직접 캡처**(PrintWindow)하므로 런처가 앞에 있어도 정확하다."""
+        try:
+            import cv2, numpy as np
+            t = cv2.imdecode(np.fromfile(awaken_screen_img_path(), np.uint8),
+                             cv2.IMREAD_COLOR)
+            big = grab_window((rect[1] + 40, rect[2] + 40))
+            if t is None or big is None:
+                return False, AWAKEN_SCREEN, 0.0
+            ar = awaken_screen_area()
+            if ar:
+                dx, dy, w, h = ar
+                x1, y1 = max(0, dx - AWAKEN_SCREEN_PAD), max(0, dy - AWAKEN_SCREEN_PAD)
+                x2 = min(big.shape[1], dx + w + AWAKEN_SCREEN_PAD)
+                y2 = min(big.shape[0], dy + h + AWAKEN_SCREEN_PAD)
+                if x2 - x1 > 4 and y2 - y1 > 4:
+                    big = big[y1:y2, x1:x2]
+            best = 0.0
+            for sc in (1.00, 0.92, 0.85, 1.08, 1.15):   # 창을 키운 정도가 달라도
+                tt = (t if sc == 1.00 else cv2.resize(
+                    t, None, fx=sc, fy=sc,
+                    interpolation=cv2.INTER_AREA if sc < 1 else cv2.INTER_CUBIC))
+                if tt.shape[0] > big.shape[0] or tt.shape[1] > big.shape[1]:
+                    continue
+                v = float(cv2.matchTemplate(big, tt, cv2.TM_CCOEFF_NORMED).max())
+                best = max(best, v)
+                if best >= AWAKEN_SEEN_MATCH:
+                    break
+            return best >= AWAKEN_SEEN_MATCH, AWAKEN_SCREEN, best
+        except Exception:
+            return False, AWAKEN_SCREEN, 0.0
+
+    def _grab_awaken_screen(self):
+        """🖼 '이게 각성화면이다' — 각성 화면에만 있는 것을 드래그해 등록한다.
+
+        사용자가 알려주는 것이 가장 확실하다 (2026-10-01).
+        **각성 화면에만 있는 글자**를 작게 자른다 — 다른 화면에도 있는 것을 자르면
+        또 아무 데서나 뜬다. 빈 칸·단색은 저장 자체를 거부한다
+        (단색은 어디서나 1.00 이 나온다 — 2026-09-16 층그림 사고와 같은 뿌리)."""
+        self.status.set("🖼 각성 화면에만 있는 글자를 작게 드래그하세요 (ESC 취소)")
+        for w in self._section_wins():
+            try: w.withdraw()
+            except Exception: pass
+        try:
+            if getattr(self, "_awaken_win", None) is not None:
+                self._awaken_win.withdraw()
+        except Exception:
+            pass
+        self.withdraw()
+        self.after(250, lambda: _PotionAreaOverlay(self, self._on_awaken_screen_img))
+
+    def _on_awaken_screen_img(self, x, y, w, h):
+        self.deiconify()
+        for wn in self._section_wins():
+            try: wn.deiconify()
+            except Exception: pass
+        if w < 5 or h < 5:
+            self.status.set("🖼 너무 작습니다 — 다시 드래그해주세요")
+            self._open_awaken_win(reuse=True); return
+        try:
+            from PIL import ImageGrab
+            im = ImageGrab.grab(bbox=(x, y, x + w, y + h),
+                                all_screens=True).convert("RGB")
+            os.makedirs(IMG_DIR, exist_ok=True)
+            im.save(awaken_screen_img_path())
+            # 단색(무늬 없음)이면 **저장하지 않는다** — 어디서나 1.00 이 나온다
+            if floor_img_flat(awaken_screen_img_path()):
+                try: os.remove(awaken_screen_img_path())
+                except Exception: pass
+                self.status.set("⚠ 무늬가 없는 자리를 잘랐습니다 (저장 안 함) — "
+                                "글자가 들어가게 다시 드래그해주세요")
+                self._open_awaken_win(reuse=True); return
+            # 그 자리를 **창 왼쪽위 기준**으로 기억한다 → 다음부터 그 둘레만 훑는다
+            msg = f"🖼 각성화면 그림 저장 ({w}×{h})"
+            r = self._awaken_win_rect()
+            if r and r[1] <= x <= r[1] + r[3] and r[2] <= y <= r[2] + r[4]:
+                with open(awaken_screen_area_path(), "w", encoding="utf-8") as f:
+                    json.dump({"dx": x - r[1], "dy": y - r[2], "w": w, "h": h},
+                              f, ensure_ascii=False, indent=2)
+                msg += f" · 자리도 기억함 (창 안 {x - r[1]},{y - r[2]})"
+            else:
+                try: os.remove(awaken_screen_area_path())
+                except Exception: pass
+                msg += " · ⚠ 리니지M 창 밖이라 자리는 못 기억함 (창 전체를 훑습니다)"
+            click_log("[각성자동] " + msg)
+            self.status.set(msg + " — [🔍 지금 각성화면인가] 로 확인해보세요")
+        except Exception as e:
+            self.status.set(f"🖼 저장 실패: {e}")
+        self._open_awaken_win(reuse=True)
 
     def _awaken_autoshow(self, xy):
         """사람이 **크게 띄운 리니지M 창**을 클릭했을 때, 각성 화면이면 런처를 띄운다.
@@ -12744,7 +12895,7 @@ class App(tk.Tk):
                 elif time.time() - getattr(self, "_awaken_no_log", 0.0) > 2.0:
                     self._awaken_no_log = time.time()
                     click_log(f"[각성자동] 각성 화면이 아님 — 가장 닮은 것 "
-                              f"{which or '-'} 일치도 {sc:.2f} (기준 {AWAKEN_MATCH}) "
+                              f"{which or '-'} 일치도 {sc:.2f} (기준 {AWAKEN_SEEN_MATCH}) "
                               f"· 클릭 {tuple(xy)} · 창 {rw}x{rh}")
                 return
             # 🔒 걸쇠가 걸려 있다 = 이미 띄웠거나 사용자가 껐다 → **다시 띄우지 않는다.**
@@ -12782,6 +12933,19 @@ class App(tk.Tk):
                 _h, rx, ry, rw, rh, nm = rect
                 lines.append(f"제일 큰 창: [{nm}]  {rw}x{rh}  왼쪽위({rx},{ry})")
                 lines.append("")
+                if os.path.exists(awaken_screen_img_path()):
+                    _ok2, _nm2, _sc2 = self._awaken_seen_by_img(rect)
+                    _ar = awaken_screen_area()
+                    lines.append(f"  🖼 등록한 각성화면 그림  일치도 {_sc2:5.2f}  "
+                                 f"{'✔ 맞음' if _ok2 else '✘ 기준 미달'} "
+                                 f"(기준 {AWAKEN_SEEN_MATCH})")
+                    lines.append(f"     훑는 자리: "
+                                 + (f"창 안 {_ar}" if _ar else "창 전체"))
+                    lines.append("")
+                else:
+                    lines.append("  🖼 등록한 각성화면 그림: 없음 "
+                                 "([🖼 이게 각성화면이다] 로 알려주세요)")
+                    lines.append("")
                 for t in (AWAKEN_AUTO, AWAKEN_GO, AWAKEN_FUSE, AWAKEN_TOUCH):
                     if not os.path.exists(os.path.join(IMG_DIR, f"{t}.png")):
                         lines.append(f"  {t:14s} 그림 없음")
@@ -12789,17 +12953,18 @@ class App(tk.Tk):
                     x, y, v, lit = self._awaken_find(t, rect)
                     lines.append(f"  {t:14s} 일치도 {v:5.2f}  밝기 {lit:5.1f}  "
                                  + (f"찾음 {(x, y)}" if x is not None
-                                    else f"못찾음 (기준 {AWAKEN_MATCH})"))
+                                    else f"못찾음 (기준 {AWAKEN_SEEN_MATCH})"))
                 ok, which, sc = self._awaken_screen_seen()
                 lines.append("")
                 lines.append(("✔ 각성 화면으로 봤다 — "
                               f"{which} 일치도 {sc:.2f}") if ok else
                              ("✘ 각성 화면이 아니라고 봤다 — 가장 닮은 것 "
-                              f"{which or '-'} {sc:.2f} (기준 {AWAKEN_MATCH})"))
+                              f"{which or '-'} {sc:.2f} (기준 {AWAKEN_SEEN_MATCH})"))
                 if not ok:
                     lines.append("")
                     lines.append("→ 각성 화면이 맞는데 못 잡으면: 그 화면에서")
-                    lines.append("   [🖼 각성 그림] 로 '자동 등록' 글자를 다시 잘라주세요")
+                    lines.append("   [🖼 이게 각성화면이다] 로 그 화면에만 있는")
+                    lines.append("   글자를 작게 드래그해 알려주세요")
             txt = chr(10).join(lines)
             click_log("[각성진단] " + " | ".join(l.strip() for l in lines if l.strip()))
             self.after(0, lambda: self._show_text_win("🔍 각성 화면 확인", txt))
