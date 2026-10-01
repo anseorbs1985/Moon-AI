@@ -347,6 +347,14 @@ AWAKEN_JITTER  = (0.90, 1.15)   # 사람처럼 — 간격을 매번 조금씩 �
 AWAKEN_TEMPO   = (0.85, 1.25)   # 이번 실행의 '자기 속도' — 시작할 때 한 번 뽑아 내내 곱한다
 AWAKEN_PAUSE_P = 0.12           # 이 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
 AWAKEN_PAUSE   = (0.7, 2.0)     # 그때 더 쉬는 시간(초)
+# ✨ 각성 화면에 들어가면 런처 창을 **자동으로 띄운다** (2026-10-01 사용자 요청:
+# "내가 그 각성화면에 들어가면 너가 자동으로 런처를 띄워줄 순 없어?")
+# **띄우기만 한다 — 실행은 사용자가 [▶] 를 눌러야 시작된다.**
+# 닫는 것도 하지 않는다 (사용자: "끄는 건 내가 끌게").
+AWAKEN_OPEN_COOL = 8.0          # 한 번 띄운 뒤 이 시간 안에는 다시 안 띄운다
+AWAKEN_SEE_COOL  = 2.0          # '각성 화면인가' 를 다시 보기까지의 최소 간격(초).
+                                # 한 번 확인에 약 75ms 든다 — 사람이 게임하며 연달아
+                                # 클릭할 때 매번 보면 아깝다 (실측 3장 다 보면 227ms).
                        # 줄마다 좌표 · 동작(클릭/잡고 내리기) · 초 · 🖼그림 을 넣는다.
                        # 안 쓰는 줄은 비워두면 건너뛴다. 더 필요하면 이 숫자만 키운다.
 # 클릭 대신 '마우스 휠 올리기'를 할 자리 (던전키: {0부터 센 클릭번호})
@@ -5227,10 +5235,20 @@ class App(tk.Tk):
                 self._awaken_busy = False
         threading.Thread(target=_go, daemon=True).start()
 
-    def _open_awaken_win(self):
-        """✨ 각성강화 — 크게 띄운 창 하나에만 돌린다 (좌표 등록 없음)."""
+    def _open_awaken_win(self, reuse=False):
+        """✨ 각성강화 — 크게 띄운 창 하나에만 돌린다 (좌표 등록 없음).
+
+        `reuse=True` 면 **이미 열려 있는 창을 죽이지 않고** 앞으로만 올린다.
+        자동 띄우기(`_awaken_autoshow`)가 이 길로 들어온다 — 사용자가 횟수를
+        고쳐놓고 쓰는 중인데 창을 다시 만들면 그 설정이 날아간다."""
         win = getattr(self, "_awaken_win", None)
         if win and win.winfo_exists():
+            if reuse:
+                try:
+                    win.deiconify(); win.lift()
+                except Exception:
+                    pass
+                return win
             try: win.destroy()
             except Exception: pass
         win = tk.Toplevel(self); self._awaken_win = win
@@ -5242,6 +5260,12 @@ class App(tk.Tk):
 
         tk.Label(win, font=("맑은 고딕", 10, "bold"), fg="#8e44ad",
                  text="각성 화면을 크게 띄워두면 알아서 돌립니다").pack(pady=(10, 2))
+        # ✨ 각성 화면에 들어가면 이 창을 자동으로 띄운다 (띄우기만 — 실행은 ▶ 로)
+        self._awaken_open_btn = tk.Button(
+            win, text="", font=("맑은 고딕", 8, "bold"), pady=1,
+            command=self._awaken_open_toggle)
+        self._awaken_open_btn.pack(pady=(0, 4))
+        self._awaken_open_btn_paint()
         tk.Label(win, font=("맑은 고딕", 9), justify="left", fg="#888",
                  text=("좌표를 찍지 않습니다 — 화면에서 버튼 글자를 찾아 누릅니다."
                        + chr(10) +
@@ -12574,10 +12598,15 @@ class App(tk.Tk):
                 if n == seen:
                     continue
                 seen = n
-                if not self.cfg.get("check_area_rel"):
-                    continue                      # 경고영역이 없으면 볼 수가 없다
                 if self._is_busy():
                     continue
+                # ✨ 각성 화면이면 각성강화 창을 띄운다 (띄우기만 · 2026-10-01).
+                # 🩹 십자가 확인보다 **먼저** 둔다 — 각성은 '크게 띄운 창' 에서 하므로
+                #    16슬롯 어디에도 안 들어가고, 아래 슬롯 확인에서 걸러져 버린다.
+                threading.Thread(target=self._awaken_autoshow, args=(xy,),
+                                 daemon=True).start()
+                if not self.cfg.get("check_area_rel"):
+                    continue                      # 경고영역이 없으면 볼 수가 없다
                 si = self._slot_of_anchor(xy)
                 if not si:
                     continue                      # 리니지M 창 밖을 클릭한 것
@@ -12612,6 +12641,97 @@ class App(tk.Tk):
                     return
         except Exception:
             pass
+
+    # ── ✨ 각성 화면에 들어가면 런처를 자동으로 띄운다 (2026-10-01 사용자 요청) ──
+    def _awaken_screen_seen(self):
+        """지금 **제일 큰 리니지M 창**이 각성 화면인가 → (맞나, 무엇으로, 점수).
+
+        '자동 등록'(`awaken_auto`) 글자를 먼저 본다 — 각성 화면에만 있고
+        [각성] 버튼이 꺼져 있어도(재료 없음) 그대로 보이므로 가장 확실하다.
+        그게 없으면 [각성]/[경험치 합성] 자리를 본다."""
+        try:
+            rect = self._awaken_win_rect()
+            if not rect:
+                return False, "", 0.0
+            # ⚠ 그림을 세 장 다 보면 **227ms** 가 든다 (실측). '각성 화면인가' 만
+            #    알면 되므로 **`자동 등록` 한 장만** 본다 (약 75ms) — 각성 화면에만
+            #    있고 [각성] 버튼이 꺼져 있어도 그대로 보여서 가장 확실하다.
+            #    그 그림이 없는 컴퓨터에서만 [각성]·[경험치 합성] 으로 넘어간다.
+            # 각성 그림은 `IMG_DIR` 에서 직접 읽는다 (`_awaken_find` 와 같은 길).
+            # ⚠ `has_img(fkey, 좌표번호)` 는 dgn2 런처용이라 여기선 쓸 수 없다.
+            def _have(nm):
+                return os.path.exists(os.path.join(IMG_DIR, f"{nm}.png"))
+            order = ([AWAKEN_AUTO] if _have(AWAKEN_AUTO)
+                     else [n for n in (AWAKEN_GO, AWAKEN_FUSE) if _have(n)])
+            best = ("", 0.0)
+            for nm in order:
+                x, y, v, _l = self._awaken_find(nm, rect)
+                if v > best[1]:
+                    best = (nm, float(v))
+                if x is not None:
+                    return True, nm, float(v)
+            return False, best[0], best[1]
+        except Exception:
+            return False, "", 0.0
+
+    def _awaken_autoshow(self, xy):
+        """사람이 **크게 띄운 리니지M 창**을 클릭했을 때, 각성 화면이면 런처를 띄운다.
+
+        · **띄우기만 한다** — 실행은 사용자가 [▶] 를 눌러야 시작된다
+          ('실행은 사용자가 시킬 때만' 2026-08-10 최우선 규칙을 지킨다).
+        · **닫지 않는다** (사용자: "끄는 건 내가 끌게").
+        · 이미 열려 있으면 **죽이지 않고 앞으로만** 올린다 (고쳐둔 횟수가 날아가므로).
+        · 상시 감시가 아니다 — **사람이 클릭한 그 순간**만 본다. 평소 부하 0."""
+        try:
+            if not self.cfg.get("awaken_open_on", True):
+                return
+            if time.time() - getattr(self, "_awaken_open_at", 0.0) < AWAKEN_OPEN_COOL:
+                return
+            # 화면을 보는 것 자체에도 쿨다운을 둔다 — 연달아 클릭할 때 아깝다
+            if time.time() - getattr(self, "_awaken_see_at", 0.0) < AWAKEN_SEE_COOL:
+                return
+            self._awaken_see_at = time.time()
+            rect = self._awaken_win_rect()
+            if not rect:
+                return
+            _h, rx, ry, rw, rh, _nm = rect
+            if not (rx <= xy[0] <= rx + rw and ry <= xy[1] <= ry + rh):
+                return                      # 크게 띄운 그 창 밖을 클릭한 것
+            ok, which, sc = self._awaken_screen_seen()
+            if not ok:
+                return
+            self._awaken_open_at = time.time()
+            _win = getattr(self, "_awaken_win", None)
+            _had = bool(_win and _win.winfo_exists())
+            self.after(0, lambda: self._open_awaken_win(reuse=True))
+            click_log(f"[각성자동] 각성 화면 확인 ({which} 일치도 {sc:.2f}) → "
+                      + ("창을 앞으로 올림" if _had else "런처 창을 띄웠다")
+                      + " (실행은 사용자가 ▶ 를 눌러야 시작)")
+            self.after(0, lambda: self.status.set(
+                "✨ 각성 화면 — 각성강화 창을 띄웠습니다 "
+                "(시작은 [▶] 를 눌러주세요 · 끄는 건 직접)"))
+        except Exception as e:
+            click_log(f"[각성자동] 실패 {e!r}")
+
+    def _awaken_open_toggle(self):
+        on = not bool(self.cfg.get("awaken_open_on", True))
+        self.cfg["awaken_open_on"] = on
+        save_cfg(self.cfg)
+        self._awaken_open_btn_paint()
+        self.status.set("✨ 각성 화면 자동 띄우기 "
+                        + ("켬 — 각성 화면을 클릭하면 창이 뜹니다 (실행은 안 함)"
+                           if on else "끔"))
+        click_log(f"[각성자동] 사용자가 {'켬' if on else '끔'}")
+
+    def _awaken_open_btn_paint(self):
+        b = getattr(self, "_awaken_open_btn", None)
+        if not b or not b.winfo_exists():
+            return
+        on = bool(self.cfg.get("awaken_open_on", True))
+        b.config(text=("✨ 각성화면이면 창 자동 띄우기 ON" if on
+                       else "✨ 자동 띄우기 OFF"),
+                 bg=("#7d3c98" if on else "#7f8c8d"), fg="white",
+                 activebackground=("#5b2c6f" if on else "#626e6e"))
 
     def _fix_click_btn_paint(self):
         b = getattr(self, "_warn_clickbtn", None)
