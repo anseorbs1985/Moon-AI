@@ -353,8 +353,12 @@ AWAKEN_PAUSE   = (0.7, 2.0)     # 그때 더 쉬는 시간(초)
 # 닫는 것도 하지 않는다 (사용자: "끄는 건 내가 끌게").
 AWAKEN_OPEN_COOL = 8.0          # 한 번 띄운 뒤 이 시간 안에는 다시 안 띄운다
 AWAKEN_SEE_COOL  = 2.0          # '각성 화면인가' 를 다시 보기까지의 최소 간격(초).
-                                # 한 번 확인에 약 75ms 든다 — 사람이 게임하며 연달아
+                                # 한 번 확인에 약 50ms 든다 — 사람이 게임하며 연달아
                                 # 클릭할 때 매번 보면 아깝다 (실측 3장 다 보면 227ms).
+# 🚨 **클릭한 뒤 바로 보면 안 된다** (2026-10-01 사용자 신고: "각성 화면 띄웠는데
+#    왜 안 가져오냐"). 각성 화면을 **여는 그 클릭** 직후에는 화면이 아직 안 그려져
+#    있어서 못 찾고, 그대로 조용히 끝났다. 그래서 **늦게, 여러 번** 본다.
+AWAKEN_SEE_WAIT  = (0.7, 1.1, 1.6)   # 클릭 뒤 이 시각들(초)에 한 번씩 본다
                        # 줄마다 좌표 · 동작(클릭/잡고 내리기) · 초 · 🖼그림 을 넣는다.
                        # 안 쓰는 줄은 비워두면 건너뛴다. 더 필요하면 이 숫자만 키운다.
 # 클릭 대신 '마우스 휠 올리기'를 할 자리 (던전키: {0부터 센 클릭번호})
@@ -5261,10 +5265,15 @@ class App(tk.Tk):
         tk.Label(win, font=("맑은 고딕", 10, "bold"), fg="#8e44ad",
                  text="각성 화면을 크게 띄워두면 알아서 돌립니다").pack(pady=(10, 2))
         # ✨ 각성 화면에 들어가면 이 창을 자동으로 띄운다 (띄우기만 — 실행은 ▶ 로)
+        _arow = tk.Frame(win); _arow.pack(pady=(0, 4))
         self._awaken_open_btn = tk.Button(
-            win, text="", font=("맑은 고딕", 8, "bold"), pady=1,
+            _arow, text="", font=("맑은 고딕", 8, "bold"), pady=1,
             command=self._awaken_open_toggle)
-        self._awaken_open_btn.pack(pady=(0, 4))
+        self._awaken_open_btn.pack(side="left")
+        tk.Button(_arow, text="🔍 지금 각성화면인가",
+                  font=("맑은 고딕", 8, "bold"), pady=1,
+                  bg="#2471a3", fg="white", activebackground="#1b5480",
+                  command=self._awaken_probe_screen).pack(side="left", padx=(3, 0))
         self._awaken_open_btn_paint()
         tk.Label(win, font=("맑은 고딕", 9), justify="left", fg="#888",
                  text=("좌표를 찍지 않습니다 — 화면에서 버튼 글자를 찾아 누릅니다."
@@ -12661,8 +12670,10 @@ class App(tk.Tk):
             # ⚠ `has_img(fkey, 좌표번호)` 는 dgn2 런처용이라 여기선 쓸 수 없다.
             def _have(nm):
                 return os.path.exists(os.path.join(IMG_DIR, f"{nm}.png"))
-            order = ([AWAKEN_AUTO] if _have(AWAKEN_AUTO)
-                     else [n for n in (AWAKEN_GO, AWAKEN_FUSE) if _have(n)])
+            # `자동 등록` 을 먼저 보고, 못 찾으면 [각성]·[경험치 합성] 으로도 본다.
+            # (처음엔 AUTO 만 봤는데, 그 글자가 가려지거나 조금 다른 판이면
+            #  각성 화면인데도 영영 못 알아봤다 — 2026-10-01)
+            order = [n for n in (AWAKEN_AUTO, AWAKEN_GO, AWAKEN_FUSE) if _have(n)]
             best = ("", 0.0)
             for nm in order:
                 x, y, v, _l = self._awaken_find(nm, rect)
@@ -12680,13 +12691,19 @@ class App(tk.Tk):
         · **띄우기만 한다** — 실행은 사용자가 [▶] 를 눌러야 시작된다
           ('실행은 사용자가 시킬 때만' 2026-08-10 최우선 규칙을 지킨다).
         · **닫지 않는다** (사용자: "끄는 건 내가 끌게").
+        · **한 번 띄운(또는 사용자가 끈) 뒤에는, 각성 화면이 한 번 사라졌다 다시
+          떠야** 또 띄운다 (2026-10-01 사용자 지시: *"내가 끄면 안 나타나야지,
+          다음 화면이 뜨면 나타야지"*). `_awaken_latch` 가 그 걸쇠다 —
+          띄울 때 걸고, **각성 화면이 아닌 것을 본 순간** 풀린다.
+          그래서 같은 화면에서 끄면 다시 안 뜨고, 화면을 나갔다 들어오면 뜬다.
         · 이미 열려 있으면 **죽이지 않고 앞으로만** 올린다 (고쳐둔 횟수가 날아가므로).
         · 상시 감시가 아니다 — **사람이 클릭한 그 순간**만 본다. 평소 부하 0."""
         try:
             if not self.cfg.get("awaken_open_on", True):
                 return
-            if time.time() - getattr(self, "_awaken_open_at", 0.0) < AWAKEN_OPEN_COOL:
-                return
+            # ⚠ 열기 쿨다운(AWAKEN_OPEN_COOL)은 **여기서 보지 않는다.**
+            #    여기서 막으면 '각성 화면이 아님' 을 볼 기회가 없어 걸쇠가 안 풀린다.
+            #    (열기 직전에만 본다 — 아래)
             # 화면을 보는 것 자체에도 쿨다운을 둔다 — 연달아 클릭할 때 아깝다
             if time.time() - getattr(self, "_awaken_see_at", 0.0) < AWAKEN_SEE_COOL:
                 return
@@ -12697,21 +12714,97 @@ class App(tk.Tk):
             _h, rx, ry, rw, rh, _nm = rect
             if not (rx <= xy[0] <= rx + rw and ry <= xy[1] <= ry + rh):
                 return                      # 크게 띄운 그 창 밖을 클릭한 것
-            ok, which, sc = self._awaken_screen_seen()
+            # 🔓 **창(캐릭터)이 바뀌었으면 걸쇠를 푼다** (2026-10-01 사용자 지시:
+            #    "다른 거나 다른 각성 화면을 띄우면 너가 띄워줘야지").
+            #    다른 클라를 크게 띄워 각성하는 경우, 중간에 '각성 화면이 아닌 것'을
+            #    볼 기회가 없어 걸쇠가 안 풀릴 수 있다. 창 손잡이·이름으로 가린다.
+            _who = (_h, _nm, rw, rh)
+            if getattr(self, "_awaken_who", None) != _who:
+                if getattr(self, "_awaken_latch", False):
+                    click_log(f"[각성자동] 다른 창([{_nm}]) 이다 — 걸쇠를 풀고 다시 본다")
+                self._awaken_latch = False
+                self._awaken_who = _who
+            # 클릭 직후에는 화면이 덜 그려져 있다 → 늦게, 여러 번 본다
+            ok, which, sc = False, "", 0.0
+            _t0 = time.time()
+            for _w in AWAKEN_SEE_WAIT:
+                time.sleep(max(0.0, _w - (time.time() - _t0)))
+                ok, which, sc = self._awaken_screen_seen()
+                if ok:
+                    break
             if not ok:
+                # 🔓 각성 화면이 아니다 → **걸쇠를 푼다.**
+                #    다음에 각성 화면이 뜨면 그때 다시 띄운다.
+                if getattr(self, "_awaken_latch", False):
+                    self._awaken_latch = False
+                    click_log("[각성자동] 각성 화면을 벗어났다 — "
+                              "다음에 각성 화면이 뜨면 다시 띄운다")
+                # **실패도 기록한다** — 이게 없어서 "왜 안 가져오냐" 를 못 짚었다.
+                # 2초에 한 줄만 남겨 로그가 넘치지 않게 한다.
+                elif time.time() - getattr(self, "_awaken_no_log", 0.0) > 2.0:
+                    self._awaken_no_log = time.time()
+                    click_log(f"[각성자동] 각성 화면이 아님 — 가장 닮은 것 "
+                              f"{which or '-'} 일치도 {sc:.2f} (기준 {AWAKEN_MATCH}) "
+                              f"· 클릭 {tuple(xy)} · 창 {rw}x{rh}")
                 return
+            # 🔒 걸쇠가 걸려 있다 = 이미 띄웠거나 사용자가 껐다 → **다시 띄우지 않는다.**
+            #    (사용자: "내가 끄면 안 나타나야지")
+            if getattr(self, "_awaken_latch", False):
+                return
+            if time.time() - getattr(self, "_awaken_open_at", 0.0) < AWAKEN_OPEN_COOL:
+                return
+            self._awaken_latch = True
             self._awaken_open_at = time.time()
             _win = getattr(self, "_awaken_win", None)
             _had = bool(_win and _win.winfo_exists())
             self.after(0, lambda: self._open_awaken_win(reuse=True))
             click_log(f"[각성자동] 각성 화면 확인 ({which} 일치도 {sc:.2f}) → "
                       + ("창을 앞으로 올림" if _had else "런처 창을 띄웠다")
-                      + " (실행은 사용자가 ▶ 를 눌러야 시작)")
+                      + " (실행은 사용자가 ▶ 를 눌러야 시작 · 끄면 다시 안 띄움)")
             self.after(0, lambda: self.status.set(
                 "✨ 각성 화면 — 각성강화 창을 띄웠습니다 "
-                "(시작은 [▶] 를 눌러주세요 · 끄는 건 직접)"))
+                "(시작은 [▶] · 끄면 다음 각성 화면에서 다시 띄웁니다)"))
         except Exception as e:
             click_log(f"[각성자동] 실패 {e!r}")
+
+    def _awaken_probe_screen(self):
+        """🔍 지금 '제일 큰 리니지M 창' 이 각성 화면으로 보이나 — 점수를 보여준다.
+
+        자동 띄우기가 안 될 때 **왜 안 되는지**를 바로 가린다
+        (창을 못 찾나 · 그림이 안 맞나 · 기준에 못 미치나).
+        사용자가 직접 누른 버튼이므로 결과 창을 띄워도 된다."""
+        def _job():
+            rect = self._awaken_win_rect()
+            lines = []
+            if not rect:
+                lines.append("✘ 리니지M 창을 못 찾았다")
+            else:
+                _h, rx, ry, rw, rh, nm = rect
+                lines.append(f"제일 큰 창: [{nm}]  {rw}x{rh}  왼쪽위({rx},{ry})")
+                lines.append("")
+                for t in (AWAKEN_AUTO, AWAKEN_GO, AWAKEN_FUSE, AWAKEN_TOUCH):
+                    if not os.path.exists(os.path.join(IMG_DIR, f"{t}.png")):
+                        lines.append(f"  {t:14s} 그림 없음")
+                        continue
+                    x, y, v, lit = self._awaken_find(t, rect)
+                    lines.append(f"  {t:14s} 일치도 {v:5.2f}  밝기 {lit:5.1f}  "
+                                 + (f"찾음 {(x, y)}" if x is not None
+                                    else f"못찾음 (기준 {AWAKEN_MATCH})"))
+                ok, which, sc = self._awaken_screen_seen()
+                lines.append("")
+                lines.append(("✔ 각성 화면으로 봤다 — "
+                              f"{which} 일치도 {sc:.2f}") if ok else
+                             ("✘ 각성 화면이 아니라고 봤다 — 가장 닮은 것 "
+                              f"{which or '-'} {sc:.2f} (기준 {AWAKEN_MATCH})"))
+                if not ok:
+                    lines.append("")
+                    lines.append("→ 각성 화면이 맞는데 못 잡으면: 그 화면에서")
+                    lines.append("   [🖼 각성 그림] 로 '자동 등록' 글자를 다시 잘라주세요")
+            txt = chr(10).join(lines)
+            click_log("[각성진단] " + " | ".join(l.strip() for l in lines if l.strip()))
+            self.after(0, lambda: self._show_text_win("🔍 각성 화면 확인", txt))
+        threading.Thread(target=_job, daemon=True).start()
+        self.status.set("🔍 각성 화면을 확인하는 중…")
 
     def _awaken_open_toggle(self):
         on = not bool(self.cfg.get("awaken_open_on", True))
