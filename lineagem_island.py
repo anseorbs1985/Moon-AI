@@ -1628,10 +1628,23 @@ class IslandApp(tk.Tk):
                 pi += 1
         return wrap
     def _preset_label(self, key, pi):
+        """버튼에 보일 글자 — 라스타바드 그림 자리는 🗡 로 따로 센다 (2026-10-03).
+
+        그냥 '(n개)' 만 보여주면 그림을 넣었는지 알 수 없어 '저장이 안 된다' 고 느낀다."""
         pr = self._presets(key)[pi]
-        n = len(pr.get("items") or {})
+        items = pr.get("items") or {}
         nm = pr.get("name") or ("P" + str(pi + 1))
-        return (nm + chr(10) + "(" + str(n) + "개)") if n else nm
+        n_img = sum(1 for v in items.values()
+                    if (v or {}).get("act") in (RASTA_CLICK, RASTA_SEE))
+        n_etc = len(items) - n_img
+        if not items:
+            return nm
+        tail = []
+        if n_etc:
+            tail.append(str(n_etc) + "개")
+        if n_img:
+            tail.append("🗡" + str(n_img))
+        return nm + chr(10) + "(" + " ".join(tail) + ")"
 
     def _open_preset_win(self, key):
         """프리셋 편집 — 좌표 1~N번을 전부 보여주고 번호별로 그대로/삭제/위치변경 선택."""
@@ -1740,6 +1753,8 @@ class IslandApp(tk.Tk):
         pw["src"].set(str(pr.get("src", 1)))
         for x, b in enumerate(pw["tabs"]):
             base = self._preset_color(self._preset_short(key, x))
+            # 어느 프리셋에 무엇이 들었는지 탭에서 바로 보이게 (2026-10-03)
+            b.config(text=self._preset_label(key, x))
             b.config(bg=base, fg="white",
                      relief="sunken" if x == pi else "raised",
                      bd=4 if x == pi else 1,
@@ -2045,7 +2060,22 @@ class IslandApp(tk.Tk):
         self._refresh_preset_btns(key)
         dels = sorted(int(k2) + 1 for k2, v in pw["items"].items() if v.get("act") == "del")
         movs = sorted(int(k2) + 1 for k2, v in pw["items"].items() if v.get("act") == "mov")
-        msg = ("저장 — 삭제 " + str(dels or "없음") + " / 이동 " + str(movs or "없음"))
+        # 🗡 라스타바드 — 그림 자리도 세서 보여준다 (2026-10-03 사용자 신고:
+        #    "라스타바드 프리셋이 저장이 안 되는데"). 실제로는 저장되고 있었는데
+        #    메시지가 삭제/이동만 세서 **"삭제 없음 / 이동 없음"** 으로 나와
+        #    아무것도 저장 안 된 것처럼 보였다. 지우지 말 것.
+        imgs = sorted(int(k2) + 1 for k2, v in pw["items"].items()
+                      if v.get("act") in (RASTA_CLICK, RASTA_SEE))
+        _nm0 = (pres[pi].get("name") or "") + " "
+        msg = ("저장 " + _nm0 + "— 삭제 " + str(dels or "없음")
+               + " / 이동 " + str(movs or "없음"))
+        if imgs:
+            _no = [n for n in imgs if not os.path.exists(rasta_img_path(n - 1))]
+            msg += " / 🗡 그림 " + str(imgs)
+            if _no:
+                msg += "  ⚠ " + str(_no) + "번은 그림이 없습니다 — 🖼 로 잘라주세요"
+        if not (dels or movs or imgs):
+            msg += "   ⚠ 고른 칸이 없습니다 (번호칸을 눌러 바꾼 뒤 저장하세요)"
         if synced:
             what = "전체 설정" if sync_all else ("클릭 " + ",".join(str(j + 1) for j in sync) + "번")
             msg += ("   [" + what + "을 " + " ".join(synced) + " '" +
@@ -2072,7 +2102,12 @@ class IslandApp(tk.Tk):
         pr = self._presets(key)[pi]
         items = pr.get("items") or {}
         if not items:
-            self._status.set("P" + str(pi + 1) + "에 저장된 내용이 없습니다 — 프리셋 설정에서 만들어주세요")
+            # 라스타바드 프리셋을 만들어두지 않고 누르면 여기서 막힌다 —
+            # "선택도 안 된다" 로 보였던 자리다 (2026-10-03). 무엇을 해야 하는지 말해준다.
+            _nm = pr.get("name") or ("P" + str(pi + 1))
+            self._status.set(
+                "'" + _nm + "' 에 저장된 내용이 없습니다 — [⚙ 프리셋 설정] 에서 "
+                "번호칸을 눌러 ✖삭제/📍위치변경/🖼그림클릭 을 고르고 [저장] 하세요")
             return
         nclk = clicks_for(key)
         slot = self.cfg[key][idx]
