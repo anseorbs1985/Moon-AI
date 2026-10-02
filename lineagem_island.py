@@ -215,6 +215,14 @@ def is_repeat_only(key, n):
 #
 # 버전은 **던전 전체가 하나** (사용자 선택) — 슬롯마다 다르게 두지 않는다.
 RASTA_KEY   = "토요일_악몽의섬"     # 라스타바드 프리셋이 있는 던전
+# 🗡 **앞은 공용, 뒤만 갈린다** (2026-10-03 사용자 지시:
+#    "기본 베이스가 악몽의섬이랑 같으니까 같이 쓴다. 뒤에는 다르니까 앞에는 다 같이 쓴다")
+#      1~25번  = 공용 (두 버전이 같이 쓴다 — 프리셋에서 '그대로' 로 두면 된다)
+#      26~35번 = 여기서부터 갈린다 (라스타바드는 그림·클릭·이동·녹화를 넣고,
+#                악몽의섬은 ✖삭제로 비운다)
+# 그래서 **버전별 좌표 세트를 따로 두지 않는다** — 지금 프리셋 틀
+# ('고른 번호만 바꾸고 나머지는 그대로')이 정확히 이 동작이다.
+RASTA_RANGE = (26, 35)
 
 # 칸마다 무엇을 할지 — **프리셋**으로 고르고(오만의탑처럼), 프리셋을 적용하면
 # 그 슬롯의 `rasta` 에 적힌다 (2026-10-03 사용자 지시).
@@ -1696,7 +1704,11 @@ class IslandApp(tk.Tk):
               "[위치]는 그 번호를 바꿀 자리를 화면에서 찍습니다." + chr(10)
               + "🗡 라스타바드: 🖼 로 그 화면에만 있는 것을 자르고, 🎯 로 둘 중 "
               "[맨위/왼쪽/1등] 을 고릅니다 (🖼 오른쪽클릭 = 그림 지우기)." + chr(10)
-              + "저장 후 슬롯 좌표 팝업에서 그 프리셋 버튼을 누르면 그 번호들만 바뀝니다 (나머지는 그대로).")
+              + "저장 후 슬롯 좌표 팝업에서 그 프리셋 버튼을 누르면 그 번호들만 바뀝니다 (나머지는 그대로)."
+              + ((chr(10) + f"🗡 악몽의섬/라스타바드: 1~{RASTA_RANGE[0]-1}번은 "
+                  f"**공용**(그대로 두세요) · {RASTA_RANGE[0]}~{RASTA_RANGE[1]}번부터 갈립니다. "
+                  f"악몽의섬 프리셋에는 아래 [🗡 {RASTA_RANGE[0]}~{RASTA_RANGE[1]}번 ✖삭제로] 를 "
+                  f"눌러 비워두세요.") if key == RASTA_KEY else ""))
         tk.Label(win, text=_h, font=("맑은 고딕", 8), fg="#555",
                  justify="left").pack(anchor="w", padx=10)
         lg = tk.Frame(win); lg.pack(anchor="w", padx=10, pady=(2, 0))
@@ -1744,6 +1756,17 @@ class IslandApp(tk.Tk):
                   width=10, command=self._preset_store).pack(side="left", padx=4)
         tk.Button(bot, text="전부 그대로", font=("맑은 고딕", 9), bg="#7f8c8d", fg="white",
                   command=self._preset_clear).pack(side="left", padx=4)
+        if key == RASTA_KEY:
+            _a, _b = RASTA_RANGE
+            tk.Button(bot, text=f"🗡 {_a}~{_b}번 ✖삭제로",
+                      font=("맑은 고딕", 9, "bold"), bg="#c0392b", fg="white",
+                      activebackground="#922b21",
+                      command=lambda: self._preset_fill_range("del")
+                      ).pack(side="left", padx=4)
+            tk.Button(bot, text=f"🗡 {_a}~{_b}번 그대로",
+                      font=("맑은 고딕", 9), bg="#5d6d7e", fg="white",
+                      command=lambda: self._preset_fill_range(None)
+                      ).pack(side="left", padx=4)
         tk.Button(bot, text="↻ 쓰던 슬롯 전부 다시 적용", font=("맑은 고딕", 9, "bold"),
                   bg="#b9770e", fg="white",
                   command=self._preset_reapply).pack(side="left", padx=4)
@@ -2023,6 +2046,30 @@ class IslandApp(tk.Tk):
         self._refresh(key)
         self._status.set("↻ '" + nm + "' 다시 적용 — 슬롯 " +
                          ", ".join(str(i + 1) for i in hit))
+
+    def _preset_fill_range(self, act):
+        """🗡 라스타바드 구간(26~35)을 한 번에 채운다.
+
+        · `act="del"` → **✖삭제** : 악몽의섬 프리셋에 쓴다. 그 칸을 비워서
+          악몽의섬이 라스타바드 칸까지 누르지 않게 한다. **이게 꼭 필요하다.**
+        · `act=None`  → **그대로** : 그 구간 설정을 지운다 (되돌리기).
+        앞 1~25 는 건드리지 않는다 — **공용**이다."""
+        a, b = RASTA_RANGE
+        n = min(b, clicks_for(self._pw["key"]))
+        cnt = 0
+        for j in range(a - 1, n):
+            if act is None:
+                if self._pw["items"].pop(str(j), None) is not None:
+                    cnt += 1
+            else:
+                self._pw["items"][str(j)] = {"act": act}
+                cnt += 1
+        self._preset_refresh_cells()
+        self._status.set(
+            f"🗡 {a}~{n}번 {cnt}칸을 "
+            + ("✖삭제 로 채웠습니다 — [저장] 을 눌러주세요 "
+               "(악몽의섬이 라스타바드 칸을 누르지 않게 됩니다)"
+               if act == "del" else "그대로 로 되돌렸습니다 — [저장] 을 눌러주세요"))
 
     def _preset_clear(self):
         self._pw["items"] = {}
