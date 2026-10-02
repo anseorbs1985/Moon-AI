@@ -594,58 +594,81 @@ class BatchOverlay(tk.Toplevel):
 
 
 class RastaGrabOverlay(tk.Toplevel):
-    """🖼 라스타바드 그림 자르기 — 화면을 **드래그**해 그 사각형을 돌려준다.
+    """🖼 화면을 **드래그**해 그 사각형을 돌려준다 (라스타바드 그림 자르기).
 
-    섬 실행기에는 '점 하나 클릭' 오버레이만 있었다 (`BatchOverlay`).
-    그림은 **범위**가 필요하므로 드래그용을 따로 만들었다."""
+    ⚠ 메인런처의 `_PotionAreaOverlay` 와 **똑같은 방식**으로 만들었다 —
+    그게 이 환경에서 확실히 동작하는 것이 확인된 구현이다 (2026-10-03).
+    내가 처음 만든 것은 아래 셋이 달라서 **드래그해도 아무 일도 안 났다**:
+      · `e.x`(위젯 좌표)를 썼다 → **`e.x_root`(화면 좌표)** 를 써야 한다
+      · `destroy()` 직후 그 자리에서 콜백을 불렀다 → **`app.after(150, …)`** 로
+        창을 닫은 뒤 앱 쪽에서 불러야 한다 (예외가 나면 조용히 묻힌다)
+      · 안내 글자가 작아 떴는지도 몰랐다 → **가운데 큰 글자**
+    **클로드는 이 구현을 바꾸지 말 것.**"""
 
     def __init__(self, app, on_done, note=""):
         super().__init__()
         self.app, self.on_done = app, on_done
         self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.attributes("-alpha", 0.35)
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         self.geometry(f"{sw}x{sh}+0+0")
-        self.attributes("-alpha", 0.3)
-        self.attributes("-topmost", True)
-        self.lift(); self.focus_force()
         self.configure(bg="black")
-        self.c = tk.Canvas(self, bg="black", highlightthickness=0)
-        self.c.pack(fill="both", expand=True)
-        self.c.create_text(sw // 2, 60, fill="white", font=("맑은 고딕", 14),
-                           text=(note or "그 화면에만 있는 것을 작게 드래그하세요")
-                                + "   —   ESC: 취소")
-        self._x0 = self._y0 = None
+        self._start = None
         self._rect = None
-        self.c.bind("<ButtonPress-1>", self._down)
-        self.c.bind("<B1-Motion>", self._move)
-        self.c.bind("<ButtonRelease-1>", self._up)
-        self.bind("<Escape>", lambda e: self._cancel())
+        tk.Label(self,
+                 text=((note or "그림으로 쓸 곳") + " — 드래그하세요" + chr(10)
+                       + "ESC = 취소"),
+                 font=("맑은 고딕", 18, "bold"), fg="white", bg="black",
+                 justify="center").place(relx=0.5, rely=0.5, anchor="center")
+        self._canvas = tk.Canvas(self, bg="black", highlightthickness=0)
+        self._canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        self._canvas.bind("<ButtonPress-1>", self._on_press)
+        self._canvas.bind("<B1-Motion>", self._on_drag)
+        self._canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Escape>", self._cancel)
+        self.focus_force()
 
-    def _cancel(self):
-        try: self.destroy()
-        except Exception: pass
-        try: self.app.deiconify()
-        except Exception: pass
-
-    def _down(self, e):
-        self._x0, self._y0 = e.x, e.y
+    def _on_press(self, e):
+        self._start = (e.x_root, e.y_root)
         if self._rect:
-            self.c.delete(self._rect)
-        self._rect = self.c.create_rectangle(e.x, e.y, e.x, e.y,
-                                             outline="#f1c40f", width=2)
+            self._canvas.delete(self._rect)
 
-    def _move(self, e):
-        if self._rect:
-            self.c.coords(self._rect, self._x0, self._y0, e.x, e.y)
-
-    def _up(self, e):
-        x0, y0 = self._x0, self._y0
-        if x0 is None:
+    def _on_drag(self, e):
+        if not self._start:
             return
-        x, y = min(x0, e.x), min(y0, e.y)
-        w, h = abs(e.x - x0), abs(e.y - y0)
-        self.destroy(); self.update_idletasks()
-        self.on_done(x, y, w, h)
+        if self._rect:
+            self._canvas.delete(self._rect)
+        x0, y0 = self._start
+        self._rect = self._canvas.create_rectangle(
+            x0, y0, e.x_root, e.y_root, outline="yellow", width=2)
+
+    def _on_release(self, e):
+        if not self._start:
+            return
+        x0, y0 = self._start
+        x1, y1 = e.x_root, e.y_root
+        self.destroy()
+        self.app.after(150, lambda: self.on_done(
+            min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0)))
+
+    def _cancel(self, e=None):
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        try:
+            self.app.deiconify()
+        except Exception:
+            pass
+        w = getattr(self.app, "_preset_win", None)
+        if w and w.winfo_exists():
+            try: w.deiconify()
+            except Exception: pass
+        try:
+            self.app._pmsg("드래그를 취소했습니다")
+        except Exception:
+            pass
 
 
 class IslandApp(tk.Tk):
