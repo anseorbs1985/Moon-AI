@@ -1789,8 +1789,14 @@ class IslandApp(tk.Tk):
                            bg="#2471a3", fg="white",
                            command=lambda x=jx: self._preset_probe_img(x))
             qb.pack(side="left", padx=(2, 0))
+            ob = tk.Button(grow, text="📍", font=("맑은 고딕", 8), width=3,
+                           bg="#95a5a6", fg="white",
+                           command=lambda x=jx: self._preset_pick_offset(x))
+            ob.pack(side="left", padx=(2, 0))
+            ob.bind("<Button-3>", lambda e, x=jx: self._preset_del_offset(x))
             self._pw["cells"].append({"state": sb, "pick": pb, "rec": rb,
-                                      "img": gb, "tgt": tb, "probe": qb})
+                                      "img": gb, "tgt": tb, "probe": qb,
+                                      "off": ob})
         bot = tk.Frame(win); bot.pack(pady=(2, 10))
         tk.Button(bot, text="저장", font=("맑은 고딕", 10, "bold"), bg="#1e8449", fg="white",
                   width=10, command=self._preset_store).pack(side="left", padx=4)
@@ -1870,6 +1876,13 @@ class IslandApp(tk.Tk):
                     (it or {}).get("pick") or "top", "맨위")
                 c["tgt"].config(text=(_pk if _ri else "🎯"),
                                 bg=("#2471a3" if _ri else "#95a5a6"), fg="white")
+            if c.get("off") is not None:
+                _of = (it or {}).get("off")
+                c["off"].config(
+                    text=(f"{_of[0]:+d},{_of[1]:+d}" if _of else "📍"),
+                    width=(8 if _of else 3),
+                    bg=("#d35400" if _of else ("#7f8c8d" if _ri else "#95a5a6")),
+                    fg="white")
             rbtn = c.get("rec")
             if rbtn is not None:
                 if it and it.get("act") == "rec":
@@ -1994,6 +2007,74 @@ class IslandApp(tk.Tk):
         self._status.set(f"클릭 {jx+1} 번 — 둘 중 '{nm[nxt]}' 을 고릅니다")
         self._preset_refresh_cells()
 
+    def _preset_pick_offset(self, jx):
+        """📍 '그림에서 얼마나 떨어진 곳을 누를지' 를 화면에서 찍는다.
+
+        쓰는 법: 그 화면을 1번(기준슬롯) 클라에 띄워두고 📍 → **누를 자리를 클릭**.
+        그림이 지금 어디서 잡히는지 보고 **그 자리와의 차이**를 저장한다.
+        그래서 글자로 찾고 그 위/옆의 네모를 누를 수 있다 —
+        똑같이 생긴 큐브가 둘이어도 글자가 다르므로 틀린 것을 누르지 않는다.
+        오른쪽 클릭 = 떨어짐 지우기(그림 가운데를 누름)."""
+        it = (self._pw["items"].get(str(jx)) or {})
+        if it.get("act") not in (RASTA_CLICK,):
+            self._status.set(f"📍 {jx+1}번은 '🖼 그림클릭' 자리가 아닙니다 "
+                             f"(번호칸을 눌러 바꿔주세요)")
+            return
+        if not os.path.exists(rasta_img_path(jx)):
+            self._status.set(f"📍 {jx+1}번 칸에 그림이 없습니다 — 🖼 로 먼저 잘라주세요")
+            return
+        key = self._pw["key"]
+        try:
+            si = max(1, min(SLOTS, int(self._pw["src"].get()))) - 1
+        except Exception:
+            si = 0
+        slots = self.cfg.get(key) or []
+        anchor = next((c for c in ((slots[si] if si < len(slots) else {})
+                                   .get("coords") or []) if c), None)
+        if not anchor:
+            self._status.set(f"📍 기준슬롯 #{si+1} 에 좌표가 없어 어느 클라인지 "
+                             f"알 수 없습니다")
+            return
+        gx, gy, gv = rasta_find(jx, anchor, pick=(it.get("pick") or "top"))
+        if gx is None:
+            self._status.set(f"📍 지금 그림을 못 찾았습니다 (최고 {gv:.2f}) — "
+                             f"그 화면을 기준슬롯 #{si+1} 클라에 띄워두고 다시 누르세요")
+            return
+        self._off_target = (jx, gx, gy)
+        try:
+            self._preset_win.withdraw()
+        except Exception:
+            pass
+        self.withdraw()
+        self._status.set(f"📍 {jx+1}번 — 실제로 **누를 자리**를 클릭하세요 "
+                         f"(그림은 ({gx},{gy}) 에서 찾았습니다)")
+        self.after(250, lambda: RastaGrabOverlay(
+            self, self._on_offset_pick, f"{jx+1}번 — 누를 자리를 클릭"))
+
+    def _on_offset_pick(self, x, y, w, h):
+        self.deiconify()
+        jx, gx, gy = getattr(self, "_off_target", (0, 0, 0))
+        # 드래그했으면 그 가운데, 그냥 클릭했으면 그 점
+        px, py = (x + w // 2, y + h // 2) if (w > 4 and h > 4) else (x, y)
+        dx, dy = int(px) - int(gx), int(py) - int(gy)
+        it = self._pw["items"].setdefault(str(jx), {"act": RASTA_CLICK,
+                                                    "pick": "top"})
+        it["off"] = [dx, dy]
+        self._status.set(f"📍 {jx+1}번 — 그림에서 ({dx:+d}, {dy:+d}) 떨어진 곳을 "
+                         f"누릅니다 — [저장] 을 눌러주세요")
+        self._rlog(f"[라스타] {jx+1}번 누를자리 떨어짐 {dx:+d},{dy:+d}")
+        self._preset_refresh_cells()
+        self._reopen_preset_win(self._pw["key"])
+
+    def _preset_del_offset(self, jx):
+        it = self._pw["items"].get(str(jx)) or {}
+        if it.pop("off", None) is not None:
+            self._status.set(f"📍 {jx+1}번 — 떨어짐을 지웠습니다 "
+                             f"(그림 가운데를 누릅니다) — [저장] 하세요")
+        else:
+            self._status.set(f"📍 {jx+1}번 — 떨어짐이 없습니다 (그림 가운데를 누름)")
+        self._preset_refresh_cells()
+
     def _preset_probe_img(self, jx):
         """🔍 이 칸의 그림이 **지금** 잡히는지 확인한다 (클릭하지 않는다).
 
@@ -2032,6 +2113,13 @@ class IslandApp(tk.Tk):
             gx, gy, gv = rasta_find(jx, anchor, pick=pick)[0:3] if True else (0, 0, 0)
             lines.append("")
             lines.append(f"🎯 지금 설정({_nm}) 으로는 → ({gx}, {gy}) 일치도 {gv:.2f}")
+            _of = it.get("off")
+            if _of:
+                lines.append(f"📍 실제로 누를 자리 → "
+                             f"({gx + _of[0]}, {gy + _of[1]})  "
+                             f"(그림에서 {_of[0]:+d},{_of[1]:+d})")
+            else:
+                lines.append("📍 떨어짐 없음 — 그림 가운데를 누릅니다")
             if len(cand) > 1:
                 lines.append("")
                 lines.append("※ 비슷한 그림이 여러 개입니다 — 🎯 로 어느 것을 "
@@ -2294,8 +2382,10 @@ class IslandApp(tk.Tk):
                 # 🗡 라스타바드 — 이 번호는 **그림으로** 처리한다.
                 #   좌표는 **건드리지 않는다** (어느 클라인지 알아야 하므로 그대로 둔다).
                 #   실행할 때 읽도록 그 슬롯에 적어둔다.
-                slot.setdefault("rasta", {})[str(j)] = {
-                    "mode": it.get("act"), "pick": it.get("pick") or "top"}
+                _r1 = {"mode": it.get("act"), "pick": it.get("pick") or "top"}
+                if it.get("off"):
+                    _r1["off"] = list(it["off"])
+                slot.setdefault("rasta", {})[str(j)] = _r1
                 movs.append(j + 1)
                 continue
             elif it.get("act") == "rec":
@@ -3982,11 +4072,20 @@ class IslandApp(tk.Tk):
                 except Exception:
                     pass
                 self._last_focus = si
+                # 📍 '그림에서 떨어진 자리' 가 정해져 있으면 거기를 누른다.
+                #    글자로 찾고(글자는 서로 다르다) 그 옆/위의 **네모**를 누르는 데 쓴다 —
+                #    똑같이 생긴 큐브가 둘 떠 있어도 틀린 것을 누르지 않는다 (2026-10-03).
+                _off = st.get("off") or [0, 0]
+                _cx, _cy = int(x) + int(_off[0]), int(y) + int(_off[1])
                 self._status.set(f"🗡 [{name}] {lbl} 그림 찾음 ({pick}) "
-                                 f"일치도 {v:.2f} → 누름")
-                click_at(x, y)
+                                 f"일치도 {v:.2f} → 누름"
+                                 + (f" (그림에서 {_off[0]:+d},{_off[1]:+d})"
+                                    if any(_off) else ""))
+                click_at(_cx, _cy)
                 self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) "
-                           f"그림 눌렀다 ({pick} · {v:.2f}) 자리 ({x},{y})")
+                           f"그림 눌렀다 ({pick} · {v:.2f}) 그림자리 ({x},{y})"
+                           + (f" → 누른자리 ({_cx},{_cy}) 떨어짐 "
+                              f"{_off[0]:+d},{_off[1]:+d}" if any(_off) else ""))
                 time.sleep(random.uniform(*RASTA_AFTER))
                 return True
             if t < RASTA_TRIES - 1:
