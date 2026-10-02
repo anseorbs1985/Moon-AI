@@ -2101,14 +2101,14 @@ class IslandApp(tk.Tk):
         """슬롯 팝업의 프리셋 버튼 — 이 슬롯의 해당 번호만 삭제/이동 (나머지는 그대로)."""
         pr = self._presets(key)[pi]
         items = pr.get("items") or {}
-        if not items:
-            # 라스타바드 프리셋을 만들어두지 않고 누르면 여기서 막힌다 —
-            # "선택도 안 된다" 로 보였던 자리다 (2026-10-03). 무엇을 해야 하는지 말해준다.
-            _nm = pr.get("name") or ("P" + str(pi + 1))
-            self._status.set(
-                "'" + _nm + "' 에 저장된 내용이 없습니다 — [⚙ 프리셋 설정] 에서 "
-                "번호칸을 눌러 ✖삭제/📍위치변경/🖼그림클릭 을 고르고 [저장] 하세요")
-            return
+        # 🗡 **내용이 비어 있어도 '선택'은 된다** (2026-10-03 사용자 지시:
+        #    "프리셋에서 라바를 누르면 선택이 되고 프리셋창은 닫혀야 하잖아").
+        #    예전엔 여기서 `return` 해버려 **이름도 안 바뀌고 팝업도 안 닫혀**
+        #    눌러도 아무 일도 안 나는 것처럼 보였다.
+        #    아래 흐름을 그대로 타면: 좌표는 건드리지 않고(바꿀 것이 없다),
+        #    슬롯 이름이 그 프리셋으로 바뀌고, 좌표 팝업이 닫힌다.
+        #    **이 early return 을 다시 넣지 말 것.**
+        _empty = not items
         nclk = clicks_for(key)
         slot = self.cfg[key][idx]
         # 🗡 이 프리셋에서 '그림 자리' 가 아닌 번호는 **묵은 그림 설정을 지운다** —
@@ -2197,8 +2197,18 @@ class IslandApp(tk.Tk):
             except Exception:
                 pass
             self._pop = {}
-        self._status.set("#" + str(idx + 1) + " " + nm + " 적용 — 삭제 " +
-                         str(sorted(dels) or "없음") + " / 이동 " + str(sorted(movs) or "없음"))
+        if _empty:
+            self._status.set(
+                "#" + str(idx + 1) + " '" + nm + "' 선택 — 아직 내용이 비어 있습니다 "
+                "([⚙ 프리셋 설정] 에서 번호칸을 눌러 ✖삭제/📍위치변경/🖼그림클릭 을 "
+                "고르고 [저장])")
+        else:
+            _imgs = sorted(int(k3) + 1 for k3, v3 in items.items()
+                           if (v3 or {}).get("act") in (RASTA_CLICK, RASTA_SEE))
+            self._status.set("#" + str(idx + 1) + " " + nm + " 적용 — 삭제 " +
+                             str(sorted(dels) or "없음") + " / 이동 " +
+                             str(sorted(movs) or "없음")
+                             + (" / 🗡 그림 " + str(_imgs) if _imgs else ""))
 
     def _commit_pending_edits(self, key=None, idx=None):
         """열려 있는 좌표 팝업의 미저장 편집(간격·이름표)을 즉시 반영.
