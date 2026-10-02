@@ -129,6 +129,9 @@ def wait_mouse_idle(stop_fn, status_fn, idle_sec=MOUSE_IDLE_SEC):
 import datetime
 BASE        = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE, "island_coords.json")
+# 🖼 그림은 메인런처와 **같은 폴더**를 쓴다 — 업데이트가 함께 배포하고,
+#    메인런처의 그림 도구(🖼·🔍·🎯)와 파일 이름 규칙이 같아 서로 통한다.
+IMG_DIR     = os.path.join(BASE, "click_templates")
 COUNT_FILE  = os.path.join(BASE, "island_counts.json")
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE    = 0.05
@@ -187,6 +190,162 @@ def is_repeat_only(key, n):
     """n번(1부터) 좌표가 '반복에서만 누르는' 자리인가."""
     r = repeat_only_range(key)
     return bool(r) and r[0] <= n <= r[1]
+
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║ 🗡 라스타바드 버전 (2026-10-03 사용자 요청)                               ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+# 사용자: "악몽의섬을 두 가지 버전으로 만들어야 한다. 첫째는 악몽의섬 그대로,
+#          둘째는 라스타바드 버전. 들어가는 방법은 악몽의섬을 그대로 쓰고, 그 안에서
+#          용던고고처럼 던전 그림을 보고 **둘 중 하나**를 골라 가야 하고, 가면
+#          **앞으로 이동**하고, 또 그림을 보고 클릭하고, 또 앞으로 가야 한다."
+#
+# 왜 '악몽의섬의 버전' 으로 만들었나 (별 던전으로 떼지 않은 이유):
+#   ⏰ 4시간1회+2시간5회 와 **금요일 23:50 자동 초기화**가 던전 키
+#   `토요일_악몽의섬` 에 묶여 있다. 같은 키를 쓰면 그 둘이 **그대로 따라온다** —
+#   사용자가 원한 "라스타바드도 4시간1회 2시간5회, 금요일에 자동 초기화" 가 공짜다.
+#   16슬롯·프리셋·OFF·⏰·창고 구간(REPEAT_ONLY_RANGE)도 전부 그대로 쓴다.
+#   악몽의섬은 **이미 31칸**이라 칸을 늘릴 필요도 없었다.
+#
+# 버전은 **던전 전체가 하나** (사용자 선택) — 슬롯마다 다르게 두지 않는다.
+RASTA_KEY   = "토요일_악몽의섬"     # 이 던전만 버전을 고를 수 있다
+VER_NIGHT   = "night"               # 악몽의섬 그대로
+VER_RASTA   = "rasta"               # 라스타바드
+VER_LABEL   = {VER_NIGHT: "악몽의섬", VER_RASTA: "라스타바드"}
+
+# 칸마다 무엇을 할지 — `_rasta_steps` 에 던전키별로 저장 (슬롯이 아니라 **던전** 단위.
+# 순서는 16슬롯이 같고 좌표만 다르기 때문)
+RASTA_CLICK = "img"    # 그림을 찾아 **그 자리를 누른다** (둘 중 하나 고르기)
+RASTA_SEE   = "see"    # 그림이 **보이는지만** 확인 (안 보이면 그 슬롯 중단)
+
+RASTA_MATCH   = 0.60   # 그림 기준 (칸마다 `rasta_<번호>_thr.json` 으로 덮어쓸 수 있다)
+RASTA_TRIES   = 3      # 못 찾으면 몇 번까지 다시 보나
+RASTA_GAP     = (0.9, 1.4)   # 다시 볼 때까지
+RASTA_AFTER   = (0.45, 0.80)  # 그림을 누른 뒤 화면이 바뀌기를 기다리는 시간
+
+# ⌨ **'앞으로 이동' 은 새로 만들지 않는다** — 섬 실행기에 이미 있는 **방향 기능**을 쓴다.
+#    `_hold_arrow` 가 **WASD 스캔코드를 SendInput** 으로 꾹 누른다 (대각선도 두 키 동시).
+#    사용자가 알려준 `wd` = **↗** 가 정확히 그것이다.
+#    ⚠ `pyautogui` 로 키를 보내는 길을 새로 만들지 말 것 — 이 게임은 DirectInput 이라
+#      스캔코드가 아니면 씹힌다 (아이템등록에서 이미 데인 교훈).
+
+
+def dun_ver(cfg, key):
+    """그 던전의 버전 — 악몽의섬만 고를 수 있고, 나머지는 늘 '그대로'."""
+    if key != RASTA_KEY:
+        return VER_NIGHT
+    try:
+        v = (cfg.get("_dun_ver") or {}).get(key)
+        return VER_RASTA if v == VER_RASTA else VER_NIGHT
+    except Exception:
+        return VER_NIGHT
+
+
+def rasta_steps(cfg, key):
+    """칸별 설정 — {"3": {"mode": "img", "pick": "top"}, …} (번호는 0부터 문자열)."""
+    try:
+        return dict((cfg.get("_rasta_steps") or {}).get(key) or {})
+    except Exception:
+        return {}
+
+
+def rasta_step(cfg, key, j):
+    return dict(rasta_steps(cfg, key).get(str(j)) or {})
+
+
+def rasta_img_path(j):
+    """그림은 메인런처와 **같은 폴더·같은 이름 규칙**을 쓴다 (click_templates/)."""
+    return os.path.join(IMG_DIR, f"rasta_{j+1:02d}.png")
+
+
+def rasta_thr(j):
+    try:
+        with open(os.path.join(IMG_DIR, f"rasta_{j+1:02d}_thr.json"),
+                  encoding="utf-8") as f:
+            return float((json.load(f) or {}).get("thr") or RASTA_MATCH)
+    except Exception:
+        return RASTA_MATCH
+
+
+def grab_window(coord):
+    """그 좌표가 있는 클라 창을 **직접** 캡처한다 (PrintWindow).
+
+    화면을 긁으면(`ImageGrab`) 런처나 다른 창이 앞에 있을 때 그 창이 찍혀
+    잘못 판단한다 (2026-08-29 교훈). 이 방식은 가려져 있어도 정확하다.
+    ⚠ 메인런처에 같은 함수가 있다 — **고칠 때 양쪽을 같이 볼 것.**"""
+    try:
+        import win32gui, win32ui, cv2, numpy as np
+        from ctypes import windll
+        from PIL import Image
+        from precise_click import game_window_at
+        h = game_window_at(int(coord[0]), int(coord[1]))
+        if not h:
+            return None
+        import ctypes.wintypes
+        r = ctypes.wintypes.RECT()
+        ctypes.windll.user32.GetWindowRect(h, ctypes.byref(r))
+        w, ht = r.right - r.left, r.bottom - r.top
+        hdc = win32gui.GetWindowDC(h)
+        mfc = win32ui.CreateDCFromHandle(hdc)
+        sv = mfc.CreateCompatibleDC()
+        bmp = win32ui.CreateBitmap()
+        bmp.CreateCompatibleBitmap(mfc, w, ht)
+        sv.SelectObject(bmp)
+        windll.user32.PrintWindow(h, sv.GetSafeHdc(), 2)
+        info = bmp.GetInfo()
+        bits = bmp.GetBitmapBits(True)
+        im = Image.frombuffer("RGB", (info["bmWidth"], info["bmHeight"]),
+                              bits, "raw", "BGRX", 0, 1)
+        try:
+            win32gui.DeleteObject(bmp.GetHandle()); sv.DeleteDC()
+            mfc.DeleteDC(); win32gui.ReleaseDC(h, hdc)
+        except Exception:
+            pass
+        return cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR), (r.left, r.top)
+    except Exception:
+        return None
+
+
+def rasta_find(j, anchor, pick="top"):
+    """칸 j 의 그림을 그 클라 창 안에서 찾는다 → (화면x, 화면y, 점수).
+
+    **둘 중 하나 고르기**: 기준을 넘는 후보를 다 모아 `pick` 으로 고른다
+    (사용자 선택: "항상 위(또는 왼쪽) 것").
+      top  = 맨 위 · left = 맨 왼쪽 · best = 점수 1등
+    ⚠ `cv2.imread` 는 한글 경로를 조용히 못 읽는다 → `imdecode` 를 쓴다 (2026-08-27).
+    """
+    q = rasta_img_path(j)
+    if not os.path.exists(q) or not anchor:
+        return None, None, -1.0
+    try:
+        import cv2, numpy as np
+        got = grab_window(anchor)
+        if not got:
+            return None, None, 0.0
+        big, (ox, oy) = got
+        tpl = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+        if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
+            return None, None, 0.0
+        res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
+        thr = rasta_thr(j)
+        mx = float(res.max())
+        ys, xs = np.where(res >= thr)
+        if len(xs) == 0:
+            return None, None, mx
+        th, tw = tpl.shape[0], tpl.shape[1]
+        cand = [(int(x), int(y), float(res[y, x])) for x, y in zip(xs, ys)]
+        if pick == "left":
+            cand.sort(key=lambda c: (c[0], c[1]))
+        elif pick == "best":
+            cand.sort(key=lambda c: -c[2])
+        else:                                  # top (기본)
+            cand.sort(key=lambda c: (c[1], c[0]))
+        x, y, v = cand[0]
+        return ox + x + tw // 2, oy + y + th // 2, v
+    except Exception:
+        return None, None, 0.0
+
+
 
 
 def clicks_for(key):
@@ -407,6 +566,61 @@ class BatchOverlay(tk.Toplevel):
         x, y = e.x, e.y
         self.destroy(); self.update_idletasks()
         self.app.on_batch_coord(x, y)
+
+
+class RastaGrabOverlay(tk.Toplevel):
+    """🖼 라스타바드 그림 자르기 — 화면을 **드래그**해 그 사각형을 돌려준다.
+
+    섬 실행기에는 '점 하나 클릭' 오버레이만 있었다 (`BatchOverlay`).
+    그림은 **범위**가 필요하므로 드래그용을 따로 만들었다."""
+
+    def __init__(self, app, on_done, note=""):
+        super().__init__()
+        self.app, self.on_done = app, on_done
+        self.overrideredirect(True)
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.geometry(f"{sw}x{sh}+0+0")
+        self.attributes("-alpha", 0.3)
+        self.attributes("-topmost", True)
+        self.lift(); self.focus_force()
+        self.configure(bg="black")
+        self.c = tk.Canvas(self, bg="black", highlightthickness=0)
+        self.c.pack(fill="both", expand=True)
+        self.c.create_text(sw // 2, 60, fill="white", font=("맑은 고딕", 14),
+                           text=(note or "그 화면에만 있는 것을 작게 드래그하세요")
+                                + "   —   ESC: 취소")
+        self._x0 = self._y0 = None
+        self._rect = None
+        self.c.bind("<ButtonPress-1>", self._down)
+        self.c.bind("<B1-Motion>", self._move)
+        self.c.bind("<ButtonRelease-1>", self._up)
+        self.bind("<Escape>", lambda e: self._cancel())
+
+    def _cancel(self):
+        try: self.destroy()
+        except Exception: pass
+        try: self.app.deiconify()
+        except Exception: pass
+
+    def _down(self, e):
+        self._x0, self._y0 = e.x, e.y
+        if self._rect:
+            self.c.delete(self._rect)
+        self._rect = self.c.create_rectangle(e.x, e.y, e.x, e.y,
+                                             outline="#f1c40f", width=2)
+
+    def _move(self, e):
+        if self._rect:
+            self.c.coords(self._rect, self._x0, self._y0, e.x, e.y)
+
+    def _up(self, e):
+        x0, y0 = self._x0, self._y0
+        if x0 is None:
+            return
+        x, y = min(x0, e.x), min(y0, e.y)
+        w, h = abs(e.x - x0), abs(e.y - y0)
+        self.destroy(); self.update_idletasks()
+        self.on_done(x, y, w, h)
 
 
 class IslandApp(tk.Tk):
@@ -902,6 +1116,28 @@ class IslandApp(tk.Tk):
                   font=("맑은 고딕", 8), bg="#566573", fg="white",
                   command=lambda k=key: self._preview_all(k)
                   ).pack(fill="x", padx=4, pady=(0,2))
+
+        # ── 🗡 버전 (악몽의섬 / 라스타바드) — 악몽의섬 탭에만 나온다 ──
+        if key == RASTA_KEY:
+            vb = tk.LabelFrame(parent, text="🗡 버전 (던전 전체)",
+                               font=("맑은 고딕", 7, "bold"), fg="#5b2c6f",
+                               padx=3, pady=2)
+            vb.pack(fill="x", padx=4, pady=(0, 3))
+            v1 = tk.Frame(vb); v1.pack(fill="x")
+            self._ver_var = tk.StringVar(value=VER_LABEL[dun_ver(self.cfg, key)])
+            tk.OptionMenu(v1, self._ver_var, *VER_LABEL.values()).pack(side="left")
+            tk.Button(v1, text="적용", font=("맑은 고딕", 8, "bold"),
+                      bg="#8e44ad", fg="white", activebackground="#6c3483",
+                      command=lambda k=key: self._set_ver(k)).pack(side="left", padx=(3, 0))
+            tk.Button(v1, text="🗡 라스타바드 설정", font=("맑은 고딕", 8, "bold"),
+                      bg="#5b2c6f", fg="white", activebackground="#4a235a",
+                      command=lambda k=key: self._open_rasta_win(k)
+                      ).pack(side="left", padx=(3, 0))
+            self._ver_note = tk.Label(
+                vb, font=("맑은 고딕", 7), fg="#7f8c8d", justify="left", anchor="w",
+                text=("⏰ 4시간1회+2시간5회 와 금요일 23:50 자동 초기화는 "
+                      "두 버전 모두 그대로 적용됩니다"))
+            self._ver_note.pack(fill="x")
 
         # ── 전체 일괄 — 여기서 한 번만 정하면 모든 슬롯이 같아진다 ──
         ab = tk.LabelFrame(parent, text="전체 일괄 (한 번에 모든 슬롯)",
@@ -3368,6 +3604,234 @@ class IslandApp(tk.Tk):
                 _send_scan_key([SCAN[vk]], False)
         time.sleep(0.15)
 
+    # -- 라스타바드: 버전 고르기 / 칸별 설정 창 --------------------------
+    def _set_ver(self, key):
+        """버전을 바꿔 저장한다. **던전 전체가 한 버전** (사용자 선택)."""
+        want = VER_RASTA if self._ver_var.get() == VER_LABEL[VER_RASTA] else VER_NIGHT
+        d = dict(self.cfg.get("_dun_ver") or {})
+        d[key] = want
+        self.cfg["_dun_ver"] = d
+        save_cfg(self.cfg)
+        self._rlog(f"{key} 버전 -> {VER_LABEL[want]} (사용자)")
+        self._status.set(f"버전: {VER_LABEL[want]}"
+                         + (" — [라스타바드 설정] 에서 칸마다 그림을 등록하세요"
+                            if want == VER_RASTA else " (좌표만 누릅니다)"))
+
+    def _rasta_save(self, key, j, **kw):
+        """칸 j 의 설정을 고친다 — 쓰기 직전에 다시 읽어 **그 칸만** 고쳐 쓴다."""
+        all_ = dict(self.cfg.get("_rasta_steps") or {})
+        one = dict(all_.get(key) or {})
+        cur = dict(one.get(str(j)) or {})
+        cur.update(kw)
+        cur = {k: v for k, v in cur.items() if v not in ("", None)}
+        if cur:
+            one[str(j)] = cur
+        else:
+            one.pop(str(j), None)
+        all_[key] = one
+        self.cfg["_rasta_steps"] = all_
+        save_cfg(self.cfg)
+
+    def _open_rasta_win(self, key):
+        """칸마다 무엇을 할지 고르는 창.
+
+        · 평소     = 지금처럼 좌표를 누른다 (악몽의섬과 같다)
+        · 그림클릭 = 그림을 찾아 **그 자리를 누른다** (던전 그림 둘 중 하나 고르기)
+        · 확인만   = 그림이 보이는지만 보고 **누르지 않는다**
+
+        그림을 **못 보면 그 슬롯은 거기서 중단**한다 (다음 칸을 누르지 않는다).
+        '앞으로 이동' 은 **방향 기능**을 그대로 쓴다 — 슬롯 좌표창의 방향 칸에서
+        북동(w+d) + 초 를 넣으면 된다 (`_hold_arrow` 가 WASD 스캔코드로 꾹 누른다)."""
+        w = getattr(self, "_rasta_win", None)
+        if w and w.winfo_exists():
+            try: w.destroy()
+            except Exception: pass
+        w = tk.Toplevel(self); self._rasta_win = w
+        w.title("라스타바드 설정"); w.geometry("560x680")
+        w.attributes("-topmost", True)
+        tk.Label(w, font=("맑은 고딕", 9, "bold"), fg="#5b2c6f", justify="left",
+                 text=("칸마다 무엇을 할지 고릅니다 (16슬롯 공통 - 좌표만 슬롯별)" + chr(10)
+                       + "그림을 못 보면 그 슬롯은 거기서 멈춥니다 (다음 칸 안 누름)" + chr(10)
+                       + "앞으로 이동은 슬롯 좌표창의 방향 칸에서 북동(w+d) + 초 로")
+                 ).pack(pady=(8, 4))
+        cv = tk.Canvas(w, highlightthickness=0, height=500)
+        sb = tk.Scrollbar(w, orient="vertical", command=cv.yview)
+        bx = tk.Frame(cv)
+        cv.create_window((0, 0), window=bx, anchor="nw")
+        cv.configure(yscrollcommand=sb.set)
+        cv.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=4)
+        sb.pack(side="right", fill="y", pady=4)
+        bx.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        MODES = {"": "평소(좌표)", RASTA_CLICK: "그림클릭", RASTA_SEE: "확인만"}
+        PICKS = {"top": "맨위", "left": "맨왼쪽", "best": "점수1등"}
+        INV_M = {v: k for k, v in MODES.items()}
+        INV_P = {v: k for k, v in PICKS.items()}
+        hd = tk.Frame(bx); hd.pack(fill="x")
+        for t, wd in (("칸", 4), ("무엇을 할지", 12), ("둘 중", 8),
+                      ("그림", 8), ("기준", 6)):
+            tk.Label(hd, text=t, font=("맑은 고딕", 8, "bold"),
+                     width=wd, anchor="w").pack(side="left")
+
+        def mk_mode(jj, var):
+            def _f(_v=None):
+                self._rasta_save(key, jj, mode=INV_M.get(var.get(), ""))
+                self.after(50, lambda: self._open_rasta_win(key))
+            return _f
+
+        def mk_pick(jj, var):
+            def _f(_v=None):
+                self._rasta_save(key, jj, pick=INV_P.get(var.get(), "top"))
+            return _f
+
+        for j in range(clicks_for(key)):
+            st = rasta_step(self.cfg, key, j)
+            row = tk.Frame(bx); row.pack(fill="x", pady=1)
+            tk.Label(row, text=f"{j+1:02d}", font=("맑은 고딕", 8),
+                     width=4, anchor="w").pack(side="left")
+            mv = tk.StringVar(value=MODES.get(st.get("mode") or "", "평소(좌표)"))
+            om = tk.OptionMenu(row, mv, *MODES.values(), command=mk_mode(j, mv))
+            om.config(width=9, font=("맑은 고딕", 8)); om.pack(side="left")
+            pv = tk.StringVar(value=PICKS.get(st.get("pick") or "top", "맨위"))
+            op = tk.OptionMenu(row, pv, *PICKS.values(), command=mk_pick(j, pv))
+            op.config(width=6, font=("맑은 고딕", 8)); op.pack(side="left")
+            has = os.path.exists(rasta_img_path(j))
+            gb = tk.Button(row, text=("있음" if has else "그림"),
+                           font=("맑은 고딕", 8, "bold"), width=6,
+                           bg=("#7d3c98" if has else "#95a5a6"), fg="white",
+                           command=lambda jj=j: self._rasta_grab(key, jj))
+            gb.pack(side="left", padx=(2, 0))
+            gb.bind("<Button-3>", lambda e, jj=j: self._rasta_del(key, jj))
+            tk.Label(row, text=f"{rasta_thr(j):.2f}", font=("맑은 고딕", 8),
+                     width=6, anchor="w",
+                     fg=("#1e8449" if has else "#7f8c8d")).pack(side="left")
+        tk.Label(w, font=("맑은 고딕", 7), fg="#7f8c8d", justify="left",
+                 text=("그림 버튼: 왼쪽클릭 = 자르기 / 오른쪽클릭 = 지우기" + chr(10)
+                       + "기준은 click_templates/rasta_NN_thr.json 로 바꿉니다 "
+                       + f"(기본 {RASTA_MATCH})")).pack(pady=(0, 4))
+        tk.Button(w, text="닫기", font=("맑은 고딕", 9), width=10,
+                  command=w.destroy).pack(pady=(0, 8))
+
+    def _rasta_grab(self, key, j):
+        """그 칸의 그림을 드래그해 등록한다."""
+        self._rasta_target = (key, j)
+        try:
+            if getattr(self, "_rasta_win", None) is not None:
+                self._rasta_win.withdraw()
+        except Exception:
+            pass
+        self.withdraw()
+        self._status.set(f"{j+1}번 칸 - 그 화면에만 있는 것을 작게 드래그하세요")
+        self.after(250, lambda: RastaGrabOverlay(
+            self, self._on_rasta_img, f"{j+1}번 칸 그림"))
+
+    def _on_rasta_img(self, x, y, w, h):
+        self.deiconify()
+        key, j = getattr(self, "_rasta_target", (RASTA_KEY, 0))
+        if w < 5 or h < 5:
+            self._status.set("너무 작습니다 - 다시 드래그해주세요")
+            self._open_rasta_win(key); return
+        try:
+            from PIL import ImageGrab
+            im = ImageGrab.grab(bbox=(x, y, x + w, y + h),
+                                all_screens=True).convert("RGB")
+            os.makedirs(IMG_DIR, exist_ok=True)
+            im.save(rasta_img_path(j))
+            # 단색(무늬 없음)은 **어디서나 1.00** 이 나온다 -> 저장을 거부한다
+            # (2026-09-16 층그림 사고와 같은 뿌리)
+            import cv2, numpy as np
+            chk = cv2.imdecode(np.fromfile(rasta_img_path(j), np.uint8),
+                               cv2.IMREAD_COLOR)
+            if chk is None or float(chk.std()) < 3.0:
+                try: os.remove(rasta_img_path(j))
+                except Exception: pass
+                self._status.set("무늬가 없는 자리를 잘랐습니다 (저장 안 함) - "
+                                 "글자/아이콘이 들어가게 다시 드래그해주세요")
+                self._open_rasta_win(key); return
+            self._status.set(f"{j+1}번 칸 그림 저장 ({w}x{h})")
+            self._rlog(f"[라스타] {j+1}번 칸 그림 등록 {w}x{h}")
+        except Exception as e:
+            self._status.set(f"저장 실패: {e}")
+        self._open_rasta_win(key)
+
+    def _rasta_del(self, key, j):
+        """오른쪽 클릭 = 그 칸 그림 지우기."""
+        try:
+            if os.path.exists(rasta_img_path(j)):
+                os.remove(rasta_img_path(j))
+                self._status.set(f"{j+1}번 칸 그림을 지웠습니다")
+                self._rlog(f"[라스타] {j+1}번 칸 그림 삭제")
+            else:
+                self._status.set(f"{j+1}번 칸에 그림이 없습니다")
+        except Exception as e:
+            self._status.set(f"지우기 실패: {e}")
+        self._open_rasta_win(key)
+
+    def _rasta_do(self, key, j, si, slot, coords, name, lbl):
+        """🗡 라스타바드 — 이 칸을 **그림으로** 처리한다. 돌려주는 값: 계속해도 되나.
+
+        · `img`  = 그림을 찾아 **그 자리를 누른다** (던전 그림 둘 중 하나 고르기).
+          고르는 방법은 `pick` — 사용자 선택대로 기본이 **맨 위**다 (맨왼쪽/점수1등도 가능).
+        · `see`  = 그림이 **보이는지만** 확인한다 (누르지 않는다).
+
+        🚫 **그림을 못 보면 `False` 를 돌려 그 슬롯을 중단한다** — 다음 칸을 누르지
+           않는다. 용던고고에서 검증된 규칙 그대로다 (2026-08-28 절대 규칙:
+           "확인창이 안 뜨면 다음 좌표를 절대 누르지 않는다"). 다른 슬롯은 계속 돈다.
+
+        어느 클라인지는 **그 슬롯에 등록된 첫 좌표**로 안다 (용던고고의 `slot_anchor` 와
+        같은 방식) — 그림 자리에는 좌표를 등록하지 않아도 된다."""
+        st = rasta_step(self.cfg, key, j)
+        mode = st.get("mode") or ""
+        pick = st.get("pick") or "top"
+        anchor = coords[j] if (j < len(coords) and coords[j]) else None
+        if not anchor:                       # 그 칸에 좌표가 없으면 슬롯의 첫 좌표로
+            anchor = next((c for c in coords if c), None)
+        if not anchor:
+            self._status.set(f"🗡 [{name}] {lbl} — 이 슬롯에 좌표가 하나도 없어 "
+                             f"어느 클라인지 알 수 없습니다")
+            self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번 좌표 없음 → 중단")
+            return False
+        if not os.path.exists(rasta_img_path(j)):
+            self._status.set(f"🗡 [{name}] {lbl} — 그림이 등록되지 않았습니다")
+            self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번 그림 없음 → 중단")
+            return False
+        best = -1.0
+        for t in range(RASTA_TRIES):
+            if self._stop_flag:
+                return False
+            x, y, v = rasta_find(j, anchor, pick=pick)
+            best = max(best, v)
+            if x is not None:
+                if mode == RASTA_SEE:
+                    self._status.set(f"🗡 [{name}] {lbl} 확인됨 (일치도 {v:.2f}) "
+                                     f"— 누르지 않고 통과")
+                    self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) "
+                               f"확인만 — 보임 {v:.2f}")
+                    return True
+                # 그 클라를 먼저 앞으로 — 비활성 창의 첫 클릭은 '창 띄우기'로만
+                # 먹히고 사라진다 (2026-08-24 교훈)
+                try:
+                    self._focus_client(si, (x, y))
+                    time.sleep(random.uniform(0.25, 0.45))
+                except Exception:
+                    pass
+                self._last_focus = si
+                self._status.set(f"🗡 [{name}] {lbl} 그림 찾음 ({pick}) "
+                                 f"일치도 {v:.2f} → 누름")
+                click_at(x, y)
+                self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) "
+                           f"그림 눌렀다 ({pick} · {v:.2f}) 자리 ({x},{y})")
+                time.sleep(random.uniform(*RASTA_AFTER))
+                return True
+            if t < RASTA_TRIES - 1:
+                self._status.set(f"🗡 [{name}] {lbl} 그림 찾는 중… "
+                                 f"({t+1}/{RASTA_TRIES} · 최고 {best:.2f})")
+                time.sleep(random.uniform(*RASTA_GAP))
+        self._status.set(f"🚫 [{name}] {lbl} 그림을 못 찾아 이 슬롯 중단 "
+                         f"(최고 {best:.2f} · 기준 {rasta_thr(j):.2f})")
+        self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) 그림 못 찾음 "
+                   f"(최고 {best:.2f} · 기준 {rasta_thr(j):.2f}) → 이 슬롯 중단")
+        return False
+
     def _hold_arrow(self, word, sec, name):
         """방향키를 sec초 동안 눌러 이동 — 대각선(↖↗↙↘)은 두 키 동시 홀드.
         스캔코드 SendInput 방식이라 게임(DirectInput)도 인식. 직전 클릭으로 포커스된 클라가 받는다."""
@@ -3779,6 +4243,7 @@ class IslandApp(tk.Tk):
                 if not wait_mouse_idle(stop_fn, status_fn): break
                 name   = slot.get("name", f"#{si+1}")
                 _labels = labels_for(key)
+                _rv = dun_ver(self.cfg, key)       # 🗡 이 던전의 버전 (night/rasta)
                 coords = slot.get("coords", [None]*len(_labels))
                 while len(coords) < len(_labels):
                     coords.append(None)
@@ -3805,6 +4270,14 @@ class IslandApp(tk.Tk):
                         d_ = None
                     rec = recs.get(str(j))
                     did = False
+                    # 🗡 라스타바드 — 이 칸이 '그림' 자리면 그림으로 처리한다.
+                    #    (악몽의섬 버전이면 `_rv` 가 night 이라 이 블록은 건너뛴다)
+                    if _rv == VER_RASTA:
+                        _rm = (rasta_step(self.cfg, key, j).get("mode") or "")
+                        if _rm in (RASTA_CLICK, RASTA_SEE):
+                            if not self._rasta_do(key, j, si, slot, coords, name, lbl):
+                                break          # 🚫 그림을 못 봤다 → **이 슬롯만 중단**
+                            did = True
                     if d_ and d_[0] == "⇩":
                         # 등록한 좌표를 짧게 누르고 아래로 살짝 끌어내리기 (스크롤)
                         if coords[j]:
