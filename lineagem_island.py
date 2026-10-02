@@ -295,6 +295,42 @@ def grab_window(coord):
         return None
 
 
+def rasta_find_all(j, anchor):
+    """칸 j 의 그림 후보를 **전부** 돌려준다 → ([(x, y, 점수), …], 최고점수).
+
+    🔍 확인 버튼이 "몇 개 잡혔고 어느 것이 맨 위인가"를 보여주는 데 쓴다.
+    암살군왕/마수군왕 큐브처럼 **비슷한 그림이 둘** 있을 때 꼭 필요하다."""
+    q = rasta_img_path(j)
+    if not os.path.exists(q) or not anchor:
+        return [], -1.0
+    try:
+        import cv2, numpy as np
+        got = grab_window(anchor)
+        if not got:
+            return [], 0.0
+        big, (ox, oy) = got
+        tpl = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+        if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
+            return [], 0.0
+        res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
+        thr = rasta_thr(j)
+        mx = float(res.max())
+        th, tw = tpl.shape[0], tpl.shape[1]
+        out, used = [], []
+        ys, xs = np.where(res >= thr)
+        for x, y in sorted(zip(xs, ys), key=lambda c: -float(res[c[1], c[0]])):
+            # 같은 것을 여러 번 세지 않게, 이미 담은 것 주변은 건너뛴다
+            if any(abs(int(x) - u[0]) < tw and abs(int(y) - u[1]) < th for u in used):
+                continue
+            used.append((int(x), int(y)))
+            out.append((ox + int(x) + tw // 2, oy + int(y) + th // 2,
+                        float(res[y, x])))
+        out.sort(key=lambda c: (c[1], c[0]))      # 위에서 아래로
+        return out, mx
+    except Exception:
+        return [], 0.0
+
+
 def rasta_find(j, anchor, pick="top"):
     """칸 j 의 그림을 그 클라 창 안에서 찾는다 → (화면x, 화면y, 점수).
 
@@ -1749,8 +1785,12 @@ class IslandApp(tk.Tk):
                            bg="#95a5a6", fg="white",
                            command=lambda x=jx: self._preset_pick_mode(x))
             tb.pack(side="left", padx=(2, 0))
+            qb = tk.Button(grow, text="🔍", font=("맑은 고딕", 8), width=3,
+                           bg="#2471a3", fg="white",
+                           command=lambda x=jx: self._preset_probe_img(x))
+            qb.pack(side="left", padx=(2, 0))
             self._pw["cells"].append({"state": sb, "pick": pb, "rec": rb,
-                                      "img": gb, "tgt": tb})
+                                      "img": gb, "tgt": tb, "probe": qb})
         bot = tk.Frame(win); bot.pack(pady=(2, 10))
         tk.Button(bot, text="저장", font=("맑은 고딕", 10, "bold"), bg="#1e8449", fg="white",
                   width=10, command=self._preset_store).pack(side="left", padx=4)
@@ -1953,6 +1993,63 @@ class IslandApp(tk.Tk):
         it["pick"] = nxt
         self._status.set(f"클릭 {jx+1} 번 — 둘 중 '{nm[nxt]}' 을 고릅니다")
         self._preset_refresh_cells()
+
+    def _preset_probe_img(self, jx):
+        """🔍 이 칸의 그림이 **지금** 잡히는지 확인한다 (클릭하지 않는다).
+
+        어느 클라에서 볼지는 편집창의 **기준슬롯** 번호를 쓴다.
+        후보를 전부 보여주므로, 비슷한 그림이 둘일 때 🎯(맨위/왼쪽)이
+        무엇을 고르는지 **누르기 전에** 알 수 있다."""
+        key = self._pw["key"]
+        it = (self._pw["items"].get(str(jx)) or {})
+        if not os.path.exists(rasta_img_path(jx)):
+            self._status.set(f"🔍 {jx+1}번 칸에 그림이 없습니다 — 🖼 로 먼저 잘라주세요")
+            return
+        try:
+            si = max(1, min(SLOTS, int(self._pw["src"].get()))) - 1
+        except Exception:
+            si = 0
+        slot = (self.cfg.get(key) or [{}])[si] if (self.cfg.get(key) or []) else {}
+        anchor = next((c for c in (slot.get("coords") or []) if c), None)
+        if not anchor:
+            self._status.set(f"🔍 기준슬롯 #{si+1} 에 좌표가 하나도 없어 "
+                             f"어느 클라인지 알 수 없습니다")
+            return
+        pick = it.get("pick") or "top"
+        cand, mx = rasta_find_all(jx, anchor)
+        lines = [f"{jx+1}번 칸 · 기준슬롯 #{si+1} · 기준 {rasta_thr(jx):.2f}",
+                 f"그림: {os.path.basename(rasta_img_path(jx))}", ""]
+        if not cand:
+            lines.append(f"✘ 못 찾았습니다 (최고 일치도 {mx:.2f})")
+            lines.append("")
+            lines.append("· 그 화면이 지금 안 떠 있거나")
+            lines.append("· 그림이 그 화면과 다릅니다 (🖼 로 다시 잘라보세요)")
+        else:
+            lines.append(f"✔ {len(cand)}개 찾았습니다 (위 → 아래 순서)")
+            for n, (x, y, v) in enumerate(cand, 1):
+                lines.append(f"   {n}. 일치도 {v:.2f}  자리 ({x}, {y})")
+            _nm = {"top": "맨위", "left": "맨왼쪽", "best": "점수1등"}.get(pick, "맨위")
+            gx, gy, gv = rasta_find(jx, anchor, pick=pick)[0:3] if True else (0, 0, 0)
+            lines.append("")
+            lines.append(f"🎯 지금 설정({_nm}) 으로는 → ({gx}, {gy}) 일치도 {gv:.2f}")
+            if len(cand) > 1:
+                lines.append("")
+                lines.append("※ 비슷한 그림이 여러 개입니다 — 🎯 로 어느 것을 "
+                             "고를지 정하세요")
+        self._status.set(f"🔍 {jx+1}번 — "
+                         + (f"{len(cand)}개 찾음" if cand
+                            else f"못 찾음 (최고 {mx:.2f})"))
+        self._rlog("[라스타] 🔍 " + " | ".join(x.strip() for x in lines if x.strip()))
+        self._show_rasta_probe(chr(10).join(lines))
+
+    def _show_rasta_probe(self, body):
+        w = tk.Toplevel(self); w.title("🔍 그림 확인")
+        w.attributes("-topmost", True)
+        t = tk.Text(w, font=("맑은 고딕", 9), width=46, height=16)
+        t.pack(fill="both", expand=True, padx=8, pady=8)
+        t.insert("end", str(body)); t.config(state="disabled")
+        tk.Button(w, text="닫기", font=("맑은 고딕", 9), width=10,
+                  command=w.destroy).pack(pady=(0, 8))
 
     def _preset_grab_img(self, jx):
         """🖼 그 칸의 그림을 드래그해 등록한다 (프리셋 편집창에서)."""
