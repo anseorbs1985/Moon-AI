@@ -208,13 +208,10 @@ def is_repeat_only(key, n):
 #   악몽의섬은 **이미 31칸**이라 칸을 늘릴 필요도 없었다.
 #
 # 버전은 **던전 전체가 하나** (사용자 선택) — 슬롯마다 다르게 두지 않는다.
-RASTA_KEY   = "토요일_악몽의섬"     # 이 던전만 버전을 고를 수 있다
-VER_NIGHT   = "night"               # 악몽의섬 그대로
-VER_RASTA   = "rasta"               # 라스타바드
-VER_LABEL   = {VER_NIGHT: "악몽의섬", VER_RASTA: "라스타바드"}
+RASTA_KEY   = "토요일_악몽의섬"     # 라스타바드 프리셋이 있는 던전
 
-# 칸마다 무엇을 할지 — `_rasta_steps` 에 던전키별로 저장 (슬롯이 아니라 **던전** 단위.
-# 순서는 16슬롯이 같고 좌표만 다르기 때문)
+# 칸마다 무엇을 할지 — **프리셋**으로 고르고(오만의탑처럼), 프리셋을 적용하면
+# 그 슬롯의 `rasta` 에 적힌다 (2026-10-03 사용자 지시).
 RASTA_CLICK = "img"    # 그림을 찾아 **그 자리를 누른다** (둘 중 하나 고르기)
 RASTA_SEE   = "see"    # 그림이 **보이는지만** 확인 (안 보이면 그 슬롯 중단)
 
@@ -229,28 +226,6 @@ RASTA_AFTER   = (0.45, 0.80)  # 그림을 누른 뒤 화면이 바뀌기를 기�
 #    ⚠ `pyautogui` 로 키를 보내는 길을 새로 만들지 말 것 — 이 게임은 DirectInput 이라
 #      스캔코드가 아니면 씹힌다 (아이템등록에서 이미 데인 교훈).
 
-
-def dun_ver(cfg, key):
-    """그 던전의 버전 — 악몽의섬만 고를 수 있고, 나머지는 늘 '그대로'."""
-    if key != RASTA_KEY:
-        return VER_NIGHT
-    try:
-        v = (cfg.get("_dun_ver") or {}).get(key)
-        return VER_RASTA if v == VER_RASTA else VER_NIGHT
-    except Exception:
-        return VER_NIGHT
-
-
-def rasta_steps(cfg, key):
-    """칸별 설정 — {"3": {"mode": "img", "pick": "top"}, …} (번호는 0부터 문자열)."""
-    try:
-        return dict((cfg.get("_rasta_steps") or {}).get(key) or {})
-    except Exception:
-        return {}
-
-
-def rasta_step(cfg, key, j):
-    return dict(rasta_steps(cfg, key).get(str(j)) or {})
 
 
 def rasta_img_path(j):
@@ -1117,28 +1092,6 @@ class IslandApp(tk.Tk):
                   command=lambda k=key: self._preview_all(k)
                   ).pack(fill="x", padx=4, pady=(0,2))
 
-        # ── 🗡 버전 (악몽의섬 / 라스타바드) — 악몽의섬 탭에만 나온다 ──
-        if key == RASTA_KEY:
-            vb = tk.LabelFrame(parent, text="🗡 버전 (던전 전체)",
-                               font=("맑은 고딕", 7, "bold"), fg="#5b2c6f",
-                               padx=3, pady=2)
-            vb.pack(fill="x", padx=4, pady=(0, 3))
-            v1 = tk.Frame(vb); v1.pack(fill="x")
-            self._ver_var = tk.StringVar(value=VER_LABEL[dun_ver(self.cfg, key)])
-            tk.OptionMenu(v1, self._ver_var, *VER_LABEL.values()).pack(side="left")
-            tk.Button(v1, text="적용", font=("맑은 고딕", 8, "bold"),
-                      bg="#8e44ad", fg="white", activebackground="#6c3483",
-                      command=lambda k=key: self._set_ver(k)).pack(side="left", padx=(3, 0))
-            tk.Button(v1, text="🗡 라스타바드 설정", font=("맑은 고딕", 8, "bold"),
-                      bg="#5b2c6f", fg="white", activebackground="#4a235a",
-                      command=lambda k=key: self._open_rasta_win(k)
-                      ).pack(side="left", padx=(3, 0))
-            self._ver_note = tk.Label(
-                vb, font=("맑은 고딕", 7), fg="#7f8c8d", justify="left", anchor="w",
-                text=("⏰ 4시간1회+2시간5회 와 금요일 23:50 자동 초기화는 "
-                      "두 버전 모두 그대로 적용됩니다"))
-            self._ver_note.pack(fill="x")
-
         # ── 전체 일괄 — 여기서 한 번만 정하면 모든 슬롯이 같아진다 ──
         ab = tk.LabelFrame(parent, text="전체 일괄 (한 번에 모든 슬롯)",
                            font=("맑은 고딕", 7, "bold"), fg="#7b241c", padx=3, pady=2)
@@ -1564,6 +1517,15 @@ class IslandApp(tk.Tk):
                              ("이동", ["▶▶", "◀◀"])],
         "화요일_에카":     [("", ["기본!!", "빨갱이 82%",
                                   "주홍이 48%", "주홍이 82%"])],
+        # 🗡 악몽의섬은 **두 가지 버전**을 프리셋으로 고른다 (2026-10-03 사용자 지시:
+        #    "오만의탑처럼 프리셋처럼 만들어줘. 그리고 좌표도 그대로 또는 변경").
+        #    오만의탑의 '층 그룹' 과 같은 모양 — 그룹을 눌러 버전을 고른다.
+        # ⚠ **앞 그룹(악몽의섬)의 이름·순서를 바꾸지 말 것.** `_presets()` 는
+        #    저장된 프리셋을 **번호(index)로** 맞춘다. 라스타바드를 **뒤에 붙였기**
+        #    때문에 기존 6개(0~5)의 설정이 그대로 유지된다. 가운데에 끼우면 전부 밀린다.
+        "토요일_악몽의섬": [("악몽의섬", ["주홍이 기본!", "주홍이 48%", "주홍이 82%",
+                                          "빨갱이 기본!", "빨갱이 48%", "빨갱이 82%"]),
+                             ("라스타바드", ["기본!!", "주홍이 48%", "주홍이 82%"])],
     }
     PRESET_DEFAULT = [("", ["주홍이 기본!", "주홍이 48%", "주홍이 82%",
                             "빨갱이 기본!", "빨갱이 48%", "빨갱이 82%"])]
@@ -1711,8 +1673,11 @@ class IslandApp(tk.Tk):
         tk.Label(top, text="기준슬롯", font=("맑은 고딕", 9)).pack(side="left", padx=(10, 2))
         tk.Spinbox(top, from_=1, to=SLOTS, textvariable=self._pw["src"], width=3,
                    font=("맑은 고딕", 9)).pack(side="left")
-        _h = ("번호칸을 누르면 [그대로 ↔ 삭제] 전환,  [위치]를 누르면 그 번호를 바꿀 자리를 화면에서 찍습니다." +
-              chr(10) + "저장 후 슬롯 좌표 팝업에서 그 프리셋 버튼을 누르면 그 번호들만 바뀝니다 (나머지는 그대로).")
+        _h = ("번호칸을 누르면 [그대로 → ✖삭제 → 🖼그림클릭 → 👁확인만] 순서로 바뀝니다. "
+              "[위치]는 그 번호를 바꿀 자리를 화면에서 찍습니다." + chr(10)
+              + "🗡 라스타바드: 🖼 로 그 화면에만 있는 것을 자르고, 🎯 로 둘 중 "
+              "[맨위/왼쪽/1등] 을 고릅니다 (🖼 오른쪽클릭 = 그림 지우기)." + chr(10)
+              + "저장 후 슬롯 좌표 팝업에서 그 프리셋 버튼을 누르면 그 번호들만 바뀝니다 (나머지는 그대로).")
         tk.Label(win, text=_h, font=("맑은 고딕", 8), fg="#555",
                  justify="left").pack(anchor="w", padx=10)
         lg = tk.Frame(win); lg.pack(anchor="w", padx=10, pady=(2, 0))
@@ -1742,7 +1707,19 @@ class IslandApp(tk.Tk):
                            bg="#7f8c8d", fg="white",
                            command=lambda x=jx: self._preset_record(x))
             rb.pack(pady=(1, 0))
-            self._pw["cells"].append({"state": sb, "pick": pb, "rec": rb})
+            # 🗡 라스타바드 — 그림 자리일 때만 쓰는 두 버튼 (2026-10-03)
+            grow = tk.Frame(cell); grow.pack(pady=(1, 0))
+            gb = tk.Button(grow, text="🖼", font=("맑은 고딕", 8), width=3,
+                           bg="#95a5a6", fg="white",
+                           command=lambda x=jx: self._preset_grab_img(x))
+            gb.pack(side="left")
+            gb.bind("<Button-3>", lambda e, x=jx: self._rasta_del(self._pw["key"], x))
+            tb = tk.Button(grow, text="🎯", font=("맑은 고딕", 8), width=4,
+                           bg="#95a5a6", fg="white",
+                           command=lambda x=jx: self._preset_pick_mode(x))
+            tb.pack(side="left", padx=(2, 0))
+            self._pw["cells"].append({"state": sb, "pick": pb, "rec": rb,
+                                      "img": gb, "tgt": tb})
         bot = tk.Frame(win); bot.pack(pady=(2, 10))
         tk.Button(bot, text="저장", font=("맑은 고딕", 10, "bold"), bg="#1e8449", fg="white",
                   width=10, command=self._preset_store).pack(side="left", padx=4)
@@ -1787,11 +1764,28 @@ class IslandApp(tk.Tk):
                 c["state"].config(text="⏺ 녹화", bg="#8e44ad", fg="white")
                 c["pick"].config(text="녹화 사용", bg="#95a5a6", fg="white",
                                  relief="raised", bd=1)
+            elif it.get("act") in (RASTA_CLICK, RASTA_SEE):   # 🗡 그림 자리 — 남보라
+                _is_see = it.get("act") == RASTA_SEE
+                c["state"].config(text=("👁 확인만" if _is_see else "🖼 그림클릭"),
+                                  bg="#5b2c6f", fg="white")
+                c["pick"].config(text=("누르지 않음" if _is_see else "그림자리 클릭"),
+                                 bg="#95a5a6", fg="white", relief="raised", bd=1)
             else:                                        # 위치 지정 — 노랑/주황 (한눈에 구분)
                 rel = it.get("rel") or [0, 0]
                 c["state"].config(text="📍 위치변경", bg="#f39c12", fg="black")
                 c["pick"].config(text="✔ " + str(rel[0]) + "," + str(rel[1]),
                                  bg="#f1c40f", fg="black", relief="sunken", bd=3)
+            _ri = (it or {}).get("act") in (RASTA_CLICK, RASTA_SEE)
+            if c.get("img") is not None:
+                _have = os.path.exists(rasta_img_path(jx))
+                c["img"].config(
+                    text=("🖼" if _have else "🖼"),
+                    bg=("#7d3c98" if (_ri and _have) else
+                        ("#c0392b" if _ri else "#95a5a6")), fg="white")
+                _pk = {"top": "맨위", "left": "왼쪽", "best": "1등"}.get(
+                    (it or {}).get("pick") or "top", "맨위")
+                c["tgt"].config(text=(_pk if _ri else "🎯"),
+                                bg=("#2471a3" if _ri else "#95a5a6"), fg="white")
             rbtn = c.get("rec")
             if rbtn is not None:
                 if it and it.get("act") == "rec":
@@ -1869,18 +1863,69 @@ class IslandApp(tk.Tk):
                          " (" + str(pos[0]) + "," + str(pos[1]) + ")")
         _PresetDotOverlay(self, jx + 1, pos, src_txt)
 
+    # 번호칸을 누를 때 돌아가는 순서 — 라스타바드용 '그림' 두 가지를 끼웠다
+    # (2026-10-03). 📍위치변경·⏺녹화 는 각자 버튼으로 정하므로 이 순환에 없다.
+    TOGGLE_CYCLE = [None, "del", RASTA_CLICK, RASTA_SEE]
+    TOGGLE_NAME = {None: "그대로", "del": "✖ 삭제",
+                   RASTA_CLICK: "🖼 그림클릭", RASTA_SEE: "👁 확인만"}
+
     def _preset_toggle(self, jx):
+        """번호칸 클릭 → 그대로 → ✖삭제 → 🖼그림클릭 → 👁확인만 → 그대로 …"""
         pw = self._pw
-        cur = pw["items"].get(str(jx))
-        if not cur:
-            pw["items"][str(jx)] = {"act": "del"}
-            self._status.set("클릭 " + str(jx + 1) + " 번 → 삭제")
-        else:
-            act = cur.get("act")
+        cur = pw["items"].get(str(jx)) or {}
+        act = cur.get("act")
+        if act in ("mov", "rec"):        # 위치·녹화는 한 번에 '그대로'로 푼다
             pw["items"].pop(str(jx), None)
-            self._status.set("클릭 " + str(jx + 1) + " 번 → 그대로"
-                             + (" (지정한 위치 해제됨)" if act == "mov" else ""))
+            self._status.set(f"클릭 {jx+1} 번 → 그대로 (지정한 "
+                             + ("위치" if act == "mov" else "녹화") + " 해제됨)")
+            self._preset_refresh_cells(); return
+        i = self.TOGGLE_CYCLE.index(act) if act in self.TOGGLE_CYCLE else 0
+        nxt = self.TOGGLE_CYCLE[(i + 1) % len(self.TOGGLE_CYCLE)]
+        if nxt is None:
+            pw["items"].pop(str(jx), None)
+        else:
+            it = {"act": nxt}
+            if nxt in (RASTA_CLICK, RASTA_SEE):
+                it["pick"] = cur.get("pick") or "top"
+            pw["items"][str(jx)] = it
+        _n = self.TOGGLE_NAME[nxt]
+        self._status.set(f"클릭 {jx+1} 번 → {_n}"
+                         + ("  (🖼 로 그림을 잘라 등록하세요)"
+                            if nxt in (RASTA_CLICK, RASTA_SEE) else ""))
         self._preset_refresh_cells()
+
+    def _preset_pick_mode(self, jx):
+        """🎯 둘 중 어느 것을 고를지 — 맨위 → 맨왼쪽 → 점수1등 순환."""
+        pw = self._pw
+        it = pw["items"].get(str(jx))
+        if not it or it.get("act") not in (RASTA_CLICK, RASTA_SEE):
+            self._status.set(f"클릭 {jx+1} 번은 그림 자리가 아닙니다 "
+                             f"(번호칸을 눌러 🖼 그림클릭 으로 바꾸세요)")
+            return
+        order = ["top", "left", "best"]
+        nm = {"top": "맨위", "left": "맨왼쪽", "best": "점수1등"}
+        cur = it.get("pick") or "top"
+        nxt = order[(order.index(cur) + 1) % len(order)] if cur in order else "top"
+        it["pick"] = nxt
+        self._status.set(f"클릭 {jx+1} 번 — 둘 중 '{nm[nxt]}' 을 고릅니다")
+        self._preset_refresh_cells()
+
+    def _preset_grab_img(self, jx):
+        """🖼 그 칸의 그림을 드래그해 등록한다 (프리셋 편집창에서)."""
+        it = (self._pw["items"].get(str(jx)) or {})
+        if it.get("act") not in (RASTA_CLICK, RASTA_SEE):
+            self._status.set(f"클릭 {jx+1} 번을 먼저 🖼 그림클릭 / 👁 확인만 으로 "
+                             f"바꿔주세요 (번호칸 클릭)")
+            return
+        self._rasta_target = (self._pw["key"], jx)
+        try:
+            self._preset_win.withdraw()
+        except Exception:
+            pass
+        self.withdraw()
+        self._status.set(f"🖼 {jx+1}번 칸 — 그 화면에만 있는 것을 작게 드래그하세요")
+        self.after(250, lambda: RastaGrabOverlay(
+            self, self._on_rasta_img, f"{jx+1}번 칸 그림"))
 
     def _preset_pick_one(self, jx):
         """이 번호를 바꿀 위치를 화면에서 직접 찍는다 (기준 슬롯 클라 기준으로 저장)."""
@@ -2031,6 +2076,16 @@ class IslandApp(tk.Tk):
             return
         nclk = clicks_for(key)
         slot = self.cfg[key][idx]
+        # 🗡 이 프리셋에서 '그림 자리' 가 아닌 번호는 **묵은 그림 설정을 지운다** —
+        #    악몽의섬 프리셋으로 바꿔 끼웠을 때 라스타바드 설정이 남아 있으면
+        #    좌표만 바뀌고 그림을 계속 찾아 슬롯이 멈춘다.
+        _keep_r = {k3 for k3, v3 in (items or {}).items()
+                   if (v3 or {}).get("act") in (RASTA_CLICK, RASTA_SEE)}
+        _r_old = dict(slot.get("rasta") or {})
+        if _r_old:
+            slot["rasta"] = {k3: v3 for k3, v3 in _r_old.items() if k3 in _keep_r}
+            if not slot["rasta"]:
+                slot.pop("rasta", None)
         cs = slot.setdefault("coords", [])
         while len(cs) < nclk: cs.append(None)
         ds = slot.setdefault("dirs", [])
@@ -2050,6 +2105,14 @@ class IslandApp(tk.Tk):
                 if _r:
                     slot.setdefault("recs_off", {})[str(j)] = _r
                 dels.append(j + 1)
+            elif it.get("act") in (RASTA_CLICK, RASTA_SEE):
+                # 🗡 라스타바드 — 이 번호는 **그림으로** 처리한다.
+                #   좌표는 **건드리지 않는다** (어느 클라인지 알아야 하므로 그대로 둔다).
+                #   실행할 때 읽도록 그 슬롯에 적어둔다.
+                slot.setdefault("rasta", {})[str(j)] = {
+                    "mode": it.get("act"), "pick": it.get("pick") or "top"}
+                movs.append(j + 1)
+                continue
             elif it.get("act") == "rec":
                 # 이 번호는 좌표 대신 '동영상(녹화)'을 쓴다
                 cs[j] = None
@@ -3605,111 +3668,20 @@ class IslandApp(tk.Tk):
         time.sleep(0.15)
 
     # -- 라스타바드: 버전 고르기 / 칸별 설정 창 --------------------------
-    def _set_ver(self, key):
-        """버전을 바꿔 저장한다. **던전 전체가 한 버전** (사용자 선택)."""
-        want = VER_RASTA if self._ver_var.get() == VER_LABEL[VER_RASTA] else VER_NIGHT
-        d = dict(self.cfg.get("_dun_ver") or {})
-        d[key] = want
-        self.cfg["_dun_ver"] = d
-        save_cfg(self.cfg)
-        self._rlog(f"{key} 버전 -> {VER_LABEL[want]} (사용자)")
-        self._status.set(f"버전: {VER_LABEL[want]}"
-                         + (" — [라스타바드 설정] 에서 칸마다 그림을 등록하세요"
-                            if want == VER_RASTA else " (좌표만 누릅니다)"))
+    def _reopen_preset_win(self, key):
+        """그림을 자르거나 지운 뒤 **프리셋 편집창으로 돌아간다**.
 
-    def _rasta_save(self, key, j, **kw):
-        """칸 j 의 설정을 고친다 — 쓰기 직전에 다시 읽어 **그 칸만** 고쳐 쓴다."""
-        all_ = dict(self.cfg.get("_rasta_steps") or {})
-        one = dict(all_.get(key) or {})
-        cur = dict(one.get(str(j)) or {})
-        cur.update(kw)
-        cur = {k: v for k, v in cur.items() if v not in ("", None)}
-        if cur:
-            one[str(j)] = cur
-        else:
-            one.pop(str(j), None)
-        all_[key] = one
-        self.cfg["_rasta_steps"] = all_
-        save_cfg(self.cfg)
-
-    def _open_rasta_win(self, key):
-        """칸마다 무엇을 할지 고르는 창.
-
-        · 평소     = 지금처럼 좌표를 누른다 (악몽의섬과 같다)
-        · 그림클릭 = 그림을 찾아 **그 자리를 누른다** (던전 그림 둘 중 하나 고르기)
-        · 확인만   = 그림이 보이는지만 보고 **누르지 않는다**
-
-        그림을 **못 보면 그 슬롯은 거기서 중단**한다 (다음 칸을 누르지 않는다).
-        '앞으로 이동' 은 **방향 기능**을 그대로 쓴다 — 슬롯 좌표창의 방향 칸에서
-        북동(w+d) + 초 를 넣으면 된다 (`_hold_arrow` 가 WASD 스캔코드로 꾹 누른다)."""
-        w = getattr(self, "_rasta_win", None)
-        if w and w.winfo_exists():
-            try: w.destroy()
-            except Exception: pass
-        w = tk.Toplevel(self); self._rasta_win = w
-        w.title("라스타바드 설정"); w.geometry("560x680")
-        w.attributes("-topmost", True)
-        tk.Label(w, font=("맑은 고딕", 9, "bold"), fg="#5b2c6f", justify="left",
-                 text=("칸마다 무엇을 할지 고릅니다 (16슬롯 공통 - 좌표만 슬롯별)" + chr(10)
-                       + "그림을 못 보면 그 슬롯은 거기서 멈춥니다 (다음 칸 안 누름)" + chr(10)
-                       + "앞으로 이동은 슬롯 좌표창의 방향 칸에서 북동(w+d) + 초 로")
-                 ).pack(pady=(8, 4))
-        cv = tk.Canvas(w, highlightthickness=0, height=500)
-        sb = tk.Scrollbar(w, orient="vertical", command=cv.yview)
-        bx = tk.Frame(cv)
-        cv.create_window((0, 0), window=bx, anchor="nw")
-        cv.configure(yscrollcommand=sb.set)
-        cv.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=4)
-        sb.pack(side="right", fill="y", pady=4)
-        bx.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
-        MODES = {"": "평소(좌표)", RASTA_CLICK: "그림클릭", RASTA_SEE: "확인만"}
-        PICKS = {"top": "맨위", "left": "맨왼쪽", "best": "점수1등"}
-        INV_M = {v: k for k, v in MODES.items()}
-        INV_P = {v: k for k, v in PICKS.items()}
-        hd = tk.Frame(bx); hd.pack(fill="x")
-        for t, wd in (("칸", 4), ("무엇을 할지", 12), ("둘 중", 8),
-                      ("그림", 8), ("기준", 6)):
-            tk.Label(hd, text=t, font=("맑은 고딕", 8, "bold"),
-                     width=wd, anchor="w").pack(side="left")
-
-        def mk_mode(jj, var):
-            def _f(_v=None):
-                self._rasta_save(key, jj, mode=INV_M.get(var.get(), ""))
-                self.after(50, lambda: self._open_rasta_win(key))
-            return _f
-
-        def mk_pick(jj, var):
-            def _f(_v=None):
-                self._rasta_save(key, jj, pick=INV_P.get(var.get(), "top"))
-            return _f
-
-        for j in range(clicks_for(key)):
-            st = rasta_step(self.cfg, key, j)
-            row = tk.Frame(bx); row.pack(fill="x", pady=1)
-            tk.Label(row, text=f"{j+1:02d}", font=("맑은 고딕", 8),
-                     width=4, anchor="w").pack(side="left")
-            mv = tk.StringVar(value=MODES.get(st.get("mode") or "", "평소(좌표)"))
-            om = tk.OptionMenu(row, mv, *MODES.values(), command=mk_mode(j, mv))
-            om.config(width=9, font=("맑은 고딕", 8)); om.pack(side="left")
-            pv = tk.StringVar(value=PICKS.get(st.get("pick") or "top", "맨위"))
-            op = tk.OptionMenu(row, pv, *PICKS.values(), command=mk_pick(j, pv))
-            op.config(width=6, font=("맑은 고딕", 8)); op.pack(side="left")
-            has = os.path.exists(rasta_img_path(j))
-            gb = tk.Button(row, text=("있음" if has else "그림"),
-                           font=("맑은 고딕", 8, "bold"), width=6,
-                           bg=("#7d3c98" if has else "#95a5a6"), fg="white",
-                           command=lambda jj=j: self._rasta_grab(key, jj))
-            gb.pack(side="left", padx=(2, 0))
-            gb.bind("<Button-3>", lambda e, jj=j: self._rasta_del(key, jj))
-            tk.Label(row, text=f"{rasta_thr(j):.2f}", font=("맑은 고딕", 8),
-                     width=6, anchor="w",
-                     fg=("#1e8449" if has else "#7f8c8d")).pack(side="left")
-        tk.Label(w, font=("맑은 고딕", 7), fg="#7f8c8d", justify="left",
-                 text=("그림 버튼: 왼쪽클릭 = 자르기 / 오른쪽클릭 = 지우기" + chr(10)
-                       + "기준은 click_templates/rasta_NN_thr.json 로 바꿉니다 "
-                       + f"(기본 {RASTA_MATCH})")).pack(pady=(0, 4))
-        tk.Button(w, text="닫기", font=("맑은 고딕", 9), width=10,
-                  command=w.destroy).pack(pady=(0, 8))
+        편집 중이던 프리셋 번호(_pw['pi'])와 고치던 내용(items)을 잃지 않으려고,
+        창이 살아 있으면 **다시 띄우지 않고 칸 표시만** 새로 그린다."""
+        w = getattr(self, "_preset_win", None)
+        try:
+            if w and w.winfo_exists():
+                w.deiconify(); w.lift()
+                self._preset_refresh_cells()
+                return
+        except Exception:
+            pass
+        self._open_preset_win(key)
 
     def _rasta_grab(self, key, j):
         """그 칸의 그림을 드래그해 등록한다."""
@@ -3729,7 +3701,7 @@ class IslandApp(tk.Tk):
         key, j = getattr(self, "_rasta_target", (RASTA_KEY, 0))
         if w < 5 or h < 5:
             self._status.set("너무 작습니다 - 다시 드래그해주세요")
-            self._open_rasta_win(key); return
+            self._reopen_preset_win(key); return
         try:
             from PIL import ImageGrab
             im = ImageGrab.grab(bbox=(x, y, x + w, y + h),
@@ -3746,12 +3718,12 @@ class IslandApp(tk.Tk):
                 except Exception: pass
                 self._status.set("무늬가 없는 자리를 잘랐습니다 (저장 안 함) - "
                                  "글자/아이콘이 들어가게 다시 드래그해주세요")
-                self._open_rasta_win(key); return
+                self._reopen_preset_win(key); return
             self._status.set(f"{j+1}번 칸 그림 저장 ({w}x{h})")
             self._rlog(f"[라스타] {j+1}번 칸 그림 등록 {w}x{h}")
         except Exception as e:
             self._status.set(f"저장 실패: {e}")
-        self._open_rasta_win(key)
+        self._reopen_preset_win(key)
 
     def _rasta_del(self, key, j):
         """오른쪽 클릭 = 그 칸 그림 지우기."""
@@ -3764,7 +3736,7 @@ class IslandApp(tk.Tk):
                 self._status.set(f"{j+1}번 칸에 그림이 없습니다")
         except Exception as e:
             self._status.set(f"지우기 실패: {e}")
-        self._open_rasta_win(key)
+        self._reopen_preset_win(key)
 
     def _rasta_do(self, key, j, si, slot, coords, name, lbl):
         """🗡 라스타바드 — 이 칸을 **그림으로** 처리한다. 돌려주는 값: 계속해도 되나.
@@ -3779,7 +3751,7 @@ class IslandApp(tk.Tk):
 
         어느 클라인지는 **그 슬롯에 등록된 첫 좌표**로 안다 (용던고고의 `slot_anchor` 와
         같은 방식) — 그림 자리에는 좌표를 등록하지 않아도 된다."""
-        st = rasta_step(self.cfg, key, j)
+        st = ((slot.get("rasta") or {}).get(str(j)) or {})
         mode = st.get("mode") or ""
         pick = st.get("pick") or "top"
         anchor = coords[j] if (j < len(coords) and coords[j]) else None
@@ -4243,7 +4215,6 @@ class IslandApp(tk.Tk):
                 if not wait_mouse_idle(stop_fn, status_fn): break
                 name   = slot.get("name", f"#{si+1}")
                 _labels = labels_for(key)
-                _rv = dun_ver(self.cfg, key)       # 🗡 이 던전의 버전 (night/rasta)
                 coords = slot.get("coords", [None]*len(_labels))
                 while len(coords) < len(_labels):
                     coords.append(None)
@@ -4271,13 +4242,13 @@ class IslandApp(tk.Tk):
                     rec = recs.get(str(j))
                     did = False
                     # 🗡 라스타바드 — 이 칸이 '그림' 자리면 그림으로 처리한다.
-                    #    (악몽의섬 버전이면 `_rv` 가 night 이라 이 블록은 건너뛴다)
-                    if _rv == VER_RASTA:
-                        _rm = (rasta_step(self.cfg, key, j).get("mode") or "")
-                        if _rm in (RASTA_CLICK, RASTA_SEE):
-                            if not self._rasta_do(key, j, si, slot, coords, name, lbl):
-                                break          # 🚫 그림을 못 봤다 → **이 슬롯만 중단**
-                            did = True
+                    #    설정은 **그 슬롯**에 있다 (라스타바드 프리셋을 적용하면 적힌다).
+                    #    악몽의섬 프리셋을 적용하면 지워지므로 이 블록을 안 탄다.
+                    _rm = ((slot.get("rasta") or {}).get(str(j)) or {}).get("mode")
+                    if _rm in (RASTA_CLICK, RASTA_SEE):
+                        if not self._rasta_do(key, j, si, slot, coords, name, lbl):
+                            break              # 🚫 그림을 못 봤다 → **이 슬롯만 중단**
+                        did = True
                     if d_ and d_[0] == "⇩":
                         # 등록한 좌표를 짧게 누르고 아래로 살짝 끌어내리기 (스크롤)
                         if coords[j]:
