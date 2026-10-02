@@ -1817,6 +1817,13 @@ class IslandApp(tk.Tk):
                   bg="#b9770e", fg="white",
                   command=self._preset_reapply).pack(side="left", padx=4)
         tk.Button(bot, text="닫기", font=("맑은 고딕", 9), command=win.destroy).pack(side="left", padx=4)
+        # 📣 이 창 자신의 상태줄 — 안내가 **섬 실행기 상태줄**로만 가면
+        #    이 창이 그 앞에 떠 있어서 사용자가 아무것도 못 본다 (2026-10-03 신고:
+        #    "드래그 하라면서 아무것도 안 되는데"). 여기에도 같이 띄운다.
+        self._pw["msg"] = tk.Label(win, text="", font=("맑은 고딕", 9, "bold"),
+                                   fg="#1a5276", justify="left", anchor="w",
+                                   wraplength=720)
+        self._pw["msg"].pack(fill="x", padx=10, pady=(0, 8))
         self._preset_load(0)
 
     def _preset_load(self, pi):
@@ -2015,13 +2022,14 @@ class IslandApp(tk.Tk):
         그래서 글자로 찾고 그 위/옆의 네모를 누를 수 있다 —
         똑같이 생긴 큐브가 둘이어도 글자가 다르므로 틀린 것을 누르지 않는다.
         오른쪽 클릭 = 떨어짐 지우기(그림 가운데를 누름)."""
-        it = (self._pw["items"].get(str(jx)) or {})
+        it = self._pw["items"].get(str(jx)) or {}
         if it.get("act") not in (RASTA_CLICK,):
-            self._status.set(f"📍 {jx+1}번은 '🖼 그림클릭' 자리가 아닙니다 "
-                             f"(번호칸을 눌러 바꿔주세요)")
-            return
+            it = {"act": RASTA_CLICK, "pick": it.get("pick") or "top"}
+            self._pw["items"][str(jx)] = it
+            self._preset_refresh_cells()
         if not os.path.exists(rasta_img_path(jx)):
-            self._status.set(f"📍 {jx+1}번 칸에 그림이 없습니다 — 🖼 로 먼저 잘라주세요")
+            self._pmsg(f"📍 {jx+1}번 칸에 그림이 없습니다 — 먼저 [🖼] 로 "
+                       f"그 화면의 글자를 잘라주세요")
             return
         key = self._pw["key"]
         try:
@@ -2032,12 +2040,12 @@ class IslandApp(tk.Tk):
         anchor = next((c for c in ((slots[si] if si < len(slots) else {})
                                    .get("coords") or []) if c), None)
         if not anchor:
-            self._status.set(f"📍 기준슬롯 #{si+1} 에 좌표가 없어 어느 클라인지 "
+            self._pmsg(f"📍 기준슬롯 #{si+1} 에 좌표가 없어 어느 클라인지 "
                              f"알 수 없습니다")
             return
         gx, gy, gv = rasta_find(jx, anchor, pick=(it.get("pick") or "top"))
         if gx is None:
-            self._status.set(f"📍 지금 그림을 못 찾았습니다 (최고 {gv:.2f}) — "
+            self._pmsg(f"📍 지금 그림을 못 찾았습니다 (최고 {gv:.2f}) — "
                              f"그 화면을 기준슬롯 #{si+1} 클라에 띄워두고 다시 누르세요")
             return
         self._off_target = (jx, gx, gy)
@@ -2084,7 +2092,7 @@ class IslandApp(tk.Tk):
         key = self._pw["key"]
         it = (self._pw["items"].get(str(jx)) or {})
         if not os.path.exists(rasta_img_path(jx)):
-            self._status.set(f"🔍 {jx+1}번 칸에 그림이 없습니다 — 🖼 로 먼저 잘라주세요")
+            self._pmsg(f"🔍 {jx+1}번 칸에 그림이 없습니다 — 🖼 로 먼저 잘라주세요")
             return
         try:
             si = max(1, min(SLOTS, int(self._pw["src"].get()))) - 1
@@ -2093,7 +2101,7 @@ class IslandApp(tk.Tk):
         slot = (self.cfg.get(key) or [{}])[si] if (self.cfg.get(key) or []) else {}
         anchor = next((c for c in (slot.get("coords") or []) if c), None)
         if not anchor:
-            self._status.set(f"🔍 기준슬롯 #{si+1} 에 좌표가 하나도 없어 "
+            self._pmsg(f"🔍 기준슬롯 #{si+1} 에 좌표가 하나도 없어 "
                              f"어느 클라인지 알 수 없습니다")
             return
         pick = it.get("pick") or "top"
@@ -2141,18 +2149,22 @@ class IslandApp(tk.Tk):
 
     def _preset_grab_img(self, jx):
         """🖼 그 칸의 그림을 드래그해 등록한다 (프리셋 편집창에서)."""
-        it = (self._pw["items"].get(str(jx)) or {})
+        it = self._pw["items"].get(str(jx)) or {}
         if it.get("act") not in (RASTA_CLICK, RASTA_SEE):
-            self._status.set(f"클릭 {jx+1} 번을 먼저 🖼 그림클릭 / 👁 확인만 으로 "
-                             f"바꿔주세요 (번호칸 클릭)")
-            return
+            # 🖼 를 눌렀다 = '여기에 그림을 쓰겠다' → **알아서 그림클릭으로 바꾼다.**
+            #   예전엔 여기서 그냥 돌아가서 "눌러도 아무것도 안 된다" 였다 (2026-10-03).
+            it = {"act": RASTA_CLICK, "pick": it.get("pick") or "top"}
+            self._pw["items"][str(jx)] = it
+            self._preset_refresh_cells()
+            self._pmsg(f"클릭 {jx+1} 번을 🖼 그림클릭 으로 바꿨습니다 — "
+                       f"이제 그 화면에서 잘라주세요")
         self._rasta_target = (self._pw["key"], jx)
         try:
             self._preset_win.withdraw()
         except Exception:
             pass
         self.withdraw()
-        self._status.set(f"🖼 {jx+1}번 칸 — 그 화면에만 있는 것을 작게 드래그하세요")
+        self._pmsg(f"🖼 {jx+1}번 칸 — 그 화면에만 있는 것을 작게 드래그하세요")
         self.after(250, lambda: RastaGrabOverlay(
             self, self._on_rasta_img, f"{jx+1}번 칸 그림"))
 
@@ -2231,6 +2243,20 @@ class IslandApp(tk.Tk):
         self._refresh(key)
         self._status.set("↻ '" + nm + "' 다시 적용 — 슬롯 " +
                          ", ".join(str(i + 1) for i in hit))
+
+    def _pmsg(self, text):
+        """안내를 **섬 실행기 상태줄과 프리셋 편집창 양쪽**에 띄운다.
+        편집창이 앞에 떠 있어 상태줄이 안 보이기 때문 (2026-10-03)."""
+        try:
+            self._status.set(text)
+        except Exception:
+            pass
+        try:
+            lb = (getattr(self, "_pw", {}) or {}).get("msg")
+            if lb is not None and lb.winfo_exists():
+                lb.config(text=text)
+        except Exception:
+            pass
 
     def _preset_fill_range(self, act):
         """🗡 라스타바드 구간(26~35)을 한 번에 채운다.
