@@ -3537,6 +3537,12 @@ class IslandApp(tk.Tk):
     REPEAT_FIXED = {"토요일_악몽의섬": (2, 6)}
     # 반복을 새로 걸 때 '첫 회차만' 이 시간 (2026-08-22 — 악몽 6회 = 4시간 1회 + 2시간 5회)
     REPEAT_FIRST = {"토요일_악몽의섬": 4}
+    # ⏰ 첫 회차만 다른 시간 — **라스타바드만** 4시간이다 (2026-10-03 사용자 지시:
+    #    "악몽의섬은 그냥 2시간 6회로 그대로 가주고, 라스타바드만 4시간 1회에 2시간 5회")
+    #      악몽의섬   = 2시간 × 6회            (첫 회차도 2시간)
+    #      라스타바드 = 4시간 1회 + 2시간 5회 = 6회
+    #    `0` = 첫 회차도 평소 주기. 여기 있는 프리셋은 `REPEAT_FIRST`(던전 전체)보다 이긴다.
+    REPEAT_FIRST_VER = {"라스타바드": 4, "악몽의섬": 0}
     # ⏱ 반복 간격에 **더 주는 여유(분)** — 같은 악몽의섬이라도 프리셋마다 다르다.
     #    (2026-10-03 사용자: "라바는 들어가고 이동하는 시간이 좀 많기 때문에
     #     마무리되고 4분을 좀 더, 악몽의섬도 한 3분만 더 줬으면 좋겠어")
@@ -3564,9 +3570,24 @@ class IslandApp(tk.Tk):
         return random.uniform(lo, hi) * 60
 
     def _rep_first_h(self, key, h, idx=None):
-        """첫 대기 시간 — 슬롯이 '4시간 → 2시간' 모드일 때만 다른 시간을 쓴다.
-        (선택은 메인런처 악몽의섬 판의 [4h→2h]/[2h만] 버튼과 같은 파일을 본다)"""
+        """첫 대기 시간 — **그 슬롯의 프리셋**에 따라 다르다.
+
+        · 라스타바드 → 4시간 (그 다음부터 2시간 × 5회)
+        · 악몽의섬   → 없음 (첫 회차도 2시간 — 그냥 2시간 6회)
+        (2026-10-03 사용자: "악몽의섬은 그냥 2시간 6회로 그대로 가주고,
+         라스타바드만 4시간 1회에 2시간 5회로 해주라니까")
+
+        슬롯을 모르면(`idx=None`) 던전 전체값(`REPEAT_FIRST`)을 쓴다.
+        '4h→2h / 2h만' 버튼(`_first`)은 그대로 본다 — 끈 슬롯은 평소 주기."""
         f = int(self.REPEAT_FIRST.get(key, h) or h)
+        if idx is not None:
+            try:
+                _sl = (self.cfg.get(key) or [])[int(idx)]
+            except Exception:
+                _sl = {}
+            _v = self._slot_ver(key, _sl if isinstance(_sl, dict) else {})
+            if _v in self.REPEAT_FIRST_VER:
+                f = int(self.REPEAT_FIRST_VER[_v] or h) or h
         if f == h or idx is None:
             return f
         try:
@@ -3648,7 +3669,6 @@ class IslandApp(tk.Tk):
         """악몽의섬을 기본값으로 되돌린다 — 첫 회차 4시간, 그 다음부터 2시간, 6회.
         (메인런처의 [🔄 초기화] 와 같은 동작. 실행은 하지 않는다)"""
         h, n = self.REPEAT_FIXED.get(key, (2, 6))
-        f = int(self.REPEAT_FIRST.get(key, h) or h)
         slots = self.cfg.get(key) or []
         st = self._rep_state()
         st.pop("_off", None)
@@ -3660,8 +3680,10 @@ class IslandApp(tk.Tk):
                 continue
             sl["repeat_h"] = h
             sl["repeat_n"] = n
-            md[f"{key}|{i}"] = "first"
-            fd[f"{key}|{i}"] = True
+            # 🧭 첫 회차 4시간은 **라스타바드 슬롯만** — 악몽의섬은 그냥 2시간 6회
+            _f4 = bool(self.REPEAT_FIRST_VER.get(self._slot_ver(key, sl)))
+            md[f"{key}|{i}"] = "first" if _f4 else "h2"
+            fd[f"{key}|{i}"] = _f4
             st.pop(f"{key}|{i}", None)      # 걸려 있던 예약은 지운다 (켜지 않는다)
             cnt += 1
         st["_mode"] = md
@@ -3673,7 +3695,12 @@ class IslandApp(tk.Tk):
             self._sync_rep_cells(key)
         except Exception:
             pass
-        self._status.set(f"🔄 {key} 설정 초기화 — {cnt}개 슬롯 {f}시간 → {h}시간 {n}회. "
+        _f4n = sum(1 for sl in slots if isinstance(sl, dict)
+                   and any(sl.get("coords") or [])
+                   and self.REPEAT_FIRST_VER.get(self._slot_ver(key, sl)))
+        self._status.set(f"🔄 {key} 설정 초기화 — {cnt}개 슬롯 {h}시간 {n}회 "
+                         f"(라스타바드 {_f4n}개는 첫 회차만 "
+                         f"{self.REPEAT_FIRST_VER.get('라스타바드', 4)}시간). "
                          f"반복은 [실행] 을 눌렀을 때 걸립니다")
 
     def _bulk_repeat_off(self, key):
