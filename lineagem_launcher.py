@@ -155,6 +155,17 @@ ATOMIC_NEXT = {}        # (호버를 없애서 묶을 이유가 사라짐)
 # 용던고고는 좌표4부터 이미지·확인창이 이어져서, 중간에 다른 슬롯이 끼어들면
 # 그 창이 닫히거나 포커스가 바뀌어 클릭이 씹힌다 (2026-08-27 사용자 지시).
 WAVE_UNTIL = {"dragon": 3}     # 좌표1~3만 교차, 좌표4부터는 그 슬롯 완주
+# 🔀 슬롯이 바뀔 때 쉬는 시간 ('다른 창으로 넘어갈 여유') — 웨이브의 숨은 큰 비용이다.
+SWITCH_PAUSE = (0.60, 1.10)
+# 🐲 **좌표가 적으면 이 쉼도 그만큼 줄인다** (2026-10-03 사용자 지시:
+#    "좌표수가 1개면 슬롯간 시간도 줄여줘 … 좌표가 적으면 그만큼 계산해서 줄여줘")
+#    좌표1~3 을 교차로 도는 용던고고는 **거의 모든 클릭이 슬롯 전환**이라,
+#    좌표를 줄여도 이 쉼 때문에 끝나는 시간이 늘 비슷했다.
+#    ⚠ **슬롯 수에는 비례시키지 않는다** — 사용자: "슬롯이 많으면 슬롯이동시간이
+#      지금처럼 거의 동일하고". 줄이는 기준은 **슬롯당 좌표 수**뿐이다.
+SWITCH_SCALE_FKEYS = ("dragon",)
+SWITCH_FLOOR = 0.22            # 아무리 줄여도 이만큼은 쉰다 — 창 전환은 실제로 걸린다
+SWITCH_SCALE_MIN = 0.12        # 비율 하한 (좌표 1/10 이어도 이보다 더는 안 줄인다)
 # 슬롯을 섞지 않고 1번부터 순서대로 도는 런처들 (2026-08-28 사용자 지시)
 # 인사이드 쿠폰등록도 순서대로 — 메모 1~16번과 슬롯 1~16번이 짝이라
 # 섞이면 "어디까지 넣었는지"를 알 수 없다 (2026-09-13 중복등록 사고)
@@ -11790,6 +11801,19 @@ class App(tk.Tk):
             state[_si]["due"] = _t_now + _k * random.uniform(0.7, 2.3)
         last_si, done = None, 0
         _t0 = time.time()
+        # 🔀 이번 실행의 '슬롯 이동 시간' 배수 — 슬롯당 좌표 수에 비례한다.
+        #    좌표를 가득 채웠으면 1.0(지금 그대로), 10칸 중 1칸만 쓰면 크게 줄어든다.
+        _sw = 1.0
+        if fkey in SWITCH_SCALE_FKEYS and nclk:
+            _used = sum(1 for _si2, _sl2 in targets
+                        for _c2 in (_sl2.get("coords") or [])[:nclk] if _c2)
+            _avg = _used / float(max(1, len(targets)))     # 슬롯당 평균 좌표 수
+            _sw = min(1.0, max(SWITCH_SCALE_MIN, _avg / float(nclk)))
+            if _sw < 1.0:
+                click_log(f"[시간] {fkey} 슬롯 이동 시간 ×{_sw:.2f} "
+                          f"— 슬롯당 좌표 {_avg:.1f}/{nclk}개 "
+                          f"({SWITCH_PAUSE[0]*_sw:.2f}~{SWITCH_PAUSE[1]*_sw:.2f}초, "
+                          f"최소 {SWITCH_FLOOR:.2f}초) · 슬롯 {len(targets)}개는 그대로")
         # 이번 실행의 목표(= 클릭 수 × RUN_PER_CLICK)를 쓴다. RUN_BUDGET 은 **상한**일 뿐인데
         # 예전엔 여기서 상한을 보여줘서, 좌표를 줄여도 목표가 그대로인 것처럼 보였다.
         _bud = int((getattr(self, "_run_budget", {}) or {}).get(fkey)
@@ -11867,7 +11891,9 @@ class App(tk.Tk):
                 st["due"] = time.time()          # 빈 자리는 기다리지 않고 통과
                 continue
             if si != last_si:
-                time.sleep(random.uniform(0.6, 1.1))   # 다른 창으로 넘어갈 여유
+                # 다른 창으로 넘어갈 여유 — 좌표가 적은 실행이면 그만큼 짧게 (×_sw)
+                time.sleep(max(SWITCH_FLOOR,
+                               random.uniform(*SWITCH_PAUSE) * _sw))
                 if fkey in self.FOCUS_FIRST:
                     # 비활성 창의 첫 클릭은 '창 띄우기'로만 먹히고 사라진다
                     try:
