@@ -1813,9 +1813,10 @@ class IslandApp(tk.Tk):
                   "보고, 못 갔으면 그림+확인을 눌러 다시 보낸다 "
                   f"({'최대 %d번' % FIX_TRIES} · 그래도 못 가면 그 슬롯만 멈춘다). "
                   "그림은 **못 갔을 때만 보이는 것**(아직 그 화면에 있다는 표시)."
-                  + chr(10) + "   라스타바드는 **30번·33번 두 군데** — 30번에서 못 "
-                  "갔으면 28번 큐브 화면에 그대로 있으니 [🗡 칸 복사] 로 "
-                  "28→30, 31→33 하면 새로 자를 필요가 없다 (확인 짝은 29·32)."
+                  + chr(10) + "   라스타바드는 **30번·33번 두 군데** — 못 갔을 때 "
+                  "보이는 것은 **던전 입구 마름모**(용던고고에서 보는 것과 같은 종류). "
+                  "30번 마름모는 이미 등록돼 있다 (기준 0.60). 33번도 같은 마름모면 "
+                  "[🗡 칸 복사] 로 30→33 하면 된다. 확인 짝은 29·32."
                   + chr(10) + f"🗡 악몽의섬/라스타바드: 1~{RASTA_RANGE[0]-1}번은 "
                   f"**공용**(그대로 두세요) · {RASTA_RANGE[0]}~{RASTA_RANGE[1]}번부터 갈립니다. "
                   f"악몽의섬 프리셋에는 아래 [🗡 {RASTA_RANGE[0]}~{RASTA_RANGE[1]}번 ✖삭제로] 를 "
@@ -1897,10 +1898,10 @@ class IslandApp(tk.Tk):
             cp = tk.Frame(win); cp.pack(pady=(0, 4))
             tk.Label(cp, text="🗡 칸 복사 (그림·🎯·📍 전부)",
                      font=("맑은 고딕", 9, "bold"), fg="#5b2c6f").pack(side="left")
-            # 기본값 = 28번 큐브 그림 → 30번(🔁) 으로. 30번에서 못 들어갔으면
-            # 28번 화면에 그대로 있으므로 **새로 자를 필요가 없다.**
-            self._pw["cp_from"] = tk.StringVar(value="28")
-            self._pw["cp_to"] = tk.StringVar(value="30")
+            # 기본값 = 30번 마름모 → 33번. 둘 다 '던전 입구 마름모' 라 같은 그림이면
+            # 한 번 복사로 끝난다 (다르면 33번에 [🖼] 로 따로 자른다).
+            self._pw["cp_from"] = tk.StringVar(value="30")
+            self._pw["cp_to"] = tk.StringVar(value="33")
             tk.Spinbox(cp, from_=1, to=clicks_for(key), width=3,
                        textvariable=self._pw["cp_from"],
                        font=("맑은 고딕", 9)).pack(side="left", padx=(6, 2))
