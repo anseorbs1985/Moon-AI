@@ -1727,7 +1727,18 @@ class IslandApp(tk.Tk):
             except Exception: pass
         d = next(x for x in DUNGEONS if x["key"] == key)
         win = tk.Toplevel(self); self._preset_win = win
-        win.title("프리셋 편집 — " + d["label"].replace(chr(10), " "))
+        # 🕐 **어느 코드로 도는지** 제목에 박는다 (2026-10-03).
+        #    섬 실행기는 런처와 **다른 프로세스**라, 코드를 배포해도 **열려 있던 창은
+        #    옛 코드로 계속 돈다.** 그걸 모르고 "안 된다"를 여러 번 헛짚었다.
+        #    제목의 시각이 바탕화면 파일 시각과 다르면 **창을 닫았다 다시 열어야 한다.**
+        try:
+            import datetime as _dt
+            _bt = _dt.datetime.fromtimestamp(
+                os.path.getmtime(os.path.abspath(__file__))).strftime("%m-%d %H:%M")
+        except Exception:
+            _bt = "?"
+        win.title("프리셋 편집 — " + d["label"].replace(chr(10), " ")
+                  + f"   [코드 {_bt}]")
         win.attributes("-topmost", True)
         self._pw = {"key": key, "pi": 0, "items": {}, "cells": [],
                     "name": tk.StringVar(), "src": tk.StringVar(value="1")}
@@ -2188,8 +2199,20 @@ class IslandApp(tk.Tk):
             pass
         self.withdraw()
         self._pmsg(f"🖼 {jx+1}번 칸 — 그 화면에만 있는 것을 작게 드래그하세요")
-        self.after(250, lambda: RastaGrabOverlay(
-            self, self._on_rasta_img, f"{jx+1}번 칸 그림"))
+        self._rlog(f"[라스타] 🖼 {jx+1}번 드래그 시작 — 창 숨김, 오버레이 띄우는 중")
+
+        def _mk():
+            try:
+                RastaGrabOverlay(self, self._on_rasta_img, f"{jx+1}번 칸 그림")
+                self._rlog(f"[라스타] 🖼 {jx+1}번 오버레이 떴다")
+            except Exception as e:
+                import traceback
+                self._rlog("[라스타] 🖼 오버레이 실패 "
+                           + traceback.format_exc().replace(chr(10), " | ")[:600])
+                self.deiconify()
+                self._reopen_preset_win(self._pw["key"])
+                self._pmsg(f"🚨 드래그 화면을 못 띄웠습니다: {e}")
+        self.after(250, _mk)
 
     def _preset_pick_one(self, jx):
         """이 번호를 바꿀 위치를 화면에서 직접 찍는다 (기준 슬롯 클라 기준으로 저장)."""
@@ -3233,6 +3256,34 @@ class IslandApp(tk.Tk):
         self._repeat_left[(key, idx)] = n   # 남은 횟수도 새로 시작
         self._status.set(f"#{idx+1}: 반복 횟수 {n}회로 설정")
 
+    def report_callback_exception(self, exc, val, tb):
+        """🚨 버튼·이벤트에서 난 오류를 **기록하고 화면에 띄운다**.
+
+        섬 실행기는 `pythonw` 로 떠서 **콘솔이 없다.** Tk 는 콜백 예외를 stderr 로만
+        흘리므로, 이게 없으면 오류가 나도 **아무 일도 안 난 것처럼** 보인다
+        (2026-10-03: 드래그가 안 되는 원인을 세 번 헛짚었다).
+        **클로드는 이것을 지우지 말 것 — 로컬 문제를 짚는 유일한 통로다.**"""
+        import traceback
+        txt = "".join(traceback.format_exception(exc, val, tb))
+        try:
+            self._rlog("🚨 오류 " + txt.replace(chr(10), " | ")[:900])
+        except Exception:
+            pass
+        try:
+            self._pmsg("🚨 오류: " + str(val))
+        except Exception:
+            pass
+        try:
+            w = tk.Toplevel(self); w.title("🚨 오류")
+            w.attributes("-topmost", True)
+            t = tk.Text(w, font=("맑은 고딕", 9), width=86, height=18)
+            t.pack(fill="both", expand=True, padx=8, pady=8)
+            t.insert("end", txt); t.config(state="disabled")
+            tk.Button(w, text="닫기", font=("맑은 고딕", 9), width=10,
+                      command=w.destroy).pack(pady=(0, 8))
+        except Exception:
+            pass
+
     def _rlog(self, msg):
         """반복 실행 기록 — 나중에 무슨 일이 있었는지 추적용."""
         try:
@@ -4033,6 +4084,8 @@ class IslandApp(tk.Tk):
     def _on_rasta_img(self, x, y, w, h):
         self.deiconify()
         key, j = getattr(self, "_rasta_target", (RASTA_KEY, 0))
+        self._rlog(f"[라스타] 🖼 {j+1}번 드래그 끝 — 받은 값 "
+                   f"({x},{y}) {w}x{h}")
         if w < 5 or h < 5:
             self._status.set("너무 작습니다 - 다시 드래그해주세요")
             self._reopen_preset_win(key); return
