@@ -13434,8 +13434,22 @@ class App(tk.Tk):
                     pass
             except Exception:
                 pass
-        self._last_sleep = set(slept)
-        self._last_scores = _scores      # 슬롯별 점수 (왜 못 잡았는지 확인용)
+        # 🩹 **한 슬롯만 본 결과로 전체 기록을 지우지 않는다** (2026-10-03).
+        #    `only` 를 주면 그 슬롯만 훑는데, 예전엔 `slept` 를 통째로 덮어써서
+        #    **나머지 15개의 '자고 있음' 표시가 사라졌다.** 그러면 바로 뒤에
+        #    `_run_fix_slot`/`_fix_verify` 가 `_last_sleep` 을 보고 "안 자고 있는데
+        #    십자가가 없다" 고 판단해 **복구도 안 한 슬롯을 목록에서 지우거나**
+        #    엉뚱한 '안 됐다' 메시지를 낸다 (사용자 신고: "01번이 복구가 안 떠도
+        #    안 되었다고 간혹 나온다"). 본 슬롯만 갱신하고 나머지는 그대로 둔다.
+        if _only is None:
+            self._last_sleep = set(slept)
+            self._last_scores = _scores  # 슬롯별 점수 (왜 못 잡았는지 확인용)
+        else:
+            self._last_sleep = ((getattr(self, "_last_sleep", set()) or set())
+                                - _only) | set(slept)
+            _keep = [x for x in (getattr(self, "_last_scores", None) or [])
+                     if x[0] not in _only]
+            self._last_scores = sorted(_keep + _scores)
         return hit
 
     def _check_scan(self, quiet=False):
