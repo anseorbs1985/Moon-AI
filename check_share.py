@@ -57,6 +57,10 @@ def main():
          "그 던전을 통째로 덮어쓴다", True),
         ("share_island.json  presets_only", len(si.get("presets_only") or []),
          "그 던전 프리셋(좌표 포함)", True),
+        # 2026-10-03 — fill_only 는 **빈 칸만** 채우므로 로컬 좌표를 덮지 않는다.
+        #   그래도 '좌표를 건드리는 통로' 라서 세어 둔다 — 쓰고 나면 비워야 한다.
+        ("share_island.json  fill_only", len(si.get("fill_only") or []),
+         "그 던전 **빈 칸만** 채움 (덮어쓰진 않음)", True),
         ("share_island.json  presets", 1 if si.get("presets") else 0,
          "프리셋 동기화", True),
         ("share_times.json   keys", len(st.get("keys") or []),
