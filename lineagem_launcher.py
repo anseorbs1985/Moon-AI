@@ -4611,11 +4611,40 @@ class App(tk.Tk):
         except Exception:
             pass
 
-    @staticmethod
-    def _rep_delay(h):
-        """반복 주기(초) — 섬/던전 실행기와 같은 규칙(2h면 2:02~2:07 랜덤)."""
+    def _rep_delay(self, h, key=None, bi=None):
+        """반복 주기(초) — 섬/던전 실행기와 **같은 규칙**을 쓴다.
+
+        기본은 2h면 2:02~2:07 랜덤. 악몽의섬은 **프리셋마다 여유가 다르다**
+        (2026-10-03 사용자: "라바는 들어가고 이동하는 시간이 좀 많기 때문에
+        마무리되고 4분을 좀 더, 악몽의섬도 한 3분만 더"):
+          · 라스타바드 → 9~13분   (2시간 5분 + 4분)
+          · 악몽의섬   → 5~10분   (2시간 + 3분)
+        `key`/`bi` 를 주면 그 슬롯을 보고 고른다. 안 주면 예전 그대로.
+        ⚠ 섬 실행기(`lineagem_island.py`)의 `REPEAT_EXTRA_MIN` 과 **같은 값**이어야
+          한다 — 한쪽만 고치면 다음 회차부터 값이 달라진다."""
         extra = {1: (1, 7), 2: (2, 7), 3: (2, 6), 4: (2, 7)}.get(h, (1, 7))
+        v = self._slot_ver(key, bi)
+        if v:
+            extra = self.REPEAT_EXTRA_MIN.get(v, extra)
         return h * 3600 + random.uniform(extra[0], extra[1]) * 60
+
+    # ⏱ 섬 실행기와 **같은 값**을 둘 것 (lineagem_island.py 의 REPEAT_EXTRA_MIN)
+    REPEAT_EXTRA_MIN = {"라스타바드": (9, 13), "악몽의섬": (5, 10)}
+
+    def _slot_ver(self, key, bi):
+        """그 슬롯이 **라스타바드**인지 **악몽의섬**인지 (악몽의섬 던전만 해당).
+
+        프리셋을 적용하면 라스타바드 칸(26~35)은 `slot["rasta"]` 에 그림 설정이
+        적히고, 악몽의섬 프리셋은 그 칸을 ✖삭제 해서 `rasta` 를 지운다.
+        그래서 **`rasta` 가 비어 있지 않으면 라스타바드**다 (이름보다 확실하다).
+        모르면 빈 값 → 예전 기본 여유를 쓴다."""
+        if key != "토요일_악몽의섬" or bi is None:
+            return ""
+        try:
+            sl = (self._island_cfg().get(key) or [])[int(bi)]
+        except Exception:
+            return ""
+        return "라스타바드" if ((sl or {}).get("rasta")) else "악몽의섬"
 
     def _island_cfg(self):
         try:
@@ -6170,7 +6199,7 @@ class App(tk.Tk):
                 # 고정 던전 — 횟수를 다 채우면 끄지 않고 처음부터 다시
                 e["left"] = self._rep_full_n(key, bi)
                 e["run"]  = 0                          # 다음 실행이 다시 1회차
-                e["next"] = now + self._rep_delay(h)
+                e["next"] = now + self._rep_delay(h, key, bi)
                 st[kk] = e
                 self._rep_log(f"{key} #{bi+1:02d} 마지막 회차 실행 — 고정이라 "
                               f"{e['left']}회로 다시 채움")
@@ -6179,7 +6208,7 @@ class App(tk.Tk):
                 self._rep_turn_off(key, bi)
                 self._rep_log(f"{key} #{bi+1:02d} 마지막 회차 실행 (반복 종료)")
             else:
-                e["next"] = now + self._rep_delay(h)
+                e["next"] = now + self._rep_delay(h, key, bi)
                 st[kk] = e
                 self._rep_log(f"{key} #{bi+1:02d} 실행 (남은 {e['left']}회)")
             names.append(bi)
@@ -7157,7 +7186,8 @@ class App(tk.Tk):
             st.pop("_off", None)          # 다시 켰으니 '꺼둠' 표시 해제
             # 사용자가 직접 누른 실행도 '1회차'로 센다 (2026-08-16 사용자 지시)
             st[f"{self.NIGHT_KEY}|{slot_idx}"] = {"h": h, "left": max(0, n - 1), "run": 1,
-                                                  "next": time.time() + self._rep_delay(f)}
+                                                  "next": time.time() + self._rep_delay(
+                                                      f, self.NIGHT_KEY, slot_idx)}
             md = st.get("_mode") or {}          # 표시도 '2h마다' 로 맞춘다
             md[f"{self.NIGHT_KEY}|{slot_idx}"] = "h2"
             st["_mode"] = md
@@ -7617,7 +7647,8 @@ class App(tk.Tk):
             if e:                       # 이미 걸려 있으면 남은 횟수를 그대로 이어간다
                 run = int(e.get("run", 0) or 0)
                 e["h"] = h
-                e["next"] = time.time() + self._rep_delay(first if not run else h)
+                e["next"] = time.time() + self._rep_delay(
+                    first if not run else h, self.NIGHT_KEY, slot_idx)
                 st[k] = e
                 left_txt = f"남은 {e.get('left', n0)}회 그대로"
             else:

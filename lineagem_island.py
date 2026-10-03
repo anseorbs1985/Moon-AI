@@ -3537,6 +3537,31 @@ class IslandApp(tk.Tk):
     REPEAT_FIXED = {"토요일_악몽의섬": (2, 6)}
     # 반복을 새로 걸 때 '첫 회차만' 이 시간 (2026-08-22 — 악몽 6회 = 4시간 1회 + 2시간 5회)
     REPEAT_FIRST = {"토요일_악몽의섬": 4}
+    # ⏱ 반복 간격에 **더 주는 여유(분)** — 같은 악몽의섬이라도 프리셋마다 다르다.
+    #    (2026-10-03 사용자: "라바는 들어가고 이동하는 시간이 좀 많기 때문에
+    #     마무리되고 4분을 좀 더, 악몽의섬도 한 3분만 더 줬으면 좋겠어")
+    #      라스타바드 = 2시간 **5분** 간격(사용자 지정) + 4분  → 2시간 9~13분
+    #      악몽의섬   = 2시간 + 3분                          → 2시간 5~10분
+    #    (원래는 둘 다 2~7분 랜덤이었다 — 런처 `_rep_delay` 와 같은 값을 쓴다)
+    #    ⚠ 회차 구조(4시간 1회 + 5회 = 6회)는 **둘이 같다** — 다른 건 분뿐이다.
+    REPEAT_EXTRA_MIN = {"라스타바드": (9, 13), "악몽의섬": (5, 10)}
+
+    def _slot_ver(self, key, slot):
+        """그 슬롯이 **라스타바드**인지 **악몽의섬**인지.
+
+        프리셋을 적용하면 라스타바드 칸(26~35)은 `slot["rasta"]` 에 그림 설정이
+        적히고, 악몽의섬 프리셋은 그 칸을 ✖삭제 해서 `rasta` 를 지운다
+        (`_apply_preset` 의 `_keep_r`). 그래서 **`rasta` 가 비어 있지 않으면
+        라스타바드**다 — 슬롯 이름으로 보는 것보다 확실하다 (이름은 바뀐다).
+        악몽의섬이 아닌 던전은 빈 값 → 기본 여유를 쓴다."""
+        if key != RASTA_KEY:
+            return ""
+        return "라스타바드" if ((slot or {}).get("rasta")) else "악몽의섬"
+
+    def _rep_extra_sec(self, key, slot):
+        """반복 간격에 더 주는 여유(초). 랜덤 폭은 없애지 않는다 — 사람처럼."""
+        lo, hi = self.REPEAT_EXTRA_MIN.get(self._slot_ver(key, slot), (1, 7))
+        return random.uniform(lo, hi) * 60
 
     def _rep_first_h(self, key, h, idx=None):
         """첫 대기 시간 — 슬롯이 '4시간 → 2시간' 모드일 때만 다른 시간을 쓴다.
@@ -3601,7 +3626,8 @@ class IslandApp(tk.Tk):
             sl["repeat_h"] = h
             sl["repeat_n"] = n
             st[f"{key}|{i}"] = {"h": h, "left": n, "run": 0,
-                                "next": now + self._rep_first_h(key, h, i) * 3600}
+                                "next": (now + self._rep_first_h(key, h, i) * 3600
+                                         + self._rep_extra_sec(key, sl))}
             cnt += 1
         save_cfg(self.cfg)
         self._rep_write(st)
@@ -3715,7 +3741,9 @@ class IslandApp(tk.Tk):
                 st.pop("_off", None)      # 직접 실행했으니 '꺼둠' 표시 해제
                 st[f"{key}|{i}"] = {"h": h, "left": max(0, n - 1), "run": 1,
                                     # 직접 실행은 항상 평소 주기(2시간)부터 — 사용자 지시
-                                    "next": now + h * 3600}
+                                    # + 프리셋별 여유 (라바 9~13분 · 악몽 5~10분)
+                                    "next": (now + h * 3600
+                                             + self._rep_extra_sec(key, slot))}
                 # ★ 설정에도 주기를 되살린다 — repeat_h 가 0이면 메인런처의 반복 관리자가
                 #   방금 건 예약을 '꺼진 것'으로 보고 지운다 (2026-08-23)
                 try:
@@ -3819,7 +3847,11 @@ class IslandApp(tk.Tk):
                 pass
             st.pop("_off", None)          # 사용자가 다시 켰으니 '꺼둠' 표시 해제
             st[k] = {"h": h, "left": n,
-                     "next": time.time() + self._rep_first_h(key, h, idx) * 3600}
+                     "next": (time.time()
+                              + self._rep_first_h(key, h, idx) * 3600
+                              + self._rep_extra_sec(
+                                  key, (self.cfg.get(key) or [{}])[idx]
+                                  if idx < len(self.cfg.get(key) or []) else {}))}
             self._rep_write(st)
             self._status.set(f"⏰ {key} #{idx+1:02d} 반복 다시 시작 — {h}시간 {n}회")
         self._refresh_rep_btns()
@@ -3960,6 +3992,26 @@ class IslandApp(tk.Tk):
         self._active_key = key
         for k, btn in self._stop_btns.items():
             btn.config(state="normal" if k == key else "disabled")
+        # ⏰ **[실행]을 누르면 반복도 같이 건다** (2026-10-03 사용자 지시:
+        #    "그냥 내가 실행 누르면 반복도 같이 해줘. 이거 영 말을 안 듣네")
+        #    예전에는 슬롯별 🧪 버튼(`_test`/`_test_sel`)만 `_rep_restart` 를 불러서,
+        #    [실행]으로 돌리면 반복이 안 걸렸다. **이 줄을 빼지 말 것.**
+        #    돌릴 슬롯을 고르는 규칙은 아래 `_run` 의 `targets` 와 같게 맞춘다.
+        try:
+            if sel:
+                _tg = [i for i in sel
+                       if i < len(self.cfg.get(key) or [])
+                       and (self.cfg[key][i] or {}).get("enabled", True)]
+            else:
+                _tg = [i for i, _s in enumerate(self.cfg.get(key) or [])
+                       if isinstance(_s, dict) and _s.get("enabled", True)
+                       and (any(c for c in (_s.get("coords") or []))
+                            or any(_s.get("dirs") or []))]
+            if _tg:
+                self._rep_restart(key, _tg)
+                self._swap_if_due(key, _tg)   # 정해둔 회차면 물약(프리셋) 교체
+        except Exception as _e:
+            self._rlog(f"[반복] 실행과 함께 걸기 실패: {_e}")
         # 창은 켜두되 '메인런처 바로 앞(클라 뒤)'으로 물러난다 (최소화 안 함)
         self._send_behind_main()
         self._minimize_claude()
