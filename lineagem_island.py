@@ -1851,6 +1851,24 @@ class IslandApp(tk.Tk):
                   bg="#b9770e", fg="white",
                   command=self._preset_reapply).pack(side="left", padx=4)
         tk.Button(bot, text="닫기", font=("맑은 고딕", 9), command=win.destroy).pack(side="left", padx=4)
+        if key == RASTA_KEY:
+            # 🗡 같은 화면(확인창 등)이 여러 번 나올 때 — 칸을 통째로 가져온다
+            cp = tk.Frame(win); cp.pack(pady=(0, 4))
+            tk.Label(cp, text="🗡 칸 복사 (그림·🎯·📍 전부)",
+                     font=("맑은 고딕", 9, "bold"), fg="#5b2c6f").pack(side="left")
+            self._pw["cp_from"] = tk.StringVar(value="29")
+            self._pw["cp_to"] = tk.StringVar(value="32")
+            tk.Spinbox(cp, from_=1, to=clicks_for(key), width=3,
+                       textvariable=self._pw["cp_from"],
+                       font=("맑은 고딕", 9)).pack(side="left", padx=(6, 2))
+            tk.Label(cp, text="번 →", font=("맑은 고딕", 9)).pack(side="left")
+            tk.Spinbox(cp, from_=1, to=clicks_for(key), width=3,
+                       textvariable=self._pw["cp_to"],
+                       font=("맑은 고딕", 9)).pack(side="left", padx=(2, 4))
+            tk.Label(cp, text="번", font=("맑은 고딕", 9)).pack(side="left")
+            tk.Button(cp, text="복사", font=("맑은 고딕", 9, "bold"),
+                      bg="#5b2c6f", fg="white", activebackground="#4a235a",
+                      command=self._preset_copy_cell).pack(side="left", padx=(6, 0))
         # 📣 이 창 자신의 상태줄 — 안내가 **섬 실행기 상태줄**로만 가면
         #    이 창이 그 앞에 떠 있어서 사용자가 아무것도 못 본다 (2026-10-03 신고:
         #    "드래그 하라면서 아무것도 안 되는데"). 여기에도 같이 띄운다.
@@ -2303,6 +2321,52 @@ class IslandApp(tk.Tk):
                 lb.config(text=text)
         except Exception:
             pass
+
+    def _preset_copy_cell(self):
+        """🗡 한 칸의 **그림·떨어짐·설정**을 다른 칸으로 그대로 복사한다.
+
+        확인창(`이동하시겠습니까?`)처럼 **같은 화면이 여러 번** 나올 때 쓴다.
+        가져오는 것: 그림 파일(`rasta_NN.png`) · 기준(`_thr.json`) ·
+                     무엇을 할지(그림클릭/확인만) · 🎯 고르기 · 📍 떨어짐
+        **덮어쓴다** — 받는 칸에 있던 그림은 사라진다."""
+        import shutil
+        try:
+            a = int(self._pw["cp_from"].get())
+            b = int(self._pw["cp_to"].get())
+        except Exception:
+            self._pmsg("🗡 복사 — 번호를 숫자로 넣어주세요")
+            return
+        n = clicks_for(self._pw["key"])
+        if not (1 <= a <= n and 1 <= b <= n):
+            self._pmsg(f"🗡 복사 — 번호는 1~{n} 사이여야 합니다")
+            return
+        if a == b:
+            self._pmsg("🗡 복사 — 보내는 칸과 받는 칸이 같습니다")
+            return
+        src = rasta_img_path(a - 1)
+        if not os.path.exists(src):
+            self._pmsg(f"🗡 {a}번 칸에 그림이 없습니다")
+            return
+        try:
+            shutil.copy2(src, rasta_img_path(b - 1))
+            # 기준(🔍 임계값)도 같이
+            _ts = os.path.join(IMG_DIR, f"rasta_{a:02d}_thr.json")
+            if os.path.exists(_ts):
+                shutil.copy2(_ts, os.path.join(IMG_DIR, f"rasta_{b:02d}_thr.json"))
+            # 설정(무엇을 할지·🎯·📍)도 같이
+            it = dict(self._pw["items"].get(str(a - 1)) or {})
+            if it.get("act") in (RASTA_CLICK, RASTA_SEE):
+                self._pw["items"][str(b - 1)] = dict(it)
+            self._preset_refresh_cells()
+            _off = it.get("off")
+            self._pmsg(f"🗡 {a}번 → {b}번 복사했습니다 "
+                       f"(그림" + (" · 떨어짐 "
+                                   f"{_off[0]:+d},{_off[1]:+d}" if _off else "")
+                       + f" · {self.TOGGLE_NAME.get(it.get('act'), '')})"
+                       + "  — [저장] 을 눌러주세요")
+            self._rlog(f"[라스타] 칸 복사 {a} → {b} ({it})")
+        except Exception as e:
+            self._pmsg(f"🗡 복사 실패: {e}")
 
     def _preset_fill_range(self, act):
         """🗡 라스타바드 구간(26~35)을 한 번에 채운다.
