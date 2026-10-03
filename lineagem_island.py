@@ -1633,6 +1633,14 @@ class IslandApp(tk.Tk):
     PRESET_SYNC_CLICKS = {"수금_오만의탑": (11, 12)}
     # 이름이 같으면 '모든 클릭 설정'을 함께 저장하는 던전 (잊혀진섬 서쪽↔북쪽)
     PRESET_SYNC_ALL = ("월요일_잊혀진섬",)
+    # 🧭 '기본' 프리셋이 그 묶음의 **기본** — 저장하면 같은 층의 나머지 프리셋도
+    #    똑같이 맞춘다 (**한 방향**: 기본 → 나머지. 나머지를 고쳐도 기본은 안 바뀐다).
+    #    `지킬칸` 은 **그 프리셋 것을 그대로 두는 칸**(0부터) — 물약 좌표가 서로 다르다.
+    #    사용자(2026-10-03): "기본에서 수정하면 48/82%에 같이 수정이 되어야 한다.
+    #    기본이 기본이 되는 거야" / "**좌표를 제외한** 나머지 수정본은 똑같이".
+    #    {던전키: {층: (기본 프리셋 이름, 지킬칸들)}}
+    PRESET_BASE_SYNC = {RASTA_KEY: {"라스타바드": ("기본!!", (11, 12))}}
+
     # 녹화를 공유하는 프리셋 짝 — 한쪽에 녹화하면 다른 쪽에도 그대로 복사된다
     # (북 ▶▶ 와 서 ▶▶ 는 같은 동작이라 한 번만 녹화하면 됨)
     PRESET_REC_MIRROR = {"월요일_잊혀진섬": {"북 ▶▶": ["서 ▶▶"], "서 ▶▶": ["북 ▶▶"]}}
@@ -1804,7 +1812,10 @@ class IslandApp(tk.Tk):
               + ((chr(10) + "🔁 '못가면 그림' = 그 칸의 이동(녹화)이 됐는지 화면으로 "
                   "보고, 못 갔으면 그림+확인을 눌러 다시 보낸다 "
                   f"({'최대 %d번' % FIX_TRIES} · 그래도 못 가면 그 슬롯만 멈춘다). "
-                  "그림은 **못 갔을 때만 보이는 것**(입구 그림 등)을 자른다."
+                  "그림은 **못 갔을 때만 보이는 것**(아직 그 화면에 있다는 표시)."
+                  + chr(10) + "   라스타바드는 **30번·33번 두 군데** — 30번에서 못 "
+                  "갔으면 28번 큐브 화면에 그대로 있으니 [🗡 칸 복사] 로 "
+                  "28→30, 31→33 하면 새로 자를 필요가 없다 (확인 짝은 29·32)."
                   + chr(10) + f"🗡 악몽의섬/라스타바드: 1~{RASTA_RANGE[0]-1}번은 "
                   f"**공용**(그대로 두세요) · {RASTA_RANGE[0]}~{RASTA_RANGE[1]}번부터 갈립니다. "
                   f"악몽의섬 프리셋에는 아래 [🗡 {RASTA_RANGE[0]}~{RASTA_RANGE[1]}번 ✖삭제로] 를 "
@@ -1886,8 +1897,10 @@ class IslandApp(tk.Tk):
             cp = tk.Frame(win); cp.pack(pady=(0, 4))
             tk.Label(cp, text="🗡 칸 복사 (그림·🎯·📍 전부)",
                      font=("맑은 고딕", 9, "bold"), fg="#5b2c6f").pack(side="left")
-            self._pw["cp_from"] = tk.StringVar(value="29")
-            self._pw["cp_to"] = tk.StringVar(value="32")
+            # 기본값 = 28번 큐브 그림 → 30번(🔁) 으로. 30번에서 못 들어갔으면
+            # 28번 화면에 그대로 있으므로 **새로 자를 필요가 없다.**
+            self._pw["cp_from"] = tk.StringVar(value="28")
+            self._pw["cp_to"] = tk.StringVar(value="30")
             tk.Spinbox(cp, from_=1, to=clicks_for(key), width=3,
                        textvariable=self._pw["cp_from"],
                        font=("맑은 고딕", 9)).pack(side="left", padx=(6, 2))
@@ -1903,7 +1916,10 @@ class IslandApp(tk.Tk):
             fx = tk.Frame(win); fx.pack(pady=(0, 6))
             tk.Label(fx, text="🔁 못 가면 그림", font=("맑은 고딕", 9, "bold"),
                      fg="#117864").pack(side="left")
-            self._pw["fx_cell"] = tk.StringVar(value="27")
+            # 기본값 = 사용자가 말한 두 군데 중 첫째 (30번 이동 · 확인은 29번 그림).
+            # 둘째는 33번 — 확인은 32번. (2026-10-03: "30번에서 못 들어갈 수 있고
+            # 또 33번에서 못 들어갈 수가 있어. 두 개야.")
+            self._pw["fx_cell"] = tk.StringVar(value="30")
             self._pw["fx_ok"] = tk.StringVar(value="29")
             tk.Spinbox(fx, from_=1, to=clicks_for(key), width=3,
                        textvariable=self._pw["fx_cell"],
@@ -2450,7 +2466,19 @@ class IslandApp(tk.Tk):
             # 설정(무엇을 할지·🎯·📍)도 같이
             it = dict(self._pw["items"].get(str(a - 1)) or {})
             if it.get("act") in RASTA_MODES:
-                self._pw["items"][str(b - 1)] = dict(it)
+                _dst = dict(self._pw["items"].get(str(b - 1)) or {})
+                _new = dict(it)
+                if _dst.get("act") == RASTA_FIX:
+                    # 🔁 받는 칸이 '못 가면 그림' 이면 **그 모드를 지킨다** —
+                    #    28→30 처럼 그림만 가져오는 경우다. 덮어쓰면 'img' 가 되어
+                    #    이동 전에 눌러버린다 (2026-10-03).
+                    _new["act"] = RASTA_FIX
+                    if _dst.get("ok"):
+                        _new["ok"] = _dst["ok"]
+                    elif "ok" in _new:
+                        _new.pop("ok", None)
+                self._pw["items"][str(b - 1)] = _new
+                it = _new
             self._preset_refresh_cells()
             _off = it.get("off")
             self._pmsg(f"🗡 {a}번 → {b}번 복사했습니다 "
@@ -2491,6 +2519,54 @@ class IslandApp(tk.Tk):
         self._preset_refresh_cells()
         self._status.set("전부 그대로로 되돌림 — [저장]을 눌러야 반영됩니다")
 
+    def _preset_base_spread(self, key, pres, pi):
+        """🧭 '기본' 프리셋을 저장하면 **같은 층의 나머지 프리셋도 똑같이** 맞춘다.
+
+        사용자: "내가 기본에서 수정하면 48/82%에 같이 수정이 되어야 한다.
+        기본이 기본이 되는 거야" — 단 **좌표(물약 칸)는 각자 것을 지킨다.**
+
+        · **한 방향이다** — 기본 → 나머지. 48%/82% 를 고쳐도 기본은 안 바뀐다
+          (스케줄 클릭1 거울과 같은 원칙). 그래서 나머지를 저장하면 **알려만 준다**:
+          다음에 기본을 저장하면 지킬칸 빼고 덮어쓰인다.
+        · `지킬칸` 에 없는 칸은 **기본 것으로 통째 교체**한다 (덧붙이는 게 아니다) —
+          기본에서 칸을 '그대로' 로 되돌리면 나머지에서도 사라져야 한다.
+        · `src`(기준슬롯)는 **건드리지 않는다** — 좌표를 어느 클라 기준으로 잡았는지는
+          프리셋마다 다르다 (기본 1, 48/82% 2).
+
+        돌려주는 값: (맞춘 프리셋 이름들, 알림글 또는 "")"""
+        _bs = (self.PRESET_BASE_SYNC.get(key) or {})
+        me = pres[pi]
+        _floor = me.get("floor") or ""
+        pair = _bs.get(_floor)
+        if not pair:
+            return [], ""
+        base_name, keep = pair
+        keep_s = {str(c) for c in keep}
+        _nm = (me.get("name") or "").strip()
+        if _nm != base_name:
+            # 기본이 아니다 — 퍼뜨리지 않고, 덮어쓰일 수 있다고 알려준다
+            return [], (f"ℹ '{base_name}' 이 이 묶음의 기본입니다 — 다음에 그걸 "
+                        f"저장하면 칸 "
+                        + ",".join(str(c + 1) for c in sorted(keep))
+                        + " (좌표) 빼고 여기도 같이 바뀝니다")
+        out = []
+        for oi, other in enumerate(pres):
+            if oi == pi or (other.get("floor") or "") != _floor:
+                continue
+            oit = other.get("items") or {}
+            # 그 프리셋의 **좌표(물약) 칸은 그대로 지킨다**
+            mine = {k: dict(v) for k, v in oit.items() if k in keep_s}
+            other["items"] = {k: dict(v) for k, v in (me.get("items") or {}).items()
+                              if k not in keep_s}
+            other["items"].update(mine)
+            other["abs"] = me.get("abs", False)
+            out.append(other.get("name") or ("P" + str(oi + 1)))
+        if out:
+            self._rlog(f"[프리셋] 🧭 기본 '{base_name}' → {out} 에 함께 저장 "
+                       f"(칸 " + ",".join(str(c + 1) for c in sorted(keep))
+                       + " 좌표는 각자 것 유지)")
+        return out, ""
+
     def _preset_store(self):
         pw = self._pw; key = pw["key"]; pi = pw["pi"]
         try:
@@ -2506,8 +2582,9 @@ class IslandApp(tk.Tk):
         sync = self.PRESET_SYNC_CLICKS.get(key, ())
         sync_all = key in self.PRESET_SYNC_ALL
         synced = []
+        me = pres[pi]
+        based, base_warn = self._preset_base_spread(key, pres, pi)
         if sync or sync_all:
-            me = pres[pi]
             for oi, other in enumerate(pres):
                 if oi == pi or (other.get("name") or "") != (me.get("name") or ""):
                     continue
@@ -2548,6 +2625,15 @@ class IslandApp(tk.Tk):
             what = "전체 설정" if sync_all else ("클릭 " + ",".join(str(j + 1) for j in sync) + "번")
             msg += ("   [" + what + "을 " + " ".join(synced) + " '" +
                     (pres[pi].get("name") or "") + "'에도 같이 저장]")
+        if based:
+            # 🧭 기본 → 묶음 전체. 무엇이 같이 바뀌었는지 반드시 보여준다
+            _kp = (self.PRESET_BASE_SYNC.get(key) or {}).get(
+                pres[pi].get("floor") or "", ("", ()))[1]
+            msg += ("   🧭 기본이라 " + ", ".join(based) + " 에도 같이 저장"
+                    + ("  (칸 " + ",".join(str(c + 1) for c in sorted(_kp))
+                       + " 좌표는 각자 것 그대로)" if _kp else ""))
+        elif base_warn:
+            msg += "   " + base_warn
         self._status.set(msg)
 
     def _refresh_preset_btns(self, key):
