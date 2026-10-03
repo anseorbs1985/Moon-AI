@@ -1067,12 +1067,25 @@ class IslandApp(tk.Tk):
         self._refresh_counts()
 
     def _refresh_counts(self):
+        """📊 오늘 실행 횟수 패널 갱신.
+
+        ⚠ 이 패널은 **'전체 모드'(`_focus_idx is None`)에서만** 만들어진다
+        (`_build_count_panel`). 던전 하나만 열면 `_count_vars` 가 **아예 없어서**
+        `AttributeError` 로 터졌다 — 실행이 끝날 때마다.
+        `pythonw` + Tk 예외 무시 때문에 **몇 달간 아무도 몰랐고**,
+        2026-10-03 에 오류 팝업을 달자마자 바로 드러났다 (라스타바드와는 무관).
+        패널이 없으면 조용히 빠진다."""
+        if not hasattr(self, "_count_vars") or not hasattr(self, "_total_var"):
+            return
         day = today()
         day_data = self.counts.get(day, {})
         total = 0
         for i in range(SLOTS):
             v = day_data.get(str(i), 0)
-            self._count_vars[i].set(str(v))
+            try:
+                self._count_vars[i].set(str(v))
+            except Exception:
+                pass
             total += v
         self._total_var.set(f"합계: {total}")
 
