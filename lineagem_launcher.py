@@ -1146,6 +1146,11 @@ FIX_IDLE_TICK_MS = 20000    # 20초마다 '마지막 입력 이후 몇 초' 만 
 FIX_CLICK_DELAY  = (1.4, 2.0)   # 클릭 뒤 화면이 돌아오기를 기다리는 시간(초)
 FIX_CLICK_RETRY  = (1.3, 1.9)   # 못 봤으면 한 번 더 (절전 해제가 느릴 때)
 FIX_CLICK_COOL   = 6.0          # 같은 슬롯은 이 시간 안에 다시 보지 않는다
+# 🩹 손으로 복구했는지 볼 때 — 목록에 있는 슬롯은 **이만큼 더** 본 뒤에야 지운다.
+#    (2026-10-03 사용자: "내가 복구하면 없애주라. 십자가 없으면 확인하고 없애줘")
+#    여러 번 보는 이유: 점수가 흔들려(실측 0.37~0.91) 한 번씩 놓치는데,
+#    그 한 번 때문에 **복구 안 한 글이 사라지면** 더 큰 사고다 (2026-09-29).
+FIX_CLICK_GONE   = (1.2, 1.8)   # 지우기 전 마지막 확인까지의 사이
 # 2026-09-21 작위 추가 — 3슬롯씩 들어갈 때마다 그 클라를 Z 로 깨우고 시작한다
 SLEEP_WAKE = ("fix", "jakwi")
 SLEEP_WAKE_KEY = "z"
@@ -12631,8 +12636,12 @@ class App(tk.Tk):
           **1.4~2.0초 뒤에 보고, 못 보면 1.3~1.9초 뒤 한 번 더** 본다.
         · **확인만 한다 — 목록에 올리기만 하고 복구는 시작하지 않는다**
           (Z 로 깨울 때와 같은 규칙, 2026-09-29). 복구는 사용자가 누르거나 5분 유휴 때.
-        · **목록에서 지우지는 절대 않는다** — 안 보인다고 지우면 사용자가 복구를
-          안 했는데 사라지는 사고가 난다 (2026-09-29 절대 규칙).
+        · **목록에 있는데 세 번 다 안 보이면 지운다** (2026-10-03 사용자 지시:
+          "내가 복구하면 없애주라. 십자가 없으면 너도 확인하고 없애줘").
+          예전엔 '절대 지우지 않는다' 였는데(2026-09-29), 손으로 고친 글이 그대로
+          남아 헷갈린다는 신고로 바뀌었다. 그때의 사고(복구 안 했는데 사라짐)는
+          **세 번 확인 + 절전 확인**으로 막는다 — 자는 클라는 화면을 못 보므로
+          절대 지우지 않는다.
         · 돌고 있는 작업이 있으면 건너뛴다."""
         try:
             import precise_click as _pc
@@ -12674,14 +12683,34 @@ class App(tk.Tk):
                 continue
 
     def _fix_click_check(self, si):
-        """클릭한 그 슬롯 하나만 십자가를 본다 — 보이면 목록에 올리고 끝."""
+        """클릭한 그 슬롯 하나만 십자가를 본다.
+
+        · 십자가가 **보이면** → 목록에 올린다 (복구는 시작하지 않는다)
+        · **목록에 있는데 안 보이면** → 손으로 복구한 것으로 보고 **목록에서 지운다**
+          (2026-10-03 사용자: "내가 복구하면 없애주라. 십자가 없으면 너도 확인하고
+          없애줘." — 손으로 고친 글이 남아 헷갈린다는 신고)
+
+        🚫 **지울 때는 세 번 다 안 보여야 한다.** 점수가 흔들려(실측 0.37~0.91)
+           한 번씩 놓치는데, 그 한 번 때문에 **복구 안 한 글이 사라지면** 더 큰
+           사고다 (2026-09-29 신고). 그래서:
+             · 올릴 때는 한 번만 보여도 올린다 (놓치는 쪽이 위험하다)
+             · 지울 때는 **세 번 다** 안 보여야 하고, **자고 있으면 안 지운다**
+               (자는 화면은 십자가를 가리므로 '없다' 고 말할 수 없다)
+             · 목록에 없는 슬롯은 아예 손대지 않는다"""
         try:
-            for k, _d in enumerate((FIX_CLICK_DELAY, FIX_CLICK_RETRY)):
+            _in_list = int(si) in set(self._warn_load())
+            # 목록에 있으면 '지워도 되나' 를 판단해야 하므로 한 번 더 본다
+            _looks = ((FIX_CLICK_DELAY, FIX_CLICK_RETRY, FIX_CLICK_GONE)
+                      if _in_list else (FIX_CLICK_DELAY, FIX_CLICK_RETRY))
+            _saw_sleep = False
+            for k, _d in enumerate(_looks):
                 time.sleep(random.uniform(*_d))
                 if self._is_busy():
                     return
                 hit = self._check_hits(only={si})
-                if hit and si in set(hit):
+                if hit is None:
+                    return                        # 기준 그림이 없어 볼 수가 없다
+                if si in set(hit):
                     cur = set(self._warn_load())
                     if si in cur:
                         return                    # 이미 목록에 있다
@@ -12694,6 +12723,27 @@ class App(tk.Tk):
                         f"🩹 #{s:02d} 복구해야함 — 클릭한 클라에서 십자가를 봤습니다 "
                         f"(누르거나, {FIX_IDLE_SEC//60}분 쉬면 자동 복구)"))
                     return
+                if int(si) in getattr(self, "_last_sleep", set()):
+                    _saw_sleep = True
+            # ── 여기까지 왔다 = 본 횟수만큼 전부 안 보였다 ──
+            if not _in_list:
+                return                            # 목록에 없으면 할 일이 없다
+            if _saw_sleep:
+                # 자고 있었다 — 십자가가 가려진 것뿐이다. **지우지 않는다.**
+                click_log(f"[클릭확인] #{si:02d} 십자가가 안 보이지만 절전 중 — "
+                          f"화면을 못 봤으므로 목록은 그대로 둔다")
+                return
+            cur = set(self._warn_load())
+            if int(si) not in cur:
+                return                            # 그 사이 누가 지웠다
+            self._warn_save(sorted(cur - {int(si)}))
+            self._fix_paid_mark(int(si), False)   # 💎 다야 표시도 해제
+            self.after(0, self._warn_refresh)
+            click_log(f"[클릭확인] #{si:02d} 십자가가 {len(_looks)}번 확인에서 "
+                      f"모두 안 보임 → 손으로 복구한 것으로 보고 목록에서 지웠다")
+            self.after(0, lambda s=si, n=len(_looks): self.status.set(
+                f"✅ #{s:02d} 목록에서 지웠습니다 — 십자가가 {n}번 확인에서 "
+                f"모두 안 보입니다 (손으로 복구하신 것으로 봤습니다)"))
         except Exception:
             pass
 
