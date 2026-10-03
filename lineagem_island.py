@@ -3743,10 +3743,20 @@ class IslandApp(tk.Tk):
             pass
         self._status.set(f"🧪 {key} — {cnt}개 슬롯 전부 '{names[pi]}' 로 바꿨습니다")
 
-    def _rep_restart(self, key, idxs):
+    def _rep_restart(self, key, idxs, user=False):
         """개별로 돌린 슬롯은 '지금부터' 2시간 N회를 다시 센다.
-        (사용자가 직접 누른 실행만 해당 — 반복 관리가 돌린 것은 그대로 둔다)"""
-        if getattr(self, "_auto_run", False):
+
+        (사용자가 직접 누른 실행만 해당 — 반복 관리가 돌린 것은 그대로 둔다)
+
+        `user=True` = **사람이 [실행]을 눌렀다** → `_auto_run` 이 켜져 있어도 건다.
+        2026-10-03 사용자: "실행을 시키면 반복을 돌려주라니까 안 해주네."
+        기록을 보니 16슬롯 웨이브가 끝까지 돌았는데 반복을 건 줄이 **하나도 없었다** —
+        어디서 조용히 빠져나갔는지조차 안 남아 있었다. **이제 항상 남긴다.**"""
+        if getattr(self, "_auto_run", False) and not user:
+            self._rlog(f"[반복] {key} — 반복 관리가 돌린 실행이라 다시 걸지 않음")
+            return
+        if not idxs:
+            self._rlog(f"[반복] {key} — 걸 슬롯이 없다 (좌표·방향이 있는 ON 슬롯 없음)")
             return
         try:
             import json as _j
@@ -3785,6 +3795,9 @@ class IslandApp(tk.Tk):
                 except Exception:
                     pass
                 done.append((i + 1, h, n))
+            if not done:
+                self._rlog(f"[반복] {key} — {sorted(x+1 for x in idxs)} 중 "
+                           f"걸린 슬롯이 없다 (⏰ 를 켜지 않은 슬롯뿐)")
             if done:
                 try:
                     save_cfg(self.cfg)          # repeat_h 되살린 것 저장
@@ -3956,7 +3969,7 @@ class IslandApp(tk.Tk):
         self._send_behind_main()
         self._minimize_claude()
         self._run_snapshot(key)                # 실행 직전 좌표를 남겨둔다
-        self._rep_restart(key, list(sel))      # 개별 실행 → 1회차로 세고 2시간 뒤 다음
+        self._rep_restart(key, list(sel), user=True)   # 사람이 누른 실행
         self._swap_if_due(key, list(sel))      # 정해둔 회차면 물약(프리셋) 교체
         threading.Thread(target=self._run, args=(key,),
                          kwargs={"sel_list": list(sel)}, daemon=True).start()
@@ -3967,7 +3980,7 @@ class IslandApp(tk.Tk):
         self._send_behind_main()
         self._minimize_claude()
         self._run_snapshot(key)                # 실행 직전 좌표를 남겨둔다
-        self._rep_restart(key, [idx])          # 개별 실행 → 1회차로 세고 2시간 뒤 다음
+        self._rep_restart(key, [idx], user=True)       # 사람이 누른 실행
         self._swap_if_due(key, [idx])          # 정해둔 회차면 물약(프리셋) 교체
         threading.Thread(target=self._run, args=(key, idx), daemon=True).start()
 
@@ -4034,8 +4047,10 @@ class IslandApp(tk.Tk):
                        if isinstance(_s, dict) and _s.get("enabled", True)
                        and (any(c for c in (_s.get("coords") or []))
                             or any(_s.get("dirs") or []))]
+            self._rlog(f"[반복] {key} [실행] 누름 — 걸 슬롯 "
+                       f"{sorted(x+1 for x in _tg)}")
             if _tg:
-                self._rep_restart(key, _tg)
+                self._rep_restart(key, _tg, user=True)   # 사람이 누른 실행
                 self._swap_if_due(key, _tg)   # 정해둔 회차면 물약(프리셋) 교체
         except Exception as _e:
             self._rlog(f"[반복] 실행과 함께 걸기 실패: {_e}")

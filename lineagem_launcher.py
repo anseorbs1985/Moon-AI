@@ -6281,7 +6281,25 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _night_user_front_set(self, on, why=""):
+        """🙋 '사용자가 이 판을 앞으로 올려놨다' 표시.
+
+        켜져 있는 동안 `_night_dock_now` 는 **앞뒤를 건드리지 않는다**.
+        (최소화 따라가기는 그대로 — 메인런처가 내려가면 같이 내려간다)
+        실행·스케줄이 시작되면 반드시 풀어야 한다 — 판이 클라를 가리면
+        좌표 클릭이 엉킨다 (이 저장소가 여러 번 데인 부분)."""
+        if bool(getattr(self, "_night_user_front", False)) == bool(on):
+            return
+        self._night_user_front = bool(on)
+        try:
+            self._rep_log(f"슬롯판 — 사용자 앞 유지 {'켬' if on else '끔'}"
+                          + (f" ({why})" if why else ""))
+        except Exception:
+            pass
+
     def _island_step_back(self):
+        # 실행이 시작되면 '사용자 앞 유지'를 푼다 — 판이 클라를 가리면 안 된다
+        self._night_user_front_set(False, "실행 시작")
         """섬/던전 실행 시작 — **메인런처를 최소화**한다 (2026-09-19 사용자 지시).
 
         예전에는 '맨 뒤로만' 보냈는데(2026-08-09), ⏰ 반복 도중 클라가 팅기면 런처가
@@ -7412,6 +7430,13 @@ class App(tk.Tk):
             #    메인런처 바로 앞에 끼우려면 **메인런처보다 한 칸 앞에 있는 창**을 기준으로
             #    준다. 메인런처가 맨 앞이면 0(HWND_TOP).
             #    메인런처는 건드리지 않으므로 클라들과의 앞뒤는 그대로 유지된다.
+            # 🙋 **사용자가 직접 앞으로 올린 판은 앞에 둔다** (2026-10-03 지시:
+            #    "내가 클릭해서 맨 앞으로 하면 네가 앞으로 유지해줘야지, 누르니까
+            #     뒤로 가버린다"). 예전엔 1초마다 '메인런처 바로 앞'(=클라보다 뒤)
+            #    으로 끌어내려서, 눌러 올려도 1초 만에 도로 내려갔다.
+            #    다시 붙이거나(📥) 실행이 시작되면 이 표시는 풀린다.
+            if getattr(self, "_night_user_front", False):
+                return
             _u = ctypes.windll.user32
             h_prev = _u.GetWindow(h_me, 3)            # GW_HWNDPREV
             if h_prev != h_p:                         # 이미 바로 앞이면 그냥 둔다
@@ -7478,6 +7503,14 @@ class App(tk.Tk):
             self.tk.call("wm", "protocol", p._w, "WM_DELETE_WINDOW",
                          self.register(self._night_attach))
             p.bind("<Configure>", self._night_detach_moved, add="+")
+            # 🙋 사용자가 판을 **누르면(또는 포커스가 가면) 앞에 그대로 둔다**
+            #    (2026-10-03: "내가 클릭해서 맨 앞으로 하면 앞으로 유지해줘야지")
+            #    ⚠ Toplevel 에 건 bind 는 **자식 위젯 클릭에도 울린다** — 여기서는
+            #       그게 맞다 (판 안의 어느 버튼을 누르든 '쓰는 중' 이다).
+            p.bind("<Button-1>",
+                   lambda _e: self._night_user_front_set(True, "판을 누름"), add="+")
+            p.bind("<FocusIn>",
+                   lambda _e: self._night_user_front_set(True, "판에 포커스"), add="+")
             d = dict(self.cfg.get("night_detach") or {})
             d.update({"on": True, "x": int(x), "y": int(y)})
             self.cfg["night_detach"] = d; save_cfg(self.cfg)
@@ -7492,6 +7525,7 @@ class App(tk.Tk):
 
     def _night_attach(self):
         """뗀 판을 메인런처 안으로 되돌린다."""
+        self._night_user_front_set(False, "판을 다시 붙임")
         p = getattr(self, "_night_panel", None)
         if p is None or not p.winfo_exists() or not self._night_detached():
             return
@@ -7524,6 +7558,7 @@ class App(tk.Tk):
         자동으로 붙게 해줘."* 그래서 켜질 때는 무조건 붙어 있고, 떼는 것은
         **사용자가 [📤] 를 누를 때만** 이다.
         (떼어둔 상태로 저장돼 있었으면 그 표시도 꺼서 다음에도 붙은 채로 뜬다)"""
+        self._night_user_front = False      # 켤 때는 '사용자 앞 유지' 꺼짐
         try:
             d = dict(self.cfg.get("night_detach") or {})
             if d.get("on"):
