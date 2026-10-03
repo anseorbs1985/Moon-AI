@@ -514,11 +514,15 @@ def sync_island_keys(log):
         only_p = cfgm.get("presets_only") or []      # 이 던전은 '프리셋만' 받는다
         _, lock_i = load_coord_lock()                # 🔒 잠근 던전은 제외
         if lock_i:
-            _skip = [k for k in list(keys) + list(only_p) if k in lock_i]
+            # 🔒 잠금은 **좌표 잠금**이다 — `keys`(좌표·녹화·간격)만 막는다.
+            #   `presets_only`(프리셋 '정의')는 좌표가 아니라 막지 않는다.
+            #   2026-10-03: 잠금 때문에 프리셋이 로컬에 영영 안 가던 것을 고쳤다
+            #   (사용자: "프리셋이랑 전부 올려줘. 좌표랑 선택되어 있는 건 그대로").
+            _skip = [k for k in keys if k in lock_i]
             if _skip:
-                log(f"   🔒 잠금 — 건드리지 않음: {', '.join(sorted(set(_skip)))}")
-            keys   = [k for k in keys if k not in lock_i]
-            only_p = [k for k in only_p if k not in lock_i]
+                log(f"   🔒 좌표 잠금 — 좌표는 건드리지 않음: "
+                    f"{', '.join(sorted(set(_skip)))}")
+            keys = [k for k in keys if k not in lock_i]
         with_presets = bool(cfgm.get("presets"))
         if not keys and not only_p:
             return
