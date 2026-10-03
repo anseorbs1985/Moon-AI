@@ -501,6 +501,54 @@ def apply_restore_order(log):
         log(f"   ⚠ 되돌리기 실패: {e}")
 
 
+def _is_empty_cell(v):
+    """그 칸이 '비어 있다' 고 볼 값인가."""
+    return v is None or v == "" or v == [] or v == {}
+
+
+def fill_empty_slot(dst_slot, src_slot, keep=()):
+    """🏝 **비어 있는 칸만** 메인 것으로 채운 슬롯을 돌려준다.
+
+    사용자(2026-10-03): "빈 칸만 채우기" — 로컬이 이미 찍어둔 좌표는
+    **절대 건드리지 않는다.** 새로 늘어난 자리(라스타바드 26~35번 등)만 들어온다.
+
+    · `coords`·`dirs`·`gap_list`·`click_names` → **칸(index) 단위**로 비었을 때만
+    · `recs`(녹화) → **번호 단위**로 그 자리에 녹화가 없을 때만
+    · `keep` 에 적힌 항목(이름=물약 선택·ON/OFF·반복)은 아예 손대지 않는다
+    · 로컬에 없던 항목은 그대로 들어온다 (새 기능이 생겨도 안전)
+
+    🚫 이미 값이 있는 칸을 덮어쓰지 말 것 — 이것이 이 함수의 존재 이유다."""
+    out = json.loads(json.dumps(dst_slot or {}, ensure_ascii=False))
+    src = src_slot or {}
+    n_cell = n_rec = 0
+    for fld in ("coords", "dirs", "gap_list", "click_names"):
+        if fld in keep:
+            continue
+        sv = src.get(fld)
+        if not isinstance(sv, list):
+            continue
+        dv = list(out.get(fld) or [])
+        while len(dv) < len(sv):          # 늘어난 자리를 만든다
+            dv.append(None)
+        for i, v in enumerate(sv):
+            if _is_empty_cell(v):
+                continue
+            if _is_empty_cell(dv[i]):
+                dv[i] = v
+                n_cell += 1
+        out[fld] = dv
+    sr = src.get("recs")
+    if isinstance(sr, dict) and "recs" not in keep:
+        dr = dict(out.get("recs") or {})
+        for k, v in sr.items():
+            if v and not dr.get(k):
+                dr[k] = v
+                n_rec += 1
+        if dr:
+            out["recs"] = dr
+    return out, n_cell, n_rec
+
+
 def sync_island_keys(log):
     """island_coords.json 중 '지정한 던전만' 메인 것을 통째로 받는다
     (share_island.json 의 keys). 좌표·간격·이름·녹화·프리셋까지 그 던전 것만 교체."""
@@ -512,6 +560,7 @@ def sync_island_keys(log):
             cfgm = json.load(f) or {}
         keys = cfgm.get("keys") or []
         only_p = cfgm.get("presets_only") or []      # 이 던전은 '프리셋만' 받는다
+        fill_o = cfgm.get("fill_only") or []         # 이 던전은 '빈 칸만' 채운다
         _, lock_i = load_coord_lock()                # 🔒 잠근 던전은 제외
         if lock_i:
             # 🔒 잠금은 **좌표 잠금**이다 — `keys`(좌표·녹화·간격)만 막는다.
@@ -524,7 +573,7 @@ def sync_island_keys(log):
                     f"{', '.join(sorted(set(_skip)))}")
             keys = [k for k in keys if k not in lock_i]
         with_presets = bool(cfgm.get("presets"))
-        if not keys and not only_p:
+        if not keys and not only_p and not fill_o:
             return
         # 값은 **전용 파일에서** 먼저 읽는다 (2026-09-19).
         #   island_coords.json 에는 슬롯 이름이 들어 있고, 그 이름이 곧 '고른 물약'이다
@@ -558,6 +607,31 @@ def sync_island_keys(log):
         # 로컬 것을 그대로 두는 항목 — 물약(이름)·ON/OFF·반복 설정은 컴퓨터마다 다르다
         keep = cfgm.get("keep_local") or []
         got = []
+        # 🏝 '빈 칸만 채우기' — 로컬이 찍어둔 좌표는 그대로 두고 **비어 있는 칸만**.
+        #    덮어쓰지 않으므로 🔒 좌표 잠금에도 걸리지 않는다 (잠금의 뜻은
+        #    "내 좌표를 덮지 마라" 인데, 이건 빈 자리에만 넣는다 — 2026-10-03).
+        for k in fill_o:
+            v = src.get(k)
+            if not (isinstance(v, list) and all(isinstance(x, dict) for x in v)):
+                continue
+            cur = dst.get(k) or []
+            merged, tc, tr, ns_ = [], 0, 0, 0
+            for i, sslot in enumerate(v):
+                old_s = cur[i] if (i < len(cur) and isinstance(cur[i], dict)) else {}
+                m, nc, nr = fill_empty_slot(old_s, sslot, keep)
+                if m != old_s:
+                    ns_ += 1
+                merged.append(m)
+                tc += nc
+                tr += nr
+            for j in range(len(v), len(cur)):      # 로컬에만 있는 슬롯은 그대로
+                merged.append(cur[j])
+            if dst.get(k) != merged:
+                dst[k] = merged
+                got.append(f"{k} 빈 칸 채움(슬롯 {ns_}개 · 좌표 {tc}칸"
+                           + (f" · 녹화 {tr}개" if tr else "") + ")")
+            else:
+                log(f"   {k}: 채울 빈 칸이 없습니다 (로컬이 이미 다 갖고 있음)")
         for k in keys:
             v = src.get(k)
             if v is None:
