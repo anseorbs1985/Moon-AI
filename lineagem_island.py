@@ -229,6 +229,19 @@ RASTA_RANGE = (26, 35)
 RASTA_CLICK = "img"    # 그림을 찾아 **그 자리를 누른다** (둘 중 하나 고르기)
 RASTA_SEE   = "see"    # 그림이 **보이는지만** 확인 (안 보이면 그 슬롯 중단)
 
+RASTA_FIX   = "fix"    # 🔁 이 칸의 **이동이 됐는지 보고**, 안 됐으면 그림으로 다시
+# 🗡 '그림으로 처리하는' 칸 전부 — 편집기·셈·저장이 다 이 묶음을 본다.
+#    ⚠ 실행 흐름에서는 이 묶음으로 판단하지 말 것: img/see 는 좌표 대신 **먼저** 누르고,
+#       fix 는 이동을 한 **뒤에** 확인하므로 자리가 다르다.
+RASTA_MODES = (RASTA_CLICK, RASTA_SEE, RASTA_FIX)
+# 좌표 **대신 먼저** 처리하는 모드 (fix 는 이동한 **뒤**라 여기 없다 — 넣으면 두 번 눌린다)
+RASTA_FIRST = (RASTA_CLICK, RASTA_SEE)
+
+# 🔁 못 가면 그림 — 이동이 됐는지 보고 안 됐으면 다시 보내는 값들
+FIX_SETTLE = (1.3, 2.0)   # 이동 뒤 화면이 바뀌기를 기다림 (짧으면 '아직 밖'으로 오판)
+FIX_TRIES  = 3            # 그림을 눌러 다시 보내기를 몇 번까지
+FIX_AFTER  = (0.9, 1.4)   # 그림·확인을 누른 뒤
+
 RASTA_MATCH   = 0.60   # 그림 기준 (칸마다 `rasta_<번호>_thr.json` 으로 덮어쓸 수 있다)
 RASTA_TRIES   = 3      # 못 찾으면 몇 번까지 다시 보나
 RASTA_GAP     = (0.9, 1.4)   # 다시 볼 때까지
@@ -1721,7 +1734,7 @@ class IslandApp(tk.Tk):
         items = pr.get("items") or {}
         nm = pr.get("name") or ("P" + str(pi + 1))
         n_img = sum(1 for v in items.values()
-                    if (v or {}).get("act") in (RASTA_CLICK, RASTA_SEE))
+                    if (v or {}).get("act") in RASTA_MODES)
         n_etc = len(items) - n_img
         if not items:
             return nm
@@ -1788,7 +1801,11 @@ class IslandApp(tk.Tk):
               + "🗡 라스타바드: 🖼 로 그 화면에만 있는 것을 자르고, 🎯 로 둘 중 "
               "[맨위/왼쪽/1등] 을 고릅니다 (🖼 오른쪽클릭 = 그림 지우기)." + chr(10)
               + "저장 후 슬롯 좌표 팝업에서 그 프리셋 버튼을 누르면 그 번호들만 바뀝니다 (나머지는 그대로)."
-              + ((chr(10) + f"🗡 악몽의섬/라스타바드: 1~{RASTA_RANGE[0]-1}번은 "
+              + ((chr(10) + "🔁 '못가면 그림' = 그 칸의 이동(녹화)이 됐는지 화면으로 "
+                  "보고, 못 갔으면 그림+확인을 눌러 다시 보낸다 "
+                  f"({'최대 %d번' % FIX_TRIES} · 그래도 못 가면 그 슬롯만 멈춘다). "
+                  "그림은 **못 갔을 때만 보이는 것**(입구 그림 등)을 자른다."
+                  + chr(10) + f"🗡 악몽의섬/라스타바드: 1~{RASTA_RANGE[0]-1}번은 "
                   f"**공용**(그대로 두세요) · {RASTA_RANGE[0]}~{RASTA_RANGE[1]}번부터 갈립니다. "
                   f"악몽의섬 프리셋에는 아래 [🗡 {RASTA_RANGE[0]}~{RASTA_RANGE[1]}번 ✖삭제로] 를 "
                   f"눌러 비워두세요.") if key == RASTA_KEY else ""))
@@ -1882,6 +1899,25 @@ class IslandApp(tk.Tk):
             tk.Button(cp, text="복사", font=("맑은 고딕", 9, "bold"),
                       bg="#5b2c6f", fg="white", activebackground="#4a235a",
                       command=self._preset_copy_cell).pack(side="left", padx=(6, 0))
+            # 🔁 못 가면 그림 — 그 칸의 '확인' 을 어느 칸 그림으로 누를지
+            fx = tk.Frame(win); fx.pack(pady=(0, 6))
+            tk.Label(fx, text="🔁 못 가면 그림", font=("맑은 고딕", 9, "bold"),
+                     fg="#117864").pack(side="left")
+            self._pw["fx_cell"] = tk.StringVar(value="27")
+            self._pw["fx_ok"] = tk.StringVar(value="29")
+            tk.Spinbox(fx, from_=1, to=clicks_for(key), width=3,
+                       textvariable=self._pw["fx_cell"],
+                       font=("맑은 고딕", 9)).pack(side="left", padx=(6, 2))
+            tk.Label(fx, text="번 칸 — 확인은",
+                     font=("맑은 고딕", 9)).pack(side="left")
+            tk.Spinbox(fx, from_=0, to=clicks_for(key), width=3,
+                       textvariable=self._pw["fx_ok"],
+                       font=("맑은 고딕", 9)).pack(side="left", padx=(4, 2))
+            tk.Label(fx, text="번 그림 (0 = 확인창 없음)",
+                     font=("맑은 고딕", 9)).pack(side="left")
+            tk.Button(fx, text="정하기", font=("맑은 고딕", 9, "bold"),
+                      bg="#117864", fg="white", activebackground="#0e6251",
+                      command=self._preset_set_ok).pack(side="left", padx=(6, 0))
         # 📣 이 창 자신의 상태줄 — 안내가 **섬 실행기 상태줄**로만 가면
         #    이 창이 그 앞에 떠 있어서 사용자가 아무것도 못 본다 (2026-10-03 신고:
         #    "드래그 하라면서 아무것도 안 되는데"). 여기에도 같이 띄운다.
@@ -1926,7 +1962,13 @@ class IslandApp(tk.Tk):
                 c["state"].config(text="⏺ 녹화", bg="#8e44ad", fg="white")
                 c["pick"].config(text="녹화 사용", bg="#95a5a6", fg="white",
                                  relief="raised", bd=1)
-            elif it.get("act") in (RASTA_CLICK, RASTA_SEE):   # 🗡 그림 자리 — 남보라
+            elif it.get("act") == RASTA_FIX:             # 🔁 못 가면 그림 — 청록
+                _ok = it.get("ok")
+                c["state"].config(text="🔁 못가면그림", bg="#117864", fg="white")
+                c["pick"].config(text=(("확인 " + str(_ok) + "번") if _ok
+                                       else "확인 없음"),
+                                 bg="#95a5a6", fg="white", relief="raised", bd=1)
+            elif it.get("act") in RASTA_MODES:   # 🗡 그림 자리 — 남보라
                 _is_see = it.get("act") == RASTA_SEE
                 c["state"].config(text=("👁 확인만" if _is_see else "🖼 그림클릭"),
                                   bg="#5b2c6f", fg="white")
@@ -1937,7 +1979,7 @@ class IslandApp(tk.Tk):
                 c["state"].config(text="📍 위치변경", bg="#f39c12", fg="black")
                 c["pick"].config(text="✔ " + str(rel[0]) + "," + str(rel[1]),
                                  bg="#f1c40f", fg="black", relief="sunken", bd=3)
-            _ri = (it or {}).get("act") in (RASTA_CLICK, RASTA_SEE)
+            _ri = (it or {}).get("act") in RASTA_MODES
             if c.get("img") is not None:
                 _have = os.path.exists(rasta_img_path(jx))
                 c["img"].config(
@@ -2034,9 +2076,10 @@ class IslandApp(tk.Tk):
 
     # 번호칸을 누를 때 돌아가는 순서 — 라스타바드용 '그림' 두 가지를 끼웠다
     # (2026-10-03). 📍위치변경·⏺녹화 는 각자 버튼으로 정하므로 이 순환에 없다.
-    TOGGLE_CYCLE = [None, "del", RASTA_CLICK, RASTA_SEE]
+    TOGGLE_CYCLE = [None, "del", RASTA_CLICK, RASTA_SEE, RASTA_FIX]
     TOGGLE_NAME = {None: "그대로", "del": "✖ 삭제",
-                   RASTA_CLICK: "🖼 그림클릭", RASTA_SEE: "👁 확인만"}
+                   RASTA_CLICK: "🖼 그림클릭", RASTA_SEE: "👁 확인만",
+                   RASTA_FIX: "🔁 못가면 그림"}
 
     def _preset_toggle(self, jx):
         """번호칸 클릭 → 그대로 → ✖삭제 → 🖼그림클릭 → 👁확인만 → 그대로 …"""
@@ -2054,20 +2097,22 @@ class IslandApp(tk.Tk):
             pw["items"].pop(str(jx), None)
         else:
             it = {"act": nxt}
-            if nxt in (RASTA_CLICK, RASTA_SEE):
+            if nxt in RASTA_MODES:
                 it["pick"] = cur.get("pick") or "top"
+            if nxt == RASTA_FIX and cur.get("ok"):
+                it["ok"] = cur.get("ok")     # 확인 짝은 순환해도 지키다
             pw["items"][str(jx)] = it
         _n = self.TOGGLE_NAME[nxt]
         self._status.set(f"클릭 {jx+1} 번 → {_n}"
                          + ("  (🖼 로 그림을 잘라 등록하세요)"
-                            if nxt in (RASTA_CLICK, RASTA_SEE) else ""))
+                            if nxt in RASTA_MODES else ""))
         self._preset_refresh_cells()
 
     def _preset_pick_mode(self, jx):
         """🎯 둘 중 어느 것을 고를지 — 맨위 → 맨왼쪽 → 점수1등 순환."""
         pw = self._pw
         it = pw["items"].get(str(jx))
-        if not it or it.get("act") not in (RASTA_CLICK, RASTA_SEE):
+        if not it or it.get("act") not in RASTA_MODES:
             self._status.set(f"클릭 {jx+1} 번은 그림 자리가 아닙니다 "
                              f"(번호칸을 눌러 🖼 그림클릭 으로 바꾸세요)")
             return
@@ -2088,7 +2133,7 @@ class IslandApp(tk.Tk):
         똑같이 생긴 큐브가 둘이어도 글자가 다르므로 틀린 것을 누르지 않는다.
         오른쪽 클릭 = 떨어짐 지우기(그림 가운데를 누름)."""
         it = self._pw["items"].get(str(jx)) or {}
-        if it.get("act") not in (RASTA_CLICK,):
+        if it.get("act") not in (RASTA_CLICK, RASTA_FIX):
             it = {"act": RASTA_CLICK, "pick": it.get("pick") or "top"}
             self._pw["items"][str(jx)] = it
             self._preset_refresh_cells()
@@ -2215,7 +2260,7 @@ class IslandApp(tk.Tk):
     def _preset_grab_img(self, jx):
         """🖼 그 칸의 그림을 드래그해 등록한다 (프리셋 편집창에서)."""
         it = self._pw["items"].get(str(jx)) or {}
-        if it.get("act") not in (RASTA_CLICK, RASTA_SEE):
+        if it.get("act") not in RASTA_MODES:
             # 🖼 를 눌렀다 = '여기에 그림을 쓰겠다' → **알아서 그림클릭으로 바꾼다.**
             #   예전엔 여기서 그냥 돌아가서 "눌러도 아무것도 안 된다" 였다 (2026-10-03).
             it = {"act": RASTA_CLICK, "pick": it.get("pick") or "top"}
@@ -2335,6 +2380,42 @@ class IslandApp(tk.Tk):
         except Exception:
             pass
 
+    def _preset_set_ok(self):
+        """🔁 '못 가면 그림' 칸과 그 **확인 짝**을 정한다.
+
+        그 칸을 🔁 로 바꾸고, 확인창을 누를 때 쓸 그림 칸 번호를 적어둔다
+        (0 = 확인창이 안 뜨는 경우). 확인 그림은 이미 잘라 둔 칸을 그대로
+        가리키면 되므로 다시 자를 필요가 없다 (예: 29번 확인창)."""
+        try:
+            a = int(self._pw["fx_cell"].get())
+            b = int(self._pw["fx_ok"].get())
+        except Exception:
+            self._pmsg("🔁 번호를 숫자로 넣어주세요")
+            return
+        n = clicks_for(self._pw["key"])
+        if not (1 <= a <= n) or not (0 <= b <= n):
+            self._pmsg(f"🔁 번호는 1~{n} 사이여야 합니다 (확인은 0 도 됩니다)")
+            return
+        if a == b:
+            self._pmsg("🔁 자기 자신을 확인 짝으로 쓸 수 없습니다")
+            return
+        it = dict(self._pw["items"].get(str(a - 1)) or {})
+        it["act"] = RASTA_FIX
+        it["pick"] = it.get("pick") or "top"
+        if b:
+            it["ok"] = b
+        else:
+            it.pop("ok", None)
+        self._pw["items"][str(a - 1)] = it
+        self._preset_refresh_cells()
+        _have = os.path.exists(rasta_img_path(a - 1))
+        self._pmsg(f"🔁 {a}번 칸 = '못 가면 그림'"
+                   + (f" · 확인은 {b}번 그림" if b else " · 확인창 없음")
+                   + ("  — [저장] 을 눌러주세요" if _have else
+                      f"  ⚠ {a}번에 [🖼] 로 '아직 못 갔을 때만 보이는 것' 을 "
+                      f"먼저 잘라 등록하세요"))
+        self._rlog(f"[라스타] 🔁 {a}번 칸 못가면그림 · 확인짝 {b or '없음'}")
+
     def _preset_copy_cell(self):
         """🗡 한 칸의 **그림·떨어짐·설정**을 다른 칸으로 그대로 복사한다.
 
@@ -2368,7 +2449,7 @@ class IslandApp(tk.Tk):
                 shutil.copy2(_ts, os.path.join(IMG_DIR, f"rasta_{b:02d}_thr.json"))
             # 설정(무엇을 할지·🎯·📍)도 같이
             it = dict(self._pw["items"].get(str(a - 1)) or {})
-            if it.get("act") in (RASTA_CLICK, RASTA_SEE):
+            if it.get("act") in RASTA_MODES:
                 self._pw["items"][str(b - 1)] = dict(it)
             self._preset_refresh_cells()
             _off = it.get("off")
@@ -2452,7 +2533,7 @@ class IslandApp(tk.Tk):
         #    메시지가 삭제/이동만 세서 **"삭제 없음 / 이동 없음"** 으로 나와
         #    아무것도 저장 안 된 것처럼 보였다. 지우지 말 것.
         imgs = sorted(int(k2) + 1 for k2, v in pw["items"].items()
-                      if v.get("act") in (RASTA_CLICK, RASTA_SEE))
+                      if v.get("act") in RASTA_MODES)
         _nm0 = (pres[pi].get("name") or "") + " "
         msg = ("저장 " + _nm0 + "— 삭제 " + str(dels or "없음")
                + " / 이동 " + str(movs or "없음"))
@@ -2502,7 +2583,7 @@ class IslandApp(tk.Tk):
         #    악몽의섬 프리셋으로 바꿔 끼웠을 때 라스타바드 설정이 남아 있으면
         #    좌표만 바뀌고 그림을 계속 찾아 슬롯이 멈춘다.
         _keep_r = {k3 for k3, v3 in (items or {}).items()
-                   if (v3 or {}).get("act") in (RASTA_CLICK, RASTA_SEE)}
+                   if (v3 or {}).get("act") in RASTA_MODES}
         _r_old = dict(slot.get("rasta") or {})
         if _r_old:
             slot["rasta"] = {k3: v3 for k3, v3 in _r_old.items() if k3 in _keep_r}
@@ -2527,14 +2608,22 @@ class IslandApp(tk.Tk):
                 if _r:
                     slot.setdefault("recs_off", {})[str(j)] = _r
                 dels.append(j + 1)
-            elif it.get("act") in (RASTA_CLICK, RASTA_SEE):
+            elif it.get("act") in RASTA_MODES:
                 # 🗡 라스타바드 — 이 번호는 **그림으로** 처리한다.
                 #   좌표는 **건드리지 않는다** (어느 클라인지 알아야 하므로 그대로 둔다).
                 #   실행할 때 읽도록 그 슬롯에 적어둔다.
                 _r1 = {"mode": it.get("act"), "pick": it.get("pick") or "top"}
                 if it.get("off"):
                     _r1["off"] = list(it["off"])
+                if it.get("ok"):
+                    _r1["ok"] = int(it["ok"])      # 🔁 확인 짝 (몇 번 칸 그림)
                 slot.setdefault("rasta", {})[str(j)] = _r1
+                if it.get("act") == RASTA_FIX:
+                    # 🔁 칸은 **이동을 그대로 한다** (녹화·좌표를 쓴다) —
+                    #    전에 ✖삭제 였어서 녹화가 숨겨져 있으면 되살린다.
+                    _b = (slot.get("recs_off") or {}).pop(str(j), None)
+                    if _b and not rc.get(str(j)):
+                        rc[str(j)] = _b
                 movs.append(j + 1)
                 continue
             elif it.get("act") == "rec":
@@ -2593,7 +2682,7 @@ class IslandApp(tk.Tk):
                 "고르고 [저장])")
         else:
             _imgs = sorted(int(k3) + 1 for k3, v3 in items.items()
-                           if (v3 or {}).get("act") in (RASTA_CLICK, RASTA_SEE))
+                           if (v3 or {}).get("act") in RASTA_MODES)
             self._status.set("#" + str(idx + 1) + " " + nm + " 적용 — 삭제 " +
                              str(sorted(dels) or "없음") + " / 이동 " +
                              str(sorted(movs) or "없음")
@@ -4277,6 +4366,109 @@ class IslandApp(tk.Tk):
                    f"(최고 {best:.2f} · 기준 {rasta_thr(j):.2f}) → 이 슬롯 중단")
         return False
 
+    def _rasta_fix(self, key, j, si, slot, coords, name, lbl):
+        """🔁 **못 가면 그림** — 이 칸의 이동이 됐는지 화면으로 보고, 안 됐으면
+        그림을 눌러 다시 보낸다. 돌려주는 값: 계속해도 되나.
+
+        사용자 신고(2026-10-03): "녹화한 게 이동을 하는 건데 던전 안으로 들어가지
+        않는 상황이 발생한다. 용던고고 층 이동처럼 이미지가 있으니, 동영상으로 안
+        들어가면 화면을 보고 이미지를 클릭해서 확인을 눌러 이동해 줄 수 있나?"
+
+        이 칸의 그림은 **'아직 못 갔다'는 표시**다 — 이동 전에만 보이는 것
+        (던전 입구 그림·이동 안내창 등). 그래서 `👁 확인만` 과 **반대로** 읽는다:
+          · 그림이 **안 보이면** → 이동 성공 → 그냥 통과 (아무것도 안 누른다)
+          · 그림이 **보이면**   → 아직 밖 → 그림을 누르고(📍 떨어짐 적용),
+            '확인 짝'(`ok`)이 정해져 있으면 그 칸 그림도 찾아 눌러 확인 → 다시 본다
+          · `FIX_TRIES` 번 해도 보이면 → **이 슬롯 중단**
+            (밖에서 다음 좌표를 누르면 엉뚱한 곳이 눌린다 — 2026-08-28 절대 규칙)
+
+        🚫 그림이 등록돼 있지 않으면 **중단**한다 — 확인할 방법이 없는데 통과시키면
+           밖에서 계속 누르게 된다. 다른 슬롯은 그대로 돈다."""
+        st = ((slot.get("rasta") or {}).get(str(j)) or {})
+        pick = st.get("pick") or "top"
+        ok_n = st.get("ok")
+        anchor = coords[j] if (j < len(coords) and coords[j]) else None
+        if not anchor:                       # 그 칸에 좌표가 없으면 슬롯의 첫 좌표로
+            anchor = next((c for c in coords if c), None)
+        if not anchor:
+            self._status.set(f"🔁 [{name}] {lbl} — 이 슬롯에 좌표가 하나도 없어 "
+                             f"어느 클라인지 알 수 없습니다")
+            self._rlog(f"[라스타] 🔁 {key} #{si+1:02d} {j+1}번 좌표 없음 → 중단")
+            return False
+        if not os.path.exists(rasta_img_path(j)):
+            self._status.set(f"🔁 [{name}] {lbl} — '못 갔을 때 보이는 그림' 이 "
+                             f"등록되지 않았습니다 (🖼 로 잘라주세요)")
+            self._rlog(f"[라스타] 🔁 {key} #{si+1:02d} {j+1}번 그림 없음 → 중단")
+            return False
+        for t in range(FIX_TRIES):
+            if self._stop_flag:
+                return False
+            time.sleep(random.uniform(*FIX_SETTLE))
+            x, y, v = rasta_find(j, anchor, pick=pick)
+            if x is None:
+                self._status.set(f"🔁 [{name}] {lbl} 이동됐습니다 — 그대로 진행")
+                self._rlog(f"[라스타] 🔁 {key} #{si+1:02d} {j+1}번({lbl}) "
+                           f"이동 확인 (그림 안 보임) → 통과")
+                return True
+            # 아직 못 갔다 → 그 클라를 앞으로 올리고 그림을 눌러 다시 보낸다
+            try:
+                self._focus_client(si, (x, y))
+                time.sleep(random.uniform(0.25, 0.45))
+            except Exception:
+                pass
+            self._last_focus = si
+            _off = st.get("off") or [0, 0]
+            _cx, _cy = int(x) + int(_off[0]), int(y) + int(_off[1])
+            self._status.set(f"🔁 [{name}] {lbl} 아직 못 갔습니다 ({v:.2f}) → "
+                             f"그림 눌러 다시 ({t+1}/{FIX_TRIES})")
+            click_at(_cx, _cy)
+            self._rlog(f"[라스타] 🔁 {key} #{si+1:02d} {j+1}번({lbl}) "
+                       f"못 감 — 그림 눌렀다 ({pick} · {v:.2f}) ({_cx},{_cy})"
+                       + (f" 떨어짐 {_off[0]:+d},{_off[1]:+d}" if any(_off) else ""))
+            time.sleep(random.uniform(*FIX_AFTER))
+            if ok_n:
+                self._rasta_ok_click(key, int(ok_n) - 1, si, slot, anchor, name)
+                time.sleep(random.uniform(*FIX_AFTER))
+        # 마지막으로 한 번 더 본다 (방금 누른 것이 먹었을 수 있다)
+        time.sleep(random.uniform(*FIX_SETTLE))
+        x, y, v = rasta_find(j, anchor, pick=pick)
+        if x is None:
+            self._status.set(f"🔁 [{name}] {lbl} 이동됐습니다 — 그대로 진행")
+            self._rlog(f"[라스타] 🔁 {key} #{si+1:02d} {j+1}번({lbl}) "
+                       f"다시 보내서 이동됨 → 통과")
+            return True
+        self._status.set(f"🚫 [{name}] {lbl} {FIX_TRIES}번 해도 못 들어가 "
+                         f"이 슬롯 중단 (일치도 {v:.2f})")
+        self._rlog(f"[라스타] 🔁 {key} #{si+1:02d} {j+1}번({lbl}) "
+                   f"{FIX_TRIES}번 실패 (일치도 {v:.2f}) → 이 슬롯 중단")
+        return False
+
+    def _rasta_ok_click(self, key, jo, si, slot, anchor, name):
+        """🔁 '확인' 그림을 찾아 누른다 (못 가면 그림 의 짝).
+
+        확인창이 **안 뜨는 경우도 있어서**, 못 찾는 것 자체는 중단 사유가 아니다 —
+        조용히 넘어가고 바깥에서 '이동됐는지' 로 다시 판단한다."""
+        if jo < 0 or not os.path.exists(rasta_img_path(jo)):
+            self._rlog(f"[라스타] 🔁 확인 짝 {jo+1}번에 그림이 없어 건너뜀")
+            return False
+        st2 = ((slot.get("rasta") or {}).get(str(jo)) or {})
+        pick2 = st2.get("pick") or "top"
+        off2 = st2.get("off") or [0, 0]
+        for t in range(2):
+            if self._stop_flag:
+                return False
+            x, y, v = rasta_find(jo, anchor, pick=pick2)
+            if x is not None:
+                click_at(int(x) + int(off2[0]), int(y) + int(off2[1]))
+                self._status.set(f"🔁 [{name}] 확인({jo+1}번) 눌렀습니다 ({v:.2f})")
+                self._rlog(f"[라스타] 🔁 확인({jo+1}번) 눌렀다 ({v:.2f})")
+                return True
+            if t == 0:
+                time.sleep(random.uniform(*RASTA_GAP))
+        self._rlog(f"[라스타] 🔁 확인({jo+1}번) 안 보임 — 건너뜀 "
+                   f"(확인창이 안 뜨는 경우도 있다)")
+        return False
+
     def _hold_arrow(self, word, sec, name):
         """방향키를 sec초 동안 눌러 이동 — 대각선(↖↗↙↘)은 두 키 동시 홀드.
         스캔코드 SendInput 방식이라 게임(DirectInput)도 인식. 직전 클릭으로 포커스된 클라가 받는다."""
@@ -4718,7 +4910,7 @@ class IslandApp(tk.Tk):
                     #    설정은 **그 슬롯**에 있다 (라스타바드 프리셋을 적용하면 적힌다).
                     #    악몽의섬 프리셋을 적용하면 지워지므로 이 블록을 안 탄다.
                     _rm = ((slot.get("rasta") or {}).get(str(j)) or {}).get("mode")
-                    if _rm in (RASTA_CLICK, RASTA_SEE):
+                    if _rm in RASTA_FIRST:
                         if not self._rasta_do(key, j, si, slot, coords, name, lbl):
                             break              # 🚫 그림을 못 봤다 → **이 슬롯만 중단**
                         did = True
@@ -4742,11 +4934,11 @@ class IslandApp(tk.Tk):
                                 time.sleep(0.02)
                             pyautogui.mouseUp(sx, sy + dist)
                             did = True
-                    elif d_ and not _rm:
+                    elif d_ and _rm not in RASTA_FIRST:
                         # 이 자리는 클릭 대신 방향키 이동 ([방향, 초] — 대각선 포함)
                         self._hold_arrow(d_[0], float(d_[1]), name)
                         did = True
-                    elif coords[j] and not _rm:
+                    elif coords[j] and _rm not in RASTA_FIRST:
                         _cn = slot.get("click_names") or []
                         _disp = _cn[j] if (j < len(_cn) and _cn[j]) else lbl
                         self._status.set(f"🏝 [{name}] {_disp}...")
@@ -4769,6 +4961,13 @@ class IslandApp(tk.Tk):
                         # (키보드 입력이라 그 클라가 앞에 있어야 들어간다)
                         self._focus_client(si, coords[j] if j < len(coords) else None)
                         self._play_events(rec, name)
+                        did = True
+                    # 🔁 '못 가면 그림' 자리 — 위에서 한 **이동이 실제로 됐는지** 화면으로
+                    #    보고, 아직 못 갔으면 그림을 눌러 다시 보낸다 (용던고고 층이동 방식).
+                    #    ⚠ img/see 와 달리 **이동을 한 뒤**라 반드시 여기에 있어야 한다.
+                    if _rm == RASTA_FIX and not self._stop_flag:
+                        if not self._rasta_fix(key, j, si, slot, coords, name, lbl):
+                            break          # 🚫 그래도 못 갔다 → **이 슬롯만 중단**
                         did = True
                     if not did:
                         continue
