@@ -6893,10 +6893,27 @@ class App(tk.Tk):
         # 던전 고르기 탭 — 넷 다 슬롯별로 실행할 수 있다 (2026-08-24)
         tb = tk.Frame(parent); tb.pack(pady=(0, 2))
         self._dun_tabs = []
+        # 🖼 글자 **오른쪽에 그 던전 카드 사진**(16x16) — 어느 던전인지 한눈에.
+        #    (2026-10-04 사용자: "그 글 옆에 사진을 붙여줘. 칸을 늘리진 말고")
+        #    같은 버튼 안에 `compound="right"` 로 넣으므로 줄이 새로 생기지 않는다.
+        #    그림이 없으면 글자만 나온다 — 없다고 멈추지 않는다.
+        if not hasattr(self, "_dun_imgs"):
+            self._dun_imgs = {}
         for i, (didx, label, key, col) in enumerate(self.DUN_TABS):
+            _im = self._dun_imgs.get(label)
+            if _im is None:
+                try:
+                    _p = os.path.join(IMG_DIR, f"dun_{label}.png")
+                    if os.path.exists(_p):
+                        _im = tk.PhotoImage(file=_p)
+                        self._dun_imgs[label] = _im   # ⚠ 참조를 들고 있어야 안 지워진다
+                except Exception:
+                    _im = None
             b_ = tk.Button(tb, text=label, font=("맑은 고딕", 7, "bold"),
                            bg="#3a4149", fg="#9aa4b0", bd=0, padx=7, pady=2,
                            command=lambda k=i: self._dun_switch(k))
+            if _im is not None:
+                b_.config(image=_im, compound="right", padx=4)
             b_.pack(side="left", padx=(0, 2))
             self._dun_tabs.append(b_)
 
@@ -15751,11 +15768,31 @@ class App(tk.Tk):
         # 과거섬 슬롯 4개 고정 (이름 하드코딩) — 위=창 열기, 아래=▶ 실행
         _ISLAND_NAMES  = ["오만의탑", "악몽의섬", "잊혀진섬", "에카"]
         _ISLAND_COLORS = ["#8e44ad", "#2471a3", "#16a085", "#d35400"]
+        # 🖼 글자 **오른쪽에 그 던전 카드 사진**(14x14) — 어느 던전인지 한눈에
+        #    (2026-10-04 사용자: "그 글 옆에 사진을 붙여줘. 칸을 늘리진 말고")
+        #    ⚠ Tk 버튼은 **그림이 있으면 width/height 가 픽셀**로 바뀐다.
+        #       글자만일 때와 비슷하게 보이도록 픽셀값을 따로 준다.
+        if not hasattr(self, "_dun_imgs"):
+            self._dun_imgs = {}
         for i, label in enumerate(_ISLAND_NAMES):
             grp = tk.Frame(self._sec_row); grp.pack(side="left", padx=2)
-            tk.Button(grp, text=label, font=("맑은 고딕", 9, "bold"),
-                      bg=_ISLAND_COLORS[i], fg="white", width=9, height=2,
-                      command=lambda x=i: self._open_past_slot(x)).pack(side="top")
+            _im = self._dun_imgs.get(label)
+            if _im is None:
+                try:
+                    _p = os.path.join(IMG_DIR, f"dun_{label}.png")
+                    if os.path.exists(_p):
+                        _im = tk.PhotoImage(file=_p)
+                        self._dun_imgs[label] = _im   # ⚠ 참조를 들고 있어야 안 지워진다
+                except Exception:
+                    _im = None
+            _b = tk.Button(grp, text=label, font=("맑은 고딕", 9, "bold"),
+                           bg=_ISLAND_COLORS[i], fg="white",
+                           command=lambda x=i: self._open_past_slot(x))
+            if _im is not None:
+                _b.config(image=_im, compound="right", width=82, height=36, padx=3)
+            else:
+                _b.config(width=9, height=2)
+            _b.pack(side="top")
             tk.Button(grp, text="▶ 실행", font=("맑은 고딕", 8, "bold"),
                       bg=_ISLAND_COLORS[i], fg="white", width=9, height=1, pady=5,
                       command=lambda x=i: self._run_island_slot(x)

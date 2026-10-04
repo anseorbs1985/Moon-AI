@@ -231,6 +231,10 @@ RASTA_SEE   = "see"    # 그림이 **보이는지만** 확인 (안 보이면 그
 
 # 🗡 '그림으로 처리하는' 칸 전부 — 편집기·셈·저장이 다 이 묶음을 본다.
 CARD_MODE = "card"     # 🃏 슬롯이 '내 카드' 를 찾아 누르는 칸 (월드던전 목록)
+# 🃏 월드던전 입장 목록으로 들어가는 던전들 — 여기에만 [🃏] 버튼을 띄운다.
+#    (2026-10-04 사용자: "에카·잊혀진섬·오만의탑도 이미지로 클릭하게 해줘")
+#    목록 순서·내용이 바뀌므로 좌표로 누르면 엉뚱한 던전에 들어간다.
+CARD_KEYS = ("토요일_악몽의섬", "화요일_에카", "월요일_잊혀진섬", "수금_오만의탑")
 RASTA_MODES = (RASTA_CLICK, RASTA_SEE, CARD_MODE)
 # 좌표 **대신 먼저** 처리하는 모드 (지금은 그림 자리가 전부 여기에 든다)
 RASTA_FIRST = RASTA_MODES      # 전부 좌표 **대신** 처리한다
@@ -1466,7 +1470,7 @@ class IslandApp(tk.Tk):
                      fg="#555").pack(side="left")
             # 🃏 '내 카드' — 월드던전 목록은 **순서도 내용도 바뀐다** (2026-10-04).
             #    슬롯마다 갈 던전을 적어두면 카드를 그림으로 찾아 누른다.
-            if key == RASTA_KEY:
+            if key in CARD_KEYS:
                 cb2 = tk.Button(head, font=("맑은 고딕", 7, "bold"), width=5,
                                 pady=0, command=lambda k=key, x=i: self._pick_card(k, x))
                 cb2.pack(side="left", padx=(2, 0))
