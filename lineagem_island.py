@@ -2923,15 +2923,33 @@ class IslandApp(tk.Tk):
         coords = slot.get("coords", [])
         if not (any(coords) or any(d for d in (slot.get("dirs") or []) if d)):
             self._status.set(f"#{idx+1:02d} 복사할 좌표가 없습니다"); return
-        # 좌표 + 사이 시간(gap_list) + 방향/⇩(dirs) + 이름표 + 녹화(recs)까지 전부 복사
+        # 📋 **그 슬롯이 어떻게 도는지를 통째로** 담는다 (2026-10-04 사용자 지시:
+        #    "프리셋 포함해서 녹화 포함, 좌표 포함 전부 다 포함해서 복사 붙여넣기").
+        #      좌표 · 사이 시간 · 방향/⇩ · 이름표 · 녹화 · **라바 프리셋 설정(rasta)**
+        #      · **숨은 녹화(recs_off)** · **물약 기준(sw_base)**
+        #    ⚠ ON/OFF(`enabled`)와 ⏰ 반복(`repeat_*`)은 **담지 않는다** —
+        #      그건 '이 슬롯을 오늘 돌릴 것인가' 라서 슬롯 내용이 아니다.
+        #      (붙여넣다가 꺼져 있던 슬롯이 켜지거나 반복이 뒤엉키면 안 된다)
         self._slot_clip = {"key": key, "src": idx,
                            "name": slot.get("name", "미등록"),
                            "coords": copy.deepcopy(coords),
                            "gap_list": copy.deepcopy(slot.get("gap_list") or []),
                            "dirs": copy.deepcopy(slot.get("dirs") or []),
                            "click_names": copy.deepcopy(slot.get("click_names") or []),
-                           "recs": copy.deepcopy(slot.get("recs") or {})}
-        self._status.set(f"📋 #{idx+1:02d} 좌표 {sum(1 for c in coords if c)}개 + 시간·방향·이름·녹화 복사됨 — 원하는 슬롯의 [붙임]을 누르세요")
+                           "recs": copy.deepcopy(slot.get("recs") or {}),
+                           "recs_off": copy.deepcopy(slot.get("recs_off") or {}),
+                           "rasta": copy.deepcopy(slot.get("rasta") or {}),
+                           "sw_base": slot.get("sw_base")}
+        _n_c = sum(1 for c in coords if c)
+        _n_d = sum(1 for d in (slot.get("dirs") or []) if d)
+        _n_r = len(slot.get("recs") or {})
+        _n_g = sum(1 for g in (slot.get("gap_list") or []) if g not in (None, ""))
+        _n_p = len(slot.get("rasta") or {})
+        self._status.set(
+            f"📋 #{idx+1:02d} 통째로 복사됨 — 좌표 {_n_c} · 간격 {_n_g} · 방향 {_n_d}"
+            f" · 녹화 {_n_r} · 라바설정 {_n_p}"
+            + (f" · 이름 '{slot.get('name')}'" if slot.get("name") else "")
+            + "   → 원하는 슬롯의 [붙임] 을 누르세요")
 
     def _slot_paste(self, key, idx):
         """복사한 좌표 붙여넣기 — 클라이언트 창 위치 자동보정 (인형탐험과 동일)."""
@@ -2982,6 +3000,36 @@ class IslandApp(tk.Tk):
             except Exception:
                 pass
         self.cfg[key][idx]["recs"] = recs
+        # 🗡 라바 프리셋 설정(그림클릭/확인만·🎯·📍·확인짝)도 그대로 — 이게 없으면
+        #    붙여넣어도 그 슬롯은 라스타바드로 돌지 않는다 (2026-10-04).
+        #    📍 떨어짐은 '그림에서 몇 픽셀' 이라 창 위치와 무관 → 보정하지 않는다.
+        _ra = copy.deepcopy(clip.get("rasta") or {})
+        if _ra:
+            self.cfg[key][idx]["rasta"] = _ra
+        else:
+            self.cfg[key][idx].pop("rasta", None)   # 원본이 악몽의섬이면 라바설정을 지운다
+        # 프리셋이 ✖삭제로 숨겨둔 녹화도 함께 (그 자리를 되살릴 때 빈 칸이 되지 않게)
+        _ro = copy.deepcopy(clip.get("recs_off") or {})
+        if src != idx and _ro:
+            try:
+                rects = self._client_rects_by_slot()
+                if rects:
+                    rdx = rects[idx][0] - rects[src][0]
+                    rdy = rects[idx][1] - rects[src][1]
+                    for ev_list in _ro.values():
+                        for ev in ev_list:
+                            if ev[1] in ("md", "mu", "mm"):
+                                ev[2] += rdx; ev[3] += rdy
+            except Exception:
+                pass
+        if _ro:
+            self.cfg[key][idx]["recs_off"] = _ro
+        else:
+            self.cfg[key][idx].pop("recs_off", None)
+        if clip.get("sw_base") is not None:         # 물약 교체의 기준 프리셋
+            self.cfg[key][idx]["sw_base"] = clip["sw_base"]
+        else:
+            self.cfg[key][idx].pop("sw_base", None)
         self.cfg[key][idx]["pasted"] = True     # 붙여넣기 표시(⭕)
         save_cfg(self.cfg)
         self._refresh(key)
@@ -2997,7 +3045,10 @@ class IslandApp(tk.Tk):
             except Exception:
                 pass
         self.after(300, _fix_name)
-        self._status.set(f"✔ #{idx+1:02d} 붙여넣기 완료 (시간·방향·이름 포함){note}")
+        self._status.set(
+            f"✔ #{idx+1:02d} 통째로 붙여넣음 — 좌표 "
+            f"{sum(1 for c in shifted if c)} · 녹화 {len(recs)}"
+            f" · 라바설정 {len(_ra)} (간격·방향·이름 포함){note}")
 
     def _toggle_enable(self, key, idx):
         """슬롯 ON/OFF — OFF 슬롯은 대표(전체) 실행에서 건너뜀 (개별 ▶은 그대로 실행)."""
