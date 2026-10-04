@@ -1,8 +1,8 @@
 {
-  "_설명": "로컬이 받을 값. 좌표는 keys 로 보내되 share_island.json 의 keep_cells(물약 칸17·18)과 keep_local(이름·ON/OFF·반복)은 로컬 것을 그대로 둔다.",
+  "_설명": "로컬이 받을 값 — 좌표 28칸 전부 + 이름. ON/OFF·⏰반복만 로컬 것.",
   "_이번지시": "2026-10-04 사용자: '악몽의섬 수정했거든. 좌표 이거 배포해줘. 로컬 슬롯에 지정되어 있는 건 바꾸지 말고.'",
   "_담은항목": [
-    "토요일_악몽의섬 16슬롯 (coords, dirs, gap_list, click_names, recs, rasta, card)",
+    "토요일_악몽의섬 16슬롯 (coords, dirs, gap_list, click_names, recs, rasta, card, name)",
     "_presets.토요일_악몽의섬 프리셋 9개"
   ],
   "_presets": {
@@ -1176,7 +1176,8 @@
           "mode": "card",
           "pick": "top"
         }
-      }
+      },
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -1417,7 +1418,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -1658,7 +1660,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -1899,7 +1902,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -2140,7 +2144,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -2381,7 +2386,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -2622,7 +2628,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -2863,7 +2870,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -3104,7 +3112,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -3345,7 +3354,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -3586,7 +3596,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -3827,7 +3838,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -4068,7 +4080,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -4309,7 +4322,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -4550,7 +4564,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     },
     {
       "coords": [
@@ -4791,7 +4806,8 @@
         null,
         null
       ],
-      "recs": {}
+      "recs": {},
+      "name": "악몽의섬 주홍이 48%"
     }
   ]
 }
