@@ -230,9 +230,10 @@ RASTA_CLICK = "img"    # 그림을 찾아 **그 자리를 누른다** (둘 중 �
 RASTA_SEE   = "see"    # 그림이 **보이는지만** 확인 (안 보이면 그 슬롯 중단)
 
 # 🗡 '그림으로 처리하는' 칸 전부 — 편집기·셈·저장이 다 이 묶음을 본다.
-RASTA_MODES = (RASTA_CLICK, RASTA_SEE)
+CARD_MODE = "card"     # 🃏 슬롯이 '내 카드' 를 찾아 누르는 칸 (월드던전 목록)
+RASTA_MODES = (RASTA_CLICK, RASTA_SEE, CARD_MODE)
 # 좌표 **대신 먼저** 처리하는 모드 (지금은 그림 자리가 전부 여기에 든다)
-RASTA_FIRST = RASTA_MODES
+RASTA_FIRST = RASTA_MODES      # 전부 좌표 **대신** 처리한다
 
 RASTA_MATCH   = 0.60   # 그림 기준 (칸마다 `rasta_<번호>_thr.json` 으로 덮어쓸 수 있다)
 RASTA_TRIES   = 3      # 못 찾으면 몇 번까지 다시 보나
@@ -298,6 +299,71 @@ def grab_window(coord):
         return cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR), (r.left, r.top)
     except Exception:
         return None
+
+
+def card_meta():
+    """🃏 카드 공통 설정 — 찾을 범위(제목 줄)와 기준값."""
+    try:
+        with open(os.path.join(IMG_DIR, "card_meta.json"), encoding="utf-8") as f:
+            d = json.load(f) or {}
+        a = d.get("area") or {}
+        return ((int(a["dx"]), int(a["dy"]), int(a["w"]), int(a["h"])),
+                float(d.get("thr") or 0.80), list(d.get("cards") or []))
+    except Exception:
+        return None, 0.80, []
+
+
+def card_img_path(name):
+    return os.path.join(IMG_DIR, f"card_{name}.png")
+
+
+def card_list():
+    """등록된 카드 이름들."""
+    import glob
+    out = []
+    for p in glob.glob(os.path.join(IMG_DIR, "card_*.png")):
+        n = os.path.basename(p)[5:-4]
+        if n:
+            out.append(n)
+    return sorted(out)
+
+
+def card_find(name, anchor):
+    """🃏 그 클라 창에서 **이름이 맞는 카드**를 찾는다 → (화면x, 화면y, 점수).
+
+    월드던전 목록은 **순서도 내용도 통째로 바뀐다** (2026-10-04 실측: 하루 만에
+    6장이 전부 다른 던전으로 바뀌었다). 그래서 좌표로 누르면 엉뚱한 데 들어간다.
+    제목 줄(`card_meta.json` 의 area)만 훑으므로 빠르고 헛걸림이 적다.
+    실측: 진짜 0.997~1.000 · 헛걸림(다른 카드·다른 클라) 0.76 → 기준 0.80."""
+    q = card_img_path(name)
+    if not name or not os.path.exists(q) or not anchor:
+        return None, None, -1.0
+    try:
+        import cv2, numpy as np
+        got = grab_window(anchor)
+        if not got:
+            return None, None, 0.0
+        big, (ox, oy) = got
+        area, thr, _ = card_meta()
+        if area:
+            dx, dy, w, h = area
+            H, W = big.shape[:2]
+            x0, y0 = max(0, dx), max(0, dy)
+            x1, y1 = min(W, dx + w), min(H, dy + h)
+            if x1 - x0 > 8 and y1 - y0 > 8:
+                big = big[y0:y1, x0:x1]
+                ox += x0; oy += y0
+        tpl = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+        if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
+            return None, None, 0.0
+        res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
+        _mn, mx, _ml, ml = cv2.minMaxLoc(res)
+        if mx < thr:
+            return None, None, float(mx)
+        return (ox + ml[0] + tpl.shape[1] // 2,
+                oy + ml[1] + tpl.shape[0] // 2, float(mx))
+    except Exception:
+        return None, None, 0.0
 
 
 def rasta_area_path(j):
@@ -871,6 +937,7 @@ class IslandApp(tk.Tk):
         self._repeat_left = {}                               # (key,idx) → 남은 반복 횟수
         self._paste_marks = {}                               # 붙여넣기 표시(⭕) 라벨
         self._potion_lbls = {}                               # 🧪 물약색 표시 라벨
+        self._card_btns = {}            # 🃏 슬롯별 '내 카드' 버튼
         self._scroll_lbls = {}                               # 📜 주문서 층수 표시 라벨
         self._move_btns = {}                                 # ▶▶/◀◀ 방향 전환 버튼
         self._potion_mtime = 0
@@ -1397,6 +1464,13 @@ class IslandApp(tk.Tk):
             self._potion_lbls.setdefault(key, []).append(pl)
             tk.Label(head, text=f"{i+1:02d}", font=("맑은 고딕", 8, "bold"),
                      fg="#555").pack(side="left")
+            # 🃏 '내 카드' — 월드던전 목록은 **순서도 내용도 바뀐다** (2026-10-04).
+            #    슬롯마다 갈 던전을 적어두면 카드를 그림으로 찾아 누른다.
+            if key == RASTA_KEY:
+                cb2 = tk.Button(head, font=("맑은 고딕", 7, "bold"), width=5,
+                                pady=0, command=lambda k=key, x=i: self._pick_card(k, x))
+                cb2.pack(side="left", padx=(2, 0))
+                self._card_btns.setdefault(key, []).append(cb2)
             # ▶▶/◀◀ 방향 — 눌러서 바로 바꾼다 (프리셋 창을 안 거쳐도 됨)
             if any((fl or "").strip() == "이동" for fl, _n in self._preset_layout(key)):
                 mb = tk.Button(head, text="이동?", font=("맑은 고딕", 7, "bold"),
@@ -2013,6 +2087,10 @@ class IslandApp(tk.Tk):
                 c["state"].config(text="⏺ 녹화", bg="#8e44ad", fg="white")
                 c["pick"].config(text="녹화 사용", bg="#95a5a6", fg="white",
                                  relief="raised", bd=1)
+            elif it.get("act") == CARD_MODE:             # 🃏 내 카드 — 청록
+                c["state"].config(text="🃏 내 카드", bg="#117864", fg="white")
+                c["pick"].config(text="슬롯마다 다름", bg="#95a5a6", fg="white",
+                                 relief="raised", bd=1)
             elif it.get("act") in RASTA_MODES:   # 🗡 그림 자리 — 남보라
                 _is_see = it.get("act") == RASTA_SEE
                 c["state"].config(text=("👁 확인만" if _is_see else "🖼 그림클릭"),
@@ -2126,9 +2204,10 @@ class IslandApp(tk.Tk):
 
     # 번호칸을 누를 때 돌아가는 순서 — 라스타바드용 '그림' 두 가지를 끼웠다
     # (2026-10-03). 📍위치변경·⏺녹화 는 각자 버튼으로 정하므로 이 순환에 없다.
-    TOGGLE_CYCLE = [None, "del", RASTA_CLICK, RASTA_SEE]
+    TOGGLE_CYCLE = [None, "del", RASTA_CLICK, RASTA_SEE, CARD_MODE]
     TOGGLE_NAME = {None: "그대로", "del": "✖ 삭제",
-                   RASTA_CLICK: "🖼 그림클릭", RASTA_SEE: "👁 확인만"}
+                   RASTA_CLICK: "🖼 그림클릭", RASTA_SEE: "👁 확인만",
+                   CARD_MODE: "🃏 내 카드"}
 
     def _preset_toggle(self, jx):
         """번호칸 클릭 → 그대로 → ✖삭제 → 🖼그림클릭 → 👁확인만 → 그대로 …"""
@@ -3068,6 +3147,58 @@ class IslandApp(tk.Tk):
         self._refresh(key)
         self._status.set("⭕ 붙여넣기 표시 " + str(n) + "개 지움")
 
+    def _pick_card(self, key, idx):
+        """🃏 이 슬롯이 **갈 던전 카드**를 고른다.
+
+        월드던전 입장 목록은 **순서도 내용도 통째로 바뀐다** (2026-10-04 실측:
+        하루 만에 6장이 전부 다른 던전이 됐다). 좌표로 누르면 엉뚱한 데 들어가므로
+        슬롯마다 '내 카드' 를 적어두고 그림으로 찾아 누른다.
+        카드 그림은 `click_templates/card_<이름>.png` — 16슬롯이 같이 쓴다."""
+        names = card_list()
+        if not names:
+            self._status.set("🃏 등록된 카드 그림이 없습니다 "
+                             "(click_templates/card_*.png)")
+            return
+        cur = (self.cfg[key][idx].get("card") or "").strip()
+        mn = tk.Menu(self, tearoff=0)
+        mn.add_command(label="  (없음 — 좌표로 누름)",
+                       command=lambda: self._set_card(key, idx, ""))
+        mn.add_separator()
+        for n in names:
+            mn.add_command(label=("● " if n == cur else "   ") + n,
+                           command=lambda nn=n: self._set_card(key, idx, nn))
+        try:
+            b = (self._card_btns.get(key) or [None] * 16)[idx]
+            mn.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
+        except Exception:
+            mn.tk_popup(self.winfo_pointerx(), self.winfo_pointery())
+        finally:
+            mn.grab_release()
+
+    def _set_card(self, key, idx, name):
+        """🃏 그 슬롯의 '내 카드' 를 정한다 (빈 값이면 좌표로 누른다)."""
+        if name:
+            self.cfg[key][idx]["card"] = name
+        else:
+            self.cfg[key][idx].pop("card", None)
+        save_cfg(self.cfg)
+        self._refresh_card_btns(key)
+        self._status.set(f"🃏 #{idx+1:02d} 갈 카드 = "
+                         + (f"'{name}' — 목록 순서가 바뀌어도 이걸 찾아 누릅니다"
+                            if name else "없음 (좌표로 누릅니다)"))
+
+    def _refresh_card_btns(self, key):
+        """🃏 버튼에 지금 고른 카드를 보여준다."""
+        for i, b in enumerate((self._card_btns.get(key) or [])):
+            try:
+                if not b.winfo_exists():
+                    continue
+                nm = (self.cfg[key][i].get("card") or "").strip()
+                b.config(text=(nm[:4] if nm else "🃏"),
+                         bg=("#117864" if nm else "#95a5a6"), fg="white")
+            except Exception:
+                pass
+
     def _slot_copy(self, key, idx):
         """슬롯 좌표 복사 — 원하는 슬롯에서 [붙임]으로 붙여넣기 (인형탐험과 동일)."""
         import copy
@@ -3092,7 +3223,8 @@ class IslandApp(tk.Tk):
                            "recs": copy.deepcopy(slot.get("recs") or {}),
                            "recs_off": copy.deepcopy(slot.get("recs_off") or {}),
                            "rasta": copy.deepcopy(slot.get("rasta") or {}),
-                           "sw_base": slot.get("sw_base")}
+                           "sw_base": slot.get("sw_base"),
+                           "card": slot.get("card")}
         _n_c = sum(1 for c in coords if c)
         _n_d = sum(1 for d in (slot.get("dirs") or []) if d)
         _n_r = len(slot.get("recs") or {})
@@ -3179,6 +3311,10 @@ class IslandApp(tk.Tk):
             self.cfg[key][idx]["recs_off"] = _ro
         else:
             self.cfg[key][idx].pop("recs_off", None)
+        if clip.get("card"):                       # 🃏 갈 카드도 함께
+            self.cfg[key][idx]["card"] = clip["card"]
+        else:
+            self.cfg[key][idx].pop("card", None)
         if clip.get("sw_base") is not None:         # 물약 교체의 기준 프리셋
             self.cfg[key][idx]["sw_base"] = clip["sw_base"]
         else:
@@ -3212,6 +3348,10 @@ class IslandApp(tk.Tk):
 
     def _refresh(self, key):
         slots = self.cfg.get(key, [])
+        try:
+            self._refresh_card_btns(key)
+        except Exception:
+            pass
         # 그리드 셀 (좌표 개수)
         for i, sv in enumerate(self._cnt_vars.get(key, [])):
             if i >= len(slots): break
@@ -4774,6 +4914,8 @@ class IslandApp(tk.Tk):
         st = ((slot.get("rasta") or {}).get(str(j)) or {})
         mode = st.get("mode") or ""
         pick = st.get("pick") or "top"
+        if mode == CARD_MODE:
+            return self._card_do(key, j, si, slot, coords, name, lbl)
         anchor = coords[j] if (j < len(coords) and coords[j]) else None
         if not anchor:                       # 그 칸에 좌표가 없으면 슬롯의 첫 좌표로
             anchor = next((c for c in coords if c), None)
@@ -4831,6 +4973,77 @@ class IslandApp(tk.Tk):
                          f"(최고 {best:.2f} · 기준 {rasta_thr(j):.2f})")
         self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) 그림 못 찾음 "
                    f"(최고 {best:.2f} · 기준 {rasta_thr(j):.2f}) → 이 슬롯 중단")
+        return False
+
+    def _card_do(self, key, j, si, slot, coords, name, lbl):
+        """🃏 이 슬롯이 갈 **카드**를 찾아 누른다. 돌려주는 값: 계속해도 되나.
+
+        카드 이름은 **슬롯**에 적어둔다 (`slot["card"]`) — 슬롯마다 갈 던전이
+        다르기 때문이다. 그림은 `click_templates/card_<이름>.png` 하나로
+        16슬롯이 같이 쓴다.
+
+        🚫 이름이 비어 있으면 **좌표로** 누른다 (예전 그대로) — 설정 안 한 슬롯이
+           갑자기 멈추면 안 된다.
+        🚫 카드를 못 찾으면 **이 슬롯 중단** — 엉뚱한 던전에 들어가는 것보다 낫다."""
+        cname = (slot.get("card") or "").strip()
+        anchor = coords[j] if (j < len(coords) and coords[j]) else None
+        if not anchor:
+            anchor = next((c for c in coords if c), None)
+        if not cname:
+            if anchor and j < len(coords) and coords[j]:
+                self._status.set(f"🃏 [{name}] {lbl} — 갈 카드가 안 정해져 "
+                                 f"좌표로 누릅니다")
+                try:
+                    self._focus_client(si, coords[j])
+                    time.sleep(random.uniform(0.25, 0.45))
+                except Exception:
+                    pass
+                self._last_focus = si
+                click_at(*coords[j])
+                time.sleep(random.uniform(*RASTA_AFTER))
+                return True
+            self._status.set(f"🃏 [{name}] {lbl} — 갈 카드도 좌표도 없습니다")
+            self._rlog(f"[카드] {key} #{si+1:02d} {j+1}번 카드·좌표 둘 다 없음 → 중단")
+            return False
+        if not anchor:
+            self._status.set(f"🃏 [{name}] {lbl} — 이 슬롯에 좌표가 하나도 없어 "
+                             f"어느 클라인지 알 수 없습니다")
+            return False
+        if not os.path.exists(card_img_path(cname)):
+            self._status.set(f"🃏 [{name}] {lbl} — '{cname}' 카드 그림이 "
+                             f"등록되지 않았습니다")
+            self._rlog(f"[카드] {key} #{si+1:02d} '{cname}' 그림 없음 → 중단")
+            return False
+        best = -1.0
+        for t in range(RASTA_TRIES):
+            if self._stop_flag:
+                return False
+            x, y, v = card_find(cname, anchor)
+            best = max(best, v)
+            if x is not None:
+                try:
+                    self._focus_client(si, (x, y))
+                    time.sleep(random.uniform(0.25, 0.45))
+                except Exception:
+                    pass
+                self._last_focus = si
+                _off = st.get("off") or [0, 0]
+                click_at(int(x) + int(_off[0]), int(y) + int(_off[1]))
+                self._status.set(f"🃏 [{name}] {lbl} '{cname}' 찾음 "
+                                 f"(일치도 {v:.2f}) → 누름")
+                self._rlog(f"[카드] {key} #{si+1:02d} {j+1}번 '{cname}' "
+                           f"눌렀다 ({v:.2f}) ({x},{y})")
+                time.sleep(random.uniform(*RASTA_AFTER))
+                return True
+            if t < RASTA_TRIES - 1:
+                self._status.set(f"🃏 [{name}] {lbl} '{cname}' 찾는 중… "
+                                 f"({t+1}/{RASTA_TRIES} · 최고 {best:.2f})")
+                time.sleep(random.uniform(*RASTA_GAP))
+        _a, _thr, _ = card_meta()
+        self._status.set(f"🚫 [{name}] {lbl} '{cname}' 카드가 목록에 없습니다 "
+                         f"(최고 {best:.2f} · 기준 {_thr:.2f}) — 이 슬롯 중단")
+        self._rlog(f"[카드] {key} #{si+1:02d} '{cname}' 못 찾음 "
+                   f"(최고 {best:.2f}) → 이 슬롯 중단")
         return False
 
     def _hold_arrow(self, word, sec, name):
