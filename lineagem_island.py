@@ -573,12 +573,24 @@ def save_counts(data):
     with open(COUNT_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+# 🛡 창을 열 때의 `_` 키 값 — 저장할 때 '이 창이 바꾼 것' 만 가리는 데 쓴다.
+#    (2026-10-04 사고: 창이 열려 있는 동안 밖에서 고친 프리셋이 통째로 되돌아갔다)
+_LOADED_UNDER = {}
+
+
 def load_cfg():
+    global _LOADED_UNDER
     try:
         with open(CONFIG_FILE, encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
         data = {}
+    try:
+        _LOADED_UNDER = json.loads(json.dumps(
+            {k: v for k, v in data.items() if k.startswith("_")},
+            ensure_ascii=False))
+    except Exception:
+        _LOADED_UNDER = {}
     for d in DUNGEONS:
         n = clicks_for(d["key"])
         if d["key"] not in data:
@@ -603,12 +615,33 @@ def save_cfg(cfg):
             disk = json.load(f)
     except Exception:
         disk = {}
-    keys = list(SAVE_KEYS) if SAVE_KEYS else list(cfg.keys())
-    # 던전 데이터가 아닌 설정 키(_presets 등)는 어느 창에서 바꿔도 항상 저장한다
-    keys += [k for k in cfg if k.startswith("_") and k not in keys]
+    # ⚠ `_` 로 시작하는 설정 키는 여기서 쓰지 않는다 — 아래에서 '바꾼 것만' 가린다.
+    #    (SAVE_KEYS 가 비면 list(cfg) 에 `_presets` 가 섞여 들어와, 예전엔 여기서
+    #     그냥 덮어써버렸다 — 2026-10-04)
+    keys = [k for k in (list(SAVE_KEYS) if SAVE_KEYS else list(cfg.keys()))
+            if not str(k).startswith("_")]
     for k in keys:
         if k in cfg:
             disk[k] = cfg[k]
+    # 🛡 `_presets` 같은 설정 키는 **이 창이 실제로 바꾼 것만** 쓴다.
+    #    예전엔 무조건 메모리 값으로 덮어써서, 창이 열려 있는 동안 밖에서
+    #    (또는 다른 창에서) 고친 프리셋이 **통째로 옛 값으로 되돌아갔다**
+    #    (2026-10-04 사용자: "내가 전부 다 바꿨는데 네가 다시 전부 되돌려버렸는데").
+    #    **클로드는 이 보호를 없애지 말 것 — 무조건 덮어쓰기로 되돌리지 말 것.**
+    for k in [x for x in cfg if x.startswith("_") and x not in keys]:
+        try:
+            _same = (json.dumps(cfg[k], ensure_ascii=False, sort_keys=True)
+                     == json.dumps(_LOADED_UNDER.get(k), ensure_ascii=False,
+                                   sort_keys=True))
+        except Exception:
+            _same = False
+        if _same and k in disk:
+            continue          # 이 창은 안 건드렸다 → 디스크 것을 그대로 둔다
+        disk[k] = cfg[k]
+        try:                  # 이제부터는 이 값이 '연 시점' 이다
+            _LOADED_UNDER[k] = json.loads(json.dumps(cfg[k], ensure_ascii=False))
+        except Exception:
+            pass
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(disk, f, ensure_ascii=False, indent=2)
 
