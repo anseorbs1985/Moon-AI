@@ -1531,6 +1531,9 @@ class IslandApp(tk.Tk):
                     out.append([d_, s_])
             self.cfg[key][idx]["dirs"] = out
             save_cfg(self.cfg)
+        # 📋 붙여넣은 뒤 화면을 바로 고치려면 칸 위젯을 알고 있어야 한다
+        self._pop["name_vars"] = name_vars
+        self._pop["gap_vars"] = gap_vars
         for j in range(_n_clicks):
             cc = tk.Frame(grid); cc.grid(row=j // 6, column=(j % 6) * 2, padx=2, pady=4)
             # 이름표: 클릭해서 직접 수정 (예: 물약, 이동문) — 비우면 기본 '클릭N'
@@ -1581,6 +1584,18 @@ class IslandApp(tk.Tk):
                                 command=lambda *_: _save_dirs())
             om2.config(font=("맑은 고딕", 7), width=1, pady=0, highlightthickness=0)
             om2.pack(side="left")
+            # 📋 **이 칸 하나만** 복사/붙여넣기 (2026-10-04 사용자 지시:
+            #    "슬롯별 복사 말고 좌표별 복사… 옆에 복사 붙여넣기 되게")
+            #    좌표가 슬롯 안에서 밀렸을 때 칸을 제자리로 옮기는 데 쓴다.
+            crow = tk.Frame(cc); crow.pack()
+            tk.Button(crow, text="복", font=("맑은 고딕", 7), width=2, pady=0,
+                      bg="#2980b9", fg="white",
+                      command=lambda k=key, x=idx, c=j: self._click_copy(k, x, c)
+                      ).pack(side="left", padx=(0, 1))
+            tk.Button(crow, text="붙", font=("맑은 고딕", 7), width=2, pady=0,
+                      bg="#8e44ad", fg="white",
+                      command=lambda k=key, x=idx, c=j: self._click_paste(k, x, c)
+                      ).pack(side="left")
             if j < _n_clicks - 1:
                 # 클릭 사이 간격: ㅡ 위에 초 입력 (비우면 기본)
                 gc = tk.Frame(grid); gc.grid(row=j // 6, column=(j % 6) * 2 + 1)
@@ -3368,6 +3383,180 @@ class IslandApp(tk.Tk):
         # 단일 좌표 테스트는 금방 끝나므로 창을 최소화하지 않고 그대로 실행
         self._stop_flag = False
         threading.Thread(target=run, daemon=True).start()
+
+    def _click_copy(self, key, idx, ci):
+        """📋 **좌표 한 칸**을 통째로 복사한다 (2026-10-04 사용자 지시).
+
+        담는 것: 좌표 · 그 뒤 간격(gap_list) · 방향/⇩(dirs) · 이름표(click_names)
+                 · 녹화(recs) · 라바 설정(rasta)
+        슬롯별 [복사]/[붙임] 과 **따로 보관**한다 — 둘을 섞으면 헷갈린다."""
+        import copy
+        self._commit_pending_edits(key, idx)      # 방금 고친 값까지 반영
+        slot = self.cfg[key][idx]
+        _co = (slot.get("coords") or [])
+        _gl = (slot.get("gap_list") or [])
+        _di = (slot.get("dirs") or [])
+        _cn = (slot.get("click_names") or [])
+        self._click_clip = {
+            "key": key, "slot": idx, "j": ci,
+            "coord": copy.deepcopy(_co[ci]) if ci < len(_co) else None,
+            "gap": _gl[ci] if ci < len(_gl) else None,
+            "dir": copy.deepcopy(_di[ci]) if ci < len(_di) else None,
+            "name": _cn[ci] if ci < len(_cn) else None,
+            "rec": copy.deepcopy((slot.get("recs") or {}).get(str(ci))),
+            "rasta": copy.deepcopy((slot.get("rasta") or {}).get(str(ci))),
+        }
+        c = self._click_clip
+        _bits = []
+        if c["coord"]: _bits.append(f"좌표({c['coord'][0]},{c['coord'][1]})")
+        if c["gap"] not in (None, ""): _bits.append(f"간격 {c['gap']}")
+        if c["dir"]: _bits.append(f"방향 {c['dir'][0]}{c['dir'][1]:g}초")
+        if c["rec"]: _bits.append(f"녹화 {len(c['rec'])}동작")
+        if c["rasta"]: _bits.append("라바설정")
+        if c["name"]: _bits.append(f"'{c['name']}'")
+        self._status.set(
+            f"📋 #{idx+1:02d} {labels_for(key)[ci]} 복사 — "
+            + (" · ".join(_bits) if _bits else "빈 칸")
+            + "   → 옮길 칸의 [붙] 을 누르세요")
+
+    def _click_paste(self, key, idx, ci):
+        """📋 복사한 **좌표 한 칸**을 이 칸에 붙여넣는다.
+
+        · 다른 슬롯에 붙이면 **클라 창 위치만큼 좌표를 보정**한다
+          (녹화 안의 마우스 좌표도 같이). 📍 떨어짐은 '그림에서 몇 픽셀' 이라
+          보정하지 않는다.
+        · 빈 칸을 복사해 붙이면 그 칸이 **비워진다** — 그게 '그대로 옮기기' 다.
+        · 같은 던전 안에서만 붙일 수 있다 (칸 수·뜻이 달라진다)."""
+        import copy
+        clip = getattr(self, "_click_clip", None)
+        if not clip:
+            self._status.set("먼저 옮길 칸의 [복] 을 누르세요"); return
+        if clip.get("key") != key:
+            self._status.set("다른 던전에서 복사한 칸입니다 — 같은 던전 안에서만 "
+                             "붙일 수 있습니다"); return
+        if clip.get("slot") == idx and clip.get("j") == ci:
+            self._status.set("같은 칸입니다"); return
+        self._commit_pending_edits(key, idx)
+        slot = self.cfg[key][idx]
+        n = clicks_for(key)
+        dx = dy = 0
+        note = ""
+        if clip.get("slot") != idx:
+            rects = self._client_rects_by_slot()
+            if rects:
+                dx = rects[idx][0] - rects[clip["slot"]][0]
+                dy = rects[idx][1] - rects[clip["slot"]][1]
+                note = f" — 클라 위치 보정 ({dx:+},{dy:+})"
+            else:
+                note = " — ⚠ 클라 16개를 못 찾아 원본 좌표 그대로"
+        # 좌표
+        co = list(slot.get("coords") or [])
+        while len(co) < n: co.append(None)
+        _c = copy.deepcopy(clip.get("coord"))
+        co[ci] = ([_c[0] + dx, _c[1] + dy] if _c else None)
+        slot["coords"] = co
+        # 간격 (그 칸 '뒤' 의 쉬는 시간)
+        gl = list(slot.get("gap_list") or [])
+        while len(gl) < n: gl.append(None)
+        gl[ci] = clip.get("gap")
+        slot["gap_list"] = gl
+        # 방향/⇩
+        di = list(slot.get("dirs") or [])
+        while len(di) < n: di.append(None)
+        di[ci] = copy.deepcopy(clip.get("dir"))
+        slot["dirs"] = di
+        # 이름표
+        cn = list(slot.get("click_names") or [])
+        while len(cn) < n: cn.append(None)
+        cn[ci] = clip.get("name")
+        slot["click_names"] = cn
+        # 녹화 (마우스 좌표도 보정)
+        rc = dict(slot.get("recs") or {})
+        _r = copy.deepcopy(clip.get("rec"))
+        if _r:
+            if dx or dy:
+                for ev in _r:
+                    if ev[1] in ("md", "mu", "mm"):
+                        ev[2] += dx; ev[3] += dy
+            rc[str(ci)] = _r
+        else:
+            rc.pop(str(ci), None)
+        slot["recs"] = rc
+        # 🗡 라바 설정 (📍 떨어짐은 그림 기준이라 보정하지 않는다)
+        ra = dict(slot.get("rasta") or {})
+        if clip.get("rasta"):
+            ra[str(ci)] = copy.deepcopy(clip["rasta"])
+        else:
+            ra.pop(str(ci), None)
+        if ra:
+            slot["rasta"] = ra
+        else:
+            slot.pop("rasta", None)
+        save_cfg(self.cfg)
+        self._refresh(key)
+        self._pop_sync_click(key, idx, ci)
+        _bits = []
+        if co[ci]: _bits.append(f"좌표({co[ci][0]},{co[ci][1]})")
+        if gl[ci] not in (None, ""): _bits.append(f"간격 {gl[ci]}")
+        if di[ci]: _bits.append(f"방향 {di[ci][0]}")
+        if rc.get(str(ci)): _bits.append("녹화")
+        if ra.get(str(ci)): _bits.append("라바설정")
+        self._status.set(
+            f"✔ #{idx+1:02d} {labels_for(key)[ci]} 에 붙여넣음 — "
+            + (" · ".join(_bits) if _bits else "비웠습니다") + note)
+
+    def _pop_sync_click(self, key, idx, ci):
+        """열려 있는 좌표 팝업의 **그 칸 하나**를 지금 설정에 맞춘다.
+        (붙여넣기 뒤에 화면이 옛 값을 그대로 보여주면 사용자가 헷갈린다)"""
+        pop = getattr(self, "_pop", {}) or {}
+        if not (pop.get("win") and pop["win"].winfo_exists()
+                and pop.get("key") == key and pop.get("slot") == idx):
+            return
+        slot = self.cfg[key][idx]
+        try:
+            _co = slot.get("coords") or []
+            on = ci < len(_co) and _co[ci]
+            vs = pop.get("vars") or []
+            if ci < len(vs):
+                vs[ci].set("✔" if on else "✗")
+            bs = pop.get("btns") or []
+            if ci < len(bs):
+                _d = next(x for x in DUNGEONS if x["key"] == key)
+                bs[ci].config(bg=_d["color"] if on else "#7f8c8d")
+        except Exception:
+            pass
+        try:
+            _d = (slot.get("dirs") or [])
+            dvs = pop.get("dir_vars") or []
+            if ci < len(dvs):
+                dvs[ci].set(_d[ci][0] if (ci < len(_d) and _d[ci]) else "ㅡ")
+        except Exception:
+            pass
+        try:
+            _has = bool((slot.get("recs") or {}).get(str(ci)))
+            rbs = pop.get("rec_btns") or []
+            if ci < len(rbs):
+                rbs[ci].config(text="●" if _has else "⏺",
+                               bg="#c0392b" if _has else "#7f8c8d")
+        except Exception:
+            pass
+        try:
+            _g = (slot.get("gap_list") or [])
+            gvs = pop.get("gap_vars") or []
+            if ci < len(gvs):
+                v = _g[ci] if ci < len(_g) else None
+                gvs[ci].set("" if v in (None, "") else
+                            (f"{v:g}" if isinstance(v, (int, float)) else str(v)))
+        except Exception:
+            pass
+        try:
+            _n = (slot.get("click_names") or [])
+            nvs = pop.get("name_vars") or []
+            if ci < len(nvs):
+                nvs[ci].set((_n[ci] if ci < len(_n) and _n[ci]
+                             else labels_for(key)[ci]))
+        except Exception:
+            pass
 
     def _del_click(self, key, idx, ci):
         """좌표 하나만 삭제 — 실행 때 그 자리는 건너뛰고 다음 좌표부터 진행."""
