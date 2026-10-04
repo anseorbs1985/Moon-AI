@@ -54,7 +54,13 @@ def main():
         ("share_coords.json  force", len(sc.get("force") or []),
          "★ 로컬이 찍어둔 좌표까지 **덮어쓴다**", True),
         ("share_island.json  keys", len(si.get("keys") or []),
-         "그 던전을 통째로 덮어쓴다", True),
+         ("그 던전을 덮어쓴다 (칸"
+          + ",".join(str(int(c) + 1) for c in (si.get("keep_cells") or []))
+          + " 은 로컬 유지)") if si.get("keep_cells")
+         else "그 던전을 통째로 덮어쓴다", True),
+        # 2026-10-04 — keys 로 덮어쓸 때 '이 칸만 로컬 것을 지킨다' (물약 등)
+        ("share_island.json  keep_cells", len(si.get("keep_cells") or []),
+         "↑ 덮어쓰기에서 **빼는** 칸 (많을수록 안전)", False),
         ("share_island.json  presets_only", len(si.get("presets_only") or []),
          "그 던전 프리셋(좌표 포함)", True),
         # 2026-10-03 — fill_only 는 **빈 칸만** 채우므로 로컬 좌표를 덮지 않는다.

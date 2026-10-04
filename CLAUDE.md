@@ -3421,3 +3421,21 @@ AttributeError: '_tkinter.tkapp' object has no attribute '_count_vars'
   ⚠ **Tk 버튼은 그림이 있으면 `width`/`height` 가 픽셀로 바뀐다** — 그래서
   `width=82, height=36` 을 따로 준다. 글자만일 때(`width=9, height=2`)와 헷갈리지 말 것.
   ⚠ `PhotoImage` 는 **참조를 들고 있어야** 안 지워진다 (`self._dun_imgs`).
+
+### 🧪 `keep_cells` — 좌표는 바꾸되 '그 칸'만 로컬 것을 지킨다 (2026-10-04)
+
+사용자: *"좌표 변경된 것도 같이 바뀔 수 있게 해주고, 내가 슬롯에 물약 주홍이
+48%로 되어 있으면 프리셋도 주홍물약 48%로 똑같이 되어 있는 거야."*
+
+`share_island.json` 의 **`keep_cells`** (0부터 센 칸 번호):
+`keys` 로 그 던전 좌표를 메인 것으로 바꾸되, **여기 적힌 칸은 로컬 것을 그대로** 둔다.
+지금 `[16, 17]` = **칸17·18 = 물약** (슬롯마다 고른 게 다르다).
+
+- `keep_local`(name·enabled·repeat_h·repeat_n)은 **항목 단위**,
+  `keep_cells` 는 **칸 단위** — 둘 다 적용된다.
+- `coords`·`dirs`·`gap_list`·`click_names` 는 그 칸을, `recs`·`rasta` 는 그 번호를 지킨다.
+- 검증: 가짜 로컬(좌표·물약·이름·ON/OFF·반복이 전부 다른)로 돌려
+  **나머지 25칸은 메인으로 바뀌고 물약 칸·이름·ON/OFF·반복은 그대로**.
+- ⚠ **로컬 클라 창이 메인과 같은 자리**일 때만 `keys` 를 쓴다 (2026-10-04 확인: 같음).
+- ⚠ 배포가 끝나면 `keys`·`presets_only` 를 **반드시 비운다**
+  (2026-09-30 `force` 를 안 비워 로컬 좌표가 계속 돌아갔던 사고).

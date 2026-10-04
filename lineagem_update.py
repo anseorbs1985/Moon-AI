@@ -606,6 +606,12 @@ def sync_island_keys(log):
             dst = json.load(f)
         # 로컬 것을 그대로 두는 항목 — 물약(이름)·ON/OFF·반복 설정은 컴퓨터마다 다르다
         keep = cfgm.get("keep_local") or []
+        # 🧪 '지킬 칸' — 좌표는 메인 것으로 바꾸되 **이 칸들은 로컬 것을 그대로** 둔다.
+        #    물약 칸(17·18)이 슬롯마다 다르기 때문이다 (2026-10-04 사용자:
+        #    "좌표 변경된 것도 같이 바뀔 수 있게 해주고, 내가 슬롯에 물약 주홍이
+        #     48%로 되어 있으면 프리셋도 주홍물약 48%로 똑같이 되어 있는 거야").
+        #    값은 **0부터** 센 칸 번호 (칸17 → 16).
+        keep_cells = [int(x) for x in (cfgm.get("keep_cells") or [])]
         got = []
         # 🏝 '빈 칸만 채우기' — 로컬이 찍어둔 좌표는 그대로 두고 **비어 있는 칸만**.
         #    덮어쓰지 않으므로 🔒 좌표 잠금에도 걸리지 않는다 (잠금의 뜻은
@@ -650,13 +656,35 @@ def sync_island_keys(log):
                         ns.pop(fld, None)
                         if fld in old_s:
                             ns[fld] = old_s[fld]
+                    # 🧪 지킬 칸은 **로컬 값으로 되돌린다** (물약 등 슬롯마다 다른 칸)
+                    for _c in keep_cells:
+                        for _f in ("coords", "dirs", "gap_list", "click_names"):
+                            _nv = ns.get(_f)
+                            _ov = old_s.get(_f)
+                            if not isinstance(_nv, list):
+                                continue
+                            while len(_nv) <= _c:
+                                _nv.append(None)
+                            _nv[_c] = (_ov[_c] if (isinstance(_ov, list)
+                                                   and _c < len(_ov)) else None)
+                        for _f in ("recs", "rasta"):
+                            _nd = ns.get(_f)
+                            if not isinstance(_nd, dict):
+                                continue
+                            _od = old_s.get(_f) or {}
+                            if str(_c) in _od:
+                                _nd[str(_c)] = _od[str(_c)]
+                            else:
+                                _nd.pop(str(_c), None)
                     merged.append(ns)
                 v = merged
             if dst.get(k) == v:
                 continue
             dst[k] = v
             got.append(f"{k}({_count_in(v)}좌표"
-                       + (f", {'·'.join(keep)} 는 로컬 것 유지" if keep else "") + ")")
+                       + (f", {'·'.join(keep)} 는 로컬 것 유지" if keep else "")
+                       + (f", 칸{','.join(str(c+1) for c in keep_cells)}"
+                          f"(물약 등)은 로컬 것 유지" if keep_cells else "") + ")")
         sp = (src.get("_presets") or {})
         dp = dst.setdefault("_presets", {})
         for k in (list(keys) if with_presets else []) + list(only_p):
