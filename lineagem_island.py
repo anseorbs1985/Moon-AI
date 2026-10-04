@@ -3490,6 +3490,19 @@ class IslandApp(tk.Tk):
                 rec = (slot.get("recs") or {}).get(str(ci))
                 if d_ and d_[0] == "⏺":
                     d_ = None
+                # 🗡 그림 자리(라스타바드)면 **그림으로** 처리한다 — 실행 때와 같은 길.
+                #    (2026-10-04) 예전엔 이걸 안 봐서, 그림 자리를 ▶ 로 눌러도
+                #    좌표가 없으면 **아무 일도 안 났다**. 테스트가 불가능했다.
+                _rm = ((slot.get("rasta") or {}).get(str(ci)) or {}).get("mode")
+                if _rm in RASTA_FIRST:
+                    _okr = self._rasta_do(key, ci, idx, slot, coords, name, lbl)
+                    if not _okr:
+                        return                   # 못 찾았으면 거기서 끝 (실행과 같다)
+                    if rec:                      # 그림 누른 뒤 녹화가 있으면 이어서
+                        self._focus_client_for_slot(idx)
+                        self._play_events(rec, name)
+                        self._status.set(f"✔ [{name}] {lbl} 그림 누르고 녹화까지 완료")
+                    return
                 # 방향 이동/녹화 테스트는 키 입력이라 그 슬롯의 클라를 먼저 포커스
                 if (d_ and d_[0] != "⇩") or rec:
                     self._focus_client_for_slot(idx)
