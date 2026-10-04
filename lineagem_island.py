@@ -300,6 +300,46 @@ def grab_window(coord):
         return None
 
 
+def rasta_area_path(j):
+    """📐 칸 j 의 '그림을 찾을 범위' 파일 — 클라 창 왼쪽위 기준 {dx,dy,w,h}."""
+    return os.path.join(IMG_DIR, f"rasta_{j+1:02d}_area.json")
+
+
+def rasta_area(j):
+    """정해둔 범위 (dx, dy, w, h) — 없으면 None (창 전체에서 찾는다)."""
+    try:
+        with open(rasta_area_path(j), encoding="utf-8") as f:
+            a = json.load(f) or {}
+        if int(a.get("w") or 0) > 0 and int(a.get("h") or 0) > 0:
+            return (int(a.get("dx") or 0), int(a.get("dy") or 0),
+                    int(a["w"]), int(a["h"]))
+    except Exception:
+        pass
+    return None
+
+
+def rasta_crop(j, big):
+    """📐 범위가 정해져 있으면 **그 안만** 잘라 돌려준다 → (그림, 왼쪽, 위).
+
+    🚫 범위를 쓰는 이유 — 작은 글자는 **창 전체를 훑으면 헛걸림이 진짜만큼 높다.**
+       실측(2026-10-04, 16클라): '암살군왕의 큐브' 진짜 0.53 · 헛걸림 0.40~0.58
+       → 범위를 130x70 으로 좁히니 헛걸림 0.19 (여유 0.34).
+       용던고고가 18x17 마름모를 0.55 로 쓰는 비결이 이것이다.
+    ⚠ 범위 **밖으로 넓히지 않는다** — 용던고고는 못 찾으면 창 전체로 넓히는데,
+       라스타바드는 '똑같이 생긴 큐브 둘 중 하나 고르기' 라서 넓히면 틀린 것을
+       누른다. 못 찾으면 그냥 못 찾은 것으로 두고 그 슬롯을 멈춘다."""
+    a = rasta_area(j)
+    if not a:
+        return big, 0, 0
+    dx, dy, w, h = a
+    H, W = big.shape[:2]
+    x0, y0 = max(0, dx), max(0, dy)
+    x1, y1 = min(W, dx + w), min(H, dy + h)
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return big, 0, 0          # 범위가 망가졌으면 창 전체로 (안전)
+    return big[y0:y1, x0:x1], x0, y0
+
+
 def rasta_find_all(j, anchor):
     """칸 j 의 그림 후보를 **전부** 돌려준다 → ([(x, y, 점수), …], 최고점수).
 
@@ -314,6 +354,8 @@ def rasta_find_all(j, anchor):
         if not got:
             return [], 0.0
         big, (ox, oy) = got
+        big, _cx, _cy = rasta_crop(j, big)      # 📐 정해둔 범위 안만 본다
+        ox += _cx; oy += _cy
         tpl = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
         if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
             return [], 0.0
@@ -353,6 +395,8 @@ def rasta_find(j, anchor, pick="top"):
         if not got:
             return None, None, 0.0
         big, (ox, oy) = got
+        big, _cx, _cy = rasta_crop(j, big)      # 📐 정해둔 범위 안만 본다
+        ox += _cx; oy += _cy
         tpl = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
         if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
             return None, None, 0.0
@@ -363,7 +407,17 @@ def rasta_find(j, anchor, pick="top"):
         if len(xs) == 0:
             return None, None, mx
         th, tw = tpl.shape[0], tpl.shape[1]
-        cand = [(int(x), int(y), float(res[y, x])) for x, y in zip(xs, ys)]
+        # 🔎 **덩어리로 묶는다** — 글자 하나에 픽셀 수십 개가 걸리는데, 예전엔 그
+        #    픽셀을 전부 후보로 놓고 (y,x) 로 정렬해 **가장자리**를 집었다.
+        #    그래서 점수가 낮게 나오고(실측 0.582 → 0.430) 누르는 자리도 어긋났다.
+        #    점수가 높은 것부터 보면서, 이미 담은 것 주변(그림 크기 안)은 건너뛴다.
+        cand, _used = [], []
+        for _x, _y in sorted(zip(xs, ys), key=lambda c: -float(res[c[1], c[0]])):
+            _x, _y = int(_x), int(_y)
+            if any(abs(_x - u[0]) < tw and abs(_y - u[1]) < th for u in _used):
+                continue
+            _used.append((_x, _y))
+            cand.append((_x, _y, float(res[_y, _x])))
         if pick == "left":
             cand.sort(key=lambda c: (c[0], c[1]))
         elif pick == "best":
@@ -1869,7 +1923,12 @@ class IslandApp(tk.Tk):
                            command=lambda x=jx: self._preset_pick_offset(x))
             ob.pack(side="left", padx=(2, 0))
             ob.bind("<Button-3>", lambda e, x=jx: self._preset_del_offset(x))
-            self._pw["cells"].append({"state": sb, "pick": pb, "rec": rb,
+            ab = tk.Button(grow, text="📐", font=("맑은 고딕", 8), width=3,
+                           bg="#95a5a6", fg="white",
+                           command=lambda x=jx: self._preset_grab_area(x))
+            ab.pack(side="left", padx=(2, 0))
+            ab.bind("<Button-3>", lambda e, x=jx: self._preset_del_area(x))
+            self._pw["cells"].append({"area": ab, "state": sb, "pick": pb, "rec": rb,
                                       "img": gb, "tgt": tb, "probe": qb,
                                       "off": ob})
         bot = tk.Frame(win); bot.pack(pady=(2, 10))
@@ -1976,6 +2035,11 @@ class IslandApp(tk.Tk):
                     (it or {}).get("pick") or "top", "맨위")
                 c["tgt"].config(text=(_pk if _ri else "🎯"),
                                 bg=("#2471a3" if _ri else "#95a5a6"), fg="white")
+            if c.get("area") is not None:
+                _ar = rasta_area(jx)
+                c["area"].config(text=("📐" if _ar else "📐"),
+                                 bg=("#117864" if (_ri and _ar) else "#95a5a6"),
+                                 fg="white")
             if c.get("off") is not None:
                 _of = (it or {}).get("off")
                 c["off"].config(
@@ -2199,7 +2263,10 @@ class IslandApp(tk.Tk):
             return
         pick = it.get("pick") or "top"
         cand, mx = rasta_find_all(jx, anchor)
-        lines = [f"{jx+1}번 칸 · 기준슬롯 #{si+1} · 기준 {rasta_thr(jx):.2f}",
+        _ar = rasta_area(jx)
+        lines = [f"{jx+1}번 칸 · 기준슬롯 #{si+1} · 기준 {rasta_thr(jx):.2f}"
+                 + (f" · 📐 범위 ({_ar[0]},{_ar[1]}) {_ar[2]}x{_ar[3]}"
+                    if _ar else " · 📐 범위 없음 (창 전체)"),
                  f"그림: {os.path.basename(rasta_img_path(jx))}", ""]
         if not cand:
             lines.append(f"✘ 못 찾았습니다 (최고 일치도 {mx:.2f})")
@@ -2239,6 +2306,77 @@ class IslandApp(tk.Tk):
         t.insert("end", str(body)); t.config(state="disabled")
         tk.Button(w, text="닫기", font=("맑은 고딕", 9), width=10,
                   command=w.destroy).pack(pady=(0, 8))
+
+    def _preset_grab_area(self, jx):
+        """📐 **그림을 찾을 범위**를 화면에서 드래그해 정한다.
+
+        작은 글자는 창 전체를 훑으면 엉뚱한 곳이 더 높게 나온다 — 범위를 좁히면
+        그게 사라진다 (2026-10-04 실측: 헛걸림 0.58 → 0.19).
+        **기준슬롯 창 왼쪽위 기준**으로 저장하므로 16슬롯에 전부 적용된다.
+        오른쪽 클릭 = 범위 지우기 (창 전체로 되돌림)."""
+        self._rasta_area_target = (self._pw["key"], jx)
+        self.withdraw()
+        self._pmsg(f"📐 {jx+1}번 칸 — 그 그림이 **뜰 수 있는 곳**을 넉넉히 "
+                   f"드래그하세요 (캐릭이 움직여도 들어오게)")
+        self._rlog(f"[라스타] 📐 {jx+1}번 범위 드래그 시작")
+
+        def _mk():
+            try:
+                RastaGrabOverlay(self, self._on_rasta_area, f"{jx+1}번 칸 찾을 범위")
+            except Exception as e:
+                import traceback
+                self._rlog("[라스타] 📐 오버레이 실패 "
+                           + traceback.format_exc().replace(chr(10), " | ")[:600])
+                self.deiconify()
+                self._reopen_preset_win(self._pw["key"])
+                self._pmsg(f"🚨 드래그 화면을 못 띄웠습니다: {e}")
+        self.after(250, _mk)
+
+    def _on_rasta_area(self, x, y, w, h):
+        """드래그한 사각형을 **기준슬롯 창 왼쪽위 기준**으로 바꿔 저장한다."""
+        self.deiconify()
+        key, j = getattr(self, "_rasta_area_target", (RASTA_KEY, 0))
+        self._reopen_preset_win(key)
+        if w < 12 or h < 12:
+            self._pmsg("📐 너무 작습니다 — 다시 드래그해주세요")
+            return
+        try:
+            si = max(0, int(self._pw["src"].get()) - 1)
+        except Exception:
+            si = 0
+        rects = self._client_rects_by_slot()
+        if not rects or si >= len(rects):
+            self._pmsg(f"📐 클라 16개를 못 찾았습니다 — 기준슬롯 #{si+1} 창을 "
+                       f"확인해주세요")
+            return
+        L, T = rects[si][0], rects[si][1]
+        dx, dy = int(x) - L, int(y) - T
+        a = {"dx": dx, "dy": dy, "w": int(w), "h": int(h)}
+        try:
+            with open(rasta_area_path(j), "w", encoding="utf-8") as f:
+                json.dump(a, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self._pmsg(f"📐 저장 실패: {e}")
+            return
+        self._preset_refresh_cells()
+        self._pmsg(f"📐 {j+1}번 칸 찾을 범위 = 창 왼쪽위에서 ({dx},{dy}) "
+                   f"크기 {int(w)}x{int(h)}  — [🔍] 로 확인해보세요 "
+                   f"(16슬롯 전부에 적용됩니다)")
+        self._rlog(f"[라스타] 📐 {j+1}번 범위 {a} (기준슬롯 #{si+1})")
+
+    def _preset_del_area(self, jx):
+        """📐 오른쪽 클릭 — 범위를 지워 창 전체에서 찾게 되돌린다."""
+        p = rasta_area_path(jx)
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+            except Exception as e:
+                self._pmsg(f"📐 지우기 실패: {e}"); return
+            self._preset_refresh_cells()
+            self._pmsg(f"📐 {jx+1}번 칸 범위를 지웠습니다 — 창 전체에서 찾습니다 "
+                       f"(글자가 작으면 헛걸림이 늘 수 있습니다)")
+        else:
+            self._pmsg(f"📐 {jx+1}번 칸에는 정해둔 범위가 없습니다")
 
     def _preset_grab_img(self, jx):
         """🖼 그 칸의 그림을 드래그해 등록한다 (프리셋 편집창에서)."""
