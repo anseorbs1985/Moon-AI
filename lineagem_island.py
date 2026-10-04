@@ -3290,6 +3290,18 @@ class IslandApp(tk.Tk):
                                 ev[2] += rdx; ev[3] += rdy
             except Exception:
                 pass
+        # 🛡 **지워질 녹화는 숨겨 보관한다** — 붙여넣기로 날아가면 되살릴 길이 없다
+        #    (2026-10-04 사고: #05 의 녹화 3개가 흔적도 없이 사라졌다).
+        #    프리셋의 ✖삭제가 `recs_off` 에 숨기는 것과 같은 보호다 (2026-08-10).
+        #    **클로드는 이 보호를 없애지 말 것.**
+        _lost = {k: v for k, v in (self.cfg[key][idx].get("recs") or {}).items()
+                 if v and not recs.get(k)}
+        if _lost:
+            _off = dict(self.cfg[key][idx].get("recs_off") or {})
+            _off.update(copy.deepcopy(_lost))
+            self.cfg[key][idx]["recs_off"] = _off
+            self._rlog(f"[붙임] #{idx+1:02d} 녹화 "
+                       f"{sorted(int(k)+1 for k in _lost)} 는 덮이지 않게 숨겨 보관")
         self.cfg[key][idx]["recs"] = recs
         # 🗡 라바 프리셋 설정(그림클릭/확인만·🎯·📍·확인짝)도 그대로 — 이게 없으면
         #    붙여넣어도 그 슬롯은 라스타바드로 돌지 않는다 (2026-10-04).
@@ -3298,6 +3310,12 @@ class IslandApp(tk.Tk):
         if _ra:
             self.cfg[key][idx]["rasta"] = _ra
         else:
+            # 🛡 지워질 라바설정도 숨겨 보관 (2026-10-04 사고 — 되살릴 길이 없었다)
+            _lr = self.cfg[key][idx].get("rasta") or {}
+            if _lr:
+                self.cfg[key][idx]["rasta_off"] = copy.deepcopy(_lr)
+                self._rlog(f"[붙임] #{idx+1:02d} 라바설정 "
+                           f"{sorted(int(k)+1 for k in _lr)} 는 숨겨 보관")
             self.cfg[key][idx].pop("rasta", None)   # 원본이 악몽의섬이면 라바설정을 지운다
         # 프리셋이 ✖삭제로 숨겨둔 녹화도 함께 (그 자리를 되살릴 때 빈 칸이 되지 않게)
         _ro = copy.deepcopy(clip.get("recs_off") or {})
@@ -3313,8 +3331,12 @@ class IslandApp(tk.Tk):
                                 ev[2] += rdx; ev[3] += rdy
             except Exception:
                 pass
-        if _ro:
-            self.cfg[key][idx]["recs_off"] = _ro
+        # ⚠ **덮지 말고 합친다** — 바로 위에서 '지워질 녹화' 를 여기에 숨겨뒀다.
+        #    예전엔 그냥 덮어써서 그 보관이 통째로 날아갔다 (2026-10-04).
+        _cur_off = dict(self.cfg[key][idx].get("recs_off") or {})
+        _cur_off.update(_ro)
+        if _cur_off:
+            self.cfg[key][idx]["recs_off"] = _cur_off
         else:
             self.cfg[key][idx].pop("recs_off", None)
         if clip.get("card"):                       # 🃏 갈 카드도 함께
