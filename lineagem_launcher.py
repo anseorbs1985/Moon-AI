@@ -9998,6 +9998,10 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"🏢 층 확인 실패: {e}")
 
+    def _open_dragon_floor(self):
+        """🏢 용던층확인!! — 메인런처 버튼에서 바로 연다 (용던고고 창을 안 거쳐도 된다)."""
+        self._floor_view("dragon")
+
     def _floor_view(self, fkey):
         """🏢 층 확인 — 16클라의 **층 글씨를 5배로 확대해 보여주고**, 그대로 넣는다.
 
@@ -16003,6 +16007,11 @@ class App(tk.Tk):
             ("🌙 절전모드",  "#1f618d", self._open_slp_win,      "#154360", self._start_slp),
             ("🧪 물약색",   "#8e44ad", self._open_potion_win,   "#6c3483", self._potion_check),
             ("📜 주문서",    "#2471a3", self._open_scroll_win,   "#1a5276", self._scroll_check),
+            # 🏢 용던고고 층 확인 — 주문서확인과 같은 자리에 뺐다 (2026-10-05 사용자 지시:
+            #    "저기 위에 주문서 확인처럼 용던층확인!! 이렇게 해서 빼주고,
+            #     저기에서 입력하면 네가 넣어주라는 거야")
+            ("🏢 용던층" + chr(10) + "확인!!", "#1a5276", self._open_dragon_floor,
+             "#154360", self._open_dragon_floor),
         ]
         # 안 쓰는 런처의 버튼은 만들지 않는다 (HIDE_LAUNCHERS)
         fixed = [f for f in fixed if f[0] not in HIDE_LAUNCHERS]
