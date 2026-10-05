@@ -10127,7 +10127,10 @@ class App(tk.Tk):
         self._fv_ents = {}
         for i in range(16):
             cell = tk.Frame(body, bd=1, relief="groove")
-            cell.grid(row=i // 4, column=i % 4, padx=3, pady=3, sticky="nsew")
+            # ⚠ 클라 배치와 **같은 순서(세로)** 로 놓는다 — 1·2·3·4 가 **첫 칸 아래로**.
+            #    (2026-10-05 사용자: "왜 가로로 되냐, 세로로 1,2,3,4 화면 클라랑
+            #     맞춰줘야지") 주문서확인 창도 `i % 4, i // 4` 로 같다.
+            cell.grid(row=i % 4, column=i // 4, padx=3, pady=3, sticky="nsew")
             tk.Label(cell, text=f"#{i+1:02d}", font=("맑은 고딕", 8, "bold"),
                      fg="#555").pack()
             # 사진은 칸을 꽉 채우고, 칸은 창을 따라 늘어난다 (2026-10-05)
