@@ -4505,18 +4505,32 @@ class App(tk.Tk):
         return win
 
     def _close_subwin(self, win):
-        """서브창을 닫고 메인런처를 앞으로 띄운다."""
+        """서브창을 닫는다 — 메인런처는 **앞으로 올리지 않는다**.
+
+        (2026-10-05 사용자 지시) *"복구를 누르면 메인런처 창이 앞으로 튀어나오잖아.
+        그냥 뒤에 그대로 있고 복구가 됐으면 좋겠어."*
+        예전엔 `deiconify(); lift(); focus_force()` 로 끌어올려서, 리니지M 클라를
+        가리고 포커스까지 빼앗았다. CLAUDE.md 의 '작업이 끝나면 앞으로 올리지 않고
+        맨 뒤로만 복원' 규칙과도 어긋났다.
+        🚫 **여기에 `lift()`/`focus_force()` 를 다시 넣지 말 것.**
+        내려가 있던(최소화) 경우에만 올려주되, 앞으로 가져오지는 않는다."""
         try:
             if win and win.winfo_exists():
                 win.destroy()
         except Exception:
             pass
-        def _raise():
+
+        def _restore():
             try:
-                self.deiconify(); self.lift(); self.focus_force()
+                if self.state() == "iconic":      # 최소화돼 있을 때만 꺼내준다
+                    self.deiconify()
+                    try:
+                        self._send_to_back()      # 꺼내되 맨 뒤로 (클라를 안 가리게)
+                    except Exception:
+                        pass
             except Exception:
                 pass
-        self.after(60, _raise)
+        self.after(60, _restore)
 
     def _subwin_autoclose_tick(self):
         """열려있는 서브창이 3분간 조작이 없으면 자동으로 닫는다(실행 중엔 유지)."""

@@ -5217,6 +5217,18 @@ class IslandApp(tk.Tk):
         c = coords[j] if j < len(coords) else None
         rec = recs.get(str(j))
         did = False
+        # 🗡🃏 그림 자리(🖼/👁)와 카드 자리(🃏)는 **개별 실행과 똑같이** 처리한다.
+        #    (2026-10-05 사용자: "개별로 하면 다 되는데 전체실행은 똑같은 지점에서
+        #     멈춘다" — 전체실행은 이 함수를 타는데 여기에 처리가 없었다)
+        #    못 찾으면 `None` 을 돌려 **그 슬롯만** 멈춘다 (엉뚱한 곳을 누르지 않게).
+        _rm = ((slot.get("rasta") or {}).get(str(j)) or {}).get("mode")
+        if _rm in RASTA_FIRST:
+            if not self._rasta_do(key, j, si, slot, coords, name, lbl):
+                return None            # ← 이 슬롯 중단 (웨이브는 다른 슬롯 계속)
+            if rec and not self._stop_flag:
+                self._focus_client(si, c)
+                self._play_events(rec, name)
+            return True
         if d_ and d_[0] == "⇩":
             if c:
                 dist = max(30, int(float(d_[1]) * 30))
@@ -5421,6 +5433,12 @@ class IslandApp(tk.Tk):
                 continue
             did = self._do_one_click(key, si, st["slot"], j, labels[j], move_set,
                                      tag=f"  (#{si+1:02d} {j+1}/{total})")
+            if did is None:
+                # 🚫 그림/카드를 못 찾았다 → **이 슬롯만** 끝낸다 (다른 슬롯은 계속)
+                st["j"] = total
+                self._rlog(f"🚫 {key} #{si+1:02d} 좌표{j+1} 에서 그림/카드를 못 찾아 "
+                           f"이 슬롯 중단 (다른 슬롯은 계속)")
+                continue
             st["j"] = j + 1
             if did:
                 done_cnt += 1
@@ -5495,9 +5513,13 @@ class IslandApp(tk.Tk):
             status_fn = lambda m: self.after(0, lambda m=m: self._status.set(m))
             # 오만의탑·악몽의섬: 슬롯 하나씩이 아니라 번갈아(웨이브) 실행
             if key in self.WAVE_KEYS and slot_idx is None and len(targets) > 1:
-                _ln = getattr(self, "_auto_lanes", None)
+                # 🌊 동시 슬롯 수 — 전체실행도 **WAVE_LANES(2)** 로 간다.
+                #    (2026-10-05 사용자: "악몽의섬 실행을 2개씩만 하자. 3~4개씩
+                #     하니까 렉이 엄청나게 발생한다. 하나 끝나면 다른 거 하고")
+                #    ⚠ 예전 메시지는 '3개씩' 이라고 **거짓말**을 했다 (실제로는 2였다).
+                _ln = getattr(self, "_auto_lanes", None) or WAVE_LANES
                 self._status.set(f"🌊 번갈아 실행 — {len(targets)}개 슬롯 "
-                                 f"(동시 {_ln or 3}개씩)")
+                                 f"(동시 {_ln}개씩)")
                 # 반복 실행(--lanes 지정)은 슬롯 번호 순서 그대로 2개씩 —
                 # 동시에 도는 창이 적을수록 클릭이 안전하다
                 self._run_wave(key, targets, lanes=_ln,
