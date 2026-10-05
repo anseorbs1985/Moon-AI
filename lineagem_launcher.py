@@ -1819,6 +1819,13 @@ FLOOR_STRICT = ("dragon",)
 AREA_STRICT = ("dragon",)
 FLOOR_WAIT  = (0.6, 1.0)       # 다시 보기까지 쉬는 시간(초) — 사람처럼 랜덤
 FLOOR_PAD   = 12               # 저장해둔 자리 둘레로 이만큼 더 넓게 훑는다(px)
+# 🏢 [🏢 용던층확인!!] 창에 **보여줄** 자리 — 창 크기 대비 **비율**이라 클라마다 맞는다.
+#   '용의 계곡 던전 N층' **글씨 줄만** 잡는다 (미니맵·사람 아이콘 제외).
+#   (2026-10-05 사용자: "숫자 쪽만 좀 더 크게 · 왼쪽 편으로 글씨가 다 보이게 ·
+#    저 위치 그림은 안 보여줘도 된다")
+#   실측 491x276 창에서 (400,104) 70x16 → 비율로 환산.
+#   ⚠ 이건 **보여주기 전용**이다 — 층 맞추기(FLOOR_*)에는 쓰지 않는다.
+FLOOR_VIEW_BOX = (400 / 491, 104 / 276, 70 / 491, 16 / 276)
 FLOOR_MIN_STD = 3.0            # 이보다 밋밋한(무늬 없는) 그림은 쓰지 않는다 — 아래 설명
 
 # ── 🔢 층 '숫자만' 보기 (2026-09-23) ────────────────────────────────────────
@@ -10105,14 +10112,14 @@ class App(tk.Tk):
             if b is None or not b.winfo_exists():
                 return 5
             cw = max(60, b.winfo_width() // 4 - 14)
-            ch = max(40, b.winfo_height() // 4 - 62)   # 번호·읽기·입력칸 자리를 뺀다
+            ch = max(30, b.winfo_height() // 4 - 66)   # 번호·읽기·입력칸 자리를 뺀다
             cr = getattr(self, "_fv_crops", {}) or {}
             ws = [c.shape[1] for c in cr.values() if c is not None and getattr(c, "size", 0)]
             hs = [c.shape[0] for c in cr.values() if c is not None and getattr(c, "size", 0)]
             if not ws:
                 return 5
             z = min(cw / max(ws), ch / max(hs))
-            return max(2, min(14, int(z)))
+            return max(2, min(20, int(z)))      # 글씨 줄만 잘라 가로로 길다 → 더 키울 수 있다
         except Exception:
             return 5
 
@@ -10139,7 +10146,16 @@ class App(tk.Tk):
                     out.append((i, None, None, "창을 못 찾음"))
                     continue
                 try:
-                    crop = _floor_grab(fkey, anc)
+                    _big = grab_window(anc)
+                    crop = None
+                    if _big is not None:
+                        _H, _W = _big.shape[:2]
+                        rx, ry, rw, rh = FLOOR_VIEW_BOX
+                        _x = max(0, int(_W * rx)); _y = max(0, int(_H * ry))
+                        _x2 = min(_W, _x + max(8, int(_W * rw)))
+                        _y2 = min(_H, _y + max(6, int(_H * rh)))
+                        if _x2 - _x > 6 and _y2 - _y > 4:
+                            crop = _big[_y:_y2, _x:_x2]
                 except Exception:
                     crop = None
                 try:
