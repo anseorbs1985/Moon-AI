@@ -1805,6 +1805,16 @@ FLOOR_TRIES = 3                # 못 보면 몇 번까지 다시 볼지
 # 2026-09-16 사용자 지시: "특히 용의계곡 7층에서는 좌표를 눌러서는 안 돼, 절대 오토를 누르면 안 돼."
 # 좌표1~6 까지만 하고 그 슬롯은 거기서 끝난다 (다른 슬롯은 계속).
 FLOOR_NO_AUTO = {"dragon": (7,)}
+# 🚫 **확인 못 하면 안 누른다** (2026-10-05 사용자 지시: "맞는 층에서 오토 돌리라고
+#    했는데 그냥 돌려버려서 퀘스트 다 깨버린다. 강화해주라")
+#    여기 적힌 런처는 층이 **확실히 맞을 때만** 오토를 누른다.
+#    층을 안 정했거나 · 층 그림이 없거나 · 확인 중 오류가 나면 **안 누르고 중단**한다.
+#    (예전엔 셋 다 '그냥 통과' 라서 엉뚱한 층에서 오토가 눌렸다)
+FLOOR_STRICT = ("dragon",)
+# 🚫 📐 범위를 정해둔 자리는 **범위 밖으로 넓혀 찾지 않는다** (2026-10-05 사용자 지시:
+#    "못 가면 그 자리에 그대로 있어야 하는데 왜 다른 곳을 클릭해서 가버리느냐")
+#    못 찾으면 그냥 못 찾은 것으로 두고 그 슬롯을 멈춘다 — 엉뚱한 곳을 누르는 것보다 낫다.
+AREA_STRICT = ("dragon",)
 FLOOR_WAIT  = (0.6, 1.0)       # 다시 보기까지 쉬는 시간(초) — 사람처럼 랜덤
 FLOOR_PAD   = 12               # 저장해둔 자리 둘레로 이만큼 더 넓게 훑는다(px)
 FLOOR_MIN_STD = 3.0            # 이보다 밋밋한(무늬 없는) 그림은 쓰지 않는다 — 아래 설명
@@ -2930,6 +2940,12 @@ def find_image(fkey, j, coord):
     _ub = search_box(fkey, j, coord) if area_is_set(fkey, j) else None
     if _ub:
         boxes.append(tuple(_ub))
+    # 🚫 **범위를 정해뒀으면 그 밖으로 넓히지 않는다** (2026-10-05 사용자 지시:
+    #    "못 가면 그 자리에 그대로 있어야 하는데 왜 다른 곳을 클릭해서 가버리느냐").
+    #    넓혀서 찾으면 엉뚱한 자리를 눌러 **다른 방향으로 걸어간다** — 못 찾은 채로
+    #    그 슬롯을 멈추는 쪽이 낫다. 범위를 안 정한 자리는 예전 그대로 넓힌다.
+    if _ub and fkey in AREA_STRICT:
+        return _find_in_boxes(fkey, j, coord, paths, boxes)
     _zb = zone_box(fkey, j, coord)
     if _zb and tuple(_zb) not in boxes:
         boxes.append(tuple(_zb))
@@ -2941,6 +2957,11 @@ def find_image(fkey, j, coord):
             boxes.append(tuple(rc))
     except Exception:
         pass
+    return _find_in_boxes(fkey, j, coord, paths, boxes)
+
+
+def _find_in_boxes(fkey, j, coord, paths, boxes):
+    """정해진 상자들을 차례로 훑는다 — 첫 상자 밖은 엄격하게 본다."""
     best = 0.0
     for _bi, _box in enumerate(boxes):
         _strict = _bi > 0        # 첫 상자 밖으로 넓힐수록 엄격하게 (오클릭 방지)
@@ -11350,7 +11371,17 @@ class App(tk.Tk):
                 return True
             si = self._slot_index(fkey, slot)
             fl = self._slot_floor(fkey, si) if si >= 0 else 0
+            _strict = fkey in FLOOR_STRICT
             if not fl:
+                if _strict:
+                    # 🚫 층을 안 정한 슬롯은 **오토를 누르지 않는다** (2026-10-05).
+                    #    예전엔 그냥 통과해서, 층이 틀려도 오토가 눌려 퀘스트가 깨졌다.
+                    _nm0 = (slot or {}).get("name", f"#{si+1}")
+                    click_log(f"{fkey} [{_nm0}] 🚫 갈 층을 안 정한 슬롯 — "
+                              f"좌표{j+1}(오토)를 누르지 않고 이 슬롯 끝")
+                    self.status.set(f"🚫 [{_nm0}] 갈 층이 안 정해져 오토를 "
+                                    f"누르지 않았습니다 (🏢 에서 층을 정해주세요)")
+                    return False
                 return True                       # 이 슬롯은 층 확인을 안 쓴다
             nm = (slot or {}).get("name", f"#{si+1}")
             # 🚫 오토 금지 층 — 층이 맞든 아니든 **여기서 무조건 끝낸다.**
@@ -11361,6 +11392,13 @@ class App(tk.Tk):
                 self.status.set(f"🚫 [{nm}] {fl}층 — 오토를 누르지 않습니다")
                 return False
             if not floor_img_list(fkey, fl) and not floor_dig_list(fkey, fl):
+                if _strict:
+                    # 🚫 그 층 그림이 없으면 **확인할 방법이 없다** → 안 누른다
+                    click_log(f"{fkey} [{nm}] 🚫 {fl}층 그림이 등록되지 않아 "
+                              f"확인할 수 없음 — 좌표{j+1}(오토)를 누르지 않고 끝")
+                    self.status.set(f"🚫 [{nm}] {fl}층 그림이 없어 오토를 "
+                                    f"누르지 않았습니다 (🏢 에서 등록해주세요)")
+                    return False
                 return True                       # 그 층 그림이 아직 없다
             best, why, last = 0.0, "", {}
             for t in range(FLOOR_TRIES):
@@ -11380,8 +11418,17 @@ class App(tk.Tk):
             self.status.set(f"🏢 [{nm}] {fl}층이 아니라 오토를 누르지 않았습니다 ({why})")
             self._note(fkey, nm, f"{fl}층 확인 실패 — {why} ({_all}) → 오토 안 누름")
             return False
-        except Exception:
-            return True                           # 확인이 불가능하면 막지 않는다
+        except Exception as _e:
+            # 🚫 확인 중 오류 — **확실하지 않으면 누르지 않는다** (2026-10-05).
+            #    예전엔 `return True` 라서, 오류가 나면 엉뚱한 층에서도 오토가 눌렸다.
+            if fkey in FLOOR_STRICT:
+                try:
+                    click_log(f"{fkey} 🚫 층 확인 중 오류({_e!r}) — "
+                              f"좌표{j+1}(오토)를 누르지 않고 이 슬롯 끝")
+                except Exception:
+                    pass
+                return False
+            return True                           # 그 밖 런처는 막지 않는다
 
     def _do_click_or_wheel(self, fkey, j, coord, slot=None):
         """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다.
