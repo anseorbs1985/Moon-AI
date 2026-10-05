@@ -9633,26 +9633,85 @@ class App(tk.Tk):
         self.status.set("🐲 용던고고!!! — 먼저 절전해제(F11) 전체 실행…")
         threading.Thread(target=self._dragon_seq_then_run, daemon=True).start()
 
+    def _wins_hide(self):
+        """🙈 내 창(확인창·서브창)을 **전부 숨긴다** — 클릭을 내가 먹지 않게.
+
+        (2026-10-05 사용자: "확인창을 뒤로 보냈다가 끝나면 다시 올려보내야지,
+        그래야 다 눌리지") — 확인창은 `-topmost` 라서 '맨 뒤로' 보내도 보통 창
+        위에 그대로 남는다. 그래서 **숨긴다(withdraw)** — 이게 확실하다.
+        돌려줄 목록을 `_wins_show()` 에 그대로 넘기면 원래대로 돌아온다."""
+        saved = []
+        try:
+            for w in list(self.winfo_children()):
+                try:
+                    if not isinstance(w, tk.Toplevel) or not w.winfo_exists():
+                        continue
+                    if w.state() == "withdrawn":
+                        continue                # 이미 숨겨져 있던 것은 건드리지 않는다
+                    try:
+                        top = bool(w.attributes("-topmost"))
+                    except Exception:
+                        top = False
+                    saved.append((w, w.state(), top))
+                    w.withdraw()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            self._send_to_back()              # 메인런처도 클라 뒤로
+        except Exception:
+            pass
+        return saved
+
+    def _wins_show(self, saved):
+        """🙌 `_wins_hide()` 로 숨긴 창을 **원래 상태로 다시 올린다**."""
+        for w, st, top in (saved or []):
+            try:
+                if not w.winfo_exists():
+                    continue
+                w.deiconify()
+                if st == "iconic":
+                    w.iconify()
+                    continue
+                if top:
+                    w.attributes("-topmost", True)
+                w.lift()
+            except Exception:
+                pass
+
     def _seq_then(self, after_fn, label):
         """🔆 절전해제(F11)를 **끝까지 돌린 뒤** 넘겨준 일을 한다.
 
         (2026-10-05 사용자: "주문서 확인 누르면 먼저 F11 로 절전을 해제해주고
         사진을 찍어줘") — 자고 있는 클라는 화면이 가려져 아무것도 못 읽는다.
+
+        순서: ① 내 창 숨김 → ② F11 전체 → ③ 창 다시 올림 → ④ 사진.
+        ⚠ ①을 빼먹으면 **확인창이 클라를 덮은 채로 클릭이 들어가** 창이 클릭을
+          다 먹는다 (2026-10-05 사용자 지적: "그 위를 찍는데 그게 말이 되냐").
         ⚠ 절전해제를 **띄워만 놓고** 바로 다음 일을 하면, 아직 시작 전이라
           다음 일이 잠금을 채가서 절전해제가 통째로 건너뛰어진다
-          (`_dragon_seq_then_run` 에 적힌 교훈). 그래서 **이 스레드에서 끝까지** 돌린다."""
+          (`_dragon_seq_then_run` 에 적힌 교훈). 그래서 **이 스레드에서 끝까지** 돌린다.
+        ⚠ 사진(④)은 창을 되올린 **뒤**에 찍는다 — `PrintWindow` 로 창을 직접
+          캡처하니 가려져도 괜찮고, 숨긴 채로 찍으면 칸 크기를 못 재 배율이 깨진다."""
         def _go():
             try:
                 self._run_seq()
             except Exception as e:
                 self.after(0, lambda err=e: self.status.set(f"⚠ 절전해제 실패: {err}"))
             time.sleep(1.2)                  # 마지막 클릭이 먹고 화면이 뜰 시간
-            self.after(0, lambda: self.status.set(f"{label} — 사진을 찍습니다…"))
-            self.after(300, after_fn)
+
+            def _back():
+                self._wins_show(saved)        # ③ 창을 먼저 되올린다
+                self.status.set(f"{label} — 사진을 찍습니다…")
+                self.after(350, after_fn)     # ④ 그 다음 찍는다
+            self.after(0, _back)
         if self._is_busy():
             self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 끝난 뒤 다시 눌러주세요")
             return
-        self.status.set(f"{label} — 먼저 절전해제(F11) 전체 실행…")
+        self.status.set(f"{label} — 창을 치우고 절전해제(F11) 전체 실행…")
+        saved = self._wins_hide()            # ① 클릭을 가리지 않게 치운다
+        self.update_idletasks()
         threading.Thread(target=_go, daemon=True).start()
 
     def _dragon_seq_then_run(self):
@@ -10159,7 +10218,8 @@ class App(tk.Tk):
         주문서확인과 같게 **먼저 F11(절전해제)** 한다 — 자는 클라는 층이 안 보인다.
         [🔄 다시 찍기] 는 깨우지 않고 바로 찍는다 (이미 깨어 있으므로)."""
         if not _woke:
-            self._fv_msg.config(text="🔆 절전해제(F11) 먼저 돌리는 중…")
+            # 창은 `_seq_then` 이 숨겼다 되올린다 (덮고 있으면 클릭을 먹는다)
+            self._fv_msg.config(text="🔆 창을 치우고 절전해제(F11) 돌리는 중…")
             self._seq_then(lambda f=fkey: self._floor_view_scan(f, True),
                            "🏢 용던층확인")
             return
