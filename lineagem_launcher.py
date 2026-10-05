@@ -10020,13 +10020,16 @@ class App(tk.Tk):
         win.attributes("-topmost", True)
         win.geometry("1180x760")
         tk.Label(win, text="16클라의 '용의 계곡 던전 N층' 글씨를 5배로 확대해 보여줍니다. "
-                           "눈으로 확인하고 [이대로 넣기] 를 누르세요.",
+                           "사진을 보고 **층 숫자를 직접 넣은 뒤** [✔ 넣기] 를 누르세요 "
+                           "(비워두면 그 슬롯은 건드리지 않습니다).",
                  font=("맑은 고딕", 9), fg="#555").pack(anchor="w", padx=10, pady=(8, 2))
         body = tk.Frame(win); body.pack(fill="both", expand=True, padx=8, pady=4)
         self._fv_photos = {}
         self._fv_imgs = {}
         self._fv_lbls = {}
         self._fv_read = {}
+        self._fv_vars = {}          # 🔢 슬롯마다 사용자가 넣는 층
+        self._fv_ents = {}
         for i in range(16):
             cell = tk.Frame(body, bd=1, relief="groove")
             cell.grid(row=i // 4, column=i % 4, padx=3, pady=3, sticky="nsew")
@@ -10035,18 +10038,33 @@ class App(tk.Tk):
             im = tk.Label(cell, bg="#222", width=30, height=5)
             im.pack(padx=2)
             self._fv_imgs[i] = im
-            lb = tk.Label(cell, text="—", font=("맑은 고딕", 9, "bold"))
+            lb = tk.Label(cell, text="—", font=("맑은 고딕", 8), fg="#777")
             lb.pack()
             self._fv_lbls[i] = lb
+            # 🔢 **사용자가 직접 넣는 칸** — 사진을 보고 층 숫자를 적는다.
+            #    (2026-10-05 사용자: "내가 숫자 넣으면 네가 넣어주면 될 것 같은데")
+            #    그림 맞추기는 견본이 안 맞아 못 믿는다 — 사람이 보는 게 확실하다.
+            row = tk.Frame(cell); row.pack(pady=(1, 3))
+            tk.Label(row, text="층", font=("맑은 고딕", 9, "bold"),
+                     fg="#1a5276").pack(side="left", padx=(0, 3))
+            v = tk.StringVar(value="")
+            self._fv_vars[i] = v
+            e = tk.Entry(row, textvariable=v, width=4, justify="center",
+                         font=("맑은 고딕", 12, "bold"))
+            e.pack(side="left")
+            self._fv_ents[i] = e
         for c in range(4):
             body.grid_columnconfigure(c, weight=1)
         bot = tk.Frame(win); bot.pack(pady=(2, 10))
         tk.Button(bot, text="🔄 다시 찍기", font=("맑은 고딕", 9, "bold"),
                   bg="#5d6d7e", fg="white", width=12,
                   command=lambda f=fkey: self._floor_view_scan(f)).pack(side="left", padx=4)
-        tk.Button(bot, text="✔ 이대로 넣기", font=("맑은 고딕", 10, "bold"),
-                  bg="#1e8449", fg="white", width=14,
+        tk.Button(bot, text="✔ 넣기", font=("맑은 고딕", 10, "bold"),
+                  bg="#1e8449", fg="white", width=10,
                   command=lambda f=fkey: self._floor_view_apply(f)).pack(side="left", padx=4)
+        tk.Button(bot, text="🧹 입력칸 비우기", font=("맑은 고딕", 9),
+                  bg="#95a5a6", fg="white", width=14,
+                  command=self._floor_view_clear).pack(side="left", padx=4)
         tk.Button(bot, text="닫기", font=("맑은 고딕", 9),
                   command=win.destroy).pack(side="left", padx=4)
         self._fv_msg = tk.Label(win, text="", font=("맑은 고딕", 9, "bold"), fg="#1a5276")
@@ -10100,28 +10118,47 @@ class App(tk.Tk):
                 except Exception:
                     pass
             was = self._slot_floor(fkey, i)
+            # 입력칸에는 **지금 지정된 층**을 채워둔다 (없으면 비워둔다).
+            #    자동으로 읽은 값은 참고로만 아래에 보여준다 — 믿고 넣지 않는다.
+            v = self._fv_vars.get(i)
+            if v is not None and not (v.get() or "").strip():
+                v.set(str(was) if was else "")
             if fl:
                 ok += 1
                 self._fv_read[i] = fl
-                _same = (fl == was)
-                lb.config(text=(f"{fl}층" + ("  (그대로)" if _same else
-                                             f"  ← {was}층" if was else "  ← 안함")),
-                          fg=("#1e8449" if _same else "#b9770e"))
+                lb.config(text=f"읽기: {fl}층 (참고)", fg="#7f8c8d")
             else:
                 bad += 1
-                lb.config(text=f"못 읽음", fg="#c0392b")
+                lb.config(text="읽기: 못 읽음 (직접 넣으세요)", fg="#c0392b")
         self._fv_msg.config(
-            text=f"📷 읽음 {ok}개 · 못 읽음 {bad}개   —   "
-                 f"사진과 숫자가 맞으면 [✔ 이대로 넣기]")
+            text=f"📷 16클라 찍음 — 사진을 보고 **층 숫자를 넣고** [✔ 넣기] "
+                 f"(자동 읽기는 참고용: 읽음 {ok} · 못읽음 {bad})")
 
     def _floor_view_apply(self, fkey):
-        """🏢 읽은 층을 슬롯에 넣는다 — **못 읽은 슬롯은 건드리지 않는다.**"""
-        read = getattr(self, "_fv_read", {}) or {}
-        if not read:
-            self._fv_msg.config(text="넣을 것이 없습니다 — [🔄 다시 찍기] 를 먼저 누르세요")
-            return
-        n = keep = 0
-        for i, fl in sorted(read.items()):
+        """🏢 **입력칸에 적은 층**을 슬롯에 넣는다.
+
+        (2026-10-05 사용자: "내가 숫자 넣으면 네가 넣어주면 될 것 같은데")
+        · **비워둔 칸은 건드리지 않는다** — 안 본 슬롯을 지우면 안 된다.
+        · `0`·`없음`·`-` 을 넣으면 그 슬롯의 층 지정을 **푼다**.
+        · 숫자가 아니거나 고를 수 없는 층이면 그 칸만 건너뛰고 알려준다."""
+        n = keep = blank = bad = cleared = 0
+        bad_list = []
+        for i in range(16):
+            v = (self._fv_vars.get(i).get() if self._fv_vars.get(i) else "").strip()
+            if not v:
+                blank += 1
+                continue
+            if v in ("0", "-", "없음", "x", "X"):
+                if self._slot_floor(fkey, i):
+                    self._set_slot_floor(fkey, i, 0)
+                    cleared += 1
+                continue
+            try:
+                fl = int(v)
+            except Exception:
+                bad += 1; bad_list.append(f"#{i+1:02d}'{v}'"); continue
+            if fl not in FLOOR_LIST:
+                bad += 1; bad_list.append(f"#{i+1:02d}{fl}층"); continue
             if self._slot_floor(fkey, i) == fl:
                 keep += 1
                 continue
@@ -10131,11 +10168,26 @@ class App(tk.Tk):
             self._floor_menu_sync(fkey)
         except Exception:
             pass
-        _skip = 16 - len(read)
-        click_log(f"[층확인] {fkey} — 넣음 {n} · 이미맞음 {keep} · 못읽음 {_skip}")
-        self._fv_msg.config(
-            text=f"✔ {n}개 넣었습니다 (이미 맞음 {keep}개 · 못 읽어 건드리지 않음 {_skip}개)")
-        self.status.set(f"🏢 층 확인 — {n}개 넣음 · {_skip}개는 못 읽어 그대로")
+        click_log(f"[층확인] {fkey} — 넣음 {n} · 이미맞음 {keep} · 해제 {cleared} · "
+                  f"빈칸 {blank} · 이상 {bad}")
+        msg = (f"✔ {n}개 넣었습니다"
+               + (f" · 이미 맞음 {keep}개" if keep else "")
+               + (f" · 해제 {cleared}개" if cleared else "")
+               + (f" · 빈칸 {blank}개는 그대로" if blank else ""))
+        if bad:
+            msg += (f"   ⚠ {bad}개는 못 넣었습니다 ({', '.join(bad_list)}) — "
+                    f"고를 수 있는 층: {'·'.join(str(f) for f in FLOOR_LIST)}")
+        self._fv_msg.config(text=msg)
+        self.status.set(f"🏢 층 확인 — {n}개 넣음")
+
+    def _floor_view_clear(self):
+        """🧹 입력칸만 비운다 (슬롯 설정은 그대로)."""
+        for v in (getattr(self, "_fv_vars", {}) or {}).values():
+            try:
+                v.set("")
+            except Exception:
+                pass
+        self._fv_msg.config(text="입력칸을 비웠습니다 (슬롯 설정은 그대로)")
 
     def _floor_autofill(self, fkey):
         """🏢 층 자동채우기 — 16클라를 한 번에 읽어 **슬롯마다 갈 층을 채운다.**
