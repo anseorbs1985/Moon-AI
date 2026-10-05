@@ -10024,7 +10024,8 @@ class App(tk.Tk):
         self._floorview_win = win
         win.title("🏢 층 확인 — 사진 보고 넣기")
         win.attributes("-topmost", True)
-        win.geometry("1180x760")
+        win.geometry("1240x980")        # 처음부터 사진이 크게 — 창을 키우면 더 커진다
+        win.minsize(760, 520)
         tk.Label(win, text="16클라의 '용의 계곡 던전 N층' 글씨를 5배로 확대해 보여줍니다. "
                            "사진을 보고 **층 숫자를 직접 넣은 뒤** [✔ 넣기] 를 누르세요 "
                            "(비워두면 그 슬롯은 건드리지 않습니다).",
@@ -10041,8 +10042,9 @@ class App(tk.Tk):
             cell.grid(row=i // 4, column=i % 4, padx=3, pady=3, sticky="nsew")
             tk.Label(cell, text=f"#{i+1:02d}", font=("맑은 고딕", 8, "bold"),
                      fg="#555").pack()
-            im = tk.Label(cell, bg="#222", width=30, height=5)
-            im.pack(padx=2)
+            # 사진은 칸을 꽉 채우고, 칸은 창을 따라 늘어난다 (2026-10-05)
+            im = tk.Label(cell, bg="#222")
+            im.pack(padx=2, pady=1, fill="both", expand=True)
             self._fv_imgs[i] = im
             lb = tk.Label(cell, text="—", font=("맑은 고딕", 8), fg="#777")
             lb.pack()
@@ -10059,8 +10061,12 @@ class App(tk.Tk):
                          font=("맑은 고딕", 12, "bold"))
             e.pack(side="left")
             self._fv_ents[i] = e
+        # ↔↕ 가로·세로 **전부** 창을 따라 늘어난다 (2026-10-05 사용자 지시:
+        #    "셀 크기에 따라서 확장 좀 맞춰줘, 아래위옆 다")
         for c in range(4):
-            body.grid_columnconfigure(c, weight=1)
+            body.grid_columnconfigure(c, weight=1, uniform="fv")
+        for r in range(4):
+            body.grid_rowconfigure(r, weight=1, uniform="fv")
         bot = tk.Frame(win); bot.pack(pady=(2, 10))
         tk.Button(bot, text="🔄 다시 찍기", font=("맑은 고딕", 9, "bold"),
                   bg="#5d6d7e", fg="white", width=12,
@@ -10073,9 +10079,50 @@ class App(tk.Tk):
                   command=self._floor_view_clear).pack(side="left", padx=4)
         tk.Button(bot, text="닫기", font=("맑은 고딕", 9),
                   command=win.destroy).pack(side="left", padx=4)
-        self._fv_msg = tk.Label(win, text="", font=("맑은 고딕", 9, "bold"), fg="#1a5276")
+        self._fv_msg = tk.Label(win, text="", font=("맑은 고딕", 9, "bold"),
+                                fg="#1a5276", wraplength=1100, justify="left")
         self._fv_msg.pack(pady=(0, 6))
+        # 창을 키우거나 줄이면 **사진도 그만큼** 다시 그린다 (연달아 오는 것은 묶는다)
+        self._fv_body = body
+        self._fv_resize_job = None
+
+        def _on_resize(e, f=fkey):
+            if e.widget is not win:
+                return                      # ⚠ 자식 위젯의 <Configure> 도 올라온다
+            if self._fv_resize_job:
+                try:
+                    win.after_cancel(self._fv_resize_job)
+                except Exception:
+                    pass
+            self._fv_resize_job = win.after(180, lambda: self._floor_view_redraw(f))
+        win.bind("<Configure>", _on_resize, add="+")
         self.after(120, lambda f=fkey: self._floor_view_scan(f))
+
+    def _floor_view_zoom(self):
+        """칸 크기를 보고 **사진을 몇 배로 키울지** 정한다 (2~14배)."""
+        try:
+            b = getattr(self, "_fv_body", None)
+            if b is None or not b.winfo_exists():
+                return 5
+            cw = max(60, b.winfo_width() // 4 - 14)
+            ch = max(40, b.winfo_height() // 4 - 62)   # 번호·읽기·입력칸 자리를 뺀다
+            cr = getattr(self, "_fv_crops", {}) or {}
+            ws = [c.shape[1] for c in cr.values() if c is not None and getattr(c, "size", 0)]
+            hs = [c.shape[0] for c in cr.values() if c is not None and getattr(c, "size", 0)]
+            if not ws:
+                return 5
+            z = min(cw / max(ws), ch / max(hs))
+            return max(2, min(14, int(z)))
+        except Exception:
+            return 5
+
+    def _floor_view_redraw(self, fkey):
+        """창 크기가 바뀌었을 때 — **다시 찍지 않고** 가진 사진만 새 배율로 그린다."""
+        self._fv_resize_job = None
+        cr = getattr(self, "_fv_crops", None)
+        if not cr:
+            return
+        self._floor_view_paint(fkey)
 
     def _floor_view_scan(self, fkey):
         """16클라를 찍어 층 글씨를 확대해 보여준다 (백그라운드에서 찍는다)."""
@@ -10104,9 +10151,16 @@ class App(tk.Tk):
         threading.Thread(target=_go, daemon=True).start()
 
     def _floor_view_draw(self, fkey, rows):
-        """찍어온 것을 칸에 그린다 — 사진은 **5배 확대**."""
+        """찍어온 것을 간직하고 그린다 (그리기는 `_floor_view_paint` 가 한다)."""
+        self._fv_crops = {i: c for i, c, _f, _w in rows}
+        self._fv_rows = rows
+        self._floor_view_paint(fkey)
+
+    def _floor_view_paint(self, fkey):
+        """가진 사진을 **지금 칸 크기에 맞는 배율**로 그린다."""
         from PIL import Image, ImageTk
-        import numpy as _np
+        rows = getattr(self, "_fv_rows", None) or []
+        _z = self._floor_view_zoom()
         ok = bad = 0
         self._fv_read = {}
         for i, crop, fl, why in rows:
@@ -10117,7 +10171,7 @@ class App(tk.Tk):
                     import cv2
                     rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
                     p = Image.fromarray(rgb)
-                    p = p.resize((p.width * 5, p.height * 5), Image.LANCZOS)
+                    p = p.resize((p.width * _z, p.height * _z), Image.LANCZOS)
                     ph = ImageTk.PhotoImage(p)
                     self._fv_photos[i] = ph          # ⚠ 참조를 들고 있어야 안 지워진다
                     im.config(image=ph, width=p.width, height=p.height)
@@ -10137,7 +10191,8 @@ class App(tk.Tk):
                 bad += 1
                 lb.config(text="읽기: 못 읽음 (직접 넣으세요)", fg="#c0392b")
         self._fv_msg.config(
-            text=f"📷 16클라 찍음 — 사진을 보고 **층 숫자를 넣고** [✔ 넣기] "
+            text=f"📷 16클라 찍음 (사진 {_z}배) — 사진을 보고 **층 숫자를 넣고** "
+                 f"[✔ 넣기]   ※ 창을 키우면 사진도 같이 커집니다 "
                  f"(자동 읽기는 참고용: 읽음 {ok} · 못읽음 {bad})")
 
     def _floor_view_apply(self, fkey):
