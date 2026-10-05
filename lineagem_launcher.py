@@ -9633,6 +9633,28 @@ class App(tk.Tk):
         self.status.set("🐲 용던고고!!! — 먼저 절전해제(F11) 전체 실행…")
         threading.Thread(target=self._dragon_seq_then_run, daemon=True).start()
 
+    def _seq_then(self, after_fn, label):
+        """🔆 절전해제(F11)를 **끝까지 돌린 뒤** 넘겨준 일을 한다.
+
+        (2026-10-05 사용자: "주문서 확인 누르면 먼저 F11 로 절전을 해제해주고
+        사진을 찍어줘") — 자고 있는 클라는 화면이 가려져 아무것도 못 읽는다.
+        ⚠ 절전해제를 **띄워만 놓고** 바로 다음 일을 하면, 아직 시작 전이라
+          다음 일이 잠금을 채가서 절전해제가 통째로 건너뛰어진다
+          (`_dragon_seq_then_run` 에 적힌 교훈). 그래서 **이 스레드에서 끝까지** 돌린다."""
+        def _go():
+            try:
+                self._run_seq()
+            except Exception as e:
+                self.after(0, lambda err=e: self.status.set(f"⚠ 절전해제 실패: {err}"))
+            time.sleep(1.2)                  # 마지막 클릭이 먹고 화면이 뜰 시간
+            self.after(0, lambda: self.status.set(f"{label} — 사진을 찍습니다…"))
+            self.after(300, after_fn)
+        if self._is_busy():
+            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 끝난 뒤 다시 눌러주세요")
+            return
+        self.status.set(f"{label} — 먼저 절전해제(F11) 전체 실행…")
+        threading.Thread(target=_go, daemon=True).start()
+
     def _dragon_seq_then_run(self):
         """절전해제를 이 스레드에서 통째로 돌린다(끝날 때까지 대기) → 그 다음 용던고고.
         (예전엔 절전해제를 띄워놓고 1.5초 뒤 상태만 봤더니, 아직 시작 전이라
@@ -10077,7 +10099,7 @@ class App(tk.Tk):
         bot = tk.Frame(win); bot.pack(pady=(2, 10))
         tk.Button(bot, text="🔄 다시 찍기", font=("맑은 고딕", 9, "bold"),
                   bg="#5d6d7e", fg="white", width=12,
-                  command=lambda f=fkey: self._floor_view_scan(f)).pack(side="left", padx=4)
+                  command=lambda f=fkey: self._floor_view_scan(f, True)).pack(side="left", padx=4)
         tk.Button(bot, text="✔ 넣기", font=("맑은 고딕", 10, "bold"),
                   bg="#1e8449", fg="white", width=10,
                   command=lambda f=fkey: self._floor_view_apply(f)).pack(side="left", padx=4)
@@ -10131,8 +10153,16 @@ class App(tk.Tk):
             return
         self._floor_view_paint(fkey)
 
-    def _floor_view_scan(self, fkey):
-        """16클라를 찍어 층 글씨를 확대해 보여준다 (백그라운드에서 찍는다)."""
+    def _floor_view_scan(self, fkey, _woke=False):
+        """16클라를 찍어 층 글씨를 확대해 보여준다 (백그라운드에서 찍는다).
+
+        주문서확인과 같게 **먼저 F11(절전해제)** 한다 — 자는 클라는 층이 안 보인다.
+        [🔄 다시 찍기] 는 깨우지 않고 바로 찍는다 (이미 깨어 있으므로)."""
+        if not _woke:
+            self._fv_msg.config(text="🔆 절전해제(F11) 먼저 돌리는 중…")
+            self._seq_then(lambda f=fkey: self._floor_view_scan(f, True),
+                           "🏢 용던층확인")
+            return
         self._fv_msg.config(text="📷 16클라를 찍는 중…")
 
         def _go():
@@ -14440,10 +14470,14 @@ class App(tk.Tk):
         except Exception:
             pass
 
-    def _scroll_check(self):
+    def _scroll_check(self, _woke=False):
+        """📜 주문서 층수 확인 — **먼저 F11(절전해제)** 하고 찍는다 (2026-10-05)."""
         if not (getattr(self, "_scroll_win", None) and self._scroll_win.winfo_exists()):
             self._open_scroll_win()
-            self.after(400, self._scroll_check); return
+            self.after(400, lambda: self._scroll_check(_woke)); return
+        if not _woke:
+            self._seq_then(lambda: self._scroll_check(True), "📜 주문서 확인")
+            return
         crops = self._scroll_grab()
         if crops is None:
             return
