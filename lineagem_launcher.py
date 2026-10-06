@@ -426,6 +426,15 @@ DOLL_SLOT_MIN  = 2.0   # 슬롯 간 간격(초) — 2~4초 랜덤
 DOLL_SLOT_MAX  = 4.0
 # 씹힘 방지용 추가 좌표간 간격 (사냥·전체실행·인형탐험 제외 전 기능)
 # 2026-08-05: 너무 빠른 느낌이라 전체 10~20% 완화 (0.9~1.6 → 0.99~1.92)
+# ── 🔮 마력의기운 제작! · 🗝 오만 지배석 획득! (2026-10-06 사용자 요청) ──────
+#    좌표만 누르는 런처 둘. 변신확인용과 같은 틀이고, 다른 점은 **느릿느릿**.
+#    사용자: "이건 급한 게 아니라서 사람이 클릭했겠다 싶을 정도로 느릿느릿하게 해도 된다"
+SLOW_CLICKS   = 8          # 슬롯당 좌표 8칸 (안 쓰는 칸은 비워두면 건너뜀)
+SLOW_FKEYS    = ("magic", "omanst")
+SLOW_GAP_MIN  = 2.6        # 클릭 사이 (다른 런처 기본은 1.14~2.62초 — 두 배쯤 느리다)
+SLOW_GAP_MAX  = 5.2
+SLOW_SLOT_GAP = (4.0, 7.5)  # 슬롯 사이
+
 EXTRA_GAP_MIN  = 1.04
 EXTRA_GAP_MAX  = 2.02
 
@@ -467,6 +476,8 @@ DEFAULT_CFG = {
     "item_slots":   None,               # 아이템정리 — 처음 로드 때 스케줄 슬롯을 복사해 생성
     "item_hotkey":  None,               # 아이템정리 실행 단축키 (가상키 코드)
     "item_on":      False,              # 아이템정리 단축키 활성화 상태 (재시작 유지)
+    "magic_slots":   None,              # 🔮 마력의기운 제작! — 16슬롯 × 좌표8 (느릿느릿)
+    "omanst_slots":  None,              # 🗝 오만 지배석 획득! — 16슬롯 × 좌표8 (느릿느릿)
     "dollchk_slots": None,              # 인형확인용 — 처음 로드 때 변신확인용 복사
     "relic_slots":   None,              # 성물확인용 — 처음 로드 때 변신확인용 복사
     "coupon_slots":  None,              # 쿠폰등록 — 16슬롯 × 좌표9 (변신확인용 방식)
@@ -723,6 +734,20 @@ def load_cfg():
                 while len(c) < DUNGEON_CLICKS:
                     c.append(None)
                 s["coords"] = c[:DUNGEON_CLICKS]
+        # 🔮 마력의기운 제작! · 🗝 오만 지배석 획득! — **빈 칸으로** 만든다.
+        #    (변신확인용 좌표를 복사하면 엉뚱한 곳을 누르게 된다 — 사용자가 직접 찍는다)
+        for _k3 in ("magic_slots", "omanst_slots"):
+            _l3 = cfg.get(_k3)
+            if not _l3:
+                cfg[_k3] = [{"name": "미등록", "coords": [None] * SLOW_CLICKS}
+                            for _ in range(16)]
+            else:
+                for _s3 in _l3:
+                    if isinstance(_s3, dict):
+                        _c3 = list(_s3.get("coords") or [])
+                        while len(_c3) < SLOW_CLICKS:
+                            _c3.append(None)
+                        _s3["coords"] = _c3[:SLOW_CLICKS]
         # 인형확인용/성물확인용 — 변신확인용과 동일 구조, 처음 생기면 그대로 복사
         import copy as _cp2
         for _k2 in ("dollchk_slots", "relic_slots"):
@@ -3487,6 +3512,8 @@ class App(tk.Tk):
         self._item_on      = bool(self.cfg.get("item_on", False))
         self._item_stop    = False
         self._dollchk_stop = False
+        self._magic_stop  = False      # 🔮 마력의기운 제작!
+        self._omanst_stop = False      # 🗝 오만 지배석 획득!
         self._fish_stop = False
         self._circus_stop = False
         self._circus2_stop = False
@@ -4375,7 +4402,13 @@ class App(tk.Tk):
                 ("🗿 성물\n확인용", "#117864", self._open_relic_win,   lambda: self._start_dgn2("relic")),
                 ("🎪 서커스\n이벤트등록", "#7d3c98", self._open_circus_win, lambda: self._start_dgn2("circus")),
                 ("🎪 서커스\n이벤트실행", "#5b2c6f", self._open_circus2_win, lambda: self._start_dgn2("circus2")),
-                ("🎪 서커스\n이벤트퀘스트", "#4a235a", self._open_circus3_win, lambda: self._start_dgn2("circus3"))):
+                ("🎪 서커스\n이벤트퀘스트", "#4a235a", self._open_circus3_win, lambda: self._start_dgn2("circus3")),
+                # 🔮🗝 좌표만 누르는 런처 둘 — **이 줄 제일 밑** (2026-10-06 사용자 지시:
+                #      "버튼은 변신확인용 라인 제일 밑으로 해주면 좋겠어")
+                ("🔮 마력의기운\n제작!", "#8e44ad", self._open_magic_win,
+                 lambda: self._start_dgn2("magic")),
+                ("🗝 오만 지배석\n획득!", "#935116", self._open_omanst_win,
+                 lambda: self._start_dgn2("omanst"))):
             rr = tk.Frame(chk_col); rr.pack(anchor="n", pady=(0,4))
             tk.Button(rr, text=_t, font=("맑은 고딕", 9, "bold"), bg=_bg, fg="white",
                       width=9, height=2, command=_open).pack(side="left")
@@ -5971,6 +6004,8 @@ class App(tk.Tk):
         ("dollchk_slots",  "🧸 인형확인용"),
         ("relic_slots",    "🗿 성물확인용"),
         ("dungeon_slots",  "🏰 변신확인용"),
+        ("magic_slots",    "🔮 마력의기운 제작!"),
+        ("omanst_slots",   "🗝 오만 지배석 획득!"),
         ("fish_slots",     "🎣 낚시녹임"),
         ("market_slots",   "🔎 거래소검색"),
         ("coupon_slots",   "🎟 쿠폰등록"),
@@ -8575,6 +8610,8 @@ class App(tk.Tk):
                 "inmail":  ("inmail_slots",  "인사이드 우편함!!", "📬"),
                 "jakwi":   ("jakwi_slots",   "작위!!",     "👑"),
                 "fix":     ("fix_slots",     "복구",       "🩹"),
+                "magic":   ("magic_slots",   "마력의기운 제작!", "🔮"),
+                "omanst":  ("omanst_slots",  "오만 지배석 획득!", "🗝"),
                 "dollchk": ("dollchk_slots", "인형확인용", "🧸"),
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
@@ -9737,6 +9774,18 @@ class App(tk.Tk):
     def _open_eventshop_win(self):
         self._open_section_win("_eventshop_win", "🛒 이벤트상점",
                                lambda p: self._build_dgn2("eventshop", p), w=470, h=600, pinnable=True)
+
+    def _open_magic_win(self):
+        """🔮 마력의기운 제작! — 좌표만 누르는 창 (변신확인용과 같은 틀, 느릿느릿)."""
+        self._open_section_win("_magic_win", "🔮 마력의기운 제작!",
+                               lambda p: self._build_dgn2("magic", p),
+                               w=470, h=620, pinnable=True)
+
+    def _open_omanst_win(self):
+        """🗝 오만 지배석 획득! — 좌표만 누르는 창 (변신확인용과 같은 틀, 느릿느릿)."""
+        self._open_section_win("_omanst_win", "🗝 오만 지배석 획득!",
+                               lambda p: self._build_dgn2("omanst", p),
+                               w=470, h=620, pinnable=True)
 
     def _open_dollchk_win(self):
         self._open_section_win("_dollchk_win", "🧸 인형확인용",
@@ -12691,6 +12740,14 @@ class App(tk.Tk):
                         if fkey == "eventshop" and j == 0:
                             # 이벤트상점: 클릭1 → 4초 × 1.15~1.30 랜덤 증가 후 클릭2
                             time.sleep(4.0 * random.uniform(1.15, 1.30))
+                        elif fkey in SLOW_FKEYS:
+                            # 🐢 느릿느릿 — 사람이 보고 누르는 속도 (2026-10-06 사용자:
+                            #    "급한 게 아니라서 사람이 클릭했겠다 싶을 정도로 느릿느릿")
+                            #    칸에 초를 적어뒀으면 그걸 쓴다.
+                            _cg = self._slot_gap(slot, j)
+                            self._wait_gap(stop, name, j,
+                                           (_cg * random.uniform(1.0, 1.12)) if _cg is not None
+                                           else random.uniform(SLOW_GAP_MIN, SLOW_GAP_MAX))
                         elif fkey in ("dragon", "knight", "fix"):
                             pass                 # 위에서 이미 쉬었다
                         else:
@@ -12708,6 +12765,12 @@ class App(tk.Tk):
                     self._jakwi_rank_run(
                         _anchor, name, stop=stop,
                         coords=[c for c in (slot.get("coords") or []) if c])
+                # 🐢 슬롯 사이도 넉넉히 쉰다 (느릿느릿 런처만, 마지막 슬롯 뒤엔 생략)
+                if (fkey in SLOW_FKEYS and slot_idx is None
+                        and tn < len(targets) - 1 and not getattr(self, stop, False)):
+                    _sg = random.uniform(*SLOW_SLOT_GAP)
+                    click_log(f"[{fkey}] 슬롯 [{name}] 끝 → 다음 슬롯까지 {_sg:.1f}초")
+                    self._wait_gap(stop, f"{name} → 다음", -1, _sg)
                 if fkey in self.PASTE_FKEYS:
                     self._coupon_log(f"[{fkey}] 슬롯 [{name}] 끝 (클릭간격 배수 {c_mult:.2f})")
                     # 슬롯 간 간격 — 기본 3초의 +2%~18% 랜덤 (마지막 슬롯 뒤엔 생략)
@@ -19157,6 +19220,20 @@ class App(tk.Tk):
                             reg=self._reg_pass_click,    test=self._test_pass,    prev=self._preview_pass,    delete=self._del_pass),
             "item":    dict(title="아이템정리", key="item_slots",   clicks=SCHED_CLICKS,   color="#7d6608",
                             reg=self._reg_item_click,    test=self._test_item,    prev=self._preview_item,    delete=self._del_item),
+            # 🔮🗝 좌표만 누르는 느릿느릿 런처 둘 (2026-10-06) — 변신확인용과 같은 틀.
+            #      sel=True 로 '선택실행' 을 켰다 (슬롯 몇 개만 돌릴 때 편하다).
+            "magic":   dict(title="마력의기운 제작!", key="magic_slots",
+                            clicks=SLOW_CLICKS, color="#8e44ad", enable=True, sel=True,
+                            reg=lambda s, c: self._reg_dgn2_click("magic", s, c),
+                            test=lambda i: self._test_dgn2("magic", i),
+                            prev=lambda i: self._preview_dgn2("magic", i),
+                            delete=lambda i: self._del_dgn2("magic", i)),
+            "omanst":  dict(title="오만 지배석 획득!", key="omanst_slots",
+                            clicks=SLOW_CLICKS, color="#935116", enable=True, sel=True,
+                            reg=lambda s, c: self._reg_dgn2_click("omanst", s, c),
+                            test=lambda i: self._test_dgn2("omanst", i),
+                            prev=lambda i: self._preview_dgn2("omanst", i),
+                            delete=lambda i: self._del_dgn2("omanst", i)),
             "dollchk": dict(title="인형확인용", key="dollchk_slots", clicks=DUNGEON_CLICKS, color="#b9770e",
                             reg=lambda s, c: self._reg_dgn2_click("dollchk", s, c),
                             test=lambda i: self._test_dgn2("dollchk", i),
@@ -22056,7 +22133,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_lastrun_win","_lock_win","_scroll_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_knight_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
+                 "_lastrun_win","_lock_win","_scroll_win","_magic_win","_omanst_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_knight_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs
@@ -23014,7 +23091,8 @@ class App(tk.Tk):
         #    (2026-09-22 사용자 신고: "왜 작위는 예외냐"). 그래서 **아는 런처를 전부**
         #    훑어 멈춤 플래그를 세운다 — 새 런처가 생겨도 자동으로 포함된다.
         try:
-            for _fk in ("incoupon", "inmail", "jakwi", "fix", "dollchk", "relic",
+            for _fk in ("magic", "omanst",
+                        "incoupon", "inmail", "jakwi", "fix", "dollchk", "relic",
                         "dragon", "knight", "sched", "coupon", "market", "tj",
                         "eventshop", "fish", "circus", "circus2", "circus3",
                         "dc", "wdoff", "seq", "item", "doll", "scroll", "past",
