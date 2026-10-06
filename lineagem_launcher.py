@@ -430,7 +430,7 @@ DOLL_SLOT_MAX  = 4.0
 #    좌표만 누르는 런처 둘. 변신확인용과 같은 틀이고, 다른 점은 **느릿느릿**.
 #    사용자: "이건 급한 게 아니라서 사람이 클릭했겠다 싶을 정도로 느릿느릿하게 해도 된다"
 SLOW_CLICKS   = 8          # 슬롯당 좌표 칸 수 (안 쓰는 칸은 비워두면 건너뜀)
-MAGIC_CLICKS  = 15         # 🔮 마력의기운 제작! — 2026-10-06 사용자 지시로 8+7=15칸
+MAGIC_CLICKS  = 18         # 🔮 마력의기운 제작! — 8 → 15 → 18칸 (2026-10-06 사용자 지시)
 OMANST_CLICKS = SLOW_CLICKS   # 🗝 오만 지배석 획득! — 8칸 그대로
 # 슬롯 키마다 칸 수 (처음 만들 때·칸을 늘릴 때 둘 다 여기를 본다)
 SLOW_CLICKS_BY = {"magic_slots": MAGIC_CLICKS, "omanst_slots": OMANST_CLICKS}
