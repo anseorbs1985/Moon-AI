@@ -429,7 +429,11 @@ DOLL_SLOT_MAX  = 4.0
 # ── 🔮 마력의기운 제작! · 🗝 오만 지배석 획득! (2026-10-06 사용자 요청) ──────
 #    좌표만 누르는 런처 둘. 변신확인용과 같은 틀이고, 다른 점은 **느릿느릿**.
 #    사용자: "이건 급한 게 아니라서 사람이 클릭했겠다 싶을 정도로 느릿느릿하게 해도 된다"
-SLOW_CLICKS   = 8          # 슬롯당 좌표 8칸 (안 쓰는 칸은 비워두면 건너뜀)
+SLOW_CLICKS   = 8          # 슬롯당 좌표 칸 수 (안 쓰는 칸은 비워두면 건너뜀)
+MAGIC_CLICKS  = 15         # 🔮 마력의기운 제작! — 2026-10-06 사용자 지시로 8+7=15칸
+OMANST_CLICKS = SLOW_CLICKS   # 🗝 오만 지배석 획득! — 8칸 그대로
+# 슬롯 키마다 칸 수 (처음 만들 때·칸을 늘릴 때 둘 다 여기를 본다)
+SLOW_CLICKS_BY = {"magic_slots": MAGIC_CLICKS, "omanst_slots": OMANST_CLICKS}
 SLOW_FKEYS    = ("magic", "omanst")
 SLOW_GAP_MIN  = 2.6        # 클릭 사이 (다른 런처 기본은 1.14~2.62초 — 두 배쯤 느리다)
 SLOW_GAP_MAX  = 5.2
@@ -476,7 +480,7 @@ DEFAULT_CFG = {
     "item_slots":   None,               # 아이템정리 — 처음 로드 때 스케줄 슬롯을 복사해 생성
     "item_hotkey":  None,               # 아이템정리 실행 단축키 (가상키 코드)
     "item_on":      False,              # 아이템정리 단축키 활성화 상태 (재시작 유지)
-    "magic_slots":   None,              # 🔮 마력의기운 제작! — 16슬롯 × 좌표8 (느릿느릿)
+    "magic_slots":   None,              # 🔮 마력의기운 제작! — 16슬롯 × 좌표15 (느릿느릿)
     "omanst_slots":  None,              # 🗝 오만 지배석 획득! — 16슬롯 × 좌표8 (느릿느릿)
     "dollchk_slots": None,              # 인형확인용 — 처음 로드 때 변신확인용 복사
     "relic_slots":   None,              # 성물확인용 — 처음 로드 때 변신확인용 복사
@@ -736,18 +740,20 @@ def load_cfg():
                 s["coords"] = c[:DUNGEON_CLICKS]
         # 🔮 마력의기운 제작! · 🗝 오만 지배석 획득! — **빈 칸으로** 만든다.
         #    (변신확인용 좌표를 복사하면 엉뚱한 곳을 누르게 된다 — 사용자가 직접 찍는다)
-        for _k3 in ("magic_slots", "omanst_slots"):
+        for _k3, _n3 in SLOW_CLICKS_BY.items():
             _l3 = cfg.get(_k3)
             if not _l3:
-                cfg[_k3] = [{"name": "미등록", "coords": [None] * SLOW_CLICKS}
+                cfg[_k3] = [{"name": "미등록", "coords": [None] * _n3}
                             for _ in range(16)]
             else:
                 for _s3 in _l3:
                     if isinstance(_s3, dict):
                         _c3 = list(_s3.get("coords") or [])
-                        while len(_c3) < SLOW_CLICKS:
+                        while len(_c3) < _n3:
                             _c3.append(None)
-                        _s3["coords"] = _c3[:SLOW_CLICKS]
+                        # ⚠ **자르지 않는다** — 칸 수를 줄이면 이미 찍은 좌표가 날아간다.
+                        #    (2026-10-06 칸을 8→15 로 늘렸다. 늘리기만 한다)
+                        _s3["coords"] = _c3
         # 인형확인용/성물확인용 — 변신확인용과 동일 구조, 처음 생기면 그대로 복사
         import copy as _cp2
         for _k2 in ("dollchk_slots", "relic_slots"):
@@ -19223,13 +19229,13 @@ class App(tk.Tk):
             # 🔮🗝 좌표만 누르는 느릿느릿 런처 둘 (2026-10-06) — 변신확인용과 같은 틀.
             #      sel=True 로 '선택실행' 을 켰다 (슬롯 몇 개만 돌릴 때 편하다).
             "magic":   dict(title="마력의기운 제작!", key="magic_slots",
-                            clicks=SLOW_CLICKS, color="#8e44ad", enable=True, sel=True,
+                            clicks=MAGIC_CLICKS, color="#8e44ad", enable=True, sel=True,
                             reg=lambda s, c: self._reg_dgn2_click("magic", s, c),
                             test=lambda i: self._test_dgn2("magic", i),
                             prev=lambda i: self._preview_dgn2("magic", i),
                             delete=lambda i: self._del_dgn2("magic", i)),
             "omanst":  dict(title="오만 지배석 획득!", key="omanst_slots",
-                            clicks=SLOW_CLICKS, color="#935116", enable=True, sel=True,
+                            clicks=OMANST_CLICKS, color="#935116", enable=True, sel=True,
                             reg=lambda s, c: self._reg_dgn2_click("omanst", s, c),
                             test=lambda i: self._test_dgn2("omanst", i),
                             prev=lambda i: self._preview_dgn2("omanst", i),
