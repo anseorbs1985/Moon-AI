@@ -1750,6 +1750,15 @@ ITEMREG_BLUE     = 40.0  # B-R 이 이보다 크면 파란색 → 최저가로 �
 #    초록은 B-R 이 0 근처라 파란색 재기로는 안 걸려서 '흰색' 으로 멈췄다.
 #    **G 가 R·B 보다 높은가**로 따로 잰다. 흰색은 R≈G≈B 라 둘 다 0 근처 → 그대로 멈춘다.
 ITEMREG_GREEN    = 40.0  # G - max(R,B) 가 이보다 크면 초록색 → 최저가로 자동
+# 🟣 **보라(영웅)·주황(전설)은 올리지 않는다** (2026-10-06 사용자 지시:
+#    "주황 전설은 올리지 마, 내가 스스로 올릴 거야. 그냥 파란색이랑 초록색만 올려줘")
+#    주황은 B-R 이 크게 음수라 이미 걸러졌다. **문제는 보라였다** — B-R +65 로
+#    '파란색' 재기를 넘어 자동으로 올라갔다.
+#    보라와 파랑을 가르는 것은 **R 과 G 의 크기 관계**다 (실측 계산):
+#        파랑 (80,160,255)   B-R +175 · G-R +80   ← G 가 R 보다 높다
+#        보라 (190,110,255)  B-R  +65 · G-R −80   ← R 이 G 보다 훨씬 높다
+#    그래서 파란색은 **B-R 과 G-R 을 둘 다** 넘어야 한다.
+ITEMREG_BLUE_GR  = -10.0  # 파란색은 G-R 이 이보다 커야 한다 (보라는 한참 밑이다)
 ITEMREG_HOTKEY   = 0x75          # 기본 F6 (창의 [단축키] 으로 바꿀 수 있다)
 # 2026-09-16 사용자 요청 "속도를 30프로만 당겨줘" — 기다리는 시간을 전부 ×0.7.
 # 줄여도 되는 이유: 2·3번 칸의 🖼('등록 창이 떠 있나') 확인이 **화면이 뜰 때까지
@@ -2142,9 +2151,12 @@ def itemreg_name_blue(xy):
     **초록색이거나 파란색이면** 최저가로 그냥 올린다 (2026-10-06 사용자 지시:
     "초록색이랑 파란색 이렇게 두 개는 네가 그냥 최저가 확인해서 바로 올려줘").
     흰색(주문서·잡템)이면 멈춰서 사용자가 수량·금액을 넣는다 (2026-09-29 지시).
-    · 파란색 = `B-R ≥ ITEMREG_BLUE`
+    · 파란색 = `B-R ≥ ITEMREG_BLUE` **그리고** `G-R ≥ ITEMREG_BLUE_GR`
     · 초록색 = `G-max(R,B) ≥ ITEMREG_GREEN`
     흰색은 R≈G≈B 라 두 재기 모두 0 근처 → 자동으로 안 올라간다.
+    🚫 **주황(전설)·보라(영웅)는 올리지 않는다** (2026-10-06 사용자 지시 —
+       "내가 스스로 올릴 거야"). 주황은 B-R 이 크게 음수라 저절로 걸러지고,
+       보라는 B-R 이 +65 로 파랑 재기를 넘으므로 **`G-R` 로 따로 막는다.**
     '판매 수량' 글자를 찾아 **이름 칸의 자리를 잡고**, 그 칸의 글자 화소만 골라
     B-R 을 잰다. 색 판정은 이 저장소에서 여러 번 검증된 방법이다
     (가루 체크칸 100/48 · 각성 버튼 106/43 — 한 번도 안 틀렸다).
@@ -2187,13 +2199,25 @@ def itemreg_name_blue(xy):
         br = float((_b - _r)[m].mean())                     # 파란색 재기
         import numpy as _np
         gr = float((_g - _np.maximum(_r, _b))[m].mean())    # 🟢 초록색 재기
-        _blue  = br >= ITEMREG_BLUE
+        g_r = float((_g - _r)[m].mean())                    # 🟣 보라 가르기
+        # 🔵 파랑 — B-R 과 **G-R 둘 다** 넘어야 한다 (보라를 걸러내려고)
+        _blue  = (br >= ITEMREG_BLUE) and (g_r >= ITEMREG_BLUE_GR)
         _green = gr >= ITEMREG_GREEN
-        _c = "🔵파랑" if _blue else ("🟢초록" if _green else "⚪흰색")
-        # 두 값을 **늘 같이** 남긴다 — 어긋나면 이 숫자로 기준을 고친다
-        return (_blue or _green), br, (f"{_c} · B-R {br:+.0f} / G-max(R,B) {gr:+.0f} "
-                                       f"(기준 {ITEMREG_BLUE:.0f}/{ITEMREG_GREEN:.0f}, "
-                                       f"점 {int(m.sum())})")
+        if _blue:
+            _c = "🔵파랑"
+        elif _green:
+            _c = "🟢초록"
+        elif br >= ITEMREG_BLUE:
+            _c = "🟣보라(안 올림)"      # 파랑처럼 B 가 높지만 R 도 높다 = 보라
+        elif br <= -ITEMREG_BLUE:
+            _c = "🟠주황(안 올림)"      # R 이 B 보다 한참 높다 = 주황/빨강
+        else:
+            _c = "⚪흰색"
+        # 세 값을 **늘 같이** 남긴다 — 어긋나면 이 숫자로 기준을 고친다
+        return (_blue or _green), br, (
+            f"{_c} · B-R {br:+.0f} / G-max(R,B) {gr:+.0f} / G-R {g_r:+.0f} "
+            f"(기준 파랑 {ITEMREG_BLUE:.0f}&G-R≥{ITEMREG_BLUE_GR:.0f} · "
+            f"초록 {ITEMREG_GREEN:.0f}, 점 {int(m.sum())})")
     except Exception as e:
         return None, 0.0, f"확인 실패 {e!r}"
 
@@ -18693,7 +18717,7 @@ class App(tk.Tk):
                         _blue, _br, _bw = itemreg_name_blue(xy)
                     if _man or not _blue:
                         _why = ("💰 값넣기 모드" if _man else
-                                ("⚪ 흰색 아이템 (초록·파랑만 자동)" if _blue is False
+                                ("🚫 초록·파랑이 아님" if _blue is False
                                  else "⚠ 이름을 못 읽음") + f" — {_bw}")
                         click_log(f"[아이템등록] {_why} → {k+1}번({st['key']}) "
                                   f"앞에서 멈춤. 누른 키: {' → '.join(done) or '없음'} "
