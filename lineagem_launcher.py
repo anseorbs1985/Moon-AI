@@ -1299,6 +1299,13 @@ START_PAUSE_MAX = 0.16
 CHECK_TRIES = 4
 ESC_TIMES   = 1      # 취소할 때 ESC 를 몇 번 누를지 (2026-08-29 사용자 지시로 한 번)
 RECLICK_WAIT = [2.0, 3.0]        # 확인까지 2초 → 3초 (전 28초는 너무 느렸다)
+# 🚶 **멀리 있는 것을 누르면 '이동' 으로 먹는다** — 확인창이 안 뜨고 걸어간다.
+#    (2026-10-06 사용자: "마름모가 떠 있는데 왜 못 올라가" → "딱 저 정도 거리가 안 돼")
+#    실측: 성공한 자리는 창내 x 143~290(캐릭터 근처), 안 되는 것은 x=112·128·133.
+#    그래서 **걸어갈 시간**을 주고 다시 누른다 (누를 때마다 그림을 다시 찾으므로
+#    가까워진 새 자리를 누르게 된다). 위 값은 '클릭이 씹혔나' 를 보는 시간이라 짧다.
+#    ⚠ 이 값을 다시 2~3초로 줄이지 말 것 — 걸어갈 틈이 없어 같은 증상이 돌아온다.
+RECLICK_WAIT_BY = {"dragon": [2.5, 4.5, 6.0]}
 DRIFT_MAX  = 40           # 그림이 이만큼(px) 안에서 움직인 건 '같은 것'으로 본다.
                           # 더 멀면 다른 마름모라 겨냥을 옮기지 않는다 (엉뚱한 층 방지)
 
@@ -12439,7 +12446,8 @@ class App(tk.Tk):
             if has_img(fkey, j + 1):
                 _rtries = max(RECLICK_TRIES, RECLICK_TRIES_BY.get(fkey, 0))
                 for _try in range(_rtries):
-                    _w = RECLICK_WAIT[min(_try, len(RECLICK_WAIT) - 1)]
+                    _ww = RECLICK_WAIT_BY.get(fkey) or RECLICK_WAIT
+                    _w = _ww[min(_try, len(_ww) - 1)]
                     time.sleep(_w * random.uniform(0.9, 1.15))
                     _wx, _wy, _ws = find_image(fkey, j + 1, coord)
                     if _wx is not None:
@@ -12465,7 +12473,8 @@ class App(tk.Tk):
                         break
                     _hold = RECLICK_HOLD[min(_try, len(RECLICK_HOLD) - 1)]
                     click_log(f"{fkey} [{nm}] 좌표{j+1} 눌렀는데 창이 안 뜸 "
-                              f"(좌표{j+2} 최고 {_ws:.2f}) → 다시 누름 "
+                              f"(좌표{j+2} 최고 {_ws:.2f}) — 멀어서 '이동' 으로 먹힌 듯, "
+                              f"걸어간 뒤 다시 누름 "
                               f"({_try+1}/{_rtries}, "
                               f"{_hold[0]:.2f}~{_hold[1]:.2f}초 꾹)")
                     self.status.set(f"🖼 [{nm}] 좌표{j+1} 창이 안 떠서 다시 누름 "
