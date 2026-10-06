@@ -22165,18 +22165,42 @@ class App(tk.Tk):
         try:
             import ctypes
             u = ctypes.windll.user32
-            hwnd = int(self.winfo_id())
+            # ⚠ `winfo_id()` 는 Tk 의 **안쪽** 창이라 ShowWindow 가 안 먹는다.
+            #    `wm_frame()` 이 실제 바깥 창(제목줄 있는 것) 핸들이다.
+            hwnd = 0
             try:
-                import win32gui
-                _h = win32gui.FindWindow(None, "리니지M 자동 실행")
-                if _h:
-                    hwnd = _h
+                hwnd = int(self.wm_frame(), 16)
             except Exception:
-                pass
+                hwnd = 0
+            if not hwnd:
+                try:
+                    import win32gui
+                    hwnd = win32gui.FindWindow(None, "리니지M 자동 실행") or 0
+                except Exception:
+                    hwnd = 0
+            if not hwnd:
+                hwnd = int(self.winfo_id())
+            _BOT = (1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)   # HWND_BOTTOM, 크기·위치·활성화 안 건드림
+            _prev = u.GetForegroundWindow()       # 앞에 있던 창을 먼저 기억해둔다
             if self.state() != "normal":
                 u.ShowWindow(hwnd, 4)            # SW_SHOWNOACTIVATE — 올리지 않는다
-            # HWND_BOTTOM(1) + SWP_NOSIZE|NOMOVE|NOACTIVATE
-            u.SetWindowPos(hwnd, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
+                # ⚠ 그래도 최소화가 안 풀리면(사용자 신고: "완료됐는데 최소화를
+                #   유지한다") 어쩔 수 없이 deiconify 로 풀고 **곧바로** 뒤로 민다.
+                try:
+                    if self.state() != "normal":
+                        self.deiconify()
+                except Exception:
+                    pass
+            u.SetWindowPos(hwnd, *_BOT)
+            # 되살리다 포커스를 빼앗았으면 **앞에 있던 창을 그대로 되돌린다**
+            #    (실측: 다른 창이 앞에 있을 때는 애초에 안 빼앗는다. 앞에 아무도
+            #     없을 때만 자기가 앞으로 와서, 그 경우만 되돌리면 된다)
+            try:
+                if u.GetForegroundWindow() == hwnd and _prev and _prev != hwnd:
+                    u.SetForegroundWindow(_prev)
+                    u.SetWindowPos(hwnd, *_BOT)
+            except Exception:
+                pass
         except Exception:
             try:
                 self.deiconify()                 # win32 가 안 되면 어쩔 수 없이
@@ -22212,6 +22236,10 @@ class App(tk.Tk):
                 self._back_after_id = None
         except Exception:
             pass
+        # ⏭ 대기열의 **다음 작업이 벌써 시작됐으면 그냥 둔다** — 지금 올리면
+        #    돌고 있는 작업 위로 창이 올라온다. 그 작업이 끝날 때 되살아난다.
+        if self._is_busy():
+            return
         self._quiet_restore = True          # <Map>/포커스 핸들러의 '앞으로 올리기' 억제
         self._stay_back(4.0)                # 되돌아오려 해도 4초간 계속 뒤로 민다
         self._show_back_noactivate()        # ⚠ deiconify() 로 되돌리지 말 것 (앞으로 올라감)
@@ -22936,11 +22964,24 @@ class App(tk.Tk):
             time.sleep(0.01)      # 0.05 면 짧은 뜸을 넘겨버려 실제론 더 오래 쉰다
 
     def _run_task(self, name, fn, *args):
-        """작업 스레드 래퍼 — 끝나면 잠금 해제."""
+        """작업 스레드 래퍼 — 끝나면 잠금 해제 + **런처를 '맨 뒤'로 되살린다.**
+
+        🔙 (2026-10-06 사용자: *"완료를 하면 최소화를 해버리냐… 변신확인 완료가
+        됐는데 최소화를 유지한다. 내가 모든 런처 완료되면 뒤로 보내달라고 했잖아"*)
+
+        예전엔 `_run_dgn2` 만 끝에 `_restore_back()` 을 불렀고, `_run_dungeon`
+        (변신확인) 처럼 손으로 만든 런처들은 **최소화를 그대로 남겼다.**
+        ⚠ 런처마다 챙기지 말 것 — **여기 한 곳**에서 한다. 그래야 새 런처를
+          만들어도 자동으로 적용된다 (`_stop()` 을 '아는 런처 전부' 로 바꾼 것과
+          같은 이유 — 손으로 나열하면 반드시 빠진다)."""
         try:
             fn(*args)
         finally:
             self._clear_busy(name)
+            try:
+                self.after(0, self._restore_back)
+            except Exception:
+                pass
 
     def _stop(self):
         self._stop_flag      = True
