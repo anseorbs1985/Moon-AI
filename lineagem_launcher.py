@@ -1744,7 +1744,12 @@ ITEMREG_QTY_MIN  = 0.70            # 이만큼 닮아야 '등록 창' 으로 본
 ITEMREG_NAME_OFF = (165, -172, 520, -138)
 ITEMREG_NAME_INK = 120   # 이 밝기 위를 '글자'로 본다
 ITEMREG_NAME_MIN = 5     # 글자 점이 이만큼도 없으면 '못 읽음' → 안전하게 멈춘다
-ITEMREG_BLUE     = 40.0  # B-R 이 이보다 크면 파란색(고급 이상) → 최저가로 자동
+ITEMREG_BLUE     = 40.0  # B-R 이 이보다 크면 파란색 → 최저가로 자동
+# 🟢 **초록색도 자동** (2026-10-06 사용자: "초록색이랑 파란색 이렇게 두 개는
+#    네가 그냥 최저가 확인해서 바로 올려주면 안 되겠냐")
+#    초록은 B-R 이 0 근처라 파란색 재기로는 안 걸려서 '흰색' 으로 멈췄다.
+#    **G 가 R·B 보다 높은가**로 따로 잰다. 흰색은 R≈G≈B 라 둘 다 0 근처 → 그대로 멈춘다.
+ITEMREG_GREEN    = 40.0  # G - max(R,B) 가 이보다 크면 초록색 → 최저가로 자동
 ITEMREG_HOTKEY   = 0x75          # 기본 F6 (창의 [단축키] 으로 바꿀 수 있다)
 # 2026-09-16 사용자 요청 "속도를 30프로만 당겨줘" — 기다리는 시간을 전부 ×0.7.
 # 줄여도 되는 이유: 2·3번 칸의 🖼('등록 창이 떠 있나') 확인이 **화면이 뜰 때까지
@@ -1848,6 +1853,22 @@ FLOOR_STRICT = ("dragon",)
 #    "못 가면 그 자리에 그대로 있어야 하는데 왜 다른 곳을 클릭해서 가버리느냐")
 #    못 찾으면 그냥 못 찾은 것으로 두고 그 슬롯을 멈춘다 — 엉뚱한 곳을 누르는 것보다 낫다.
 AREA_STRICT = ("dragon",)
+# 👀 **그래도 눈이 너무 좁았다** (2026-10-06 사용자: "층(마름모)이 활성화가 되어 있어도
+#    층을 안 올라가는 증상이 있다 — 네가 보는 눈이 좀 좁은 것 같은 느낌이랄까").
+#    범위 **둘레로 이만큼만** 더 본다 (창 전체로는 안 넓힌다 — 엉뚱한 데를 누르면 안 되니까).
+#    넓힌 자리에서 찾은 것은 **엄격 판정**(ZONE_OUT_MIN)을 통과해야 인정한다.
+AREA_STRICT_PAD = 64
+# 🏢 **층을 '못 읽었을 때'는 이동이 성공했으면 오토를 누른다** (2026-10-06 사용자 지시:
+#    "네가 층을 이동해서 성공을 하면 오토를 눌러주는 건 어때? 층이 틀렸을 때는
+#     오토를 돌리지 않더라도")
+#    ⚠ **다른 층이 확실히 1등이면 여기서도 절대 안 누른다** — 퀘스트 깨는 길은 그대로 막는다.
+#    층 숫자 견본이 화면과 잘 안 맞아(실측 0.504 vs 기준 0.80) 거의 늘 '못 읽음' 이
+#    되는 바람에 오토가 계속 멈췄다. '못 읽음' 과 '틀림' 은 다르게 다룬다.
+FLOOR_TRUST_MOVE = ("dragon",)
+# 🔁 오토를 못 누른 슬롯은 **런처가 끝난 뒤 다시 층을 확인해** 맞으면 눌러준다
+#    (2026-10-06 사용자: "오토를 안 돌렸을 때는 네가 다시 층을 확인해서 돌릴 수 있나?")
+FLOOR_RETRY_WAIT  = (2.5, 4.2)   # 다시 보기 전에 쉬는 시간(초) — 화면이 가라앉을 시간
+FLOOR_RETRY_TRIES = 2            # 슬롯마다 몇 번까지 다시 볼지
 FLOOR_WAIT  = (0.6, 1.0)       # 다시 보기까지 쉬는 시간(초) — 사람처럼 랜덤
 FLOOR_PAD   = 12               # 저장해둔 자리 둘레로 이만큼 더 넓게 훑는다(px)
 # 🏢 [🏢 용던층확인!!] 창에 **보여줄** 자리 — 창 크기 대비 **비율**이라 클라마다 맞는다.
@@ -2116,10 +2137,14 @@ def itemreg_box(big, dx, dy, w, h, pad=0):
 
 
 def itemreg_name_blue(xy):
-    """등록 창의 **아이템 이름이 파란색(고급 이상)인가** → (파랑?, B-R, 설명).
+    """등록 창의 **아이템 이름이 초록색·파란색인가** → (자동?, B-R, 설명).
 
-    파란색이면 최저가로 그냥 올린다. 흰색(주문서·잡템)이면 멈춰서 사용자가
-    수량·금액을 넣는다 (2026-09-29 사용자 지시).
+    **초록색이거나 파란색이면** 최저가로 그냥 올린다 (2026-10-06 사용자 지시:
+    "초록색이랑 파란색 이렇게 두 개는 네가 그냥 최저가 확인해서 바로 올려줘").
+    흰색(주문서·잡템)이면 멈춰서 사용자가 수량·금액을 넣는다 (2026-09-29 지시).
+    · 파란색 = `B-R ≥ ITEMREG_BLUE`
+    · 초록색 = `G-max(R,B) ≥ ITEMREG_GREEN`
+    흰색은 R≈G≈B 라 두 재기 모두 0 근처 → 자동으로 안 올라간다.
     '판매 수량' 글자를 찾아 **이름 칸의 자리를 잡고**, 그 칸의 글자 화소만 골라
     B-R 을 잰다. 색 판정은 이 저장소에서 여러 번 검증된 방법이다
     (가루 체크칸 100/48 · 각성 버튼 106/43 — 한 번도 안 틀렸다).
@@ -2156,8 +2181,19 @@ def itemreg_name_blue(xy):
         m = cv2.cvtColor(z, cv2.COLOR_BGR2GRAY) > ITEMREG_NAME_INK
         if int(m.sum()) < ITEMREG_NAME_MIN:
             return None, 0.0, f"이름 글자를 못 읽음 (점 {int(m.sum())})"
-        br = float((z[:, :, 0].astype(int) - z[:, :, 2].astype(int))[m].mean())
-        return (br >= ITEMREG_BLUE), br, f"B-R {br:+.0f} (점 {int(m.sum())})"
+        _b = z[:, :, 0].astype(int)      # OpenCV 는 BGR 순서
+        _g = z[:, :, 1].astype(int)
+        _r = z[:, :, 2].astype(int)
+        br = float((_b - _r)[m].mean())                     # 파란색 재기
+        import numpy as _np
+        gr = float((_g - _np.maximum(_r, _b))[m].mean())    # 🟢 초록색 재기
+        _blue  = br >= ITEMREG_BLUE
+        _green = gr >= ITEMREG_GREEN
+        _c = "🔵파랑" if _blue else ("🟢초록" if _green else "⚪흰색")
+        # 두 값을 **늘 같이** 남긴다 — 어긋나면 이 숫자로 기준을 고친다
+        return (_blue or _green), br, (f"{_c} · B-R {br:+.0f} / G-max(R,B) {gr:+.0f} "
+                                       f"(기준 {ITEMREG_BLUE:.0f}/{ITEMREG_GREEN:.0f}, "
+                                       f"점 {int(m.sum())})")
     except Exception as e:
         return None, 0.0, f"확인 실패 {e!r}"
 
@@ -2985,6 +3021,12 @@ def find_image(fkey, j, coord):
     #    넓혀서 찾으면 엉뚱한 자리를 눌러 **다른 방향으로 걸어간다** — 못 찾은 채로
     #    그 슬롯을 멈추는 쪽이 낫다. 범위를 안 정한 자리는 예전 그대로 넓힌다.
     if _ub and fkey in AREA_STRICT:
+        # 👀 범위 **둘레로 AREA_STRICT_PAD 만** 더 본다 (2026-10-06 — 활성화돼 있어도
+        #    못 찾는 일이 있었다). 창 전체로는 안 넓히고, 그 클라 창 안으로 자른다.
+        #    이 넓힌 상자는 `_find_in_boxes` 에서 **엄격 판정**을 받는다 (두 번째 상자라서).
+        _pb = _pad_box(_ub, AREA_STRICT_PAD, client_rect_at(coord[0], coord[1]))
+        if _pb and tuple(_pb) != tuple(_ub):
+            boxes.append(tuple(_pb))
         return _find_in_boxes(fkey, j, coord, paths, boxes)
     _zb = zone_box(fkey, j, coord)
     if _zb and tuple(_zb) not in boxes:
@@ -3000,6 +3042,22 @@ def find_image(fkey, j, coord):
     return _find_in_boxes(fkey, j, coord, paths, boxes)
 
 
+def _pad_box(box, pad, clip=None):
+    """상자 둘레를 pad 만큼 넓힌다 — `clip`(그 클라 창) 밖으로는 안 나간다."""
+    try:
+        x1, y1, x2, y2 = (int(v) for v in box[:4])
+        x1 -= pad; y1 -= pad; x2 += pad; y2 += pad
+        if clip:
+            cx1, cy1, cx2, cy2 = (int(v) for v in clip[:4])
+            x1 = max(x1, cx1); y1 = max(y1, cy1)
+            x2 = min(x2, cx2); y2 = min(y2, cy2)
+        if x2 - x1 < 4 or y2 - y1 < 4:
+            return None
+        return (x1, y1, x2, y2)
+    except Exception:
+        return None
+
+
 def _find_in_boxes(fkey, j, coord, paths, boxes):
     """정해진 상자들을 차례로 훑는다 — 첫 상자 밖은 엄격하게 본다."""
     best = 0.0
@@ -3009,9 +3067,9 @@ def _find_in_boxes(fkey, j, coord, paths, boxes):
             x, y, sc = _find_one(fkey, j, coord, _p, _box, _strict)
             if x is not None:
                 if _bi:
-                    click_log(f"{fkey} 좌표{j+1} — 지정 범위 밖에서 찾음 "
+                    click_log(f"{fkey} 좌표{j+1} — 지정 범위 **둘레**에서 찾음 "
                               f"(일치도 {sc:.2f} ≥ {ZONE_OUT_MIN}, 엄격 판정 통과) "
-                              f"· 범위(📐)를 조금 넓혀두면 더 잘 잡힙니다")
+                              f"· 범위(📐)를 조금 넓혀두면 더 빨리 잡힙니다")
                 return x, y, sc
             best = max(best, sc)
     return None, None, best
@@ -11820,7 +11878,7 @@ class App(tk.Tk):
                                     f"누르지 않았습니다 (🏢 에서 등록해주세요)")
                     return False
                 return True                       # 그 층 그림이 아직 없다
-            best, why, last = 0.0, "", {}
+            best, why, last, _dg = 0.0, "", {}, False
             for t in range(FLOOR_TRIES):
                 last, _dg = floor_scores2(fkey, coord)
                 ok, sc, why = floor_seen(fkey, fl, coord, last, _dg)
@@ -11832,10 +11890,40 @@ class App(tk.Tk):
                 if t < FLOOR_TRIES - 1:
                     time.sleep(random.uniform(*FLOOR_WAIT))
             _all = " ".join(f"{k}층 {v:.2f}" for k, v in sorted(last.items()))
-            click_log(f"{fkey} [{nm}] 🏢 {fl}층이 아님 — {why} "
-                      f"(점수: {_all} / 기준 {FLOOR_MATCH}, {FLOOR_TRIES}번 확인) "
+            # 🏢 **'확실히 다른 층' 과 '그냥 못 읽음' 은 다르다** (2026-10-06).
+            #    · 다른 층이 기준을 넘고 내 층보다 뚜렷이 높다 → **틀린 층. 절대 안 누른다.**
+            #    · 그게 아니면(전부 기준 미만·1·2등이 비슷) → **못 읽은 것**이다.
+            #      이때는 '이동이 성공했나' 를 보고 누른다 (사용자 지시).
+            _need = FLOOR_DIG_MATCH if _dg else FLOOR_MATCH
+            _top = max(last, key=lambda k: last[k]) if last else None
+            _wrong = bool(last and _top is not None and _top != fl
+                          and last[_top] >= _need
+                          and last[_top] >= last.get(fl, 0.0) * FLOOR_RATIO)
+            if not _wrong and fkey in FLOOR_TRUST_MOVE:
+                _mv = (getattr(self, "_floor_moved", None) or {}).get(
+                    (fkey, id(slot) if slot is not None else 0))
+                if _mv:
+                    click_log(f"{fkey} [{nm}] 🏢 {fl}층을 **못 읽었지만** "
+                              f"좌표{_mv[0]}에서 이동이 확인됐으므로(일치도 {_mv[1]:.2f}) "
+                              f"좌표{j+1}(오토) 진행 — {why} (점수: {_all}) "
+                              f"· 틀린 층이면 안 눌렀다")
+                    self.status.set(f"🏢 [{nm}] 층을 못 읽었지만 이동이 성공해 "
+                                    f"오토를 누릅니다 ({why})")
+                    self._note(fkey, nm,
+                               f"{fl}층을 못 읽음({why}) — 이동 성공으로 보고 오토 누름")
+                    return True
+                click_log(f"{fkey} [{nm}] 🏢 {fl}층을 못 읽었고 **이동한 기록도 없음** "
+                          f"→ 좌표{j+1}(오토) 안 누름 — {why} (점수: {_all})")
+            # 여기까지 왔으면 누르지 않는다. 끝나고 **다시 확인해서** 눌러본다.
+            self._floor_retry_add(fkey, si, nm, coord, fl, j, why, _all, _wrong)
+            click_log(f"{fkey} [{nm}] 🏢 "
+                      + (f"{_top}층으로 보임 — {fl}층이 아님" if _wrong
+                         else f"{fl}층을 못 읽음")
+                      + f" ({why}, 점수: {_all} / 기준 {_need}, {FLOOR_TRIES}번 확인) "
                       f"→ 좌표{j+1}(오토)를 누르지 않고 이 슬롯 중단")
-            self.status.set(f"🏢 [{nm}] {fl}층이 아니라 오토를 누르지 않았습니다 ({why})")
+            self.status.set(f"🏢 [{nm}] "
+                            + (f"{_top}층으로 보여" if _wrong else f"{fl}층을 못 읽어")
+                            + f" 오토를 누르지 않았습니다 ({why}) — 끝나고 다시 봅니다")
             self._note(fkey, nm, f"{fl}층 확인 실패 — {why} ({_all}) → 오토 안 누름")
             return False
         except Exception as _e:
@@ -11849,6 +11937,73 @@ class App(tk.Tk):
                     pass
                 return False
             return True                           # 그 밖 런처는 막지 않는다
+
+    def _floor_retry_add(self, fkey, si, nm, coord, fl, j, why, allsc, wrong):
+        """🔁 오토를 못 누른 슬롯을 **'끝나고 다시 볼 목록'** 에 적어둔다.
+
+        (2026-10-06 사용자: "오토를 안 돌렸을 때는 네가 다시 층을 확인해서
+        돌릴 수 있나?") — 실행 중에는 화면이 아직 안 가라앉아 층 글씨가 흐리다.
+        런처가 다 끝난 뒤 조용할 때 한 번 더 보면 읽히는 일이 많다."""
+        try:
+            if fl in FLOOR_NO_AUTO.get(fkey, ()):
+                return                      # 🚫 오토 금지 층은 다시 보지도 않는다
+            lst = getattr(self, "_floor_retry", None)
+            if lst is None:
+                lst = self._floor_retry = []
+            if any(r["si"] == si for r in lst):
+                return
+            lst.append(dict(si=si, nm=nm, coord=tuple(coord), fl=fl, j=j,
+                            why=why, all=allsc, wrong=bool(wrong)))
+        except Exception:
+            pass
+
+    def _floor_retry_pass(self, fkey, stop):
+        """🔁 런처가 끝난 뒤 — **오토를 못 누른 슬롯만** 다시 층을 확인해 눌러준다.
+
+        (2026-10-06 사용자 지시) 규칙은 실행 중과 똑같다:
+        · 그 층이 **맞게 읽히면** 오토를 누른다.
+        · **다른 층이 확실히 1등이면** 안 누른다.
+        · 여기서도 못 읽으면 그냥 둔다 (사용자가 직접 본다).
+        🚫 오토 금지 층(용의계곡 7층)은 목록에 아예 안 들어간다."""
+        todo = list(getattr(self, "_floor_retry", None) or [])
+        self._floor_retry = []
+        if not todo or getattr(self, stop, False):
+            return
+        _nm2 = ", ".join(f"#{r['si']+1:02d}" for r in todo)
+        click_log(f"{fkey} 🔁 오토를 못 누른 {len(todo)}슬롯({_nm2})을 "
+                  f"다시 층을 확인해 눌러본다")
+        self.status.set(f"🔁 오토를 못 누른 {len(todo)}슬롯 — 다시 층을 확인합니다…")
+        _hit = _no = 0
+        for r in todo:
+            if getattr(self, stop, False):
+                click_log(f"{fkey} 🔁 멈춤 — 남은 {len(todo)-_hit-_no}슬롯은 그대로")
+                break
+            time.sleep(random.uniform(*FLOOR_RETRY_WAIT))
+            ok, sc, why = False, 0.0, ""
+            last = {}
+            for t in range(FLOOR_RETRY_TRIES):
+                last, _dg = floor_scores2(fkey, r["coord"])
+                ok, sc, why = floor_seen(fkey, r["fl"], r["coord"], last, _dg)
+                if ok or getattr(self, stop, False):
+                    break
+                if t < FLOOR_RETRY_TRIES - 1:
+                    time.sleep(random.uniform(*FLOOR_WAIT))
+            _all = " ".join(f"{k}층 {v:.2f}" for k, v in sorted(last.items()))
+            if ok and not getattr(self, stop, False):
+                _hit += 1
+                click_log(f"{fkey} [{r['nm']}] 🔁 다시 보니 {r['fl']}층 확인됨 "
+                          f"(일치도 {sc:.2f}) → 좌표{r['j']+1}(오토) 누름")
+                self.status.set(f"🔁 [{r['nm']}] {r['fl']}층 확인 — 오토를 눌렀습니다")
+                self._click_log(fkey, r["j"], r["coord"], None, "클릭(다시확인)")
+                click_at(*r["coord"])
+                self._note(fkey, r["nm"], f"🔁 다시 확인해 {r['fl']}층 맞음 → 오토 누름")
+            else:
+                _no += 1
+                click_log(f"{fkey} [{r['nm']}] 🔁 다시 봐도 {r['fl']}층이 아님/못 읽음 "
+                          f"— {why} (점수: {_all}) → 그대로 둔다")
+                self._note(fkey, r["nm"], f"🔁 다시 봐도 안 됨 — {why} ({_all})")
+        click_log(f"{fkey} 🔁 다시확인 끝 — 누름 {_hit} · 그대로 {_no}")
+        self.status.set(f"🔁 다시확인 끝 — 오토 누름 {_hit}개 · 그대로 둔 것 {_no}개")
 
     def _do_click_or_wheel(self, fkey, j, coord, slot=None):
         """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다.
@@ -12029,6 +12184,17 @@ class App(tk.Tk):
             # 좌표도 함께 등록돼 있으면 → 그림은 '창이 떴는지 확인'용.
             #   그림이 보일 때까지 기다렸다가 **등록한 좌표**를 누른다.
             # 좌표가 없으면 → 그림 가운데를 누른다. (2026-08-27 사용자 지시)
+            # 🏢 **이동이 성공했다는 표시** — 층 관문(오토) 앞의 그림을 찾았다는 뜻.
+            #    층을 못 읽을 때 이걸 근거로 오토를 누른다 (2026-10-06 사용자 지시).
+            #    ⚠ 관문 자리(오토) 자신은 세지 않는다 — 그건 '이동' 이 아니다.
+            if FLOOR_GATE.get(fkey) and j + 1 < FLOOR_GATE[fkey]:
+                try:
+                    _mv = getattr(self, "_floor_moved", None)
+                    if _mv is None:
+                        _mv = self._floor_moved = {}
+                    _mv[(fkey, _slot_id)] = (j + 1, float(sc))
+                except Exception:
+                    pass
             if _own_coord:
                 click_log(f"{fkey} [{nm}] 좌표{j+1} 그림 확인됨 (일치도 {sc:.2f}) "
                           f"→ 등록한 좌표 클릭")
@@ -12497,6 +12663,8 @@ class App(tk.Tk):
     def _run_dgn2(self, fkey, slot_idx=None, sel_list=None):
         self._start_pause(fkey)
         self._img_done = set()      # 실행할 때마다 '이미지 찾음' 표시를 비운다
+        self._floor_moved = {}      # 🏢 이 슬롯이 '층 이동'을 해냈나 (오토 판단에 쓴다)
+        self._floor_retry = []      # 🔁 오토를 못 누른 슬롯 — 끝나고 다시 본다
         self._run_note = []         # 이번 실행에서 잘 안 된 것 (끝나고 요약)
         self._pace_now = 1.0        # 목표 시간에 맞추는 간격 배수 (1.0 = 그대로)
         key, title, icon = self._dgn2_info(fkey)
@@ -12609,6 +12777,8 @@ class App(tk.Tk):
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=3,
                                     gap=(DRAGON_GAP_MIN, DRAGON_GAP_MAX),
                                     slot_gap=(0.7, 1.4), keep_order=True)
+                # 🔁 오토를 못 누른 슬롯은 여기서 **다시 층을 확인해** 눌러준다
+                self._floor_retry_pass(fkey, stop)
                 return
             if fkey in ("dragon", "knight"):
                 # F11(절전해제)이 끝난 시각부터 정해둔 시간 안에 전부 끝낸다.
@@ -12797,6 +12967,8 @@ class App(tk.Tk):
                 self.after(0, self._incoupon_refresh_done)
             else:
                 self.status.set(f"✔ {title} 실행 완료!")
+            # 🔁 오토를 못 누른 슬롯은 **다시 층을 확인해** 눌러준다 (한 슬롯씩 돈 경우)
+            self._floor_retry_pass(fkey, stop)
         except Exception as e:
             self.status.set(f"오류: {e}")
         finally:
@@ -18516,12 +18688,12 @@ class App(tk.Tk):
                     _man = (self._itemreg_mode() == "manual")
                     _blue, _br, _bw = (None, 0.0, "")
                     if not _man:
-                        # 🎨 파란색(고급 이상)만 최저가로 자동. 흰색이거나
-                        #    못 읽으면 멈춰서 사용자가 값을 넣는다 (사용자 지시)
+                        # 🎨 **초록색·파란색**은 최저가로 자동 (2026-10-06 사용자 지시).
+                        #    흰색이거나 못 읽으면 멈춰서 사용자가 값을 넣는다.
                         _blue, _br, _bw = itemreg_name_blue(xy)
                     if _man or not _blue:
                         _why = ("💰 값넣기 모드" if _man else
-                                ("⚪ 흰색 아이템" if _blue is False
+                                ("⚪ 흰색 아이템 (초록·파랑만 자동)" if _blue is False
                                  else "⚠ 이름을 못 읽음") + f" — {_bw}")
                         click_log(f"[아이템등록] {_why} → {k+1}번({st['key']}) "
                                   f"앞에서 멈춤. 누른 키: {' → '.join(done) or '없음'} "
@@ -18529,7 +18701,7 @@ class App(tk.Tk):
                         self.after(0, lambda w=_why: self.status.set(
                             f"{w} — 수량·가격을 넣고 F7 을 누르면 등록합니다"))
                         return
-                    _trace.append(f"파랑 {_br:+.0f}")
+                    _trace.append(_bw or f"B-R {_br:+.0f}")
                 # ✋ F7 — 여기서 멈추고 값을 직접 넣게 한다 (ESC 안 누름, 화면 그대로)
                 if getattr(self, "_itemreg_hold", False):
                     self._itemreg_hold = False
