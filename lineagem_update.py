@@ -1038,7 +1038,13 @@ def ensure_launcher():
 
 
 def _show_launcher():
-    """메인런처 창을 복원해서 화면에 보여준다 (워치독의 시작 최소화 이후에 실행)."""
+    """메인런처 창을 **뒤에서** 되살린다 — 앞으로 올리지 않는다 (2026-10-06).
+
+    사용자: "업데이트 완료가 되어도 뒤에 있어라. 완료가 되었더라도."
+    예전엔 `SW_RESTORE` + `SetForegroundWindow` 로 **일부러 앞으로** 올려서,
+    업데이트가 끝나는 순간 런처가 리니지M 클라를 덮었다.
+    지금은 `SW_SHOWNOACTIVATE`(최소화만 풀고 활성화 안 함) + `HWND_BOTTOM`.
+    ⚠ 클로드는 여기를 `SetForegroundWindow` 로 되돌리지 말 것."""
     import ctypes
     u = ctypes.windll.user32
     found = []
@@ -1052,9 +1058,10 @@ def _show_launcher():
     WN = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
     u.EnumWindows(WN(cb), 0)
     for h in found:
-        u.ShowWindow(h, 9)          # SW_RESTORE
+        u.ShowWindow(h, 4)          # SW_SHOWNOACTIVATE — 보이게만, 앞으로는 안 올린다
         try:
-            u.SetForegroundWindow(h)
+            # HWND_BOTTOM(1) + SWP_NOSIZE|NOMOVE|NOACTIVATE → 클라 뒤에 그대로
+            u.SetWindowPos(h, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
         except Exception:
             pass
 
@@ -1345,10 +1352,11 @@ def finish(msg=""):
     ok = ensure_launcher()
     if ok:
         time.sleep(2)               # 워치독의 시작 최소화가 지나간 뒤
-        _show_launcher()            # 런처 창을 화면에 띄워서 보여줌 (이후엔 10분 유휴 최소화가 처리)
+        _show_launcher()            # 런처를 **뒤에서** 되살린다 (앞으로 올리지 않음)
     if msg:
         log(""); log(msg)
-    log("✔ 메인런처 실행 확인 (창 표시)" if ok else "⚠ 메인런처 재시작 실패 — 클로드 확인 필요")
+    log("✔ 메인런처 실행 확인 (뒤에서 띄움 — 작업표시줄에서 꺼내세요)"
+        if ok else "⚠ 메인런처 재시작 실패 — 클로드 확인 필요")
     log("이 창은 5초 후에 꺼집니다")
     root.after(5000, root.destroy)
 

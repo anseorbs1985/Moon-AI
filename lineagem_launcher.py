@@ -12993,7 +12993,11 @@ class App(tk.Tk):
             return
         self._fix_queue = q
         self._fix_bulk_ready = False
-        self.status.set(f"▶ 전부 복구 시작 — {len(q)}개 {q} (하나씩 순서대로)")
+        # 🔙 복구는 **뒤에서 조용히** 돈다 (2026-10-06 사용자: "복구를 누르면
+        #    메인런처 창이 앞으로 안 튀어나오고 그냥 뒤에서 그대로 처리")
+        self._stay_back(len(q) * 14 + 10)
+        self._send_behind_only()
+        self.status.set(f"▶ 전부 복구 시작 — {len(q)}개 {q} (하나씩 순서대로, 뒤에서)")
         self._fix_run_next()
 
     def _fix_run_next(self):
@@ -13010,6 +13014,7 @@ class App(tk.Tk):
             self.after(200, self._fix_run_next)
             return
         self.status.set(f"▶ 전부 복구 — #{si:02d} 차례 (남은 {len(q)}개)")
+        self._stay_back(len(q) * 14 + 20)      # 🔙 남은 만큼 계속 뒤에 둔다
         self._run_fix_slot(si, _bulk=True)
         # 끝나고 확인까지 마칠 시간을 준 뒤 다음으로
         self.after(1500, self._fix_run_next)
@@ -13674,6 +13679,10 @@ class App(tk.Tk):
                 self._fix_queue = _q
                 self._fix_run_next()
                 return
+        # 🔙 개별 복구도 **뒤에서** 돈다 — 앞으로 튀어나오지 않는다 (2026-10-06)
+        self._stay_back(25.0)
+        if not _bulk:
+            self._send_behind_only()
         idx = int(si) - 1
         try:
             slots = self.cfg.get("fix_slots") or []
@@ -15412,6 +15421,15 @@ class App(tk.Tk):
             pid = ctypes.c_ulong()
             u.GetWindowThreadProcessId(fg, ctypes.byref(pid))
             if pid.value == os.getpid():
+                # 🔙 '뒤에 있어라' 시간 안이면 **내 창이 앞이어도 뒤로 민다**
+                #    (2026-10-06 사용자: "작업 끝나거나 그러면 앞으로 튀어나오지
+                #     말고 뒤에 있으라니까 왜 계속 앞으로 나오냐")
+                #    예전엔 여기서 그냥 돌아가서, 한 번 앞으로 나오면 그대로 남았다.
+                if time.time() < float(getattr(self, "_back_until", 0.0)):
+                    if self.state() == "normal":
+                        self._send_to_back()
+                    self._auto_back_done = 0
+                    return
                 self._auto_back_done = 0        # 내 창을 보고 있으면 그대로 둔다
                 return
             # 클로드 창을 보고 있으면 건드리지 않는다 (사용자가 쓰는 중)
@@ -15433,10 +15451,16 @@ class App(tk.Tk):
         self.after(80, self._auto_back_tick)    # 0.08초마다 — 즉시 반응
 
     def _raise_on_click(self, e=None):
-        """메인런처 안 아무 곳(빈 곳 포함)이나 클릭하면 창을 앞으로 올린다."""
+        """메인런처 안 아무 곳(빈 곳 포함)이나 클릭하면 창을 앞으로 올린다.
+        (단 `_stay_back()` 시간 안에는 올리지 않는다 — 2026-10-06)"""
         try:
             if self.state() != "normal" or getattr(self, "_quiet_restore", False):
                 return
+            if time.time() < float(getattr(self, "_back_until", 0.0)):
+                # 🙌 사람이 **직접 클릭**했다 → 올려준다 (2026-10-06).
+                #    이 클릭이 [복구] 버튼이면 그 명령이 곧바로 다시 걸므로
+                #    복구는 그대로 뒤에서 돈다.
+                self._stay_back_off("클릭")
             self.lift()
             import win32gui, win32con
             hwnd = win32gui.FindWindow(None, "리니지M 자동 실행")
@@ -15453,6 +15477,8 @@ class App(tk.Tk):
     def _bring_to_front(self, e=None):
         if getattr(self, "_quiet_restore", False):   # 맨뒤 복원 중엔 올리지 않음
             return
+        if time.time() < float(getattr(self, "_back_until", 0.0)):
+            return                                  # 🔙 '뒤에 있어라' 시간 (2026-10-06)
         self.lift()
 
     def _raise_main(self):
@@ -15508,6 +15534,9 @@ class App(tk.Tk):
         self._last_activity = time.time()   # 다시 올라오면 유휴 타이머 리셋
         # 작업 완료 후 '맨 뒤로 복원'(_restore_back) 중에는 앞으로 올리지 않는다
         if not getattr(self, "_quiet_restore", False):
+            # 🙌 작업표시줄로 **사람이 꺼낸 것** → '뒤에 있어라' 를 푼다 (2026-10-06).
+            #    (완료 복원 중에는 `_quiet_restore` 가 여기까지 오지 못하게 막는다)
+            self._stay_back_off("작업표시줄")
             self._bring_to_front()
         # 워치독이 최소화 상태로 띄우면 시작 시 크기맞춤이 걸리지 않으므로,
         # 최초로 창이 보여질 때 딱 한 번만 콘텐츠 크기에 맞춘다(맵 이벤트 폭주 방지: 1회성).
@@ -22125,6 +22154,56 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _show_back_noactivate(self):
+        """🙈 최소화만 풀고 **앞으로 올리지는 않는다** (2026-10-06).
+
+        ⚠ `deiconify()` 는 최소화를 풀면서 **창을 앞으로도 올린다** — 그래서
+          맨 뒤로 보내기 전에 한 번 번쩍 앞으로 나왔다 (사용자 신고:
+          "작업 끝나면 앞으로 튀어나오지 말고 뒤에 있으라니까 왜 계속 나오냐").
+          `SW_SHOWNOACTIVATE`(4) 는 **활성화 없이** 보여주므로 번쩍임이 없다.
+          클로드는 여기를 `deiconify()` 로 되돌리지 말 것."""
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            hwnd = int(self.winfo_id())
+            try:
+                import win32gui
+                _h = win32gui.FindWindow(None, "리니지M 자동 실행")
+                if _h:
+                    hwnd = _h
+            except Exception:
+                pass
+            if self.state() != "normal":
+                u.ShowWindow(hwnd, 4)            # SW_SHOWNOACTIVATE — 올리지 않는다
+            # HWND_BOTTOM(1) + SWP_NOSIZE|NOMOVE|NOACTIVATE
+            u.SetWindowPos(hwnd, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
+        except Exception:
+            try:
+                self.deiconify()                 # win32 가 안 되면 어쩔 수 없이
+            except Exception:
+                pass
+
+    def _stay_back_off(self, why=""):
+        """🙌 '뒤에 있어라' 를 **푼다** — 사람이 직접 꺼냈을 때만 (2026-10-06).
+
+        복구가 도는 동안에도 사용자가 작업표시줄이나 클릭으로 런처를 꺼내면
+        올라와야 한다. 안 그러면 25초 동안 아무것도 누를 수 없다."""
+        self._back_until = 0.0
+
+    def _stay_back(self, sec=10.0):
+        """🔙 앞으로 **sec 초 동안은 런처가 앞에 와도 뒤로 민다** (2026-10-06).
+
+        사용자: "복구를 누르면 앞으로 안 튀어나오고 그냥 뒤에서 그대로 처리는
+        안 되는 거냐" / "작업 끝나도 뒤에 있어라".
+
+        따로 타이머를 만들지 않는다 — 이미 0.08초마다 도는 `_auto_back_check`
+        가 이 시각을 보고 밀어준다. 겹쳐 부르면 **더 늦은 쪽**이 남는다."""
+        try:
+            self._back_until = max(float(getattr(self, "_back_until", 0.0)),
+                                   time.time() + float(sec))
+        except Exception:
+            pass
+
     def _restore_back_quiet(self):
         """완료 후 복원 — 앞으로 띄우지 않고 곧바로 맨 뒤로 되살린다 (모든 실행 공통)."""
         try:
@@ -22134,10 +22213,8 @@ class App(tk.Tk):
         except Exception:
             pass
         self._quiet_restore = True          # <Map>/포커스 핸들러의 '앞으로 올리기' 억제
-        try:
-            self.deiconify()
-        except Exception:
-            pass
+        self._stay_back(4.0)                # 되돌아오려 해도 4초간 계속 뒤로 민다
+        self._show_back_noactivate()        # ⚠ deiconify() 로 되돌리지 말 것 (앞으로 올라감)
         self._send_to_back()
         self.after(120, self._send_to_back)
         self.after(320, self._send_to_back)
