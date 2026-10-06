@@ -1144,6 +1144,25 @@ CLICK_LOG = os.path.join(LOCAL_DATA, "click_log.txt")   # 클릭이 어느 창�
 #   좌표 대신 '그림'을 찾아 누른다. 못 찾으면 그 슬롯은 거기서 끝낸다.
 IMG_DIR   = os.path.join(BASE, "click_templates")
 IMG_MATCH = 0.60          # 이 정도 닮으면 같은 그림으로 본다 (2026-08-27 사용자 지시)
+# 🔷 **이 자리는 더 오래 본다** (2026-10-06 — 용던 마름모).
+#    (런처, 0부터 센 좌표번호) → 몇 번까지 다시 볼지.
+#    용던 좌표5(마름모)는 **좌표1~4 의 이동이 끝나야** 화면에 나타난다. 실측에서
+#    캐릭이 아직 마을에 있는 채로 3번만 보고 포기했다 (견본 5장 전부 0.26~0.31).
+#    기준을 내려도 소용없다 — **화면에 없는 것**이라 더 기다리는 수밖에 없다.
+# (되돌아가 다시 하는 길이 생겼으니 첫 관찰은 적당히 — 7 → 5. 2026-10-06)
+IMG_TRIES_BY = {("dragon", 4): 5}
+# 🔄 **못 찾으면 앞 좌표부터 다시 한다** (2026-10-06 사용자 제안: "4번부터 다시
+#    시도를 해보는 건 어떠냐"). (런처, 좌표번호) → (돌아갈 좌표번호, 몇 번까지).
+#    번호는 **0부터** 센다 — ("dragon", 4) 는 좌표5(마름모), 3 은 좌표4.
+#    **딱 한 번만** 다시 한다 (2026-10-06 사용자: "딱 한번만 더 시도해보고
+#    안되면 그대로 냅두자"). 숫자를 올리지 말 것 — 오래 끄는 걸 싫어한다.
+#    왜 이게 맞나: '못찾음' 사진을 열어보니 캐릭이 **마을 한가운데** 서 있었다.
+#    마름모가 화면에 **아예 없다**(견본 5장 전부 0.26~0.31) — 이동이 안 먹은 것이라
+#    더 기다려도 소용없고 **이동을 다시 시켜야** 한다.
+#    ⚠ 돌아가서 누르는 것은 **그 슬롯에 등록된 좌표뿐**이고, 끝내 못 찾으면
+#      예전처럼 그 슬롯만 중단한다 (다음 좌표=오토는 절대 안 누른다).
+RETRY_FROM = {("dragon", 4): (3, 1)}   # 🔁 딱 한 번만 더 — 안 되면 그대로 둔다
+RETRY_FROM_WAIT = (2.2, 3.4)   # 되돌아가 누른 뒤 이동이 끝나기를 기다리는 시간(초)
 IMG_TRIES = 3             # 못 찾으면 1~1.5초 간격으로 몇 번까지 다시 볼지.
                           # 6번은 너무 느렸다 (2026-08-28 사용자 지시로 3번)
 PEAK_RATIO = 1.45         # '1등 ÷ 2등' 이 이만큼 크면 점수가 낮아도 찾은 것으로 본다
@@ -1153,6 +1172,12 @@ PEAK_MIN   = 0.40         # 다만 이 점수 밑이면 배수와 무관하게 �
 GRAY_MIN   = 0.55
 GRAY_RATIO = 1.35
 RECLICK_TRIES = 2         # 눌렀는데 창이 안 뜰 때 다시 눌러보는 횟수 (2026-08-28 — 속도)
+# 🔷 **이 런처는 더 여러 번 눌러본다** (2026-10-06 사용자: "마름모 활성화가 되어 있어도
+#    잘 안 올라간다"). 실측 기록: `좌표5 눌렀는데 창이 안 뜸 → 다시 누름 (2/2)` 뒤 중단 —
+#    2번으로는 부족했다. 누를 때마다 **다시 찾아서** 누르고 **점점 길게 꾹** 누른다
+#    (RECLICK_HOLD 에 4단계가 이미 들어 있다).
+#    ⚠ 그래도 **확인창을 못 보면 다음 좌표(오토)는 절대 안 누른다** — 그 규칙은 그대로.
+RECLICK_TRIES_BY = {"dragon": 4}
 RECLICK_HOLD = [(0.18, 0.30), (0.35, 0.50), (0.50, 0.70), (0.70, 0.95)]  # 갈수록 길게
 # 누른 뒤 '창이 떴나' 보기까지 기다리는 시간 — 점점 길게 준다.
 # 마름모가 캐릭터에서 멀면 눌러도 바로 창이 안 뜨고 **걸어가는 시간**이 필요하다
@@ -1665,7 +1690,10 @@ def img_path(fkey, j):
 # 그래서 '이 컴퓨터 전용 그림'을 따로 둔다 — 업데이트가 절대 덮어쓰지 않는다.
 IMG_DIR_MINE = os.path.join(os.environ.get("LOCALAPPDATA", BASE),
                             "MoonAI", "click_templates")
-IMG_MAX = 4            # 한 좌표에 그림 몇 장까지
+# 🔷 4 → 10 (2026-10-06). 같은 마름모인데 배경(지형·몹·이펙트)에 따라 점수가
+#    **0.66 · 0.74 · 0.96** 으로 크게 흔들린다(실측). 그런데 전용 견본이 **4/4 로 꽉 차
+#    더 못 배우고 있었다.** 배우는 것은 **확인창이 뜬 자리뿐**이라 늘려도 안전하다.
+IMG_MAX = 10           # 한 좌표에 그림 몇 장까지
 
 
 def img_mine_path(fkey, j, n):
@@ -12029,6 +12057,66 @@ class App(tk.Tk):
         click_log(f"{fkey} 🔁 다시확인 끝 — 누름 {_hit} · 그대로 {_no}")
         self.status.set(f"🔁 다시확인 끝 — 오토 누름 {_hit}개 · 그대로 둔 것 {_no}개")
 
+    def _retry_from_prev(self, fkey, j, coord, slot, nm, sc0):
+        """🔄 이 자리 그림을 못 찾았다 — **앞 좌표부터 다시 해본다.**
+
+        (2026-10-06 사용자 제안: "마름모를 못 찾아서 실패를 하면 **4번부터 다시
+        시도를 해보는 건 어떠냐**") — 못 찾는 진짜 이유가 '이동이 아직 안 끝남'
+        이라서, 기다리는 것보다 **이동을 다시 시키는 쪽**이 맞다.
+
+        돌아가서 누르는 것은 **그 슬롯에 등록된 좌표뿐**이다.
+        찾으면 (x, y, 점수), 끝내 못 찾으면 (None, None, 최고점수) 를 돌려준다."""
+        want = RETRY_FROM.get((fkey, j))
+        if not want or slot is None:
+            return None, None, sc0
+        back, times = want
+        stop = f"_{fkey}_stop"
+        cl = (slot or {}).get("coords") or []
+        best = sc0
+        for _r in range(times):
+            if getattr(self, stop, False):
+                return None, None, best
+            # 되돌아가서 **등록된 좌표만** 순서대로 다시 누른다 (back → j-1)
+            _did = []
+            for b in range(back, j):
+                if getattr(self, stop, False):
+                    return None, None, best
+                c = cl[b] if b < len(cl) else None
+                if not c:
+                    continue
+                self._click_log(fkey, b, c, slot, f"다시({_r+1}/{times})")
+                click_at(*c)
+                _did.append(b + 1)
+                time.sleep(random.uniform(0.5, 0.9))
+            if not _did:
+                click_log(f"{fkey} [{nm}] 🔄 좌표{back+1}~{j} 에 등록된 좌표가 없어 "
+                          f"되돌아갈 수 없음 — 이 슬롯 중단")
+                return None, None, best
+            _w = random.uniform(*RETRY_FROM_WAIT)
+            click_log(f"{fkey} [{nm}] 🔄 좌표{j+1} 을 못 찾아 "
+                      f"**좌표{'·'.join(str(x) for x in _did)} 부터 다시** "
+                      f"({_r+1}/{times}, 최고 {best:.2f}) — {_w:.1f}초 기다렸다 다시 봅니다")
+            self.status.set(f"🔄 [{nm}] 좌표{j+1} 못 찾음 — "
+                            f"좌표{_did[0]}부터 다시 ({_r+1}/{times})")
+            time.sleep(_w)
+            for _t in range(max(1, IMG_TRIES_BY.get((fkey, j), IMG_TRIES))):
+                if getattr(self, stop, False):
+                    return None, None, best
+                ix, iy, sc = find_image(fkey, j, coord)
+                best = max(best, sc)
+                if ix is not None:
+                    click_log(f"{fkey} [{nm}] 🔄 다시 해보니 좌표{j+1} 찾음 "
+                              f"({ix},{iy}) 일치도 {sc:.2f} — 계속 진행")
+                    self.status.set(f"🔄 [{nm}] 좌표{j+1} 다시 해서 찾았습니다 "
+                                    f"({sc:.2f})")
+                    self._note(fkey, nm,
+                               f"좌표{j+1} 못 찾아 좌표{_did[0]}부터 다시 → 찾음")
+                    return ix, iy, sc
+                time.sleep(random.uniform(1.0, 1.5))
+        click_log(f"{fkey} [{nm}] 🔄 {times}번 다시 했지만 좌표{j+1} 을 끝내 못 찾음 "
+                  f"(최고 {best:.2f}) → 이 슬롯 중단")
+        return None, None, best
+
     def _do_click_or_wheel(self, fkey, j, coord, slot=None):
         """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다.
         HOVER_INDICES 에 적힌 자리는 클릭하지 않고 '마우스만 올려놓는다'."""
@@ -12132,6 +12220,7 @@ class App(tk.Tk):
             sc = 0.0
             _chk_only = is_check_only(fkey, j)
             _tries = (CHECK_TRIES if _chk_only else IMG_TRIES)
+            _tries = max(_tries, IMG_TRIES_BY.get((fkey, j), 0))   # 🔷 더 오래 보는 자리
             for _t in range(_tries):
                 ix, iy, sc = find_image(fkey, j, coord)
                 if ix is not None and sc < CONFIRM_MIN:
@@ -12184,6 +12273,12 @@ class App(tk.Tk):
                                 f"ESC {ESC_TIMES}번 누르고 중단")
                 self._note(fkey, nm, f"좌표{j+1} 👁 확인 실패 — ESC 취소 (최고 {sc:.2f})")
                 return "이미지없음"
+            if ix is None and (fkey, j) in RETRY_FROM and not _chk_only:
+                # 🔄 **앞 좌표부터 다시 해본다** (2026-10-06 사용자 제안).
+                #    못 찾는 진짜 이유가 '이동이 아직 안 끝남' 이라, 기다리는 것보다
+                #    이동을 다시 시키는 쪽이 맞다. 그래도 못 찾으면 아래로 내려가
+                #    **예전처럼 이 슬롯만 중단**한다.
+                ix, iy, sc = self._retry_from_prev(fkey, j, coord, slot, nm, sc)
             if ix is None:
                 save_miss_shot(fkey, j, coord)      # 뭘 봤는지 사진으로 남긴다
                 _bx = search_box(fkey, j, coord)
@@ -12325,7 +12420,8 @@ class App(tk.Tk):
             # (2026-08-27 사용자 지시 — 씹혔을 때 스스로 회복하게).
             # 로컬에서 '창이 안 뜬다'가 잦아 2회까지, 갈수록 더 길게 누른다.
             if has_img(fkey, j + 1):
-                for _try in range(RECLICK_TRIES):
+                _rtries = max(RECLICK_TRIES, RECLICK_TRIES_BY.get(fkey, 0))
+                for _try in range(_rtries):
                     _w = RECLICK_WAIT[min(_try, len(RECLICK_WAIT) - 1)]
                     time.sleep(_w * random.uniform(0.9, 1.15))
                     _wx, _wy, _ws = find_image(fkey, j + 1, coord)
@@ -12340,10 +12436,10 @@ class App(tk.Tk):
                     _hold = RECLICK_HOLD[min(_try, len(RECLICK_HOLD) - 1)]
                     click_log(f"{fkey} [{nm}] 좌표{j+1} 눌렀는데 창이 안 뜸 "
                               f"(좌표{j+2} 최고 {_ws:.2f}) → 다시 누름 "
-                              f"({_try+1}/{RECLICK_TRIES}, "
+                              f"({_try+1}/{_rtries}, "
                               f"{_hold[0]:.2f}~{_hold[1]:.2f}초 꾹)")
                     self.status.set(f"🖼 [{nm}] 좌표{j+1} 창이 안 떠서 다시 누름 "
-                                    f"({_try+1}/{RECLICK_TRIES})")
+                                    f"({_try+1}/{_rtries})")
                     self._note(fkey, nm, f"좌표{j+1} 창이 안 떠서 다시 누름")
                     # 같은 자리를 또 눌러봐야 소용없다 — 그림이 움직였을 수 있으니
                     # **다시 찾아서** 누른다. 그림이 아예 없어졌으면 이미 눌린 것이므로
