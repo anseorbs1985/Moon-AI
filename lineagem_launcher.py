@@ -2223,7 +2223,29 @@ def itemreg_box(big, dx, dy, w, h, pad=0):
             min(big.shape[1], x2), min(big.shape[0], y2))
 
 
-def itemreg_name_blue(xy):
+def itemreg_name_blue(xy, wait=True):
+    """🏷 이름 색 — **창이 다 그려질 때까지 기다렸다** 읽는다 (2026-10-07).
+
+    키 `4` 뒤 180ms 에 바로 보면 **창이 떠오르는 중**이라 제목만 그려지고
+    아이템 이름은 아직 없는 순간을 본다 (실측: `이름 글자를 못 읽음 (점 0)`).
+    그래서 **못 읽을 때만** 다시 본다 — 흰색이라 멈추는 것은 곧바로 돌려준다.
+    ⚠ 이 기다림을 빼지 말 것. 2번칸 🖼 은 기다리는데 여기만 안 기다려서
+      파란 아이템이 등록되지 않았다."""
+    if not wait:
+        return _itemreg_name_blue1(xy)
+    _end = time.time() + ITEMREG_SEE_MAX
+    _last = (None, 0.0, "")
+    while True:
+        _last = _itemreg_name_blue1(xy)
+        if _last[0] is not None:          # 파랑/초록(True) 이거나 흰색(False) — 답이 나왔다
+            return _last
+        if time.time() >= _end:
+            return (_last[0], _last[1], _last[2] + " · %.1f초 기다렸는데 못 읽음"
+                    % ITEMREG_SEE_MAX)
+        time.sleep(random.uniform(*ITEMREG_SEE_GAP))
+
+
+def _itemreg_name_blue1(xy):
     """등록 창의 **아이템 이름이 초록색·파란색인가** → (자동?, B-R, 설명).
 
     **초록색이거나 파란색이면** 최저가로 그냥 올린다 (2026-10-06 사용자 지시:
