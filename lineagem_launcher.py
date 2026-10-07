@@ -225,7 +225,10 @@ FIX_FOCUS_WAIT     = (0.35, 0.60)
 # 자리는 건드리지 않는다 — 떼었을 때 그 자리, 사용자가 옮긴 자리가 전부다
 # (2026-09-30 사용자 재지시: "떼면 그 자리에 그대로 올라오게 해주라")
 NIGHT_DOCK_MS      = 1000  # 앞뒤·최소화를 맞추는 간격(ms) — 창 두 개만 보므로 거의 공짜
-TJ_CLICKS          = 3     # TJ성공!! 슬롯당 좌표 수
+TJ_CLICKS          = 4     # TJ성공!! 슬롯당 좌표 수
+#    2026-10-07 사용자 요청으로 3 → 4. **새 칸은 맨 앞(좌표1)** 이고 쓰던 세 개는
+#    한 칸씩 뒤로 밀렸다 (아래 `tj_front_added` 이사 코드가 한 번만 밀어준다).
+#    마지막 칸은 그대로 '닫기' — 실행부가 `phase == TJ_CLICKS - 1` 로 본다.
 TJ_MIN             = 0.81  # TJ성공!! 좌표 간 클릭 간격(초) — 10~20% 완화(0.7~1.2 → 0.77~1.44)
 TJ_MAX             = 1.51
 TJ_SLOT_MIN        = 0.7   # TJ성공!! 슬롯 간 간격(초) — 0.7~2.3 랜덤
@@ -494,7 +497,8 @@ DEFAULT_CFG = {
     "eventshop_slots": None,            # 이벤트상점 — 16슬롯 × 좌표3 (변신확인용 방식)
     "fix_slots":     [{"name": "미등록", "coords": [None] * FIX_CLICKS}
                       for _ in range(FIX_SLOTS)],   # 🩹 복구 (그림 확인 필수)
-    "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표3 (인형탐험식 실행)
+    "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표4 (인형탐험식 실행)
+    "tj_front_added": False,            # 좌표를 맨 앞에 한 번 밀었나 (2026-10-07)
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
     "seq_slots":    [None]*SEQ_SLOTS,   # 연속 클릭 좌표 (각 [x,y] 또는 None)
     "seq_hotkey":   None,               # 연속 클릭 실행 단축키 (가상키 코드)
@@ -814,7 +818,19 @@ def load_cfg():
             while len(nc) < 16:
                 nc.append({"name": "미등록", "coords": [None] * _n3})
             cfg[_k3] = nc[:16]
-        # tj_slots (TJ성공!!) — 16슬롯 × 좌표 3
+        # ⭕ TJ성공!! — 좌표를 **맨 앞에** 하나 더 (2026-10-07 사용자 요청).
+        #    쓰던 3칸 자료는 [좌표1,2,3] 인데 **새 칸이 맨 앞**이므로 앞으로 밀어야 한다.
+        #    아래 기본 패딩은 빈 칸을 **뒤에** 붙이므로 그대로 두면 순서가 어긋난다.
+        #    ⚠ 컴퓨터마다 **한 번만** 한다 (`tj_front_added`). 이 표시를 지우지 말 것 —
+        #      지우면 다음에 켤 때 또 밀려서 좌표가 한 칸씩 계속 밀려난다.
+        if not cfg.get("tj_front_added"):
+            for _s in (cfg.get("tj_slots") or []):
+                if isinstance(_s, dict):
+                    _c = list(_s.get("coords") or [])
+                    if len(_c) < TJ_CLICKS:          # 아직 안 민 자료만
+                        _s["coords"] = [None] + _c
+            cfg["tj_front_added"] = True
+        # tj_slots (TJ성공!!) — 16슬롯 × 좌표 4 (맨 앞이 새 칸)
         nt = []
         for s in (cfg.get("tj_slots") or []):
             if isinstance(s, dict):
@@ -8665,7 +8681,8 @@ class App(tk.Tk):
         self._open_section_win("_tj_win", "⭕ TJ성공!!", self._build_tj, w=470, h=600)
 
     def _build_tj(self, parent):
-        tk.Label(parent, text="TJ성공!!  (슬롯 순서 랜덤 / 좌표1~3 순서대로, 인형탐험식 간격)",
+        tk.Label(parent, text="TJ성공!!  (슬롯 순서 랜덤 / 좌표1~4 순서대로, "
+                              "마지막 칸은 40~60초 뒤에 '닫기')",
                  font=("맑은 고딕", 9, "bold"), fg="#ad1457").pack(anchor="w", padx=4, pady=(4,2))
         pr = tk.Frame(parent); pr.pack(pady=3)
         self._tj_stop = False
