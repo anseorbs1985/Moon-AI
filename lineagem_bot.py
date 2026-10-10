@@ -75,6 +75,29 @@ CURL = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
 POLL_TIMEOUT = 25        # 텔레그램 long-poll — 새 메시지가 없으면 이만큼 기다린다
 OUT_TICK = 1.0           # 런처가 적어둔 답(bot_out.json)을 확인하는 간격(초)
 
+def pc_name():
+    """이 컴퓨터 이름 — 모든 답 앞에 붙는다. 21대를 구분하는 유일한 수단이다.
+    `local_config.json` 의 `pc_name` 을 쓰고, 없으면 윈도 컴퓨터이름."""
+    n = (load_cfg().get("pc_name") or "").strip()
+    if n:
+        return n
+    try:
+        import socket
+        return socket.gethostname()
+    except Exception:
+        return "이름없음"
+
+
+# 💬 그룹에서 쓰는 글 명령 — **버튼은 그룹에서 퍼지지 않는다**(맨 위 설명 참조).
+#    `/` 로 시작하는 것만 그룹의 모든 봇에게 전달되므로 반드시 슬래시 명령이어야 한다.
+TEXT_CMDS = {
+    "go": "reconnect", "재접속": "reconnect", "접속": "reconnect",
+    "shot": "shot", "화면": "shot", "사진": "shot",
+    "status": "status", "상태": "status",
+    "stop": "stop", "멈춤": "stop", "정지": "stop",
+    "menu": "menu", "start": "menu", "메뉴": "menu",
+}
+
 # 📱 폰에 뜨는 버튼. (보이는 글, 명령)
 BUTTONS = [
     [("🔄 재접속 + 사냥", "reconnect")],
@@ -93,10 +116,24 @@ def log(msg):
 
 
 def load_cfg():
+    # utf-8-sig — 사람이 메모장으로 고치면 BOM 이 붙는다. utf-8 로 읽으면 예외가 난다.
     try:
-        return json.load(io.open(CFG_FILE, encoding="utf-8"))
+        return json.load(io.open(CFG_FILE, encoding="utf-8-sig"))
     except Exception:
         return {}
+
+
+def beat():
+    """🫀 살아 있다는 표시 — 한 바퀴마다 다시 쓴다.
+    런처는 이 파일이 오래됐으면 '봇이 죽었다' 로 보고 다시 켠다.
+    강제 종료되어 `finally` 가 못 돌아도 파일이 낡아서 저절로 들통난다."""
+    try:
+        os.makedirs(DATA, exist_ok=True)
+        io.open(os.path.join(DATA, "bot_run.json"), "w",
+                encoding="utf-8").write(json.dumps({"pid": os.getpid(),
+                                                    "at": time.time()}))
+    except Exception:
+        pass
 
 
 def save_cfg_key(key, val):
@@ -163,12 +200,16 @@ class Bot:
         ]}, ensure_ascii=False)
 
     def send(self, chat_id, text, with_keys=False):
+        # 21대를 구분하는 유일한 수단 — 모든 답 앞에 컴퓨터 이름을 붙인다
+        if not text.startswith("["):
+            text = "[%s] %s" % (pc_name(), text)
         p = {"chat_id": chat_id, "text": text}
         if with_keys:
             p["reply_markup"] = self.keyboard()
         return self.api("sendMessage", p)
 
     def send_photo(self, chat_id, path, caption=""):
+        caption = "[%s] %s" % (pc_name(), caption)
         return self.api("sendPhoto", {"chat_id": chat_id, "caption": caption},
                         files={"photo": path}, timeout=120)
 
@@ -201,7 +242,7 @@ class Bot:
         if not os.path.exists(OUT_FILE):
             return
         try:
-            d = json.load(io.open(OUT_FILE, encoding="utf-8"))
+            d = json.load(io.open(OUT_FILE, encoding="utf-8-sig"))
         except Exception:
             return                       # 아직 쓰는 중일 수 있다 — 다음 번에 다시
         try:
@@ -220,16 +261,22 @@ class Bot:
     # ── 한 바퀴 ─────────────────────────────────────────────────────────────
     def loop(self):
         log("봇 시작 — 버튼을 누를 때만 움직입니다")
-        last_out = 0.0
-        while True:
-            # 런처가 적어둔 답이 있으면 먼저 보낸다
-            if time.time() - last_out >= OUT_TICK:
-                last_out = time.time()
+        # 📨 답 보내기는 **별도 스레드**로 — `getUpdates` 가 최대 25초 기다리는 동안
+        #    같은 스레드에 두면 답이 그만큼 늦는다 (실측: 사진이 25초 뒤에 도착).
+        #    ⚠ 클로드는 이것을 다시 한 스레드로 합치지 말 것.
+        import threading
+
+        def _out_loop():
+            while True:
                 try:
                     self.pump_out()
                 except Exception as e:
                     log("답 전송 오류: %s" % e)
+                time.sleep(OUT_TICK)
 
+        threading.Thread(target=_out_loop, daemon=True).start()
+        while True:
+            beat()                       # 🫀 살아 있다는 표시 (한 바퀴마다)
             r = self.api("getUpdates",
                          {"offset": self.offset, "timeout": POLL_TIMEOUT,
                           "allowed_updates": json.dumps(["message",
@@ -253,24 +300,50 @@ class Bot:
             chat = str(((cb.get("message") or {}).get("chat") or {}).get("id") or "")
             data = cb.get("data") or ""
             self.remember(chat)
-            self.answer_cb(cb.get("id"), "받았습니다")
             label = dict((c, t) for row in BUTTONS for t, c in row).get(data, data)
-            self.send(chat, "▶ %s — 시작합니다" % label)
+            # 버튼 눌림 표시는 **텔레그램 자체 알림**으로만 — 메시지를 새로 보내지 않는다
+            # (사용자 선택: "안 된 컴퓨터만" 답한다)
+            self.answer_cb(cb.get("id"), "%s — %s" % (pc_name(), label))
             self.put_cmd(data, chat)
             return
-        chat = str((msg.get("chat") or {}).get("id") or "")
+        ch = (msg.get("chat") or {})
+        chat = str(ch.get("id") or "")
         if not chat:
             return
-        self.remember(chat)
+        is_group = (ch.get("type") or "") in ("group", "supergroup")
+        if not is_group:
+            self.remember(chat)       # 1:1 상대만 기억한다 (그룹은 저장하지 않는다)
         text = (msg.get("text") or "").strip()
-        if text in ("/start", "/menu", "시작", "메뉴", ""):
-            self.send(chat,
-                      "🌙 Moon-AI\n\n"
-                      "버튼을 누르면 그때만 움직입니다.\n"
-                      "스스로 시작하는 건 없습니다.",
-                      with_keys=True)
-        else:
-            self.send(chat, "버튼으로 눌러주세요.", with_keys=True)
+        if not text:
+            return
+        # 💬 `/go` · `/go@dkmoon_bot` · `/go 3번컴` 을 모두 받는다
+        if not text.startswith("/"):
+            if not is_group:
+                self.send(chat, "버튼을 누르거나 /go 로 보내주세요.", with_keys=True)
+            return                    # 그룹의 일반 수다는 무시한다
+        parts = text[1:].split()
+        word = parts[0].split("@")[0].lower()
+        rest = " ".join(parts[1:]).strip()
+        cmd = TEXT_CMDS.get(word)
+        if not cmd:
+            if not is_group:
+                self.send(chat, "모르는 명령입니다. /go /shot /status /stop",
+                          with_keys=True)
+            return
+        me = pc_name()
+        # 🎯 이름을 적었으면 **그 컴퓨터만** 움직인다 (`/go 3번컴`)
+        if rest and rest.lower() not in me.lower():
+            return
+        if cmd == "menu":
+            self.send(chat, f"🌙 Moon-AI — {me}\n\n"
+                            f"/go 재접속+사냥 · /shot 화면 · /status 상태 · /stop 멈춤\n"
+                            f"특정 컴퓨터만: /go {me}",
+                      with_keys=not is_group)
+            return
+        self.put_cmd(cmd, chat)
+        # 🤫 **정상일 때는 답하지 않는다** (사용자 선택: "안 된 컴퓨터만").
+        #    21대가 다 답하면 버튼 한 번에 알림이 21개 쌓인다.
+        #    못 한 경우는 런처가 `bot_out.json` 에 적어 보낸다.
 
     def remember(self, chat):
         """처음 말을 건 상대를 `local_config.json` 에 적어둔다 — **바뀔 때만.**
@@ -292,15 +365,20 @@ def main():
     # 🪪 내 pid 를 남긴다 — 런처가 이 pid 가 살아 있는지 커널에 바로 물어본다.
     #    (`island_run.json` 과 같은 방식. `wmic` 로 프로세스를 뒤지면 1~3초씩
     #     멈춘다 — CLAUDE.md 2026-08-24 교훈. 다시 쓰지 말 것.)
-    try:
-        os.makedirs(DATA, exist_ok=True)
-        io.open(os.path.join(DATA, "bot_run.json"), "w",
-                encoding="utf-8").write(json.dumps({"pid": os.getpid()}))
-    except Exception:
-        pass
+    beat()
+    # 🗒 **왜 죽었는지 반드시 남긴다.** `pythonw` 는 콘솔이 없어 예외가 통째로
+    #    사라진다 — 2026-10-11 에 봇이 소리없이 죽어서 원인을 못 찾고 헤맸다.
+    #    (이 저장소 규칙: "조용히 실패하는 감지를 만들지 말 것")
+    import traceback
     try:
         Bot(tok).loop()
+        log("봇 종료 — loop 가 정상적으로 끝났다 (있을 수 없는 일)")
+    except BaseException as e:
+        log("봇 죽음 — %s: %s" % (type(e).__name__, e))
+        log("  " + traceback.format_exc().replace(chr(10), chr(10) + "  "))
+        raise
     finally:
+        log("봇 끝 — bot_run.json 지움 (런처가 1분 안에 다시 켠다)")
         try:
             os.remove(os.path.join(DATA, "bot_run.json"))
         except Exception:

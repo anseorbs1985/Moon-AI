@@ -23533,6 +23533,27 @@ class App(tk.Tk):
     #    봇은 `lineagem_bot.py` — **별도 프로세스**다. 명령은 파일로 주고받는다
     #    (이 저장소가 이미 쓰는 방식: `bar.json` 의 `raise`, `island_run.json` 의 `pid`).
     BOT_CMD_FRESH = 120        # 이보다 오래된 명령은 버린다 (초)
+    BOT_DEAD_SEC  = 60         # 🫀 심장박동이 이보다 오래되면 봇이 죽은 것으로 본다.
+    #    봇은 한 바퀴(약 25초)마다 뛴다 → 60초면 두 번 넘게 놓친 것이라 확실하다.
+    #    확인 주기 30초와 합쳐 **최악 90초 안에 되살아난다**.
+    #    ⚠ 25초보다 작게 내리지 말 것 — 살아 있는 봇을 죽은 줄 알고 또 띄운다
+    #      (같은 토큰을 두 곳에서 물어보면 서로 명령을 가로챈다).
+
+    def _bot_pc(self):
+        """이 컴퓨터 이름 — 폰에서 21대를 구분하는 유일한 수단.
+        `local_config.json` 의 `pc_name`, 없으면 윈도 컴퓨터이름."""
+        try:
+            n = (json.load(io.open(os.path.join(BASE, "local_config.json"),
+                                   encoding="utf-8")).get("pc_name") or "").strip()
+            if n:
+                return n
+        except Exception:
+            pass
+        try:
+            import socket
+            return socket.gethostname()
+        except Exception:
+            return "이름없음"
 
     @staticmethod
     def _bot_path(name):
@@ -23571,8 +23592,11 @@ class App(tk.Tk):
     def _bot_do(self, path):
         """폰에서 온 명령 하나를 실행한다. **버튼을 누를 때만 들어온다.**"""
         try:
-            d = json.load(io.open(path, encoding="utf-8"))
-        except Exception:
+            # utf-8-sig — 사람이 만든 파일에는 BOM 이 붙어 있을 수 있다.
+            # utf-8 로 읽으면 예외가 나서 **명령이 조용히 무시된다** (실측).
+            d = json.load(io.open(path, encoding="utf-8-sig"))
+        except Exception as e:
+            click_log(f"[봇] 명령 파일을 읽지 못했다: {e}")
             return
         cmd = (d.get("cmd") or "").strip()
         chat = d.get("chat_id")
@@ -23583,7 +23607,7 @@ class App(tk.Tk):
         click_log(f"[봇] 폰에서 '{cmd}' 명령을 받았다")
         if cmd == "stop":
             self._stop()
-            self._bot_out("■ 전체멈춤 — 돌던 작업을 전부 껐습니다.", chat=chat)
+            # 🤫 멈춤도 조용히 — 21대가 다 답하면 알림이 쌓인다
             return
         if cmd == "status":
             self._bot_out(self._bot_status_text(), chat=chat)
@@ -23595,12 +23619,20 @@ class App(tk.Tk):
             self._bot_out("📸 화면을 찍는 중…", chat=chat)
             return
         if cmd == "reconnect":
+            # 🚫 좌표가 안 등록된 컴퓨터는 `_start` 가 경고창만 띄우고 끝난다 →
+            #    밖에서는 그걸 볼 수 없으니 **폰으로 알려준다.**
+            _need = [k for k in ("lineagem", "game_start", "multiplay")
+                     if not self.cfg.get(k)]
+            if not self.cfg.get("char_btns"):
+                _need.append("캐릭터 접속 버튼")
+            if _need:
+                self._bot_out("✘ 재접속 못 함 — 좌표가 등록되지 않았습니다: "
+                              + ", ".join(_need), chat=chat)
+                return
             if self._is_busy():
-                self._bot_out("⏸ 지금 다른 작업이 돌고 있습니다 — "
-                              "대기열에 넣었습니다.", chat=chat)
-            else:
-                self._bot_out("🔄 재접속 시작 — 퍼플 실행 → 계정 접속 → "
-                              "캐릭 선택 → 사냥", chat=chat)
+                self._bot_out("⏸ 다른 작업이 돌고 있어 대기열에 넣었습니다.",
+                              chat=chat)
+            # 🤫 정상 시작은 **답하지 않는다** (사용자 선택: "안 된 컴퓨터만").
             # 사용자가 [전체 자동실행] 을 누른 것과 **같은 길**을 탄다
             # (좌표 검사·대기열·최소화가 전부 그대로 적용된다)
             self.after(0, self._start)
@@ -23624,7 +23656,7 @@ class App(tk.Tk):
             warn = sorted(self._warn_load())
         except Exception:
             warn = []
-        return ("🌙 Moon-AI 지금 상태\n\n"
+        return (f"🌙 {self._bot_pc()} 지금 상태\n\n"
                 f"작업 중: {busy}\n"
                 f"상태줄: {now}\n"
                 f"⏰ 반복 걸린 슬롯: {nrep}개\n"
@@ -23660,27 +23692,39 @@ class App(tk.Tk):
                 pass
             if not tok:
                 return                       # 토큰이 없으면 아무것도 안 한다
-            # 이미 돌고 있나 — pid 가 살아 있는지 커널에 바로 물어본다
+            # 🫀 이미 돌고 있나 — **심장박동이 싱싱한가**로 본다.
+            #    pid 만 보면 강제 종료 때 파일이 남아 '살아 있다' 고 오판한다
+            #    (실측: pid 20100 이 죽었는데 파일이 남아 영영 안 켜졌다).
+            _hb = self._bot_path("bot_run.json")
             try:
-                pid = int(json.load(io.open(self._bot_path("bot_run.json"),
-                                            encoding="utf-8")).get("pid") or 0)
+                if (os.path.exists(_hb)
+                        and time.time() - os.path.getmtime(_hb) < self.BOT_DEAD_SEC):
+                    return                   # 싱싱하다 — 새로 켜지 않는다
             except Exception:
-                pid = 0
-            if pid:
-                import ctypes
-                h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-                if h:
-                    ctypes.windll.kernel32.CloseHandle(h)
-                    return                   # 살아 있다 — 새로 켜지 않는다
+                pass
             f = os.path.join(BASE, "lineagem_bot.py")
             if not os.path.exists(f):
                 return
-            subprocess.Popen(["pythonw", f], cwd=BASE,
+            # sys.executable — `"pythonw"` 는 PATH 에 의존한다. 예약작업·워치독이
+            # 띄운 런처의 PATH 는 사용자 콘솔과 다를 수 있어 조용히 실패했다.
+            # ⚠ 이 파일은 `sys` 를 상단에서 import 하지 않는다 (함수 안에서 쓴다).
+            import sys as _sys
+            _py = _sys.executable or "pythonw"
+            subprocess.Popen([_py, f], cwd=BASE,
                              creationflags=getattr(subprocess,
                                                    "CREATE_NO_WINDOW", 0))
             click_log("[봇] 텔레그램 봇을 켰다 (창 없음 · 버튼을 누를 때만 움직인다)")
         except Exception:
             pass
+        finally:
+            # 🔁 봇이 죽으면 저절로 되살아나게 1분마다 확인한다.
+            #    확인은 **파일 시각 한 번**이라 부하가 없다.
+            #    ⚠ 이건 '봇을 켜두는' 것일 뿐 **게임 작업을 시작하지 않는다**
+            #      (2026-08-10 규칙의 런처 기동 예외와 같은 성격).
+            try:
+                self.after(30000, self._bot_start_watcher)
+            except Exception:
+                pass
 
     def _stop(self):
         self._stop_flag      = True
