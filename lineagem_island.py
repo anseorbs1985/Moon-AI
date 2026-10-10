@@ -167,6 +167,21 @@ SLOT_GAP_SOLO  = (25.0, 40.0) # 동시 1슬롯일 때의 슬롯 쉼(초)
 #     쉼  6초 → 11.6분   쉼 10초 → 12.1분   쉼 60초 → 18.2분
 #   사용자가 "약 11분에 맞추자" 고 해서 6초로 잡았다. 팅김이 남으면 이 값을 올린다
 #   (쉼을 늘리는 것보다 WAVE_LANES 를 줄이는 쪽이 부하에 더 효과가 크다).
+# 🚫 웨이브는 **등록한 간격보다 빠르게 누르지 않는다** (2026-10-10 실측).
+#    예전 값은 (0.55, 1.5) 였다 → 최소 0.73배로, 등록한 간격보다 **빨랐다.**
+#    그래서 화면이 뜨기 전에 다음 칸이 눌리고 빡빡한 칸에서 그 슬롯이 멈췄다
+#    ("개별은 되는데 전체실행은 한 군데서 멈춘다" 의 원인).
+#    개별(_run)은 최소 1.29배라 늘 느렸다 — 이제 웨이브도 1.0배 밑으로 안 간다.
+#    ⚠ 하한을 1.0 밑으로 내리지 말 것. 랜덤 폭은 없애지 말고 범위만 좁힌다.
+WAVE_GAP_MULT  = (1.0, 1.5)
+# 🧱 이 칸부터는 그 슬롯을 '쭉' 끝낸다 — 사이에 다른 슬롯이 끼지 못하게 한다.
+#    런처의 WAVE_UNTIL/_wave_tail 과 같은 방식 (2026-08-27 에 용던고고에서 검증).
+#    이유: 확인창·그림이 이어지는 구간에서 다른 클라를 클릭하면 포커스가 넘어가
+#    확인창이 닫히거나 클릭이 씹힌다. 악몽의섬 19~ 는 창고·상인·라스타바드 구간이다.
+#    사용자 지시(2026-10-10): "간격에 문제가 생길 것 같으면 그쪽은 쭉 클릭을 해버리고
+#    다시 문제가 안 될 것 같으면 다음 걸 클릭하면 되지 않냐"
+WAVE_TAIL_FROM = {"토요일_악몽의섬": 19}
+
 CLICK_LABELS = ["클릭1", "클릭2", "추가", "클릭3", "클릭4", "클릭5"]
 
 # 던전별 좌표 개수 (기본 6개, 예외만 지정)
@@ -5229,6 +5244,11 @@ class IslandApp(tk.Tk):
             if rec and not self._stop_flag:
                 self._focus_client(si, c)
                 self._play_events(rec, name)
+            # 🗒 그림·카드 자리도 기록을 남긴다. 여기서 바로 return 하는 바람에
+            #    아래 기록 줄을 건너뛰어서, 2026-10-10 에 #01 칸6 을 안 누른 것처럼
+            #    보여 한참 헤맸다 (실제로는 카드 이름이 비어 좌표로 눌렸다).
+            #    기록이 없으면 원격에서 아무것도 짚을 수 없다 — 지우지 말 것.
+            self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) 실행 [{_rm}]")
             return True
         if d_ and d_[0] == "⇩":
             if c:
@@ -5326,7 +5346,10 @@ class IslandApp(tk.Tk):
             p["j"] = j + 1
             if did:
                 gl = p["slot"].get("gap_list") or []
-                p["due"] = t + self._gap_seconds(gl[j] if j < len(gl) else None) * p["sp"] * pace * 1.05
+                # ⚠ 실제 실행과 **같은 평균 배수**를 써야 한다. 여기가 옛 1.05 로
+                #    남아 있으면 '금방 끝난다'고 오판해 _calc_pace 가 배속을 틀리게 잡는다.
+                p["due"] = (t + self._gap_seconds(gl[j] if j < len(gl) else None)
+                            * p["sp"] * pace * (sum(WAVE_GAP_MULT) / 2.0))
                 t += 0.525          # 클릭 사이 평균 텀 (0.35~0.7)
             else:
                 p["due"] = t
@@ -5365,7 +5388,11 @@ class IslandApp(tk.Tk):
                          "due": now + random.uniform(0, 20.0),     # 시작 시점 넓게 흩뿌림
                          "sp": random.uniform(1.10, 1.20)}         # 이 슬롯 전체 10~20% 완화
         total = len(labels)
-        _ronly = repeat_only_range(key)     # 이 구간은 ⏰ 반복에서만 누른다
+        # 🏦 창고 구간 — 표시(🏦)·기록용으로만 쓴다. **건너뛰지 않는다** (2026-10-10).
+        _ronly = repeat_only_range(key)
+        if _ronly:
+            self._rlog(f"🏦 {key} 창고 칸 {_ronly[0]}~{_ronly[1]} 도 그대로 누릅니다 "
+                       f"(건너뛰면 뒤 칸이 깨져서 2026-10-10 에 없앴다)")
         # 목표 소요시간 랜덤 — 실행 전에 내부 시뮬레이션으로 배속을 맞춘다
         target_sec = random.uniform(252, 284) * slow_factor()   # 전체 12~17% 지연 (약 4:42~5:32)
         pace = self._calc_pace(state, total, target_sec,
@@ -5413,13 +5440,12 @@ class IslandApp(tk.Tk):
             si = random.choice(ready)          # 차례가 된 것 중 무작위 선택
             st = state[si]
             j  = st["j"]
-            # 🏦 반복 전용 좌표(창고 등) — 사용자가 직접 실행한 경우엔 **그 칸만** 건너뛴다.
-            #    빈 칸과 똑같이 기다림 없이 통과시킨다 (슬롯을 끝내면 안 된다 —
-            #    구간 뒤쪽에 원래 좌표가 그대로 남아 있다).
-            if (_ronly and not getattr(self, "_is_repeat_run", False)
-                    and _ronly[0] <= j + 1 <= _ronly[1]):
-                st["j"] = j + 1
-                continue
+            # 🏦 창고 칸(19~23)을 **건너뛰지 않는다** (2026-10-10 — 사용자 신고).
+            #    예전에는 직접 실행일 때 이 칸만 건너뛰었는데, 좌표 19~28 이
+            #    **같은 창 안의 한 흐름**이라 앞을 건너뛰면 24번(끌어내리기)부터
+            #    전부 허공에 들어갔다 → 사용자가 본 '상점에서 멈춤'.
+            #    개별 실행(_run)은 원래 건너뛰지 않아서 끝까지 잘 됐다 —
+            #    **두 경로를 같게 맞춘 것이다.** 되살리지 말 것.
             # 다른 클라이언트로 넘어가는 클릭이면 창이 앞으로 올라올 시간을 더 준다 —
             # 바로 누르면 첫 클릭이 '창 활성화'로만 먹히고 사라질 수 있다
             if si != last_si:
@@ -5433,6 +5459,16 @@ class IslandApp(tk.Tk):
                 except Exception:
                     pass
                 last_si = si
+            # 🧱 여기서부터는 **이 슬롯을 쭉 끝낸다** — 확인창·그림이 이어지는 구간이라
+            #    중간에 다른 클라를 클릭하면 포커스가 넘어가 창이 닫히고 클릭이 씹힌다.
+            #    (런처의 WAVE_UNTIL/_wave_tail 과 같은 방식 — 2026-10-10 사용자 지시)
+            _tf = WAVE_TAIL_FROM.get(key, 0)
+            if _tf and (j + 1) >= _tf:
+                done_cnt += self._wave_tail(key, si, st, j, total, labels,
+                                            move_set, _ronly, stop_fn,
+                                            status_fn, pace)
+                last_si = si
+                continue
             if not wait_mouse_idle(stop_fn, status_fn): return
             if self._stop_flag: break
             # 🚫 클라가 팅겨서 창이 사라졌으면 **그 자리를 누르지 않는다.**
@@ -5461,7 +5497,7 @@ class IslandApp(tk.Tk):
                 # 매 클릭마다 큰 편차(0.7~1.7배) — 슬롯마다 시간이 제각각 흘러
                 # 어떤 슬롯은 연달아 두세 번, 어떤 슬롯은 한참 쉬었다 눌린다
                 st["due"] = (time.time() + self._gap_seconds(g) * st["sp"] * pace
-                             * random.uniform(0.55, 1.5))
+                             * random.uniform(*WAVE_GAP_MULT))
             else:
                 st["due"] = time.time()        # 빈 자리는 기다리지 않고 바로 다음으로
             # 마우스는 하나 — 클릭끼리 최소 간격을 둬서 씹힘 방지
@@ -5479,6 +5515,49 @@ class IslandApp(tk.Tk):
             pass
         for si, _s in targets:
             self._add_count(si)
+
+    def _wave_tail(self, key, si, st, j0, total, labels, move_set,
+                   ronly, stop_fn, status_fn, pace):
+        """좌표 j0 부터 그 슬롯을 **끊김 없이 끝까지** 민다 (웨이브 섞임 방지).
+
+        확인창·그림이 이어지는 구간에 다른 슬롯이 끼어들면 포커스가 넘어가
+        창이 닫히거나 클릭이 씹힌다 (런처 `_wave_tail` 과 같은 이유).
+        이 슬롯이 끝나면 웨이브가 다시 다른 슬롯을 돌린다.
+        """
+        slot = st["slot"]
+        done = 0
+        for j in range(j0, total):
+            if self._stop_flag:
+                break
+            # 🏦 창고 칸도 그대로 누른다 — 건너뛰면 뒤 칸이 깨진다 (2026-10-10)
+            if not wait_mouse_idle(stop_fn, status_fn):
+                break
+            if self._stop_flag:
+                break
+            # 🚫 클라가 팅겨서 창이 사라졌으면 그 자리를 누르지 않는다
+            if not self._client_alive(slot):
+                self._status.set(f"🚫 #{si+1:02d} 클라가 없어졌습니다 — "
+                                 f"{j+1}번째에서 중단")
+                self._rlog(f"🚫 {key} #{si+1:02d} 클라 창 없음(팅김) → 좌표{j+1} "
+                           f"이후를 누르지 않고 이 슬롯 중단")
+                break
+            did = self._do_one_click(key, si, slot, j, labels[j], move_set,
+                                     tag=f"  (#{si+1:02d} {j+1}/{total} 이어서)")
+            if did is None:
+                # 🚫 그림/카드를 못 찾았다 → 이 슬롯만 끝낸다 (다른 슬롯은 계속)
+                self._rlog(f"🚫 {key} #{si+1:02d} 좌표{j+1} 에서 그림/카드를 못 찾아 "
+                           f"이 슬롯 중단 (이어서 구간, 다른 슬롯은 계속)")
+                break
+            if not did:
+                continue          # 빈 칸은 기다리지 않고 통과
+            done += 1
+            if j + 1 < total:
+                gl = slot.get("gap_list") or []
+                g = gl[j] if j < len(gl) else None
+                time.sleep(self._gap_seconds(g) * st["sp"] * pace
+                           * random.uniform(*WAVE_GAP_MULT))
+        st["j"] = total           # 이 슬롯은 여기서 끝 (웨이브가 다음 슬롯 투입)
+        return done
 
     def _run(self, key, slot_idx=None, sel_list=None):
         self._slot_running = True
