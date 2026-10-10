@@ -4135,22 +4135,31 @@ class App(tk.Tk):
     def _start_claude_behind(self):
         """런처가 켜질 때 **클로드도 같이 켠다 — 단, 뒤에** (2026-08-29 사용자 지시).
 
-        이미 떠 있으면 새로 켜지 않는다. 켠 뒤에는 뒤로 보내고
-        메인런처를 앞으로 올린다."""
+        이미 떠 있으면 새로 켜지 않는다. 켠 뒤에는 **클로드만** 뒤로 보낸다.
+        ⚠ 예전에는 여기서 **메인런처를 앞으로 올렸다**(`_claude_to_back_me_front`).
+          이 길은 업데이트·워치독 재시작·4:50 자동시작 전부 지나므로,
+          재시작할 때마다 런처가 리니지M 클라를 덮었다 (2026-10-11 사용자 신고:
+          "업데이트 하거나 그래도 맨 뒤로 보내줘"). 이제 런처는 건드리지 않는다."""
         try:
             if self._claude_running():
-                self.after(1200, self._claude_to_back_me_front)
+                self.after(1200, self._claude_to_back)
                 return
             subprocess.Popen(["explorer.exe",
                               "shell:appsFolder\\" + self.CLAUDE_AUMID])
             # 창이 뜨는 데 시간이 걸린다 — 몇 번 확인하며 뒤로 보낸다
             for _ms in (2500, 4000, 6000, 9000):
-                self.after(_ms, self._claude_to_back_me_front)
+                self.after(_ms, self._claude_to_back)
         except Exception:
             pass
 
-    def _claude_to_back_me_front(self):
-        """클로드는 뒤로, 메인런처는 앞으로."""
+    def _claude_to_back(self):
+        """클로드만 맨 뒤로 — **메인런처는 건드리지 않는다** (2026-10-11).
+
+        사용자: *"업데이트 하거나 그래도 맨 뒤로 보내줘."*
+        예전 이름은 `_claude_to_back_me_front` 였고 끝에
+        `self.deiconify(); self.lift()` 가 있어서, **런처가 켜질 때마다**
+        (업데이트·워치독 재시작·4:50 자동시작) 자기를 앞으로 올려 클라를 덮었다.
+        🚫 여기에 `lift()`·`deiconify()`·`SetForegroundWindow` 를 다시 넣지 말 것."""
         try:
             import win32gui, win32con
             _f = win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
@@ -4167,9 +4176,11 @@ class App(tk.Tk):
             win32gui.EnumWindows(_cb, None)
         except Exception:
             pass
+        # 🔙 런처는 **앞으로 올리지 않는다.** 최소화돼 있을 때만 뒤에서 풀어준다
+        #    (`deiconify()` 는 최소화를 풀면서 앞으로도 올리므로 쓰지 않는다).
         try:
-            self.deiconify()
-            self.lift()
+            if self.state() == "iconic":
+                self._show_back_noactivate()
         except Exception:
             pass
 
