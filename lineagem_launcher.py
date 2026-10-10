@@ -3759,6 +3759,16 @@ class App(tk.Tk):
         self.after(4000, self._sync_prestart_tasks)   # 스케줄 10분 전 자동시작 작업 동기화
         self.after(1000, self._mail_scheduler_tick)
         self.after(1000, self._past_scheduler_tick)
+        # 📱 폰(텔레그램) 명령 받기 — 1초마다 **파일 시각만** 본다 (부하 0).
+        #    켤 때 남아 있던 옛 명령으로 저절로 실행되지 않게,
+        #    지금 시각을 먼저 기억해둔다 (`_bot_cmd_m`).
+        try:
+            _bp = self._bot_path("bot_cmd.json")
+            self._bot_cmd_m = os.path.getmtime(_bp) if os.path.exists(_bp) else 0
+        except Exception:
+            self._bot_cmd_m = 0
+        self.after(1500, self._bot_tick)
+        self.after(4000, self._bot_start_watcher)
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
         self.after(2000, self._queue_tick)               # 실행 대기열 순차 처리
         self.after(3000, self._auto_back_tick)           # 다른 창을 클릭하면 런처를 바로 맨 뒤로
@@ -23518,6 +23528,159 @@ class App(tk.Tk):
                 self.after(0, self._restore_back)
             except Exception:
                 pass
+
+    # ── 📱 폰(텔레그램) 명령 ────────────────────────────────────────────────
+    #    봇은 `lineagem_bot.py` — **별도 프로세스**다. 명령은 파일로 주고받는다
+    #    (이 저장소가 이미 쓰는 방식: `bar.json` 의 `raise`, `island_run.json` 의 `pid`).
+    BOT_CMD_FRESH = 120        # 이보다 오래된 명령은 버린다 (초)
+
+    @staticmethod
+    def _bot_path(name):
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        return os.path.join(d, name)
+
+    def _bot_out(self, text="", photo=None, chat=None):
+        """봇이 폰으로 보낼 답을 적어둔다. 봇이 1초마다 읽어 보내고 지운다."""
+        try:
+            p = self._bot_path("bot_out.json")
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            d = {"text": text, "at": time.time()}
+            if photo:
+                d["photo"] = photo
+            if chat:
+                d["chat_id"] = str(chat)
+            tmp = p + ".tmp"
+            io.open(tmp, "w", encoding="utf-8").write(
+                json.dumps(d, ensure_ascii=False))
+            os.replace(tmp, p)          # 원자적 — 봇이 반쪽 파일을 읽지 않게
+        except Exception:
+            pass
+
+    def _bot_tick(self):
+        """1초마다 `bot_cmd.json` 의 **수정시각만** 확인한다 (파일을 읽지 않는다)."""
+        try:
+            p = self._bot_path("bot_cmd.json")
+            m = os.path.getmtime(p) if os.path.exists(p) else 0
+            if m and m != getattr(self, "_bot_cmd_m", 0):
+                self._bot_cmd_m = m
+                self._bot_do(p)
+        except Exception:
+            pass
+        self.after(1000, self._bot_tick)
+
+    def _bot_do(self, path):
+        """폰에서 온 명령 하나를 실행한다. **버튼을 누를 때만 들어온다.**"""
+        try:
+            d = json.load(io.open(path, encoding="utf-8"))
+        except Exception:
+            return
+        cmd = (d.get("cmd") or "").strip()
+        chat = d.get("chat_id")
+        # 🚫 오래된 명령은 버린다 — 런처를 켤 때 남아 있던 파일로 실행되면 안 된다
+        if time.time() - float(d.get("at") or 0) > self.BOT_CMD_FRESH:
+            click_log(f"[봇] 오래된 명령 '{cmd}' 은 버렸다 (실행하지 않음)")
+            return
+        click_log(f"[봇] 폰에서 '{cmd}' 명령을 받았다")
+        if cmd == "stop":
+            self._stop()
+            self._bot_out("■ 전체멈춤 — 돌던 작업을 전부 껐습니다.", chat=chat)
+            return
+        if cmd == "status":
+            self._bot_out(self._bot_status_text(), chat=chat)
+            return
+        if cmd == "shot":
+            # 📸 화면 긁기는 **반드시 스레드로** — 여기서 하면 창이 멈춘다
+            threading.Thread(target=self._bot_shot, args=(chat,),
+                             daemon=True).start()
+            self._bot_out("📸 화면을 찍는 중…", chat=chat)
+            return
+        if cmd == "reconnect":
+            if self._is_busy():
+                self._bot_out("⏸ 지금 다른 작업이 돌고 있습니다 — "
+                              "대기열에 넣었습니다.", chat=chat)
+            else:
+                self._bot_out("🔄 재접속 시작 — 퍼플 실행 → 계정 접속 → "
+                              "캐릭 선택 → 사냥", chat=chat)
+            # 사용자가 [전체 자동실행] 을 누른 것과 **같은 길**을 탄다
+            # (좌표 검사·대기열·최소화가 전부 그대로 적용된다)
+            self.after(0, self._start)
+            return
+        self._bot_out(f"모르는 명령입니다: {cmd}", chat=chat)
+
+    def _bot_status_text(self):
+        """📋 지금 상태 — 밖에서 한 눈에 보도록."""
+        try:
+            now = self.status.get()
+        except Exception:
+            now = "(알 수 없음)"
+        busy = "예" if self._is_busy() else "아니오"
+        try:
+            rep = json.load(io.open(self._bot_path("island_repeat.json"),
+                                    encoding="utf-8"))
+            nrep = len([k for k in rep if not k.startswith("_")])
+        except Exception:
+            nrep = 0
+        try:
+            warn = sorted(self._warn_load())
+        except Exception:
+            warn = []
+        return ("🌙 Moon-AI 지금 상태\n\n"
+                f"작업 중: {busy}\n"
+                f"상태줄: {now}\n"
+                f"⏰ 반복 걸린 슬롯: {nrep}개\n"
+                f"🩹 복구해야함: {warn if warn else '없음'}")
+
+    def _bot_shot(self, chat=None):
+        """지금 화면을 사진으로 — 16클라가 한 화면에 있으니 통째로 찍는다.
+        ⚠ 백그라운드 스레드에서만 부를 것 (ImageGrab 은 무겁다)."""
+        try:
+            from PIL import ImageGrab
+            im = ImageGrab.grab()
+            if im.width > 1600:                 # 폰으로 보낼 만큼 줄인다
+                h = int(im.height * 1600 / im.width)
+                im = im.resize((1600, h))
+            p = self._bot_path("bot_shot.jpg")
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            im.convert("RGB").save(p, "JPEG", quality=72)
+            self._bot_out(time.strftime("📸 %m-%d %H:%M:%S 화면"),
+                          photo=p, chat=chat)
+        except Exception as e:
+            self._bot_out(f"📸 실패: {e}", chat=chat)
+
+    def _bot_start_watcher(self):
+        """봇이 안 돌고 있으면 켜둔다 — **창도 없고 아무것도 클릭하지 않는다.**
+        (클로드 창을 뒤에 켜두는 `_start_claude_behind` 와 같은 성격)"""
+        try:
+            tok = ""
+            try:
+                tok = (json.load(io.open(os.path.join(BASE,
+                       "local_config.json"), encoding="utf-8"))
+                       .get("telegram_token") or "").strip()
+            except Exception:
+                pass
+            if not tok:
+                return                       # 토큰이 없으면 아무것도 안 한다
+            # 이미 돌고 있나 — pid 가 살아 있는지 커널에 바로 물어본다
+            try:
+                pid = int(json.load(io.open(self._bot_path("bot_run.json"),
+                                            encoding="utf-8")).get("pid") or 0)
+            except Exception:
+                pid = 0
+            if pid:
+                import ctypes
+                h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+                if h:
+                    ctypes.windll.kernel32.CloseHandle(h)
+                    return                   # 살아 있다 — 새로 켜지 않는다
+            f = os.path.join(BASE, "lineagem_bot.py")
+            if not os.path.exists(f):
+                return
+            subprocess.Popen(["pythonw", f], cwd=BASE,
+                             creationflags=getattr(subprocess,
+                                                   "CREATE_NO_WINDOW", 0))
+            click_log("[봇] 텔레그램 봇을 켰다 (창 없음 · 버튼을 누를 때만 움직인다)")
+        except Exception:
+            pass
 
     def _stop(self):
         self._stop_flag      = True
