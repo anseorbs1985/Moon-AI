@@ -221,6 +221,15 @@ FIX_GAP_MAX        = 1.25
 # 슬롯의 **첫 좌표를 누르기 전에** 그 창을 앞으로 올리고 이만큼 기다린다.
 # 비활성 창의 첫 클릭은 '창 띄우기'로만 먹히고 사라진다 (2026-08-24 에 이미 겪은 것).
 FIX_FOCUS_WAIT     = (0.35, 0.60)
+# 🔍 복구를 누르기 전 **십자가를 몇 번 보나** (2026-10-11 사용자 신고:
+#    "복구에 실패하는 게 너무 많아, 꼼꼼히 잘 좀 보고 해줘").
+#    십자가 점수는 기준(0.55) 바로 옆에서 흔들린다 — 실측 있을 때 0.57~0.85 ·
+#    없을 때 0.35~0.55. 한 번만 보면 놓쳐서 **복구를 안 하고 목록에서 지운다**
+#    (10-10 20:26 에 #11·#12 가 뜬 지 36초 만에 그렇게 지워졌다).
+#    **한 번이라도 보이면 복구를 돌린다.** 세 번 다 안 보여야 '이미 복구됨' 이다.
+#    ⏱ 속도는 그대로다 — 있으면 첫 번에 보이고 끝난다 (한 슬롯 0.07초).
+FIX_SEE_TRIES      = 3
+FIX_SEE_GAP        = (0.25, 0.45)
 # 📤 떼어낸 슬롯판(오만의탑·악몽의섬 …)의 **앞뒤와 최소화만** 메인런처에 맞춘다.
 # 자리는 건드리지 않는다 — 떼었을 때 그 자리, 사용자가 옮긴 자리가 전부다
 # (2026-09-30 사용자 재지시: "떼면 그 자리에 그대로 올라오게 해주라")
@@ -14219,15 +14228,30 @@ class App(tk.Tk):
         # 목록에 남고 → 5분 유휴 자동복구가 그 클라를 깨워 또 시도하고 →
         # 또 '안 보이니 취소' → 목록에 그대로 … 영원히 반복.
         try:
-            hit = self._check_hits()
-            if hit is not None and int(si) not in set(hit):
+            # 🔍 **한 번만 보고 판단하지 않는다** (2026-10-11).
+            #    한 번 놓치면 복구를 하나도 안 하고 목록에서 지워버렸다.
+            #    보이면 첫 번에 끝나므로 **속도는 그대로다.**
+            hit, _seen = None, False
+            for _t in range(FIX_SEE_TRIES):
+                hit = self._check_hits()
+                if hit is None:
+                    break                  # 확인 자체가 불가(기준 그림 없음 등)
+                if int(si) in set(hit):
+                    _seen = True
+                    if _t:
+                        click_log(f"fix #{si:02d} 십자가가 {_t+1}번째에 보였다 — "
+                                  f"한 번만 봤으면 복구를 안 하고 지웠을 것")
+                    break
+                if _t < FIX_SEE_TRIES - 1:
+                    time.sleep(random.uniform(*FIX_SEE_GAP))
+            if hit is not None and not _seen:
                 _still_sleep = int(si) in getattr(self, "_last_sleep", set())
                 if _woke and not _still_sleep:
                     self._warn_save(sorted(set(self._warn_load()) - {int(si)}))
                     self._fix_paid_mark(int(si), False)     # 💎 다야 표시도 해제
                     self.after(0, self._warn_refresh)
-                    click_log(f"fix #{si:02d} 십자가가 없다 — 이미 복구된 것으로 보고 "
-                              f"목록에서 지웠다"
+                    click_log(f"fix #{si:02d} 십자가가 {FIX_SEE_TRIES}번 다 안 보였다 — "
+                              f"이미 복구된 것으로 보고 목록에서 지웠다"
                               + (" (절전에서 깨운 뒤 확인)" if _was_sleep else ""))
                     self.status.set(f"✅ #{si:02d} 십자가가 없어 목록에서 지웠습니다 "
                                     f"(이미 복구된 것 — 아무것도 누르지 않았습니다)")
