@@ -5225,6 +5225,7 @@ class IslandApp(tk.Tk):
         if _rm in RASTA_FIRST:
             if not self._rasta_do(key, j, si, slot, coords, name, lbl):
                 return None            # ← 이 슬롯 중단 (웨이브는 다른 슬롯 계속)
+            self._last_focus = si      # 🖼 처리가 그 클라를 앞으로 올려뒀다
             if rec and not self._stop_flag:
                 self._focus_client(si, c)
                 self._play_events(rec, name)
@@ -5251,11 +5252,24 @@ class IslandApp(tk.Tk):
             if j in move_set:
                 pyautogui.moveTo(*c)
             else:
+                # 🌊 그 클라를 먼저 앞으로 — **비활성 창은 첫 클릭이 '창 띄우기'로만
+                #    먹히고 사라진다** (2026-08-24 교훈). 웨이브는 슬롯이 번갈아 돌아
+                #    클릭마다 창이 바뀌므로 개별 실행보다 훨씬 자주 걸린다.
+                #    이게 없어서 **전체실행만 한 지점에서 멈췄다** (2026-10-10).
+                #    같은 클라가 이어지면 다시 올리지 않는다 (`_last_focus`).
+                if self._last_focus != si:
+                    try:
+                        self._focus_client(si, c)
+                        time.sleep(random.uniform(0.25, 0.45))
+                    except Exception:
+                        pass
+                    self._last_focus = si
                 click_at(*c)
             did = True
         if rec and not self._stop_flag:
             # 녹화는 키보드 입력이라 '앞에 있는 창'으로만 들어간다 → 이 클라를 먼저 앞으로
             self._focus_client(si, c)
+            self._last_focus = si        # 방금 올렸으니 다음 클릭은 또 올리지 않는다
             self._play_events(rec, name)
             did = True
         if did:
