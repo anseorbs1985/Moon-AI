@@ -6928,6 +6928,7 @@ class App(tk.Tk):
         tk.Label(parent, text="좌표 등록  (버튼 → 3초 후 해당 위치 클릭)",
                  font=("맑은 고딕", 8), fg="#888").pack(anchor="w", padx=4)
         self._coord_vars = {}
+        self._login_rows = {}
         for key, label in LABELS.items():
             row = tk.Frame(parent); row.pack(fill="x", padx=4, pady=1)
             tk.Label(row, text=label, font=("맑은 고딕", 8),
@@ -6940,6 +6941,27 @@ class App(tk.Tk):
                       command=lambda k=key: self._reg_coord(k)).pack(side="right")
             tk.Button(row, text="👁", font=("맑은 고딕", 7), width=2,
                       command=lambda k=key: self._preview_label_coord(k)).pack(side="right", padx=1)
+            # 🔐 접속 단계는 **이 줄에서 바로** 그림을 등록한다 (2026-10-12 사용자 지시:
+            #    "좌표등록 안에 01 02 03 이렇게 옆에다가 그대로 냅둬야 하는 거 아니냐").
+            #    그림이 있으면 그 단계는 **그림을 찾아** 누르고, 못 찾으면 멈춘다.
+            #    ⚠ 같은 목록을 가진 창을 따로 만들지 말 것 — 보는 곳이 갈린다.
+            if key in LOGIN_IDX:
+                _th = tk.Label(row, width=8)
+                _th.pack(side="right", padx=(2, 0))
+                _b3 = tk.Button(row, text="🔍", font=("맑은 고딕", 7), width=2,
+                                command=lambda k=key: self._login_test(k))
+                _b3.pack(side="right", padx=1)
+                _b2 = tk.Button(row, text="📐", font=("맑은 고딕", 7), width=2,
+                                command=lambda k=key: self._login_area(k))
+                _b2.pack(side="right", padx=1)
+                _b2.bind("<Button-3>", lambda e, k=key: self._login_area_del(k))
+                _b1 = tk.Button(row, font=("맑은 고딕", 7), width=5,
+                                command=lambda k=key: self._login_grab(k))
+                _b1.pack(side="right", padx=1)
+                _b1.bind("<Button-3>", lambda e, k=key: self._login_del(k))
+                self._login_rows[key] = (_b1, _b2, _th)
+        # 🖼/📐 상태를 처음 한 번 그려준다 (등록됐는지 눈에 보이게)
+        self.after(400, self._login_paint)
 
         # 프로필 아이디 OCR 설정
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=3)
@@ -16769,10 +16791,6 @@ class App(tk.Tk):
             #     저기에서 입력하면 네가 넣어주라는 거야")
             ("🏢 용던층" + chr(10) + "확인!!", "#1a5276", self._open_dragon_floor,
              "#154360", self._open_dragon_floor),
-            # 🔐 접속을 좌표 대신 **그림**으로 (2026-10-12 사용자 요청:
-            #    "좌표로 하니까 하나 잘못 클릭하면 전부 다 안 되어버려서")
-            ("🔐 접속" + chr(10) + "그림", "#8e44ad", self._open_login_img,
-             None, None),
         ]
         # 안 쓰는 런처의 버튼은 만들지 않는다 (HIDE_LAUNCHERS)
         fixed = [f for f in fixed if f[0] not in HIDE_LAUNCHERS]
@@ -23629,81 +23647,20 @@ class App(tk.Tk):
             pyautogui.click(int(p[0]), int(p[1]))
         return True
 
-    # ── 🖼 접속 그림 등록 창 ───────────────────────────────────────────────
-    def _open_login_img(self):
-        """단계마다 🖼(그림) · 📐(범위) · 🔍(지금 찾아보기) 를 둔 작은 창."""
-        if getattr(self, "_login_win", None) is not None:
-            try:
-                self._login_win.deiconify(); self._login_win.lift(); return
-            except Exception:
-                pass
-        win = tk.Toplevel(self)
-        self._login_win = win
-        win.title("🔐 접속 그림 — 좌표 대신 그림으로 누른다")
-        win.geometry("+120+120")
-        def _close():
-            self._login_win = None
-            try: win.destroy()
-            except Exception: pass
-        win.protocol("WM_DELETE_WINDOW", _close)
-        tk.Label(win, font=("맑은 고딕", 9), justify="left", fg="#555",
-                 text=("그림을 등록한 단계는 **그림을 찾아** 누릅니다 — "
-                       "못 찾으면 아무것도 누르지 않고 멈춥니다." + chr(10) +
-                       "그림이 없는 단계는 예전처럼 등록한 좌표를 누릅니다 "
-                       "(한 단계씩 바꿔가도 됩니다)." + chr(10) +
-                       "🖼 = 드래그로 그 버튼의 **글자**를 작게 자르기 "
-                       "(오른쪽 클릭 = 지우기) · 📐 = 훑을 범위 · 🔍 = 지금 찾아보기")
-                 ).pack(anchor="w", padx=8, pady=(8, 4))
-        self._login_rows = {}
-        body = tk.Frame(win); body.pack(padx=8, pady=(0, 8))
-        for i, (k, nm) in enumerate(LOGIN_STEPS):
-            r = tk.Frame(body); r.pack(fill="x", pady=1)
-            tk.Label(r, text=f"{i+1:02d}", font=("맑은 고딕", 9, "bold"),
-                     width=3).pack(side="left")
-            tk.Label(r, text=nm, font=("맑은 고딕", 9), width=20,
-                     anchor="w").pack(side="left")
-            lbl = tk.Label(r, font=("맑은 고딕", 8), width=13, anchor="w")
-            lbl.pack(side="left")
-            b1 = tk.Button(r, font=("맑은 고딕", 8), width=7, pady=0,
-                           command=lambda kk=k: self._login_grab(kk))
-            b1.pack(side="left", padx=1)
-            b1.bind("<Button-3>", lambda e, kk=k: self._login_del(kk))
-            b2 = tk.Button(r, text="📐", font=("맑은 고딕", 8), width=3, pady=0,
-                           command=lambda kk=k: self._login_area(kk))
-            b2.pack(side="left", padx=1)
-            b2.bind("<Button-3>", lambda e, kk=k: self._login_area_del(kk))
-            tk.Button(r, text="🔍", font=("맑은 고딕", 8), width=3, pady=0,
-                      command=lambda kk=k: self._login_test(kk)).pack(side="left")
-            th = tk.Label(r, width=10)
-            th.pack(side="left", padx=(4, 0))
-            self._login_rows[k] = (lbl, b1, b2, th)
-        self._login_msg = tk.Label(win, font=("맑은 고딕", 9), fg="#1a5276",
-                                   justify="left", wraplength=560, text="")
-        self._login_msg.pack(anchor="w", padx=8, pady=(0, 8))
-        try: apply_dark(win)
-        except Exception: pass
-        self._login_paint()
-
+    # ── 🖼 접속 그림 — 좌표등록 창의 그 줄에서 다룬다 (따로 창을 만들지 않는다) ──
     def _login_paint(self):
-        """각 줄의 좌표·그림 상태를 다시 그린다 (등록됐는지 눈에 보이게).
+        """좌표등록 줄의 🖼/📐 상태와 썸네일을 다시 그린다.
         (2026-09-16 규칙: '등록을 했으면 보여줘야 등록이 됐는지 알잖아')"""
         if not getattr(self, "_login_rows", None):
             return
         self._login_photo = getattr(self, "_login_photo", {})
-        for k, (lbl, b1, b2, th) in self._login_rows.items():
+        for k, (b1, b2, th) in self._login_rows.items():
             j = LOGIN_IDX[k]
-            c = self.cfg.get(k)
             try:
-                lbl.config(text=(f"＋{int(c[0])},{int(c[1])}" if c else "— 없음"),
-                           fg=("#1e8449" if c else "#999"),
-                           font=("맑은 고딕", 8, "bold" if c else "normal"))
-            except Exception:
-                pass
-            n = len(img_list(LOGIN_FKEY, j))
-            b1.config(text=("🖼" if not n else (f"🖼{n}장" if n > 1 else "🖼있음")),
-                      bg=("#8e44ad" if n else "#ddd"),
-                      fg=("white" if n else "black"))
-            try:
+                n = len(img_list(LOGIN_FKEY, j))
+                b1.config(text=("🖼" if not n else (f"🖼{n}" if n > 1 else "🖼✔")),
+                          bg=("#8e44ad" if n else "#ddd"),
+                          fg=("white" if n else "black"))
                 b2.config(bg=("#e67e22" if area_is_set(LOGIN_FKEY, j) else "#ddd"),
                           fg=("white" if area_is_set(LOGIN_FKEY, j) else "black"))
             except Exception:
@@ -23714,8 +23671,8 @@ class App(tk.Tk):
                 ps = img_list(LOGIN_FKEY, j)
                 if ps:
                     im = Image.open(ps[0])
-                    w = max(1, int(im.width * 18 / max(1, im.height)))
-                    im = im.resize((min(w, 90), 18))
+                    w = max(1, int(im.width * 14 / max(1, im.height)))
+                    im = im.resize((min(w, 64), 14))
                     self._login_photo[k] = ImageTk.PhotoImage(im)
                     th.config(image=self._login_photo[k], text="")
                 else:
@@ -23725,10 +23682,7 @@ class App(tk.Tk):
                 pass
 
     def _lmsg(self, text):
-        """안내는 **이 창 안에** 보여준다 — 뒤에 가려진 상태줄만 쓰면 안 보인다
-        (2026-10-03 교훈)."""
-        try: self._login_msg.config(text=text)
-        except Exception: pass
+        """안내는 메인런처 상태줄에 — 좌표등록이 그 창 안에 있으므로 여기가 맞다."""
         try: self.status.set(text)
         except Exception: pass
 
@@ -23740,20 +23694,16 @@ class App(tk.Tk):
         for w in self._section_wins():
             try: w.withdraw()
             except Exception: pass
-        try: self._login_win.withdraw()
-        except Exception: pass
         self.withdraw()
         self.after(250, lambda: _PotionAreaOverlay(self, self._on_login_img))
 
     def _login_back(self):
+        """드래그가 끝나면 숨긴 창을 되돌린다 — **앞으로 올리지 않는다**
+        (2026-10-06 절대 규칙: `deiconify()` 는 창을 앞으로도 올린다)."""
         self._show_back_noactivate()
         for wn in self._section_wins():
             try: wn.deiconify()
             except Exception: pass
-        try:
-            self._login_win.deiconify(); self._login_win.lift()
-        except Exception:
-            pass
 
     def _on_login_img(self, x, y, w, h):
         key = getattr(self, "_login_key", None)
@@ -23826,8 +23776,6 @@ class App(tk.Tk):
         for w in self._section_wins():
             try: w.withdraw()
             except Exception: pass
-        try: self._login_win.withdraw()
-        except Exception: pass
         self.withdraw()
         self.after(250, lambda: _PotionAreaOverlay(self, self._on_login_area))
 
