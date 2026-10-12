@@ -4907,7 +4907,12 @@ class App(tk.Tk):
             w.bind("<ButtonRelease-1>", _end)
 
     def _open_settings_win(self):
-        self._open_section_win("_settings_win", "⚙ 좌표 등록", self._build_left, w=320, h=680)
+        # ⚠ 320 → 660 (2026-10-12). 줄마다 ▶·🖼·📐·🔍·썸네일이 붙어서 320px 로는
+        #    **좌표 표시와 [등록] 버튼이 창 밖으로 밀려나** 보이지 않았다
+        #    (사용자: "너 좌표 입력 칸도 없애 버렸냐? 좌표 등록은 어디에서 해야 하냐").
+        #    ⚠ 이 줄에 위젯을 더 붙일 때는 **창 폭도 같이 늘릴 것.**
+        self._open_section_win("_settings_win", "⚙ 좌표 등록", self._build_left,
+                               w=660, h=760)
 
     def _open_hunt_win(self):
         self._open_section_win("_hunt_win", "🏹 사냥", self._build_right, w=470, h=620)
@@ -6935,12 +6940,16 @@ class App(tk.Tk):
         for key, label in LABELS.items():
             row = tk.Frame(parent); row.pack(fill="x", padx=4, pady=1)
             tk.Label(row, text=label, font=("맑은 고딕", 8),
-                     width=18, anchor="w").pack(side="left")
+                     width=16, anchor="w").pack(side="left")
             var = tk.StringVar()
             self._coord_vars[key] = var
-            tk.Label(row, textvariable=var, font=("맑은 고딕", 7),
-                     fg="gray", width=12).pack(side="left")
-            tk.Button(row, text="등록", font=("맑은 고딕", 7),
+            # 좌표 표시 — 등록되면 초록 굵은 글씨, 없으면 회색 (`_refresh_ui` 가 채운다)
+            tk.Label(row, textvariable=var, font=("맑은 고딕", 8),
+                     fg="#1e8449", width=11, anchor="w").pack(side="left")
+            # [좌표등록] — 누르면 3초 뒤 그 자리를 클릭해 좌표를 잡는다.
+            # ⚠ 줄이 좁으면 이 버튼이 **창 밖으로 밀려나** 보이지 않는다 (2026-10-12).
+            tk.Button(row, text="좌표등록", font=("맑은 고딕", 8), width=7,
+                      bg="#2471a3", fg="white", activebackground="#1a5276",
                       command=lambda k=key: self._reg_coord(k)).pack(side="right")
             tk.Button(row, text="👁", font=("맑은 고딕", 7), width=2,
                       command=lambda k=key: self._preview_label_coord(k)).pack(side="right", padx=1)
