@@ -454,9 +454,12 @@ SLOW_SLOT_GAP = (4.0, 7.5)  # 슬롯 사이
 EXTRA_GAP_MIN  = 1.04
 EXTRA_GAP_MAX  = 2.02
 
-# 좌표등록 미리보기(👁)의 빨간 점 크기 — 기본 3 의 **4배** (2026-09-09 사용자 요청).
-# 좌표등록은 점이 하나뿐이라 크게 해도 겹치지 않는다. 다른 미리보기는 기본값 그대로.
-LABEL_DOT_R = 12
+# 좌표등록 미리보기(👁)의 빨간 **도트** 크기 — 기본 3 의 **8배**.
+#   2026-09-09 사용자 요청으로 3 → 12 (4배), 2026-10-12 사용자 요청으로 **12 → 24**
+#   ("미리보기 하잖아 그거 도트를 2배로 키워주라").
+#   좌표등록은 점이 **하나뿐**이라 크게 해도 겹치지 않는다.
+#   ⚠ 다른 미리보기(슬롯·던전)는 점이 많아 크면 겹친다 — **같이 키우지 말 것.**
+LABEL_DOT_R = 24
 
 DEFAULT_CFG = {
     "pre_click1":  None,                # 리니지M 전에 먼저 누를 자리 ① (비우면 건너뜀)
@@ -6941,6 +6944,12 @@ class App(tk.Tk):
                       command=lambda k=key: self._reg_coord(k)).pack(side="right")
             tk.Button(row, text="👁", font=("맑은 고딕", 7), width=2,
                       command=lambda k=key: self._preview_label_coord(k)).pack(side="right", padx=1)
+            # ▶ **그 단계만 지금 한 번** 눌러본다 (2026-10-12 사용자 요청:
+            #    "각각 옆에 실행버튼을 다 만들어줘 개별로. 지금 접속이 굉장히 이상해")
+            tk.Button(row, text="▶", font=("맑은 고딕", 7, "bold"), width=2,
+                      bg="#1e8449", fg="white", activebackground="#166b3a",
+                      command=lambda k=key: self._run_one_coord(k)
+                      ).pack(side="right", padx=1)
             # 🔐 접속 단계는 **이 줄에서 바로** 그림을 등록한다 (2026-10-12 사용자 지시:
             #    "좌표등록 안에 01 02 03 이렇게 옆에다가 그대로 냅둬야 하는 거 아니냐").
             #    그림이 있으면 그 단계는 **그림을 찾아** 누르고, 못 찾으면 멈춘다.
@@ -16664,9 +16673,9 @@ class App(tk.Tk):
                 pass
             self.status.set(f"✔ {LABELS[k]} 좌표 이동 저장 ({int(nx)},{int(ny)})")
 
-        # 점을 **4배 크게** (3 → 12) — 좌표등록 미리보기에만 적용한다.
+        # 도트를 **8배 크게** (기본 3 → 24) — 좌표등록 미리보기에만 적용한다.
         # 다른 미리보기(슬롯·던전 등)는 점이 많아 크면 겹치므로 기본 크기 그대로 둔다
-        # (2026-09-09 사용자 요청: "딱 여기에만, 지금 네 배 크기로").
+        # (2026-09-09 "딱 여기에만 네 배", 2026-10-12 "도트를 2배로" → 24).
         self._open_dot_preview(LABELS[key], dots,
                                lambda _: self._reg_coord(key), save_fn=_save,
                                dot_r=LABEL_DOT_R)
@@ -23646,6 +23655,56 @@ class App(tk.Tk):
         else:
             pyautogui.click(int(p[0]), int(p[1]))
         return True
+
+    def _run_one_coord(self, key):
+        """▶ **그 단계만 지금 한 번** 눌러본다 (2026-10-12 사용자 요청:
+        "각각 옆에 실행버튼을 다 만들어줘 개별로. 지금 접속이 뭔가 굉장히 이상해").
+
+        접속이 이상할 때는 한 단계씩 눌러보며 어디가 틀렸는지 짚는 것이 가장 빠르다.
+        접속 단계는 **평소 실행과 똑같은 길**을 탄다 — 그림이 있으면 그림을 찾아
+        누르고, 못 찾으면 **아무것도 누르지 않는다.**
+
+        ⚠ **창을 치우고 누른다.** 좌표등록 창은 `-topmost` 라 퍼플 창을 덮으므로
+          그대로 누르면 그 창이 클릭을 먹는다 (2026-10-05 F11 절전해제에서 같은 일).
+          '맨 뒤로' 로는 안 된다 — topmost 창은 맨 뒤로 보내도 위에 남는다.
+          숨김 → 0.35초 → 클릭 → 되올림 순서를 바꾸지 말 것.
+        """
+        if self._is_busy():
+            self.status.set("⏸ 다른 작업이 돌고 있어 지금은 누르지 않습니다")
+            return
+        nm = LABELS.get(key, key)
+        saved = self._wins_hide()
+        self.update_idletasks()
+
+        def _go():
+            time.sleep(0.35)            # 창이 사라질 틈
+            try:
+                if key in LOGIN_IDX:
+                    ok = self._lclick(
+                        key,
+                        hover=key in ("google_acc", "confirm_btn"),
+                        move_only=(key == "confirm_hover"))
+                else:
+                    c = self.cfg.get(key)
+                    ok = bool(c)
+                    if c:
+                        pyautogui.click(int(c[0]), int(c[1]))
+                if ok:
+                    msg = f"✔ {nm} — 눌렀습니다"
+                else:
+                    msg = (f"✘ {nm} — 아무것도 누르지 않았습니다 "
+                           f"(그림을 못 찾았거나 좌표가 없습니다)")
+            except Exception as e:
+                msg = f"✘ {nm} 실행 오류: {e}"
+            click_log(f"[접속] ▶ 개별 실행 — {msg}")
+
+            def _back():
+                self._wins_show(saved)      # 창을 되돌린다
+                self.status.set(msg)
+            self.after(0, _back)
+
+        self.status.set(f"▶ {nm} — 창을 치우고 한 번 누릅니다…")
+        threading.Thread(target=_go, daemon=True).start()
 
     # ── 🖼 접속 그림 — 좌표등록 창의 그 줄에서 다룬다 (따로 창을 만들지 않는다) ──
     def _login_paint(self):
