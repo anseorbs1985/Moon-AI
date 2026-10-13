@@ -221,6 +221,10 @@ FIX_GAP_MAX        = 1.25
 # 슬롯의 **첫 좌표를 누르기 전에** 그 창을 앞으로 올리고 이만큼 기다린다.
 # 비활성 창의 첫 클릭은 '창 띄우기'로만 먹히고 사라진다 (2026-08-24 에 이미 겪은 것).
 FIX_FOCUS_WAIT     = (0.35, 0.60)
+# 🩹 **2회차는 꼼꼼히** (2026-10-13 사용자 지시: "한 번은 지금 속도와 똑같이 하고,
+#    실패하게 되면은 다시 꼼꼼히 다시 눌러줘"). 1회차는 지금 속도 그대로다.
+FIX_SLOW_MULT      = 2.2       # 2회차 간격·창 올리는 틈 배수
+CHECK_TRIES_SLOW   = 8         # 2회차 👁 '무료' 확인 횟수 (1회차는 CHECK_TRIES=4)
 # 🔍 복구를 누르기 전 **십자가를 몇 번 보나** (2026-10-11 사용자 신고:
 #    "복구에 실패하는 게 너무 많아, 꼼꼼히 잘 좀 보고 해줘").
 #    십자가 점수는 기준(0.55) 바로 옆에서 흔들린다 — 실측 있을 때 0.57~0.85 ·
@@ -1868,7 +1872,13 @@ ITEMREG_HOTKEY   = 0x75          # 기본 F6 (창의 [단축키] 으로 바꿀 �
 # 기다렸다가** 누르므로, 고정 대기가 짧아도 헛발질하지 않는다.
 # 랜덤 폭은 없애지 않고 범위만 좁혔다 (사람처럼 규칙).
 # 🖼 확인은 **창이 뜨는 순간** 넘어가도록 촘촘히 본다 — 이래야 '딱 딱 딱' 이 된다.
-ITEMREG_SEE_GAP  = (0.05, 0.09)  # 다시 볼 때까지(초) — 한 번 보는 데 몇 ms 밖에 안 든다
+# 🏃 다시 볼 때까지(초). **0.05~0.09 → 0.01~0.03** (2026-10-13 사용자: "아이템
+#    확인하는 게 느렸어 많이"). 실측: 한 번 보는 데 **창 캡처 50ms + 매칭 12ms = 62ms**
+#    가 이미 든다. 그 위에 50~90ms 를 더 쉬면 **확인 속도가 사실상 절반**이 된다.
+#    캡처 자체가 박자를 만들어 주므로 이 쉼은 거의 필요 없다.
+#    ⚠ 0 으로 만들지 말 것 (랜덤 폭은 없애지 않는다 — '항상 사람처럼' 규칙).
+#    ⚠ 이걸 줄여도 **잘못 읽을 위험은 없다** — 판정 기준은 그대로고 더 자주 볼 뿐이다.
+ITEMREG_SEE_GAP  = (0.01, 0.03)
 ITEMREG_SEE_MAX  = 1.6           # 이 시간 안에 안 뜨면 중단 (뒤 키는 안 누른다)
 ITEMREG_SETTLE   = (0.15, 0.22)  # 창이 보인 뒤 '키를 받을 수 있게' 되기까지(초)
 # 내가 클릭한 뒤 **게임이 그 아이템을 고를 때까지** 기다리는 시간(초).
@@ -3802,6 +3812,8 @@ class App(tk.Tk):
         except Exception:
             self._bot_cmd_m = 0
         self.after(1500, self._bot_tick)
+        # 🔙 완료 후 최소화가 남아 있으면 맨 뒤로 되살린다 (복원을 빠뜨린 경로 대비)
+        self.after(3000, self._minauto_tick)
         self.after(4000, self._bot_start_watcher)
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
         self.after(2000, self._queue_tick)               # 실행 대기열 순차 처리
@@ -12409,7 +12421,10 @@ class App(tk.Tk):
             ix = iy = None
             sc = 0.0
             _chk_only = is_check_only(fkey, j)
-            _tries = (CHECK_TRIES if _chk_only else IMG_TRIES)
+            # 🐢 2회차(꼼꼼히)는 👁 확인을 더 여러 번 본다 — 실패는 늘 기준 바로
+            #    밑(0.68~0.69)에서 났다. 화면이 덜 그려진 순간을 본 것이라 더 보면 잡힌다.
+            _tries = ((CHECK_TRIES_SLOW if getattr(self, "_fix_slow", False)
+                       else CHECK_TRIES) if _chk_only else IMG_TRIES)
             _tries = max(_tries, IMG_TRIES_BY.get((fkey, j), 0))   # 🔷 더 오래 보는 자리
             for _t in range(_tries):
                 ix, iy, sc = find_image(fkey, j, coord)
@@ -13203,7 +13218,9 @@ class App(tk.Tk):
                 if fkey == "fix" and _anchor:
                     try:
                         self._focus_client_at(_anchor)
-                        time.sleep(random.uniform(*FIX_FOCUS_WAIT))
+                        time.sleep(random.uniform(*FIX_FOCUS_WAIT)
+                                   * (FIX_SLOW_MULT
+                                      if getattr(self, "_fix_slow", False) else 1.0))
                     except Exception:
                         pass
                 order = [j for j in range(nclk)
@@ -13245,8 +13262,11 @@ class App(tk.Tk):
                     if fkey == "fix":
                         # 🩹 복구 간격 — 2026-09-29 에 0.30~0.60 → 0.70~1.25 로 넓혔다.
                         # 너무 연속적으로 눌러 창이 뜨기 전에 다음 좌표가 씹혔다.
+                        # 🐢 **2회차(꼼꼼히)는 FIX_SLOW_MULT 배** (2026-10-13)
+                        _fm = (FIX_SLOW_MULT if getattr(self, "_fix_slow", False)
+                               else 1.0)
                         self._wait_gap(stop, name, j,
-                                       random.uniform(FIX_GAP_MIN, FIX_GAP_MAX))
+                                       random.uniform(FIX_GAP_MIN, FIX_GAP_MAX) * _fm)
                     elif fkey in ("dragon", "knight"):
                         # 정해둔 범위에서 랜덤 (좌표2→3은 더 쉬어준다)
                         _left -= 1
@@ -13542,6 +13562,16 @@ class App(tk.Tk):
         hdr = getattr(self, "_warn_hdr", None)   # 개수 표시는 쓰지 않는다 (사용자 지시)
         if hdr and hdr.winfo_exists():
             hdr.pack_forget()
+        # 🟣 영웅(보라) 아이템 — **아직 안 판 것**을 들고 있는 목록 (2026-10-13).
+        #    복구 목록과 **같은 틀**에 그린다 — 따로 창을 만들지 않는다
+        #    (2026-10-12 교훈: "같은 목록을 가진 창을 따로 만들지 말 것").
+        for _hk, _hv in sorted(self._hero_load().items()):
+            _hr = tk.Frame(box); _hr.pack(fill="x", pady=1)
+            tk.Button(_hr, text=f"🟣 영웅 {_hk}  ({(_hv or {}).get('at', '')})",
+                      font=("맑은 고딕", 9, "bold"), bg="#6c3483", fg="white",
+                      activebackground="#512e5f", anchor="w",
+                      command=lambda q=_hk: self._hero_remove(q)
+                      ).pack(side="left", fill="x", expand=True)
         for si in slots:
             row = tk.Frame(box); row.pack(fill="x", pady=1)
             # 누르면 그 슬롯만 복구를 돌린다 (2026-08-29 사용자 요청).
@@ -14244,11 +14274,24 @@ class App(tk.Tk):
             pass
         return None
 
-    def _run_fix_slot(self, si, _bulk=False):
+    def _run_fix_slot(self, si, _bulk=False, slow=False):
         """'복구해야함 03' 을 누르면 **그 슬롯만** 복구를 돌린다 (2026-08-29 사용자 요청).
 
         좌표4 의 👁 '무료' 확인을 통과할 때만 뒤 좌표를 누르므로,
-        재화가 드는 상태면 그 자리에서 멈춘다 — 눌러도 안전하다."""
+        재화가 드는 상태면 그 자리에서 멈춘다 — 눌러도 안전하다.
+
+        `slow=True` 는 **2회차(꼼꼼히)** 다 (2026-10-13 사용자 지시) —
+        간격·창 올리는 틈 `FIX_SLOW_MULT` 배, 👁 확인 `CHECK_TRIES_SLOW` 번.
+        1회차는 **지금 속도 그대로**다."""
+        # 🐢 이 실행의 속도를 정한다. `_run_fix_slot` 이 복구의 **유일한 입구**라
+        #    (개별·전체·유휴·단축키 전부 여기를 지난다) 여기서 정하면 샐 곳이 없다.
+        self._fix_slow = bool(slow)
+        if not slow:
+            # 사용자가 직접 다시 누른 것 = 1회차 → 2회차 기회를 다시 준다
+            try:
+                getattr(self, "_fix_retry", {}).pop(int(si), None)
+            except Exception:
+                pass
         # F11 로 목록을 새로 만든 뒤 **첫 번째로 누르는 것은 '단체 복구'** 다.
         # 뜬 것들을 번호 순서대로 한 번에 처리하고, 그 뒤부터는 개별로만 돈다
         # (2026-08-29 사용자 지시).
@@ -14398,9 +14441,21 @@ class App(tk.Tk):
                 except Exception:
                     pass
             if tries <= 0:
-                if not marked:
-                    self.status.set(f"🩹 복구 #{si:02d} — 십자가가 아직 남아 있습니다 "
-                                    f"(목록은 그대로 둡니다)")
+                if marked:
+                    return          # 💎 다야 필요 — 실패가 아니다. 다시 돌리지 않는다
+                # 🐢 **실패 → 한 번 더, 이번엔 꼼꼼히** (2026-10-13 사용자 지시)
+                self._fix_retry = getattr(self, "_fix_retry", {})
+                if self._fix_retry.get(int(si), 0) < 1 and not self._is_busy():
+                    self._fix_retry[int(si)] = 1
+                    click_log(f"fix #{si:02d} 1회차 실패(십자가 남음) → "
+                              f"2회차 **꼼꼼히** 다시 (간격 ×{FIX_SLOW_MULT}, "
+                              f"👁 확인 {CHECK_TRIES_SLOW}번)")
+                    self.status.set(f"🐢 복구 #{si:02d} 실패 — 더 천천히 "
+                                    f"한 번 더 눌러봅니다")
+                    self.after(800, lambda i=si: self._run_fix_slot(i, slow=True))
+                    return
+                self.status.set(f"🩹 복구 #{si:02d} — 십자가가 아직 남아 있습니다 "
+                                f"(두 번 해봤습니다 · 목록은 그대로 둡니다)")
                 return
             self.after(FIX_WATCH_MS, lambda: self._fix_verify(si, tries - 1, marked))
         except Exception as e:
@@ -19054,6 +19109,10 @@ class App(tk.Tk):
                         #    흰색이거나 못 읽으면 멈춰서 사용자가 값을 넣는다.
                         _blue, _br, _bw = itemreg_name_blue(xy)
                     if _man or not _blue:
+                        # 🟣 **영웅(보라)이면 그 클라에 빨간 점**을 띄운다
+                        #    (2026-10-13 사용자 요청). 올리지는 않는다 — 표시만.
+                        if "🟣보라" in (_bw or ""):
+                            self.after(0, lambda c=xy: self._hero_add(c))
                         _why = ("💰 값넣기 모드" if _man else
                                 ("🚫 초록·파랑이 아님" if _blue is False
                                  else "⚠ 이름을 못 읽음") + f" — {_bw}")
@@ -22688,6 +22747,12 @@ class App(tk.Tk):
     def _minimize_all(self):
         # 실행 중에는 메인런처도 최소화한다 (2026-08-07 사용자 지시 — 화면에 남아 있으면
         # 실수로 클릭할 수 있어서). 완료 후엔 _restore_back이 '맨 뒤'로만 되살린다.
+        # 🔙 **내린 것은 내가 기록해둔다** — 복원을 빠뜨린 경로를 `_minauto_tick` 이
+        #    한 곳에서 메운다 (2026-10-13 사용자: "완료 후에 여전히 최소화하는
+        #    로컬이 있어"). `_minimize_all` 을 부르는 곳이 27군데라 손으로 챙기면
+        #    반드시 빠진다. 사용자가 **직접** 내린 것은 이 표시가 없어 건드리지 않는다.
+        self._min_by_us = True
+        self._min_at = time.time()
         for w in self._section_wins():
             w.iconify()
         self._send_to_back()
@@ -22847,6 +22912,7 @@ class App(tk.Tk):
 
     def _restore_back_quiet(self):
         """완료 후 복원 — 앞으로 띄우지 않고 곧바로 맨 뒤로 되살린다 (모든 실행 공통)."""
+        self._min_by_us = False        # 되살렸으니 감시 표시를 지운다
         try:
             if getattr(self, "_back_after_id", None):
                 self.after_cancel(self._back_after_id)
@@ -22879,6 +22945,33 @@ class App(tk.Tk):
             self._done_after = self.after(3600000, lambda: self._done_var.set(""))   # 1시간 유지
         except Exception:
             pass
+
+    def _minauto_tick(self):
+        """🔙 **작업이 끝났는데 최소화가 남아 있으면 되살린다** (맨 뒤로).
+
+        2026-10-13 사용자: *"메인런처의 어떠한 작업이 있더라도 맨 뒤로 보내달라고
+        했는데 **완료 후에 여전히 최소화하는 로컬이 있어**."*
+
+        `_minimize_all()` 을 부르는 곳이 **27군데**인데 복원은 19군데뿐이었다.
+        손으로 하나씩 챙기면 **반드시 빠진다** (이 저장소의 반복된 교훈) →
+        **한 곳에서** 지켜본다. 새 런처를 만들어도 저절로 적용된다.
+
+        · 되살리는 조건: **우리가 내렸고**(`_min_by_us`) · **작업이 끝났고**
+          (`_is_busy()` 거짓) · 내린 지 3초가 지났을 때
+        · **사용자가 직접 내린 것은 건드리지 않는다** (그때는 표시가 없다)
+        · 되살리는 곳은 **맨 뒤** — 앞으로 올리지 않는다 (2026-10-06 절대 규칙)
+        · 변수 두 개만 보므로 **부하 0**
+        ⚠ 클로드는 이 감시를 없애지 말 것."""
+        try:
+            if (getattr(self, "_min_by_us", False)
+                    and not self._is_busy()
+                    and time.time() - getattr(self, "_min_at", 0) > 3.0):
+                self._min_by_us = False
+                click_log("[복원] 작업이 끝났는데 최소화가 남아 있어 맨 뒤로 되살림")
+                self._restore_back_quiet()
+        except Exception:
+            pass
+        self.after(1000, self._minauto_tick)
 
     def _restore_back(self):
         """모든 작업 완료 후 복원 — 앞으로 띄우지 않고 곧바로 '맨 뒤'로 되살린다.
@@ -23664,6 +23757,60 @@ class App(tk.Tk):
         else:
             pyautogui.click(int(p[0]), int(p[1]))
         return True
+
+    # ── 🟣 영웅(보라) 아이템 — 런처 목록에 남긴다 (클라 밖) ───────────────
+    #    사용자: "여기에 영웅 아이템이 있으니까 **팔렸는지 확인**하려는 목적이라
+    #    **클라 외부** 어딘가에 표기를 해달라" (2026-10-13).
+    #    → 알림이 아니라 **'아직 안 팔렸다' 를 들고 있는 목록**이다.
+    @staticmethod
+    def _hero_path():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        return os.path.join(d, "hero_items.json")
+
+    def _hero_load(self):
+        try:
+            with open(self._hero_path(), encoding="utf-8-sig") as f:
+                return json.load(f) or {}
+        except Exception:
+            return {}
+
+    def _hero_save(self, d):
+        try:
+            p = self._hero_path()
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            tmp = p + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, p)
+        except Exception:
+            pass
+
+    def _hero_add(self, xy):
+        """🟣 영웅(보라)을 만났다 — 그 슬롯을 목록에 올린다. **올리지는 않는다.**
+        런처를 껐다 켜도 남는다 (팔렸는지 나중에 확인해야 하므로)."""
+        try:
+            si = self._slot_of_anchor((int(xy[0]), int(xy[1])))
+            k = f"{int(si):02d}" if si else "??"
+            d = self._hero_load()
+            if k in d:
+                return                      # 이미 올라가 있다
+            d[k] = {"at": time.strftime("%m-%d %H:%M")}
+            self._hero_save(d)
+            click_log(f"[아이템등록] 🟣 영웅 — #{k} 목록에 올렸습니다 "
+                      f"(팔리면 그 줄을 눌러 지우세요)")
+            self.status.set(f"🟣 영웅 아이템 #{k} — 목록에 남겼습니다 "
+                            f"(팔리면 눌러서 지우세요)")
+            self.after(0, self._warn_refresh)
+        except Exception:
+            pass
+
+    def _hero_remove(self, k):
+        d = self._hero_load()
+        if d.pop(str(k), None) is not None:
+            self._hero_save(d)
+            click_log(f"[아이템등록] 🟣 영웅 #{k} — 목록에서 지웠습니다 (팔림 확인)")
+            self.status.set(f"✔ 영웅 #{k} 지웠습니다")
+        self._warn_refresh()
 
     def _run_one_coord(self, key):
         """▶ **그 단계만 지금 한 번** 눌러본다 (2026-10-12 사용자 요청:

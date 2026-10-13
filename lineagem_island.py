@@ -5744,6 +5744,11 @@ class IslandApp(tk.Tk):
                         continue
                     if self._p0_done.get(f"{key}|{si}", 0) >= POTION0_MAX:
                         continue
+                    # 🚫 **OFF 슬롯은 보지도 않는다** (2026-10-13 사용자 지시:
+                    #    "슬롯마다 그 해당 던전에 ON 일 때만. 나머지 OFF 슬롯은
+                    #     안 해도 된다"). 도는 사이에 꺼둘 수도 있으니 여기서 다시 본다.
+                    if not (slots[si] if si < len(slots) else {}).get("enabled", True):
+                        continue
                     anc = self._slot_anchor(slots[si] if si < len(slots) else {})
                     if not anc:
                         continue
@@ -5766,9 +5771,25 @@ class IslandApp(tk.Tk):
             self._status.set(f"💧 물약 0개 — #{[i+1 for i in bad]} 를 다시 돌립니다")
             # 😴 깨우기는 넣지 않는다 — **실행을 누르면 알아서 절전에서 깨어나
             #    한 바퀴 다시 돈다** (2026-10-13 사용자 확인). 필요 없는 코드를 두지 않는다.
+            #
+            # 🧍 **하나씩 순차적으로** 돌린다 (2026-10-13 사용자 지시: "여러 캐릭들이
+            #    0개라고 떠 있으면 하나씩 해주는데 순차적으로 실행을 해줬으면 좋겠어").
+            #    `sel_list` 로 한 번에 넘기면 악몽의섬·오만의탑은 **웨이브(동시 2슬롯)** 로
+            #    가버린다 (`len(targets) > 1` 이면 웨이브). 그래서 `slot_idx` 로 하나씩 부른다.
             # 🚫 다시 돌리는 실행에는 표시를 붙여 **또 확인하지 않게** 한다
             self._p0_retry = True
-            self._run(key, sel_list=bad)
+            self._p0_busy = True        # 끝날 때까지 창을 닫지 않는다 (아래 finally 참조)
+            try:
+                for n, si in enumerate(bad, 1):
+                    if self._stop_flag:
+                        break
+                    self._status.set(f"💧 #{si+1:02d} 다시 돌리는 중… "
+                                     f"({n}/{len(bad)})")
+                    self._rlog(f"💧 다시 돌림 {n}/{len(bad)} — #{si+1:02d}")
+                    self._run(key, slot_idx=si)
+            finally:
+                self._p0_busy = False
+            self._potion0_finish(key)
         except Exception as e:
             try:
                 self._rlog(f"💧 물약 0개 확인 오류: {e}")
@@ -6032,6 +6053,10 @@ class IslandApp(tk.Tk):
             if _p0_go:
                 threading.Thread(target=self._potion0_after, args=(key,),
                                  daemon=True).start()
+            elif getattr(self, "_p0_busy", False):
+                # 💧 다시 돌리는 중 — 종료·창 복원은 **다 끝난 뒤 한 번만** 한다
+                #    (`_potion0_after` 가 마지막에 `_potion0_finish` 를 부른다).
+                pass
             elif getattr(self, "_auto_run", False):
                 # 런처 ▶ 자동 실행 모드: 완료 후 창을 띄우지 않고 스스로 종료 —
                 # 런처가 종료를 감지하고 대기열의 다음 던전을 이어서 실행한다
