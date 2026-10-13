@@ -350,7 +350,8 @@ def place_list(key):
             if os.path.exists(p)]
 
 
-PLACE_CW, PLACE_CH = 75, 12    # 494x278 창 기준 칸 크기 — 여기에 **맞춰 놓고** 본다
+PLACE_CW, PLACE_CH = 75, 12
+PLACE_PAD = 10                 # 이름 **뒤 여백**을 이만큼 그림에 포함한다    # 494x278 창 기준 칸 크기 — 여기에 **맞춰 놓고** 본다
 
 
 def place_crop(big):
@@ -379,6 +380,24 @@ def place_crop(big):
     return cut
 
 
+def place_nogreen(cut):
+    """칸에서 **초록 시계만 지운다**(검게). 이름·여백은 그대로.
+
+    시계는 매번 바뀌므로 지워야 하지만, **이름 뒤 여백은 남겨야** 구분이 잘 된다.
+    실측 2026-10-13: `잊혀진 섬` ↔ `무너진 설벽` 이 0.73 까지 붙었는데,
+    초록만 지우고 뒤 여백 10px 를 넣으니 **밖 최고 0.66** 으로 떨어졌다
+    (여유 0.02 → 0.34)."""
+    try:
+        import numpy as np
+        c = cut.astype(np.int16)
+        B, G, R = c[:, :, 0], c[:, :, 1], c[:, :, 2]
+        ink = (R + G + B) > 240
+        c[ink & ((G - R) > 40) & ((G - B) > 30)] = 0
+        return c.astype(cut.dtype)
+    except Exception:
+        return cut
+
+
 def place_trim(cut, drop_tail=False):
     """잘라낸 장소 칸에서 **이름 글자만** 남긴다 → 더 작은 그림.
 
@@ -396,10 +415,13 @@ def place_trim(cut, drop_tail=False):
         # 실측(2026-10-13): 이름 R164 G175 B169 (G-R +11) · 시계 R70 G153 B99 (G-R +82)
         green = ink & ((G - R) > 40) & ((G - B) > 30)   # 초록 시계
         white = ink & ~green
+        cut = place_nogreen(cut)        # 그림에서 시계를 지운다 (이름·여백은 그대로)
         ys, xs = np.where(white)
         if len(xs) < 8:
             return None
-        x0, x1 = max(0, int(xs.min()) - 1), min(cut.shape[1], int(xs.max()) + 2)
+        # 이름 **뒤 여백**까지 넣는다 — 이름 길이가 달라 구분이 훨씬 잘 된다
+        x0 = max(0, int(xs.min()) - 1)
+        x1 = min(cut.shape[1], int(xs.max()) + 2 + PLACE_PAD)
         y0, y1 = max(0, int(ys.min()) - 1), min(cut.shape[0], int(ys.max()) + 2)
         if drop_tail:
             # 🏢 **뒤 한 덩어리를 뺀다** — `오만의탑 5층` 처럼 층수가 붙는 곳용
@@ -440,7 +462,7 @@ def place_in_dungeon(key, anchor):
         got = grab_window(anchor)
         if not got:
             return False, 0.0, "창 캡처 실패"
-        cut = place_crop(got[0])
+        cut = place_nogreen(place_crop(got[0]))   # 비교할 때도 시계를 지운다
         best = -1.0
         for p in ps:
             t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
