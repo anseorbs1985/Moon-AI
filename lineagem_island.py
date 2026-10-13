@@ -5764,6 +5764,8 @@ class IslandApp(tk.Tk):
             self._rlog(f"💧 {key} 다시 돌림 — 슬롯 "
                        f"{[i+1 for i in bad]} (슬롯당 {POTION0_MAX}번만)")
             self._status.set(f"💧 물약 0개 — #{[i+1 for i in bad]} 를 다시 돌립니다")
+            # 😴 깨우기는 넣지 않는다 — **실행을 누르면 알아서 절전에서 깨어나
+            #    한 바퀴 다시 돈다** (2026-10-13 사용자 확인). 필요 없는 코드를 두지 않는다.
             # 🚫 다시 돌리는 실행에는 표시를 붙여 **또 확인하지 않게** 한다
             self._p0_retry = True
             self._run(key, sel_list=bad)
