@@ -106,6 +106,22 @@ def main():
         warn.append("COORDS_ROLLBACK_ID")
 
     print()
+    # 🔒🔒 코드가 막는 것 — 목록에 적혀 있어도 거부된다 (2026-10-14 사용자 최우선 지시)
+    try:
+        import re as _re
+        _u = io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "lineagem_update.py"), encoding="utf-8").read()
+        _ni = _re.search(r"^NEVER_ISLAND\s*=\s*(\w+)", _u, _re.M)
+        _nk = _re.search(r"^NEVER_COORD_KEYS\s*=\s*\{(.*?)\}", _u, _re.M | _re.S)
+        _keys = _re.findall(r'"([a-z_0-9]+)"', _nk.group(1)) if _nk else []
+        print("🔒 코드가 막는 것 (목록에 적혀 있어도 거부)")
+        print("   섬/던전 전체(island_coords.json) : "
+              + ("막힘 ✔" if (_ni and _ni.group(1) == "True") else "⚠ 안 막힘"))
+        print("   coords.json 항목               : "
+              + (" · ".join(_keys) if _keys else "(없음)"))
+        print()
+    except Exception:
+        pass
     if not warn:
         print("✅ 지금 상태로는 업데이트가 **로컬 좌표를 하나도 건드리지 않는다.**")
         print("   (유실 자동복구만 남음 — coords.json 이 없거나 2000바이트 이하일 때만)")

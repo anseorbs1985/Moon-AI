@@ -149,6 +149,25 @@ DATA_FILES = ["island_counts.json"]
 DATA_DIRS  = ["reroll_templates", "click_templates"]   # 이미지 클릭 그림도 배포
 
 
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║ 🔒🔒 코드가 막는 것 — 목록에 뭐라고 적혀 있든 **절대 받지 않는다**        ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+# 사용자 2026-10-14 (최우선): "섬/던전 실행기 여기 있는 것들이 돌아가면 내가 정말
+#   미쳐버림… 이것들만 지켜주면 된다. 인형탐험이랑 이건 다른 컴퓨터들과 다 달라서."
+#
+# 지금까지는 share_*.json 의 목록을 **비워두는 것**으로 막았는데 **두 번 샜다**
+# (2026-09-30 · 10-13 — 배포하려고 열어놓고 안 닫았다). 사람이 기억해야 하는 방식은
+# 또 샌다. 그래서 **코드에 박는다.**
+#
+# 🚫 클로드는 이것을 '잠깐만' 풀지 말 것. 정말 배포해야 하면 **사용자에게 먼저 말하고**
+#    코드를 고치고, 받은 뒤 되돌린다. 코드를 고치면 커밋에 남아 잊어버리지 않는다.
+NEVER_ISLAND = True            # island_coords.json 은 어떤 경로로도 받지 않는다
+NEVER_COORD_KEYS = {
+    "doll_slots",              # 🧸 인형탐험 — 컴퓨터마다 다르다 (사용자 지목)
+    "char_btns",               # 👤 캐릭터 접속 버튼 — 계정마다 캐릭 수·자리가 다르다
+}
+
+
 def load_coord_lock():
     """🔒 좌표 잠금 — 이 컴퓨터에서 잠근 항목은 업데이트가 절대 건드리지 않는다.
     (%LOCALAPPDATA%\\MoonAI\\coord_lock.json — 머신별 파일이라 git과 무관)"""
@@ -162,6 +181,10 @@ def load_coord_lock():
 
 
 def sync_times(log):
+    # 🔒🔒 간격(gap_list)도 island_coords.json 을 고치는 길이라 함께 막는다
+    if NEVER_ISLAND:
+        return
+
     """좌표는 그대로 두고 '클릭 간격(gap_list)'만 메인 것으로 맞춘다.
     share_times.json 에 적힌 던전만 대상 (컴퓨터마다 좌표 위치가 다르기 때문)."""
     try:
@@ -550,6 +573,22 @@ def fill_empty_slot(dst_slot, src_slot, keep=()):
 
 
 def sync_island_keys(log):
+    # 🔒🔒 섬/던전 좌표는 **코드가 막는다** (2026-10-14 사용자 최우선 지시).
+    #     share_island.json 에 무엇이 적혀 있든 여기서 끝낸다.
+    if NEVER_ISLAND:
+        try:
+            man = os.path.join(REPO, "share_island.json")
+            with open(man, encoding="utf-8") as f:
+                d = json.load(f) or {}
+            asked = [k for k in ("keys", "presets_only", "fill_only")
+                     if (d.get(k) or [])]
+            if asked:
+                log("   🔒 섬/던전 좌표 배포 요청을 **거부**했다 "
+                    f"({', '.join(asked)}) — 코드가 막고 있다 (NEVER_ISLAND)")
+        except Exception:
+            pass
+        return
+
     """island_coords.json 중 '지정한 던전만' 메인 것을 통째로 받는다
     (share_island.json 의 keys). 좌표·간격·이름·녹화·프리셋까지 그 던전 것만 교체."""
     try:
@@ -712,6 +751,13 @@ def sync_coord_keys(log):
             return
         with open(man, encoding="utf-8") as f:
             keys = (json.load(f) or {}).get("keys") or []
+        # 🔒🔒 **코드가 막는 항목은 목록에 적혀 있어도 뺀다** (2026-10-14 사용자 지시:
+        #     "인형탐험이랑 이건 다른 컴퓨터들과 다 달라서"). 아래 `force` 에서도 뺀다.
+        _blocked = [k for k in keys if k in NEVER_COORD_KEYS]
+        if _blocked:
+            log(f"   🔒 {', '.join(_blocked)} 배포 요청을 **거부**했다 "
+                f"— 코드가 막고 있다 (NEVER_COORD_KEYS)")
+        keys = [k for k in keys if k not in NEVER_COORD_KEYS]
         if not keys:
             return
         # ── 보낼 값은 **share_coords_data.json** 에서 읽는다 (2026-09-14) ──────
@@ -749,6 +795,7 @@ def sync_coord_keys(log):
         try:
             with open(man, encoding="utf-8") as f:
                 force = set((json.load(f) or {}).get("force") or [])
+            force -= NEVER_COORD_KEYS      # 🔒🔒 코드가 막는 항목은 갈아끼우지 않는다
         except Exception:
             force = set()
         lock_k, _ = load_coord_lock()
