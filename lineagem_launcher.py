@@ -239,6 +239,13 @@ P0_WATCH_COOL = 1200           # 같은 슬롯은 20분에 한 번만 다시 돌
 #     그 이후에 다음 좌표들 클릭해줘."
 #    ①→② 사이는 예전처럼 짧게(0.7~1.3초) 가고, **② 뒤에만** 길게 쉰다.
 PRE2_WAIT          = 10.0
+# 🔁 **게임 실행 전에 프로필(구글 계정)을 몇 번 전환할까** — 2026-10-14 사용자 실측:
+#    "케릭터 접속을 하기 전에 구글을 각각 두 번씩 전환을 해주고 나서 접속을 하면
+#     다 접속이 되는 거 같거든." 업데이트 직후 로컬에서 접속이 자주 실패했는데
+#     손으로 두 번 전환하면 전부 접속됐다. 퍼플이 계정 상태를 다시 읽을 시간이 필요하다.
+#    ⚠ **줄이지 말 것** — 사용자가 손으로 확인한 값이다.
+PROFILE_PRESWITCH      = 2          # 전환 횟수
+PROFILE_PRESWITCH_WAIT = 6.0        # 전환 한 번 뒤 쉬는 시간(초)
 FIX_SLOW_MULT      = 2.2       # 2회차 간격·창 올리는 틈 배수
 CHECK_TRIES_SLOW   = 8         # 2회차 👁 '무료' 확인 횟수 (1회차는 CHECK_TRIES=4)
 # 🔍 복구를 누르기 전 **십자가를 몇 번 보나** (2026-10-11 사용자 신고:
@@ -24072,6 +24079,40 @@ class App(tk.Tk):
             except Exception:
                 pass
 
+    def _profile_switch_once(self, tag=""):
+        """🔁 프로필(구글 계정) **전환 한 번** — 프로필 → (마우스 올림) → 구글 계정 → 확인.
+
+        계정을 바꿀 때 쓰던 네 단계 그대로다. **두 군데에 같은 코드가 있던 것을
+        여기 하나로 묶었다** (실행 전 전환 · 계정 순회 전환) — 한쪽만 고쳐서
+        어긋나는 일을 막는다.
+
+        돌려주는 값: 끝까지 갔으면 True, 그림을 못 찾았거나 멈춤이면 False."""
+        self.status.set(f"{tag} 프로필 클릭...")
+        if not self._lclick("profile_btn"):
+            return False
+        if not self._wait(2):
+            return False
+        # 프로필 다음에 **마우스만 올려야** 계정 목록이 뜬다 (2026-08-29)
+        if (self.cfg.get("confirm_hover")
+                or has_img(LOGIN_FKEY, LOGIN_IDX["confirm_hover"])):
+            self.status.set(f"{tag} 마우스 올림...")
+            if not self._lclick("confirm_hover", move_only=True):
+                return False
+            if not self._wait(1):
+                return False
+            self._lclick("confirm_hover", move_only=True)
+        self.status.set(f"{tag} 구글 계정 클릭...")
+        if not self._lclick("google_acc", hover=True):
+            return False
+        if not self._wait(2):
+            return False
+        if (self.cfg.get("confirm_btn")
+                or has_img(LOGIN_FKEY, LOGIN_IDX["confirm_btn"])):
+            self.status.set(f"{tag} 확인 클릭...")
+            if not self._lclick("confirm_btn", hover=True):
+                return False
+        return True
+
     def _run_one_coord(self, key):
         """▶ **그 단계만 지금 한 번** 눌러본다 (2026-10-12 사용자 요청:
         "각각 옆에 실행버튼을 다 만들어줘 개별로. 지금 접속이 뭔가 굉장히 이상해").
@@ -24798,6 +24839,20 @@ class App(tk.Tk):
                 try: win.activate()
                 except: pass
                 if not self._wait(1): self.status.set("멈춤"); return
+
+                # 🔁 **게임 실행 전에 프로필을 두 번 전환한다** (2026-10-14 사용자 지시).
+                #    업데이트 직후 접속이 자주 실패했는데, 손으로 두 번 전환하면
+                #    전부 접속됐다 — 퍼플이 계정 상태를 다시 읽을 시간이 필요하다.
+                #    ⚠ 이 단계를 빼거나 횟수를 줄이지 말 것.
+                for _ps in range(PROFILE_PRESWITCH):
+                    _tag = (f"[{acc_idx+1}/{total}] 프로필 전환 "
+                            f"{_ps+1}/{PROFILE_PRESWITCH} —")
+                    if not self._profile_switch_once(_tag):
+                        self.status.set("멈춤"); return
+                    self.status.set(f"{_tag} {PROFILE_PRESWITCH_WAIT:.0f}초 기다림...")
+                    if not self._wait(PROFILE_PRESWITCH_WAIT):
+                        self.status.set("멈춤"); return
+
                 self.status.set(f"[{acc_idx+1}/{total}] 게임 실행 클릭...")
                 if not self._lclick("game_start"):
                     return
@@ -24967,30 +25022,9 @@ class App(tk.Tk):
                 except: pass
                 if not self._wait(1): self.status.set("멈춤"); return
 
-                self.status.set(f"[{acc_idx+1}/{total}] 프로필 클릭...")
-                if not self._lclick("profile_btn"):
-                    return
-                if not self._wait(2): self.status.set("멈춤"); return
-
-                # 프로필 다음에 **마우스만 올려야** 계정 목록이 뜬다 (2026-08-29)
-                if self.cfg.get("confirm_hover") or has_img(
-                        LOGIN_FKEY, LOGIN_IDX["confirm_hover"]):
-                    self.status.set(f"[{acc_idx+1}/{total}] 마우스 올림...")
-                    if not self._lclick("confirm_hover", move_only=True):
-                        return
-                    if not self._wait(1): self.status.set("멈춤"); return
-                    self._lclick("confirm_hover", move_only=True)
-
-                self.status.set(f"[{acc_idx+1}/{total}] 구글 계정 클릭...")
-                if not self._lclick("google_acc", hover=True):
-                    return
-                if not self._wait(2): self.status.set("멈춤"); return
-
-                if (self.cfg.get("confirm_btn")
-                        or has_img(LOGIN_FKEY, LOGIN_IDX["confirm_btn"])):
-                    self.status.set(f"[{acc_idx+1}/{total}] 확인 클릭...")
-                    if not self._lclick("confirm_btn", hover=True):
-                        return
+                # 🔁 계정 바꾸기도 **같은 함수**를 쓴다 (네 단계가 두 군데에 있던 것을 합쳤다)
+                if not self._profile_switch_once(f"[{acc_idx+1}/{total}]"):
+                    self.status.set("멈춤"); return
 
                 self.status.set(f"[{acc_idx+1}/{total}] 새 계정 로딩... (15초)")
                 if not self._wait(15): self.status.set("멈춤"); return
