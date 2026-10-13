@@ -234,6 +234,11 @@ HERO_CV_H  = HERO_R * 2 + 6
 #    죽는데"). 실행 끝 직후에만 보면 늦는다 — 물약은 사냥 도중에 떨어진다.
 P0_WATCH_MS   = 120000         # 2분마다 (16클라 약 1초 → 1분당 0.5초)
 P0_WATCH_COOL = 1200           # 같은 슬롯은 20분에 한 번만 다시 돌린다
+# ⏳ '리니지M 전 클릭 ②' 를 누른 뒤 기다리는 시간(초) — 2026-10-14 사용자 지시:
+#    "2 리니지m 전클릭 이거 두 번째 거 누르고 나서 한 10초 정도 기다려줘.
+#     그 이후에 다음 좌표들 클릭해줘."
+#    ①→② 사이는 예전처럼 짧게(0.7~1.3초) 가고, **② 뒤에만** 길게 쉰다.
+PRE2_WAIT          = 10.0
 FIX_SLOW_MULT      = 2.2       # 2회차 간격·창 올리는 틈 배수
 CHECK_TRIES_SLOW   = 8         # 2회차 👁 '무료' 확인 횟수 (1회차는 CHECK_TRIES=4)
 # 🔍 복구를 누르기 전 **십자가를 몇 번 보나** (2026-10-11 사용자 신고:
@@ -24774,7 +24779,15 @@ class App(tk.Tk):
                     self.status.set(f"[{acc_idx+1}/{total}] 리니지M 전 클릭 {_pn}...")
                     if not self._lclick(_pk):
                         self.status.set("멈춤"); return
-                    if not self._wait(random.uniform(0.7, 1.3)):
+                    # ⏳ **②를 누른 뒤에는 10초 쉰다** (2026-10-14 사용자 지시).
+                    #    ①→② 사이는 예전처럼 짧게 간다.
+                    if _pk == "pre_click2":
+                        self.status.set(f"[{acc_idx+1}/{total}] 전 클릭 ② 뒤 "
+                                        f"{PRE2_WAIT:.0f}초 기다리는 중...")
+                        _w = PRE2_WAIT
+                    else:
+                        _w = random.uniform(0.7, 1.3)
+                    if not self._wait(_w):
                         self.status.set("멈춤"); return
 
                 self.status.set(f"[{acc_idx+1}/{total}] 리니지M 클릭...")
