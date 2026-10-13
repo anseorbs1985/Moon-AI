@@ -14911,6 +14911,45 @@ class App(tk.Tk):
             pass
         return im
 
+    @staticmethod
+    def _grid16(wins):
+        """창 목록에서 **격자 16개만** 고른다 → 슬롯 순서(01~16, 세로 열우선).
+
+        (2026-10-13 사용자 지시: "16개를 초과해도 돌려주고 좌표상으로만 돌려줘.
+         아직 정리를 못 해서 **아래에 냅뒀으니까** 아래에 있는 건 신경 안 썼으면.")
+
+        `wins` 는 `(왼쪽, 위, 오른쪽, 아래, …)` 목록.
+        ① x 로 묶어 **열**을 만든다 (200px 넘게 떨어지면 다른 열)
+        ② 4개 이상인 열만 남기고 많은 순으로 **4열**, 그다음 왼→오른쪽 정렬
+        ③ 각 열에서 **y 가 작은 것부터 4개** = 위에서 4개 → **아래 것은 버린다**
+
+        ⚠ 16개가 정확히 맞으면 예전과 **같은 결과**가 나온다.
+        ⚠ 여분을 **오른쪽에 5번째 열**로 세우면 그 열이 뽑힐 수 있다 — 지금은
+          '여분은 아래' 를 전제로 한다."""
+        try:
+            if not wins or len(wins) < 16:
+                return None
+            ws = sorted(wins, key=lambda w: w[0])
+            cols, cur = [], [ws[0]]
+            for w in ws[1:]:
+                if w[0] - cur[-1][0] > 200:
+                    cols.append(cur); cur = [w]
+                else:
+                    cur.append(w)
+            cols.append(cur)
+            cols = [c for c in cols if len(c) >= 4]
+            if len(cols) < 4:
+                return None
+            if len(cols) > 4:
+                cols = sorted(cols, key=lambda c: -len(c))[:4]
+            cols.sort(key=lambda c: min(x[0] for x in c))
+            out = []
+            for c in cols:
+                out += sorted(c, key=lambda w: w[1])[:4]
+            return out if len(out) == 16 else None
+        except Exception:
+            return None
+
     def _client_hwnds_by_slot(self):
         """슬롯 순서(01~16)로 (창핸들, 위치) — 화면 배치 세로 열우선."""
         try:
@@ -14929,12 +14968,8 @@ class App(tk.Tk):
                             wins.append((l, tp, r, b, h))
                 return True
             win32gui.EnumWindows(cb, None)
-            if len(wins) < 16:
-                return None
-            wins = sorted(wins, key=lambda w: w[0])[:16]
-            wins.sort(key=lambda w: w[0])
-            cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
-            return [w for col in cols for w in col]
+            # 🪟 16개를 넘어도 **격자 16개만** 좌표로 고른다 (2026-10-13)
+            return self._grid16(wins)
         except Exception:
             return None
 
@@ -20650,8 +20685,11 @@ class App(tk.Tk):
                                rereg_fn=rereg, save_fn=_save, dot_r=4)
 
     def _client_rects_by_slot(self):
-        """리니지M 클라이언트 창 16개를 화면 배치(세로 열우선 01~16) 순서로 반환.
-        16개가 정확히 안 보이면 None (보정 불가)."""
+        """리니지M 클라 창을 화면 배치(세로 열우선 01~16) 순서로 반환.
+
+        **16개를 넘어도 격자 16개만** 골라 돌려준다 (`_grid16`) —
+        정리 중인 여분 클라를 격자 **아래**에 세워둬도 영향이 없다.
+        16개를 못 채우면 None."""
         try:
             import win32gui
             wins = []
@@ -20668,11 +20706,10 @@ class App(tk.Tk):
                             wins.append((l, tp, r, b))
                 return True
             win32gui.EnumWindows(cb, None)
-            if len(wins) != 16:
-                return None
-            wins.sort(key=lambda w: w[0])                     # x(열) 정렬
-            cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
-            return [w for col in cols for w in col]           # 01~16 (열 우선)
+            # 🪟 **16개를 넘어도 격자 16개만** 좌표로 고른다 (2026-10-13 사용자 지시).
+            #    예전에는 `!= 16` 이라 18개면 None 이 돌아가, 이 함수를 쓰는
+            #    15군데(복구·물약색·주문서·층확인·물약감시…)가 **전부 멈췄다.**
+            return self._grid16(wins)
         except Exception:
             return None
 

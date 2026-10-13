@@ -557,6 +557,45 @@ def rasta_thr(j):
         return RASTA_MATCH
 
 
+def grid16(wins, xi=0, yi=1):
+    """창 목록에서 **격자 16개만** 골라 슬롯 순서(01~16, 세로 열우선)로 돌려준다.
+
+    (2026-10-13 사용자 지시: "16개를 초과해도 돌려주고 좌표상으로만 돌려줘.
+     아직 정리를 못 해서 **아래에 냅뒀으니까** 아래에 있는 건 신경 안 썼으면.")
+
+    `xi`·`yi` 는 각 항목에서 **x·y 가 몇 번째 칸인지** (자료 모양이 함수마다 다르다).
+    ① x 로 묶어 열을 만든다 (200px 넘게 떨어지면 다른 열)
+    ② 4개 이상인 열만, 많은 순으로 4열 → 왼→오른쪽 정렬
+    ③ 각 열에서 **y 가 작은 것부터 4개** → 아래에 세워둔 여분은 버린다
+
+    ⚠ 16개가 정확히 맞으면 예전과 **같은 결과**다.
+    ⚠ 여분을 **오른쪽 5번째 열**로 세우면 그 열이 뽑힐 수 있다 (지금은 '아래' 전제).
+    ⚠ 메인런처에 같은 규칙(`_grid16`)이 있다 — **고칠 때 양쪽을 같이 볼 것.**"""
+    try:
+        if not wins or len(wins) < 16:
+            return None
+        ws = sorted(wins, key=lambda w: w[xi])
+        cols, cur = [], [ws[0]]
+        for w in ws[1:]:
+            if w[xi] - cur[-1][xi] > 200:
+                cols.append(cur); cur = [w]
+            else:
+                cur.append(w)
+        cols.append(cur)
+        cols = [c for c in cols if len(c) >= 4]
+        if len(cols) < 4:
+            return None
+        if len(cols) > 4:
+            cols = sorted(cols, key=lambda c: -len(c))[:4]
+        cols.sort(key=lambda c: min(x[xi] for x in c))
+        out = []
+        for c in cols:
+            out += sorted(c, key=lambda w: w[yi])[:4]
+        return out if len(out) == 16 else None
+    except Exception:
+        return None
+
+
 def grab_window(coord):
     """그 좌표가 있는 클라 창을 **직접** 캡처한다 (PrintWindow).
 
@@ -3292,11 +3331,8 @@ class IslandApp(tk.Tk):
                             wins.append((l, tp, r, b))
                 return True
             win32gui.EnumWindows(cb, None)
-            if len(wins) != 16:
-                return None
-            wins.sort(key=lambda w: w[0])                     # x(열) 정렬
-            cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
-            return [w for col in cols for w in col]           # 01~16 (열 우선)
+            # 🪟 16개를 넘어도 **격자 16개만** 좌표로 고른다 (2026-10-13)
+            return grid16(wins, 0, 1)
         except Exception:
             return None
 
@@ -5009,11 +5045,11 @@ class IslandApp(tk.Tk):
                             wins.append((h, l, tp))
                 return True
             win32gui.EnumWindows(cb, None)
-            if len(wins) != 16:
+            # 🪟 자료가 (창핸들, x, y) 라 xi=1 · yi=2
+            _od = grid16(wins, 1, 2)
+            if not _od:
                 return False
-            wins.sort(key=lambda w: w[1])
-            cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[2]) for i in range(4)]
-            hs = [w[0] for col in cols for w in col]
+            hs = [w[0] for w in _od]
             if si >= len(hs):
                 return False
             u = ctypes.windll.user32
@@ -5141,12 +5177,11 @@ class IslandApp(tk.Tk):
                 return True
             win32gui.EnumWindows(cb, None)
             hwnd = None
-            if len(wins) == 16:
-                wins.sort(key=lambda w: w[0])
-                cols = [sorted(wins[i*4:(i+1)*4], key=lambda w: w[1]) for i in range(4)]
-                order = [w for col in cols for w in col]
-                if 0 <= si < 16:
-                    hwnd = order[si][4]
+            # 🪟 16개를 넘어도 격자 16개만 (클릭마다 쓰이는 길이라 특히 중요 —
+            #    여기서 실패하면 창을 안 올린 채 눌러 첫 클릭이 통째로 씹힌다)
+            order = grid16(wins, 0, 1)
+            if order and 0 <= si < 16:
+                hwnd = order[si][4]
             if hwnd is None and coord:            # 슬롯 감지 실패 → 좌표로 찾는다
                 h2 = win32gui.WindowFromPoint((int(coord[0]), int(coord[1])))
                 u = ctypes.windll.user32
