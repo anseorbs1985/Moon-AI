@@ -318,12 +318,32 @@ def potion0_thr():
         return POTION0_MATCH
 
 
+POTION0_BASE_W = 494           # 그림을 자른 창의 가로 (meta 가 없을 때 쓰는 기본)
+
+
+def potion0_meta_w():
+    """그림을 **어느 크기의 창**에서 잘랐나 — 크기 보정의 기준."""
+    try:
+        with open(os.path.join(IMG_DIR, "potion0_meta.json"),
+                  encoding="utf-8-sig") as f:
+            return int((json.load(f) or {}).get("w") or POTION0_BASE_W)
+    except Exception:
+        return POTION0_BASE_W
+
+
 def potion0_seen(anchor):
     """그 클라 창에서 '체력 회복제가 0개' 문구를 찾는다 → (보임?, 점수).
 
-    문구는 대화창에 뜨고 자리가 조금씩 달라서 **창 전체**를 본다.
+    문구는 절전 화면 가운데 위쪽에 뜨고 자리가 조금씩 달라 **창 전체**를 본다.
     `grab_window`(PrintWindow)로 그 창을 직접 찍으므로 **가려져 있어도 정확하다**
-    (2026-08-29 교훈: 화면 긁기는 런처가 앞에 있으면 엉뚱한 것을 읽는다)."""
+    (2026-08-29 교훈: 화면 긁기는 런처가 앞에 있으면 엉뚱한 것을 읽는다).
+
+    ⚠ **크기 보정이 필요하다** (2026-10-13 — 로컬에서 안 잡히던 원인).
+      그림은 메인의 494×278 창에서 잘랐다. 로컬 클라가 480×270 이면 글자가
+      조금 작게 보여 점수가 뚝 떨어진다. 용던고고가 2026-08-27 에 같은 이유로
+      0.80~1.25배 보정을 넣었다 — 여기만 빠져 있었다.
+      ① 창 가로 비율로 **한 번** 맞춰보고 ② 그래도 모자라면 작은 범위를 훑는다.
+      클로드는 이 보정을 빼지 말 것."""
     q = potion0_img_path()
     if not os.path.exists(q) or not anchor:
         return False, -1.0
@@ -333,11 +353,36 @@ def potion0_seen(anchor):
         if not got:
             return False, 0.0
         big, _ = got
-        tpl = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
-        if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
+        tpl0 = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+        if tpl0 is None:
             return False, 0.0
-        mx = float(cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED).max())
-        return (mx >= potion0_thr()), mx
+        thr = potion0_thr()
+
+        def _try(t):
+            if (t is None or big.shape[0] < t.shape[0]
+                    or big.shape[1] < t.shape[1] or t.shape[0] < 3):
+                return -1.0
+            return float(cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED).max())
+
+        def _scaled(k):
+            if abs(k - 1.0) < 0.02:
+                return tpl0
+            w = max(3, int(round(tpl0.shape[1] * k)))
+            h = max(3, int(round(tpl0.shape[0] * k)))
+            return cv2.resize(tpl0, (w, h),
+                              interpolation=cv2.INTER_CUBIC if k > 1
+                              else cv2.INTER_AREA)
+
+        # 📏 **창 가로 비율로 한 번만** 맞춘다.
+        #    ⚠ 여러 배율을 훑어 '최고값' 을 쓰면 **잡음까지 올라간다** —
+        #      실측(2026-10-13, 문구가 없는 16클라): 보정 없음 0.40~0.45 인데
+        #      8단계 훑기를 넣으니 **0.49~0.61** 로 올라가 여유가 깎였다.
+        #      용던고고는 마름모가 배경에 묻혀 훑기가 필요했지만, 이 문구는
+        #      글자가 또렷해 비율 한 번이면 충분하다.
+        #    🚫 클로드는 여기에 배율 훑기를 다시 넣지 말 것.
+        k0 = big.shape[1] / float(max(1, potion0_meta_w()))
+        mx = _try(_scaled(k0))
+        return (mx >= thr), mx
     except Exception:
         return False, 0.0
 
@@ -5660,9 +5705,24 @@ class IslandApp(tk.Tk):
                                  "글자가 들어가게 다시 드래그해주세요")
                 self._potion0_paint()
                 return
-            self._status.set(f"✔ 💧 0개 그림 저장 ({w}×{h}) — "
+            # 📏 **어느 크기의 창에서 잘랐는지** 적어둔다 — 창 크기가 다른 컴퓨터에서
+            #    이 값으로 크기를 맞춘다 (없으면 POTION0_BASE_W 를 쓴다).
+            _bw = POTION0_BASE_W
+            try:
+                import win32gui
+                _hw = win32gui.WindowFromPoint((int(x) + 2, int(y) + 2))
+                _rt = win32gui.GetWindowRect(
+                    win32gui.GetAncestor(_hw, 2))      # GA_ROOT
+                if _rt[2] - _rt[0] > 100:
+                    _bw = int(_rt[2] - _rt[0])
+                with open(os.path.join(IMG_DIR, "potion0_meta.json"), "w",
+                          encoding="utf-8") as f:
+                    json.dump({"w": _bw}, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+            self._status.set(f"✔ 💧 0개 그림 저장 ({w}×{h}, 창 가로 {_bw}) — "
                              f"[🔍 16클라 확인] 으로 지금 점수를 보세요")
-            self._rlog(f"💧 0개 그림 등록 {w}x{h}")
+            self._rlog(f"💧 0개 그림 등록 {w}x{h} · 자른 창 가로 {_bw}")
         except Exception as e:
             self._status.set(f"✘ 💧 그림 저장 실패: {e}")
         self._potion0_paint()
@@ -5691,7 +5751,8 @@ class IslandApp(tk.Tk):
                 out.append(f"{i+1:02d}:{v:.2f}")
                 if ok:
                     hit.append(i + 1)
-            m = (" ".join(out) + f"  (기준 {potion0_thr():.2f}) → 0개 "
+            m = (" ".join(out) + f"  (기준 {potion0_thr():.2f} · 그림을 자른 창 "
+                 f"가로 {potion0_meta_w()}) → 0개 "
                  + (str(hit) if hit else "없음"))
             self._rlog("💧 🔍 " + m)
             self.after(0, lambda: self._status.set("🔍 " + m))
@@ -5701,20 +5762,38 @@ class IslandApp(tk.Tk):
 
     # ── 💧 '체력 회복제가 0개' → 그 슬롯만 다시 한 번 ─────────────────────
     def _potion0_armed(self, key):
-        """지금 '물약 0개' 확인을 시작해도 되나."""
+        """지금 '물약 0개' 확인을 시작해도 되나.
+
+        ⚠ **안 하는 이유는 반드시 기록한다** (2026-10-13 — 로컬에서 "왜 자동으로
+          실행을 안 누르냐" 를 짚을 수 없었다). 조용히 실패하는 감지를 만들지 말 것."""
         try:
             if self._stop_flag:
-                return False
+                return False               # 멈춤 — 기록할 일이 아니다
             if getattr(self, "_p0_retry", False):
                 return False               # 🚫 다시 돌린 실행은 또 확인하지 않는다
             if not potion0_on():
-                return False               # 사용자가 끈 경우
+                self._rlog("💧 확인 안 함 — [💧 자동 OFF] 로 꺼져 있습니다")
+                return False
             if not os.path.exists(potion0_img_path()):
-                return False               # 그림이 없으면 아무것도 하지 않는다
-            ran = [i for i in (getattr(self, "_p0_ran", None) or [])
+                self._rlog("💧 확인 안 함 — 그림이 없습니다 "
+                           f"({potion0_img_path()}) · 섬/던전 창의 "
+                           f"[💧 0개 그림 등록] 으로 한 번 잘라주세요")
+                return False
+            ran0 = list(getattr(self, "_p0_ran", None) or [])
+            ran = [i for i in ran0
                    if getattr(self, "_p0_done", {}).get(f"{key}|{i}", 0) < POTION0_MAX]
-            return bool(ran)
-        except Exception:
+            if not ran:
+                self._rlog("💧 확인 안 함 — "
+                           + ("이번에 돈 슬롯이 없습니다" if not ran0
+                              else f"돈 슬롯 {[i+1 for i in ran0]} 은 이미 "
+                                   f"{POTION0_MAX}번 다시 돌렸습니다"))
+                return False
+            return True
+        except Exception as e:
+            try:
+                self._rlog(f"💧 확인 안 함 — 오류 {e}")
+            except Exception:
+                pass
             return False
 
     def _potion0_after(self, key):
