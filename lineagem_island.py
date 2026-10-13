@@ -321,6 +321,99 @@ def potion0_thr():
 POTION0_BASE_W = 494           # 그림을 자른 창의 가로 (meta 가 없을 때 쓰는 기본)
 
 
+# 📍 **장소 이름**이 뜨는 자리 — 창 크기 대비 **비율** (창이 달라도 맞는다).
+#    실측 494×278 창: 사람 아이콘 + 이름이 x 13~90 · y 58~76.
+#    아이콘을 빼고 **글자만** 넉넉히 잡는다 (x 26~98 · y 57~77).
+#    ⚠ 세로를 넉넉히 잡으면 **아랫줄(돈/Exp)까지 들어와** 흰 글자가 섞인다 →
+#      초록 시계를 빼도 테두리가 안 줄어든다 (2026-10-13 실측).
+#      이름 글자는 창 기준 **y 62~68** 뿐이다. y 60~72 만 본다.
+PLACE_BOX   = (26 / 494, 60 / 278, 72 / 494, 12 / 278)
+# 기준 — 실측(2026-10-13, 16클라 교차 비교):
+#   같은 장소 0.80~1.00  ·  다른 장소 0.24~0.61  → 그 사이인 0.72 로 잡는다.
+#   ⚠ 내리기 전에 반드시 '다른 장소' 점수를 16클라로 재볼 것.
+PLACE_MATCH = 0.72
+PLACE_MAX   = 8            # 던전마다 이름 그림 최대 장수 (사냥터가 여럿이라 넉넉히)
+
+
+def place_img_path(key, n):
+    """던전 이름 그림 — 던전마다 여러 장(하나라도 맞으면 그 던전 안)."""
+    safe = "".join(c for c in str(key) if c.isalnum() or c in "_가-힣")
+    return os.path.join(IMG_DIR, f"place_{safe}_{n+1}.png")
+
+
+def place_list(key):
+    return [p for p in (place_img_path(key, n) for n in range(PLACE_MAX))
+            if os.path.exists(p)]
+
+
+def place_crop(big):
+    """창 캡처에서 **장소 이름 칸**만 잘라낸다."""
+    h, w = big.shape[0], big.shape[1]
+    x = int(w * PLACE_BOX[0]); y = int(h * PLACE_BOX[1])
+    cw = max(8, int(w * PLACE_BOX[2])); ch = max(6, int(h * PLACE_BOX[3]))
+    return big[y:y + ch, x:x + cw]
+
+
+def place_trim(cut):
+    """잘라낸 장소 칸에서 **이름 글자만** 남긴다 → 더 작은 그림.
+
+    ⚠ 이름 오른쪽에 **초록 시계**(`03:21`)가 붙는 슬롯이 있다 (실측 2026-10-13).
+      시간은 매번 바뀌므로 그림에 들어가면 **다시는 안 맞는다.**
+      그래서 **초록 픽셀을 뺀 흰 글자**의 테두리만 남긴다.
+      칸(비교할 범위)은 넓게 두고 **그림만 작게** 만드는 것이라,
+      이름이 짧든(에스카로스) 길든(무너져버린 봉인지대) 둘 다 맞는다."""
+    try:
+        import numpy as np
+        B = cut[:, :, 0].astype(int)
+        G = cut[:, :, 1].astype(int)
+        R = cut[:, :, 2].astype(int)
+        ink = (R + G + B) > 240
+        # 실측(2026-10-13): 이름 R164 G175 B169 (G-R +11) · 시계 R70 G153 B99 (G-R +82)
+        green = ink & ((G - R) > 40) & ((G - B) > 30)   # 초록 시계
+        white = ink & ~green
+        ys, xs = np.where(white)
+        if len(xs) < 8:
+            return None
+        x0, x1 = max(0, int(xs.min()) - 1), min(cut.shape[1], int(xs.max()) + 2)
+        y0, y1 = max(0, int(ys.min()) - 1), min(cut.shape[0], int(ys.max()) + 2)
+        if x1 - x0 < 8 or y1 - y0 < 5:
+            return None
+        return cut[y0:y1, x0:x1]
+    except Exception:
+        return None
+
+
+def place_in_dungeon(key, anchor):
+    """그 캐릭이 **지금 그 던전 안에 있나** → (안에 있나, 최고점수, 설명).
+
+    이름 그림이 **한 장도 없으면 (True, -1, '등록 안 됨')** — 막지 않는다
+    (등록 안 한 컴퓨터에서 갑자기 아무것도 안 되면 안 된다).
+    ⚠ 그림이 있는데 **안 맞으면 마을에 있는 것** → 그 슬롯은 건너뛴다."""
+    ps = place_list(key)
+    if not ps:
+        return True, -1.0, "던전 이름 그림이 없어 확인 안 함"
+    if not anchor:
+        return False, -1.0, "기준 좌표 없음"
+    try:
+        import cv2, numpy as np
+        got = grab_window(anchor)
+        if not got:
+            return False, 0.0, "창 캡처 실패"
+        cut = place_crop(got[0])
+        best = -1.0
+        for p in ps:
+            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            if t is None or cut.shape[0] < t.shape[0] or cut.shape[1] < t.shape[1]:
+                continue
+            v = float(cv2.matchTemplate(cut, t, cv2.TM_CCOEFF_NORMED).max())
+            best = max(best, v)
+            if best >= PLACE_MATCH:
+                return True, best, "던전 안"
+        return False, best, "던전 밖(마을 등)"
+    except Exception as e:
+        return False, 0.0, f"확인 실패 {e}"
+
+
 def potion0_meta_w():
     """그림을 **어느 크기의 창**에서 잘랐나 — 크기 보정의 기준."""
     try:
@@ -1541,11 +1634,24 @@ class IslandApp(tk.Tk):
                   bg="#1a5276", fg="white",
                   command=lambda k=key: self._potion0_test(k)
                   ).pack(side="left", padx=(3, 0))
+        # 📍 던전 안에 있을 때만 다시 돌리려면 **그 던전의 이름 그림**이 필요하다.
+        #    장소 이름은 창 왼쪽 위 고정 자리라 **드래그 없이** 그 칸만 자른다.
+        tk.Label(b3, text=" 슬롯", font=("맑은 고딕", 7)).pack(side="left")
+        _psv = tk.StringVar(value="1")
+        tk.Spinbox(b3, from_=1, to=SLOTS, textvariable=_psv, width=3,
+                   font=("맑은 고딕", 7)).pack(side="left")
+        _plb = tk.Button(b3, font=("맑은 고딕", 7, "bold"), fg="white",
+                         command=lambda k=key, v=_psv: self._place_grab(k, v))
+        _plb.pack(side="left", padx=(2, 0))
+        _plb.bind("<Button-3>", lambda e, k=key: self._place_del(k))
+        self._place_btns = getattr(self, "_place_btns", {})
+        self._place_btns[key] = _plb
         _tb = tk.Button(b3, font=("맑은 고딕", 7, "bold"), fg="white",
                         command=self._potion0_toggle)
         _tb.pack(side="left", padx=(3, 0))
         self._p0_btns[key] = (_pb, _tb)
         self._potion0_paint()
+        self._place_paint(key)
 
         # ── 번호 지정 일괄 적용 — 지정한 클릭 번호만 전 슬롯에 복사/삭제 ──
         nb = tk.LabelFrame(parent, text="번호 지정 일괄 (예: 3,7,12-14)",
@@ -5733,6 +5839,73 @@ class IslandApp(tk.Tk):
         self._status.set("🗑 💧 0개 그림을 지웠습니다 — 자동 다시돌리기가 멈춥니다")
         self._potion0_paint()
 
+    def _place_paint(self, key):
+        b = (getattr(self, "_place_btns", None) or {}).get(key)
+        if not b:
+            return
+        n = len(place_list(key))
+        try:
+            b.config(text=(f"📍 던전이름 {n}장" if n else "📍 던전이름 등록"),
+                     bg=("#196f3d" if n else "#7f8c8d"))
+        except Exception:
+            pass
+
+    def _place_grab(self, key, var):
+        """📍 **지금 그 슬롯이 보고 있는 장소 이름**을 그대로 잘라 등록한다.
+
+        자리가 고정이라 드래그가 필요 없다 — 그 칸만 잘라 저장한다.
+        던전 안에 있는 캐릭의 슬롯 번호를 골라 누르면 된다.
+        같은 던전에 이름이 둘이면(악몽의섬 ↔ 라스타바드) 각각 한 번씩 누른다."""
+        try:
+            si = max(1, min(SLOTS, int(var.get()))) - 1
+        except Exception:
+            si = 0
+        slots = self.cfg.get(key) or []
+        anc = self._slot_anchor(slots[si] if si < len(slots) else {})
+        if not anc:
+            self._status.set(f"📍 #{si+1:02d} 에 좌표가 없어 어느 클라인지 모릅니다")
+            return
+        got = grab_window(anc)
+        if not got:
+            self._status.set(f"📍 #{si+1:02d} 창을 못 찍었습니다")
+            return
+        cut = place_crop(got[0])
+        _tr = place_trim(cut)          # 초록 시계를 빼고 **이름 글자만**
+        if _tr is not None:
+            cut = _tr
+        try:
+            import cv2, numpy as np
+            if float(cut.std()) < 3.0:
+                self._status.set("📍 그 자리에 글자가 없습니다 "
+                                 "(캐릭이 접속 중이거나 화면이 덜 뜬 상태)")
+                return
+            n = len(place_list(key))
+            if n >= PLACE_MAX:
+                self._status.set(f"📍 이름 그림이 {PLACE_MAX}장 다 찼습니다 "
+                                 f"(오른쪽 클릭으로 지운 뒤 다시)")
+                return
+            os.makedirs(IMG_DIR, exist_ok=True)
+            p = place_img_path(key, n)
+            cv2.imencode(".png", cut)[1].tofile(p)
+            self._status.set(f"✔ 📍 {key} 던전 이름 {n+1}번째 등록 "
+                             f"({cut.shape[1]}×{cut.shape[0]}, #{si+1:02d} 에서) — "
+                             f"이제 던전 안일 때만 다시 돌립니다")
+            self._rlog(f"📍 {key} 던전 이름 그림 {n+1}장째 등록 (#{si+1:02d})")
+        except Exception as e:
+            self._status.set(f"📍 저장 실패: {e}")
+        self._place_paint(key)
+
+    def _place_del(self, key):
+        n = 0
+        for i in range(PLACE_MAX):
+            try:
+                os.remove(place_img_path(key, i)); n += 1
+            except Exception:
+                pass
+        self._status.set(f"🗑 📍 {key} 던전 이름 그림 {n}장을 지웠습니다 — "
+                         f"이제 장소를 확인하지 않습니다")
+        self._place_paint(key)
+
     def _potion0_test(self, key):
         """🔍 지금 16클라에 그 문구가 떠 있나 — **아무것도 누르지 않는다.**"""
         if not os.path.exists(potion0_img_path()):
@@ -5748,8 +5921,9 @@ class IslandApp(tk.Tk):
                     out.append(f"{i+1:02d}:-")
                     continue
                 ok, v = potion0_seen(anc)
-                out.append(f"{i+1:02d}:{v:.2f}")
-                if ok:
+                _in, _pv, _ = place_in_dungeon(key, anc)
+                out.append(f"{i+1:02d}:{v:.2f}{'' if _in else '(밖)'}")
+                if ok and _in:
                     hit.append(i + 1)
             m = (" ".join(out) + f"  (기준 {potion0_thr():.2f} · 그림을 자른 창 "
                  f"가로 {potion0_meta_w()}) → 0개 "
@@ -5843,6 +6017,24 @@ class IslandApp(tk.Tk):
             if not bad:
                 self._status.set("💧 물약 0개인 슬롯 없음 — 다시 돌리지 않습니다")
                 return self._potion0_finish(key)
+            # 📍 **던전 안에 있는 슬롯만** 다시 돌린다 (2026-10-13 사용자 지시:
+            #    "아니 던전 안에 있을 때만 돌려줘"). 마을에 나와 있으면 다시 돌려봐야
+            #    엉뚱한 곳이 눌린다. 이름 그림이 없으면 막지 않는다.
+            _keep, _out = [], []
+            for si in bad:
+                _anc = self._slot_anchor(slots[si] if si < len(slots) else {})
+                _in, _pv, _pw = place_in_dungeon(key, _anc)
+                if _in:
+                    _keep.append(si)
+                else:
+                    _out.append(f"#{si+1:02d}({_pv:.2f} {_pw})")
+            if _out:
+                self._rlog("📍 던전 밖이라 건너뜀 — " + " ".join(_out))
+            if not _keep:
+                self._status.set("💧 물약 0개인 슬롯은 있는데 "
+                                 "전부 던전 밖입니다 — 다시 돌리지 않습니다")
+                return self._potion0_finish(key)
+            bad = _keep
             for si in bad:
                 self._p0_done[f"{key}|{si}"] = self._p0_done.get(f"{key}|{si}", 0) + 1
             self._rlog(f"💧 {key} 다시 돌림 — 슬롯 "
