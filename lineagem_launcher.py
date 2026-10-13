@@ -223,6 +223,13 @@ FIX_GAP_MAX        = 1.25
 FIX_FOCUS_WAIT     = (0.35, 0.60)
 # 🩹 **2회차는 꼼꼼히** (2026-10-13 사용자 지시: "한 번은 지금 속도와 똑같이 하고,
 #    실패하게 되면은 다시 꼼꼼히 다시 눌러줘"). 1회차는 지금 속도 그대로다.
+# 🟣 영웅 아이템 점 — 슬롯마다 3개 (2026-10-13 사용자 설계).
+#    "점은 내가 어느 정도 확인할 수 있는 크기로" → 지름 16px.
+HERO_DOTS  = 3
+HERO_R     = 8                 # 점 반지름(px) — 지름 16
+HERO_GAP   = 6                 # 점 사이 틈
+HERO_CV_W  = HERO_DOTS * (HERO_R * 2 + HERO_GAP) + 2
+HERO_CV_H  = HERO_R * 2 + 6
 FIX_SLOW_MULT      = 2.2       # 2회차 간격·창 올리는 틈 배수
 CHECK_TRIES_SLOW   = 8         # 2회차 👁 '무료' 확인 횟수 (1회차는 CHECK_TRIES=4)
 # 🔍 복구를 누르기 전 **십자가를 몇 번 보나** (2026-10-11 사용자 신고:
@@ -4697,7 +4704,12 @@ class App(tk.Tk):
                       width=4, height=2, command=_run).pack(side="left", padx=(2,0))
 
         winmgmt = tk.Frame(front_row); winmgmt.pack(side="left", padx=(4,10), anchor="n")
-        self._build_winmgmt(winmgmt)
+        # 🪟 재배치는 **그대로 두고**, 🟣 영웅 판을 그 **바로 아래**에 붙인다
+        #    (2026-10-13 사용자: "재배치는 그대로 냅두고 그 아래에 새로 만들어주라는
+        #     거야, 재배치 하는 런처 밑으로"). 그래서 재배치 쪽 코드는 손대지 않았다.
+        _wtop = tk.Frame(winmgmt); _wtop.pack(anchor="w")
+        self._build_winmgmt(_wtop)
+        self._build_hero_grid(winmgmt)
 
         tk.Frame(front_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(4,8))
 
@@ -13562,16 +13574,6 @@ class App(tk.Tk):
         hdr = getattr(self, "_warn_hdr", None)   # 개수 표시는 쓰지 않는다 (사용자 지시)
         if hdr and hdr.winfo_exists():
             hdr.pack_forget()
-        # 🟣 영웅(보라) 아이템 — **아직 안 판 것**을 들고 있는 목록 (2026-10-13).
-        #    복구 목록과 **같은 틀**에 그린다 — 따로 창을 만들지 않는다
-        #    (2026-10-12 교훈: "같은 목록을 가진 창을 따로 만들지 말 것").
-        for _hk, _hv in sorted(self._hero_load().items()):
-            _hr = tk.Frame(box); _hr.pack(fill="x", pady=1)
-            tk.Button(_hr, text=f"🟣 영웅 {_hk}  ({(_hv or {}).get('at', '')})",
-                      font=("맑은 고딕", 9, "bold"), bg="#6c3483", fg="white",
-                      activebackground="#512e5f", anchor="w",
-                      command=lambda q=_hk: self._hero_remove(q)
-                      ).pack(side="left", fill="x", expand=True)
         for si in slots:
             row = tk.Frame(box); row.pack(fill="x", pady=1)
             # 누르면 그 슬롯만 복구를 돌린다 (2026-08-29 사용자 요청).
@@ -23785,32 +23787,104 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _build_hero_grid(self, parent):
+        """🟣 영웅 아이템 판 — 슬롯마다 점 3개. 재배치 그리드 **바로 아래**.
+
+        점 하나 = 영웅 아이템 하나. **누르면 빨강(있음) · 다시 누르면 꺼짐(팔림).**
+        번호 배치는 재배치와 **똑같이** 세로(열 우선)라 눈이 바로 따라간다.
+        (2026-10-13 사용자 설계 — 글 목록보다 한눈에 들어오고 손으로 고치기 쉽다)"""
+        box = tk.LabelFrame(parent,
+                            text=" 🟣 영웅 — 먹으면 점을 켜고, 팔리면 끈다 ",
+                            font=("맑은 고딕", 8, "bold"), fg="#6c3483",
+                            bd=2, relief="groove")
+        box.pack(anchor="w", pady=(6, 0), padx=1)
+        hg = tk.Frame(box); hg.pack(padx=3, pady=3)
+        self._hero_cv = {}
+        for idx in range(16):
+            r, c = idx % 4, idx // 4        # 재배치와 같은 세로(열 우선) 배치
+            cell = tk.Frame(hg); cell.grid(row=r, column=c, padx=4, pady=2)
+            tk.Label(cell, text=f"{idx+1:02d}", font=("맑은 고딕", 7),
+                     fg="#888").pack(side="left", padx=(0, 2))
+            cv = tk.Canvas(cell, width=HERO_CV_W, height=HERO_CV_H,
+                           highlightthickness=0, bg=cell.cget("bg"),
+                           cursor="hand2")
+            cv.pack(side="left")
+            cv.bind("<Button-1>", lambda e, x=idx: self._hero_click(x, e.x))
+            self._hero_cv[idx] = cv
+        self._hero_paint()
+
+    def _hero_dots(self, k):
+        """그 슬롯의 점 상태 — 길이 `HERO_DOTS` 의 0/1 목록."""
+        v = (self._hero_load() or {}).get(str(k))
+        if isinstance(v, list):
+            v = [1 if x else 0 for x in v][:HERO_DOTS]
+        else:
+            v = []                       # 옛 형식(사전)은 버린다 — 점으로 바뀌었다
+        return v + [0] * (HERO_DOTS - len(v))
+
+    def _hero_paint(self):
+        """점 48개(16슬롯 × 3)를 다시 그린다. 켜진 것만 빨강."""
+        for idx, cv in (getattr(self, "_hero_cv", None) or {}).items():
+            try:
+                if not cv.winfo_exists():
+                    continue
+                cv.delete("all")
+                st = self._hero_dots(f"{idx+1:02d}")
+                for n in range(HERO_DOTS):
+                    cx = HERO_R + 1 + n * (HERO_R * 2 + HERO_GAP)
+                    cy = HERO_CV_H // 2
+                    cv.create_oval(cx - HERO_R, cy - HERO_R,
+                                   cx + HERO_R, cy + HERO_R,
+                                   fill=("#e74c3c" if st[n] else ""),
+                                   outline=("#c0392b" if st[n] else "#999"))
+            except Exception:
+                pass
+
+    def _hero_click(self, idx, x):
+        """점을 눌렀다 — **켜고 끄기**. 어느 점인지는 누른 가로 위치로 안다."""
+        try:
+            n = max(0, min(HERO_DOTS - 1, int(x) // (HERO_R * 2 + HERO_GAP)))
+            k = f"{idx+1:02d}"
+            st = self._hero_dots(k)
+            st[n] = 0 if st[n] else 1
+            d = self._hero_load()
+            if any(st):
+                d[k] = st
+            else:
+                d.pop(k, None)           # 다 끄면 줄을 아예 지운다
+            self._hero_save(d)
+            self._hero_paint()
+            _on = sum(st)
+            self.status.set(f"🟣 영웅 #{k} — {_on}개 있음" if _on
+                            else f"✔ 영웅 #{k} — 전부 팔림")
+            click_log(f"[영웅] #{k} {n+1}번째 점 "
+                      + ("켬(있음)" if st[n] else "끔(팔림)") + f" → 지금 {_on}개")
+        except Exception:
+            pass
+
     def _hero_add(self, xy):
         """🟣 영웅(보라)을 만났다 — 그 슬롯을 목록에 올린다. **올리지는 않는다.**
         런처를 껐다 켜도 남는다 (팔렸는지 나중에 확인해야 하므로)."""
         try:
             si = self._slot_of_anchor((int(xy[0]), int(xy[1])))
-            k = f"{int(si):02d}" if si else "??"
+            if not si:
+                return
+            k = f"{int(si):02d}"
+            st = self._hero_dots(k)
+            if all(st):
+                return                      # 점 3개가 이미 다 켜져 있다
+            st[st.index(0)] = 1             # **빈 점 하나를 켠다** (손으로 켜는 것과 같다)
             d = self._hero_load()
-            if k in d:
-                return                      # 이미 올라가 있다
-            d[k] = {"at": time.strftime("%m-%d %H:%M")}
+            d[k] = st
             self._hero_save(d)
-            click_log(f"[아이템등록] 🟣 영웅 — #{k} 목록에 올렸습니다 "
-                      f"(팔리면 그 줄을 눌러 지우세요)")
-            self.status.set(f"🟣 영웅 아이템 #{k} — 목록에 남겼습니다 "
-                            f"(팔리면 눌러서 지우세요)")
-            self.after(0, self._warn_refresh)
+            self.after(0, self._hero_paint)
+            _on = sum(st)
+            click_log(f"[아이템등록] 🟣 영웅 — #{k} 점을 하나 켰습니다 (지금 {_on}개) "
+                      f"— 팔리면 그 점을 눌러 끄세요")
+            self.status.set(f"🟣 영웅 #{k} — 점을 켰습니다 ({_on}개) · "
+                            f"팔리면 재배치 아래 점을 눌러 끄세요")
         except Exception:
             pass
-
-    def _hero_remove(self, k):
-        d = self._hero_load()
-        if d.pop(str(k), None) is not None:
-            self._hero_save(d)
-            click_log(f"[아이템등록] 🟣 영웅 #{k} — 목록에서 지웠습니다 (팔림 확인)")
-            self.status.set(f"✔ 영웅 #{k} 지웠습니다")
-        self._warn_refresh()
 
     def _run_one_coord(self, key):
         """▶ **그 단계만 지금 한 번** 눌러본다 (2026-10-12 사용자 요청:
