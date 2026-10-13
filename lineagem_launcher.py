@@ -244,7 +244,8 @@ PRE2_WAIT          = 10.0
 #     다 접속이 되는 거 같거든." 업데이트 직후 로컬에서 접속이 자주 실패했는데
 #     손으로 두 번 전환하면 전부 접속됐다. 퍼플이 계정 상태를 다시 읽을 시간이 필요하다.
 #    ⚠ **줄이지 말 것** — 사용자가 손으로 확인한 값이다.
-PROFILE_PRESWITCH      = 2          # 전환 횟수
+# 2026-10-14 저녁 사용자: "먼저 **한 번씩만** 퍼플을 전환하고 그 이후에는 그냥 접속을 해줘."
+PROFILE_PRESWITCH      = 1          # 전환 횟수
 PROFILE_PRESWITCH_WAIT = 6.0        # 전환 한 번 뒤 쉬는 시간(초)
 FIX_SLOW_MULT      = 2.2       # 2회차 간격·창 올리는 틈 배수
 CHECK_TRIES_SLOW   = 8         # 2회차 👁 '무료' 확인 횟수 (1회차는 CHECK_TRIES=4)
@@ -24006,6 +24007,25 @@ class App(tk.Tk):
             #    대신 **등록된 슬롯 좌표**로 그 클라를 찾는다 (섬 실행기와 같은 방식).
             self._p0_watch_done = getattr(self, "_p0_watch_done", {})
             now = time.time()
+            # 🎮 **리니지M 클라가 켜져 있을 때만 본다** (2026-10-14 사용자 지시:
+            #    "물약감시는 리니지m 클라가 켜져 있을 때만 감시해야지").
+            #    꺼져 있으면 창을 못 찍어 점수가 엉뚱하게 나오고, 쓸데없이 16번 훑는다.
+            try:
+                import win32gui
+                _n = [0]
+                def _cb(h, _):
+                    if win32gui.IsWindowVisible(h) and not win32gui.IsIconic(h):
+                        t = win32gui.GetWindowText(h)
+                        if t.startswith("리니지M l"):
+                            l, tp, r_, b_ = win32gui.GetWindowRect(h)
+                            if r_ - l > 100 and b_ - tp > 100:
+                                _n[0] += 1
+                    return True
+                win32gui.EnumWindows(_cb, None)
+                if _n[0] < 1:
+                    return self._p0_why("리니지M 클라가 안 켜져 있다")
+            except Exception:
+                pass
             try:
                 _ic = json.load(io.open(os.path.join(BASE, "island_coords.json"),
                                         encoding="utf-8-sig"))
@@ -24079,6 +24099,42 @@ class App(tk.Tk):
             except Exception:
                 pass
 
+    def _purple_front(self, wait=0.7):
+        """🟣 퍼플 창을 **앞으로** 올린다. 내려가 있으면(최소화) **되살린다.**
+
+        2026-10-14 사용자: *"퍼플을 내리고 좌표클릭을 해버리는데 그렇게 하면 안 되잖아.
+        퍼플에 리니지M을 킨 상태에서 접속을 해야 하잖아."*
+        `profile_btn` 은 창 오른쪽 위라, 그 순간 프로필 화면이 아니면 **최소화 버튼**을
+        눌러버린다 → 퍼플이 내려가고 뒤 클릭이 전부 엉뚱한 곳으로 간다.
+        그래서 **누르기 전마다** 이걸 부른다.
+
+        ⚠ **`maximize()` 를 부르지 말 것** — 좌표는 지금 창 크기 기준으로 찍혀 있다.
+          크기를 바꾸면 전부 어긋난다. 올리기와 최소화 복원까지만 한다."""
+        try:
+            w = find_purple()
+            if not w:
+                return False
+            try:
+                import win32gui, win32con
+                h = win32gui.FindWindow(None, w.title)
+                if h:
+                    if win32gui.IsIconic(h):        # 내려가 있으면 되살린다
+                        win32gui.ShowWindow(h, win32con.SW_RESTORE)
+                        time.sleep(0.5)
+                    win32gui.SetForegroundWindow(h)
+                else:
+                    w.activate()
+            except Exception:
+                try:
+                    w.activate()
+                except Exception:
+                    pass
+            if wait:
+                time.sleep(wait)
+            return True
+        except Exception:
+            return False
+
     def _profile_switch_once(self, tag=""):
         """🔁 프로필(구글 계정) **전환 한 번** — 프로필 → (마우스 올림) → 구글 계정 → 확인.
 
@@ -24087,6 +24143,8 @@ class App(tk.Tk):
         어긋나는 일을 막는다.
 
         돌려주는 값: 끝까지 갔으면 True, 그림을 못 찾았거나 멈춤이면 False."""
+        # 🟣 **퍼플이 올라와 있어야 한다** — 내려가 있으면 오른쪽 위가 최소화 버튼이다
+        self._purple_front()
         self.status.set(f"{tag} 프로필 클릭...")
         if not self._lclick("profile_btn"):
             return False
@@ -24101,6 +24159,7 @@ class App(tk.Tk):
             if not self._wait(1):
                 return False
             self._lclick("confirm_hover", move_only=True)
+        self._purple_front(0.3)        # 🟣 목록이 뜬 뒤에도 퍼플이 앞이어야 한다
         self.status.set(f"{tag} 구글 계정 클릭...")
         if not self._lclick("google_acc", hover=True):
             return False
@@ -24853,11 +24912,13 @@ class App(tk.Tk):
                     if not self._wait(PROFILE_PRESWITCH_WAIT):
                         self.status.set("멈춤"); return
 
+                self._purple_front()      # 🟣 퍼플을 앞으로 (내려갔으면 되살린다)
                 self.status.set(f"[{acc_idx+1}/{total}] 게임 실행 클릭...")
                 if not self._lclick("game_start"):
                     return
                 if not self._wait(5): self.status.set("멈춤"); return
 
+                self._purple_front()      # 🟣 퍼플을 앞으로
                 self.status.set(f"[{acc_idx+1}/{total}] 멀티플레이 클릭...")
                 if not self._lclick("multiplay"):
                     return
