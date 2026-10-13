@@ -327,13 +327,15 @@ POTION0_BASE_W = 494           # 그림을 자른 창의 가로 (meta 가 없을
 #    ⚠ 세로를 넉넉히 잡으면 **아랫줄(돈/Exp)까지 들어와** 흰 글자가 섞인다 →
 #      초록 시계를 빼도 테두리가 안 줄어든다 (2026-10-13 실측).
 #      이름 글자는 창 기준 **y 62~68** 뿐이다. y 60~72 만 본다.
-PLACE_BOX   = (26 / 494, 60 / 278, 72 / 494, 12 / 278)
+#    실측(2026-10-13): 사람 아이콘 x13~21 · 이름은 **x25 부터** 시작한다
+#    (해적섬 = x25~41). x26 으로 잡으면 **첫 글자가 1px 잘린다** → x23 부터.
+PLACE_BOX   = (23 / 494, 60 / 278, 75 / 494, 12 / 278)
 # 기준 — 실측(2026-10-13, 16클라 교차 비교):
 #   같은 장소 0.72~1.00  ·  다른 장소 0.34~0.45  ·  마을(기린 마을) 0.36
 #   (2026-10-13 메인 16클라 · 에카 그림 4장). 5번 클라만 글자가 조금 다르게
 #   그려져 0.72 에 딱 걸쳐서, 가운데인 **0.60** 으로 내렸다 (여유 위 0.12 · 아래 0.15).
 #   ⚠ 더 내리기 전에 반드시 '다른 장소'·'마을' 점수를 16클라로 재볼 것.
-PLACE_MATCH = 0.60
+PLACE_MATCH = 0.75
 PLACE_MAX   = 8            # 던전마다 이름 그림 최대 장수 (사냥터가 여럿이라 넉넉히)
 
 
@@ -348,12 +350,33 @@ def place_list(key):
             if os.path.exists(p)]
 
 
+PLACE_CW, PLACE_CH = 75, 12    # 494x278 창 기준 칸 크기 — 여기에 **맞춰 놓고** 본다
+
+
 def place_crop(big):
-    """창 캡처에서 **장소 이름 칸**만 잘라낸다."""
+    """창 캡처에서 **장소 이름 칸**만 잘라 **항상 같은 크기(72×12)로 맞춘다.**
+
+    ⚠ 창을 크게 띄우면(확대) 칸도 같이 커져서 그림이 안 맞는다 — 실측 2026-10-13:
+      2번 클라를 확대했더니 칸이 72×12 → **364×58** 이 됐다.
+      그래서 자른 뒤 **한 크기로 맞춰** 비교한다. 등록할 때도 같은 크기를 쓰므로
+      **창이 크든 작든 같은 그림**이 된다 (로컬 21대에도 그대로 맞는다).
+    """
     h, w = big.shape[0], big.shape[1]
     x = int(w * PLACE_BOX[0]); y = int(h * PLACE_BOX[1])
     cw = max(8, int(w * PLACE_BOX[2])); ch = max(6, int(h * PLACE_BOX[3]))
-    return big[y:y + ch, x:x + cw]
+    cut = big[y:y + ch, x:x + cw]
+    if cut.shape[0] < 3 or cut.shape[1] < 6:
+        return cut
+    try:
+        import cv2
+        if (cut.shape[1], cut.shape[0]) != (PLACE_CW, PLACE_CH):
+            cut = cv2.resize(cut, (PLACE_CW, PLACE_CH),
+                             interpolation=(cv2.INTER_AREA
+                                            if cut.shape[1] > PLACE_CW
+                                            else cv2.INTER_CUBIC))
+    except Exception:
+        pass
+    return cut
 
 
 def place_trim(cut, drop_tail=False):
