@@ -329,9 +329,11 @@ POTION0_BASE_W = 494           # 그림을 자른 창의 가로 (meta 가 없을
 #      이름 글자는 창 기준 **y 62~68** 뿐이다. y 60~72 만 본다.
 PLACE_BOX   = (26 / 494, 60 / 278, 72 / 494, 12 / 278)
 # 기준 — 실측(2026-10-13, 16클라 교차 비교):
-#   같은 장소 0.80~1.00  ·  다른 장소 0.24~0.61  → 그 사이인 0.72 로 잡는다.
-#   ⚠ 내리기 전에 반드시 '다른 장소' 점수를 16클라로 재볼 것.
-PLACE_MATCH = 0.72
+#   같은 장소 0.72~1.00  ·  다른 장소 0.34~0.45  ·  마을(기린 마을) 0.36
+#   (2026-10-13 메인 16클라 · 에카 그림 4장). 5번 클라만 글자가 조금 다르게
+#   그려져 0.72 에 딱 걸쳐서, 가운데인 **0.60** 으로 내렸다 (여유 위 0.12 · 아래 0.15).
+#   ⚠ 더 내리기 전에 반드시 '다른 장소'·'마을' 점수를 16클라로 재볼 것.
+PLACE_MATCH = 0.60
 PLACE_MAX   = 8            # 던전마다 이름 그림 최대 장수 (사냥터가 여럿이라 넉넉히)
 
 
@@ -354,7 +356,7 @@ def place_crop(big):
     return big[y:y + ch, x:x + cw]
 
 
-def place_trim(cut):
+def place_trim(cut, drop_tail=False):
     """잘라낸 장소 칸에서 **이름 글자만** 남긴다 → 더 작은 그림.
 
     ⚠ 이름 오른쪽에 **초록 시계**(`03:21`)가 붙는 슬롯이 있다 (실측 2026-10-13).
@@ -376,6 +378,22 @@ def place_trim(cut):
             return None
         x0, x1 = max(0, int(xs.min()) - 1), min(cut.shape[1], int(xs.max()) + 2)
         y0, y1 = max(0, int(ys.min()) - 1), min(cut.shape[0], int(ys.max()) + 2)
+        if drop_tail:
+            # 🏢 **뒤 한 덩어리를 뺀다** — `오만의탑 5층` 처럼 층수가 붙는 곳용
+            #    (2026-10-13 사용자: "오만의탑은 오만의탑 몇 층 이렇게 되는데
+            #     그냥 오만의탑으로 인식하면 좋을 것 같아").
+            #    글자가 없는 **가장 넓은 틈**에서 끊고 **왼쪽만** 남긴다.
+            col = white[:, x0:x1].sum(axis=0)
+            runs, st = [], None
+            for i, v in enumerate(col):
+                if v == 0 and st is None:
+                    st = i
+                elif v != 0 and st is not None:
+                    runs.append((i - st, st, i)); st = None
+            runs = [r for r in runs if r[1] > 6 and r[2] < (x1 - x0) - 2]
+            if runs:
+                g = max(runs)              # 가장 넓은 틈
+                x1 = x0 + g[1] + 1
         if x1 - x0 < 8 or y1 - y0 < 5:
             return None
         return cut[y0:y1, x0:x1]
@@ -1644,6 +1662,8 @@ class IslandApp(tk.Tk):
                          command=lambda k=key, v=_psv: self._place_grab(k, v))
         _plb.pack(side="left", padx=(2, 0))
         _plb.bind("<Button-3>", lambda e, k=key: self._place_del(k))
+        # 🏢 가운데(휠) 클릭 = **뒤 한 덩어리를 빼고** 등록 (`오만의탑 5층` → `오만의탑`)
+        _plb.bind("<Button-2>", lambda e, k=key, v=_psv: self._place_grab(k, v, True))
         self._place_btns = getattr(self, "_place_btns", {})
         self._place_btns[key] = _plb
         _tb = tk.Button(b3, font=("맑은 고딕", 7, "bold"), fg="white",
@@ -5850,7 +5870,7 @@ class IslandApp(tk.Tk):
         except Exception:
             pass
 
-    def _place_grab(self, key, var):
+    def _place_grab(self, key, var, drop_tail=False):
         """📍 **지금 그 슬롯이 보고 있는 장소 이름**을 그대로 잘라 등록한다.
 
         자리가 고정이라 드래그가 필요 없다 — 그 칸만 잘라 저장한다.
@@ -5870,7 +5890,7 @@ class IslandApp(tk.Tk):
             self._status.set(f"📍 #{si+1:02d} 창을 못 찍었습니다")
             return
         cut = place_crop(got[0])
-        _tr = place_trim(cut)          # 초록 시계를 빼고 **이름 글자만**
+        _tr = place_trim(cut, drop_tail)   # 초록 시계를 빼고 **이름 글자만**
         if _tr is not None:
             cut = _tr
         try:
