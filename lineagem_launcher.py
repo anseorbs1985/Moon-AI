@@ -230,6 +230,10 @@ HERO_R     = 8                 # 점 반지름(px) — 지름 16
 HERO_GAP   = 6                 # 점 사이 틈
 HERO_CV_W  = HERO_DOTS * (HERO_R * 2 + HERO_GAP) + 2
 HERO_CV_H  = HERO_R * 2 + 6
+# 💧 물약 0개 **상시 감시** (2026-10-13 사용자 요청: "멘트가 나와도 가만히 있어서
+#    죽는데"). 실행 끝 직후에만 보면 늦는다 — 물약은 사냥 도중에 떨어진다.
+P0_WATCH_MS   = 120000         # 2분마다 (16클라 약 1초 → 1분당 0.5초)
+P0_WATCH_COOL = 1200           # 같은 슬롯은 20분에 한 번만 다시 돌린다
 FIX_SLOW_MULT      = 2.2       # 2회차 간격·창 올리는 틈 배수
 CHECK_TRIES_SLOW   = 8         # 2회차 👁 '무료' 확인 횟수 (1회차는 CHECK_TRIES=4)
 # 🔍 복구를 누르기 전 **십자가를 몇 번 보나** (2026-10-11 사용자 신고:
@@ -3821,6 +3825,8 @@ class App(tk.Tk):
         self.after(1500, self._bot_tick)
         # 🔙 완료 후 최소화가 남아 있으면 맨 뒤로 되살린다 (복원을 빠뜨린 경로 대비)
         self.after(3000, self._minauto_tick)
+        # 💧 물약 0개 상시 감시 — 사냥 도중에 떨어지는 것을 잡는다 (2026-10-13)
+        self.after(20000, self._p0_watch_tick)
         self.after(4000, self._bot_start_watcher)
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
         self.after(2000, self._queue_tick)               # 실행 대기열 순차 처리
@@ -23885,6 +23891,144 @@ class App(tk.Tk):
                             f"팔리면 재배치 아래 점을 눌러 끄세요")
         except Exception:
             pass
+
+    # ── 💧 물약 0개 상시 감시 — 그 슬롯만 다시 돌린다 ─────────────────────
+    def _p0_watch_tick(self):
+        """2분마다 16클라를 훑어 '체력 회복제가 0개' 를 찾는다.
+
+        ⚠ 화면을 긁는 일은 **반드시 백그라운드 스레드**에서 (2026-09-16 사고:
+          `self.after` 틱에서 긁었더니 1분에 1.92초씩 창이 멈췄다).
+          여기서는 스레드를 띄우기만 하므로 틱 자체의 부하는 0 이다."""
+        try:
+            self._p0_watch_n = getattr(self, "_p0_watch_n", 0) + 1
+            if self._p0_watch_n == 1:
+                click_log("[물약감시] 감시 시작 — 2분마다 16클라를 봅니다")
+            if self._is_busy():
+                # 🗒 **빠져나가는 이유도 남긴다** — 조용하면 왜 안 도는지 알 수 없다
+                if self._p0_watch_n % 10 == 1:
+                    click_log("[물약감시] 다른 작업이 도는 중이라 건너뜀")
+            else:
+                threading.Thread(target=self._p0_watch_scan, daemon=True).start()
+        except Exception as e:
+            try: click_log(f"[물약감시] 틱 오류: {e}")
+            except Exception: pass
+        self.after(P0_WATCH_MS, self._p0_watch_tick)
+
+    def _p0_why(self, msg):
+        """감시가 **왜 안 돌았는지** 남긴다 (10번에 한 번만 — 기록이 넘치지 않게).
+        ⚠ 조용히 빠져나가면 로컬에서 원인을 짚을 수 없다 (이 저장소의 반복된 교훈)."""
+        try:
+            if getattr(self, "_p0_watch_n", 0) % 10 == 1:
+                click_log(f"[물약감시] 건너뜀 — {msg}")
+        except Exception:
+            pass
+        return None
+
+    def _p0_watch_scan(self):
+        """16클라를 보고, 물약 0개 + 그 던전 안이면 **그 슬롯만** 다시 실행."""
+        try:
+            import lineagem_island as _isl      # 섬 실행기의 판정 함수를 그대로 쓴다
+        except Exception as e:
+            click_log(f"[물약감시] 섬 실행기 모듈을 못 읽음: {e}")
+            return
+        try:
+            if not _isl.potion0_on():
+                return self._p0_why("[💧 자동 OFF] 로 꺼져 있음")
+            if not os.path.exists(_isl.potion0_img_path()):
+                return self._p0_why("물약 0개 그림이 없음")
+            # 섬 실행기가 이미 돌고 있으면 건드리지 않는다
+            try:
+                _rf = os.path.join(os.environ.get("LOCALAPPDATA", BASE),
+                                   "MoonAI", "island_run.json")
+                if os.path.exists(_rf):
+                    import ctypes
+                    _pid = int((json.load(io.open(_rf, encoding="utf-8-sig"))
+                                or {}).get("pid") or 0)
+                    if _pid:
+                        _h = ctypes.windll.kernel32.OpenProcess(0x1000, False, _pid)
+                        if _h:
+                            ctypes.windll.kernel32.CloseHandle(_h)
+                            return
+            except Exception:
+                pass
+            # 🚫 `_client_rects_by_slot()` 을 쓰지 않는다 — 그건 **정확히 16개**일 때만
+            #    동작하는데, 실측 2026-10-13 에 클라가 **18개**였다 (바리스타·라텔이
+            #    격자 밖에 더 떠 있었다) → None 이 돌아와 감시가 통째로 멈췄다.
+            #    대신 **등록된 슬롯 좌표**로 그 클라를 찾는다 (섬 실행기와 같은 방식).
+            self._p0_watch_done = getattr(self, "_p0_watch_done", {})
+            now = time.time()
+            try:
+                _ic = json.load(io.open(os.path.join(BASE, "island_coords.json"),
+                                        encoding="utf-8-sig"))
+            except Exception as e:
+                return self._p0_why(f"island_coords.json 을 못 읽음: {e}")
+            # 장소 그림이 등록된 던전만 대상 (어느 던전인지 알아야 돌릴 수 있다)
+            keys = [(n, d["key"]) for n, d in enumerate(_isl.DUNGEONS[:4])
+                    if _isl.place_list(d["key"])]
+            if not keys:
+                return self._p0_why("던전 장소 그림이 한 장도 없어 "
+                                    "어느 던전인지 알 수 없음")
+            # 🧭 ① **슬롯마다 기준 좌표를 하나 모은다** (어느 던전 설정이든 좌표는
+            #    같은 클라를 가리킨다). ② 물약 0개를 **슬롯당 한 번** 본다.
+            #    ③ 걸린 슬롯만 **모든 던전**의 장소 그림과 맞춰본다.
+            #    ⚠ 예전에는 던전별로 돌며 `_seen` 으로 중복을 걸렀는데, 그러면
+            #      9번이 '잊혀진섬' 차례에 먼저 걸려 제외되고 **'에카' 차례엔 아예
+            #      안 봤다** (2026-10-13 실측 — 문구가 떠 있는데 안 돌던 진짜 원인).
+            ancs = {}
+            for _didx, _key in keys:
+                for si, slot in enumerate(_ic.get(_key) or []):
+                    if si in ancs or not isinstance(slot, dict):
+                        continue
+                    if not slot.get("enabled", True):
+                        continue            # 🚫 OFF 슬롯은 보지 않는다
+                    a0 = _isl.IslandApp._slot_anchor(slot)
+                    if a0:
+                        ancs[si] = a0
+            hits = []
+            _sc = []
+            for si in sorted(ancs):
+                anc = ancs[si]
+                ok, v = _isl.potion0_seen(anc)
+                _sc.append(f"{si+1:02d}:{v:.2f}")
+                if not ok:
+                    continue
+                if now - self._p0_watch_done.get(si, 0) < P0_WATCH_COOL:
+                    continue
+                for didx, key in keys:          # 어느 던전 안인지 **전부** 맞춰본다
+                    inn, pv, _w = _isl.place_in_dungeon(key, anc)
+                    if inn:
+                        hits.append((si, key, didx, v, pv))
+                        break
+            # 🗒 **살아 있다는 것을 가끔 남긴다** — 찾은 게 없을 때도 조용하면
+            #    "감시가 도는지" 를 알 수 없다 (이 저장소 규칙: 조용히 실패하지 말 것).
+            #    10번에 한 번(약 20분)만 남겨 기록이 넘치지 않게 한다.
+            if hits or getattr(self, "_p0_watch_n", 0) % 10 == 1:
+                click_log(f"[물약감시] {len(_sc)}클라 확인 "
+                          f"(기준 {_isl.potion0_thr():.2f}) " + " ".join(_sc)
+                          + (f" → 0개 {[h[0]+1 for h in hits]}" if hits else " → 없음"))
+            if not hits:
+                return
+            for si, key, didx, v, pv in hits:
+                self._p0_watch_done[si] = now
+                click_log(f"[물약감시] 💧 #{si+1:02d} 물약 0개 ({v:.2f}) · "
+                          f"{key} 안 ({pv:.2f}) → 그 슬롯만 다시 실행")
+                self.after(0, lambda n=si, k=key: self.status.set(
+                    f"💧 #{n+1:02d} 물약 0개 — {k} 그 슬롯만 다시 돌립니다"))
+                try:
+                    subprocess.Popen(
+                        ["pythonw",
+                         os.path.join(BASE, "lineagem_island.py"),
+                         str(didx), "--run", "--slot", str(si + 1)],
+                        cwd=BASE,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                except Exception as e:
+                    click_log(f"[물약감시] 실행 실패: {e}")
+                break                 # 한 번에 하나씩 — 다음 틱에서 그 다음 슬롯
+        except Exception as e:
+            try:
+                click_log(f"[물약감시] 오류: {e}")
+            except Exception:
+                pass
 
     def _run_one_coord(self, key):
         """▶ **그 단계만 지금 한 번** 눌러본다 (2026-10-12 사용자 요청:
