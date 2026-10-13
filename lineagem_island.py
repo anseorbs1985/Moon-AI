@@ -269,6 +269,79 @@ RASTA_AFTER   = (0.45, 0.80)  # 그림을 누른 뒤 화면이 바뀌기를 기�
 
 
 
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║ 💧 '체력 회복제가 0개 남았습니다' → 그 슬롯만 다시 한 번 (2026-10-13)      ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+# 물약이 0개면 그 슬롯은 **사실 실패한 것**이다 (물약 칸이 씹혔다) → 다시 돌린다.
+POTION0_MATCH = 0.70           # 기본 기준 (칸마다 `potion0_thr.json` 으로 조절)
+POTION0_WAIT  = (25.0, 40.0)   # 실행이 끝난 뒤 문구가 뜰 때까지 기다리는 시간(초)
+POTION0_TRIES = 3              # 그 사이 몇 번 나눠 볼까
+POTION0_GAP   = (6.0, 10.0)    # 다시 보기 간격(초)
+POTION0_MAX   = 1              # 🚫 슬롯당 다시 돌리는 횟수 — 무한 고리 방지
+
+
+def potion0_img_path():
+    return os.path.join(IMG_DIR, "potion0.png")
+
+
+def potion0_flag_path():
+    """켬/끔은 **머신별 파일**에 둔다 — `island_coords.json`(좌표)을 건드리지 않는다.
+    좌표 파일은 가장 중요한 자료라 설정 하나 때문에 쓰기를 더하지 않는다."""
+    d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+    return os.path.join(d, "potion0.json")
+
+
+def potion0_on():
+    try:
+        with open(potion0_flag_path(), encoding="utf-8-sig") as f:
+            return bool((json.load(f) or {}).get("on", True))
+    except Exception:
+        return True                 # 기본 켬 (사용자가 요청한 기능이다)
+
+
+def potion0_on_set(v):
+    try:
+        p = potion0_flag_path()
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump({"on": bool(v)}, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def potion0_thr():
+    try:
+        with open(os.path.join(IMG_DIR, "potion0_thr.json"),
+                  encoding="utf-8") as f:
+            return float((json.load(f) or {}).get("thr") or POTION0_MATCH)
+    except Exception:
+        return POTION0_MATCH
+
+
+def potion0_seen(anchor):
+    """그 클라 창에서 '체력 회복제가 0개' 문구를 찾는다 → (보임?, 점수).
+
+    문구는 대화창에 뜨고 자리가 조금씩 달라서 **창 전체**를 본다.
+    `grab_window`(PrintWindow)로 그 창을 직접 찍으므로 **가려져 있어도 정확하다**
+    (2026-08-29 교훈: 화면 긁기는 런처가 앞에 있으면 엉뚱한 것을 읽는다)."""
+    q = potion0_img_path()
+    if not os.path.exists(q) or not anchor:
+        return False, -1.0
+    try:
+        import cv2, numpy as np
+        got = grab_window(anchor)
+        if not got:
+            return False, 0.0
+        big, _ = got
+        tpl = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+        if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
+            return False, 0.0
+        mx = float(cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED).max())
+        return (mx >= potion0_thr()), mx
+    except Exception:
+        return False, 0.0
+
+
 def rasta_img_path(j):
     """그림은 메인런처와 **같은 폴더·같은 이름 규칙**을 쓴다 (click_templates/)."""
     return os.path.join(IMG_DIR, f"rasta_{j+1:02d}.png")
@@ -1411,6 +1484,23 @@ class IslandApp(tk.Tk):
                   bg="#7b241c", fg="white",
                   command=lambda k=key, v=pv, nm=names: self._bulk_preset(k, v, nm)
                   ).pack(side="left", padx=(4, 0))
+        # 3줄: 💧 '체력 회복제가 0개 남았습니다' 가 뜬 슬롯을 **한 번 더** 돌린다
+        #      (2026-10-13 사용자 요청). 물약이 0개면 그 슬롯은 사실 실패한 것이다.
+        b3 = tk.Frame(ab); b3.pack(fill="x", pady=(3, 0))
+        self._p0_btns = getattr(self, "_p0_btns", {})
+        _pb = tk.Button(b3, font=("맑은 고딕", 7, "bold"), fg="white",
+                        command=self._potion0_grab)
+        _pb.pack(side="left")
+        _pb.bind("<Button-3>", lambda e: self._potion0_del())
+        tk.Button(b3, text="🔍 16클라 확인", font=("맑은 고딕", 7, "bold"),
+                  bg="#1a5276", fg="white",
+                  command=lambda k=key: self._potion0_test(k)
+                  ).pack(side="left", padx=(3, 0))
+        _tb = tk.Button(b3, font=("맑은 고딕", 7, "bold"), fg="white",
+                        command=self._potion0_toggle)
+        _tb.pack(side="left", padx=(3, 0))
+        self._p0_btns[key] = (_pb, _tb)
+        self._potion0_paint()
 
         # ── 번호 지정 일괄 적용 — 지정한 클릭 번호만 전 슬롯에 복사/삭제 ──
         nb = tk.LabelFrame(parent, text="번호 지정 일괄 (예: 3,7,12-14)",
@@ -5516,6 +5606,188 @@ class IslandApp(tk.Tk):
         for si, _s in targets:
             self._add_count(si)
 
+    # ── 💧 그림 등록 · 확인 · 켬/끔 ───────────────────────────────────────
+    def _potion0_paint(self):
+        """버튼에 '그림이 있나 · 켜져 있나' 를 보여준다
+        (2026-09-16 규칙: 등록을 했으면 보여줘야 됐는지 알잖아)."""
+        _has = os.path.exists(potion0_img_path())
+        _on = potion0_on()
+        for _pb, _tb in (getattr(self, "_p0_btns", None) or {}).values():
+            try:
+                _pb.config(text=("💧 0개그림 있음" if _has else "💧 0개 그림 등록"),
+                           bg=("#8e44ad" if _has else "#7f8c8d"))
+                _tb.config(text=("💧 자동 ON" if _on else "💧 자동 OFF"),
+                           bg=("#1e8449" if _on else "#7f8c8d"))
+            except Exception:
+                pass
+
+    def _potion0_toggle(self):
+        potion0_on_set(not potion0_on())
+        self._potion0_paint()
+        self._status.set("💧 물약 0개 자동 다시돌리기 — "
+                         + ("켰습니다" if potion0_on() else "껐습니다"))
+        self._rlog("💧 자동 다시돌리기 " + ("ON" if potion0_on() else "OFF")
+                   + " (사용자)")
+
+    def _potion0_grab(self):
+        """💧 '체력 회복제가 0개 남았습니다' 문구를 드래그해 등록한다."""
+        self._status.set("💧 '체력 회복제가 0개 남았습니다' 글자만 드래그하세요 "
+                         "— 숫자가 바뀌는 부분은 빼고 (ESC 취소)")
+        self.withdraw()
+        self.after(250, lambda: RastaGrabOverlay(
+            self, self._on_potion0_img, "💧 '체력 회복제가 0개' 글자를 드래그"))
+
+    def _on_potion0_img(self, x, y, w, h):
+        self.deiconify()
+        if w < 5 or h < 5:
+            self._status.set("💧 너무 작습니다 — 다시 드래그해주세요")
+            return
+        try:
+            from PIL import ImageGrab
+            im = ImageGrab.grab(bbox=(x, y, x + w, y + h),
+                                all_screens=True).convert("RGB")
+            os.makedirs(IMG_DIR, exist_ok=True)
+            p = potion0_img_path()
+            im.save(p)
+            # 🚫 무늬 없는(단색) 그림은 저장하지 않는다 — 어디서나 1.00 이 나온다
+            #    (2026-09-16 층그림 사고와 같은 뿌리). 라스타 그림 등록과 같은 검사다.
+            import cv2, numpy as np
+            _chk = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            if _chk is None or float(_chk.std()) < 3.0:
+                try: os.remove(p)
+                except Exception: pass
+                self._status.set("⚠ 무늬가 없는 자리를 잘랐습니다 (저장 안 함) — "
+                                 "글자가 들어가게 다시 드래그해주세요")
+                self._potion0_paint()
+                return
+            self._status.set(f"✔ 💧 0개 그림 저장 ({w}×{h}) — "
+                             f"[🔍 16클라 확인] 으로 지금 점수를 보세요")
+            self._rlog(f"💧 0개 그림 등록 {w}x{h}")
+        except Exception as e:
+            self._status.set(f"✘ 💧 그림 저장 실패: {e}")
+        self._potion0_paint()
+
+    def _potion0_del(self):
+        try: os.remove(potion0_img_path())
+        except Exception: pass
+        self._status.set("🗑 💧 0개 그림을 지웠습니다 — 자동 다시돌리기가 멈춥니다")
+        self._potion0_paint()
+
+    def _potion0_test(self, key):
+        """🔍 지금 16클라에 그 문구가 떠 있나 — **아무것도 누르지 않는다.**"""
+        if not os.path.exists(potion0_img_path()):
+            self._status.set("🔍 그림이 없습니다 — 먼저 [💧 0개 그림 등록]")
+            return
+        slots = self.cfg.get(key) or []
+
+        def _go():
+            out, hit = [], []
+            for i in range(SLOTS):
+                anc = self._slot_anchor(slots[i] if i < len(slots) else {})
+                if not anc:
+                    out.append(f"{i+1:02d}:-")
+                    continue
+                ok, v = potion0_seen(anc)
+                out.append(f"{i+1:02d}:{v:.2f}")
+                if ok:
+                    hit.append(i + 1)
+            m = (" ".join(out) + f"  (기준 {potion0_thr():.2f}) → 0개 "
+                 + (str(hit) if hit else "없음"))
+            self._rlog("💧 🔍 " + m)
+            self.after(0, lambda: self._status.set("🔍 " + m))
+
+        self._status.set("🔍 16클라를 보는 중…")
+        threading.Thread(target=_go, daemon=True).start()
+
+    # ── 💧 '체력 회복제가 0개' → 그 슬롯만 다시 한 번 ─────────────────────
+    def _potion0_armed(self, key):
+        """지금 '물약 0개' 확인을 시작해도 되나."""
+        try:
+            if self._stop_flag:
+                return False
+            if getattr(self, "_p0_retry", False):
+                return False               # 🚫 다시 돌린 실행은 또 확인하지 않는다
+            if not potion0_on():
+                return False               # 사용자가 끈 경우
+            if not os.path.exists(potion0_img_path()):
+                return False               # 그림이 없으면 아무것도 하지 않는다
+            ran = [i for i in (getattr(self, "_p0_ran", None) or [])
+                   if getattr(self, "_p0_done", {}).get(f"{key}|{i}", 0) < POTION0_MAX]
+            return bool(ran)
+        except Exception:
+            return False
+
+    def _potion0_after(self, key):
+        """실행이 끝난 뒤 문구가 뜬 슬롯을 찾아 **한 번만** 다시 돌린다.
+
+        물약이 0개인 것은 **사냥을 시작한 뒤** 알 수 있으므로 바로 보지 않고
+        `POTION0_WAIT` 기다렸다가 `POTION0_TRIES` 번 나눠 본다."""
+        try:
+            slots = self.cfg.get(key) or []
+            ran = list(getattr(self, "_p0_ran", None) or [])
+            self._p0_done = getattr(self, "_p0_done", {})
+            w = random.uniform(*POTION0_WAIT)
+            self._rlog(f"💧 {key} 물약 0개 확인 — {w:.0f}초 뒤부터 "
+                       f"{len(ran)}개 슬롯을 {POTION0_TRIES}번 봅니다")
+            self._status.set(f"💧 물약 0개 확인 — {w:.0f}초 뒤…")
+            t0 = time.time()
+            while time.time() - t0 < w:
+                if self._stop_flag:
+                    return self._potion0_finish(key)
+                time.sleep(0.5)
+            bad, scores = [], {}
+            for t in range(POTION0_TRIES):
+                if self._stop_flag:
+                    return self._potion0_finish(key)
+                for si in ran:
+                    if si in bad:
+                        continue
+                    if self._p0_done.get(f"{key}|{si}", 0) >= POTION0_MAX:
+                        continue
+                    anc = self._slot_anchor(slots[si] if si < len(slots) else {})
+                    if not anc:
+                        continue
+                    ok, v = potion0_seen(anc)
+                    scores[si] = max(scores.get(si, -1.0), v)
+                    if ok:
+                        bad.append(si)
+                if t < POTION0_TRIES - 1 and len(bad) < len(ran):
+                    time.sleep(random.uniform(*POTION0_GAP))
+            self._rlog("💧 점수 " + " ".join(
+                f"{i+1:02d}:{scores.get(i, -1):.2f}" for i in ran)
+                + f"  (기준 {potion0_thr():.2f}) → 0개 [{', '.join(str(i+1) for i in bad)}]")
+            if not bad:
+                self._status.set("💧 물약 0개인 슬롯 없음 — 다시 돌리지 않습니다")
+                return self._potion0_finish(key)
+            for si in bad:
+                self._p0_done[f"{key}|{si}"] = self._p0_done.get(f"{key}|{si}", 0) + 1
+            self._rlog(f"💧 {key} 다시 돌림 — 슬롯 "
+                       f"{[i+1 for i in bad]} (슬롯당 {POTION0_MAX}번만)")
+            self._status.set(f"💧 물약 0개 — #{[i+1 for i in bad]} 를 다시 돌립니다")
+            # 🚫 다시 돌리는 실행에는 표시를 붙여 **또 확인하지 않게** 한다
+            self._p0_retry = True
+            self._run(key, sel_list=bad)
+        except Exception as e:
+            try:
+                self._rlog(f"💧 물약 0개 확인 오류: {e}")
+            except Exception:
+                pass
+            self._potion0_finish(key)
+
+    def _potion0_finish(self, key):
+        """다시 돌릴 것이 없을 때 — 미뤄둔 종료·창 복원을 여기서 한다
+        (`_run` 의 finally 가 `return` 으로 건너뛴 몫)."""
+        try:
+            if getattr(self, "_auto_run", False):
+                self.after(500, self.destroy)
+            else:
+                def _restore():
+                    self.deiconify()
+                    self._send_behind_main()
+                self.after(0, _restore)
+        except Exception:
+            pass
+
     def _wave_tail(self, key, si, st, j0, total, labels, move_set,
                    ronly, stop_fn, status_fn, pace):
         """좌표 j0 부터 그 슬롯을 **끊김 없이 끝까지** 민다 (웨이브 섞임 방지).
@@ -5601,6 +5873,8 @@ class IslandApp(tk.Tk):
                     # (2026-08-09) 카매사오기는 02~04 슬롯이 항상 마지막에 실행돼야 한다.
                     # (앞 슬롯들이 먼저 끝나야 이 슬롯들이 할 일이 생김)
                     targets.sort(key=lambda t: 1 if t[0] in (1, 2, 3) else 0)
+            # 💧 이번에 실제로 돈 슬롯 — 끝난 뒤 '물약 0개' 를 확인할 대상이다
+            self._p0_ran = [si for si, _s in targets]
             d = next(x for x in DUNGEONS if x["key"] == key)
             stop_fn   = lambda: self._stop_flag
             status_fn = lambda m: self.after(0, lambda m=m: self._status.set(m))
@@ -5746,7 +6020,17 @@ class IslandApp(tk.Tk):
                 # 선택 실행 끝 — 담아둔 + 선택 비우고 버튼 원상복구
                 self._sel_order[key] = []
                 self.after(0, lambda: self._refresh_sel(key))
-            if getattr(self, "_auto_run", False):
+            # 💧 '체력 회복제가 0개' 가 뜬 슬롯은 **한 번만** 다시 돌린다.
+            #    ⚠ `--run` 모드는 아래에서 `destroy()` 로 스스로 종료하므로,
+            #      다시 돌릴 것이 있으면 **그 종료를 미룬다** (아래 elif 로 건너뜀).
+            #      다시 돌리기가 끝나면 `_potion0_finish` 가 종료를 맡는다.
+            #    ⚠ `finally` 안에서 `return` 하지 말 것 — 예외를 삼킨다
+            #      (파이썬이 SyntaxWarning 을 낸다). 그래서 elif 로 묶었다.
+            _p0_go = self._potion0_armed(key)
+            if _p0_go:
+                threading.Thread(target=self._potion0_after, args=(key,),
+                                 daemon=True).start()
+            elif getattr(self, "_auto_run", False):
                 # 런처 ▶ 자동 실행 모드: 완료 후 창을 띄우지 않고 스스로 종료 —
                 # 런처가 종료를 감지하고 대기열의 다음 던전을 이어서 실행한다
                 self.after(500, self.destroy)
