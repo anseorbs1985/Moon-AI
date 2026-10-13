@@ -1099,6 +1099,58 @@ def ensure_autostart_0450():
         pass
 
 
+def ensure_logon_start():
+    """🔁 **재부팅(로그온) 하면 메인런처와 클로드를 자동으로 켠다** (2026-10-14 사용자 요청).
+
+    `LineageM_AutoStart_0450` 은 새벽 4:50 **그 시각에만** 돈다. 낮에 재부팅하면
+    다음 날 새벽까지 꺼진 채로 남는다 → **로그온 트리거**를 따로 둔다.
+
+    · 런처: 예약 작업 `LineageM_Logon` (로그온 40초 뒤 워치독 실행).
+      워치독은 **이미 켜져 있으면 아무것도 하지 않으므로** 중복 걱정이 없다.
+    · 클로드: 시작프로그램 폴더에 바로가기. 스토어 앱이라 경로가 아니라
+      **앱 ID(AUMID)** 로 띄워야 확실하다 → `explorer.exe shell:AppsFolder 뒤에 앱 ID`.
+      그 컴퓨터에 클로드가 없으면 조용히 건너뛴다.
+
+    ⚠ 이건 '실행은 사용자가 시킬 때만'(2026-08-10)의 **런처를 켜두는 예약** 쪽이다 —
+      창을 살려둘 뿐 **클릭 작업을 시작하지 않는다.** 클로드는 여기에
+      게임 작업 자동 시작을 붙이지 말 것."""
+    # ① 런처 — 로그온 예약 작업
+    try:
+        exe = sys.executable.replace("python.exe", "pythonw.exe")
+        wd = os.path.join(DESK, "lineagem_watchdog.py")
+        q = sh(["schtasks", "/Query", "/TN", "LineageM_Logon"])
+        if q.returncode != 0:
+            r = sh(["schtasks", "/Create", "/F", "/TN", "LineageM_Logon",
+                    "/SC", "ONLOGON", "/DELAY", "0000:40",
+                    "/TR", f'"{exe}" "{wd}"'])
+            if r.returncode == 0:
+                log("   ✔ 재부팅(로그온) 자동 시작 예약 작업 등록 — 40초 뒤 런처")
+            else:
+                log("   ⚠ 로그온 자동 시작 등록 실패: "
+                    + (r.stderr or r.stdout or "").strip()[:60])
+    except Exception:
+        pass
+    # ② 클로드 — 시작프로그램 바로가기 (스토어 앱이라 앱 ID 로 띄운다)
+    try:
+        ps = (
+            "$a = Get-StartApps | Where-Object { $_.Name -match 'Claude' } | "
+            "Select-Object -First 1; "
+            "if ($a) { "
+            "$p = Join-Path ([Environment]::GetFolderPath('Startup')) 'Claude.lnk'; "
+            "if (-not (Test-Path $p)) { "
+            "$w = New-Object -ComObject WScript.Shell; $s = $w.CreateShortcut($p); "
+            "$s.TargetPath = \"$env:WINDIR\\explorer.exe\"; "
+            "$s.Arguments = 'shell:AppsFolder\' + $a.AppID; "
+            "$s.Description = '재부팅 후 클로드 자동 실행'; $s.Save(); "
+            "Write-Output 'made' } }"
+        )
+        r = sh(["powershell", "-NoProfile", "-Command", ps])
+        if "made" in (r.stdout or ""):
+            log("   ✔ 재부팅 후 클로드 자동 실행 바로가기 등록")
+    except Exception:
+        pass
+
+
 def ensure_shortcut_icon():
     """바탕화면 메인런처 바로가기 아이콘을 moon.ico로 통일 (모든 컴퓨터 공통)."""
     try:
@@ -1348,6 +1400,7 @@ def finish(msg=""):
     coords_guard_restore(log)
     ensure_keepalive()               # 상시감시 예약 작업 보장 (없으면 등록)
     ensure_autostart_0450()          # 새벽 4:50 자동 시작 보장 (없으면 등록)
+    ensure_logon_start()             # 🔁 재부팅(로그온) 하면 런처·클로드 자동 시작
     ensure_shortcut_icon()           # 바로가기 아이콘 통일 (moon.ico)
     ok = ensure_launcher()
     if ok:
