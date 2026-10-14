@@ -1141,6 +1141,21 @@ def save_cfg(cfg):
         except Exception:
             pass
         return
+    # 🗒 **무엇이 바뀌었는지 남긴다** (2026-10-14 — 로컬 두 대에서 "용던고고 좌표가
+    #    돌아간다" 는 신고가 있었는데, 누가 언제 바꿨는지 알 길이 없었다).
+    #    항목 이름과 개수만 적는다 (좌표값은 길어서 안 적는다).
+    try:
+        _chg = []
+        for _k in set(list(out) + list(disk)):
+            if json.dumps(out.get(_k), sort_keys=True, ensure_ascii=False) !=                json.dumps(disk.get(_k), sort_keys=True, ensure_ascii=False):
+                _o, _n = disk.get(_k), out.get(_k)
+                _cnt = lambda v: (len(v) if isinstance(v, (list, dict)) else ("있음" if v else "없음"))
+                _chg.append(f"{_k}({_cnt(_o)}→{_cnt(_n)})")
+        if _chg:
+            click_log("[좌표저장] " + " · ".join(sorted(_chg)[:8])
+                      + (f" 외 {len(_chg)-8}개" if len(_chg) > 8 else ""))
+    except Exception:
+        pass
     # 쓰다가 죽어도 파일이 깨지지 않게 임시파일 → 교체
     _tmp = CONFIG_FILE + ".tmp"
     with open(_tmp, "w", encoding="utf-8") as f:
@@ -11511,7 +11526,12 @@ class App(tk.Tk):
         if fkey == "jakwi" and getattr(self, "_jakwi_running", False):
             self.status.set("👑 작위 — 이미 돌고 있습니다 ([■ 멈춤] 으로 먼저 중단)")
             return
-        if not self._try_busy_or_queue(title, lambda: self._start_dgn2(fkey, sel_list)): return
+        if not self._try_busy_or_queue(title, lambda: self._start_dgn2(fkey, sel_list)):
+            # 🗒 **왜 안 돌았는지 남긴다** (2026-10-14 — 로컬에서 "용던고고가 말을
+            #    안 듣는다" 는데 기록이 없어 짚을 수 없었다)
+            click_log(f"[{fkey}] 실행 안 함 — '{self._busy_label()}' 이(가) 돌고 있어 "
+                      f"대기열에 넣었습니다")
+            return
         setattr(self, f"_{fkey}_stop", False)
         self._set_btn(f"btn_{fkey}_run", state="disabled")
         self._set_btn(f"btn_{fkey}_stop", state="normal")
