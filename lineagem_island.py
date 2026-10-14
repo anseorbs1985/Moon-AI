@@ -285,7 +285,37 @@ POTION0_MAX   = 1              # 🚫 슬롯당 다시 돌리는 횟수 — 무�
 # ╚══════════════════════════════════════════════════════════════════════════╝
 OMANST_KEY      = "수금_오만의탑"
 OMANST_PICK_IDX = 23            # 클릭24 자리(0부터 세서 23)에서 고른다
-OMANST_WANT     = (2, 3)        # 원하는 로마숫자 — 사용자: "정화 Ⅱ·Ⅲ 만"
+OMANST_WANT     = (2, 3)        # 기본 우선순위 (슬롯마다 바꿀 수 있다)
+# 🎚 슬롯마다 고를 수 있는 우선순위 (2026-10-15 사용자: "어떤 건 Ⅱ가 우선이고
+#    어떤 건 Ⅲ이 우선이고 그러거든. 이걸 선택하게 해줄 수 있어?")
+#    앞에 올수록 먼저 고른다. 빈 목록 = 숫자를 안 보고 정화면 바로 고른다.
+OMANST_PREFS = [
+    ("정화 Ⅱ>Ⅲ",     [2, 3]),
+    ("정화 Ⅲ>Ⅱ",     [3, 2]),
+    ("정화 Ⅱ만",      [2]),
+    ("정화 Ⅲ만",      [3]),
+    ("정화 Ⅰ>Ⅱ>Ⅲ",   [1, 2, 3]),
+    ("정화 Ⅲ>Ⅱ>Ⅰ",   [3, 2, 1]),
+    ("아무거나",       []),
+]
+OMANST_PREF_NAMES = [n for n, _ in OMANST_PREFS]
+
+
+def omanst_pref_of(slot):
+    """그 슬롯이 고른 우선순위 (숫자 목록). 안 정했으면 기본 Ⅱ>Ⅲ."""
+    v = (slot or {}).get("omanst_pref")
+    if isinstance(v, list):
+        return [int(x) for x in v if str(x).isdigit()]
+    return list(OMANST_WANT)
+
+
+def omanst_pref_name(slot):
+    """그 슬롯의 우선순위를 목록에 보이는 이름으로."""
+    cur = omanst_pref_of(slot)
+    for n, v in OMANST_PREFS:
+        if v == cur:
+            return n
+    return OMANST_PREF_NAMES[0]
 OMANST_TRIES    = 3             # 새로고침 포함 **세 번까지** (아데나만)
 OMANST_MATCH    = 0.70          # '정화' 글자 일치 기준
 # 실측 자리 (창 491×276 기준 비율) — 창 크기가 달라도 맞는다
@@ -1365,6 +1395,8 @@ class IslandApp(tk.Tk):
         self._sel_order = {d["key"]: [] for d in DUNGEONS}   # +로 고른 슬롯 (누른 순서)
         self._rep_vars  = {d["key"]: [] for d in DUNGEONS}   # ⏰ 드롭다운 표시 변수
         self._repn_vars = {d["key"]: [] for d in DUNGEONS}   # 반복 '횟수' 드롭다운 변수
+        # 🏢 오만의탑 — 슬롯마다 고른 정화 우선순위 드롭다운 변수 (2026-10-15)
+        self._omanst_vars = {}
         self._numsel    = {}                                 # 번호 지정 일괄 입력칸
         self._repeat_left = {}                               # (key,idx) → 남은 반복 횟수
         self._paste_marks = {}                               # 붙여넣기 표시(⭕) 라벨
@@ -2005,8 +2037,40 @@ class IslandApp(tk.Tk):
                       bg="#c0392b", fg="white",
                       command=lambda k=key, x=i: self._stop_repeat(k, x)
                       ).pack(side="left", padx=(1, 0))
+            # 🏢 오만의탑만 — **이 슬롯이 어떤 정화를 먼저 고를지** (2026-10-15)
+            if key == OMANST_KEY:
+                r6 = tk.Frame(cell); r6.pack(pady=(1, 0))
+                _sl0 = (self.cfg.get(key) or [{}] * SLOTS)[i]
+                ov = tk.StringVar(value=omanst_pref_name(_sl0))
+                oom = tk.OptionMenu(r6, ov, *OMANST_PREF_NAMES,
+                                    command=lambda val, k=key, x=i:
+                                    self._set_omanst_pref(k, x, val))
+                oom.config(font=("맑은 고딕", 6), width=10, pady=0,
+                           highlightthickness=0, bg="#6c3483", fg="white",
+                           activebackground="#512e5f")
+                oom.pack(side="left")
+                self._omanst_vars.setdefault(key, {})[i] = ov
 
         self._refresh(key)
+
+    def _set_omanst_pref(self, key, idx, val):
+        """🏢 그 슬롯이 먼저 고를 정화 숫자를 정한다 (2026-10-15 사용자 요청).
+        `island_coords.json` 의 그 슬롯에 `omanst_pref` 로 저장한다 —
+        그 파일은 코드가 배포를 막고 있어 **컴퓨터마다 따로** 간다."""
+        try:
+            pref = dict(OMANST_PREFS).get(val)
+            if pref is None:
+                return
+            slots = self.cfg.setdefault(key, [{} for _ in range(SLOTS)])
+            while len(slots) <= idx:
+                slots.append({})
+            slots[idx]["omanst_pref"] = list(pref)
+            save_cfg(self.cfg)
+            self._status.set(f"🏢 #{idx+1:02d} 정화 우선순위 → {val}"
+                             + ("  (숫자 안 보고 정화면 선택)" if not pref else ""))
+            self._rlog(f"[오만의탑] #{idx+1:02d} 우선순위 {val} {pref}")
+        except Exception as e:
+            self._status.set(f"⚠ 우선순위 저장 실패: {e}")
 
     def _open_slot_pop(self, key, idx):
         """슬롯 좌표 등록 팝업 — 이름 + 클릭1~6 버튼 + 그룹복사."""
