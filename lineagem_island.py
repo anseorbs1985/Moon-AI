@@ -280,6 +280,71 @@ POTION0_GAP   = (6.0, 10.0)    # 다시 보기 간격(초)
 POTION0_MAX   = 1              # 🚫 슬롯당 다시 돌리는 횟수 — 무한 고리 방지
 
 
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║ 🏢 오만의탑 — 정화 Ⅱ·Ⅲ 을 그림으로 보고 고른다 (2026-10-15)              ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+OMANST_KEY      = "수금_오만의탑"
+OMANST_PICK_IDX = 23            # 클릭24 자리(0부터 세서 23)에서 고른다
+OMANST_WANT     = (2, 3)        # 원하는 로마숫자 — 사용자: "정화 Ⅱ·Ⅲ 만"
+OMANST_TRIES    = 3             # 새로고침 포함 **세 번까지** (아데나만)
+OMANST_MATCH    = 0.70          # '정화' 글자 일치 기준
+# 실측 자리 (창 491×276 기준 비율) — 창 크기가 달라도 맞는다
+OMANST_PANEL  = (240 / 491, 65 / 276, 170 / 491, 90 / 276)   # 퀘스트 세 줄이 있는 곳
+OMANST_REFRESH = (304 / 491, 184 / 276)                       # 새로고침 버튼 가운데
+OMANST_WIDE   = 3               # 덩어리 폭이 이보다 넓으면 V 가 섞인 것 (Ⅳ·Ⅴ)
+
+
+def omanst_img_path():
+    """'정화' 글자 그림 — 이것만 있으면 숫자는 잉크 모양으로 읽는다."""
+    return os.path.join(IMG_DIR, "omanst_jh.png")
+
+
+def omanst_read(big):
+    """퀘스트 화면에서 **정화 줄의 자리와 로마숫자**를 읽는다.
+
+    돌려주는 값: `(창안 x, 창안 y, 숫자)` — 못 읽으면 `(None, None, 0)`.
+    숫자는 Ⅰ~Ⅲ 이면 1~3, **Ⅳ·Ⅴ 처럼 V 가 섞이면 9** (원하지 않는다는 뜻).
+
+    `정화` 를 그림으로 찾고 **그 오른쪽 잉크 덩어리**만 센다 — 로마숫자 견본이
+    없어도 되고, 줄 위치가 흔들려도 따라간다 (실측 일치도 1.00)."""
+    q = omanst_img_path()
+    if not os.path.exists(q) or big is None:
+        return None, None, 0
+    try:
+        import cv2, numpy as np
+        h, w = big.shape[0], big.shape[1]
+        px, py = int(w * OMANST_PANEL[0]), int(h * OMANST_PANEL[1])
+        pw, ph = int(w * OMANST_PANEL[2]), int(h * OMANST_PANEL[3])
+        panel = big[py:py + ph, px:px + pw]
+        tpl = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+        if tpl is None or panel.shape[0] < tpl.shape[0] or panel.shape[1] < tpl.shape[1]:
+            return None, None, 0
+        res = cv2.matchTemplate(panel, tpl, cv2.TM_CCOEFF_NORMED)
+        if float(res.max()) < OMANST_MATCH:
+            return None, None, 0            # 정화 줄이 없다
+        _loc = np.unravel_index(res.argmax(), res.shape)
+        jx, jy = int(_loc[1]) + px, int(_loc[0]) + py
+        # 🔢 '정화' 오른쪽의 잉크 덩어리를 센다
+        g = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
+        band = g[jy:jy + tpl.shape[0], jx + tpl.shape[1]:jx + tpl.shape[1] + 22]
+        cols = (band > 120).sum(axis=0)
+        runs, st = [], None
+        for i, v in enumerate(cols):
+            if v and st is None:
+                st = i
+            elif not v and st is not None:
+                runs.append((st, i)); st = None
+        if st is not None:
+            runs.append((st, len(cols)))
+        if not runs:
+            return jx, jy, 0
+        if any((r[1] - r[0]) >= OMANST_WIDE for r in runs):
+            return jx, jy, 9                # V 가 섞였다 (Ⅳ·Ⅴ) — 원하지 않는다
+        return jx, jy, len(runs)            # 좁은 막대 개수 = Ⅰ·Ⅱ·Ⅲ
+    except Exception:
+        return None, None, 0
+
+
 def potion0_img_path():
     return os.path.join(IMG_DIR, "potion0.png")
 
