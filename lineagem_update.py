@@ -1064,6 +1064,40 @@ def log_trouble(reason):
         pass
 
 
+def kill_launchers(log=None):
+    """런처·섬실행기·OCR 을 **전부** 종료하고, 하나도 안 남을 때까지 확인한다.
+    돌려주는 값: 전부 죽었으면 True."""
+    _ps = ("Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' OR "
+           "Name='python.exe'\" | Where-Object { $_.CommandLine -match "
+           "'lineagem_launcher|lineagem_island|lineagem_ocr|lineagem_dungeon' } | "
+           "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }")
+    for _try in range(2):
+        sh(["powershell", "-NoProfile", "-Command", _ps])
+        for _ in range(10):
+            time.sleep(1)
+            if not _launcher_running():
+                return True
+        if log and _try == 0:
+            log("   ⚠ 런처가 안 죽었습니다 — 한 번 더 종료합니다")
+    return not _launcher_running()
+
+
+def force_restart_launcher(log=None):
+    """🔁 **옛 런처를 반드시 죽이고 새로 띄운다** (2026-10-14 사용자 지시).
+
+    예전 `ensure_launcher()` 는 *"떠 있으면 그대로"* 라, 종료가 실패했거나 워치독이
+    먼저 되살렸으면 **옛 프로세스가 그대로 남았다**:
+      · 새 코드가 안 올라간다 ("재시작 안 하면 적용이 안 되는 건가?")
+      · 낡은 프로세스가 **옛 좌표를 저장**한다 ("좌표가 돌아간다")
+    업데이트의 목적은 **새 코드로 바꾸는 것**이라 옛 프로세스를 남기면 안 한 것과 같다.
+    ⚠ '떠 있으면 그대로' 로 되돌리지 말 것."""
+    if log:
+        log("   옛 런처를 종료합니다 (전부 내려갈 때까지 확인)")
+    if not kill_launchers(log) and log:
+        log("   ⚠ 아직 남아 있습니다 — 그래도 새로 띄워봅니다")
+    return ensure_launcher()
+
+
 def ensure_launcher():
     """메인런처가 꺼져 있으면 반드시 다시 띄운다 (워치독 → 직접 실행 순). 떠 있으면 그대로."""
     if _launcher_running():
@@ -1907,8 +1941,12 @@ def main():
             else:
                 log("   → 메인런처부터 다시 띄운 뒤 보고합니다")
 
-        log("5) 런처 재시작...")
-        ok = ensure_launcher()
+        # 🔁 **옛 런처를 반드시 죽이고 새로 띄운다** (2026-10-14 사용자 지시:
+        #    "업데이트를 하면 한 번 더 재시작을 해주든지 아니면 고쳐주든지").
+        #    예전엔 '떠 있으면 그대로' 라 새 코드가 안 올라가고, 낡은 프로세스가
+        #    옛 좌표를 저장해 **좌표가 돌아갔다.**
+        log("5) 런처 재시작 (옛 런처를 확실히 내리고 새로 띄웁니다)...")
+        ok = force_restart_launcher(log)
         if ok and copy_err is None and git_ok:
             finish("✔ 업데이트 완료!")
         elif ok and copy_err is None:
