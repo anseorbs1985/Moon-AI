@@ -375,6 +375,77 @@ def omanst_read(big):
         return None, None, 0
 
 
+def omanst_pick(app, anchor, slot, log=None):
+    """🏢 **정화 줄을 골라 누른다** — 세 번까지 새로고침하며 (2026-10-15 사용자 요청).
+
+    돌려주는 값: 골랐으면 True, 끝내 못 골랐으면 False(= 등록된 좌표로 그냥 누른다).
+
+    · 그 슬롯이 고른 우선순위(`omanst_pref`)에 맞는 숫자가 나오면 **바로 고른다**
+    · 아니면 **새로고침**(아데나) — `OMANST_TRIES`(3)번까지
+    · **마지막 판에서는 숫자를 안 보고** 정화면 고른다
+      (사용자: "마지막은 그냥 아무거나 나와도 선택해주면 되거든")
+    ⚠ 고르기만 한다 — **수락은 다음 좌표(클릭25)가 누른다.**
+      새로고침을 누르면 고른 줄이 풀리므로 **고른 뒤에 수락**해야 한다."""
+    import time, random
+    pref = omanst_pref_of(slot)
+    _L = log or (lambda m: None)
+    for t in range(1, OMANST_TRIES + 1):
+        got = grab_window(anchor)
+        if not got:
+            _L("[오만의탑] 창을 못 찍어 중단")
+            return False
+        big, (ox, oy) = got
+        x, y, n = omanst_read(big)
+        nm = {0: "못읽음", 1: "Ⅰ", 2: "Ⅱ", 3: "Ⅲ", 9: "Ⅳ·Ⅴ"}.get(n, str(n))
+        last = (t == OMANST_TRIES)
+        want = (n in pref) if pref else (n > 0)
+        if last and n > 0:
+            want = True                      # 마지막 판은 아무거나
+        _L(f"[오만의탑] {t}/{OMANST_TRIES}판 — 정화 {nm} "
+           f"(원하는 것 {pref or '아무거나'}) → {'고른다' if want else '새로고침'}")
+        if want and x is not None:
+            try:
+                app._focus_client_at(anchor) if hasattr(app, "_focus_client_at") else None
+            except Exception:
+                pass
+            _click(ox + x + 6, oy + y + 6)   # 정화 글자 자리를 누르면 그 줄이 골라진다
+            time.sleep(random.uniform(0.5, 0.9))
+            _L(f"[오만의탑] 정화 {nm} 선택 ✔ (수락은 다음 좌표가 누른다)")
+            return True
+        if last:
+            _L("[오만의탑] 정화 줄을 못 찾았다 — 등록된 좌표로 그냥 누른다")
+            return False
+        # 🔄 새로고침 (아데나). 누르면 고른 줄이 풀리므로 다시 읽고 고른다.
+        rx = ox + int(big.shape[1] * OMANST_REFRESH[0])
+        ry = oy + int(big.shape[0] * OMANST_REFRESH[1])
+        _click(rx, ry)
+        time.sleep(random.uniform(1.8, 2.6))
+    return False
+
+
+def _click(x, y):
+    """창을 앞으로 올린 뒤 누른다 (퀘스트 창은 앞에 있어야 먹는다)."""
+    import time, random
+    try:
+        import win32gui
+        from precise_click import game_window_at
+        h = game_window_at(int(x), int(y))
+        if h:
+            if win32gui.IsIconic(h):
+                import win32con
+                win32gui.ShowWindow(h, win32con.SW_RESTORE)
+                time.sleep(0.4)
+            win32gui.SetForegroundWindow(h)
+            time.sleep(random.uniform(0.25, 0.45))
+    except Exception:
+        pass
+    try:
+        import pyautogui
+        pyautogui.click(int(x), int(y))
+    except Exception:
+        pass
+
+
 def potion0_img_path():
     return os.path.join(IMG_DIR, "potion0.png")
 
@@ -6492,7 +6563,26 @@ class IslandApp(tk.Tk):
                         _cn = slot.get("click_names") or []
                         _disp = _cn[j] if (j < len(_cn) and _cn[j]) else lbl
                         self._status.set(f"🏝 [{name}] {_disp}...")
-                        if j in move_set:
+                        # 🏢 **오만의탑 그 자리에서는 그림을 보고 정화를 고른다**
+                        #    (2026-10-15 사용자 요청). 골랐으면 좌표 클릭을 건너뛴다 —
+                        #    이미 그 줄을 눌러 골라놨기 때문. 수락은 다음 좌표가 누른다.
+                        #    그림이 없거나 못 고르면 예전처럼 좌표를 누른다.
+                        #    ⚠ 여기서 `continue` 로 빠져나가지 말 것 — 뒤의 간격·횟수
+                        #      처리가 통째로 건너뛰어진다. 표시만 남기고 아래로 흐른다.
+                        _picked = False
+                        if (key == OMANST_KEY and j == OMANST_PICK_IDX
+                                and os.path.exists(omanst_img_path())):
+                            try:
+                                self._focus_client(si, coords[j])
+                                time.sleep(random.uniform(0.25, 0.45))
+                                self._last_focus = si
+                            except Exception:
+                                pass
+                            _picked = omanst_pick(self, self._slot_anchor(slot),
+                                                  slot, log=self._rlog)
+                        if _picked:
+                            pass                      # 이미 골랐다 — 좌표는 안 누른다
+                        elif j in move_set:
                             pyautogui.moveTo(*coords[j])
                         else:
                             # 그 클라를 먼저 앞으로 — 비활성 창은 첫 클릭이
