@@ -155,6 +155,12 @@ ATOMIC_NEXT = {}        # (호버를 없애서 묶을 이유가 사라짐)
 # 용던고고는 좌표4부터 이미지·확인창이 이어져서, 중간에 다른 슬롯이 끼어들면
 # 그 창이 닫히거나 포커스가 바뀌어 클릭이 씹힌다 (2026-08-27 사용자 지시).
 WAVE_UNTIL = {"dragon": 3}     # 좌표1~3만 교차, 좌표4부터는 그 슬롯 완주
+# ⚡ **마지막 좌표를 누른 뒤 이 슬롯을 끝내기까지** 쉬는 시간(초) — 2026-10-14 사용자:
+#    "1번을 한 번 클릭하는 거면 그냥 1번 클릭하고 **0.5초 후에 바로 슬롯 넘어가죠**.
+#     너무 느려. 왜 16개 전부 도는 거랑 5개 도는 거랑 시간이 비슷하게만 느껴져서."
+#    예전에는 마지막 클릭 뒤에도 **간격을 한 번 더 쉬고**(0.6~1.35초 × 속도 보정),
+#    남은 빈 좌표를 끝까지 훑은 뒤에야 슬롯이 끝났다 → 1개짜리가 10개짜리만큼 느렸다.
+LAST_CLICK_GAP = 0.5
 # 🔀 슬롯이 바뀔 때 쉬는 시간 ('다른 창으로 넘어갈 여유') — 웨이브의 숨은 큰 비용이다.
 SWITCH_PAUSE = (0.60, 1.10)
 # 🐲 **좌표가 적으면 이 쉼도 그만큼 줄인다** (2026-10-03 사용자 지시:
@@ -12816,13 +12822,19 @@ class App(tk.Tk):
             _sa = stop_at(fkey)
             if _sa and (j + 1) >= _sa:
                 break
-            if j + 1 < nclk:
-                _g = self._slot_gap(slot, j)
-                _base = _g if _g is not None else random.uniform(*gap)
-                _base *= getattr(self, "_pace_now", 1.0)   # 웨이브가 정한 페이스
-                if fkey in EXTRA_GAPS:
-                    _base += extra_gap(fkey, j)   # 기다림은 줄이지 않는다
-                time.sleep(_base * random.uniform(*slow))
+            # ⚡ **남은 좌표가 없으면 바로 끝낸다** (2026-10-14 사용자 지시).
+            #    예전에는 `j + 1 < nclk` 만 보고 **마지막 클릭 뒤에도 한 번 더 쉬고**,
+            #    빈 좌표를 끝까지 훑었다 → 좌표가 적은 슬롯이 쓸데없이 느렸다.
+            if not any(((k < len(coords) and coords[k]) or has_img(fkey, k))
+                       for k in range(j + 1, nclk)):
+                time.sleep(LAST_CLICK_GAP)
+                break
+            _g = self._slot_gap(slot, j)
+            _base = _g if _g is not None else random.uniform(*gap)
+            _base *= getattr(self, "_pace_now", 1.0)   # 웨이브가 정한 페이스
+            if fkey in EXTRA_GAPS:
+                _base += extra_gap(fkey, j)   # 기다림은 줄이지 않는다
+            time.sleep(_base * random.uniform(*slow))
         st["j"] = nclk
         return done
 
@@ -12994,6 +13006,14 @@ class App(tk.Tk):
                 st["j"] = j + 1
             if st["j"] >= nclk:
                 continue                    # 묶음에서 중단됨 — 이 슬롯 끝
+            # ⚡ **남은 좌표가 없으면 바로 이 슬롯을 끝낸다** (2026-10-14 사용자 지시).
+            #    마지막 클릭 뒤에 간격을 한 번 더 쉬지 않고, 빈 좌표도 훑지 않는다.
+            #    그림만 지정한 자리(`has_img`)도 '남은 좌표'로 친다.
+            if not any(((k < len(coords) and coords[k]) or has_img(fkey, k))
+                       for k in range(st["j"], nclk)):
+                st["j"] = nclk
+                time.sleep(LAST_CLICK_GAP)
+                continue
             _g = self._slot_gap(st["slot"], j)          # 칸에 적어둔 초가 있으면 그걸로
             _base = _g if _g is not None else random.uniform(*gap)
             # '더 쉬어야 하는 자리'(좌표2→3)는 화면이 뜨기를 기다리는 시간이라
@@ -13153,10 +13173,11 @@ class App(tk.Tk):
                                 f"(간격 {DRAGON_GAP_MIN:.1f}~{DRAGON_GAP_MAX:.1f}초, "
                                 f"좌표2→3은 +{DRAGON_EXTRA[1][0]:.1f}~{DRAGON_EXTRA[1][1]:.1f}초, "
                                 f"약 {_est//60}분 {_est%60}초 예상)")
-                # 동시 3슬롯 · 슬롯 간격 1~2초 랜덤 (2026-08-28 사용자 지시)
+                # 동시 3슬롯 · 슬롯 간격 — 2026-10-14 사용자 지시로 **지금의 50%**
+                #   (0.7~1.4 → 0.35~0.7). "슬롯간 간격도 지금의 50%로 줄여줘"
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=3,
                                     gap=(DRAGON_GAP_MIN, DRAGON_GAP_MAX),
-                                    slot_gap=(0.7, 1.4), keep_order=True)
+                                    slot_gap=(0.35, 0.7), keep_order=True)
                 # 🔁 오토를 못 누른 슬롯은 여기서 **다시 층을 확인해** 눌러준다
                 self._floor_retry_pass(fkey, stop)
                 return
