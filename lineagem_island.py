@@ -413,8 +413,14 @@ def omanst_pick(app, anchor, slot, log=None):
             _L(f"[오만의탑] 정화 {nm} 선택 ✔ (수락은 다음 좌표가 누른다)")
             return True
         if last:
-            _L("[오만의탑] 정화 줄을 못 찾았다 — 등록된 좌표로 그냥 누른다")
-            return False
+            # 🚫 **정화가 없으면 아무것도 고르지 않는다** (2026-10-15 사용자:
+            #    "정화만 해당하는 거야. 왜 정복을 선택하는 거야")
+            #    예전엔 False 를 돌려줘 **등록된 좌표(3번째 줄)를 그냥 눌렀고**,
+            #    그 줄이 정복이면 **정복이 선택됐다.** 그게 이 사고의 원인이다.
+            #    아무것도 안 고르면 수락이 회색이라 그냥 지나간다 — 그게 낫다.
+            _L("[오만의탑] ⚠ 정화 줄이 없다 — **아무것도 고르지 않는다** "
+               "(정복·생존은 절대 고르지 않는다)")
+            return True
         # 🔄 새로고침 (아데나). 누르면 고른 줄이 풀리므로 다시 읽고 고른다.
         rx = ox + int(big.shape[1] * OMANST_REFRESH[0])
         ry = oy + int(big.shape[0] * OMANST_REFRESH[1])
@@ -5784,13 +5790,21 @@ class IslandApp(tk.Tk):
                 self._last_focus = si
             except Exception:
                 pass
-            return bool(omanst_pick(self, anc, slot, log=self._rlog))
+            ok = bool(omanst_pick(self, anc, slot, log=self._rlog))
+            if not ok:
+                # 🚫 **그 자리에서는 좌표를 절대 누르지 않는다.**
+                #    등록된 클릭24 는 '3번째 줄' 고정이라, 그 줄이 정복이면
+                #    **정복이 선택된다** (2026-10-15 사용자: "왜 정복을 선택하는 거야").
+                #    못 골랐으면 그냥 지나간다 — 수락이 회색이라 아무 일도 안 난다.
+                self._rlog("[오만의탑] ⚠ 못 골랐다 — 좌표는 누르지 않고 지나간다 "
+                           "(정복·생존을 누르느니 아무것도 안 누른다)")
+            return True
         except Exception as e:
             try:
-                self._rlog(f"[오만의탑] 고르기 오류 — {e} (좌표로 누른다)")
+                self._rlog(f"[오만의탑] 고르기 오류 — {e} · 좌표는 누르지 않는다")
             except Exception:
                 pass
-            return False
+            return True
 
     def _do_one_click(self, key, si, slot, j, lbl, move_set, tag=""):
         """슬롯의 j번째 자리 1개 실행 (드래그/방향키/클릭/녹화). 실행했으면 True."""
@@ -5808,6 +5822,12 @@ class IslandApp(tk.Tk):
         #    (2026-10-05 사용자: "개별로 하면 다 되는데 전체실행은 똑같은 지점에서
         #     멈춘다" — 전체실행은 이 함수를 타는데 여기에 처리가 없었다)
         #    못 찾으면 `None` 을 돌려 **그 슬롯만** 멈춘다 (엉뚱한 곳을 누르지 않게).
+        # 🏢 **오만의탑 그 자리는 무엇보다 먼저** 그림을 보고 고른다 (2026-10-15).
+        #    아래 그림(🖼)·카드(🃏) 처리가 먼저 돌면 그걸 타고 나가버려서
+        #    고르기가 통째로 건너뛰어진다 (그러면 좌표로 3번째 줄 = 정복을 누른다).
+        if self._omanst_try(key, si, slot, j):
+            self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) 정화 고름")
+            return True
         _rm = ((slot.get("rasta") or {}).get(str(j)) or {}).get("mode")
         if _rm in RASTA_FIRST:
             if not self._rasta_do(key, j, si, slot, coords, name, lbl):
@@ -5841,10 +5861,7 @@ class IslandApp(tk.Tk):
             _cn = slot.get("click_names") or []
             _disp = _cn[j] if (j < len(_cn) and _cn[j]) else lbl
             self._status.set(f"🏝 [{name}] {_disp}{tag}")
-            # 🏢 오만의탑 그 자리면 **그림을 보고 고른다** (웨이브도 여기를 지난다)
-            if self._omanst_try(key, si, slot, j):
-                pass                       # 이미 골랐다 — 좌표는 안 누른다
-            elif j in move_set:
+            if j in move_set:
                 pyautogui.moveTo(*c)
             else:
                 # 🌊 그 클라를 먼저 앞으로 — **비활성 창은 첫 클릭이 '창 띄우기'로만
@@ -6597,9 +6614,10 @@ class IslandApp(tk.Tk):
                         _cn = slot.get("click_names") or []
                         _disp = _cn[j] if (j < len(_cn) and _cn[j]) else lbl
                         self._status.set(f"🏝 [{name}] {_disp}...")
-                        # 🏢 오만의탑 그 자리면 **그림을 보고 고른다** (웨이브와 같은 함수)
-                        #    ⚠ `continue` 로 빠져나가지 말 것 — 뒤의 간격·횟수 처리가
-                        #      통째로 건너뛰어진다. 표시만 남기고 아래로 흐른다.
+                        # 🏢 오만의탑 그 자리면 **그림을 보고 고른다** (웨이브와 같은 함수).
+                        #    못 고르면 `_omanst_try` 가 **스스로 True 를 돌려** 좌표를
+                        #    안 누르게 한다 — 정복을 누르느니 아무것도 안 누른다.
+                        #    ⚠ `continue` 로 빠져나가지 말 것 (뒤 간격·횟수가 건너뛰어진다).
                         if self._omanst_try(key, si, slot, j):
                             pass                      # 이미 골랐다 — 좌표는 안 누른다
                         elif j in move_set:
