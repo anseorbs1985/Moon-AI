@@ -325,6 +325,11 @@ OMANST_MATCH    = 0.70          # '정화' 글자 일치 기준
 # 실측 자리 (창 491×276 기준 비율) — 창 크기가 달라도 맞는다
 OMANST_PANEL  = (240 / 491, 65 / 276, 170 / 491, 90 / 276)   # 퀘스트 세 줄이 있는 곳
 OMANST_REFRESH = (304 / 491, 184 / 276)                       # 새로고침 버튼 가운데
+# 💰 새로고침 값 옆 **동전 아이콘** 자리 — 아데나인지 확인하는 데 쓴다.
+#    사용자 2026-10-15: "**다야는 절대 쓰지 말고.**"
+#    실측: 아데나 동전은 금색이라 **R-B ≈ +66** (세 화면 모두). 다야는 파란색이라 갈린다.
+OMANST_COIN    = (277 / 491, 178 / 276, 14 / 491, 12 / 276)
+OMANST_COIN_RB = 30            # R-B 가 이보다 작으면 아데나가 아니다 → 안 누른다
 OMANST_WIDE   = 3               # 덩어리 폭이 이보다 넓으면 V 가 섞인 것 (Ⅳ·Ⅴ)
 
 
@@ -428,6 +433,25 @@ def omanst_pick(app, anchor, slot, log=None):
             _L("[오만의탑] ⚠ 정화 줄이 없다 — **아무것도 고르지 않는다** "
                "(정복·생존은 절대 고르지 않는다)")
             return True
+        # 💰 **아데나인지 확인하고** 새로고침한다 (다야면 절대 안 누른다).
+        #    사용자 2026-10-15: "다야는 절대 쓰지 말고."
+        try:
+            _h, _w = big.shape[0], big.shape[1]
+            _cx, _cy = int(_w * OMANST_COIN[0]), int(_h * OMANST_COIN[1])
+            _cw, _ch = max(4, int(_w * OMANST_COIN[2])), max(4, int(_h * OMANST_COIN[3]))
+            _coin = big[_cy:_cy + _ch, _cx:_cx + _cw].astype(float)
+            _rb = float(_coin[:, :, 2].mean() - _coin[:, :, 0].mean())
+        except Exception:
+            _rb = 0.0
+        if _rb < OMANST_COIN_RB:
+            _L(f"[오만의탑] ⚠ 새로고침이 아데나가 아니다 (동전 R-B {_rb:+.0f}) "
+               f"— **누르지 않는다**. 정화가 있으면 그대로 고른다")
+            if x is not None:
+                _click(ox + x + 6, oy + y + 6)
+                time.sleep(random.uniform(0.5, 0.9))
+                _L(f"[오만의탑] 정화 {nm} 선택 ✔ (아데나가 없어 더 안 돌림)")
+                return True
+            return False
         # 🔄 새로고침 (아데나). 누르면 고른 줄이 풀리므로 다시 읽고 고른다.
         rx = ox + int(big.shape[1] * OMANST_REFRESH[0])
         ry = oy + int(big.shape[0] * OMANST_REFRESH[1])
