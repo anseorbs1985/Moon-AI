@@ -5761,6 +5761,37 @@ class IslandApp(tk.Tk):
         except Exception:
             return True
 
+    def _omanst_try(self, key, si, slot, j):
+        """🏢 **오만의탑 그 자리면 그림을 보고 정화를 고른다.** 골랐으면 True.
+
+        골랐으면 부르는 쪽은 **좌표를 누르지 않는다** (이미 그 줄을 눌러 골라놨다).
+        그림이 없거나 못 고르면 False → 예전처럼 좌표를 누른다.
+
+        ⚠ **웨이브(`_do_one_click`)와 순차(`_run`) 양쪽에서 부른다.**
+          한쪽만 걸면 슬롯을 여러 개 고를 때 그냥 좌표로 눌러버린다
+          (2026-10-15 실제로 그랬다: 1·5·9·13번을 돌렸는데 전부 그냥 클릭)."""
+        try:
+            if key != OMANST_KEY or j != OMANST_PICK_IDX:
+                return False
+            if not os.path.exists(omanst_img_path()):
+                return False
+            anc = self._slot_anchor(slot)
+            if not anc:
+                return False
+            try:
+                self._focus_client(si, anc)
+                time.sleep(random.uniform(0.25, 0.45))
+                self._last_focus = si
+            except Exception:
+                pass
+            return bool(omanst_pick(self, anc, slot, log=self._rlog))
+        except Exception as e:
+            try:
+                self._rlog(f"[오만의탑] 고르기 오류 — {e} (좌표로 누른다)")
+            except Exception:
+                pass
+            return False
+
     def _do_one_click(self, key, si, slot, j, lbl, move_set, tag=""):
         """슬롯의 j번째 자리 1개 실행 (드래그/방향키/클릭/녹화). 실행했으면 True."""
         name   = slot.get("name", f"#{si+1}")
@@ -5810,7 +5841,10 @@ class IslandApp(tk.Tk):
             _cn = slot.get("click_names") or []
             _disp = _cn[j] if (j < len(_cn) and _cn[j]) else lbl
             self._status.set(f"🏝 [{name}] {_disp}{tag}")
-            if j in move_set:
+            # 🏢 오만의탑 그 자리면 **그림을 보고 고른다** (웨이브도 여기를 지난다)
+            if self._omanst_try(key, si, slot, j):
+                pass                       # 이미 골랐다 — 좌표는 안 누른다
+            elif j in move_set:
                 pyautogui.moveTo(*c)
             else:
                 # 🌊 그 클라를 먼저 앞으로 — **비활성 창은 첫 클릭이 '창 띄우기'로만
@@ -6563,24 +6597,10 @@ class IslandApp(tk.Tk):
                         _cn = slot.get("click_names") or []
                         _disp = _cn[j] if (j < len(_cn) and _cn[j]) else lbl
                         self._status.set(f"🏝 [{name}] {_disp}...")
-                        # 🏢 **오만의탑 그 자리에서는 그림을 보고 정화를 고른다**
-                        #    (2026-10-15 사용자 요청). 골랐으면 좌표 클릭을 건너뛴다 —
-                        #    이미 그 줄을 눌러 골라놨기 때문. 수락은 다음 좌표가 누른다.
-                        #    그림이 없거나 못 고르면 예전처럼 좌표를 누른다.
-                        #    ⚠ 여기서 `continue` 로 빠져나가지 말 것 — 뒤의 간격·횟수
-                        #      처리가 통째로 건너뛰어진다. 표시만 남기고 아래로 흐른다.
-                        _picked = False
-                        if (key == OMANST_KEY and j == OMANST_PICK_IDX
-                                and os.path.exists(omanst_img_path())):
-                            try:
-                                self._focus_client(si, coords[j])
-                                time.sleep(random.uniform(0.25, 0.45))
-                                self._last_focus = si
-                            except Exception:
-                                pass
-                            _picked = omanst_pick(self, self._slot_anchor(slot),
-                                                  slot, log=self._rlog)
-                        if _picked:
+                        # 🏢 오만의탑 그 자리면 **그림을 보고 고른다** (웨이브와 같은 함수)
+                        #    ⚠ `continue` 로 빠져나가지 말 것 — 뒤의 간격·횟수 처리가
+                        #      통째로 건너뛰어진다. 표시만 남기고 아래로 흐른다.
+                        if self._omanst_try(key, si, slot, j):
                             pass                      # 이미 골랐다 — 좌표는 안 누른다
                         elif j in move_set:
                             pyautogui.moveTo(*coords[j])
