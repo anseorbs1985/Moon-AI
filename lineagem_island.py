@@ -5068,6 +5068,66 @@ class IslandApp(tk.Tk):
         except Exception:
             pass
 
+    def _rep_touch(self, key, si):
+        """⏰ **그 슬롯이 방금 돌기 시작했으니** 다음 회차를 지금 기준으로 다시 잡는다.
+
+        사용자(2026-10-17): *"2시간이 안 됐는데 왜 계속 다시 시작하는 거야?"*
+
+        원인 — `_rep_restart` 는 **[실행]을 누른 그 순간** 16슬롯을 **한꺼번에**
+        `now + 2시간 + 여유` 로 걸어둔다. 그런데 실제 클릭은 **웨이브로 퍼져서**
+        30분 넘게 걸린다. 그래서 늦게 돈 슬롯일수록 다음 회차가 빨리 온다:
+        ```
+        04:13 [실행] → ⏰ 16슬롯 전부 06:18 로 예약
+        #15 04:13 에 돔 → 06:18 = 2시간 05분  OK
+        #12 04:45 에 돔 → 06:18 = **1시간 33분**  ← 32분이나 이르다
+        ```
+        → 그 슬롯의 **첫 클릭이 실제로 나갈 때** `next` 만 다시 잡는다.
+
+        ⚠ **`next` 말고는 아무것도 건드리지 않는다** — `left`·`run`·`_mode`·
+          `repeat_h` 는 그대로다. 회차를 더 주거나 빼지 않는다.
+        ⚠ **예약이 없는 슬롯에는 아무 것도 만들지 않는다** — '⏰ 는 사용자가
+          실행했을 때만 켜진다'(2026-08-23 절대 규칙)를 그대로 지킨다.
+        ⚠ 뒤로만 민다 (`next` 를 늘리기만 한다) — 당기는 일은 없다."""
+        try:
+            import json as _j
+            d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+            f = os.path.join(d, "island_repeat.json")
+            with open(f, encoding="utf-8") as fp:
+                st = _j.load(fp) or {}
+            k = f"{key}|{si}"
+            cur = st.get(k)
+            if not isinstance(cur, dict):
+                return                      # 예약이 없으면 만들지 않는다
+            slots = self.cfg.get(key) or []
+            slot = slots[si] if si < len(slots) else {}
+            h = float(cur.get("h") or self._rep_hn(key, slot)[0] or 2)
+            nxt = time.time() + h * 3600 + self._rep_extra_sec(key, slot)
+            if nxt <= float(cur.get("next") or 0) + 30:
+                return                      # 이미 그만큼 뒤면 그대로 둔다
+            old = float(cur.get("next") or 0)
+            cur["next"] = nxt
+            st[k] = cur
+            tmp = f + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fp:
+                _j.dump(st, fp, ensure_ascii=False, indent=2)
+            os.replace(tmp, f)
+            self._rlog(f"[반복] {key} #{si+1:02d} 지금 돌기 시작 → 다음 회차를 "
+                       f"{time.strftime('%H:%M', time.localtime(nxt))} 로 다시 잡음 "
+                       f"(원래 {time.strftime('%H:%M', time.localtime(old))} · "
+                       f"+{(nxt-old)/60:.0f}분, 웨이브로 늦게 돈 만큼)")
+        except Exception:
+            pass
+
+    def _rep_touch_once(self, key, si):
+        """한 실행 안에서 **슬롯마다 한 번만** `_rep_touch` 를 부른다."""
+        s = getattr(self, "_rep_touched", None)
+        if s is None:
+            s = self._rep_touched = set()
+        if si in s:
+            return
+        s.add(si)
+        self._rep_touch(key, si)
+
     def _run_snapshot(self, key):
         """실행 직전 그 던전의 좌표를 따로 남겨둔다 —
         나중에 '마지막 실행 시점으로 되돌리기'를 정확히 할 수 있게.
@@ -5902,6 +5962,9 @@ class IslandApp(tk.Tk):
             return True
 
     def _do_one_click(self, key, si, slot, j, lbl, move_set, tag=""):
+        # ⏰ 이 슬롯이 **실제로 돌기 시작한 시각**으로 다음 회차를 다시 잡는다
+        #    (웨이브로 30분 넘게 퍼지면 늦게 돈 슬롯이 1시간 33분 만에 또 돌았다)
+        self._rep_touch_once(key, si)
         """슬롯의 j번째 자리 1개 실행 (드래그/방향키/클릭/녹화). 실행했으면 True."""
         name   = slot.get("name", f"#{si+1}")
         coords = slot.get("coords", [])
@@ -6619,6 +6682,7 @@ class IslandApp(tk.Tk):
                     targets.sort(key=lambda t: 1 if t[0] in (1, 2, 3) else 0)
             # 💧 이번에 실제로 돈 슬롯 — 끝난 뒤 '물약 0개' 를 확인할 대상이다
             self._p0_ran = [si for si, _s in targets]
+            self._rep_touched = set()   # ⏰ 슬롯별 '다음 회차 다시 잡기' 표시 초기화
             d = next(x for x in DUNGEONS if x["key"] == key)
             stop_fn   = lambda: self._stop_flag
             status_fn = lambda m: self.after(0, lambda m=m: self._status.set(m))
@@ -6666,6 +6730,10 @@ class IslandApp(tk.Tk):
                 _slow_always = key in ("수금_오만의탑", "토요일_악몽의섬")
                 _slow = (random.uniform(1.10, 1.20)
                          if (_slow_always or not any(recs.values())) else 1.0)
+                # ⏰ 이 슬롯이 **실제로 돌기 시작한 시각**으로 다음 회차를 다시 잡는다.
+                #    ⚠ 웨이브(`_do_one_click`)와 **한 쌍이다** — 한쪽만 걸면
+                #      '개별은 되는데 전체는 안 된다' 가 또 생긴다 (2026-10-05·10-10 교훈).
+                self._rep_touch_once(key, si)
                 for j, lbl in enumerate(_labels):
                     if self._stop_flag: break
                     if key == "카매사오기":
