@@ -1192,6 +1192,28 @@ def cfg_stamp():
         return f"좌표 파일을 못 읽음 ({e!r})"
 
 
+def code_stamp():
+    """**돌고 있는 코드 파일**의 '지금 모습' — 크기·수정시각·내용지문.
+
+    🩺 로컬이 이상할 때 **이것부터** 메인과 견준다. 지문이 다르면 **옛 코드**다
+    → 🔄 업데이트. (2026-10-16 신설)
+
+    ⚠ `cfg_stamp()` 와 **헷갈리지 말 것**:
+        `code_stamp` = 코드   → 메인과 **같아야** 정상
+        `cfg_stamp`  = 좌표   → 머신별이라 **달라야** 정상
+      CLAUDE.md 2026-10-14 에 '지문이 다르면 옛 코드' 라고 적어뒀는데, 그 줄은
+      좌표 지문이어서 **21대가 전부 옛 코드로 보이는** 쓸 수 없는 진단이었다."""
+    try:
+        import hashlib
+        p = os.path.abspath(__file__)
+        raw = open(p, "rb").read()
+        return (f"{len(raw):,}B · "
+                f"{time.strftime('%m-%d %H:%M:%S', time.localtime(os.path.getmtime(p)))}"
+                f" · 지문 {hashlib.md5(raw).hexdigest()[:8]}")
+    except Exception as e:
+        return f"코드 파일을 못 읽음 ({e!r})"
+
+
 def find_purple():
     for w in gw.getAllWindows():
         if "purple" in w.title.lower() or "lineage" in w.title.lower():
@@ -3767,7 +3789,10 @@ class App(tk.Tk):
         #    끄기 직전에도 같은 줄을 남기므로, 두 줄을 견주면 **재시작 사이에
         #    파일이 바뀌었는지 / 같은 파일인데 화면만 옛것인지** 가 바로 갈린다.
         try:
-            click_log("[재시작] 켜짐 — " + cfg_stamp() + f" · PID {os.getpid()}")
+            # 🩺 **코드 지문**(메인과 같아야 정상) + **좌표 지문**(달라야 정상)
+            #    을 한 줄에 둘 다 남긴다 — 로컬 진단의 첫 줄이다 (2026-10-16).
+            click_log("[재시작] 켜짐 — 코드 " + code_stamp()
+                      + " | 좌표 " + cfg_stamp() + f" · PID {os.getpid()}")
         except Exception:
             pass
         self._accounts = load_accounts()
