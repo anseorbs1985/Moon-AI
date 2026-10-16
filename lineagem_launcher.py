@@ -24126,6 +24126,7 @@ class App(tk.Tk):
                         ancs[si] = a0
             hits = []
             _sc = []
+            _dbgp = []      # 🗒 슬롯마다 **던전별 점수** — 왜 그걸 골랐는지 남긴다
             for si in sorted(ancs):
                 anc = ancs[si]
                 ok, v = _isl.potion0_seen(anc)
@@ -24134,11 +24135,37 @@ class App(tk.Tk):
                     continue
                 if now - self._p0_watch_done.get(si, 0) < P0_WATCH_COOL:
                     continue
-                for didx, key in keys:          # 어느 던전 안인지 **전부** 맞춰본다
-                    inn, pv, _w = _isl.place_in_dungeon(key, anc)
-                    if inn:
-                        hits.append((si, key, didx, v, pv))
-                        break
+                # 🧭 **어느 던전인지 겨뤄서 고른다** (2026-10-16 사용자 지시:
+                #    "오만의탑이면 오만의탑을 실행해야 하는 거고 — 너가 체크를
+                #    해라 거기에 맞는 걸로"). 예전에는 **먼저 기준을 넘은 던전**이
+                #    이겼다 — `DUNGEONS` 순서상 오만의탑이 늘 먼저라, 점수가 낮아도
+                #    오만의탑이 뽑힐 수 있었다.
+                #    ① 1등 ≥ PLACE_MATCH  ② 1등 ≥ 2등 × PLACE_RATIO  → 둘 다 넘어야 한다.
+                #    애매하면 **아무것도 돌리지 않는다** (엉뚱한 던전보다 낫다).
+                #    ⚠ 절대 점수 하나로 되돌리지 말 것 — 층 겨루기와 같은 규칙이다.
+                _sv = _isl.place_scores([k for _, k in keys], anc)
+                if not _sv:
+                    _dbgp.append(f"#{si+1:02d} 창 캡처 실패")
+                    continue
+                _rank = sorted(_sv.items(), key=lambda kv: -kv[1])
+                _top, _tv = _rank[0]
+                _2nd = _rank[1][1] if len(_rank) > 1 else 0.0
+                _ratio = (_tv / _2nd) if _2nd > 0 else 99.0
+                _dbgp.append("#%02d %s" % (si + 1, " ".join(
+                    f"{k.split('_')[-1]}:{x:.2f}" for k, x in _rank)))
+                if _tv < _isl.PLACE_MATCH:
+                    click_log(f"[물약감시] #{si+1:02d} 물약 0개인데 **던전 밖**"
+                              f"(1등 {_top} {_tv:.2f} < {_isl.PLACE_MATCH:.2f}) "
+                              f"→ 안 돌린다")
+                    continue
+                if _ratio < _isl.PLACE_RATIO:
+                    click_log(f"[물약감시] #{si+1:02d} **어느 던전인지 애매하다** "
+                              f"(1등 {_top} {_tv:.2f} · 2등 {_rank[1][0]} {_2nd:.2f} "
+                              f"= {_ratio:.2f}배 < {_isl.PLACE_RATIO}배) "
+                              f"→ 엉뚱한 던전을 돌리느니 **안 돌린다**")
+                    continue
+                _didx = dict((k, d) for d, k in keys)[_top]
+                hits.append((si, _top, _didx, v, _tv))
             # 🗒 **살아 있다는 것을 가끔 남긴다** — 찾은 게 없을 때도 조용하면
             #    "감시가 도는지" 를 알 수 없다 (이 저장소 규칙: 조용히 실패하지 말 것).
             #    10번에 한 번(약 20분)만 남겨 기록이 넘치지 않게 한다.
@@ -24146,6 +24173,11 @@ class App(tk.Tk):
                 click_log(f"[물약감시] {len(_sc)}클라 확인 "
                           f"(기준 {_isl.potion0_thr():.2f}) " + " ".join(_sc)
                           + (f" → 0개 {[h[0]+1 for h in hits]}" if hits else " → 없음"))
+            # 🗒 **어느 던전으로 봤는지** 점수를 그대로 남긴다 — 엉뚱한 던전을
+            #    골랐다는 신고가 오면 이 줄 하나로 짚인다 (예전엔 고른 것만 남아
+            #    **왜 그걸 골랐는지 알 수 없었다**).
+            if _dbgp:
+                click_log("[물약감시] 던전 겨루기 — " + " | ".join(_dbgp))
             if not hits:
                 return
             for si, key, didx, v, pv in hits:

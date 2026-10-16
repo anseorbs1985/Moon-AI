@@ -680,6 +680,43 @@ def place_in_dungeon(key, anchor):
         return False, 0.0, f"확인 실패 {e}"
 
 
+PLACE_RATIO = 1.25     # 1등이 2등보다 이만큼은 높아야 그 던전으로 인정한다
+
+
+def place_scores(keys, anchor):
+    """🧭 **한 캡처로 여러 던전을 겨룬다** → `{던전: 점수}` (못 찍으면 `{}`).
+
+    물약감시가 '어느 던전 안인가' 를 고를 때 쓴다. `place_in_dungeon` 은
+    기준을 넘는 순간 빠져나와 **진짜 최고점을 안 돌려주므로** 비교에 쓸 수 없다.
+
+    ⚠ **창을 한 번만 찍어 모든 던전에 같은 화면을 댄다** — 던전마다 따로 찍으면
+      그 사이 화면이 바뀌어 공정하지 않다 (덤으로 캡처가 1번이라 빠르다).
+    ⚠ 고르는 쪽은 **1등 ≥ PLACE_MATCH 이고 1등 ≥ 2등 × PLACE_RATIO** 를 둘 다
+      확인할 것 — 절대 점수만 보면 '첫 매치가 이기는' 옛 버그로 돌아간다."""
+    if not anchor:
+        return {}
+    try:
+        import cv2, numpy as np
+        got = grab_window(anchor)
+        if not got:
+            return {}
+        cut = place_nogreen(place_crop(got[0]))
+        out = {}
+        for key in keys:
+            best = -1.0
+            for p in place_list(key):
+                t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+                if (t is None or cut.shape[0] < t.shape[0]
+                        or cut.shape[1] < t.shape[1]):
+                    continue
+                best = max(best, float(
+                    cv2.matchTemplate(cut, t, cv2.TM_CCOEFF_NORMED).max()))
+            out[key] = best
+        return out
+    except Exception:
+        return {}
+
+
 def potion0_meta_w():
     """그림을 **어느 크기의 창**에서 잘랐나 — 크기 보정의 기준."""
     try:
