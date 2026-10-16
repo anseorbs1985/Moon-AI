@@ -688,6 +688,13 @@ def place_in_dungeon(key, anchor):
         return False, 0.0, f"확인 실패 {e}"
 
 
+# 마을도 장소 그림 틀을 그대로 쓴다 (2026-10-17). 던전이 아니라 '마을' 이라는
+#   가짜 던전키 하나를 둘 뿐이라 등록·비교·배포가 전부 똑같이 돌아간다.
+#   주의: '시계가 없다' 로 마을을 판정하면 **창이 HUD 를 가린 것과 구분이 안 된다**
+#   (실측 2026-10-17 #04: 소지품 창이 덮여 장소 0.21 · 초록 0 — 마을과 똑같았다).
+#   그래서 **마을을 그림으로 등록해 '있을 때' 잡는다.** 창이 가리면 마을 그림도
+#   안 맞으므로 저절로 걸러진다.
+TOWN_KEY = "_마을"
 PLACE_RATIO = 1.25     # 1등이 2등보다 이만큼은 높아야 그 던전으로 인정한다
 
 
@@ -2000,6 +2007,18 @@ class IslandApp(tk.Tk):
         _plb.bind("<Button-2>", lambda e, k=key, v=_psv: self._place_grab(k, v, True))
         self._place_btns = getattr(self, "_place_btns", {})
         self._place_btns[key] = _plb
+        # 🏘 **마을 등록** — 악몽의섬이 마을에 오래 서 있으면 다시 돌리기 위해
+        #    (2026-10-17 사용자: "마을에 13분 동안 서 있으면 자동실행을 하자").
+        #    같은 틀을 쓰므로 등록·비교·배포가 던전이름과 똑같다.
+        #    ⚠ '시계가 없다' 로 마을을 판정하면 **창이 HUD 를 가린 것과 구분이 안 된다**
+        #      (실측 #04). 그래서 마을을 **그림으로 등록해 '있을 때'** 잡는다.
+        if key == "토요일_악몽의섬":
+            _twb = tk.Button(b3, font=("맑은 고딕", 7, "bold"), fg="white",
+                             command=lambda v=_psv: self._place_grab(TOWN_KEY, v))
+            _twb.pack(side="left", padx=(2, 0))
+            _twb.bind("<Button-3>", lambda e: self._place_del(TOWN_KEY))
+            self._place_btns[TOWN_KEY] = _twb
+            self._place_paint(TOWN_KEY)
         _tb = tk.Button(b3, font=("맑은 고딕", 7, "bold"), fg="white",
                         command=self._potion0_toggle)
         _tb.pack(side="left", padx=(3, 0))
@@ -6272,8 +6291,12 @@ class IslandApp(tk.Tk):
             return
         n = len(place_list(key))
         try:
-            b.config(text=(f"📍 던전이름 {n}장" if n else "📍 던전이름 등록"),
-                     bg=("#196f3d" if n else "#7f8c8d"))
+            if key == TOWN_KEY:
+                b.config(text=(f"🏘 마을 {n}장" if n else "🏘 마을 등록"),
+                         bg=("#7d6608" if n else "#7f8c8d"))
+            else:
+                b.config(text=(f"📍 던전이름 {n}장" if n else "📍 던전이름 등록"),
+                         bg=("#196f3d" if n else "#7f8c8d"))
         except Exception:
             pass
 

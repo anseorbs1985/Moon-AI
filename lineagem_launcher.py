@@ -240,6 +240,16 @@ HERO_CV_H  = HERO_R * 2 + 6
 #    죽는데"). 실행 끝 직후에만 보면 늦는다 — 물약은 사냥 도중에 떨어진다.
 P0_WATCH_MS   = 120000         # 2분마다 (16클라 약 1초 → 1분당 0.5초)
 P0_WATCH_COOL = 1200           # 같은 슬롯은 20분에 한 번만 다시 돌린다
+# 마을에 오래 서 있으면 다시 실행 — 악몽의섬만 (2026-10-17 사용자 요청)
+#   "5분 남기고 죽으면 다시 가도 5분만 돌고 1시간 55분 동안 아무것도 안 한다."
+#   ⏰ 2시간 반복은 **그대로 두고** 그 빈 시간만 메운다.
+IDLE_RERUN_KEY  = "토요일_악몽의섬"   # 이 던전만 (사용자: "악몽의섬 쪽만 이야기하는 거야")
+# 몇 분을 서 있어야 '놀고 있다' 로 볼까 — ⏰ 여유(REPEAT_EXTRA_MIN)보다 길어야
+# 반복이 곧 걸릴 슬롯을 겹쳐 돌리지 않는다. 그래서 **여유 최대 + 3분**:
+#    악몽의섬   10 + 3 = 13분  <- 사용자가 고른 값 그대로
+#    라스타바드 13 + 3 = 16분  <- 여유가 13분까지라 13분이면 딱 겹친다
+IDLE_RERUN_MIN  = {"악몽의섬": 13, "라스타바드": 16}
+IDLE_RERUN_COOL = 2400         # 한 번 돌리면 그 슬롯은 40분간 다시 안 본다
 # ⏳ '리니지M 전 클릭 ②' 를 누른 뒤 기다리는 시간(초) — 2026-10-14 사용자 지시:
 #    "2 리니지m 전클릭 이거 두 번째 거 누르고 나서 한 10초 정도 기다려줘.
 #     그 이후에 다음 좌표들 클릭해줘."
@@ -24029,7 +24039,18 @@ class App(tk.Tk):
                 if self._p0_watch_n % 10 == 1:
                     click_log("[물약감시] 다른 작업이 도는 중이라 건너뜀")
             else:
-                threading.Thread(target=self._p0_watch_scan, daemon=True).start()
+                def _both():
+                    self._p0_watch_scan()
+                    # 같은 틱에 이어서 돈다 — 새 타이머를 만들지 않는다.
+                    # 13분을 2분 간격으로 보므로 눈금이 넉넉하다.
+                    try:
+                        self._idle_watch_scan()
+                    except Exception as e:
+                        try:
+                            click_log(f"[마을감시] 오류: {e}")
+                        except Exception:
+                            pass
+                threading.Thread(target=_both, daemon=True).start()
         except Exception as e:
             try: click_log(f"[물약감시] 틱 오류: {e}")
             except Exception: pass
@@ -24044,6 +24065,92 @@ class App(tk.Tk):
         except Exception:
             pass
         return None
+
+    def _idle_watch_scan(self):
+        """악몽의섬 슬롯이 **마을에 오래 서 있으면** 그 슬롯만 다시 실행한다.
+
+        사용자(2026-10-17): "5분 남기고 죽으면 다시 가도 5분만 돌고 1시간 55분 동안
+        아무것도 안 하는 상황이 생기잖아. **마을에 13분 동안 서 있으면** 자동 실행."
+
+        주의 — **'시계가 없다' 로 판정하지 말 것.** 창이 HUD 를 가린 것과 구분이
+        안 된다 (실측 #04: 소지품 창이 덮여 장소 0.21 · 초록 0 = 마을과 똑같았다).
+        **마을 그림이 1등으로 맞을 때만** 센다. 창이 가리면 마을 그림도 안 맞아
+        저절로 걸러진다.
+        마을 그림이 없으면 아무 일도 하지 않는다 (등록 안 한 컴퓨터는 그대로).
+        ⏰ 2시간 예약은 건드리지 않는다 — 빈 시간을 메울 뿐이다."""
+        import lineagem_island as _isl
+        key = IDLE_RERUN_KEY
+        now = time.time()
+        seen = getattr(self, "_idle_since", None)
+        if seen is None:
+            seen = self._idle_since = {}
+        if not _isl.place_list(_isl.TOWN_KEY):
+            return self._p0_why("마을 그림이 없다 — [마을 등록] 으로 한 번 잘라주세요")
+        if not _isl.place_list(key):
+            return self._p0_why(f"{key} 장소 그림이 없어 던전 안인지 모른다")
+        try:
+            _ic = json.load(io.open(os.path.join(BASE, "island_coords.json"),
+                                    encoding="utf-8-sig"))
+        except Exception as e:
+            return self._p0_why(f"island_coords.json 을 못 읽음: {e}")
+        _cmp = [_isl.TOWN_KEY, key]
+        _note = []
+        _fire = False
+        for si, slot in enumerate(_ic.get(key) or []):
+            if not isinstance(slot, dict) or not slot.get("enabled", True):
+                seen.pop(si, None)
+                continue
+            anc = _isl.IslandApp._slot_anchor(slot)
+            if not anc:
+                seen.pop(si, None)
+                continue
+            if now - self._p0_watch_done.get(si, 0) < IDLE_RERUN_COOL:
+                continue
+            sv = _isl.place_scores(_cmp, anc)
+            if not sv:
+                continue
+            _rank = sorted(sv.items(), key=lambda kv: -kv[1])
+            _top, _tv = _rank[0]
+            _2nd = _rank[1][1] if len(_rank) > 1 else 0.0
+            _ratio = (_tv / _2nd) if _2nd > 0 else 99.0
+            # 마을 그림이 **1등으로 확실할 때만** 센다 (던전 겨루기와 같은 규칙)
+            intown = (_top == _isl.TOWN_KEY and _tv >= _isl.PLACE_MATCH
+                      and _ratio >= _isl.PLACE_RATIO)
+            if not intown:
+                if si in seen:
+                    _note.append(f"#{si+1:02d} 마을 벗어남")
+                seen.pop(si, None)
+                continue
+            t0 = seen.setdefault(si, now)
+            # 프리셋마다 기다리는 시간이 다르다 — ⏰ 여유보다 길어야 겹치지 않는다
+            _ver = "라스타바드" if (slot.get("rasta") or {}) else "악몽의섬"
+            _need = IDLE_RERUN_MIN.get(_ver, 13) * 60
+            _mins = (now - t0) / 60.0
+            _note.append(f"#{si+1:02d} 마을 {_mins:.0f}/{_need/60:.0f}분({_ver})")
+            if now - t0 < _need:
+                continue
+            self._p0_watch_done[si] = now
+            seen.pop(si, None)
+            _fire = True
+            click_log(f"[마을감시] #{si+1:02d} {_ver} 가 마을에 {_mins:.0f}분째 "
+                      f"서 있다 (마을 {_tv:.2f} · {_ratio:.2f}배) → 그 슬롯만 "
+                      f"다시 실행 (⏰ 예약은 그대로 둔다)")
+            self.after(0, lambda n=si, v=_ver: self.status.set(
+                f"#{n+1:02d} 마을에 오래 서 있어 — {v} 를 다시 돌립니다"))
+            try:
+                _didx = next(n for n, d in enumerate(_isl.DUNGEONS[:4])
+                             if d["key"] == key)
+                subprocess.Popen(
+                    ["pythonw", os.path.join(BASE, "lineagem_island.py"),
+                     str(_didx), "--run", "--slot", str(si + 1)],
+                    cwd=BASE,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            except Exception as e:
+                click_log(f"[마을감시] 실행 실패: {e}")
+            break              # 한 번에 하나씩 — 다음 틱에서 그 다음 슬롯
+        # 조용히 실패하지 않는다 — 마을에 선 슬롯이 있거나 5틱(10분)에 한 번은 남긴다
+        if _note and (_fire or getattr(self, "_p0_watch_n", 0) % 5 == 1):
+            click_log("[마을감시] " + " | ".join(_note))
 
     def _p0_watch_scan(self):
         """16클라를 보고, 물약 0개 + 그 던전 안이면 **그 슬롯만** 다시 실행."""
