@@ -244,11 +244,21 @@ P0_WATCH_COOL = 1200           # 같은 슬롯은 20분에 한 번만 다시 돌
 #   "5분 남기고 죽으면 다시 가도 5분만 돌고 1시간 55분 동안 아무것도 안 한다."
 #   ⏰ 2시간 반복은 **그대로 두고** 그 빈 시간만 메운다.
 IDLE_RERUN_KEY  = "토요일_악몽의섬"   # 이 던전만 (사용자: "악몽의섬 쪽만 이야기하는 거야")
-# 몇 분을 서 있어야 '놀고 있다' 로 볼까 — ⏰ 여유(REPEAT_EXTRA_MIN)보다 길어야
-# 반복이 곧 걸릴 슬롯을 겹쳐 돌리지 않는다. 그래서 **여유 최대 + 3분**:
-#    악몽의섬   10 + 3 = 13분  <- 사용자가 고른 값 그대로
-#    라스타바드 13 + 3 = 16분  <- 여유가 13분까지라 13분이면 딱 겹친다
-IDLE_RERUN_MIN  = {"악몽의섬": 13, "라스타바드": 16}
+# 🧪 **물약이 없어서 나온 것일 때만** 다시 돌린다 (2026-10-17 사용자 재지시):
+#    "죽어서 마을에 있으면 2시간 간격을 그대로 유지해주고, **물약이 없어서** 마을에
+#     갔다가 서 있으면 **5분 후**에 다시 던전을 실행해줄 수 있어? **물약이 있는데
+#     죽어 있으면 그냥 마을에 냅두고 반복만 유지**해줬으면 좋겠는데."
+#    → 죽은 것은 **아무것도 하지 않는다** (던전 입장을 아껴야 하므로).
+#      물약이 없는 것만 돌린다 — 악몽의섬 흐름에 **창고·상점 구간이 있어
+#      다시 돌리면 물약을 채워 오기 때문**이다.
+IDLE_RERUN_MIN  = 5            # 마을에 이만큼 서 있으면 (분) — 사용자가 고른 값
+# '물약이 없어서 나왔다' 는 **최근에 물약 0개 문구를 봤는가** 로 가린다.
+# 물약감시가 2분마다 16클라를 보며 본 시각을 적어둔다 (`_p0_seen_at`).
+IDLE_P0_WINDOW  = 1800         # 30분 안에 물약 0개를 봤으면 '물약 때문' 으로 본다
+# ⏰ 가 곧 걸릴 슬롯은 건드리지 않는다 — 사용자의 "중복일 수가 있으니까" 를 지킨다.
+# 5분은 ⏰ 여유(악몽의섬 5~10분 · 라스타바드 9~13분)보다 짧아서, 이 확인이 없으면
+# 예약이 임박한 슬롯을 겹쳐 돌릴 수 있다.
+IDLE_SKIP_SOON  = 900          # 예약이 15분 안이면 그냥 예약에 맡긴다
 IDLE_RERUN_COOL = 2400         # 한 번 돌리면 그 슬롯은 40분간 다시 안 본다
 # ⏳ '리니지M 전 클릭 ②' 를 누른 뒤 기다리는 시간(초) — 2026-10-14 사용자 지시:
 #    "2 리니지m 전클릭 이거 두 번째 거 누르고 나서 한 10초 정도 기다려줘.
@@ -24093,6 +24103,20 @@ class App(tk.Tk):
                                     encoding="utf-8-sig"))
         except Exception as e:
             return self._p0_why(f"island_coords.json 을 못 읽음: {e}")
+        # ⏰ 예약 시각 — 곧 걸릴 슬롯은 건드리지 않는다 (겹쳐 돌리지 않으려고)
+        _rep = {}
+        try:
+            _rp = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
+                               "island_repeat.json")
+            for _k, _v in (json.load(io.open(_rp, encoding="utf-8-sig")) or {}).items():
+                if _k.startswith("_") or not isinstance(_v, dict):
+                    continue
+                _kk, _, _ii = _k.rpartition("|")
+                if _kk == key and _ii.isdigit():
+                    _rep[int(_ii)] = float(_v.get("next") or 0)
+        except Exception:
+            pass
+        _seen_at = getattr(self, "_p0_seen_at", None) or {}
         _cmp = [_isl.TOWN_KEY, key]
         _note = []
         _fire = False
@@ -24104,7 +24128,11 @@ class App(tk.Tk):
             if not anc:
                 seen.pop(si, None)
                 continue
-            if now - self._p0_watch_done.get(si, 0) < IDLE_RERUN_COOL:
+            # 쿨다운은 **물약감시와 따로** 쓴다 — 같이 쓰면 서로를 막아버린다
+            _idone = getattr(self, "_idle_done", None)
+            if _idone is None:
+                _idone = self._idle_done = {}
+            if now - _idone.get(si, 0) < IDLE_RERUN_COOL:
                 continue
             sv = _isl.place_scores(_cmp, anc)
             if not sv:
@@ -24122,21 +24150,35 @@ class App(tk.Tk):
                 seen.pop(si, None)
                 continue
             t0 = seen.setdefault(si, now)
-            # 프리셋마다 기다리는 시간이 다르다 — ⏰ 여유보다 길어야 겹치지 않는다
             _ver = "라스타바드" if (slot.get("rasta") or {}) else "악몽의섬"
-            _need = IDLE_RERUN_MIN.get(_ver, 13) * 60
             _mins = (now - t0) / 60.0
-            _note.append(f"#{si+1:02d} 마을 {_mins:.0f}/{_need/60:.0f}분({_ver})")
+            # 🧪 **물약이 없어서 나온 것인가** — 아니면(= 죽은 것) 그냥 둔다.
+            #    사용자: "물약이 있는데 죽어 있으면 그냥 마을에 냅두고 반복만 유지."
+            _ago = now - _seen_at.get(si, 0)
+            if _ago > IDLE_P0_WINDOW:
+                _note.append(f"#{si+1:02d} 마을 {_mins:.0f}분 — 물약 때문이 아님"
+                             f"(죽은 듯) → 그냥 둔다")
+                continue
+            # ⏰ 가 곧 걸리면 예약에 맡긴다 (겹쳐 돌리지 않는다)
+            _nx = _rep.get(si, 0)
+            if _nx and (_nx - now) < IDLE_SKIP_SOON:
+                _note.append(f"#{si+1:02d} 마을 {_mins:.0f}분 — ⏰ 가 "
+                             f"{(_nx-now)/60:.0f}분 뒤라 예약에 맡긴다")
+                continue
+            _need = IDLE_RERUN_MIN * 60
+            _note.append(f"#{si+1:02d} 마을 {_mins:.0f}/{IDLE_RERUN_MIN}분"
+                         f"(물약없음 {_ago/60:.0f}분 전)")
             if now - t0 < _need:
                 continue
-            self._p0_watch_done[si] = now
+            self._idle_done[si] = now
             seen.pop(si, None)
             _fire = True
-            click_log(f"[마을감시] #{si+1:02d} {_ver} 가 마을에 {_mins:.0f}분째 "
-                      f"서 있다 (마을 {_tv:.2f} · {_ratio:.2f}배) → 그 슬롯만 "
-                      f"다시 실행 (⏰ 예약은 그대로 둔다)")
+            click_log(f"[마을감시] #{si+1:02d} {_ver} — **물약이 없어서** 마을에 "
+                      f"{_mins:.0f}분째 서 있다 (마을 {_tv:.2f} · {_ratio:.2f}배 · "
+                      f"물약0개를 {_ago/60:.0f}분 전에 봤다) → 그 슬롯만 다시 실행 "
+                      f"(⏰ 예약은 그대로 둔다)")
             self.after(0, lambda n=si, v=_ver: self.status.set(
-                f"#{n+1:02d} 마을에 오래 서 있어 — {v} 를 다시 돌립니다"))
+                f"#{n+1:02d} 물약이 없어 마을에 서 있어 — {v} 를 다시 돌립니다"))
             try:
                 _didx = next(n for n, d in enumerate(_isl.DUNGEONS[:4])
                              if d["key"] == key)
@@ -24238,6 +24280,13 @@ class App(tk.Tk):
                 anc = ancs[si]
                 ok, v = _isl.potion0_seen(anc)
                 _sc.append(f"{si+1:02d}:{v:.2f}")
+                if ok:
+                    # 🧪 **본 시각을 적어둔다** — 마을감시가 '물약 때문에 나온 건가'
+                    #    를 가릴 때 쓴다 (2026-10-17). 던전 안에서든 밖에서든 적는다.
+                    _sa = getattr(self, "_p0_seen_at", None)
+                    if _sa is None:
+                        _sa = self._p0_seen_at = {}
+                    _sa[si] = now
                 if not ok:
                     continue
                 if now - self._p0_watch_done.get(si, 0) < P0_WATCH_COOL:
