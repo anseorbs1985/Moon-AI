@@ -18587,7 +18587,7 @@ class App(tk.Tk):
                                self._build_itemreg, w=430, h=430, pinnable=True)
 
     def _build_itemreg(self, parent):
-        tk.Label(parent, text="아이템 등록  (켜두면 아이템을 클릭할 때마다 최저가로 올립니다)",
+        tk.Label(parent, text="아이템 등록  (켜두면 아이템을 클릭할 때 '판매'까지 눌러줍니다)",
                  font=("맑은 고딕", 9, "bold"), fg="#117a8b").pack(anchor="w", padx=6, pady=(6, 2))
         tk.Label(parent, font=("맑은 고딕", 8), fg="#888", justify="left",
                  text="게임의 '최저가' 버튼을 대신 눌러주는 것이라 가격을 읽지 않습니다.\n"
@@ -18928,8 +18928,18 @@ class App(tk.Tk):
         return bool(self.cfg.get("itemreg_on", True))
 
     def _itemreg_mode(self):
-        """'auto' = 최저가로 끝까지 / 'manual' = 값을 직접 넣게 멈춘다."""
-        return "manual" if self.cfg.get("itemreg_mode") == "manual" else "auto"
+        """'manual'(기본) = **판매까지만 누르고 멈춘다** / 'auto' = 최저가로 끝까지.
+
+        💰 **기본이 '값넣기(판매까지만)' 다** (2026-10-16 사용자 지시:
+        *"아이템 등록하는 거 너가 올리지 말고 판매까지만 빠르게 눌러줘.
+        나머지 거래소에 등록하는 건 내가 할게"*).
+
+        ⚠ 기본값을 **코드에** 둔 이유: `itemreg_mode` 는 `coords.json`(머신별)이라
+          버튼만 누르면 그 컴퓨터만 바뀐다. 로컬 21대가 같아야 하므로 코드가 정한다
+          (CLAUDE.md 2026-08-15 '어디서나 같아야 하는 설정은 코드에 넣는다').
+        ⚠ `== "manual"` 로 되돌리지 말 것 — 그러면 다시 최저가로 **올려버린다.**
+          최저가로 끝까지 올리고 싶은 컴퓨터는 버튼을 눌러 `"auto"` 를 저장한다."""
+        return "auto" if self.cfg.get("itemreg_mode") == "auto" else "manual"
 
     def _itemreg_mode_toggle(self):
         m = "auto" if self._itemreg_mode() == "manual" else "manual"
@@ -18937,9 +18947,9 @@ class App(tk.Tk):
         save_cfg(self.cfg)
         self._itemreg_refresh()
         self.status.set(
-            "💰 값넣기 — 최저가를 누르지 않고 멈춥니다. 수량·가격을 넣고 F7 로 등록하세요"
+            "💰 값넣기(기본) — '판매'까지만 누르고 멈춥니다. 등록은 직접 하세요"
             if m == "manual" else
-            "🏷 최저가 — 아이템을 클릭하면 최저가로 바로 올립니다")
+            "🏷 최저가 — 아이템을 클릭하면 최저가로 **끝까지 올립니다** (주의)")
         click_log(f"[아이템등록] 모드 {'값넣기' if m == 'manual' else '최저가'} (사용자)")
 
     def _itemreg_toggle(self, on=None):
@@ -18955,7 +18965,10 @@ class App(tk.Tk):
             self.status.set("🏷 아이템 등록 ON — 그런데 거래소 그림이 없습니다. "
                             "등록 전에는 동작하지 않습니다")
         else:
-            self.status.set("🏷 아이템 등록 " + ("ON — 아이템을 클릭하면 최저가로 올립니다"
+            _mt = ("'판매'까지만 누릅니다 (등록은 직접)"
+                   if self._itemreg_mode() == "manual" else
+                   "최저가로 끝까지 올립니다")
+            self.status.set("🏷 아이템 등록 " + (f"ON — 아이템을 클릭하면 {_mt}"
                                                 if on else "OFF (수동으로 올리세요)"))
         click_log(f"[아이템등록] {'켬' if on else '끔'} (사용자)")
 
