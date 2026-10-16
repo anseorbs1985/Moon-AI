@@ -24165,6 +24165,29 @@ class App(tk.Tk):
                               f"→ 엉뚱한 던전을 돌리느니 **안 돌린다**")
                     continue
                 _didx = dict((k, d) for d, k in keys)[_top]
+                # 🚦 **고른 던전에서 그 슬롯이 실제로 돌 수 있나** (2026-10-16).
+                #    기준좌표는 '아무 던전' 에서 모으므로, 잊혀진섬 #03 이 ON 이면
+                #    `ancs[3]` 이 생긴다. 그 캐릭이 에스카로스에 있으면 에카를 고르는데
+                #    **에카 #03 은 OFF** 일 수 있다 → 섬 실행기가 거부하고 끝난다.
+                #    `--run` 은 창을 숨기므로 **그 안내가 아무 데도 안 보이고**,
+                #    런처는 '다시 실행' 이라 남기고 20분 쿨다운까지 걸어
+                #    **아무 일도 안 났는데 된 것처럼** 보였다.
+                #    ⚠ OFF 를 켜주지 않는다 (2026-08-29 절대 규칙) — 이유만 남긴다.
+                _ws = (_ic.get(_top) or [])
+                _ws = _ws[si] if (si < len(_ws)
+                                  and isinstance(_ws[si], dict)) else {}
+                if not _ws.get("enabled", True):
+                    click_log(f"[물약감시] ⏸ #{si+1:02d} 물약 0개 · {_top} 안"
+                              f"({_tv:.2f}) 인데 **그 던전에서 OFF** → 돌리지 않는다 "
+                              f"(돌리려면 {_top} 창에서 #{si+1:02d} 를 ON)")
+                    self._p0_watch_done[si] = now
+                    continue
+                if not _isl.IslandApp._slot_anchor(_ws):
+                    click_log(f"[물약감시] ⏸ #{si+1:02d} 물약 0개 · {_top} 안"
+                              f"({_tv:.2f}) 인데 **그 던전에 좌표가 없다** "
+                              f"→ 돌리지 않는다")
+                    self._p0_watch_done[si] = now
+                    continue
                 hits.append((si, _top, _didx, v, _tv))
             # 🗒 **살아 있다는 것을 가끔 남긴다** — 찾은 게 없을 때도 조용하면
             #    "감시가 도는지" 를 알 수 없다 (이 저장소 규칙: 조용히 실패하지 말 것).
