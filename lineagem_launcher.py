@@ -18001,6 +18001,67 @@ class App(tk.Tk):
             self.after(1200, lambda: self._check_scan(quiet=True))
         except Exception:
             pass
+        # 🚪 (2026-10-17) 절전이 풀렸을 때 **인벤토리·상점이 열려 있으면 닫는다.**
+        #    사용자: "절전이 해제되면 **저 상태**(창이 다 닫힌 화면)일 때 좌표가
+        #    클릭이 되어야 한다는 거야." 창이 떠 있으면 그 자리 좌표가 창에 먹힌다.
+        try:
+            self.after(2000, self._esc_close_all)
+        except Exception:
+            pass
+
+    def _esc_close_all(self):
+        """🚪 16클라를 훑어 **열려 있는 창만** ESC 로 닫는다 (F11 절전해제 뒤).
+
+        2026-10-17 사용자 요청. 절전이 풀린 순간 인벤토리·상점이 열려 있으면
+        그 자리 좌표 클릭을 **창이 먹어버린다.**
+
+        🚫 **창이 안 보이는 클라는 건드리지 않는다** — 무조건 ESC 를 누르면
+           시스템 메뉴가 열린다. 등록 그림(`click_templates/esc_*.png`)이
+           보일 때만 그 클라를 앞으로 올리고 한 번 누른다.
+        ⚠ 화면 긁기는 **백그라운드 스레드**에서 (2026-09-16 UI 정지 사고)."""
+        def _work():
+            try:
+                import lineagem_island as _isl
+            except Exception:
+                return
+            if not _isl.esc_list():
+                return                       # 등록 그림이 없으면 아무것도 안 한다
+            try:
+                if self._is_busy():
+                    click_log("[ESC닫기] 다른 작업이 도는 중이라 건너뜀")
+                    return
+                rects = self._client_rects_by_slot()
+                if not rects:
+                    click_log("[ESC닫기] 건너뜀 — 리니지M 창 16개를 못 찾음")
+                    return
+                shut, left = [], []
+                for si in range(len(rects)):
+                    if self._is_busy():
+                        break
+                    anc = (rects[si][0] + 60, rects[si][1] + 60)
+                    opened, sc, who = _isl.esc_win_open(anc)
+                    if not opened:
+                        continue
+                    self._focus_client_at(anc)
+                    time.sleep(random.uniform(0.12, 0.22))
+                    press_esc(1)
+                    time.sleep(random.uniform(0.30, 0.55))
+                    _o, _s, _w = _isl.esc_win_open(anc)
+                    (left if _o else shut).append(
+                        f"#{si+1:02d}({who.replace('.png','')} {sc:.2f})")
+                if shut or left:
+                    msg = "[ESC닫기] "
+                    if shut:
+                        msg += f"닫았다 {' '.join(shut)}"
+                    if left:
+                        msg += f" | ⚠ 안 닫힘 {' '.join(left)}"
+                    click_log(msg)
+            except Exception as e:
+                try:
+                    click_log(f"[ESC닫기] 오류: {e}")
+                except Exception:
+                    pass
+        threading.Thread(target=_work, daemon=True).start()
 
     def _assign_seq_hotkey(self):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
