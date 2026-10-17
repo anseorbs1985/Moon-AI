@@ -260,6 +260,19 @@ IDLE_P0_WINDOW  = 1800         # 30분 안에 물약 0개를 봤으면 '물약 �
 # 예약이 임박한 슬롯을 겹쳐 돌릴 수 있다.
 IDLE_SKIP_SOON  = 900          # 예약이 15분 안이면 그냥 예약에 맡긴다
 IDLE_RERUN_COOL = 2400         # 한 번 돌리면 그 슬롯은 40분간 다시 안 본다
+# 🏝 **⏰ 재진입을 웨이브 없이 하나씩** 돌릴 던전 (2026-10-17 사용자 지시).
+#    "악몽의섬은 다시 들어갈 때 웨이브 하지 말라니까, 그냥 하나씩 넣어주라고."
+#    이유: 여러 슬롯을 번갈아 누르면 **순간 부하로 클라가 팅긴다.**
+REPEAT_ONE_BY_ONE = {"토요일_악몽의섬": True}
+
+
+def key_of_didx(didx):
+    """던전 번호 → 던전 키 (섬 실행기의 DUNGEONS 순서와 같다)."""
+    try:
+        import lineagem_island as _i
+        return _i.DUNGEONS[didx]["key"]
+    except Exception:
+        return ""
 # ⏳ '리니지M 전 클릭 ②' 를 누른 뒤 기다리는 시간(초) — 2026-10-14 사용자 지시:
 #    "2 리니지m 전클릭 이거 두 번째 거 누르고 나서 한 10초 정도 기다려줘.
 #     그 이후에 다음 좌표들 클릭해줘."
@@ -5091,7 +5104,7 @@ class App(tk.Tk):
         return h * 3600 + random.uniform(extra[0], extra[1]) * 60
 
     # ⏱ 섬 실행기와 **같은 값**을 둘 것 (lineagem_island.py 의 REPEAT_EXTRA_MIN)
-    REPEAT_EXTRA_MIN = {"라스타바드": (9, 13), "악몽의섬": (5, 10)}
+    REPEAT_EXTRA_MIN = {"라스타바드": (14, 20), "악몽의섬": (10, 16)}   # 2026-10-17 +5~6분
 
     def _slot_ver(self, key, bi):
         """그 슬롯이 **라스타바드**인지 **악몽의섬**인지 (악몽의섬 던전만 해당).
@@ -6710,10 +6723,15 @@ class App(tk.Tk):
         cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(didx),
                "--run", "--repeat"]
         if len(sidxs) > 1:
-            # ⏰ 반복도 **2개씩** 웨이브 (2026-09-19 사용자 최종 지시).
-            # 1개씩(23~30분)은 너무 느려서, 2개씩 유지하고 대신 속도를 늦췄다 —
-            # 클릭 간격 +20%(`CLICK_SLOW`), 슬롯 사이 +15%(`SLOT_GAP_AFTER`).
-            cmd += ["--slots", ",".join(str(i + 1) for i in sorted(sidxs)), "--lanes", "2"]
+            # 🏝 **악몽의섬은 다시 들어갈 때 웨이브를 쓰지 않는다 — 하나씩**
+            #    (2026-10-17 사용자 지시: "악몽의섬은 다시 들어갈 때 웨이브 하지
+            #     말라니까, 그냥 하나씩 넣어주라고… 계속 웨이브로 넣어버리니까
+            #     순간적인 부하가 컴퓨터에 걸려서 다른 게 팅긴다").
+            #    실측 16슬롯: 2개씩 약 14분 → 하나씩 약 31분. 2시간 안에 넉넉하다.
+            #    ⚠ 2026-09-19 의 '⏰ 반복도 2개씩' 은 이 지시로 **악몽의섬만 폐지**.
+            _lanes = "1" if REPEAT_ONE_BY_ONE.get(key_of_didx(didx)) else "2"
+            cmd += ["--slots", ",".join(str(i + 1) for i in sorted(sidxs)),
+                    "--lanes", _lanes]
         else:
             cmd += ["--slot", str(sidxs[0] + 1)]
         proc = subprocess.Popen(cmd)
