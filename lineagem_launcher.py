@@ -256,7 +256,11 @@ IDLE_RERUN_KEY  = "토요일_악몽의섬"   # 이 던전만 (사용자: "악몽
 #    → 죽은 것은 **아무것도 하지 않는다** (던전 입장을 아껴야 하므로).
 #      물약이 없는 것만 돌린다 — 악몽의섬 흐름에 **창고·상점 구간이 있어
 #      다시 돌리면 물약을 채워 오기 때문**이다.
-IDLE_RERUN_MIN  = 5            # 마을에 이만큼 서 있으면 (분) — 사용자가 고른 값
+# 마을에 이만큼 서 있으면 다시 돌린다 (분). **4~5분 사이 랜덤** —
+# 2026-10-17 사용자: "4~5분 사이까지 확인해서 다시 실행" · "항상 랜덤 시간이야".
+# 슬롯이 마을에 들어간 순간 그 슬롯의 목표를 한 번 뽑아 `_idle_need` 에 기억한다
+# (틱마다 새로 뽑으면 4분과 5분을 오가며 흔들린다).
+IDLE_RERUN_MIN  = (4.0, 5.0)
 # '물약이 없어서 나왔다' 는 **최근에 물약 0개 문구를 봤는가** 로 가린다.
 # 물약감시가 2분마다 16클라를 보며 본 시각을 적어둔다 (`_p0_seen_at`).
 IDLE_P0_WINDOW  = 1800         # 30분 안에 물약 0개를 봤으면 '물약 때문' 으로 본다
@@ -24174,6 +24178,8 @@ class App(tk.Tk):
                 if si in seen:
                     _note.append(f"#{si+1:02d} 마을 벗어남")
                 seen.pop(si, None)
+                # 목표 시간도 버린다 — 다음에 마을에 들어오면 4~5분을 새로 뽑는다
+                getattr(self, "_idle_need", {}).pop(si, None)
                 continue
             t0 = seen.setdefault(si, now)
             _ver = "라스타바드" if (slot.get("rasta") or {}) else "악몽의섬"
@@ -24191,13 +24197,20 @@ class App(tk.Tk):
                 _note.append(f"#{si+1:02d} 마을 {_mins:.0f}분 — ⏰ 가 "
                              f"{(_nx-now)/60:.0f}분 뒤라 예약에 맡긴다")
                 continue
-            _need = IDLE_RERUN_MIN * 60
-            _note.append(f"#{si+1:02d} 마을 {_mins:.0f}/{IDLE_RERUN_MIN}분"
+            # 이 슬롯의 목표 시간을 **마을에 들어간 그때 한 번만** 뽑는다
+            _nd = getattr(self, "_idle_need", None)
+            if _nd is None:
+                _nd = self._idle_need = {}
+            if si not in _nd:
+                _nd[si] = random.uniform(*IDLE_RERUN_MIN)
+            _need = _nd[si] * 60
+            _note.append(f"#{si+1:02d} 마을 {_mins:.1f}/{_nd[si]:.1f}분"
                          f"(물약없음 {_ago/60:.0f}분 전)")
             if now - t0 < _need:
                 continue
             self._idle_done[si] = now
             seen.pop(si, None)
+            getattr(self, "_idle_need", {}).pop(si, None)
             _fire = True
             click_log(f"[마을감시] #{si+1:02d} {_ver} — **물약이 없어서** 마을에 "
                       f"{_mins:.0f}분째 서 있다 (마을 {_tv:.2f} · {_ratio:.2f}배 · "
