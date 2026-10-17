@@ -928,6 +928,9 @@ ESC_BASE_W  = 494      # 그림을 자른 창 가로 — 창 크기가 다르면
 ESC_MAX     = 8        # 창 그림 최대 장수
 ESC_WAIT    = (0.30, 0.55)   # ESC 를 누른 뒤 창이 닫히기를 기다리는 시간
 ESC_TRIES   = 2        # 안 닫히면 한 번 더 (그래도 안 닫히면 그냥 진행한다)
+# 🚪 **첫 좌표(절전해제)를 누른 뒤** 화면이 돌아올 때까지 이만큼 기다렸다 본다.
+#    절전 화면이 인벤토리를 덮고 있어서 **깨우기 전에는 창이 안 보인다.**
+ESC_AFTER_WAKE = (0.9, 1.4)
 
 
 def esc_meta():
@@ -6179,6 +6182,16 @@ class IslandApp(tk.Tk):
             did = True
         if did:
             self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) 실행")
+            # 🚪 **첫 좌표(절전해제)를 누른 바로 다음에** 창을 확인한다.
+            #    ⚠ 그 전에 보면 절전 화면이 인벤토리를 덮고 있어 **안 보인다.**
+            #    ⚠ 순차(`_run`)의 같은 자리와 **한 쌍이다** — 한쪽만 걸면
+            #      '개별은 되는데 전체실행은 안 된다' 가 또 생긴다.
+            if j == 0:
+                try:
+                    time.sleep(random.uniform(*ESC_AFTER_WAKE))
+                    self._esc_close(si, self._slot_anchor(slot), name)
+                except Exception:
+                    pass
         return did
 
     @staticmethod
@@ -6269,12 +6282,6 @@ class IslandApp(tk.Tk):
         # 슬롯별 진행 상태: [다음에 할 클릭 번호, 언제 할 차례인지, 슬롯 고유 속도]
         state = {}
         for si, slot in targets:
-            # 🚪 이 슬롯을 들여보내기 전에 열린 창을 닫는다 (순차와 한 쌍)
-            try:
-                self._esc_close(si, self._slot_anchor(slot),
-                                slot.get("name", f"#{si+1}"))
-            except Exception:
-                pass
             state[si] = {"slot": slot, "j": 0,
                          "due": now + random.uniform(0, 20.0),     # 시작 시점 넓게 흩뿌림
                          "sp": random.uniform(1.05, 1.15)}         # 이 슬롯 전체 5~15% 완화
@@ -6859,8 +6866,6 @@ class IslandApp(tk.Tk):
                     if self._stop_flag: break
                 if not wait_mouse_idle(stop_fn, status_fn): break
                 name   = slot.get("name", f"#{si+1}")
-                # 🚪 인벤토리·상점이 열려 있으면 ESC 로 닫고 시작한다
-                self._esc_close(si, self._slot_anchor(slot), name)
                 _labels = labels_for(key)
                 coords = slot.get("coords", [None]*len(_labels))
                 while len(coords) < len(_labels):
@@ -6953,6 +6958,15 @@ class IslandApp(tk.Tk):
                     if not did:
                         continue
                     self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) 실행")
+                    # 🚪 **첫 좌표(절전해제)를 누른 바로 다음에** 창을 확인한다.
+                    #    ⚠ 그 전에 보면 **절전 화면이 인벤토리를 덮고 있어 안 보인다**
+                    #      (2026-08-29 복구에서 똑같이 겪었다: "순서가 중요하다 —
+                    #       깨우기 → 확인"). 사용자 정정(2026-10-17):
+                    #      "섬 실행기 첫 번째에 절전해제 좌표가 있어. **그걸 클릭한
+                    #       다음에** 확인을 해야 하는 거야."
+                    if j == 0:
+                        time.sleep(random.uniform(*ESC_AFTER_WAKE))
+                        self._esc_close(si, self._slot_anchor(slot), name)
                     g = gl[j] if j < len(gl) else None
                     # 좌표 간 간격 10~25% 랜덤 증가 (× 녹화 없는 슬롯은 _slow 추가 완화)
                     _mult = (random.uniform(1.10, 1.25) * _slow * 1.05
