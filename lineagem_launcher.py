@@ -245,6 +245,9 @@ HERO_CV_H  = HERO_R * 2 + 6
 # ⚠ 더 줄이기 전에 21대 전체 부하를 생각할 것 (30초로 하면 1분당 2초).
 P0_WATCH_MS   = 60000
 P0_WATCH_COOL = 1200           # 같은 슬롯은 20분에 한 번만 다시 돌린다
+# 🕐 작업 중에 '물약 0개' 를 봤으면 적어뒀다가 작업이 끝난 뒤 돌린다.
+#    이만큼 지나면 버린다 — 그 사이 창고에서 채웠을 수 있다.
+P0_PEND_MAX   = 1800           # 적어둔 것은 30분까지만 유효
 # 마을에 오래 서 있으면 다시 실행 — 악몽의섬만 (2026-10-17 사용자 요청)
 #   "5분 남기고 죽으면 다시 가도 5분만 돌고 1시간 55분 동안 아무것도 안 한다."
 #   ⏰ 2시간 반복은 **그대로 두고** 그 빈 시간만 메운다.
@@ -24074,11 +24077,15 @@ class App(tk.Tk):
             if self._p0_watch_n == 1:
                 click_log("[물약감시] 감시 시작 — %g초마다 16클라를 봅니다"
                          % (P0_WATCH_MS / 1000.0,))
-            if self._is_busy():
-                # 🗒 **빠져나가는 이유도 남긴다** — 조용하면 왜 안 도는지 알 수 없다
-                if self._p0_watch_n % 10 == 1:
-                    click_log("[물약감시] 다른 작업이 도는 중이라 건너뜀")
-            else:
+            # 🚨 **작업 중에도 화면은 본다** (2026-10-17 — 로컬 "물약이 없는데
+            #    다시 실행을 안 한다" 의 진짜 원인).
+            #    예전에는 `_is_busy()` 면 통째로 건너뛰었다. 악몽의섬 전체실행이
+            #    23분, ⏰ 반복까지 겹치면 **그 사이 내내 감시가 멈춰** 있었고,
+            #    문구는 잠깐 떴다 사라지므로 영영 못 봤다.
+            #    → 보는 것(PrintWindow)은 게임에 입력을 보내지 않아 **클릭과 무관**하다.
+            #      실측 16클라 1.02초 = 1분당 1.7% — 팅김과 상관없다.
+            #    → 대신 **돌리는 것만** 미룬다 (`_p0_pend`, 아래 참조).
+            if True:
                 def _both():
                     self._p0_watch_scan()
                     # 같은 틱에 이어서 돈다 — 새 타이머를 만들지 않는다.
@@ -24207,6 +24214,14 @@ class App(tk.Tk):
             _note.append(f"#{si+1:02d} 마을 {_mins:.1f}/{_nd[si]:.1f}분"
                          f"(물약없음 {_ago/60:.0f}분 전)")
             if now - t0 < _need:
+                continue
+            # 🕐 작업이 돌고 있으면 **돌리지 않고 다음 틱으로 미룬다.**
+            #    마을에 서 있는 것은 **계속되는 상태**라 적어둘 필요가 없다 —
+            #    작업이 끝난 뒤에도 마을이면 그때 잡힌다 (물약 문구와 다른 점).
+            #    ⚠ `seen` 을 비우지 말 것 — 비우면 마을 시간을 처음부터 다시 센다.
+            if self._is_busy():
+                _note.append(f"#{si+1:02d} 마을 {_mins:.1f}분 — 다른 작업이 "
+                             f"도는 중이라 미룬다")
                 continue
             self._idle_done[si] = now
             seen.pop(si, None)
@@ -24396,10 +24411,54 @@ class App(tk.Tk):
             #    **왜 그걸 골랐는지 알 수 없었다**).
             if _dbgp:
                 click_log("[물약감시] 던전 겨루기 — " + " | ".join(_dbgp))
+            # 🕐 **작업 중에 적어둔 것**을 먼저 처리한다 (문구는 이미 사라졌을 수 있다).
+            #    ⚠ 그 사이 창고 구간에서 물약을 채웠을 수 있으므로 **아직 그 던전 안인지**
+            #      다시 확인하고, 너무 오래된 것은 버린다.
+            _pd = getattr(self, "_p0_pend", None) or {}
+            if _pd and not self._is_busy() and not hits:
+                for si in sorted(_pd):
+                    key, didx, at = _pd[si]
+                    if now - at > P0_PEND_MAX:
+                        _pd.pop(si, None)
+                        click_log(f"[물약감시] 🕐 #{si+1:02d} 적어둔 지 "
+                                  f"{(now-at)/60:.0f}분이 지나 버린다")
+                        continue
+                    if now - self._p0_watch_done.get(si, 0) < P0_WATCH_COOL:
+                        continue
+                    _a2 = ancs.get(si)
+                    _s2 = _isl.place_scores([k for _, k in keys], _a2) if _a2 else {}
+                    _r2 = sorted(_s2.items(), key=lambda kv: -kv[1]) if _s2 else []
+                    _ok = (_r2 and _r2[0][0] == key
+                           and _r2[0][1] >= _isl.PLACE_MATCH
+                           and (_r2[0][1] / _r2[1][1] if len(_r2) > 1 and _r2[1][1] > 0
+                                else 99.0) >= _isl.PLACE_RATIO)
+                    _pd.pop(si, None)
+                    if not _ok:
+                        click_log(f"[물약감시] 🕐 #{si+1:02d} 적어뒀지만 지금은 "
+                                  f"{key} 안이 아니다 — 돌리지 않는다")
+                        continue
+                    hits = [(si, key, didx, -1.0, _r2[0][1])]
+                    click_log(f"[물약감시] 🕐 #{si+1:02d} 작업이 끝나 "
+                              f"**적어둔 것을 지금 돌린다** ({key} {_r2[0][1]:.2f})")
+                    break
             if not hits:
+                return
+            # 🕐 **작업이 돌고 있으면 쌓아두고 끝난 뒤에 돌린다.**
+            #    여기서 바로 돌리면 돌던 작업과 클릭이 엉킨다.
+            if self._is_busy():
+                _pd = getattr(self, "_p0_pend", None)
+                if _pd is None:
+                    _pd = self._p0_pend = {}
+                for si, key, didx, v, pv in hits:
+                    if si not in _pd:
+                        click_log(f"[물약감시] 🕐 #{si+1:02d} 물약 0개 ({v:.2f}) · "
+                                  f"{key} 안 — 다른 작업이 도는 중이라 "
+                                  f"**적어두고 끝나면 돌린다**")
+                    _pd[si] = (key, didx, now)
                 return
             for si, key, didx, v, pv in hits:
                 self._p0_watch_done[si] = now
+                getattr(self, "_p0_pend", {}).pop(si, None)
                 click_log(f"[물약감시] 💧 #{si+1:02d} 물약 0개 ({v:.2f}) · "
                           f"{key} 안 ({pv:.2f}) → 그 슬롯만 다시 실행")
                 self.after(0, lambda n=si, k=key: self.status.set(
