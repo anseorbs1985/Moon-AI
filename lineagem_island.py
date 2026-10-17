@@ -914,6 +914,73 @@ def grab_window(coord):
         return None
 
 
+# ── 🚪 슬롯 시작 전 '열려 있는 창' 을 ESC 로 닫는다 ──────────────────────
+#    2026-10-17 사용자: "처음에 Z 를 실행하고 들어가잖아. 그런데 화면이 인벤토리가
+#    열려 있으면 **ESC 를 한 번 누르고** 다음 걸 진행해야 하거든. 지금 버튼이나
+#    시간 때문에 저런 상태가 발생하거나 **상점에 들어가 있는 상태**가 발생하고 있어서."
+#
+#    🚫 **무조건 ESC 를 누르지 않는다** — 창이 없을 때 누르면 시스템 메뉴가 열린다.
+#       등록한 그림이 **보일 때만** 누른다.
+#    ⚠ 창 종류마다 그림이 한 장씩 필요하다. 소지품 탭줄은 인벤토리에서는 y37,
+#      상점 안에서는 y52 라 **같은 그림으로 둘 다 못 잡는다** (실측 0.66).
+ESC_MATCH   = 0.70     # 기준 (esc_meta.json 의 thr 가 있으면 그 값)
+ESC_BASE_W  = 494      # 그림을 자른 창 가로 — 창 크기가 다르면 이 비율로 맞춘다
+ESC_MAX     = 8        # 창 그림 최대 장수
+ESC_WAIT    = (0.30, 0.55)   # ESC 를 누른 뒤 창이 닫히기를 기다리는 시간
+ESC_TRIES   = 2        # 안 닫히면 한 번 더 (그래도 안 닫히면 그냥 진행한다)
+
+
+def esc_meta():
+    """{기준, 기준 창 가로} — 없으면 코드 기본값."""
+    try:
+        with open(os.path.join(IMG_DIR, "esc_meta.json"), encoding="utf-8-sig") as f:
+            d = json.load(f) or {}
+        return float(d.get("thr") or ESC_MATCH), int(d.get("w") or ESC_BASE_W)
+    except Exception:
+        return ESC_MATCH, ESC_BASE_W
+
+
+def esc_img_path(n):
+    return os.path.join(IMG_DIR, "esc_%02d.png" % (n + 1))
+
+
+def esc_list():
+    return [p for p in (esc_img_path(n) for n in range(ESC_MAX)) if os.path.exists(p)]
+
+
+def esc_win_open(anchor):
+    """그 클라에 **ESC 로 닫을 창**이 열려 있나 → (열림?, 점수, 어느 그림).
+
+    `grab_window`(PrintWindow)로 그 창을 직접 찍으므로 가려져 있어도 정확하다."""
+    ps = esc_list()
+    if not ps or not anchor:
+        return False, -1.0, ""
+    try:
+        import cv2, numpy as np
+        got = grab_window(anchor)
+        if not got:
+            return False, 0.0, ""
+        big = got[0]
+        thr, bw = esc_meta()
+        k = big.shape[1] / float(bw or ESC_BASE_W)
+        best, who = 0.0, ""
+        for p in ps:
+            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            if t is None:
+                continue
+            if abs(k - 1.0) > 0.01:
+                t = cv2.resize(t, (max(3, int(t.shape[1] * k)),
+                                   max(3, int(t.shape[0] * k))))
+            if big.shape[0] < t.shape[0] or big.shape[1] < t.shape[1]:
+                continue
+            s = float(cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED).max())
+            if s > best:
+                best, who = s, os.path.basename(p)
+        return (best >= thr), best, who
+    except Exception:
+        return False, 0.0, ""
+
+
 def card_meta():
     """🃏 카드 공통 설정 — 찾을 범위(제목 줄)와 기준값."""
     try:
@@ -5856,6 +5923,45 @@ class IslandApp(tk.Tk):
                    f"(최고 {best:.2f}) → 이 슬롯 중단")
         return False
 
+    def _esc_close(self, si, anc, name=""):
+        """🚪 그 클라에 창이 열려 있으면 **ESC 한 번**으로 닫는다 (슬롯 시작 전).
+
+        2026-10-17 사용자: "인벤토리가 열려 있으면 ESC 를 한 번 누르고 다음 걸
+        진행해야 하거든 … 상점에 들어가 있는 상태가 발생하고 있어서."
+
+        🚫 창이 **안 보이면 아무것도 누르지 않는다** — 무조건 누르면 시스템 메뉴가 뜬다.
+        ⚠ ESC 는 **지금 앞에 있는 창**이 받는다 → 먼저 그 클라를 앞으로 올린다.
+        ⚠ 순차(`_run`)와 웨이브(`_run_wave`) **양쪽에서 부른다** — 한쪽만 걸면
+          '개별은 되는데 전체실행은 안 된다' 가 또 생긴다 (2026-10-05·10-10·10-15 교훈)."""
+        if not esc_list() or not anc:
+            return
+        try:
+            ESC_SC = 0x01                      # ESC 스캔코드
+            for _t in range(ESC_TRIES):
+                opened, sc, who = esc_win_open(anc)
+                if not opened:
+                    if _t:
+                        self._rlog(f"🚪 #{si+1:02d} {name} 창이 닫혔다 "
+                                   f"({_t}번째 ESC · 지금 {sc:.2f})")
+                    return
+                self._focus_client(si, anc)
+                time.sleep(random.uniform(0.12, 0.22))
+                _send_scan_key([ESC_SC], True)
+                time.sleep(random.uniform(0.06, 0.11))
+                _send_scan_key([ESC_SC], False)
+                self._rlog(f"🚪 #{si+1:02d} {name} 창이 열려 있다 "
+                           f"({who} {sc:.2f}) → ESC 를 눌렀다 ({_t+1}/{ESC_TRIES})")
+                time.sleep(random.uniform(*ESC_WAIT))
+            _o, _s, _w = esc_win_open(anc)
+            if _o:
+                self._rlog(f"🚪 #{si+1:02d} {name} ESC {ESC_TRIES}번에도 창이 "
+                           f"안 닫혔다 ({_w} {_s:.2f}) — 그대로 진행한다")
+        except Exception as e:
+            try:
+                self._rlog(f"🚪 #{si+1:02d} ESC 오류: {e}")
+            except Exception:
+                pass
+
     def _hold_arrow(self, word, sec, name):
         """방향키를 sec초 동안 눌러 이동 — 대각선(↖↗↙↘)은 두 키 동시 홀드.
         스캔코드 SendInput 방식이라 게임(DirectInput)도 인식. 직전 클릭으로 포커스된 클라가 받는다."""
@@ -6163,6 +6269,12 @@ class IslandApp(tk.Tk):
         # 슬롯별 진행 상태: [다음에 할 클릭 번호, 언제 할 차례인지, 슬롯 고유 속도]
         state = {}
         for si, slot in targets:
+            # 🚪 이 슬롯을 들여보내기 전에 열린 창을 닫는다 (순차와 한 쌍)
+            try:
+                self._esc_close(si, self._slot_anchor(slot),
+                                slot.get("name", f"#{si+1}"))
+            except Exception:
+                pass
             state[si] = {"slot": slot, "j": 0,
                          "due": now + random.uniform(0, 20.0),     # 시작 시점 넓게 흩뿌림
                          "sp": random.uniform(1.05, 1.15)}         # 이 슬롯 전체 5~15% 완화
@@ -6747,6 +6859,8 @@ class IslandApp(tk.Tk):
                     if self._stop_flag: break
                 if not wait_mouse_idle(stop_fn, status_fn): break
                 name   = slot.get("name", f"#{si+1}")
+                # 🚪 인벤토리·상점이 열려 있으면 ESC 로 닫고 시작한다
+                self._esc_close(si, self._slot_anchor(slot), name)
                 _labels = labels_for(key)
                 coords = slot.get("coords", [None]*len(_labels))
                 while len(coords) < len(_labels):
