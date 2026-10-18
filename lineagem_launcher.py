@@ -1405,6 +1405,20 @@ SIDEBAR_WIDE  = 80             # 폭이 이보다 크면 **이미 확장됨**
 SIDEBAR_DOTS  = (28, 209)      # 56x316 바에서 잰 값
 SIDEBAR_WAIT  = (0.40, 0.70)   # 누른 뒤 펼쳐지기를 기다리는 시간
 SIDEBAR_TRIES = 2              # 안 펼쳐지면 한 번 더 (그래도 안 되면 그냥 진행)
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║ 🧭 **기준 슬롯(#05)이 확장돼 있어야 모든 좌표가 맞는다**                  ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+# 2026-10-18 사용자: "모든 확장의 기본은 5번이거든. **5번은 무조건 확장이 되어
+#   있어야지 모든 좌표가 다 같거든.** 그러면 만약 5번이 확장이 안 되어 있으면
+#   **퍼플을 다시 다른 계정으로 전환**을 해줘."
+#
+# 🚫 **옆 바를 ⋯ 로 직접 펼치지 않는다** — 2026-10-18 에 그렇게 만들었다가
+#    되돌렸다. 스케줄·과거섬 클릭2 는 **접힘 기준 ▶ 자리**(창 기준 28,165)라,
+#    섣불리 펼치면 그 자리가 ⌨(키보드)가 되어 **오히려 어긋난다.**
+#    기준을 맞추는 길은 **계정 전환 한 가지**다.
+BASE_SLOT     = 4        # 0부터 센 번호 → #05
+BASE_EXPAND   = True     # 이 확인을 켤지 (끄면 예전처럼 그냥 진행)
+BASE_COOL     = 600      # 전환을 한 번 하면 이만큼은 다시 안 한다 (초)
 
 # ── ⌨ 조작키 설정(.cfg) 배포 (2026-09-27 사용자 요청) ─────────────────────
 # 게임의 [마우스·키 녹화 설정] 패널 안 **[가져오기]** 를 대신 눌러 .cfg 를 적용한다.
@@ -22529,6 +22543,8 @@ class App(tk.Tk):
                 targets = [(i, s) for i, s in enumerate(slots)
                            if any(s.get("coords", []))]
                 random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
+            # 🧭 기준 슬롯(#05) 확장 확인 — 과거섬도 같은 옆 바를 쓴다
+            self._base_expand_ok("🏝 과거섬")
             for si, slot in targets:
                 if self._past_stop: break
                 name   = slot.get("name", f"#{si+1}")
@@ -22721,6 +22737,7 @@ class App(tk.Tk):
                 _wave = [(i, sl) for i, sl in targets if i + 1 <= SCHED_WAVE_TO]
                 _tail = [(i, sl) for i, sl in targets if i + 1 > SCHED_WAVE_TO]
                 if len(_wave) > 1:
+                    self._base_expand_ok("📅 스케줄")
                     self._run_sched_wave(_wave)
                 elif _wave:
                     _tail = _wave + _tail
@@ -22733,6 +22750,8 @@ class App(tk.Tk):
                 self._sched_wake_log()
                 self._sb_log()
                 return
+            # 🧭 기준 슬롯(#05)이 확장돼 있어야 모든 좌표가 맞는다 (실행에 한 번)
+            self._base_expand_ok("📅 스케줄")
             for si, slot in targets:
                 if self._sched_stop: break
                 name   = slot.get("name", f"#{si+1}")
@@ -22765,6 +22784,56 @@ class App(tk.Tk):
             self.after(0, self._restore_back)
             self._set_btn("btn_sched_run", state="normal", bg="#16a085", text="▶  실행")
             self._set_btn("btn_sched_stop", state="disabled")
+
+    def _base_expand_ok(self, tag=""):
+        """🧭 **기준 슬롯(#05)이 확장돼 있나** — 아니면 퍼플 계정 전환으로 되돌린다.
+
+        모든 좌표가 #05 의 확장 상태를 기준으로 찍혀 있다 (사용자 설명).
+        #05 가 접혀 있으면 **다른 슬롯 좌표도 전부 어긋난** 상태다.
+
+        돌려주는 값 — 지금 기준이 맞으면 True.
+        🚫 **옆 바를 직접 펼치지 않는다** (그러면 클릭2 자리가 ⌨ 가 되어 더 나빠진다).
+        ⚠ 계정 전환은 **큰 동작**이라 `BASE_COOL`(10분)에 한 번만 한다.
+        ⚠ 전환한 뒤에도 안 맞으면 **그냥 진행한다** — 작업을 막지는 않는다."""
+        if not BASE_EXPAND:
+            return True
+        try:
+            got = self._sidebar_of(BASE_SLOT)
+            if not got:
+                click_log(f"[기준확장] {tag} #{BASE_SLOT+1:02d} 옆 바를 못 찾음 "
+                          f"— 확인을 건너뛴다")
+                return True
+            W = got[3]
+            if W > SIDEBAR_WIDE:
+                click_log(f"[기준확장] {tag} #{BASE_SLOT+1:02d} {W}px 확장 ✔ "
+                          f"— 좌표 기준이 맞다")
+                return True
+            now = time.time()
+            last = getattr(self, "_base_sw_at", 0)
+            if now - last < BASE_COOL:
+                click_log(f"[기준확장] ⚠ #{BASE_SLOT+1:02d} 가 {W}px 로 접혀 있다 "
+                          f"— 그런데 {int((now-last)/60)}분 전에 전환했으므로 "
+                          f"다시 하지 않고 그대로 진행한다")
+                return False
+            self._base_sw_at = now
+            click_log(f"[기준확장] 🔁 #{BASE_SLOT+1:02d} 가 {W}px 로 접혀 있다 "
+                      f"(기준 {SIDEBAR_WIDE}px) → 퍼플 계정 전환으로 되돌린다")
+            self.status.set(f"🧭 #{BASE_SLOT+1:02d} 확장이 풀려 퍼플을 전환합니다...")
+            ok = self._profile_switch_once("[기준확장]")
+            time.sleep(random.uniform(1.5, 2.5))
+            got2 = self._sidebar_of(BASE_SLOT)
+            W2 = got2[3] if got2 else 0
+            click_log(f"[기준확장] 전환 {'✔' if ok else '✘'} → "
+                      f"#{BASE_SLOT+1:02d} 지금 {W2}px "
+                      + ("— 되돌아왔다 ✔" if W2 > SIDEBAR_WIDE
+                         else "— ⚠ 아직 접힘. 그대로 진행한다"))
+            return W2 > SIDEBAR_WIDE
+        except Exception as e:
+            try:
+                click_log(f"[기준확장] 오류: {e} — 그대로 진행한다")
+            except Exception:
+                pass
+            return True
 
     def _sidebar_of(self, si):
         """그 슬롯 클라의 **오른쪽에 붙은 옆 바** → (핸들, 왼쪽, 위, 폭, 높이).
@@ -22962,8 +23031,6 @@ class App(tk.Tk):
                 return
             # 😴 자고 있으면 먼저 깨운다 (스케줄은 절전해제 좌표가 없다)
             self._sched_wake(si, coords[0], name)
-            # 🧩 옆 바가 접혀 있으면 펼친다 (버튼이 확장해야만 보이는 클라가 있다)
-            self._sidebar_expand(si, name)
             _snap = self._user_focus_snap()
             if coords[0]:
                 self.status.set(f"📅 [{name}] #{si+1:02d} 클릭1... (순서대로)")
@@ -23033,7 +23100,6 @@ class App(tk.Tk):
                     # 😴 자고 있으면 먼저 깨운다 — **순차(`_run_sched_seq`)와 한 쌍**.
                     #    한쪽만 걸면 '개별은 되는데 전체는 안 된다' 가 또 생긴다.
                     self._sched_wake(si, coords[0], name)
-                    self._sidebar_expand(si, name)   # 🧩 접혀 있으면 펼친다
                     self.status.set(f"📅 [{name}] 클릭1...  (남은 슬롯 {len(alive)})")
                     self._wait_user_free("_sched_stop")
                     _snap = self._user_focus_snap()
