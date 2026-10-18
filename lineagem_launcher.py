@@ -424,18 +424,21 @@ CARDFIX_BASE_WH = (491, 276)    # 위 좌표를 찍은 창 크기
 # ⏱ 2026-10-19 사용자: "성공했는데 엄청나게 빠르다 시간을 좀만 늦추자
 #    **3배로 늦춰봐 랜덤으로 시간주고**" → 아래 셋을 그대로 3배로 넓혔다.
 #    🚫 랜덤 폭을 0으로 만들지 말 것 (범위째 3배 — "항상 사람이 하는 것처럼").
-# ⏱ 2026-10-19 사용자: "시간 조정을 **0.8초에서 ~1.4초 랜덤**으로 해주면 안 되냐
-#    이거 **할 때마다**" → 좌표를 누를 때마다 이 범위에서 뽑는다.
-#    🚫 값 하나로 고정하지 말 것 (범위 랜덤 — "항상 사람이 하는 것처럼").
-CARDFIX_GAP    = (0.80, 1.40)   # 좌표 사이 — 누를 때마다 랜덤
-CARDFIX_SLOT_GAP = (0.80, 1.40) # 클라 사이 — 같은 범위로 맞췄다
+# ⏱ 2026-10-19 사용자: "좌표 사이가 아니라 그냥 **한 셋트가 끝나는 시간**을
+#    0.7초~1.5초 정도로 해주라는 거야"
+#    → 그 클라를 **시작해서 마지막 좌표를 누를 때까지**를 이 범위에서 뽑고,
+#      좌표 사이 간격은 **남은 시간 ÷ 남은 칸수** 로 그때그때 계산한다.
+#      그래서 좌표가 3개든 5개든 셋트 시간은 늘 이 안에 들어온다.
+#    🚫 값 하나로 고정하지 말 것 — 셋트마다 목표가 다르고, 칸마다 ±20% 를 더 흔든다.
+CARDFIX_SET    = (0.70, 1.50)   # 한 셋트(그 클라의 좌표 전부) 끝나는 시간
+CARDFIX_JIT    = (0.80, 1.20)   # 칸마다 그 위에 더 흔드는 폭
+CARDFIX_MIN_GAP = 0.06          # 좌표 사이 하한 — 그 밑으로는 안 줄인다
+CARDFIX_SLOT_GAP = (0.80, 1.40) # 클라 사이 (셋트와 별개)
 # ⚡ 2026-10-19 사용자: "내가 화면을 띄워놨는데 왜케 그 다음을 늦게 클릭을 하냐
 #    **70~80프로 줄여줘**" → 아래 둘은 **기다리는 시간**이라 되돌렸다.
 #    🚫 좌표·클라 **사이** 간격(위 3배)은 그대로 둔다 — 그건 사용자가 원한 속도다.
 CARDFIX_FOCUS  = (0.20, 0.38)   # 창을 앞으로 올린 뒤 첫 클릭까지
 CARDFIX_START  = (0.08, 0.16)   # 화면을 본 뒤 첫 클릭까지 (전 0.50 고정)
-CARDFIX_HOLD   = 0.12           # 12% 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
-CARDFIX_HOLD_T = (0.5, 1.6)
 CARDFIX_MATCH  = 0.75           # 화면 판정 기준 (cardfix_meta.json 이 있으면 그 값)
 CARDFIX_BASE_W = 491            # 그림을 자른 창 가로
 CARDFIX_SEE_COOL = 0.6          # 화면을 다시 보기까지 (초) — 전 2.0 (클릭을
@@ -6077,6 +6080,21 @@ class App(tk.Tk):
         except Exception:
             return None
 
+    def _cardfix_front(self, coord):
+        """그 좌표의 리니지M 창이 **이미 맨 앞**인가 (올리고 기다릴 필요가 없는가).
+
+        ⚡ 사람이 방금 누른 클라는 이미 앞이라, 포커스 뜸(0.20~0.38초)을 건너뛸 수
+          있다 — 셋트 시간이 0.7초일 때는 그 뜸이 절반을 먹는다.
+        ⚠ 모르겠으면 False → 평소대로 올리고 기다린다 (첫 클릭이 '창 띄우기' 로만
+          먹히고 사라지는 것을 막아야 하므로, 안전한 쪽으로 둔다)."""
+        try:
+            import win32gui, ctypes
+            hwnd = win32gui.WindowFromPoint((int(coord[0]), int(coord[1])))
+            root = ctypes.windll.user32.GetAncestor(hwnd, 2)      # GA_ROOT
+            return bool(root) and win32gui.GetForegroundWindow() == root
+        except Exception:
+            return False
+
     def _cardfix_at(self, xy):
         """⚡ **방금 클릭한 그 클라 하나만** 본다 → (슬롯0부터, L, T, 점수, 폭, 높이).
 
@@ -6277,8 +6295,14 @@ class App(tk.Tk):
                       + ("" if (abs(_kx - 1.0) < 0.01 and abs(_ky - 1.0) < 0.01)
                          else " · %dx%d→%dx%d 가로 %.2f배 세로 %.2f배"
                               % (_bw, _bh, _nw, _nh, _kx, _ky)))
-            self._focus_client_at((L + 60, T + 60))
-            time.sleep(random.uniform(*CARDFIX_FOCUS))
+            # ⏱ 이 셋트를 **얼마에 끝낼지** 먼저 뽑는다 (사용자 지시 0.7~1.5초).
+            _budget = random.uniform(*CARDFIX_SET)
+            _t0 = time.perf_counter()
+            # 창이 이미 앞이면 올리지도, 기다리지도 않는다 (⚡ 방금 누른 클라)
+            _coord = (L + 60, T + 60)
+            if not self._cardfix_front(_coord):
+                self._focus_client_at(_coord)
+                time.sleep(random.uniform(*CARDFIX_FOCUS))
             for k, (dx, dy) in enumerate(rels, 1):
                 if getattr(self, "_stop_flag", False):
                     break
@@ -6286,10 +6310,14 @@ class App(tk.Tk):
                     "🃏 변신확정 클라 %d/%d · 좌표 %d/%d..." % (a, n, b, m)))
                 click_at(L + int(dx * _kx), T + int(dy * _ky))
                 if k < len(rels):
-                    _g = random.uniform(*CARDFIX_GAP)
-                    if random.random() < CARDFIX_HOLD:
-                        _g += random.uniform(*CARDFIX_HOLD_T)   # 가끔 멈칫
-                    time.sleep(_g)
+                    # 남은 시간을 남은 칸수로 나눠 쓴다 — 칸마다 다시 재므로
+                    # 한 칸이 길어져도 뒤에서 저절로 메워진다 (셋트 시간 유지).
+                    _left = _budget - (time.perf_counter() - _t0)
+                    _g = max(CARDFIX_MIN_GAP, _left / (len(rels) - k))
+                    time.sleep(_g * random.uniform(*CARDFIX_JIT))
+            click_log("[변신확정] (%d/%s) #%02d 끝 — %.2f초 (목표 %.2f초)"
+                      % (ai, an if an > 0 else "?", si + 1,
+                         time.perf_counter() - _t0, _budget))
             time.sleep(random.uniform(*CARDFIX_SLOT_GAP))
         except Exception as e:
             try:
