@@ -401,6 +401,22 @@ JAKWI_GAP_ROUND = (0.60, 1.00)   # 한 바퀴 끝내고 다시 1번으로 갈 �
 JAKWI_PAUSE   = (1.0, 2.0);  JAKWI_PAUSE_P = 0.12   # 줄 사이 멈칫
 JAKWI_REST    = (1.5, 3.0);  JAKWI_REST_P  = 0.20   # 회차 사이 긴 쉼
 JAKWI_CLICKS   = 8     # 👑 작위!! 좌표 수 — 20개는 너무 많다는 사용자 지시로 8개 (2026-09-07)
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║ 🃏 변신확정!! — 카드교체 화면에서 '카드 확정' 을 대신 눌러준다            ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+# 2026-10-19 사용자: "내가 저건(미니맵 옆 「카드 교체」) 클릭을 할 거야. 그럼 지금
+#   1번처럼 되거든. 저걸 내가 **좌표로 입력을 해둘게**. 너가 저 상태에서
+#   **자동으로 클릭 확정**을 해주면 되거든."
+#
+# 🎯 좌표는 **한 벌만** 찍는다 — 카드교체 창은 16클라 **창 기준 같은 자리**에 뜬다.
+#    `cardfix_rels` 에 (dx, dy) 로 저장하고, 실행할 때 그 클라 창 왼쪽위를 더한다.
+#    (아이템등록이 쓰는 방식과 같다 — 창 크기가 달라도 비율로 맞춘다)
+CARDFIX_CLICKS = 5     # 카드 확정 4장 + 선택 확정 = 5개
+CARDFIX_GAP    = (0.18, 0.34)   # 좌표 사이 — "빠르게 후다닥" (사용자 지시)
+CARDFIX_MATCH  = 0.75           # 화면 판정 기준 (cardfix_meta.json 이 있으면 그 값)
+CARDFIX_BASE_W = 491            # 그림을 자른 창 가로
+CARDFIX_SEE_COOL = 2.0          # 화면을 다시 보기까지 (초)
+CARDFIX_OPEN_COOL = 8.0         # 창을 다시 띄우기까지 (초)
 
 # ── ✨ 각성강화!! (2026-09-28 사용자 요청) ───────────────────────────────
 # 사용자: "작위처럼 만들고 싶은데 이건 내리는 건 아니고 누르기만 하면 돼",
@@ -563,6 +579,10 @@ DEFAULT_CFG = {
     "sched_slots":  [{"name": "미등록", "coords": [None] * SCHED_CLICKS}
                      for _ in range(SCHED_SLOTS)],
     "jakwi_slots":  None,               # 👑 작위!! — 16슬롯 × 좌표10 (칸마다 간격·휠)
+    # 🃏 변신확정!! — 카드교체 창 안 좌표 **한 벌** (창 왼쪽위 기준 dx,dy)
+    "cardfix_rels": None,
+    "cardfix_on":   True,               # 화면이 보이면 창을 자동으로 띄울지
+    "cardfix_auto": False,              # True 면 들어가자마자 스스로 누른다
     "item_slots":   None,               # 아이템정리 — 처음 로드 때 스케줄 슬롯을 복사해 생성
     "item_hotkey":  None,               # 아이템정리 실행 단축키 (가상키 코드)
     "item_on":      False,              # 아이템정리 단축키 활성화 상태 (재시작 유지)
@@ -1534,6 +1554,51 @@ def grab_patch(fkey, j, coord):
         return cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
     except Exception:
         return None
+
+
+def cardfix_img_path():
+    return os.path.join(IMG_DIR, "cardfix_screen.png")
+
+
+def cardfix_meta():
+    """(기준, 기준 창 가로) — 없으면 코드 기본값."""
+    try:
+        with open(os.path.join(IMG_DIR, "cardfix_meta.json"), encoding="utf-8-sig") as f:
+            d = json.load(f) or {}
+        return float(d.get("thr") or CARDFIX_MATCH), int(d.get("w") or CARDFIX_BASE_W)
+    except Exception:
+        return CARDFIX_MATCH, CARDFIX_BASE_W
+
+
+def cardfix_seen(coord):
+    """🃏 그 클라가 **카드교체 화면**인가 → (보임?, 점수).
+
+    `grab_window`(PrintWindow)로 그 창을 직접 찍으므로 가려져 있어도 정확하다.
+    ⚠ 그림은 **'다시 뽑기 x5'** 다 (실측 여유 0.603). 제목 '카드 교체' 는
+      미니맵 옆 버튼과 **글자가 같아** 쓰지 않았다 — 혼동된다.
+    ⚠ 창 가로 비율로 한 번 맞춰 본다 (작은 창·큰 창 둘 다)."""
+    q = cardfix_img_path()
+    if not (os.path.exists(q) and coord):
+        return False, -1.0
+    try:
+        import cv2, numpy as np
+        big = grab_window(coord)
+        if big is None:
+            return False, 0.0
+        t = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+        if t is None:
+            return False, 0.0
+        thr, bw = cardfix_meta()
+        k = big.shape[1] / float(bw or CARDFIX_BASE_W)
+        if abs(k - 1.0) > 0.01:
+            t = cv2.resize(t, (max(3, int(t.shape[1] * k)),
+                               max(3, int(t.shape[0] * k))))
+        if big.shape[0] < t.shape[0] or big.shape[1] < t.shape[1]:
+            return False, 0.0
+        v = float(cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED).max())
+        return (v >= thr), v
+    except Exception:
+        return False, 0.0
 
 
 def sleep_img_path(fkey):
@@ -4522,6 +4587,16 @@ class App(tk.Tk):
                   bg="#2c3e50", fg="white", activebackground="#1b2631",
                   width=6, height=2,
                   command=self._restart_launcher).pack(pady=(2, 0))
+        # 🃏 변신확정!! — 👑 작위!! **바로 위** (2026-10-19 사용자 요청)
+        _cf = tk.Frame(cl_col); _cf.pack(pady=(2, 0))
+        tk.Button(_cf, text="🃏 변신" + chr(10) + "확정!!", font=("맑은 고딕", 8, "bold"),
+                  bg="#8e44ad", fg="white", activebackground="#6c3483",
+                  width=6, height=2,
+                  command=self._open_cardfix_win).pack(side="left")
+        tk.Button(_cf, text="▶", font=("맑은 고딕", 11, "bold"),
+                  bg="#6c3483", fg="white", activebackground="#4a235a",
+                  width=2, height=2,
+                  command=self._cardfix_run).pack(side="left", padx=(2, 0))
         # 👑 작위!! — 런처 재시작 바로 아래 (2026-09-02 사용자 요청)
         # ✨ 각성강화!! 는 그 **바로 아래**, 둘 다 **옆에 ▶실행** (2026-09-28 사용자 요청)
         _jk = tk.Frame(cl_col); _jk.pack(pady=(2, 0))
@@ -5871,6 +5946,222 @@ class App(tk.Tk):
             finally:
                 self._awaken_busy = False
         threading.Thread(target=_go, daemon=True).start()
+
+    # ── 🃏 변신확정!! ─────────────────────────────────────────────────────
+    def _cardfix_rels(self):
+        """저장된 좌표 한 벌 — [(dx, dy) | None] × CARDFIX_CLICKS (창 왼쪽위 기준)."""
+        r = list(self.cfg.get("cardfix_rels") or [])[:CARDFIX_CLICKS]
+        while len(r) < CARDFIX_CLICKS:
+            r.append(None)
+        return r
+
+    def _cardfix_slot(self):
+        """🃏 지금 **카드교체 화면인 클라**를 찾는다 → (슬롯0부터, 창left, 창top, 점수).
+
+        사용자가 미니맵 옆 「카드 교체」를 눌러 들어간 그 클라를 스스로 찾는다."""
+        try:
+            if not os.path.exists(cardfix_img_path()):
+                return None
+            rects = self._client_rects_by_slot()
+            if not rects:
+                return None
+            best = None
+            for si, (l, t, r, b) in enumerate(rects):
+                ok, v = cardfix_seen(((l + r) // 2, (t + b) // 2))
+                if ok and (best is None or v > best[3]):
+                    best = (si, l, t, v)
+            return best
+        except Exception:
+            return None
+
+    def _reg_cardfix_coord(self, j):
+        """📍 좌표 j 를 찍는다 — **지금 카드교체 화면인 클라의 창 기준**으로 저장."""
+        got = self._cardfix_slot()
+        if not got:
+            self.status.set("📍 카드교체 화면인 클라가 없습니다 — "
+                            "「카드 교체」를 눌러 들어간 뒤 다시 누르세요")
+            return
+        self._cardfix_reg_j = j
+        self._cardfix_reg_lt = (got[1], got[2])
+        self._cardfix_reg_si = got[0]
+        self.status.set(f"3초 후 변신확정 [좌표{j+1}] 위치를 클릭하세요! "
+                        f"(#{got[0]+1:02d} 화면에서)")
+        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+                                  CoordOverlay(self, mode="cardfix")])
+
+    def on_cardfix_coord(self, x, y):
+        L, T = getattr(self, "_cardfix_reg_lt", (0, 0))
+        j = getattr(self, "_cardfix_reg_j", 0)
+        rels = self._cardfix_rels()
+        rels[j] = [int(x) - L, int(y) - T]
+        self.cfg["cardfix_rels"] = rels
+        save_cfg(self.cfg)
+        self.status.set(f"✔ 변신확정 좌표 {j+1} 등록 — 창 기준 "
+                        f"({rels[j][0]},{rels[j][1]}) · "
+                        f"#{getattr(self,'_cardfix_reg_si',0)+1:02d} 에서 찍음")
+        self._cardfix_paint()
+        self.deiconify()
+
+    def _cardfix_run(self):
+        """▶ 카드교체 화면인 클라에서 **좌표를 순서대로 빠르게** 누른다."""
+        if self._is_busy():
+            self.status.set("🃏 다른 작업이 도는 중입니다")
+            return
+
+        def _work():
+            if not self._try_busy("변신확정"):
+                return
+            try:
+                got = self._cardfix_slot()
+                if not got:
+                    self.after(0, lambda: self.status.set(
+                        "🃏 카드교체 화면인 클라가 없습니다"))
+                    return
+                si, L, T, v = got
+                rels = [r for r in self._cardfix_rels() if r]
+                if not rels:
+                    self.after(0, lambda: self.status.set(
+                        "🃏 좌표가 하나도 없습니다 — 창에서 📍 로 찍어주세요"))
+                    return
+                click_log("[변신확정] #%02d 카드교체 화면 (%.2f) → 좌표 %d개를 누른다"
+                          % (si + 1, v, len(rels)))
+                self._focus_client_at((L + 60, T + 60))
+                time.sleep(random.uniform(0.20, 0.35))
+                for k, (dx, dy) in enumerate(rels, 1):
+                    if getattr(self, "_stop_flag", False):
+                        break
+                    self.after(0, lambda a=k, n=len(rels): self.status.set(
+                        "🃏 변신확정 %d/%d..." % (a, n)))
+                    click_at(L + dx, T + dy)
+                    if k < len(rels):
+                        time.sleep(random.uniform(*CARDFIX_GAP))
+                click_log("[변신확정] #%02d 끝 — %d개 눌렀다" % (si + 1, len(rels)))
+                self.after(0, lambda n=len(rels): self.status.set(
+                    "✔ 변신확정 완료 (%d개)" % n))
+            except Exception as e:
+                try:
+                    click_log("[변신확정] 오류: %s" % e)
+                except Exception:
+                    pass
+            finally:
+                self._clear_busy("변신확정")
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _cardfix_paint(self):
+        """등록된 좌표를 창에 보여준다 — 됐는지 눈으로 보이게 (2026-09-16 규칙)."""
+        try:
+            for j, lb in enumerate(getattr(self, "_cardfix_lbs", [])):
+                r = self._cardfix_rels()[j]
+                if r:
+                    lb.config(text="＋%d,%d" % (r[0], r[1]), fg="#27ae60",
+                              font=("맑은 고딕", 8, "bold"))
+                else:
+                    lb.config(text="— 없음", fg="#888", font=("맑은 고딕", 8))
+        except Exception:
+            pass
+
+    def _open_cardfix_win(self, reuse=False):
+        """🃏 변신확정!! 창. `reuse=True` 면 이미 열려 있을 때 **다시 만들지 않는다**
+        (자동 띄우기는 반드시 reuse=True — 각성강화에서 배운 것)."""
+        if reuse and getattr(self, "_cardfix_win", None):
+            try:
+                w = self._cardfix_win
+                if w.winfo_exists():
+                    w.deiconify(); w.lift()
+                    return
+            except Exception:
+                pass
+        self._open_section_win("_cardfix_win", "🃏 변신확정!!",
+                               self._build_cardfix, w=430, h=340, pinnable=True)
+
+    def _build_cardfix(self, p):
+        tk.Label(p, text="🃏 카드교체 화면에서 '카드 확정' 을 대신 눌러준다",
+                 font=("맑은 고딕", 9, "bold")).pack(pady=(6, 2))
+        tk.Label(p, text="미니맵 옆 「카드 교체」는 직접 누르세요. 들어가면 아래 "
+                         "좌표가 순서대로 눌립니다. 좌표는 창 기준이라 16클라 공용입니다.",
+                 font=("맑은 고딕", 8), fg="#666", wraplength=400,
+                 justify="left").pack(pady=(0, 6))
+        self._cardfix_lbs = []
+        for j in range(CARDFIX_CLICKS):
+            row = tk.Frame(p); row.pack(fill="x", padx=12, pady=1)
+            tk.Label(row, text="좌표 %d" % (j + 1), width=6,
+                     font=("맑은 고딕", 9)).pack(side="left")
+            lb = tk.Label(row, text="— 없음", width=14, anchor="w",
+                          font=("맑은 고딕", 8), fg="#888")
+            lb.pack(side="left")
+            self._cardfix_lbs.append(lb)
+            tk.Button(row, text="📍 찍기", width=6, font=("맑은 고딕", 8),
+                      command=lambda a=j: self._reg_cardfix_coord(a)).pack(side="left")
+            tk.Button(row, text="✖", width=2, font=("맑은 고딕", 8),
+                      command=lambda a=j: self._cardfix_clear(a)).pack(side="left", padx=(2, 0))
+        tk.Button(p, text="▶ 지금 확정하기", font=("맑은 고딕", 10, "bold"),
+                  bg="#8e44ad", fg="white", height=2,
+                  command=self._cardfix_run).pack(fill="x", padx=12, pady=(10, 4))
+        self._cardfix_autov = tk.BooleanVar(value=bool(self.cfg.get("cardfix_auto")))
+        tk.Checkbutton(p, text="들어가면 스스로 누른다 (끄면 ▶ 를 눌러야 함)",
+                       variable=self._cardfix_autov, font=("맑은 고딕", 8),
+                       command=self._cardfix_auto_set).pack(anchor="w", padx=12)
+        self._cardfix_onv = tk.BooleanVar(value=bool(self.cfg.get("cardfix_on", True)))
+        tk.Checkbutton(p, text="카드교체 화면이면 이 창을 자동으로 띄운다",
+                       variable=self._cardfix_onv, font=("맑은 고딕", 8),
+                       command=self._cardfix_on_set).pack(anchor="w", padx=12)
+        self._cardfix_paint()
+
+    def _cardfix_clear(self, j):
+        rels = self._cardfix_rels()
+        rels[j] = None
+        self.cfg["cardfix_rels"] = rels
+        save_cfg(self.cfg)
+        self.status.set("좌표 %d 지웠습니다" % (j + 1))
+        self._cardfix_paint()
+
+    def _cardfix_auto_set(self):
+        self.cfg["cardfix_auto"] = bool(self._cardfix_autov.get())
+        save_cfg(self.cfg)
+
+    def _cardfix_on_set(self):
+        self.cfg["cardfix_on"] = bool(self._cardfix_onv.get())
+        save_cfg(self.cfg)
+
+    def _cardfix_click_check(self):
+        """🃏 사람이 클라를 클릭했을 때 **카드교체 화면인지** 보고 창을 띄운다.
+
+        각성강화와 같은 방식 (2026-10-01). **상시 감시가 아니다** — 사람 클릭이 신호다.
+        ⚠ 걸쇠(`_cardfix_latch`)로 **같은 화면에서 한 번만** 띄운다. 창을 닫으면
+          조용하고, 그 화면을 나갔다 다시 들어오면 또 띄운다.
+        ⚠ 자동 띄우기는 반드시 `reuse=True` — 그냥 부르면 창을 **다시 만들어**
+          사용자가 찍어둔 것이 날아간다 (각성강화에서 배운 것)."""
+        try:
+            if not self.cfg.get("cardfix_on", True):
+                return
+            if not os.path.exists(cardfix_img_path()):
+                return
+            now = time.time()
+            if now - getattr(self, "_cardfix_see_at", 0) < CARDFIX_SEE_COOL:
+                return
+            self._cardfix_see_at = now
+            if self._is_busy():
+                return
+            got = self._cardfix_slot()
+            if not got:
+                self._cardfix_latch = False     # 화면을 나갔다 → 걸쇠를 푼다
+                return
+            si, L, T, v = got
+            if getattr(self, "_cardfix_latch", False):
+                return                          # 같은 화면에서 이미 띄웠다
+            if now - getattr(self, "_cardfix_open_at", 0) < CARDFIX_OPEN_COOL:
+                return
+            self._cardfix_latch = True
+            self._cardfix_open_at = now
+            click_log("[변신확정] #%02d 카드교체 화면 확인 (%.2f) → 창을 띄웠다 %s"
+                      % (si + 1, v,
+                         "· 자동 누르기 켜짐" if self.cfg.get("cardfix_auto")
+                         else "(▶ 를 눌러야 시작)"))
+            self.after(0, lambda: self._open_cardfix_win(reuse=True))
+            if self.cfg.get("cardfix_auto"):
+                self.after(600, self._cardfix_run)
+        except Exception:
+            pass
 
     def _open_awaken_win(self, reuse=False):
         """✨ 각성강화 — 크게 띄운 창 하나에만 돌린다 (좌표 등록 없음).
@@ -14024,6 +14315,9 @@ class App(tk.Tk):
                 # 🩹 십자가 확인보다 **먼저** 둔다 — 각성은 '크게 띄운 창' 에서 하므로
                 #    16슬롯 어디에도 안 들어가고, 아래 슬롯 확인에서 걸러져 버린다.
                 threading.Thread(target=self._awaken_autoshow, args=(xy,),
+                                 daemon=True).start()
+                # 🃏 카드교체 화면이면 변신확정 창을 띄운다 (2026-10-19)
+                threading.Thread(target=self._cardfix_click_check,
                                  daemon=True).start()
                 if not self.cfg.get("check_area_rel"):
                     continue                      # 경고영역이 없으면 볼 수가 없다
@@ -27253,6 +27547,8 @@ class CoordOverlay(tk.Toplevel):
             label = f"주말던전끄기 #{app._wdoff_reg_idx+1} 위치"
         elif mode == "jakwiend":
             label = f"작위 {getattr(app, '_reg_jakwi_end_j', 0)+1}번 — 어디까지 내릴지 (놓을 자리)"
+        elif mode == "cardfix":
+            label = f"🃏 변신확정 [좌표{getattr(app, '_cardfix_reg_j', 0)+1}] 위치"
         else:
             label = LABELS.get(app._reg_target, "버튼")
 
@@ -27282,6 +27578,7 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "dgn2":      self.app.on_dgn2_coord(x, y)
         elif self.mode == "item":      self.app.on_item_coord(x, y)
         elif self.mode == "tj":        self.app.on_tj_coord(x, y)
+        elif self.mode == "cardfix":   self.app.on_cardfix_coord(x, y)
         elif self.mode == "seq":       self.app.on_seq_coord(x, y)
         elif self.mode == "slp":       self.app.on_slp_coord(x, y)
         elif self.mode == "dc":        self.app.on_dc_coord(x, y)
