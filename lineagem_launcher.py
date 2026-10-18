@@ -412,11 +412,23 @@ JAKWI_CLICKS   = 8     # 👑 작위!! 좌표 수 — 20개는 너무 많다는 
 #    `cardfix_rels` 에 (dx, dy) 로 저장하고, 실행할 때 그 클라 창 왼쪽위를 더한다.
 #    (아이템등록이 쓰는 방식과 같다 — 창 크기가 달라도 비율로 맞춘다)
 CARDFIX_CLICKS = 5     # 카드 확정 4장 + 선택 확정 = 5개
+# 📍 **좌표 기본값 — 창 왼쪽위 기준 (dx, dy)**  (2026-10-19 사용자: "이건 좌표까지
+#    해서 전부 다 배포해줘"). 창 기준이라 16클라 공용이고, 창 크기가 다르면
+#    `CARDFIX_BASE_WH` 와의 비율로 맞춘다.
+#    🚫 `share_coords.json` 으로 보내지 않는다 — 그 통로는 로컬 좌표를 덮어써
+#       2026-09-30·10-13 에 두 번 사고가 났다. **코드에 두면 🔄 만으로 같아진다**
+#       (CLAUDE.md 2026-08-15 "어디서나 같아야 하는 설정은 코드에 넣는다").
+#    로컬이 자기 좌표를 찍어두면 **그게 이긴다** (아래 `_cardfix_rels` 참고).
+CARDFIX_RELS = [[428, 59], [440, 255], [298, 233], [288, 227], [470, 18]]
+CARDFIX_BASE_WH = (491, 276)    # 위 좌표를 찍은 창 크기
 # ⏱ 2026-10-19 사용자: "성공했는데 엄청나게 빠르다 시간을 좀만 늦추자
 #    **3배로 늦춰봐 랜덤으로 시간주고**" → 아래 셋을 그대로 3배로 넓혔다.
 #    🚫 랜덤 폭을 0으로 만들지 말 것 (범위째 3배 — "항상 사람이 하는 것처럼").
-CARDFIX_GAP    = (0.54, 1.02)   # 좌표 사이 (전 0.18~0.34)
-CARDFIX_SLOT_GAP = (0.75, 1.35) # 클라 사이 (전 0.25~0.45)
+# ⏱ 2026-10-19 사용자: "시간 조정을 **0.8초에서 ~1.4초 랜덤**으로 해주면 안 되냐
+#    이거 **할 때마다**" → 좌표를 누를 때마다 이 범위에서 뽑는다.
+#    🚫 값 하나로 고정하지 말 것 (범위 랜덤 — "항상 사람이 하는 것처럼").
+CARDFIX_GAP    = (0.80, 1.40)   # 좌표 사이 — 누를 때마다 랜덤
+CARDFIX_SLOT_GAP = (0.80, 1.40) # 클라 사이 — 같은 범위로 맞췄다
 # ⚡ 2026-10-19 사용자: "내가 화면을 띄워놨는데 왜케 그 다음을 늦게 클릭을 하냐
 #    **70~80프로 줄여줘**" → 아래 둘은 **기다리는 시간**이라 되돌렸다.
 #    🚫 좌표·클라 **사이** 간격(위 3배)은 그대로 둔다 — 그건 사용자가 원한 속도다.
@@ -6025,11 +6037,26 @@ class App(tk.Tk):
 
     # ── 🃏 변신확정!! ─────────────────────────────────────────────────────
     def _cardfix_rels(self):
-        """저장된 좌표 한 벌 — [(dx, dy) | None] × CARDFIX_CLICKS (창 왼쪽위 기준)."""
+        """좌표 한 벌 — [(dx, dy) | None] × CARDFIX_CLICKS (창 왼쪽위 기준).
+
+        ⚠ **이 컴퓨터가 찍어둔 것이 먼저**다. 하나도 없으면 코드 기본값
+          (`CARDFIX_RELS`)을 쓴다 — 그래서 로컬은 🔄 업데이트만 하면 바로 돈다.
+          (칸이 전부 비어 있는 경우도 '없음' 으로 본다 — 창을 한 번 열면
+           `None` 다섯 개가 저장되기 때문)"""
         r = list(self.cfg.get("cardfix_rels") or [])[:CARDFIX_CLICKS]
+        if not any(r):
+            r = [list(x) for x in CARDFIX_RELS][:CARDFIX_CLICKS]
         while len(r) < CARDFIX_CLICKS:
             r.append(None)
         return r
+
+    def _cardfix_base(self):
+        """좌표를 찍은 **창 크기** — 이 컴퓨터 값이 먼저, 없으면 코드 기본값."""
+        bw = int(self.cfg.get("cardfix_base_w") or 0)
+        bh = int(self.cfg.get("cardfix_base_h") or 0)
+        if bw <= 0 or bh <= 0:
+            bw, bh = CARDFIX_BASE_WH
+        return bw, bh
 
     def _cardfix_slot(self):
         """🃏 지금 **카드교체 화면인 클라**를 찾는다 → (슬롯0부터, 창left, 창top, 점수).
@@ -6240,8 +6267,7 @@ class App(tk.Tk):
     def _cardfix_one(self, si, L, T, v, got, rels, ai=1, an=1):
         """🃏 **한 클라**에서 좌표를 순서대로 누른다 (가로·세로 각각 비율 보정)."""
         try:
-            _bw = int(self.cfg.get("cardfix_base_w") or 0)
-            _bh = int(self.cfg.get("cardfix_base_h") or 0)
+            _bw, _bh = self._cardfix_base()
             _nw = int(got[4]) if len(got) > 4 else 0
             _nh = int(got[5]) if len(got) > 5 else 0
             _kx = (_nw / float(_bw)) if (_bw > 0 and _nw > 0) else 1.0
