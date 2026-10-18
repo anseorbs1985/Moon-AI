@@ -3866,7 +3866,9 @@ class App(tk.Tk):
         except Exception:
             pass
         sh = self.winfo_screenheight()
-        self.geometry(f"2117x1010+76+75")   # 콘텐츠에 맞춘 높이 (작업표시줄 위로)
+        # 아래가 자꾸 잘린다는 사용자 지시로 **1.5cm(약 57px) 더** 늘렸다
+        # (2026-10-19). 1010 → 1067. 화면 1440 · 작업표시줄 48 이라 여유가 있다.
+        self.geometry(f"2117x1067+76+75")
         self.resizable(True, True)
         self.bind("<Map>", self._on_main_map)
         self.bind("<Unmap>", self._on_main_unmap)   # 런처 최소화 시 클로드도 같이 내림
