@@ -582,8 +582,9 @@ DEFAULT_CFG = {
     # 🃏 변신확정!! — 카드교체 창 안 좌표 **한 벌** (창 왼쪽위 기준 dx,dy)
     "cardfix_rels": None,
     "cardfix_on":   True,               # 화면이 보이면 창을 자동으로 띄울지
-    # 📐 좌표를 찍을 때의 **창 가로** — 큰 화면에서 비율로 보정하는 데 쓴다
+    # 📐 좌표를 찍을 때의 **창 크기** — 다른 크기에서 비율로 보정하는 데 쓴다
     "cardfix_base_w": None,
+    "cardfix_base_h": None,
     # 🃏 들어가면 **스스로** 누른다 (2026-10-19 사용자: "내가 저 카드교체
     #    화면을 띄우면 너가 **자동으로 확정**을 해주면 되는 거야")
     "cardfix_auto": True,
@@ -1560,8 +1561,35 @@ def grab_patch(fkey, j, coord):
         return None
 
 
-def cardfix_img_path():
-    return os.path.join(IMG_DIR, "cardfix_screen.png")
+def cardfix_img_path(n=0):
+    """판정 그림 — 0번은 `cardfix_screen.png`, 그 뒤는 `_2`, `_3` …
+
+    ⚠ **화면 크기마다 한 장씩 필요하다.** 작은 그림을 5배로 키우면 흐려져
+      점수가 뚝 떨어진다 (실측 2026-10-19: 큰 화면에서 0.561, 기준 0.75 미달).
+      작은 창용 1장 + 큰 창용 1장을 둔다."""
+    return os.path.join(IMG_DIR,
+                        "cardfix_screen.png" if n == 0
+                        else "cardfix_screen_%d.png" % (n + 1))
+
+
+def cardfix_img_list():
+    """있는 판정 그림을 (경로, 그 그림의 기준 창 가로) 로 모은다."""
+    thr, w1 = cardfix_meta()
+    w2 = cardfix_meta_w2()
+    out = []
+    for n, bw in enumerate((w1, w2)):
+        p = cardfix_img_path(n)
+        if os.path.exists(p):
+            out.append((p, bw or CARDFIX_BASE_W))
+    return out
+
+
+def cardfix_meta_w2():
+    try:
+        with open(os.path.join(IMG_DIR, "cardfix_meta.json"), encoding="utf-8-sig") as f:
+            return int((json.load(f) or {}).get("w2") or 0)
+    except Exception:
+        return 0
 
 
 def cardfix_meta():
@@ -1581,26 +1609,29 @@ def cardfix_seen(coord):
     ⚠ 그림은 **'다시 뽑기 x5'** 다 (실측 여유 0.603). 제목 '카드 교체' 는
       미니맵 옆 버튼과 **글자가 같아** 쓰지 않았다 — 혼동된다.
     ⚠ 창 가로 비율로 한 번 맞춰 본다 (작은 창·큰 창 둘 다)."""
-    q = cardfix_img_path()
-    if not (os.path.exists(q) and coord):
+    imgs = cardfix_img_list()
+    if not (imgs and coord):
         return False, -1.0
     try:
         import cv2, numpy as np
         big = grab_window(coord)
         if big is None:
             return False, 0.0
-        t = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
-        if t is None:
-            return False, 0.0
-        thr, bw = cardfix_meta()
-        k = big.shape[1] / float(bw or CARDFIX_BASE_W)
-        if abs(k - 1.0) > 0.01:
-            t = cv2.resize(t, (max(3, int(t.shape[1] * k)),
-                               max(3, int(t.shape[0] * k))))
-        if big.shape[0] < t.shape[0] or big.shape[1] < t.shape[1]:
-            return False, 0.0
-        v = float(cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED).max())
-        return (v >= thr), v
+        thr, _w1 = cardfix_meta()
+        best = 0.0
+        for q, bw in imgs:
+            t = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+            if t is None:
+                continue
+            k = big.shape[1] / float(bw or CARDFIX_BASE_W)
+            if abs(k - 1.0) > 0.01:
+                t = cv2.resize(t, (max(3, int(t.shape[1] * k)),
+                                   max(3, int(t.shape[0] * k))))
+            if big.shape[0] < t.shape[0] or big.shape[1] < t.shape[1]:
+                continue
+            best = max(best, float(cv2.matchTemplate(big, t,
+                                                     cv2.TM_CCOEFF_NORMED).max()))
+        return (best >= thr), best
     except Exception:
         return False, 0.0
 
@@ -5976,7 +6007,7 @@ class App(tk.Tk):
             for si, (l, t, r, b) in enumerate(rects):
                 ok, v = cardfix_seen(((l + r) // 2, (t + b) // 2))
                 if ok and (best is None or v > best[3]):
-                    best = (si, l, t, v, r - l)     # 창 가로도 함께 (비율 보정용)
+                    best = (si, l, t, v, r - l, b - t)   # 창 가로·세로도 (비율 보정용)
             return best
         except Exception:
             return None
@@ -6014,6 +6045,7 @@ class App(tk.Tk):
                 if l <= x < r and t <= y < b:
                     si, L, T = i, l, t
                     self.cfg["cardfix_base_w"] = int(r - l)   # 그때 창 가로
+                    self.cfg["cardfix_base_h"] = int(b - t)   # 그때 창 세로
                     break
         except Exception:
             pass
@@ -6059,13 +6091,20 @@ class App(tk.Tk):
                 # 📐 **창 크기가 다르면 좌표도 비율로 늘린다** (2026-10-19 사용자:
                 #    "이건 화면이 크게 해도 똑같이 해줘야 해").
                 #    찍을 때의 창 가로를 `cardfix_base_w` 에 적어뒀다.
+                # ⚠ **가로·세로를 각각** 보정한다 — 창 모양이 다르면 한 배율로는
+                #    어긋난다 (실측 2026-10-19: 491x276(1.78) → 2504x1352(1.85),
+                #    가로 5.10배 · 세로 4.90배).
                 _bw = int(self.cfg.get("cardfix_base_w") or 0)
+                _bh = int(self.cfg.get("cardfix_base_h") or 0)
                 _nw = int(got[4]) if len(got) > 4 else 0
-                _k = (_nw / float(_bw)) if (_bw > 0 and _nw > 0) else 1.0
+                _nh = int(got[5]) if len(got) > 5 else 0
+                _kx = (_nw / float(_bw)) if (_bw > 0 and _nw > 0) else 1.0
+                _ky = (_nh / float(_bh)) if (_bh > 0 and _nh > 0) else _kx
                 click_log("[변신확정] #%02d 카드교체 화면 (%.2f) → 좌표 %d개를 누른다"
                           % (si + 1, v, len(rels))
-                          + ("" if abs(_k - 1.0) < 0.01
-                             else " · 창 %d→%dpx 라 좌표를 %.2f배로 보정" % (_bw, _nw, _k)))
+                          + ("" if (abs(_kx - 1.0) < 0.01 and abs(_ky - 1.0) < 0.01)
+                             else " · 창 %dx%d→%dx%d 라 가로 %.2f배 · 세로 %.2f배 보정"
+                                  % (_bw, _bh, _nw, _nh, _kx, _ky)))
                 self._focus_client_at((L + 60, T + 60))
                 time.sleep(random.uniform(0.20, 0.35))
                 for k, (dx, dy) in enumerate(rels, 1):
@@ -6073,7 +6112,7 @@ class App(tk.Tk):
                         break
                     self.after(0, lambda a=k, n=len(rels): self.status.set(
                         "🃏 변신확정 %d/%d..." % (a, n)))
-                    click_at(L + int(dx * _k), T + int(dy * _k))
+                    click_at(L + int(dx * _kx), T + int(dy * _ky))
                     if k < len(rels):
                         time.sleep(random.uniform(*CARDFIX_GAP))
                 click_log("[변신확정] #%02d 끝 — %d개 눌렀다" % (si + 1, len(rels)))
