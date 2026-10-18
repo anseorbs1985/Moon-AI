@@ -22711,6 +22711,9 @@ class App(tk.Tk):
                     self.status.set(f"📅 스케줄 — 나머지 {len(_tail)}슬롯은 순서대로")
                     self._run_sched_seq(_tail)
                 self.status.set("✔ 매일매일 스케줄 완료!")
+                # 😴 깨우기 결과를 **한 줄로** 남긴다 — 조용히 넘어가면
+                #    "왜 안 깨웠지" 를 로컬에서 짚을 수 없다 (반복된 교훈).
+                self._sched_wake_log()
                 return
             for si, slot in targets:
                 if self._sched_stop: break
@@ -22745,6 +22748,25 @@ class App(tk.Tk):
             self._set_btn("btn_sched_run", state="normal", bg="#16a085", text="▶  실행")
             self._set_btn("btn_sched_stop", state="disabled")
 
+    def _sched_anchor(self, si):
+        """📅 그 슬롯의 **리니지M 클라 창 가운데** 좌표.
+
+        🚨 **스케줄 클릭1 좌표를 쓰면 안 된다** (2026-10-18 사고).
+           실측: 스케줄 클릭1 은 16슬롯 전부 **`ngptop`(퍼플 상단바)** 안이다
+           (예: #01 (246,43) · #02 (243,356)). 그 좌표로 `grab_window` 를 하면
+           **상단바가 찍혀** 절전 그림이 영영 안 맞고, 조용히 '깨어 있다' 로 넘어간다.
+           사용자: "**리니지m 클라이언트를 확인하고** 절전인지 아닌지 확인하고 풀고."
+        ⚠ `_client_rects_by_slot()` 은 **(왼쪽, 위, 오른쪽, 아래)** 를 돌려준다
+          — `(x, y, 폭, 높이)` 로 읽지 말 것 (2026-09-30 에 밟은 함정)."""
+        try:
+            rects = self._client_rects_by_slot()
+            if not rects or si >= len(rects):
+                return None
+            l, t, r, b = rects[si]
+            return ((l + r) // 2, (t + b) // 2)
+        except Exception:
+            return None
+
     def _sched_wake(self, si, coord, name=""):
         """📅 그 클라가 **자고 있으면 깨운다** — 스케줄은 절전해제 좌표가 없다.
 
@@ -22752,20 +22774,28 @@ class App(tk.Tk):
         풀고 스케줄을 클릭해주면 되거든 … 이건 따로 절전모드 해제 이런 게 없어."
 
         🚫 **자고 있지 않으면 아무것도 하지 않는다** (화면 확인 한 번뿐, 약 60ms).
+        ⚠ 보는 것은 **그 슬롯의 리니지M 창**이다 (`_sched_anchor`) — 클릭1 좌표가
+          아니다. 클릭1 은 상단바(ngptop)라 거기선 절전을 볼 수 없다.
         ⚠ 깨우기는 `_wake_until` 하나로 모았다 — 1번째 Z, 2번째부터 '절전모드 해제'
-          글자 클릭 (2026-09-30). 같은 코드를 또 만들지 말 것.
-        ⚠ 절전 그림이 없으면 조용히 넘어간다 (안 쓰는 컴퓨터는 예전 그대로)."""
-        if not SCHED_WAKE or not coord:
+          글자 클릭 (2026-09-30). 같은 코드를 또 만들지 말 것."""
+        if not SCHED_WAKE:
             return
         try:
             q = sleep_img_path("fix")
             if not (q and os.path.exists(q)):
+                self._sched_wake_note("절전 그림(fix_sleep.png)이 없다")
                 return
-            _x, _y, _v = find_sleep_img("fix", coord)
+            anc = self._sched_anchor(si)
+            if not anc:
+                self._sched_wake_note("리니지M 창 16개를 못 찾았다")
+                return
+            _x, _y, _v = find_sleep_img("fix", anc)
             if _x is None:
+                self._sched_wake_cnt(False, _v)
                 return                      # 깨어 있다 — 아무것도 안 한다
             self.status.set(f"😴 [{name}] #{si+1:02d} 절전 — 깨우고 누릅니다 ({_v:.2f})")
-            ok = self._wake_until(coord, si + 1, tag="sched", fkey="fix")
+            ok = self._wake_until(anc, si + 1, tag="sched", fkey="fix")
+            self._sched_wake_cnt(True, _v)
             click_log(f"[스케줄] #{si+1:02d} {name} 절전 상태 ({_v:.2f}) → "
                       + ("깨웠다" if ok else "⚠ 안 깨어남 — 그대로 진행"))
             time.sleep(random.uniform(0.5, 0.9))   # 화면이 돌아올 틈
@@ -22774,6 +22804,32 @@ class App(tk.Tk):
                 click_log(f"[스케줄] #{si+1:02d} 깨우기 오류: {e}")
             except Exception:
                 pass
+
+    def _sched_wake_cnt(self, slept, v):
+        """한 번 실행에 **한 줄 요약**을 남기려고 세어둔다 (조용히 실패하지 않게)."""
+        d = getattr(self, "_schwake", None)
+        if d is None:
+            d = self._schwake = {"잠": 0, "깸": 0, "점수": []}
+        d["잠" if slept else "깸"] += 1
+        d["점수"].append(f"{v:.2f}")
+
+    def _sched_wake_note(self, why):
+        d = getattr(self, "_schwake", None)
+        if d is None:
+            d = self._schwake = {"잠": 0, "깸": 0, "점수": []}
+        d["막힘"] = why
+
+    def _sched_wake_log(self):
+        """스케줄이 끝날 때 한 줄로 남긴다 — **왜 안 깨웠는지**가 여기 적힌다."""
+        d = getattr(self, "_schwake", None)
+        if not d:
+            return
+        self._schwake = None
+        if d.get("막힘"):
+            click_log(f"[스케줄] 😴 깨우기 못 함 — {d['막힘']}")
+            return
+        click_log(f"[스케줄] 😴 절전 {d['잠']}개 깨움 · {d['깸']}개는 이미 깨어 있었다 "
+                  f"(점수 {' '.join(d['점수'][:16])} · 기준 {SLEEP_MATCH:.2f})")
 
     def _run_sched_seq(self, targets):
         """뒤쪽 슬롯은 **한 슬롯씩 순서대로** 돈다 (겹치지 않게).
