@@ -412,8 +412,14 @@ JAKWI_CLICKS   = 8     # 👑 작위!! 좌표 수 — 20개는 너무 많다는 
 #    `cardfix_rels` 에 (dx, dy) 로 저장하고, 실행할 때 그 클라 창 왼쪽위를 더한다.
 #    (아이템등록이 쓰는 방식과 같다 — 창 크기가 달라도 비율로 맞춘다)
 CARDFIX_CLICKS = 5     # 카드 확정 4장 + 선택 확정 = 5개
-CARDFIX_GAP    = (0.18, 0.34)   # 좌표 사이 — "빠르게 후다닥" (사용자 지시)
-CARDFIX_SLOT_GAP = (0.25, 0.45) # 클라 사이 — 창이 바뀌는 틈만 준다
+# ⏱ 2026-10-19 사용자: "성공했는데 엄청나게 빠르다 시간을 좀만 늦추자
+#    **3배로 늦춰봐 랜덤으로 시간주고**" → 아래 셋을 그대로 3배로 넓혔다.
+#    🚫 랜덤 폭을 0으로 만들지 말 것 (범위째 3배 — "항상 사람이 하는 것처럼").
+CARDFIX_GAP    = (0.54, 1.02)   # 좌표 사이 (전 0.18~0.34)
+CARDFIX_SLOT_GAP = (0.75, 1.35) # 클라 사이 (전 0.25~0.45)
+CARDFIX_FOCUS  = (0.60, 1.05)   # 창을 앞으로 올린 뒤 첫 클릭까지 (전 0.20~0.35)
+CARDFIX_HOLD   = 0.12           # 12% 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
+CARDFIX_HOLD_T = (0.5, 1.6)
 CARDFIX_MATCH  = 0.75           # 화면 판정 기준 (cardfix_meta.json 이 있으면 그 값)
 CARDFIX_BASE_W = 491            # 그림을 자른 창 가로
 CARDFIX_SEE_COOL = 2.0          # 화면을 다시 보기까지 (초)
@@ -6020,20 +6026,31 @@ class App(tk.Tk):
         예전에는 점수가 가장 높은 **하나만** 처리해서, 15개를 띄워도 한 개만 됐다."""
         try:
             if not cardfix_img_list():
+                click_log("[변신확정] 판정 그림이 없다 — click_templates/"
+                          "cardfix_screen.png 를 등록해주세요")
                 return []
             rects = self._client_rects_by_slot()
             if not rects:
+                click_log("[변신확정] 리니지M 창 격자 16개를 못 찾았다")
                 return []
-            out = []
+            out, sc = [], []
             for si, (l, t, r, b) in enumerate(rects):
                 ok, v = cardfix_seen(((l + r) // 2, (t + b) // 2))
+                sc.append("%02d:%.2f" % (si + 1, v))
                 if ok:
                     out.append((si, l, t, v, r - l, b - t))
+            if not out:
+                # ⚠ 조용히 빠지지 않는다 — 점수를 남겨야 원격에서 짚을 수 있다
+                click_log("[변신확정] 카드교체 화면인 클라가 없다 — 점수 %s"
+                          % " ".join(sc))
             return out
-        except Exception:
+        except Exception as e:
+            try:
+                click_log("[변신확정] 화면 찾기 오류: %s" % e)
+            except Exception:
+                pass
             return []
-        except Exception:
-            return None
+
     def _reg_cardfix_coord(self, j):
         """📍 좌표 j 를 찍는다 — **클릭한 자리가 어느 클라 창인지** 보고 저장한다.
 
@@ -6088,49 +6105,74 @@ class App(tk.Tk):
                         % (j + 1, rels[j][0], rels[j][1], si + 1))
         self._cardfix_paint()
 
-    def _cardfix_run(self):
-        """▶ 카드교체 화면인 클라에서 **좌표를 순서대로 빠르게** 누른다."""
+    def _cardfix_run(self, why="버튼"):
+        """▶ 카드교체 화면인 클라 **전부**에서 좌표를 순서대로 빠르게 누른다."""
         if self._is_busy():
+            try:
+                click_log("[변신확정] 실행 안 함 — '%s' 이(가) 돌고 있다 (%s)"
+                          % (self._busy_label(), why))
+            except Exception:
+                pass
             self.status.set("🃏 다른 작업이 도는 중입니다")
             return
+        threading.Thread(target=self._cardfix_work, args=(why,),
+                         daemon=True).start()
 
-        def _work():
-            if not self._try_busy("변신확정"):
-                return
+    def _cardfix_work(self, why="버튼"):
+        """🃏 실제로 누르는 몸통 — **이미 스레드 안**이므로 `after` 를 거치지 않는다.
+
+        🚨 2026-10-19 실측 — 예전에는 감지 스레드가 `self.after(500, self._cardfix_run)`
+           으로 UI 스레드에 넘겼다. **`after` 를 다른 스레드에서 부르면 Tk 가 조용히
+           흘려버리는 일이 있어**, 기록에 `카드교체 화면 확인 (0.99)` 만 남고
+           **아무 일도 안 났다** (사용자: "크게해도 안하고 작게해도 안한다").
+           이제 감지 스레드가 **직접 이 함수를 부른다.**
+        ⚠ 클로드는 이 길을 `self.after` 로 되돌리지 말 것."""
+        if not self._try_busy("변신확정"):
             try:
-                alls = self._cardfix_slots_all()
-                if not alls:
-                    self.after(0, lambda: self.status.set(
-                        "🃏 카드교체 화면인 클라가 없습니다"))
-                    return
-                rels = [r for r in self._cardfix_rels() if r]
-                if not rels:
-                    self.after(0, lambda: self.status.set(
-                        "🃏 좌표가 하나도 없습니다 — 창에서 📍 로 찍어주세요"))
-                    return
-                # 🧍 **순서를 섞는다** — 늘 1번부터면 기계 같다 (2026-09-07 규칙).
-                #    2026-10-19 사용자: "알아서 **랜덤으로 순차적으로** 다 확정해주면 된다"
-                random.shuffle(alls)
-                click_log("[변신확정] 카드교체 화면 %d개 — %s 순서로 돈다"
-                          % (len(alls), [a[0] + 1 for a in alls]))
-                _n_all = len(alls)
-                for _ai, got in enumerate(alls, 1):
-                    if getattr(self, "_stop_flag", False):
-                        break
-                    si, L, T, v = got[0], got[1], got[2], got[3]
-                    self._cardfix_one(si, L, T, v, got, rels, _ai, _n_all)
-                self.after(0, lambda n=_n_all: self.status.set(
-                    "✔ 변신확정 완료 — 클라 %d개" % n))
+                click_log("[변신확정] 실행 안 함 — 잠금을 못 얻었다 (%s)" % why)
+            except Exception:
+                pass
+            return
+        try:
+            alls = self._cardfix_slots_all()
+            if not alls:
+                click_log("[변신확정] 실행 안 함 — 카드교체 화면인 클라가 "
+                          "하나도 없다 (%s)" % why)
+                self.after(0, lambda: self.status.set(
+                    "🃏 카드교체 화면인 클라가 없습니다"))
                 return
-
-            except Exception as e:
-                try:
-                    click_log("[변신확정] 오류: %s" % e)
-                except Exception:
-                    pass
-            finally:
-                self._clear_busy("변신확정")
-        threading.Thread(target=_work, daemon=True).start()
+            rels = [r for r in self._cardfix_rels() if r]
+            if not rels:
+                click_log("[변신확정] 실행 안 함 — 좌표가 하나도 없다 (%s) "
+                          "· 창에서 📍 로 찍어주세요" % why)
+                self.after(0, lambda: self.status.set(
+                    "🃏 좌표가 하나도 없습니다 — 창에서 📍 로 찍어주세요"))
+                return
+            # 🧍 **순서를 섞는다** — 늘 1번부터면 기계 같다 (2026-09-07 규칙).
+            #    2026-10-19 사용자: "알아서 **랜덤으로 순차적으로** 다 확정해주면 된다"
+            random.shuffle(alls)
+            click_log("[변신확정] 카드교체 화면 %d개 — %s 순서로 돈다 (%s)"
+                      % (len(alls), [a[0] + 1 for a in alls], why))
+            _n_all = len(alls)
+            for _ai, got in enumerate(alls, 1):
+                if getattr(self, "_stop_flag", False):
+                    break
+                si, L, T, v = got[0], got[1], got[2], got[3]
+                self._cardfix_one(si, L, T, v, got, rels, _ai, _n_all)
+            click_log("[변신확정] 끝 — 클라 %d개 처리" % _n_all)
+            self.after(0, lambda n=_n_all: self.status.set(
+                "✔ 변신확정 완료 — 클라 %d개" % n))
+        except Exception as e:
+            try:
+                click_log("[변신확정] 오류: %s" % e)
+            except Exception:
+                pass
+        finally:
+            # 🔓 걸쇠를 풀어둔다 — 안 그러면 다음에 카드교체 화면을 띄워도
+            #    "이미 띄웠다" 로 걸려 **두 번째부터 영영 안 돈다.**
+            #    스스로 또 돌지는 않는다 (사람이 클라를 클릭해야 감지가 돈다).
+            self._cardfix_latch = False
+            self._clear_busy("변신확정")
 
     def _cardfix_one(self, si, L, T, v, got, rels, ai=1, an=1):
         """🃏 **한 클라**에서 좌표를 순서대로 누른다 (가로·세로 각각 비율 보정)."""
@@ -6147,7 +6189,7 @@ class App(tk.Tk):
                          else " · %dx%d→%dx%d 가로 %.2f배 세로 %.2f배"
                               % (_bw, _bh, _nw, _nh, _kx, _ky)))
             self._focus_client_at((L + 60, T + 60))
-            time.sleep(random.uniform(0.20, 0.35))
+            time.sleep(random.uniform(*CARDFIX_FOCUS))
             for k, (dx, dy) in enumerate(rels, 1):
                 if getattr(self, "_stop_flag", False):
                     break
@@ -6155,7 +6197,10 @@ class App(tk.Tk):
                     "🃏 변신확정 클라 %d/%d · 좌표 %d/%d..." % (a, n, b, m)))
                 click_at(L + int(dx * _kx), T + int(dy * _ky))
                 if k < len(rels):
-                    time.sleep(random.uniform(*CARDFIX_GAP))
+                    _g = random.uniform(*CARDFIX_GAP)
+                    if random.random() < CARDFIX_HOLD:
+                        _g += random.uniform(*CARDFIX_HOLD_T)   # 가끔 멈칫
+                    time.sleep(_g)
             time.sleep(random.uniform(*CARDFIX_SLOT_GAP))
         except Exception as e:
             try:
@@ -6258,6 +6303,21 @@ class App(tk.Tk):
             self._cardfix_see_at = now
             if self._is_busy():
                 return
+            # ⚠ 사람이 연달아 클릭하면 이 함수가 **여러 스레드로 동시에** 들어온다.
+            #    그러면 셋 다 걸쇠가 풀린 것을 보고 셋 다 실행을 건다 (실측: 3번).
+            if getattr(self, "_cardfix_scanning", False):
+                return
+            self._cardfix_scanning = True
+            try:
+                self._cardfix_check_body(now)
+            finally:
+                self._cardfix_scanning = False
+        except Exception:
+            pass
+
+    def _cardfix_check_body(self, now):
+        """🃏 화면을 보고, 카드교체 화면이면 **여기서 바로** 확정한다."""
+        try:
             got = self._cardfix_slot()
             if not got:
                 self._cardfix_latch = False     # 화면을 나갔다 → 걸쇠를 푼다
@@ -6270,20 +6330,26 @@ class App(tk.Tk):
                 return
             self._cardfix_latch = True
             self._cardfix_open_at = now
-            click_log("[변신확정] #%02d 카드교체 화면 확인 (%.2f) → 창을 띄웠다 %s"
+            click_log("[변신확정] #%02d 카드교체 화면 확인 (%.2f) → %s"
                       % (si + 1, v,
-                         "· 자동 누르기 켜짐" if self.cfg.get("cardfix_auto")
-                         else "(▶ 를 눌러야 시작)"))
+                         "지금 바로 확정한다" if self.cfg.get("cardfix_auto")
+                         else "창을 띄웠다 (▶ 를 눌러야 시작)"))
             # 🚫 **자동이면 창을 띄우지 않는다** (2026-10-19 사용자: "저 화면이
             #    떠버리면 좌표를 클릭이 안 되잖아. 그냥 저 화면이 나오면 너가
             #    저 런처를 띄우지 말고 **자동으로 확정**해주라").
             #    창은 `-topmost` 라 카드교체 화면을 덮어 클릭을 먹는다.
             if self.cfg.get("cardfix_auto"):
-                self.after(500, self._cardfix_run)
+                # ⚠ **직접 부른다** — `self.after` 로 UI 스레드에 넘기면 조용히
+                #    흘려버리는 일이 있었다 (2026-10-19 실측, 위 주석 참고).
+                time.sleep(0.5)             # 화면이 다 그려질 틈
+                self._cardfix_work("자동")
             else:
                 self.after(0, lambda: self._open_cardfix_win(reuse=True))
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                click_log("[변신확정] 감지 오류: %s" % e)
+            except Exception:
+                pass
 
     def _open_awaken_win(self, reuse=False):
         """✨ 각성강화 — 크게 띄운 창 하나에만 돌린다 (좌표 등록 없음).
