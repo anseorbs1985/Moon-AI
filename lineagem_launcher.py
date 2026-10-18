@@ -582,6 +582,8 @@ DEFAULT_CFG = {
     # 🃏 변신확정!! — 카드교체 창 안 좌표 **한 벌** (창 왼쪽위 기준 dx,dy)
     "cardfix_rels": None,
     "cardfix_on":   True,               # 화면이 보이면 창을 자동으로 띄울지
+    # 📐 좌표를 찍을 때의 **창 가로** — 큰 화면에서 비율로 보정하는 데 쓴다
+    "cardfix_base_w": None,
     # 🃏 들어가면 **스스로** 누른다 (2026-10-19 사용자: "내가 저 카드교체
     #    화면을 띄우면 너가 **자동으로 확정**을 해주면 되는 거야")
     "cardfix_auto": True,
@@ -5974,38 +5976,63 @@ class App(tk.Tk):
             for si, (l, t, r, b) in enumerate(rects):
                 ok, v = cardfix_seen(((l + r) // 2, (t + b) // 2))
                 if ok and (best is None or v > best[3]):
-                    best = (si, l, t, v)
+                    best = (si, l, t, v, r - l)     # 창 가로도 함께 (비율 보정용)
             return best
         except Exception:
             return None
 
     def _reg_cardfix_coord(self, j):
-        """📍 좌표 j 를 찍는다 — **지금 카드교체 화면인 클라의 창 기준**으로 저장."""
-        got = self._cardfix_slot()
-        if not got:
-            self.status.set("📍 카드교체 화면인 클라가 없습니다 — "
-                            "「카드 교체」를 눌러 들어간 뒤 다시 누르세요")
-            return
+        """📍 좌표 j 를 찍는다 — **클릭한 자리가 어느 클라 창인지** 보고 저장한다.
+
+        🚫 **카드교체 화면인지 따지지 않는다** (2026-10-19 사용자: "좌표3번에 카드
+           확정 버튼을 눌러야 하는데 왜 입력이 안 되냐"). 카드 확정을 누르면 화면이
+           바뀌므로, 화면을 조건으로 걸면 **그 다음 좌표를 영영 못 찍는다.**
+        ⚠ 변신확정 창은 `-topmost` 라 **카드교체 화면을 덮는다** → 찍는 동안
+          `_wins_hide()` 로 숨겼다가 되돌린다 (2026-10-05·10-12 와 같은 패턴)."""
         self._cardfix_reg_j = j
-        self._cardfix_reg_lt = (got[1], got[2])
-        self._cardfix_reg_si = got[0]
-        self.status.set(f"3초 후 변신확정 [좌표{j+1}] 위치를 클릭하세요! "
-                        f"(#{got[0]+1:02d} 화면에서)")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
-                                  CoordOverlay(self, mode="cardfix")])
+        self.status.set("3초 후 변신확정 [좌표%d] 위치를 클릭하세요! "
+                        "(카드교체 화면 안을 클릭하면 그 클라 기준으로 저장됩니다)"
+                        % (j + 1))
+
+        def _go():
+            try:
+                self._cardfix_saved_wins = self._wins_hide()
+            except Exception:
+                self._cardfix_saved_wins = None
+            self.withdraw()
+            time.sleep(0.2)
+            CoordOverlay(self, mode="cardfix")
+        self.after(3000, _go)
 
     def on_cardfix_coord(self, x, y):
-        L, T = getattr(self, "_cardfix_reg_lt", (0, 0))
+        """클릭한 자리가 **어느 클라 창 안인지** 보고 그 창 기준(dx,dy)으로 저장."""
         j = getattr(self, "_cardfix_reg_j", 0)
+        si = L = T = None
+        try:
+            rects = self._client_rects_by_slot()
+            for i, (l, t, r, b) in enumerate(rects or []):
+                if l <= x < r and t <= y < b:
+                    si, L, T = i, l, t
+                    self.cfg["cardfix_base_w"] = int(r - l)   # 그때 창 가로
+                    break
+        except Exception:
+            pass
+        try:
+            self._wins_show(getattr(self, "_cardfix_saved_wins", None))
+        except Exception:
+            pass
+        self.deiconify()
+        if L is None:
+            self.status.set("📍 그 자리는 리니지M 창 밖입니다 — 카드교체 화면 "
+                            "안을 클릭하세요 (좌표 %d 은 그대로)" % (j + 1))
+            return
         rels = self._cardfix_rels()
         rels[j] = [int(x) - L, int(y) - T]
         self.cfg["cardfix_rels"] = rels
         save_cfg(self.cfg)
-        self.status.set(f"✔ 변신확정 좌표 {j+1} 등록 — 창 기준 "
-                        f"({rels[j][0]},{rels[j][1]}) · "
-                        f"#{getattr(self,'_cardfix_reg_si',0)+1:02d} 에서 찍음")
+        self.status.set("✔ 변신확정 좌표 %d 등록 — 창 기준 (%d,%d) · #%02d 에서 찍음"
+                        % (j + 1, rels[j][0], rels[j][1], si + 1))
         self._cardfix_paint()
-        self.deiconify()
 
     def _cardfix_run(self):
         """▶ 카드교체 화면인 클라에서 **좌표를 순서대로 빠르게** 누른다."""
@@ -6022,14 +6049,23 @@ class App(tk.Tk):
                     self.after(0, lambda: self.status.set(
                         "🃏 카드교체 화면인 클라가 없습니다"))
                     return
-                si, L, T, v = got
+                # ⚠ `_cardfix_slot` 은 **5개**를 돌려준다 (창 가로 포함)
+                si, L, T, v = got[0], got[1], got[2], got[3]
                 rels = [r for r in self._cardfix_rels() if r]
                 if not rels:
                     self.after(0, lambda: self.status.set(
                         "🃏 좌표가 하나도 없습니다 — 창에서 📍 로 찍어주세요"))
                     return
+                # 📐 **창 크기가 다르면 좌표도 비율로 늘린다** (2026-10-19 사용자:
+                #    "이건 화면이 크게 해도 똑같이 해줘야 해").
+                #    찍을 때의 창 가로를 `cardfix_base_w` 에 적어뒀다.
+                _bw = int(self.cfg.get("cardfix_base_w") or 0)
+                _nw = int(got[4]) if len(got) > 4 else 0
+                _k = (_nw / float(_bw)) if (_bw > 0 and _nw > 0) else 1.0
                 click_log("[변신확정] #%02d 카드교체 화면 (%.2f) → 좌표 %d개를 누른다"
-                          % (si + 1, v, len(rels)))
+                          % (si + 1, v, len(rels))
+                          + ("" if abs(_k - 1.0) < 0.01
+                             else " · 창 %d→%dpx 라 좌표를 %.2f배로 보정" % (_bw, _nw, _k)))
                 self._focus_client_at((L + 60, T + 60))
                 time.sleep(random.uniform(0.20, 0.35))
                 for k, (dx, dy) in enumerate(rels, 1):
@@ -6037,7 +6073,7 @@ class App(tk.Tk):
                         break
                     self.after(0, lambda a=k, n=len(rels): self.status.set(
                         "🃏 변신확정 %d/%d..." % (a, n)))
-                    click_at(L + dx, T + dy)
+                    click_at(L + int(dx * _k), T + int(dy * _k))
                     if k < len(rels):
                         time.sleep(random.uniform(*CARDFIX_GAP))
                 click_log("[변신확정] #%02d 끝 — %d개 눌렀다" % (si + 1, len(rels)))
@@ -6151,7 +6187,8 @@ class App(tk.Tk):
             if not got:
                 self._cardfix_latch = False     # 화면을 나갔다 → 걸쇠를 푼다
                 return
-            si, L, T, v = got
+            # ⚠ `_cardfix_slot` 은 **5개**를 돌려준다 (창 가로 포함)
+            si, L, T, v = got[0], got[1], got[2], got[3]
             if getattr(self, "_cardfix_latch", False):
                 return                          # 같은 화면에서 이미 띄웠다
             if now - getattr(self, "_cardfix_open_at", 0) < CARDFIX_OPEN_COOL:
@@ -6162,9 +6199,14 @@ class App(tk.Tk):
                       % (si + 1, v,
                          "· 자동 누르기 켜짐" if self.cfg.get("cardfix_auto")
                          else "(▶ 를 눌러야 시작)"))
-            self.after(0, lambda: self._open_cardfix_win(reuse=True))
+            # 🚫 **자동이면 창을 띄우지 않는다** (2026-10-19 사용자: "저 화면이
+            #    떠버리면 좌표를 클릭이 안 되잖아. 그냥 저 화면이 나오면 너가
+            #    저 런처를 띄우지 말고 **자동으로 확정**해주라").
+            #    창은 `-topmost` 라 카드교체 화면을 덮어 클릭을 먹는다.
             if self.cfg.get("cardfix_auto"):
-                self.after(600, self._cardfix_run)
+                self.after(500, self._cardfix_run)
+            else:
+                self.after(0, lambda: self._open_cardfix_win(reuse=True))
         except Exception:
             pass
 
