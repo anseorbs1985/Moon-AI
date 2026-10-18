@@ -417,12 +417,19 @@ CARDFIX_CLICKS = 5     # 카드 확정 4장 + 선택 확정 = 5개
 #    🚫 랜덤 폭을 0으로 만들지 말 것 (범위째 3배 — "항상 사람이 하는 것처럼").
 CARDFIX_GAP    = (0.54, 1.02)   # 좌표 사이 (전 0.18~0.34)
 CARDFIX_SLOT_GAP = (0.75, 1.35) # 클라 사이 (전 0.25~0.45)
-CARDFIX_FOCUS  = (0.60, 1.05)   # 창을 앞으로 올린 뒤 첫 클릭까지 (전 0.20~0.35)
+# ⚡ 2026-10-19 사용자: "내가 화면을 띄워놨는데 왜케 그 다음을 늦게 클릭을 하냐
+#    **70~80프로 줄여줘**" → 아래 둘은 **기다리는 시간**이라 되돌렸다.
+#    🚫 좌표·클라 **사이** 간격(위 3배)은 그대로 둔다 — 그건 사용자가 원한 속도다.
+CARDFIX_FOCUS  = (0.20, 0.38)   # 창을 앞으로 올린 뒤 첫 클릭까지
+CARDFIX_START  = (0.08, 0.16)   # 화면을 본 뒤 첫 클릭까지 (전 0.50 고정)
 CARDFIX_HOLD   = 0.12           # 12% 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
 CARDFIX_HOLD_T = (0.5, 1.6)
 CARDFIX_MATCH  = 0.75           # 화면 판정 기준 (cardfix_meta.json 이 있으면 그 값)
 CARDFIX_BASE_W = 491            # 그림을 자른 창 가로
-CARDFIX_SEE_COOL = 2.0          # 화면을 다시 보기까지 (초)
+CARDFIX_SEE_COOL = 0.6          # 화면을 다시 보기까지 (초) — 전 2.0 (클릭을
+                                #   눌렀는데 2초나 무시되던 것을 줄였다)
+CARDFIX_FULL_COOL = 8.0         # 16클라를 **전부** 훑기까지 (초). 한 바퀴 1.19초라
+                                #   클릭마다 돌리면 쉴 틈 없이 돈다 — 안전망으로만.
 CARDFIX_OPEN_COOL = 8.0         # 창을 다시 띄우기까지 (초)
 
 # ── ✨ 각성강화!! (2026-09-28 사용자 요청) ───────────────────────────────
@@ -1609,6 +1616,28 @@ def cardfix_meta():
         return CARDFIX_MATCH, CARDFIX_BASE_W
 
 
+_CF_TPL = {}
+
+
+def cardfix_tpl(q):
+    """판정 그림을 **한 번만 읽어 둔다.**
+
+    ⚠ 예전에는 `cardfix_seen` 안에서 클라마다 다시 읽어, 한 바퀴에
+      **16클라 × 2장 = 32번** 파일을 읽고 디코드했다 (느림의 한 축).
+    ⚠ `cv2.imread` 는 한글 경로를 못 읽으므로 `imdecode` 를 쓴다 (2026-08-27 규칙)."""
+    try:
+        import cv2, numpy as np
+        m = os.path.getmtime(q)
+        hit = _CF_TPL.get(q)
+        if hit and hit[0] == m:
+            return hit[1]
+        t = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+        _CF_TPL[q] = (m, t)
+        return t
+    except Exception:
+        return None
+
+
 def cardfix_seen(coord):
     """🃏 그 클라가 **카드교체 화면**인가 → (보임?, 점수).
 
@@ -1627,7 +1656,7 @@ def cardfix_seen(coord):
         thr, _w1 = cardfix_meta()
         best = 0.0
         for q, bw in imgs:
-            t = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+            t = cardfix_tpl(q)
             if t is None:
                 continue
             k = big.shape[1] / float(bw or CARDFIX_BASE_W)
@@ -1638,6 +1667,8 @@ def cardfix_seen(coord):
                 continue
             best = max(best, float(cv2.matchTemplate(big, t,
                                                      cv2.TM_CCOEFF_NORMED).max()))
+            if best >= thr:
+                return True, best       # ⚡ 넘었으면 남은 그림은 안 본다
         return (best >= thr), best
     except Exception:
         return False, 0.0
@@ -6019,6 +6050,27 @@ class App(tk.Tk):
         except Exception:
             return None
 
+    def _cardfix_at(self, xy):
+        """⚡ **방금 클릭한 그 클라 하나만** 본다 → (슬롯0부터, L, T, 점수, 폭, 높이).
+
+        16클라를 다 훑으면 **1.47초**가 걸려 첫 클릭이 그만큼 늦는다
+        (2026-10-19 사용자: "왜케 그 다음을 늦게 클릭을 하냐"). 한 클라는 **92ms**.
+        카드교체 화면은 거의 늘 **사람이 방금 누른 그 클라**다."""
+        try:
+            if not (xy and cardfix_img_list()):
+                return None
+            rects = self._client_rects_by_slot()
+            if not rects:
+                return None
+            x, y = int(xy[0]), int(xy[1])
+            for si, (l, t, r, b) in enumerate(rects):
+                if l <= x < r and t <= y < b:
+                    ok, v = cardfix_seen(((l + r) // 2, (t + b) // 2))
+                    return (si, l, t, v, r - l, b - t) if ok else None
+            return None
+        except Exception:
+            return None
+
     def _cardfix_slots_all(self):
         """🃏 카드교체 화면인 **모든 클라** → [(슬롯0부터, L, T, 점수, 폭, 높이), …]
 
@@ -6118,7 +6170,7 @@ class App(tk.Tk):
         threading.Thread(target=self._cardfix_work, args=(why,),
                          daemon=True).start()
 
-    def _cardfix_work(self, why="버튼"):
+    def _cardfix_work(self, why="버튼", first=None):
         """🃏 실제로 누르는 몸통 — **이미 스레드 안**이므로 `after` 를 거치지 않는다.
 
         🚨 2026-10-19 실측 — 예전에는 감지 스레드가 `self.after(500, self._cardfix_run)`
@@ -6134,13 +6186,6 @@ class App(tk.Tk):
                 pass
             return
         try:
-            alls = self._cardfix_slots_all()
-            if not alls:
-                click_log("[변신확정] 실행 안 함 — 카드교체 화면인 클라가 "
-                          "하나도 없다 (%s)" % why)
-                self.after(0, lambda: self.status.set(
-                    "🃏 카드교체 화면인 클라가 없습니다"))
-                return
             rels = [r for r in self._cardfix_rels() if r]
             if not rels:
                 click_log("[변신확정] 실행 안 함 — 좌표가 하나도 없다 (%s) "
@@ -6148,19 +6193,37 @@ class App(tk.Tk):
                 self.after(0, lambda: self.status.set(
                     "🃏 좌표가 하나도 없습니다 — 창에서 📍 로 찍어주세요"))
                 return
-            # 🧍 **순서를 섞는다** — 늘 1번부터면 기계 같다 (2026-09-07 규칙).
-            #    2026-10-19 사용자: "알아서 **랜덤으로 순차적으로** 다 확정해주면 된다"
-            random.shuffle(alls)
-            click_log("[변신확정] 카드교체 화면 %d개 — %s 순서로 돈다 (%s)"
-                      % (len(alls), [a[0] + 1 for a in alls], why))
-            _n_all = len(alls)
-            for _ai, got in enumerate(alls, 1):
-                if getattr(self, "_stop_flag", False):
-                    break
-                si, L, T, v = got[0], got[1], got[2], got[3]
-                self._cardfix_one(si, L, T, v, got, rels, _ai, _n_all)
-            click_log("[변신확정] 끝 — 클라 %d개 처리" % _n_all)
-            self.after(0, lambda n=_n_all: self.status.set(
+            # ⚡ 넘겨받은 클라를 **먼저 누른다** — 여기서 16클라를 훑으면(1.47초)
+            #    사용자가 화면을 띄운 뒤 첫 클릭이 그만큼 늦어진다.
+            n_done = 0
+            if first:
+                self._cardfix_one(first[0], first[1], first[2], first[3],
+                                  first, rels, 1, 0)
+                n_done = 1
+            # 나머지는 그 다음에 훑는다 (첫 클릭이 이미 들어간 뒤라 느려도 괜찮다)
+            rest = [a for a in self._cardfix_slots_all()
+                    if not (first and a[0] == first[0])]
+            if not (rest or n_done):
+                click_log("[변신확정] 실행 안 함 — 카드교체 화면인 클라가 "
+                          "하나도 없다 (%s)" % why)
+                self.after(0, lambda: self.status.set(
+                    "🃏 카드교체 화면인 클라가 없습니다"))
+                return
+            if rest:
+                # 🧍 **순서를 섞는다** — 늘 1번부터면 기계 같다 (2026-09-07 규칙).
+                random.shuffle(rest)
+                _tot = n_done + len(rest)
+                click_log("[변신확정] 남은 카드교체 화면 %d개 — %s 순서로 돈다 (%s)"
+                          % (len(rest), [a[0] + 1 for a in rest], why))
+                for _i, got in enumerate(rest, 1):
+                    if getattr(self, "_stop_flag", False):
+                        break
+                    si, L, T, v = got[0], got[1], got[2], got[3]
+                    self._cardfix_one(si, L, T, v, got, rels,
+                                      n_done + _i, _tot)
+                n_done += len(rest)
+            click_log("[변신확정] 끝 — 클라 %d개 처리" % n_done)
+            self.after(0, lambda n=n_done: self.status.set(
                 "✔ 변신확정 완료 — 클라 %d개" % n))
         except Exception as e:
             try:
@@ -6183,8 +6246,8 @@ class App(tk.Tk):
             _nh = int(got[5]) if len(got) > 5 else 0
             _kx = (_nw / float(_bw)) if (_bw > 0 and _nw > 0) else 1.0
             _ky = (_nh / float(_bh)) if (_bh > 0 and _nh > 0) else _kx
-            click_log("[변신확정] (%d/%d) #%02d 화면 %.2f → 좌표 %d개"
-                      % (ai, an, si + 1, v, len(rels))
+            click_log("[변신확정] (%d/%s) #%02d 화면 %.2f → 좌표 %d개"
+                      % (ai, an if an > 0 else "?", si + 1, v, len(rels))
                       + ("" if (abs(_kx - 1.0) < 0.01 and abs(_ky - 1.0) < 0.01)
                          else " · %dx%d→%dx%d 가로 %.2f배 세로 %.2f배"
                               % (_bw, _bh, _nw, _nh, _kx, _ky)))
@@ -6284,7 +6347,7 @@ class App(tk.Tk):
         self.cfg["cardfix_on"] = bool(self._cardfix_onv.get())
         save_cfg(self.cfg)
 
-    def _cardfix_click_check(self):
+    def _cardfix_click_check(self, xy=None):
         """🃏 사람이 클라를 클릭했을 때 **카드교체 화면인지** 보고 창을 띄운다.
 
         각성강화와 같은 방식 (2026-10-01). **상시 감시가 아니다** — 사람 클릭이 신호다.
@@ -6309,16 +6372,28 @@ class App(tk.Tk):
                 return
             self._cardfix_scanning = True
             try:
-                self._cardfix_check_body(now)
+                self._cardfix_check_body(now, xy)
             finally:
                 self._cardfix_scanning = False
         except Exception:
             pass
 
-    def _cardfix_check_body(self, now):
-        """🃏 화면을 보고, 카드교체 화면이면 **여기서 바로** 확정한다."""
+    def _cardfix_check_body(self, now, xy=None):
+        """🃏 화면을 보고, 카드교체 화면이면 **여기서 바로** 확정한다.
+
+        ⚡ **방금 클릭한 클라를 먼저** 본다 (92ms) — 맞으면 16클라를 훑지 않고
+           곧바로 누른다. 아니면 그때 전체를 훑는다 (1.47초)."""
         try:
-            got = self._cardfix_slot()
+            fast = self._cardfix_at(xy)
+            got = fast
+            if not got:
+                # 🚫 사람이 누른 클라가 카드교체 화면이 **아니면 16클라를 훑지 않는다.**
+                #    한 바퀴 1.19초라 클릭마다 돌리면 백그라운드가 계속 돈다.
+                #    (카드교체 화면은 거의 늘 방금 누른 그 클라다 — 전제)
+                #    그래도 놓치는 경우를 위해 **가끔만** 전체를 본다.
+                if now - getattr(self, "_cardfix_full_at", 0) >= CARDFIX_FULL_COOL:
+                    self._cardfix_full_at = now
+                    got = self._cardfix_slot()
             if not got:
                 self._cardfix_latch = False     # 화면을 나갔다 → 걸쇠를 푼다
                 return
@@ -6330,8 +6405,8 @@ class App(tk.Tk):
                 return
             self._cardfix_latch = True
             self._cardfix_open_at = now
-            click_log("[변신확정] #%02d 카드교체 화면 확인 (%.2f) → %s"
-                      % (si + 1, v,
+            click_log("[변신확정] #%02d 카드교체 화면 확인 (%.2f)%s → %s"
+                      % (si + 1, v, " ⚡방금 누른 클라" if fast else "",
                          "지금 바로 확정한다" if self.cfg.get("cardfix_auto")
                          else "창을 띄웠다 (▶ 를 눌러야 시작)"))
             # 🚫 **자동이면 창을 띄우지 않는다** (2026-10-19 사용자: "저 화면이
@@ -6341,8 +6416,8 @@ class App(tk.Tk):
             if self.cfg.get("cardfix_auto"):
                 # ⚠ **직접 부른다** — `self.after` 로 UI 스레드에 넘기면 조용히
                 #    흘려버리는 일이 있었다 (2026-10-19 실측, 위 주석 참고).
-                time.sleep(0.5)             # 화면이 다 그려질 틈
-                self._cardfix_work("자동")
+                time.sleep(random.uniform(*CARDFIX_START))
+                self._cardfix_work("자동", first=got)
             else:
                 self.after(0, lambda: self._open_cardfix_win(reuse=True))
         except Exception as e:
@@ -14506,7 +14581,7 @@ class App(tk.Tk):
                                  daemon=True).start()
                 # 🃏 카드교체 화면이면 변신확정 창을 띄운다 (2026-10-19)
                 threading.Thread(target=self._cardfix_click_check,
-                                 daemon=True).start()
+                                 args=(xy,), daemon=True).start()
                 if not self.cfg.get("check_area_rel"):
                     continue                      # 경고영역이 없으면 볼 수가 없다
                 si = self._slot_of_anchor(xy)
