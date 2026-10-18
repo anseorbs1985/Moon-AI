@@ -1388,6 +1388,23 @@ SEQ_SKIP_AWAKE = True
 #    (2026-10-18 사용자: "절전모드 상태면 네가 확인해서 해제를 하고
 #     그 다음 버튼을 눌러주면 되는 거거든").
 SCHED_WAKE = True
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║ 🧩 클라 **오른쪽 옆 바** (퍼플 CEF 창 `index.html?type=live`)             ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+# 2026-10-18 사용자: "스케줄처럼 마우스 올려서 실행시키는 것들이 있잖아.
+#   이게 클라이언트마다 있는 게 있고 아니면 **확장을 해야지만** 있는 게 있거든.
+#   저 옆에 바를 보고 **없으면 네가 확장**을 해주고 그냥 있으면 평상시랑 똑같이."
+#
+# 🎉 **그림 매칭이 필요 없다 — 창 폭만 보면 된다** (실측 2026-10-18):
+#      접힘  56px   « · 🔊 ⌨ ▶ · ⋯ · 퍼플        (아이콘 1열)
+#      확장 112px   « · 💬▶ 🔊⛶ ⌨📁 · ⋯💬 · 퍼플 (아이콘 2열)
+#    해상도·렌더링과 무관해 로컬에서도 100% 같게 동작한다.
+SIDEBAR_TITLE = "index.html"   # 그 CEF 창 제목에 이 글자가 들어 있다
+SIDEBAR_WIDE  = 80             # 폭이 이보다 크면 **이미 확장됨**
+# ⋯(점 세 개) 자리 — **창 왼쪽위 기준**. 접힘·확장 둘 다 같은 자리다 (실측).
+SIDEBAR_DOTS  = (28, 209)      # 56x316 바에서 잰 값
+SIDEBAR_WAIT  = (0.40, 0.70)   # 누른 뒤 펼쳐지기를 기다리는 시간
+SIDEBAR_TRIES = 2              # 안 펼쳐지면 한 번 더 (그래도 안 되면 그냥 진행)
 
 # ── ⌨ 조작키 설정(.cfg) 배포 (2026-09-27 사용자 요청) ─────────────────────
 # 게임의 [마우스·키 녹화 설정] 패널 안 **[가져오기]** 를 대신 눌러 .cfg 를 적용한다.
@@ -22714,6 +22731,7 @@ class App(tk.Tk):
                 # 😴 깨우기 결과를 **한 줄로** 남긴다 — 조용히 넘어가면
                 #    "왜 안 깨웠지" 를 로컬에서 짚을 수 없다 (반복된 교훈).
                 self._sched_wake_log()
+                self._sb_log()
                 return
             for si, slot in targets:
                 if self._sched_stop: break
@@ -22747,6 +22765,104 @@ class App(tk.Tk):
             self.after(0, self._restore_back)
             self._set_btn("btn_sched_run", state="normal", bg="#16a085", text="▶  실행")
             self._set_btn("btn_sched_stop", state="disabled")
+
+    def _sidebar_of(self, si):
+        """그 슬롯 클라의 **오른쪽에 붙은 옆 바** → (핸들, 왼쪽, 위, 폭, 높이).
+
+        클라 창 **밖**이라 `grab_window` 로는 못 본다 — 창 목록에서 직접 찾는다.
+        실측: 바의 왼쪽 = 그 클라의 오른쪽 끝, 위 = ngptop 과 같은 높이."""
+        try:
+            import win32gui, ctypes
+            import ctypes.wintypes as wt
+            rects = self._client_rects_by_slot()
+            if not rects or si >= len(rects):
+                return None
+            l, t, r, b = rects[si]
+            best = None
+            def _cb(h, _):
+                nonlocal best
+                if not win32gui.IsWindowVisible(h):
+                    return True
+                if SIDEBAR_TITLE not in win32gui.GetWindowText(h):
+                    return True
+                rc = wt.RECT()
+                ctypes.windll.user32.GetWindowRect(h, ctypes.byref(rc))
+                if abs(rc.left - r) > 20:
+                    return True
+                if not (-80 < (rc.top - t) < 40):
+                    return True
+                d = abs(rc.left - r) + abs(rc.top - t)
+                if best is None or d < best[0]:
+                    best = (d, h, rc.left, rc.top,
+                            rc.right - rc.left, rc.bottom - rc.top)
+                return True
+            win32gui.EnumWindows(_cb, None)
+            return best[1:] if best else None
+        except Exception:
+            return None
+
+    def _sidebar_expand(self, si, name=""):
+        """🧩 옆 바가 **접혀 있으면 ⋯ 를 눌러 펼친다.**
+
+        🚫 **이미 펼쳐져 있으면 아무것도 하지 않는다** (창 폭만 보므로 비용 0).
+        ⚠ 판정은 **창 폭**이다 — 그림이 아니다. 접힘 56 · 확장 112 (실측).
+        ⚠ 누르면 커서가 움직이므로 보던 창으로 되돌린다 (`_user_focus_*`)."""
+        try:
+            got = self._sidebar_of(si)
+            if not got:
+                self._sb_note("옆 바를 못 찾음")
+                return
+            h, X, Y, W, H = got
+            if W > SIDEBAR_WIDE:
+                self._sb_cnt(False, W)
+                return                      # 이미 확장 — 평소대로
+            for _t in range(SIDEBAR_TRIES):
+                _snap = self._user_focus_snap()
+                click_at(X + SIDEBAR_DOTS[0], Y + SIDEBAR_DOTS[1])
+                self._user_focus_back(_snap)
+                time.sleep(random.uniform(*SIDEBAR_WAIT))
+                # ⚠ **핸들로 다시 재면 안 된다** — 펼쳐질 때 CEF 창이 다시 만들어져
+                #   옛 핸들은 56px 그대로를 돌려준다 (2026-10-18 에 그렇게 속았다).
+                #   **자리로 다시 찾아** 폭을 본다.
+                _g2 = self._sidebar_of(si)
+                W2 = _g2[3] if _g2 else W
+                if W2 > SIDEBAR_WIDE:
+                    self._sb_cnt(True, W2)
+                    click_log(f"[옆바] #{si+1:02d} {name} 접혀 있어 ⋯ 를 눌러 "
+                              f"펼쳤다 ({W}px → {W2}px)")
+                    return
+            click_log(f"[옆바] #{si+1:02d} {name} ⚠ {SIDEBAR_TRIES}번 눌러도 "
+                      f"안 펼쳐졌다 ({W}px) — 그대로 진행")
+        except Exception as e:
+            try:
+                click_log(f"[옆바] #{si+1:02d} 오류: {e}")
+            except Exception:
+                pass
+
+    def _sb_cnt(self, opened, w):
+        d = getattr(self, "_sbcnt", None)
+        if d is None:
+            d = self._sbcnt = {"폄": 0, "이미": 0, "폭": []}
+        d["폄" if opened else "이미"] += 1
+        d["폭"].append(str(w))
+
+    def _sb_note(self, why):
+        d = getattr(self, "_sbcnt", None)
+        if d is None:
+            d = self._sbcnt = {"폄": 0, "이미": 0, "폭": []}
+        d["막힘"] = why
+
+    def _sb_log(self):
+        """끝날 때 한 줄 — **왜 안 폈는지**가 여기 적힌다."""
+        d = getattr(self, "_sbcnt", None)
+        if not d:
+            return
+        self._sbcnt = None
+        if d.get("막힘"):
+            click_log(f"[옆바] 🧩 확장 못 함 — {d['막힘']}")
+            return
+        click_log(f"[옆바] 🧩 {d['폄']}개 펼침 · {d['이미']}개는 이미 펼쳐져 있었다 "
+                  f"(폭 {' '.join(d['폭'][:16])} · 기준 {SIDEBAR_WIDE}px)")
 
     def _sched_anchor(self, si):
         """📅 그 슬롯의 **리니지M 클라 창 가운데** 좌표.
@@ -22846,6 +22962,8 @@ class App(tk.Tk):
                 return
             # 😴 자고 있으면 먼저 깨운다 (스케줄은 절전해제 좌표가 없다)
             self._sched_wake(si, coords[0], name)
+            # 🧩 옆 바가 접혀 있으면 펼친다 (버튼이 확장해야만 보이는 클라가 있다)
+            self._sidebar_expand(si, name)
             _snap = self._user_focus_snap()
             if coords[0]:
                 self.status.set(f"📅 [{name}] #{si+1:02d} 클릭1... (순서대로)")
@@ -22915,6 +23033,7 @@ class App(tk.Tk):
                     # 😴 자고 있으면 먼저 깨운다 — **순차(`_run_sched_seq`)와 한 쌍**.
                     #    한쪽만 걸면 '개별은 되는데 전체는 안 된다' 가 또 생긴다.
                     self._sched_wake(si, coords[0], name)
+                    self._sidebar_expand(si, name)   # 🧩 접혀 있으면 펼친다
                     self.status.set(f"📅 [{name}] 클릭1...  (남은 슬롯 {len(alive)})")
                     self._wait_user_free("_sched_stop")
                     _snap = self._user_focus_snap()
