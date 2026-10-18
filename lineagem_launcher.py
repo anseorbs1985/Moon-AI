@@ -1379,6 +1379,15 @@ SLEEP_MATCH = 0.68      # 절전 화면 판정 기준.
                         # 0.60 은 깨어 있는 0.59 와 너무 붙어 위험했다 (2026-09-02)
 SLEEP_WAKE_WAIT = (1.2, 2.5)   # Z 를 누른 뒤 깨어났는지 확인하며 기다리는 시간(초)
 SLEEP_WAKE_TRIES = 3           # 안 깨어나면 몇 번까지 다시 누를지
+# 🔆 **이미 깨어 있는 클라는 절전해제를 누르지 않는다** (2026-10-18 사용자 지시):
+#    "절전해제가 되어 있으면 다시 절전해제를 하지 않고 그냥 다음을 클릭해주는 거야."
+#    확인 비용은 창 하나당 약 60ms — 건너뛴 만큼 오히려 빨라진다.
+#    ⚠ 절전 그림(`<런처>_sleep.png`)이 없으면 **예전처럼 전부 누른다** (안전).
+SEQ_SKIP_AWAKE = True
+# 📅 스케줄은 절전해제 좌표가 따로 없다 → **자고 있으면 먼저 깨운다**
+#    (2026-10-18 사용자: "절전모드 상태면 네가 확인해서 해제를 하고
+#     그 다음 버튼을 눌러주면 되는 거거든").
+SCHED_WAKE = True
 
 # ── ⌨ 조작키 설정(.cfg) 배포 (2026-09-27 사용자 요청) ─────────────────────
 # 게임의 [마우스·키 녹화 설정] 패널 안 **[가져오기]** 를 대신 눌러 .cfg 를 적용한다.
@@ -17984,12 +17993,30 @@ class App(tk.Tk):
                 mn, mx = mx, mn
             random.shuffle(coords)   # 매 실행마다 클릭 순서 무작위
             n = len(coords)
+            # 🔆 **이미 깨어 있으면 누르지 않는다** (2026-10-18 사용자 지시).
+            #    절전 그림이 없으면 확인을 건너뛰고 예전처럼 전부 누른다.
+            _chk = SEQ_SKIP_AWAKE and bool(sleep_img_path("fix")
+                                           and os.path.exists(sleep_img_path("fix")))
+            _hit, _skip = 0, 0
             for i, (x, y) in enumerate(coords):
+                if self._seq_stop_now():
+                    break
+                if _chk:
+                    _sx, _sy, _sv = find_sleep_img("fix", (x, y))
+                    if _sx is None:
+                        _skip += 1
+                        self.after(0, lambda a=i, s=_skip: self.status.set(
+                            f"🔆 절전해제 {a+1}/{n} — 이미 깨어 있어 건너뜀 ({s}개)"))
+                        continue
+                _hit += 1
                 self.after(0, lambda a=i: self.status.set(f"🔆 절전해제 {a+1}/{n} (랜덤 순서)..."))
                 pyautogui.click(x, y)
                 if i < n - 1:
                     time.sleep(random.uniform(mn, mx))   # 슬롯간 간격 (설정값 그대로, 추가 간격 없음)
-            self.after(0, lambda: self.status.set(f"✔ 절전해제 완료 ({n}개)"))
+            _msg = (f"✔ 절전해제 완료 — {_hit}개 깨움"
+                    + (f" · {_skip}개는 이미 깨어 있어 건너뜀" if _skip else ""))
+            click_log("[절전해제] " + _msg.replace("✔ ", ""))
+            self.after(0, lambda m=_msg: self.status.set(m))
         except Exception as e:
             self.after(0, lambda err=e: self.status.set(f"절전해제 오류: {err}"))
         finally:
@@ -18062,6 +18089,13 @@ class App(tk.Tk):
                 except Exception:
                     pass
         threading.Thread(target=_work, daemon=True).start()
+
+    def _seq_stop_now(self):
+        """절전해제 도중 [■ 전체멈춤] 이 눌렸나.
+
+        ⚠ `_stop()` 이 세우는 **실제 플래그**를 본다 — 없는 이름을 보면
+          늘 False 라 멈춤이 안 먹는다 (만들다 한 번 밟았다)."""
+        return bool(getattr(self, "_stop_flag", False))
 
     def _assign_seq_hotkey(self):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
@@ -22711,6 +22745,36 @@ class App(tk.Tk):
             self._set_btn("btn_sched_run", state="normal", bg="#16a085", text="▶  실행")
             self._set_btn("btn_sched_stop", state="disabled")
 
+    def _sched_wake(self, si, coord, name=""):
+        """📅 그 클라가 **자고 있으면 깨운다** — 스케줄은 절전해제 좌표가 없다.
+
+        2026-10-18 사용자: "스케줄을 할 때 이것 또한 절전이 되어 있으면 네가 절전을
+        풀고 스케줄을 클릭해주면 되거든 … 이건 따로 절전모드 해제 이런 게 없어."
+
+        🚫 **자고 있지 않으면 아무것도 하지 않는다** (화면 확인 한 번뿐, 약 60ms).
+        ⚠ 깨우기는 `_wake_until` 하나로 모았다 — 1번째 Z, 2번째부터 '절전모드 해제'
+          글자 클릭 (2026-09-30). 같은 코드를 또 만들지 말 것.
+        ⚠ 절전 그림이 없으면 조용히 넘어간다 (안 쓰는 컴퓨터는 예전 그대로)."""
+        if not SCHED_WAKE or not coord:
+            return
+        try:
+            q = sleep_img_path("fix")
+            if not (q and os.path.exists(q)):
+                return
+            _x, _y, _v = find_sleep_img("fix", coord)
+            if _x is None:
+                return                      # 깨어 있다 — 아무것도 안 한다
+            self.status.set(f"😴 [{name}] #{si+1:02d} 절전 — 깨우고 누릅니다 ({_v:.2f})")
+            ok = self._wake_until(coord, si + 1, tag="sched", fkey="fix")
+            click_log(f"[스케줄] #{si+1:02d} {name} 절전 상태 ({_v:.2f}) → "
+                      + ("깨웠다" if ok else "⚠ 안 깨어남 — 그대로 진행"))
+            time.sleep(random.uniform(0.5, 0.9))   # 화면이 돌아올 틈
+        except Exception as e:
+            try:
+                click_log(f"[스케줄] #{si+1:02d} 깨우기 오류: {e}")
+            except Exception:
+                pass
+
     def _run_sched_seq(self, targets):
         """뒤쪽 슬롯은 **한 슬롯씩 순서대로** 돈다 (겹치지 않게).
 
@@ -22724,6 +22788,8 @@ class App(tk.Tk):
             coords = slot.get("coords", [None] * SCHED_CLICKS)
             if not self._wait_mouse_idle("_sched_stop"):
                 return
+            # 😴 자고 있으면 먼저 깨운다 (스케줄은 절전해제 좌표가 없다)
+            self._sched_wake(si, coords[0], name)
             _snap = self._user_focus_snap()
             if coords[0]:
                 self.status.set(f"📅 [{name}] #{si+1:02d} 클릭1... (순서대로)")
@@ -22790,6 +22856,9 @@ class App(tk.Tk):
                 break
             if st["u"] == 0:
                 if coords[0]:
+                    # 😴 자고 있으면 먼저 깨운다 — **순차(`_run_sched_seq`)와 한 쌍**.
+                    #    한쪽만 걸면 '개별은 되는데 전체는 안 된다' 가 또 생긴다.
+                    self._sched_wake(si, coords[0], name)
                     self.status.set(f"📅 [{name}] 클릭1...  (남은 슬롯 {len(alive)})")
                     self._wait_user_free("_sched_stop")
                     _snap = self._user_focus_snap()
