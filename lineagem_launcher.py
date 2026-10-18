@@ -1419,6 +1419,21 @@ SIDEBAR_TRIES = 2              # 안 펼쳐지면 한 번 더 (그래도 안 되
 BASE_SLOT     = 4        # 0부터 센 번호 → #05
 BASE_EXPAND   = True     # 이 확인을 켤지 (끄면 예전처럼 그냥 진행)
 BASE_COOL     = 600      # 전환을 한 번 하면 이만큼은 다시 안 한다 (초)
+# ── 🗓 **매주 수요일 10시 — 사람이 완전히 손을 뗐을 때만** ────────────────
+#    2026-10-18 사용자: "컴퓨터를 10분 동안 움직이지 않을 때 해줘야 해.
+#      매주 수요일 10시쯤에 해줬으면." → "안 겹칠까? 고민이네. 내가 하고 있을 때
+#      이 동작이 들어가면 겹치잖아."
+#
+#    🔑 **결정적인 신호는 16클라가 전부 절전인가** 이다. 사람이 게임 중이면
+#       적어도 한 클라는 깨어 있다. 무입력 10분만으로는 부족하다 —
+#       **화면을 보고만 있어도** 무입력으로 잡히기 때문이다.
+BASE_WED_ON   = True     # 이 자동 전환을 켤지
+BASE_WED_DAY  = 2        # 0=월 … 2=수
+BASE_WED_HH   = 10       # 이 시각 이후부터 (오전 10시)
+BASE_WED_IDLE = 600      # 사람 무입력 이만큼 (초)
+BASE_WED_WARN = 10       # 예고 몇 초 — 이 사이에 입력이 있으면 **취소**
+BASE_WED_SOON = 600      # ⏰ 반복이 이 안에 있으면 미룬다 (초)
+BASE_WED_TICK = 60000    # 확인 주기 (1분) — 변수 몇 개만 보므로 부하 0
 
 # ── ⌨ 조작키 설정(.cfg) 배포 (2026-09-27 사용자 요청) ─────────────────────
 # 게임의 [마우스·키 녹화 설정] 패널 안 **[가져오기]** 를 대신 눌러 .cfg 를 적용한다.
@@ -3963,6 +3978,8 @@ class App(tk.Tk):
         self.after(3000, self._minauto_tick)
         # 💧 물약 0개 상시 감시 — 사냥 도중에 떨어지는 것을 잡는다 (2026-10-13)
         self.after(20000, self._p0_watch_tick)
+        # 🗓 매주 수요일 10시 — 사람이 완전히 손을 뗐을 때만 퍼플 전환
+        self.after(45000, self._base_wed_tick)
         self.after(4000, self._bot_start_watcher)
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
         self.after(2000, self._queue_tick)               # 실행 대기열 순차 처리
@@ -22784,6 +22801,145 @@ class App(tk.Tk):
             self.after(0, self._restore_back)
             self._set_btn("btn_sched_run", state="normal", bg="#16a085", text="▶  실행")
             self._set_btn("btn_sched_stop", state="disabled")
+
+    def _base_wed_tick(self):
+        """🗓 매주 수요일 10시 이후 — **사람이 완전히 손을 뗐을 때만** 퍼플 전환.
+
+        겹치지 않으려고 조건을 **다섯 겹**으로 쌓았다 (2026-10-18 사용자 걱정:
+        "내가 하고 있을 때 이 동작이 들어가면 겹치잖아"):
+          ① 그 주에 아직 안 했다        ② 사람 무입력 BASE_WED_IDLE(10분)
+          ③ **16클라가 전부 절전**      ④ 런처 작업·섬 실행기 없음
+          ⑤ ⏰ 반복이 10분 안에 없다
+        그리고 **10초 예고** 뒤 한 번 더 확인한다 — 그 사이 마우스만 움직여도 취소.
+
+        ⚠ 유휴는 **_system_idle_seconds()**(GetLastInputInfo)를 쓴다.
+          precise_click.idle_seconds() 를 쓰지 말 것 — 원격 데스크톱에서는
+          사람 입력도 injected 라 **늘 유휴로 보인다** (2026-09-29 확인)."""
+        try:
+            if not BASE_WED_ON:
+                return
+            import datetime
+            now = datetime.datetime.now()
+            if now.weekday() != BASE_WED_DAY or now.hour < BASE_WED_HH:
+                return
+            tag = now.strftime("%Y-%W")          # 그 주 표시
+            if getattr(self, "_base_wed_tag", "") == tag:
+                return                            # 이번 주에 이미 했다
+            if self._system_idle_seconds() < BASE_WED_IDLE:
+                return
+            if self._is_busy() or self._island_running():
+                return
+            try:
+                _nx = self._island_repeat_next_all()
+                if _nx and (_nx - time.time()) < BASE_WED_SOON:
+                    return
+            except Exception:
+                pass
+            awake = self._awake_slots()
+            if awake is None:
+                return                            # 못 세면 하지 않는다 (안전)
+            if awake:
+                click_log("[기준확장] 🗓 수요일 전환 미룸 — 깨어 있는 클라 %s "
+                          "(사람이 쓰는 중일 수 있다)" % awake)
+                self._base_wed_tag = tag          # 이번 주는 넘긴다
+                return
+            got = self._sidebar_of(BASE_SLOT)
+            W = got[3] if got else 0
+            if W > SIDEBAR_WIDE:
+                click_log("[기준확장] 🗓 수요일 확인 — #%02d %dpx 확장 ✔ "
+                          "전환할 필요가 없다" % (BASE_SLOT + 1, W))
+                self._base_wed_tag = tag
+                return
+            self._base_wed_tag = tag              # 성공하든 취소든 이번 주는 끝
+            click_log("[기준확장] 🗓 수요일 — #%02d 가 %dpx 로 접혀 있다. "
+                      "%d초 뒤 퍼플을 전환한다 (그 사이 마우스·키보드를 만지면 취소)"
+                      % (BASE_SLOT + 1, W, BASE_WED_WARN))
+
+            def _go():
+                try:
+                    for _ in range(BASE_WED_WARN):
+                        self.status.set("🧭 %d초 뒤 퍼플 전환 — 마우스를 움직이면 "
+                                        "취소됩니다" % BASE_WED_WARN)
+                        time.sleep(1.0)
+                        if self._system_idle_seconds() < 3:
+                            click_log("[기준확장] 🗓 예고 중 사람이 만져 **취소**했다")
+                            self.status.set("🧭 퍼플 전환 취소 (사람이 만짐)")
+                            return
+                        if self._is_busy() or self._island_running():
+                            click_log("[기준확장] 🗓 예고 중 작업이 시작돼 **취소**했다")
+                            return
+                    ok = self._profile_switch_once("[기준확장 🗓]")
+                    time.sleep(random.uniform(1.5, 2.5))
+                    g2 = self._sidebar_of(BASE_SLOT)
+                    W2 = g2[3] if g2 else 0
+                    click_log("[기준확장] 🗓 전환 %s → #%02d 지금 %dpx %s"
+                              % ("✔" if ok else "✘", BASE_SLOT + 1, W2,
+                                 "— 되돌아왔다 ✔" if W2 > SIDEBAR_WIDE else "— ⚠ 아직 접힘"))
+                except Exception as e:
+                    try:
+                        click_log("[기준확장] 🗓 오류: %s" % e)
+                    except Exception:
+                        pass
+            threading.Thread(target=_go, daemon=True).start()
+        except Exception:
+            pass
+        finally:
+            try:
+                self.after(BASE_WED_TICK, self._base_wed_tick)
+            except Exception:
+                pass
+
+    def _awake_slots(self):
+        """🔑 **깨어 있는 클라 번호들** (전부 자면 빈 목록, 못 세면 None).
+
+        절전 그림으로 본다 — 사람이 게임 중이면 적어도 하나는 깨어 있다."""
+        try:
+            q = sleep_img_path("fix")
+            if not (q and os.path.exists(q)):
+                return None
+            rects = self._client_rects_by_slot()
+            if not rects:
+                return None
+            out = []
+            for si in range(len(rects)):
+                l, t, r, b = rects[si]
+                _x, _y, _v = find_sleep_img("fix", ((l + r) // 2, (t + b) // 2))
+                if _x is None:
+                    out.append(si + 1)
+            return out
+        except Exception:
+            return None
+
+    def _island_running(self):
+        """섬/던전 실행기가 돌고 있나 (island_run.json 의 pid 로 즉시 확인)."""
+        try:
+            import ctypes
+            p = os.path.join(os.environ.get("LOCALAPPDATA", BASE),
+                             "MoonAI", "island_run.json")
+            if not os.path.exists(p):
+                return False
+            pid = int((json.load(io.open(p, encoding="utf-8-sig")) or {}).get("pid") or 0)
+            if not pid:
+                return False
+            h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+            if h:
+                ctypes.windll.kernel32.CloseHandle(h)
+                return True
+            return False
+        except Exception:
+            return False
+
+    def _island_repeat_next_all(self):
+        """⏰ 예약 중 **가장 빠른 다음 시각** (없으면 None)."""
+        try:
+            p = os.path.join(os.environ.get("LOCALAPPDATA", BASE),
+                             "MoonAI", "island_repeat.json")
+            d = json.load(io.open(p, encoding="utf-8-sig")) or {}
+            ts = [v.get("next") for k, v in d.items()
+                  if isinstance(v, dict) and v.get("next")]
+            return min(ts) if ts else None
+        except Exception:
+            return None
 
     def _base_expand_ok(self, tag=""):
         """🧭 **기준 슬롯(#05)이 확장돼 있나** — 아니면 퍼플 계정 전환으로 되돌린다.
