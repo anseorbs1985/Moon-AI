@@ -582,7 +582,9 @@ DEFAULT_CFG = {
     # 🃏 변신확정!! — 카드교체 창 안 좌표 **한 벌** (창 왼쪽위 기준 dx,dy)
     "cardfix_rels": None,
     "cardfix_on":   True,               # 화면이 보이면 창을 자동으로 띄울지
-    "cardfix_auto": False,              # True 면 들어가자마자 스스로 누른다
+    # 🃏 들어가면 **스스로** 누른다 (2026-10-19 사용자: "내가 저 카드교체
+    #    화면을 띄우면 너가 **자동으로 확정**을 해주면 되는 거야")
+    "cardfix_auto": True,
     "item_slots":   None,               # 아이템정리 — 처음 로드 때 스케줄 슬롯을 복사해 생성
     "item_hotkey":  None,               # 아이템정리 실행 단축키 (가상키 코드)
     "item_on":      False,              # 아이템정리 단축키 활성화 상태 (재시작 유지)
@@ -4593,7 +4595,10 @@ class App(tk.Tk):
                   bg="#8e44ad", fg="white", activebackground="#6c3483",
                   width=6, height=2,
                   command=self._open_cardfix_win).pack(side="left")
-        tk.Button(_cf, text="▶", font=("맑은 고딕", 11, "bold"),
+        # ▶ 는 **옆 버튼과 같은 8pt** 여야 높이가 맞는다 — Tk 의 height 는
+        # "글자 줄 수" 라, 폰트가 크면 같은 height=2 라도 **더 길어진다**
+        # (2026-10-19 사용자: "실행버튼이 세로가 길어. 옆에 크기랑 맞춰줘")
+        tk.Button(_cf, text="▶", font=("맑은 고딕", 8, "bold"),
                   bg="#6c3483", fg="white", activebackground="#4a235a",
                   width=2, height=2,
                   command=self._cardfix_run).pack(side="left", padx=(2, 0))
@@ -4604,7 +4609,7 @@ class App(tk.Tk):
                   bg="#b7950b", fg="white", activebackground="#7d6608",
                   width=6, height=2,
                   command=self._open_jakwi_win).pack(side="left")
-        tk.Button(_jk, text="▶", font=("맑은 고딕", 11, "bold"),
+        tk.Button(_jk, text="▶", font=("맑은 고딕", 8, "bold"),
                   bg="#7d6608", fg="white", activebackground="#5b4a06",
                   width=2, height=2,
                   command=lambda: self._start_dgn2("jakwi")).pack(side="left", padx=(2, 0))
@@ -4613,7 +4618,7 @@ class App(tk.Tk):
                   bg="#8e44ad", fg="white", activebackground="#6c3483",
                   width=6, height=2,
                   command=self._open_awaken_win).pack(side="left")
-        tk.Button(_aw, text="▶", font=("맑은 고딕", 11, "bold"),
+        tk.Button(_aw, text="▶", font=("맑은 고딕", 8, "bold"),
                   bg="#6c3483", fg="white", activebackground="#512e5f",
                   width=2, height=2,
                   command=lambda: self._run_awaken()).pack(side="left", padx=(2, 0))
