@@ -413,6 +413,7 @@ JAKWI_CLICKS   = 8     # 👑 작위!! 좌표 수 — 20개는 너무 많다는 
 #    (아이템등록이 쓰는 방식과 같다 — 창 크기가 달라도 비율로 맞춘다)
 CARDFIX_CLICKS = 5     # 카드 확정 4장 + 선택 확정 = 5개
 CARDFIX_GAP    = (0.18, 0.34)   # 좌표 사이 — "빠르게 후다닥" (사용자 지시)
+CARDFIX_SLOT_GAP = (0.25, 0.45) # 클라 사이 — 창이 바뀌는 틈만 준다
 CARDFIX_MATCH  = 0.75           # 화면 판정 기준 (cardfix_meta.json 이 있으면 그 값)
 CARDFIX_BASE_W = 491            # 그림을 자른 창 가로
 CARDFIX_SEE_COOL = 2.0          # 화면을 다시 보기까지 (초)
@@ -6012,6 +6013,27 @@ class App(tk.Tk):
         except Exception:
             return None
 
+    def _cardfix_slots_all(self):
+        """🃏 카드교체 화면인 **모든 클라** → [(슬롯0부터, L, T, 점수, 폭, 높이), …]
+
+        2026-10-19 사용자: "내가 화면 띄웠는데 왜 클릭을 안 하냐 … **빠르게 완료**해줘."
+        예전에는 점수가 가장 높은 **하나만** 처리해서, 15개를 띄워도 한 개만 됐다."""
+        try:
+            if not cardfix_img_list():
+                return []
+            rects = self._client_rects_by_slot()
+            if not rects:
+                return []
+            out = []
+            for si, (l, t, r, b) in enumerate(rects):
+                ok, v = cardfix_seen(((l + r) // 2, (t + b) // 2))
+                if ok:
+                    out.append((si, l, t, v, r - l, b - t))
+            return out
+        except Exception:
+            return []
+        except Exception:
+            return None
     def _reg_cardfix_coord(self, j):
         """📍 좌표 j 를 찍는다 — **클릭한 자리가 어느 클라 창인지** 보고 저장한다.
 
@@ -6076,48 +6098,31 @@ class App(tk.Tk):
             if not self._try_busy("변신확정"):
                 return
             try:
-                got = self._cardfix_slot()
-                if not got:
+                alls = self._cardfix_slots_all()
+                if not alls:
                     self.after(0, lambda: self.status.set(
                         "🃏 카드교체 화면인 클라가 없습니다"))
                     return
-                # ⚠ `_cardfix_slot` 은 **5개**를 돌려준다 (창 가로 포함)
-                si, L, T, v = got[0], got[1], got[2], got[3]
                 rels = [r for r in self._cardfix_rels() if r]
                 if not rels:
                     self.after(0, lambda: self.status.set(
                         "🃏 좌표가 하나도 없습니다 — 창에서 📍 로 찍어주세요"))
                     return
-                # 📐 **창 크기가 다르면 좌표도 비율로 늘린다** (2026-10-19 사용자:
-                #    "이건 화면이 크게 해도 똑같이 해줘야 해").
-                #    찍을 때의 창 가로를 `cardfix_base_w` 에 적어뒀다.
-                # ⚠ **가로·세로를 각각** 보정한다 — 창 모양이 다르면 한 배율로는
-                #    어긋난다 (실측 2026-10-19: 491x276(1.78) → 2504x1352(1.85),
-                #    가로 5.10배 · 세로 4.90배).
-                _bw = int(self.cfg.get("cardfix_base_w") or 0)
-                _bh = int(self.cfg.get("cardfix_base_h") or 0)
-                _nw = int(got[4]) if len(got) > 4 else 0
-                _nh = int(got[5]) if len(got) > 5 else 0
-                _kx = (_nw / float(_bw)) if (_bw > 0 and _nw > 0) else 1.0
-                _ky = (_nh / float(_bh)) if (_bh > 0 and _nh > 0) else _kx
-                click_log("[변신확정] #%02d 카드교체 화면 (%.2f) → 좌표 %d개를 누른다"
-                          % (si + 1, v, len(rels))
-                          + ("" if (abs(_kx - 1.0) < 0.01 and abs(_ky - 1.0) < 0.01)
-                             else " · 창 %dx%d→%dx%d 라 가로 %.2f배 · 세로 %.2f배 보정"
-                                  % (_bw, _bh, _nw, _nh, _kx, _ky)))
-                self._focus_client_at((L + 60, T + 60))
-                time.sleep(random.uniform(0.20, 0.35))
-                for k, (dx, dy) in enumerate(rels, 1):
+                # 🧍 **순서를 섞는다** — 늘 1번부터면 기계 같다 (2026-09-07 규칙).
+                #    2026-10-19 사용자: "알아서 **랜덤으로 순차적으로** 다 확정해주면 된다"
+                random.shuffle(alls)
+                click_log("[변신확정] 카드교체 화면 %d개 — %s 순서로 돈다"
+                          % (len(alls), [a[0] + 1 for a in alls]))
+                _n_all = len(alls)
+                for _ai, got in enumerate(alls, 1):
                     if getattr(self, "_stop_flag", False):
                         break
-                    self.after(0, lambda a=k, n=len(rels): self.status.set(
-                        "🃏 변신확정 %d/%d..." % (a, n)))
-                    click_at(L + int(dx * _kx), T + int(dy * _ky))
-                    if k < len(rels):
-                        time.sleep(random.uniform(*CARDFIX_GAP))
-                click_log("[변신확정] #%02d 끝 — %d개 눌렀다" % (si + 1, len(rels)))
-                self.after(0, lambda n=len(rels): self.status.set(
-                    "✔ 변신확정 완료 (%d개)" % n))
+                    si, L, T, v = got[0], got[1], got[2], got[3]
+                    self._cardfix_one(si, L, T, v, got, rels, _ai, _n_all)
+                self.after(0, lambda n=_n_all: self.status.set(
+                    "✔ 변신확정 완료 — 클라 %d개" % n))
+                return
+
             except Exception as e:
                 try:
                     click_log("[변신확정] 오류: %s" % e)
@@ -6126,6 +6131,37 @@ class App(tk.Tk):
             finally:
                 self._clear_busy("변신확정")
         threading.Thread(target=_work, daemon=True).start()
+
+    def _cardfix_one(self, si, L, T, v, got, rels, ai=1, an=1):
+        """🃏 **한 클라**에서 좌표를 순서대로 누른다 (가로·세로 각각 비율 보정)."""
+        try:
+            _bw = int(self.cfg.get("cardfix_base_w") or 0)
+            _bh = int(self.cfg.get("cardfix_base_h") or 0)
+            _nw = int(got[4]) if len(got) > 4 else 0
+            _nh = int(got[5]) if len(got) > 5 else 0
+            _kx = (_nw / float(_bw)) if (_bw > 0 and _nw > 0) else 1.0
+            _ky = (_nh / float(_bh)) if (_bh > 0 and _nh > 0) else _kx
+            click_log("[변신확정] (%d/%d) #%02d 화면 %.2f → 좌표 %d개"
+                      % (ai, an, si + 1, v, len(rels))
+                      + ("" if (abs(_kx - 1.0) < 0.01 and abs(_ky - 1.0) < 0.01)
+                         else " · %dx%d→%dx%d 가로 %.2f배 세로 %.2f배"
+                              % (_bw, _bh, _nw, _nh, _kx, _ky)))
+            self._focus_client_at((L + 60, T + 60))
+            time.sleep(random.uniform(0.20, 0.35))
+            for k, (dx, dy) in enumerate(rels, 1):
+                if getattr(self, "_stop_flag", False):
+                    break
+                self.after(0, lambda a=ai, n=an, b=k, m=len(rels): self.status.set(
+                    "🃏 변신확정 클라 %d/%d · 좌표 %d/%d..." % (a, n, b, m)))
+                click_at(L + int(dx * _kx), T + int(dy * _ky))
+                if k < len(rels):
+                    time.sleep(random.uniform(*CARDFIX_GAP))
+            time.sleep(random.uniform(*CARDFIX_SLOT_GAP))
+        except Exception as e:
+            try:
+                click_log("[변신확정] #%02d 오류: %s" % (si + 1, e))
+            except Exception:
+                pass
 
     def _cardfix_paint(self):
         """등록된 좌표를 창에 보여준다 — 됐는지 눈으로 보이게 (2026-09-16 규칙)."""
