@@ -575,7 +575,7 @@ OMANST_CLICKS = SLOW_CLICKS   # 🗝 오만 지배석 획득! — 8칸 그대로
 MONDEX_CLICKS = 8
 SLOW_CLICKS_BY = {"magic_slots": MAGIC_CLICKS, "omanst_slots": OMANST_CLICKS,
                   "mondex_slots": MONDEX_CLICKS}
-SLOW_FKEYS    = ("magic", "omanst")
+SLOW_FKEYS    = ("magic", "omanst", "mondex")
 SLOW_GAP_MIN  = 2.6        # 클릭 사이 (다른 런처 기본은 1.14~2.62초 — 두 배쯤 느리다)
 SLOW_GAP_MAX  = 5.2
 SLOW_SLOT_GAP = (4.0, 7.5)  # 슬롯 사이
@@ -1534,6 +1534,17 @@ MONDEX_DRAG_DY = 140             # 한 번에 끌어올릴 거리 (위로 = 목�
 MONDEX_DRAG_N  = 8               # 한 분류에서 몇 번까지 내려볼지
 MONDEX_LIST    = (100, 48, 212, 202)   # 목록 구역 (x, y, w, h) — 바뀌었나 보는 곳
 MONDEX_SAME    = 1.5             # 끌어도 이만큼 안 바뀌면 바닥이다
+# ⏳ 마지막 좌표를 누른 뒤 **도감이 뜰 때까지 여러 번 본다** (2026-10-20 사고).
+#    예전엔 좌표를 누르자마자 **한 번만** 봤다 → 메뉴가 뜨는 중이라
+#    `도감 화면이 아니다 (0.32)` 로 16슬롯 전부 그냥 지나갔다.
+#    ⚠ 고정 sleep 하나로 때우지 말 것 — 뜨는 순간 넘어가야 빠르고 확실하다.
+MONDEX_OPEN_TRIES = 7            # 최대 7번 (약 5초)
+MONDEX_OPEN_GAP   = (0.5, 0.9)
+# 🔙 다 받았으면 **ESC 두 번** — 도감·메뉴를 닫고 사냥 화면으로 돌아간다
+#    (2026-10-20 사용자: "전부 눌렀으면 ESC 두 번 눌러줘야지 다시 사냥 화면으로").
+#    창이 몇 겹인지 바뀌면 `MONDEX_ESC` 숫자만 고친다.
+MONDEX_ESC        = 2
+MONDEX_ESC_GAP    = (0.4, 0.8)
 MONDEX_RED_MIN = 5               # 빨간 픽셀 몇 개부터 '빨간점'
 MONDEX_GAP     = (0.7, 1.5)      # 단계 사이 (사람처럼 랜덤)
 MONDEX_TEMPO   = (0.90, 1.15)
@@ -14924,6 +14935,12 @@ class App(tk.Tk):
                         break                  # 분류 빨간점이 사라졌다 = 이 분류 끝
                 click_log(f"[도감] #{si+1:02d} {_tn} 끝 — {_tgot}개 "
                           f"→ 다음 분류로")
+            # 🔙 다 받았으면 **ESC 두 번** — 사냥 화면으로 돌려놓는다.
+            #    ⚠ 안 닫으면 그 클라가 도감을 띄운 채 남아 사냥을 못 한다.
+            for _e in range(MONDEX_ESC):
+                press_key("esc")
+                time.sleep(random.uniform(*MONDEX_ESC_GAP))
+            click_log(f"[도감] 🔙 #{si+1:02d} ESC {MONDEX_ESC}번 — 사냥 화면으로")
         except Exception as e:
             click_log(f"[도감] #{si+1:02d} {name} 오류: {e}")
         return got
@@ -14946,10 +14963,22 @@ class App(tk.Tk):
             if L is None:
                 click_log(f"[도감] [{name}] 그 좌표가 리니지M 창 밖이다 — 그만둔다")
                 return 0
-            ok, sc, _k = self._mondex_open((L + 60, T + 60))
+            # ⏳ 메뉴 → 도감이 뜨는 데 시간이 걸린다. **뜰 때까지 여러 번** 본다.
+            ok, sc = False, -1.0
+            for _t in range(MONDEX_OPEN_TRIES):
+                ok, sc, _k = self._mondex_open((L + 60, T + 60))
+                if ok:
+                    if _t:
+                        click_log(f"[도감] [{name}] 도감 열림 확인 "
+                                  f"({_t+1}번째, 일치도 {sc:.2f})")
+                    break
+                if getattr(self, "_stop_flag", False):
+                    break
+                time.sleep(random.uniform(*MONDEX_OPEN_GAP))
             if not ok:
                 click_log(f"[도감] [{name}] 도감 화면이 아니다 (일치도 {sc:.2f}, "
-                          f"기준 {MONDEX_MATCH}) — 좌표를 확인해주세요")
+                          f"기준 {MONDEX_MATCH}) — {MONDEX_OPEN_TRIES}번 봤다 "
+                          f"· 좌표를 확인해주세요")
                 self.after(0, lambda n=name: self.status.set(
                     f"🗂 [{n}] 도감 화면이 아닙니다 — 좌표를 확인해주세요"))
                 return 0
