@@ -1439,6 +1439,32 @@ FIX_CLICK_GONE   = (1.2, 1.8)   # 지우기 전 마지막 확인까지의 사이
 #    런처(용던고고·복구·작위)가 슬롯마다 또 깨운다. 서로를 몰라 **Z 가 두 번**
 #    들어갔고, 두 번째 Z 는 이미 깨어 있는 화면에서 **엉뚱한 창을 열었다.**
 WAKE_COOL = 25.0
+
+# ── 📬 우편 자동 받기 (2026-10-20 사용자 요청) ─────────────────────────
+#   "절전 상태에서 가운데 우편처럼 생긴 거 오른쪽 상단에 점이 있어. 그게 빨간색으로
+#    들어오면 네가 클릭해서 우편까지 좀 받아줬으면. 웨이브 주지 말고 그냥 하나씩
+#    받고 또 받고. 컴퓨터에 아무런 행동을 5분 동안 하지 않으면 시작해줘."
+#
+#   🔎 **봉투는 자리가 고정이 아니다** (사용자: "왼쪽이나 오른쪽에 배치될 수도 있어").
+#      실측 2026-10-20: #10 은 아이콘이 하나 더 있어 봉투가 x212 → x242 로 밀렸다.
+#      → **고정 좌표를 쓰지 말고 그림으로 찾는다.** 견본 3장(mail_icon*.png)은
+#        **빨간점이 안 닿는 봉투 왼쪽 절반 + 글자**라 점의 유무와 무관하게 잡힌다.
+#   🔴 받을 우편이 있는지는 **색으로** 본다 — 찾은 자리의 오른쪽 위 모서리에
+#      빨간 픽셀이 몇 개인가. 그림 매칭이 아니라 색이라 해상도와 무관하다.
+#      실측(16클라): 우편 있음 10~13개 · 받은 뒤 0~3개.
+MAIL_AUTO_ON   = True            # coords.json 의 `mail_auto` 가 이기고, 기본은 켬
+MAIL_IDLE_SEC  = 300             # 사람이 이만큼 안 만지면 시작 (5분)
+MAIL_BATCH     = 4               # 한 번에 받을 클라 수 (사용자: "4개씩")
+MAIL_NEXT      = (300, 600)      # 한 묶음 뒤 다음 확인까지 (5~10분 랜덤)
+MAIL_TICK_MS   = 60000           # 1분마다 '지금 받을 때인가' 만 본다 (화면 안 긁음)
+MAIL_MATCH     = 0.70            # 봉투 그림 기준 (실측: 진짜 0.95~1.00 · 아닌 것 0.60)
+MAIL_RED_MIN   = 5               # 빨간 픽셀 몇 개부터 '우편 있음'
+MAIL_BASE_W    = 491             # 견본을 자른 창 가로
+MAIL_ICON_OFF  = (6, 7)          # 견본 왼쪽위 → 봉투 누를 자리
+MAIL_RED_BOX   = (12, -3, 9, 8)  # 견본 왼쪽위 기준 빨간점 칸 (dx, dy, w, h)
+MAIL_OPEN_WAIT = (1.2, 1.9)      # 봉투를 누른 뒤 우편함이 뜰 때까지
+MAIL_STEP_WAIT = (0.8, 1.5)      # 단계 사이 (사람처럼 랜덤)
+MAIL_SLOT_GAP  = (2.0, 4.0)      # 클라 사이 — 웨이브 없이 하나씩
 SLEEP_WAKE = ("fix", "jakwi", "dragon")
 SLEEP_WAKE_KEY = "z"
 SLEEP_MATCH = 0.68      # 절전 화면 판정 기준.
@@ -4153,6 +4179,7 @@ class App(tk.Tk):
         self.after(3000, self._minauto_tick)
         # 💧 물약 0개 상시 감시 — 사냥 도중에 떨어지는 것을 잡는다 (2026-10-13)
         self.after(20000, self._p0_watch_tick)
+        self.after(40000, self._mail_tick)          # 📬 우편 자동받기
         # 🗓 매주 수요일 10시 — 사람이 완전히 손을 뗐을 때만 퍼플 전환
         self.after(45000, self._base_wed_tick)
         self.after(4000, self._bot_start_watcher)
@@ -5018,6 +5045,12 @@ class App(tk.Tk):
             command=self._fix_click_toggle)
         self._warn_clickbtn.pack(fill="x", pady=(0, 1))
         self._fix_click_btn_paint()
+        # 📬 우편 자동받기 켬/끔 (2026-10-20 사용자 요청)
+        self._warn_mailbtn = tk.Button(
+            self._warn_box, text="", font=("맑은 고딕", 8, "bold"), pady=0,
+            command=self._mail_toggle)
+        self._warn_mailbtn.pack(fill="x", pady=(0, 1))
+        self._mail_btn_paint()
         self._warn_rows = tk.Frame(self._warn_box)
         self._warn_rows.pack(fill="x")
         self.after(900, self._warn_refresh)
@@ -14605,6 +14638,227 @@ class App(tk.Tk):
             return True, float(sc)
         except Exception:
             return False, 0.0
+
+    # ── 📬 우편 자동 받기 ─────────────────────────────────────────────
+    def _mail_tpls(self):
+        """봉투 견본 — `click_templates/mail_icon*.png` (한 번만 읽어 둔다)."""
+        got = getattr(self, "_mail_tpl_cache", None)
+        if got is not None:
+            return got
+        out = []
+        try:
+            import cv2, numpy as np
+            for nm in ("mail_icon.png", "mail_icon_2.png", "mail_icon_3.png",
+                       "mail_icon_4.png", "mail_icon_5.png"):
+                q = os.path.join(IMG_DIR, nm)
+                if not os.path.exists(q):
+                    continue
+                t = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+                if t is not None:
+                    out.append(t)
+        except Exception:
+            pass
+        self._mail_tpl_cache = out
+        return out
+
+    def _mail_find(self, img):
+        """위쪽 띠에서 봉투를 찾는다 → (점수, x, y, 배율). 못 찾으면 점수 -1."""
+        best = (-1.0, 0, 0, 1.0)
+        try:
+            import cv2
+            tpls = self._mail_tpls()
+            if not tpls:
+                return best
+            h, w = img.shape[:2]
+            band = img[0:max(20, int(h * 0.16)), :]
+            for tpl in tpls:
+                for s in (0.95, 1.00, 1.05):
+                    k = (w / float(MAIL_BASE_W)) * s
+                    tt = tpl
+                    if abs(k - 1.0) > 0.02:
+                        tt = cv2.resize(tpl, (max(3, int(tpl.shape[1] * k)),
+                                              max(3, int(tpl.shape[0] * k))))
+                    if band.shape[0] < tt.shape[0] or band.shape[1] < tt.shape[1]:
+                        continue
+                    _, mx, _, loc = cv2.minMaxLoc(
+                        cv2.matchTemplate(band, tt, cv2.TM_CCOEFF_NORMED))
+                    if mx > best[0]:
+                        best = (float(mx), int(loc[0]), int(loc[1]), k)
+        except Exception:
+            pass
+        return best
+
+    @staticmethod
+    def _mail_red(img, ix, iy, k):
+        """봉투 오른쪽 위 모서리의 **빨간 픽셀 수** — 받을 우편이 있으면 많다."""
+        try:
+            dx, dy, bw, bh = MAIL_RED_BOX
+            x0 = max(0, ix + int(dx * k)); y0 = max(0, iy + int(dy * k))
+            c = img[y0:y0 + max(4, int(bh * k)), x0:x0 + max(4, int(bw * k))]
+            if c.size == 0:
+                return 0
+            B = c[:, :, 0].astype(int); G = c[:, :, 1].astype(int)
+            R = c[:, :, 2].astype(int)
+            return int((((R - B) > 55) & ((R - G) > 55) & (R > 110)).sum())
+        except Exception:
+            return 0
+
+    def _mail_scan(self):
+        """받을 우편이 있는 **자는 클라**를 모은다 → [(si, L, T, 봉투x, 봉투y)]."""
+        out = []
+        try:
+            rects = self._client_rects_by_slot()
+            if not rects:
+                return out
+            for si, (l, t, r, b) in enumerate(rects):
+                anc = ((l + r) // 2, (t + b) // 2)
+                # 😴 **자는 클라만** 본다 — 깨어 있으면 그 자리에 봉투가 없다
+                #    (사용자: "절전 상태인 것부터 받아주면 돼")
+                if find_sleep_img("fix", anc)[0] is None:
+                    continue
+                img = grab_window(anc)
+                if img is None:
+                    continue
+                mx, ix, iy, k = self._mail_find(img)
+                if mx < MAIL_MATCH:
+                    continue
+                red = self._mail_red(img, ix, iy, k)
+                if red < MAIL_RED_MIN:
+                    continue
+                ox, oy = MAIL_ICON_OFF
+                out.append((si, l, t, ix + int(ox * k), iy + int(oy * k), mx, red))
+        except Exception as e:
+            click_log(f"[우편] 훑기 오류: {e}")
+        return out
+
+    @staticmethod
+    def _mail_btn(img, lo_x, lo_y, hi_x, hi_y, blue=True):
+        """그 구역에서 **파란 '모두 받기'** 또는 **빨간 ✕** 를 찾는다 → (cx, cy)."""
+        try:
+            import cv2, numpy as np
+            h, w = img.shape[:2]
+            x0, y0 = int(w * lo_x), int(h * lo_y)
+            x1, y1 = int(w * hi_x), int(h * hi_y)
+            c = img[y0:y1, x0:x1]
+            if c.size == 0:
+                return None
+            B = c[:, :, 0].astype(int); G = c[:, :, 1].astype(int)
+            R = c[:, :, 2].astype(int)
+            m = (((B - R) > 45) & (B > 90)) if blue else \
+                (((R - B) > 60) & ((R - G) > 60) & (R > 110))
+            n, lab, st, ce = cv2.connectedComponentsWithStats(m.astype(np.uint8), 8)
+            best, ba = None, 0
+            for i in range(1, n):
+                ar = st[i][4]
+                if ar > ba and ar >= (120 if blue else 40):
+                    ba, best = ar, (int(ce[i][0]) + x0, int(ce[i][1]) + y0)
+            return best
+        except Exception:
+            return None
+
+    def _mail_one(self, si, L, T, mx_, my_, name=""):
+        """클라 하나의 우편을 받는다 → 받았으면 True.
+
+        🚫 **확인하지 않는다** (2026-10-20 사용자: "받으면 끝내 확인할 필요 없어").
+        🚫 버튼을 **못 찾으면 누르지 않는다** — 엉뚱한 곳을 누르느니 그만둔다
+           (이 저장소의 절대 규칙)."""
+        anc = (L + mx_, T + my_)
+        try:
+            self._focus_client_at(anc)
+            time.sleep(random.uniform(0.25, 0.45))
+            click_at(L + mx_, T + my_)                     # ① 봉투
+            time.sleep(random.uniform(*MAIL_OPEN_WAIT))
+            img = grab_window((L + 60, T + 60))
+            if img is None:
+                click_log(f"[우편] #{si+1:02d} {name} 화면을 못 찍음 — 그만둔다")
+                return False
+            got = self._mail_btn(img, 0.55, 0.78, 1.00, 1.00, blue=True)
+            if not got:
+                click_log(f"[우편] #{si+1:02d} {name} '모두 받기' 를 못 찾음 "
+                          f"— 아무것도 누르지 않고 ESC")
+                press_key("esc")
+                return False
+            click_at(L + got[0], T + got[1])               # ② 모두 받기
+            time.sleep(random.uniform(*MAIL_STEP_WAIT))
+            # ③ 닫기 — **ESC 를 쓴다.** 실측 2026-10-20: 빨간 ✕ 는 색으로 한 번도
+            #    안 잡혔고(테두리가 얇다), ESC 로 깨끗이 닫혔다. 캡처도 한 번 아낀다.
+            press_key("esc")
+            click_log(f"[우편] 📬 #{si+1:02d} {name} 받았다 "
+                      f"(모두 받기 {got[0]},{got[1]})")
+            return True
+        except Exception as e:
+            click_log(f"[우편] #{si+1:02d} {name} 오류: {e}")
+            return False
+
+    def _mail_tick(self):
+        """1분마다 — 사람이 5분 쉬었고 한가하면 우편을 받는다 (하나씩)."""
+        try:
+            if not self.cfg.get("mail_auto", MAIL_AUTO_ON):
+                pass
+            elif time.time() < getattr(self, "_mail_next_at", 0):
+                pass
+            elif self._is_busy() or self._island_running():
+                pass
+            elif self._system_idle_seconds() < MAIL_IDLE_SEC:
+                pass
+            else:
+                threading.Thread(target=self._mail_work, daemon=True).start()
+        except Exception:
+            pass
+        self.after(MAIL_TICK_MS, self._mail_tick)
+
+    def _mail_work(self):
+        """📬 받을 우편이 있는 클라를 **하나씩** 돈다 (웨이브 없음)."""
+        if not self._try_busy("우편받기"):
+            return
+        try:
+            got = self._mail_scan()
+            if not got:
+                self._mail_next_at = time.time() + random.uniform(*MAIL_NEXT)
+                return
+            random.shuffle(got)                 # 늘 같은 순서면 기계 같다
+            use = got[:MAIL_BATCH]
+            click_log(f"[우편] 📬 받을 곳 {len(got)}개 — 이번에 {len(use)}개를 "
+                      f"하나씩 받는다 {[g[0]+1 for g in use]}")
+            n = 0
+            for i, (si, L, T, mx_, my_, sc, red) in enumerate(use):
+                if getattr(self, "_stop_flag", False):
+                    break
+                # 그 사이 사람이 돌아왔으면 멈춘다
+                if self._system_idle_seconds() < 5:
+                    click_log("[우편] 사람이 돌아와 멈춘다")
+                    break
+                if self._mail_one(si, L, T, mx_, my_):
+                    n += 1
+                if i < len(use) - 1:
+                    time.sleep(random.uniform(*MAIL_SLOT_GAP))
+            click_log(f"[우편] 끝 — {n}개 받았다")
+            self.after(0, lambda c=n: self.status.set(f"📬 우편 {c}개 받았습니다"))
+        except Exception as e:
+            click_log(f"[우편] 오류: {e}")
+        finally:
+            self._mail_next_at = time.time() + random.uniform(*MAIL_NEXT)
+            self._clear_busy("우편받기")
+
+    def _mail_btn_paint(self):
+        try:
+            b = getattr(self, "_warn_mailbtn", None)
+            if not (b and b.winfo_exists()):
+                return
+            on = bool(self.cfg.get("mail_auto", MAIL_AUTO_ON))
+            b.config(text=("📬 5분 쉬면 우편 자동받기 ON" if on
+                           else "📬 우편 자동받기 OFF"),
+                     bg=("#2980b9" if on else "#7f8c8d"), fg="white")
+        except Exception:
+            pass
+
+    def _mail_toggle(self):
+        on = not bool(self.cfg.get("mail_auto", MAIL_AUTO_ON))
+        self.cfg["mail_auto"] = on
+        save_cfg(self.cfg)
+        self._mail_btn_paint()
+        self.status.set("📬 우편 자동받기 " + ("켬 — 5분 쉬면 받습니다" if on else "끔"))
+        click_log(f"[우편] 자동받기 {'켬' if on else '끔'} (사용자)")
 
     def _wake_key(self, anchor):
         """그 좌표의 리니지M 창 손잡이 — '누구를 깨웠나' 를 기억하는 열쇠."""
