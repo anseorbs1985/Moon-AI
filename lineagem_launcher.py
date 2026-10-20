@@ -226,7 +226,10 @@ FIX_GAP_MIN        = 0.70
 FIX_GAP_MAX        = 1.25
 # 슬롯의 **첫 좌표를 누르기 전에** 그 창을 앞으로 올리고 이만큼 기다린다.
 # 비활성 창의 첫 클릭은 '창 띄우기'로만 먹히고 사라진다 (2026-08-24 에 이미 겪은 것).
-FIX_FOCUS_WAIT     = (0.35, 0.60)
+FIX_FOCUS_WAIT     = (0.45, 0.75)   # 창을 올린 뒤 십자가를 누르기까지
+#   2026-10-20 사용자: *"십자가를 … 너무 빨리 눌러버려서 실패율이 좀 있어.
+#   확실히 눌러줘."* → 0.35~0.60 에서 조금 늘렸다 (랜덤 폭은 그대로).
+FIX_FOCUS_TRIES    = 3              # 창이 앞으로 올라올 때까지 몇 번 시도할지
 # 🩹 **2회차는 꼼꼼히** (2026-10-13 사용자 지시: "한 번은 지금 속도와 똑같이 하고,
 #    실패하게 되면은 다시 꼼꼼히 다시 눌러줘"). 1회차는 지금 속도 그대로다.
 # 🟣 영웅 아이템 점 — 슬롯마다 3개 (2026-10-13 사용자 설계).
@@ -486,10 +489,19 @@ AWAKEN_BOX = {
     AWAKEN_TOUCH: (0.30, 0.62, 0.70, 0.82),   # "화면을 터치해 주세요."
     AWAKEN_FAIL:  (0.30, 0.20, 0.70, 0.42),   # "각성에 실패 하였습니다."
 }
-AWAKEN_GAP     = (0.5, 0.9)     # 버튼 하나 누르고 다음까지
-AWAKEN_ROUND   = (0.9, 1.5)     # 한 바퀴 끝내고 다음 바퀴까지
+# ⚡ **30% 당겼다** (2026-10-20 사용자 지시: *"각성하는 거 속도를 30%만 당겨주라"*).
+#   네 간격을 전부 ×0.70 했다. **랜덤 폭(비율)은 그대로** 남겼다 —
+#   값 하나로 고정하지 않는다 (2026-09-07 '항상 사람이 하는 것처럼').
+AWAKEN_GAP     = (0.35, 0.63)   # 버튼 하나 누르고 다음까지 (0.5~0.9 × 0.70)
+AWAKEN_ROUND   = (0.63, 1.05)   # 한 바퀴 끝내고 다음 바퀴까지 (0.9~1.5 × 0.70)
+AWAKEN_WAIT    = (0.28, 0.49)   # '버튼이 켜졌나' 다시 보는 간격 (0.4~0.7 × 0.70)
+AWAKEN_TGAP    = (0.35, 0.63)   # 터치 안내를 누른 뒤 (0.5~0.9 × 0.70)
 AWAKEN_MAX     = 40    # 안전장치 — 이 횟수를 넘기면 멈춘다 (창에서 바꿀 수 있다)
-AWAKEN_SEE     = 8     # 버튼이 켜지기를 몇 번까지 기다릴지 (0.4~0.7초 간격)
+# ⚠ 간격을 줄인 만큼 **횟수를 늘려 '기다리는 총 시간' 은 그대로** 뒀다.
+#   8회 × 0.55초 ≈ 4.4초  →  11회 × 0.385초 ≈ 4.2초.
+#   이것을 8 로 되돌리면 **재료가 있는데도 '[각성] 버튼이 안 뜸' 으로 중단**된다
+#   (화면 연출이 느린 클라에서). 간격만 줄이고 횟수를 안 늘리면 안 된다.
+AWAKEN_SEE     = 11    # 버튼이 켜지기를 몇 번까지 기다릴지 (AWAKEN_WAIT 간격)
 AWAKEN_JITTER  = (0.90, 1.15)   # 사람처럼 — 간격을 매번 조금씩 흔든다
 AWAKEN_TEMPO   = (0.85, 1.25)   # 이번 실행의 '자기 속도' — 시작할 때 한 번 뽑아 내내 곱한다
 AWAKEN_PAUSE_P = 0.12           # 이 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
@@ -6163,6 +6175,19 @@ class App(tk.Tk):
                 self.status.set(f"✨ 버튼 그림이 없습니다 ({nm}.png)"); return
         self._awaken_stop = False
         self._awaken_busy = True
+        # 🔙 **런처를 맨 뒤로** (2026-10-20 사용자 지시 — 절대 규칙).
+        #   사용자: *"각성할 때 가끔 메인런처가 앞으로 튀어나오는 현상이 있더라.
+        #   내가 뭔가 실행하거나 그러면 맨 뒤로 보내줘."*
+        #   `_run_awaken` 은 **`_run_task` 를 안 지나는 맨 스레드**라
+        #   (도감·우편과 같은 구멍, 2026-10-20) 아무것도 내리지 않고 있었다.
+        #   각성은 **진짜 마우스 클릭**이라 앞에 있는 창이 그 자리를 먹는다.
+        #   🚫 `_minimize_all()` 을 쓰지 말 것 — 최소화가 아니라 **맨 뒤**다.
+        try:
+            self._minimize_claude()       # 클로드는 항상 위라 클릭을 가린다
+        except Exception:
+            pass
+        self._send_to_back()
+        self._stay_back(300)              # 도는 동안 앞으로 튀어나오지 않게
         n_max = int(times or self.cfg.get("awaken_times") or AWAKEN_MAX)
 
         def _go():
@@ -6208,7 +6233,7 @@ class App(tk.Tk):
                         if gx is not None and gl >= AWAKEN_LIT:
                             break
                         gx = None
-                        _nap(0.4, 0.7)
+                        _nap(*AWAKEN_WAIT)
                     if gx is None:
                         click_log(f"[각성강화] {t+1}회째 [각성] 버튼이 안 뜸 "
                                   f"(일치도 {gv:.2f} · 밝기 {gl:.0f}/{AWAKEN_LIT:.0f}) "
@@ -6229,7 +6254,7 @@ class App(tk.Tk):
                             tx, ty, tv, _tl = self._awaken_find(AWAKEN_TOUCH, rect)
                             if tx is not None:
                                 break
-                            _nap(0.4, 0.7)
+                            _nap(*AWAKEN_WAIT)
                         if bad:
                             break
                         if tx is None:
@@ -6244,7 +6269,7 @@ class App(tk.Tk):
                             ok = fv < AWAKEN_MATCH      # 실패 글자가 없으면 성공
                         click_hold(rect[1] + rect[3]//2, rect[2] + int(rect[4]*0.42),
                                    ms=random.uniform(60, 110))
-                        _nap(0.5, 0.9)
+                        _nap(*AWAKEN_TGAP)
                     if bad:
                         break
                     done += 1
@@ -12442,12 +12467,43 @@ class App(tk.Tk):
         엉뚱한 창(또는 아무 데도)에 붙는다 → 붙여넣기 직전에 이 창을 활성화한다."""
         try:
             import win32gui, win32con, win32process, ctypes
-            hwnd = win32gui.WindowFromPoint((int(coord[0]), int(coord[1])))
-            root = ctypes.windll.user32.GetAncestor(hwnd, 2)      # GA_ROOT
+            # 🚨 **`WindowFromPoint` 를 먼저 쓰면 안 된다** (2026-10-20 — 복구 실패의 진짜 원인).
+            #   그건 그 자리의 **맨 위 창**을 돌려준다. 런처·클로드·다른 클라가 그 자리를
+            #   덮고 있으면 **그 창**이 잡히고, 제목이 '리니지M' 이 아니라서
+            #   **조용히 False 로 빠져나갔다** → 클라가 앞으로 올라오지 않은 채
+            #   좌표1(십자가)이 눌려 **'창 띄우기'로만 먹히고 사라졌다.**
+            #   사용자 신고: *"복구할 때 십자가를 누르고 해야 하는데 너무 빨리 눌러버려서
+            #   실패율이 좀 있어. 확실히 눌러줘."* — 빠른 것이 아니라 **창을 안 올린 것**이었다.
+            #
+            #   `game_window_at` 은 **게임 창만** 보고 **사각형으로** 찾으므로
+            #   가려져 있어도 정확하다 (이 저장소에서 여러 번 검증된 방법 —
+            #   2026-10-20 F11 절전해제 좌표 확인에서도 이걸 썼다).
+            #   ⚠ 클로드는 이 순서를 되돌리지 말 것.
+            root = None
+            try:
+                from precise_click import game_window_at
+                root = game_window_at(int(coord[0]), int(coord[1]))
+            except Exception:
+                root = None
+            if not root:                       # 게임 창을 못 찾았을 때만 옛 방식
+                hwnd = win32gui.WindowFromPoint((int(coord[0]), int(coord[1])))
+                root = ctypes.windll.user32.GetAncestor(hwnd, 2)      # GA_ROOT
             if not root:
                 return False
             title = win32gui.GetWindowText(root)
-            if not title.startswith("리니지M"):
+            # 🚨 **메인런처 자신을 앞으로 올리던 버그** (2026-10-20 실측 — 두 신고의 공통 원인).
+            #   런처 창 제목이 **`리니지M 자동 실행`** 이라 `startswith("리니지M")` 을
+            #   **그대로 통과**했다. 그래서 `WindowFromPoint` 가 런처를 집으면
+            #   `SetForegroundWindow(런처)` 를 불러 **런처를 앞으로 끌어올리고**,
+            #   바로 뒤의 좌표 클릭을 **런처가 먹었다.**
+            #   실측 16슬롯 중 **6개**(#06·07·08·10·11·12)가 런처로 잡혔다 —
+            #   사용자 신고 둘이 전부 이것이었다:
+            #     *"복구할 때 십자가를 … 실패율이 좀 있어"*
+            #     *"각성할 때 가끔 메인런처가 앞으로 튀어나오는 현상이 있더라"*
+            #   CLAUDE.md 2026-08-29 에 이미 적어둔 규칙(`리니지M 자동 실행` 은 제외)을
+            #   `_client_hwnds_by_slot` 에만 넣고 **여기엔 빠뜨렸다.**
+            #   ⚠ 클로드는 이 제외를 지우지 말 것.
+            if not title.startswith("리니지M") or title.startswith("리니지M 자동 실행"):
                 return False
             if win32gui.GetForegroundWindow() == root:
                 return True
@@ -13691,7 +13747,18 @@ class App(tk.Tk):
             try:
                 _fx, _fy, _fs = find_image(fkey, j, coord)
                 if _fx is not None:
-                    _dx, _dy = _fx - coord[0], _fy - coord[1]
+                    # 🚨 **우리가 📍 로 옮긴 만큼을 '드리프트' 로 오해하던 버그**
+                    #    (2026-10-20 발견). `coord` 에는 이미 📍 offset(+8,+0)이
+                    #    더해져 있는데 그것과 **그림 가운데**(_fx)를 비교해서,
+                    #    좌표5를 누를 때마다 **빠짐없이** `(-8,+0) 어긋남` 이 찍혔다
+                    #    (실측 10-20 17:06~17:09 — 16슬롯 전부).
+                    #    피해: ① 기록이 거짓으로 도배돼 **진짜 밀림을 못 본다**
+                    #          ② 반대쪽으로 8px 밀리면 16px 로 읽힌다
+                    #          ③ 쓸데없는 `move_at` + 0.12~0.22초를 매번 더한다
+                    #    → **그림 가운데(`_ic`,`_iy0`)와 비교**한다. 0px 이 정상이다.
+                    #    ⚠ `coord` 와 비교하도록 되돌리지 말 것.
+                    _bx, _by = _ic, _iy0
+                    _dx, _dy = _fx - _bx, _fy - _by
                     # 멀리 잡혔으면 '움직인 것'이 아니라 **다른 마름모**다 — 무시한다.
                     # (위·아래에 같은 아이콘이 있어 엉뚱한 층으로 가던 문제 방지)
                     if abs(_dx) > DRIFT_MAX or abs(_dy) > DRIFT_MAX:
@@ -13701,6 +13768,7 @@ class App(tk.Tk):
                         click_log(f"{fkey} [{nm}] 좌표{j+1} 자리가 어긋나 있었음 "
                                   f"({_dx:+d},{_dy:+d}) → 새 자리로 다시 겨냥")
                         coord = (_fx + _o2[0], _fy + _o2[1])
+                        _ic, _iy0 = _fx, _fy      # 기준도 새 자리로 옮긴다
                         move_at(*coord)
                         time.sleep(random.uniform(0.12, 0.22))
             except Exception:
@@ -14301,13 +14369,29 @@ class App(tk.Tk):
                 # 복구 창이 안 열린 채 좌표2·3이 허공에 눌렸다
                 # (사용자 신고: "복구가 제대로 안 되는 경우가 상당히 많다").
                 if fkey == "fix" and _anchor:
-                    try:
-                        self._focus_client_at(_anchor)
-                        time.sleep(random.uniform(*FIX_FOCUS_WAIT)
-                                   * (FIX_SLOW_MULT
-                                      if getattr(self, "_fix_slow", False) else 1.0))
-                    except Exception:
-                        pass
+                    # ✅ **올라왔는지 확인하고, 안 왔으면 다시 올린다** (2026-10-20 지시:
+                    #    *"십자가를 … 확실히 눌러줘"*). 예전엔 한 번 부르고 결과를
+                    #    **보지 않았다** — 실패하면 그대로 눌러 클릭이 통째로 씹혔다.
+                    #    ⚠ 이 확인을 없애지 말 것. 조용히 실패하는 길을 만들지 않는다.
+                    _fm0 = (FIX_SLOW_MULT if getattr(self, "_fix_slow", False) else 1.0)
+                    _up = False
+                    for _ft in range(FIX_FOCUS_TRIES):
+                        try:
+                            _up = bool(self._focus_client_at(_anchor))
+                        except Exception:
+                            _up = False
+                        time.sleep(random.uniform(*FIX_FOCUS_WAIT) * _fm0)
+                        if _up:
+                            if _ft:
+                                click_log(f"fix #{si+1:02d} 창을 {_ft+1}번째에 앞으로 "
+                                          f"올렸다 — 이제 십자가를 누른다")
+                            break
+                    if not _up:
+                        # 못 올렸으면 그대로 눌러봐야 '창 띄우기' 로 먹힌다.
+                        # 기록을 남겨 원격에서 짚을 수 있게 한다.
+                        click_log(f"fix #{si+1:02d} ⚠ 창을 {FIX_FOCUS_TRIES}번 시도해도 "
+                                  f"앞으로 못 올렸다 — 그래도 진행한다 "
+                                  f"(십자가가 씹힐 수 있다)")
                 order = [j for j in range(nclk)
                          if coords[j] or (has_img(fkey, j) and _anchor)]
                 # 쿠폰: 클릭5(입력칸)가 등록돼 있으면 그 직후, 없으면 클릭4 직후에 붙여넣기
@@ -14335,15 +14419,23 @@ class App(tk.Tk):
                             fkey, j, coords[j] or _anchor, slot)
                         if _act == "이미지없음":
                             break        # 이 슬롯만 끝 — 다음 슬롯으로 넘어간다
+                    # 🚨 이 두 줄은 **`break` 뒤에 있어 영영 안 돌던 죽은 코드**였다
+                    #   (2026-10-20 발견). 그래서 **칸마다 상태줄이 안 바뀌고**
+                    #   쿠폰의 `클릭n 완료` 기록이 **한 줄도 안 남았다.**
+                    #   `break` 앞으로 옮겨 제자리를 찾아줬다.
+                    #   ⚠ 다시 `break` 뒤로 보내지 말 것.
+                    try:
+                        self.status.set(f"{icon} [{name}] {_act}{j+1}...")
+                        if fkey == "coupon" and coords[j]:
+                            self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
+                    except Exception:
+                        pass
                     _sa = stop_at(fkey)
                     if _sa and (j + 1) >= _sa:
                         # '여기까지만' 으로 정해둔 좌표를 마쳤다 → 이 슬롯 끝
                         # (뒤 좌표가 같은 아이콘을 또 눌러 되돌아가는 것 방지)
                         self.status.set(f"{icon} [{name}] 좌표{_sa}까지 끝 — 이 슬롯 종료")
                         break
-                        self.status.set(f"{icon} [{name}] {_act}{j+1}...")
-                        if fkey == "coupon":
-                            self._coupon_log(f"클릭{j+1} 완료 {tuple(coords[j])}")
                     if fkey == "fix":
                         # 🩹 복구 간격 — 2026-09-29 에 0.30~0.60 → 0.70~1.25 로 넓혔다.
                         # 너무 연속적으로 눌러 창이 뜨기 전에 다음 좌표가 씹혔다.
@@ -16003,6 +16095,13 @@ class App(tk.Tk):
             _win = getattr(self, "_awaken_win", None)
             _had = bool(_win and _win.winfo_exists())
             self.after(0, lambda: self._open_awaken_win(reuse=True))
+            # 🔙 **각성강화 창만 띄우고 메인런처는 맨 뒤로** (2026-10-20 사용자 지시).
+            #   사용자: *"각성할 때 가끔 메인런처가 앞으로 튀어나오는 현상이 있더라."*
+            #   자식 창(Toplevel)을 띄우면 윈도가 주인 창(메인런처)까지 같이
+            #   올리는 경우가 있다. 띄운 **직후** 메인런처만 뒤로 내린다 —
+            #   각성강화 창은 `-topmost` 라 그대로 앞에 남는다.
+            #   ⚠ `_send_to_back()` 은 **최소화가 아니라 맨 뒤**다 (2026-10-06 규칙).
+            self.after(220, self._send_to_back)
             click_log(f"[각성자동] 각성 화면 확인 ({which} 일치도 {sc:.2f}) → "
                       + ("창을 앞으로 올림" if _had else "런처 창을 띄웠다")
                       + " (실행은 사용자가 ▶ 를 눌러야 시작 · 끄면 다시 안 띄움)")
@@ -21143,6 +21242,32 @@ class App(tk.Tk):
                 return                            # 거래소가 아니다 — 조용히 무시
             click_log(f"[아이템등록] 🛒 거래소 확인 (일치도 {sc:.3f}) "
                       f"— 클릭 {tuple(xy)} · 창({rc[0]},{rc[1]})")
+            # 🚫 **등록창이 이미 열려 있으면 아무것도 누르지 않는다** (2026-10-20 지시).
+            #   사용자: *"최저가 클릭하는 거 **처음에 한 번만** 해줘.
+            #   내가 가격을 수정해도 너가 다시 최저가를 눌러버리니까 계속 돌아가버려서 힘들다."*
+            #
+            #   왜 다시 눌렸나 — 값넣기 모드는 `4`(판매) → `5`(최저가) 를 누르고
+            #   **창을 열어둔 채** 멈춘다. 그 상태에서 사용자가 값을 고치려고
+            #   소지품 칸 쪽을 한 번 더 클릭하면, 클릭 감시가 그것을 **새 아이템 선택**
+            #   으로 보고 처음부터 또 돌려 **`5`(최저가)가 다시 들어가** 고친 값이 날아갔다.
+            #
+            #   등록창(`itemreg_02.png` = '최저 거래 단가' 라벨)이 보이면
+            #   **지금 사용자가 그 창에서 값을 넣는 중**이다 → 손대지 않는다.
+            #   새 아이템을 올릴 때는 그 창을 닫으면(✕·ESC·등록) 다시 동작한다.
+            #   ⚠ 확인 비용은 창 캡처 한 번(약 62ms)뿐이다.
+            #   🚫 클로드는 이 관문을 없애지 말 것 — 없애면 고친 값이 또 날아간다.
+            try:
+                _wo, _wv = itemreg_img_seen(ITEMREG_PRICE_STEP, xy)
+            except Exception:
+                _wo, _wv = False, -1.0
+            if _wo:
+                click_log(f"[아이템등록] ⏸ 등록창이 이미 열려 있다 (일치도 {_wv:.3f}) "
+                          f"— **최저가를 다시 누르지 않는다.** 값을 고치는 중으로 봅니다 "
+                          f"(새 아이템은 그 창을 닫고 누르세요)")
+                self.after(0, lambda: self.status.set(
+                    "⏸ 등록창이 열려 있어 그대로 둡니다 — 값을 고친 뒤 "
+                    "직접 등록하거나, 창을 닫고 다른 아이템을 누르세요"))
+                return
             steps = self._itemreg_steps()
             order = [k for k in range(ITEMREG_STEPS) if steps[k]["key"]]
             if not order:
