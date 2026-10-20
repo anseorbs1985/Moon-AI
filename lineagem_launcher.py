@@ -1492,7 +1492,14 @@ P0_RUN_WAIT  = 600               # 한 슬롯 실행을 최대 이만큼 기다�
 #   🔴 받을 우편이 있는지는 **색으로** 본다 — 찾은 자리의 오른쪽 위 모서리에
 #      빨간 픽셀이 몇 개인가. 그림 매칭이 아니라 색이라 해상도와 무관하다.
 #      실측(16클라): 우편 있음 10~13개 · 받은 뒤 0~3개.
-MAIL_AUTO_ON   = True            # coords.json 의 `mail_auto` 가 이기고, 기본은 켬
+# 📬 우편 자동받기 — **기본 꺼짐** (2026-10-20 사용자 지시).
+#   사용자: *"우편함 받는 거 스스로 깨우지 말고 내가 버튼을 만들면 깨워…
+#   계속 왜 스스로 절전모드를 해제하냐고, 우편을 받는 것도 아닌데"*
+#   실측 10-20 — 18:23·18:33·18:42·18:49·18:55·20:58 … **6~9분마다 스스로 돌며
+#   클라를 깨웠다.** 그게 '수시로 절전을 깨운다' 의 진짜 범인이었다.
+#   → 우편은 **메인런처 [📬 우편 지금 받기] 를 누를 때만** 돈다.
+#   🚫 클로드는 이 기본값을 True 로 되돌리지 말 것.
+MAIL_AUTO_ON   = False
 MAIL_IDLE_SEC  = 300             # 사람이 이만큼 안 만지면 시작 (5분)
 MAIL_BATCH     = 4               # 한 번에 받을 클라 수 (사용자: "4개씩")
 MAIL_NEXT      = (300, 600)      # 한 묶음 뒤 다음 확인까지 (5~10분 랜덤)
@@ -1514,6 +1521,17 @@ MAIL_OPEN_WAIT = (1.20, 2.00)    # 봉투를 누른 뒤 우편함을 보기까�
 MAIL_READ_WAIT = (0.45, 0.95)    # 화면을 '읽는' 시간 — 모두 받기를 누르기 전
 MAIL_STEP_WAIT = (0.55, 1.05)    # 받은 뒤 닫기까지
 MAIL_SLOT_GAP  = (3.0, 7.0)      # 클라 사이 — 웨이브 없이 하나씩 (그대로)
+# 📬 **[▶ 우편함 실행] 은 5분에 걸쳐 묶음으로 나눠 받는다** (2026-10-20 사용자 지시).
+#   사용자: *"한 번에 받지 말고 시간을 조정하면서 **5분에 걸쳐 랜덤으로** 받아줘…
+#   4개 슬롯 받고 **1~2분 사이**에 걸쳐서 다른 거 3개 받고 4개 받고 2개 받고
+#   이런 식으로 랜덤으로. **이건 사람이 하는 것처럼** 해줘."*
+MAIL_SPREAD    = (240.0, 360.0)  # 전체 목표 시간 4~6분 (매번 다시 뽑는다)
+MAIL_BURST     = (2, 4)          # 한 묶음에 받을 개수 — 2~4개 랜덤
+MAIL_IN_GAP    = (8.0, 16.0)     # **묶음 안** 슬롯 사이 (10초·9초·15초처럼)
+MAIL_BURST_GAP = (60.0, 120.0)   # **묶음 사이** 1~2분
+MAIL_FIT       = (0.55, 1.60)    # 목표 시간에 맞추는 배수 한계
+#   ⚠ 랜덤 폭을 0 으로 만들지 말 것 — 목표 시간은 **뽑은 값에 배수를 곱해** 맞춘다
+#     (2026-09-07 '항상 사람이 하는 것처럼' · 순서를 바꾸면 값이 굳는다).
 # ── 🗂 몬스터 도감 보상 받기 (2026-10-20 사용자 요청) ─────────────────
 #   "1번 창에 점 세 개를 클릭해놨거든. 제일 아래에 몬스터도감이라고 빨간점이
 #    들어온 게 있어. 이거를 내가 열어줄 거야. 그러면 안 받은 것들이 빨간점으로
@@ -14735,6 +14753,9 @@ class App(tk.Tk):
     # · 다야는 좌표4 의 👁 '무료' 확인이 그대로 막는다 — 재화를 쓰는 일은 없다
     def _fix_idle_tick(self):
         try:
+            # ✅ **기본 켬 그대로** — 2026-10-20 에 잠깐 껐다가 사용자 지시로 되살렸다:
+            #   *"전부 끄면 안 돼. 그럼 **상시로 깨우는 우편 자동받기만** 꺼줘."*
+            #   끈 것은 우편 자동받기(`MAIL_AUTO_ON`) 하나뿐이다.
             if not self.cfg.get("fix_idle_on", True):
                 self._fix_idle_done = False
             else:
@@ -15299,23 +15320,71 @@ class App(tk.Tk):
                 return
             random.shuffle(got)                 # 늘 같은 순서면 기계 같다
             use = got if now else got[:MAIL_BATCH]
-            click_log(f"[우편] 📬 받을 곳 {len(got)}개 — 이번에 {len(use)}개를 "
-                      f"하나씩 받는다 {[g[0]+1 for g in use]}"
-                      + (" (지금 받기 — 전부)" if now else ""))
-            n = 0
-            for i, (si, L, T, mx_, my_, sc, red) in enumerate(use):
+            # 📬 **묶음으로 쪼갠다** — 2~4개 받고 1~2분 쉬고 또 2~4개 (사람처럼).
+            #    버튼으로 부른 것만 이렇게 하고, (지금은 안 도는) 자동 쪽은 예전 그대로.
+            _bursts = []
+            if now:
+                _k = 0
+                while _k < len(use):
+                    _b = random.randint(*MAIL_BURST)
+                    _bursts.append(use[_k:_k + _b])
+                    _k += _b
+                # 뽑은 간격들을 **목표 시간에 맞춰 배수로** 늘리거나 줄인다
+                _want = random.uniform(*MAIL_SPREAD)
+                _ins = [random.uniform(*MAIL_IN_GAP)
+                        for b in _bursts for _ in range(max(0, len(b) - 1))]
+                _bgs = [random.uniform(*MAIL_BURST_GAP)
+                        for _ in range(max(0, len(_bursts) - 1))]
+                _plan = sum(_ins) + sum(_bgs) + len(use) * 4.0   # 4초 = 한 슬롯 받는 시간
+                _fit = 1.0 if _plan <= 0 else max(MAIL_FIT[0],
+                                                  min(MAIL_FIT[1], _want / _plan))
+                _ins = [g * _fit for g in _ins]
+                _bgs = [g * _fit for g in _bgs]
+                click_log(f"[우편] 📬 받을 곳 {len(got)}개 — "
+                          f"{len(_bursts)}묶음 {[len(b) for b in _bursts]} 으로 "
+                          f"약 {int(_plan * _fit / 60)}분 {int(_plan * _fit % 60)}초에 "
+                          f"걸쳐 받는다 (목표 {int(_want)}초 · 배수 {_fit:.2f}) "
+                          f"{[g[0] + 1 for g in use]}")
+            else:
+                _bursts, _ins, _bgs = [use], [], []
+                click_log(f"[우편] 📬 받을 곳 {len(got)}개 — 이번에 {len(use)}개를 "
+                          f"하나씩 받는다 {[g[0]+1 for g in use]}")
+            n, _done, _ii, _bi = 0, 0, 0, 0
+            _t0 = time.time()
+            for _bn, _burst in enumerate(_bursts):
                 if getattr(self, "_stop_flag", False):
                     break
-                # 그 사이 사람이 돌아왔으면 멈춘다 — **버튼으로 부른 것은 예외**
-                if not now and self._system_idle_seconds() < 5:
-                    click_log("[우편] 사람이 돌아와 멈춘다")
-                    break
-                if self._mail_one(si, L, T, mx_, my_):
-                    n += 1
-                if i < len(use) - 1:
-                    self.after(0, lambda a=i, m=len(use): self.status.set(
-                        f"📬 우편 받는 중 {a+1}/{m}..."))
-                    time.sleep(random.uniform(*MAIL_SLOT_GAP))
+                if _bn:                      # 묶음 사이 — 1~2분 쉰다
+                    _w = _bgs[_bi] if _bi < len(_bgs) else random.uniform(*MAIL_BURST_GAP)
+                    _bi += 1
+                    click_log(f"[우편] ⏸ {_bn}묶음 끝 — {int(_w)}초 쉬고 다음 묶음")
+                    self.after(0, lambda s=int(_w), a=_done, m=len(use):
+                               self.status.set(f"📬 우편 {a}/{m} — {s}초 쉬는 중 (사람처럼)"))
+                    _end = time.time() + _w
+                    while time.time() < _end:
+                        if getattr(self, "_stop_flag", False):
+                            break
+                        time.sleep(0.5)
+                for i, (si, L, T, mx_, my_, sc, red) in enumerate(_burst):
+                    if getattr(self, "_stop_flag", False):
+                        break
+                    # 그 사이 사람이 돌아왔으면 멈춘다 — **버튼으로 부른 것은 예외**
+                    if not now and self._system_idle_seconds() < 5:
+                        click_log("[우편] 사람이 돌아와 멈춘다")
+                        break
+                    if self._mail_one(si, L, T, mx_, my_):
+                        n += 1
+                    _done += 1
+                    if i < len(_burst) - 1:
+                        _g = (_ins[_ii] if _ii < len(_ins)
+                              else random.uniform(*MAIL_SLOT_GAP))
+                        _ii += 1
+                        self.after(0, lambda a=_done, m=len(use), s=_g:
+                                   self.status.set(
+                                       f"📬 우편 받는 중 {a}/{m} — {s:.0f}초 뒤 다음"))
+                        time.sleep(_g)
+            if now:
+                click_log(f"[우편] ⏱ 실제 {int(time.time()-_t0)}초 걸렸다")
             click_log(f"[우편] 끝 — {n}개 받았다")
             self.after(0, lambda c=n, t=len(use): self.status.set(
                 f"📬 우편 {c}개 받았습니다" + (f" (시도 {t}개)" if c < t else "")))
@@ -19657,6 +19726,14 @@ class App(tk.Tk):
         if not self._try_busy("절전해제"):
             return
         self._seq_running = True
+        # 🚨 **[■ 전체멈춤] 깃발을 내린다** (2026-10-20).
+        #   `_stop_flag` 를 내리는 곳이 **[전체 자동실행] 하나뿐**이었다.
+        #   그래서 전체멈춤을 한 번 누르면 F11 이 **첫 슬롯에서 바로 break** 되어
+        #   **영영 아무것도 안 했다** — 실측 10-19 08:40 · 17:51 둘 다 `0개 깨움`.
+        #   사용자가 **방금 F11 을 누른 것**이 곧 '이것을 하라' 는 뜻이므로
+        #   여기서 내리는 것이 맞다.
+        #   ⚠ 클로드는 이 한 줄을 지우지 말 것 — 지우면 F11 이 조용히 죽는다.
+        self._stop_flag = False
         try:
             # 클릭 좌표를 런처/연속클릭 창이 가리지 않도록 확실히 최소화 후 실행
             self.after(0, self._seq_hide)
@@ -19671,12 +19748,15 @@ class App(tk.Tk):
             #    절전 그림이 없으면 확인을 건너뛰고 예전처럼 전부 누른다.
             _chk = SEQ_SKIP_AWAKE and bool(sleep_img_path("fix")
                                            and os.path.exists(sleep_img_path("fix")))
-            _hit, _skip = 0, 0
+            _hit, _skip, _sc = 0, 0, []
+            _cut = False
             for i, (x, y) in enumerate(coords):
                 if self._seq_stop_now():
+                    _cut = True
                     break
                 if _chk:
                     _sx, _sy, _sv = find_sleep_img("fix", (x, y))
+                    _sc.append(f"{_sv:.2f}" + ("😴" if _sx is not None else "✔"))
                     if _sx is None:
                         _skip += 1
                         self.after(0, lambda a=i, s=_skip: self.status.set(
@@ -19692,9 +19772,22 @@ class App(tk.Tk):
                 self._wake_mark((x, y))
                 if i < n - 1:
                     time.sleep(random.uniform(mn, mx))   # 슬롯간 간격 (설정값 그대로, 추가 간격 없음)
-            _msg = (f"✔ 절전해제 완료 — {_hit}개 깨움"
-                    + (f" · {_skip}개는 이미 깨어 있어 건너뜀" if _skip else ""))
-            click_log("[절전해제] " + _msg.replace("✔ ", ""))
+            # 🗒 **왜 그렇게 했는지 항상 남긴다** (2026-10-20).
+            #   예전엔 건너뛴 수가 0 이면 아무 말도 없어서, 멈춤 깃발 때문에
+            #   아무것도 안 했을 때도 `0개 깨움` 한 줄뿐이라 원인을 짚을 수 없었다.
+            if _cut:
+                _msg = (f"⏹ 절전해제 중단 — [■ 전체멈춤] 이 눌렸습니다 "
+                        f"({_hit}개 깨움 · {_skip}개 건너뜀)")
+            elif not _chk:
+                _msg = (f"✔ 절전해제 완료 — {_hit}개 전부 눌렀습니다 "
+                        f"(절전 그림이 없어 '이미 깨어 있나' 확인을 못 했습니다)")
+            else:
+                _msg = (f"✔ 절전해제 완료 — 😴 {_hit}개 깨움 · "
+                        f"✔ {_skip}개는 이미 깨어 있어 건너뜀")
+            click_log("[절전해제] " + _msg.replace("✔ ", "", 1))
+            if _sc:
+                click_log(f"[절전해제] 점수 {' '.join(_sc)} "
+                          f"(기준 {SLEEP_MATCH:.2f} · 😴=깨움 ✔=건너뜀)")
             self.after(0, lambda m=_msg: self.status.set(m))
         except Exception as e:
             self.after(0, lambda err=e: self.status.set(f"절전해제 오류: {err}"))
@@ -23949,7 +24042,23 @@ class App(tk.Tk):
         self.status.set("우편함 멈추는 중...")
 
     def _run_mail_standalone(self):
-        self._run_mail()
+        """📬 [▶ 우편함 실행] — **그림으로 받는 새 방식**으로 돈다 (2026-10-20 사용자 지시).
+
+        사용자: *"메인런처에 우편함이라고 만들어놨으니까 거기에 실행버튼까지 있으니까
+        누르면은 너가 실행해줘. **기존에 좌표 전부 없애고**"*
+
+        · 새 방식(`_mail_work`)은 **'모두 받기' 버튼을 그림으로 찾아** 누르므로
+          `mail_slots` 좌표가 **필요 없다** — 그래서 좌표를 비워도 그대로 돈다.
+        · `now=True` — **전부** 받고, 사람이 만져도 멈추지 않는다
+          (버튼을 누른 사람이 옆에 있는 게 당연하므로).
+        · 🚫 **자동으로는 절대 안 돈다** — `MAIL_AUTO_ON = False`.
+          깨우는 것도 **이 버튼을 눌렀을 때만**이다.
+        ⚠ 클로드는 이것을 옛 좌표 방식(`_run_mail`)으로 되돌리지 말 것."""
+        try:
+            self._mail_work(now=True)
+        except Exception as e:
+            click_log(f"[우편] ▶ 우편함 실행 오류: {e}")
+            self.after(0, lambda err=e: self.status.set(f"📬 우편함 오류: {err}"))
         self.after(0, lambda: self._set_btn("btn_mail_run", state="normal"))
         self.after(0, lambda: self._set_btn("btn_mail_stop", state="disabled"))
         self._mail_stop = False
