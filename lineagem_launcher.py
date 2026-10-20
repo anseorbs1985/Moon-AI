@@ -5126,6 +5126,11 @@ class App(tk.Tk):
             command=self._mail_toggle)
         self._warn_mailbtn.pack(fill="x", pady=(0, 1))
         self._mail_btn_paint()
+        # 📬 지금 받기 — 자동이 못 받은 것·따로 받고 싶을 때 (2026-10-20 요청)
+        tk.Button(self._warn_box, text="📬 우편 지금 받기 (전부)",
+                  font=("맑은 고딕", 8, "bold"), pady=0,
+                  bg="#2471a3", fg="white", activebackground="#1a5276",
+                  command=self._mail_run_now).pack(fill="x", pady=(0, 1))
         # 🗂 몬스터 도감 보상 받기 (2026-10-20) — 창은 사용자가 열어둔다
         tk.Button(self._warn_box, text="🗂 도감 보상받기 (열어둔 클라)",
                   font=("맑은 고딕", 8, "bold"), pady=0,
@@ -15178,38 +15183,63 @@ class App(tk.Tk):
             pass
         self.after(MAIL_TICK_MS, self._mail_tick)
 
-    def _mail_work(self):
-        """📬 받을 우편이 있는 클라를 **하나씩** 돈다 (웨이브 없음)."""
+    def _mail_work(self, now=False):
+        """📬 받을 우편이 있는 클라를 **하나씩** 돈다 (웨이브 없음).
+
+        `now=True` = 사용자가 **[📬 지금 받기]** 를 누른 것 (2026-10-20 요청:
+        "자동으로 받는데 못 받은 것들이 있거나 내가 따로 받고 싶으면 버튼을 누를게").
+          · `MAIL_BATCH`(4) 제한 **없이 전부** 받는다
+          · **사람이 만져도 안 멈춘다** — 누른 사람이 옆에 있는 게 당연하므로
+            '사람이 돌아왔다' 로 멈추면 버튼이 무용지물이 된다"""
         if not self._try_busy("우편받기"):
+            if now:
+                self.after(0, lambda: self.status.set("📬 다른 작업이 도는 중입니다"))
             return
         try:
             got = self._mail_scan()
             if not got:
+                if now:
+                    click_log("[우편] 지금 받기 — 받을 우편이 있는 클라가 없다")
+                    self.after(0, lambda: self.status.set(
+                        "📬 받을 우편이 없습니다 (자는 클라만 봅니다)"))
                 self._mail_next_at = time.time() + random.uniform(*MAIL_NEXT)
                 return
             random.shuffle(got)                 # 늘 같은 순서면 기계 같다
-            use = got[:MAIL_BATCH]
+            use = got if now else got[:MAIL_BATCH]
             click_log(f"[우편] 📬 받을 곳 {len(got)}개 — 이번에 {len(use)}개를 "
-                      f"하나씩 받는다 {[g[0]+1 for g in use]}")
+                      f"하나씩 받는다 {[g[0]+1 for g in use]}"
+                      + (" (지금 받기 — 전부)" if now else ""))
             n = 0
             for i, (si, L, T, mx_, my_, sc, red) in enumerate(use):
                 if getattr(self, "_stop_flag", False):
                     break
-                # 그 사이 사람이 돌아왔으면 멈춘다
-                if self._system_idle_seconds() < 5:
+                # 그 사이 사람이 돌아왔으면 멈춘다 — **버튼으로 부른 것은 예외**
+                if not now and self._system_idle_seconds() < 5:
                     click_log("[우편] 사람이 돌아와 멈춘다")
                     break
                 if self._mail_one(si, L, T, mx_, my_):
                     n += 1
                 if i < len(use) - 1:
+                    self.after(0, lambda a=i, m=len(use): self.status.set(
+                        f"📬 우편 받는 중 {a+1}/{m}..."))
                     time.sleep(random.uniform(*MAIL_SLOT_GAP))
             click_log(f"[우편] 끝 — {n}개 받았다")
-            self.after(0, lambda c=n: self.status.set(f"📬 우편 {c}개 받았습니다"))
+            self.after(0, lambda c=n, t=len(use): self.status.set(
+                f"📬 우편 {c}개 받았습니다" + (f" (시도 {t}개)" if c < t else "")))
         except Exception as e:
             click_log(f"[우편] 오류: {e}")
         finally:
             self._mail_next_at = time.time() + random.uniform(*MAIL_NEXT)
             self._clear_busy("우편받기")
+
+    def _mail_run_now(self):
+        """📬 [지금 받기] — 자는 클라의 우편을 **전부** 받는다 (유휴 기다리지 않음)."""
+        if self._is_busy():
+            self.status.set("📬 다른 작업이 도는 중입니다")
+            return
+        self.status.set("📬 받을 곳을 찾는 중...")
+        threading.Thread(target=self._mail_work, kwargs={"now": True},
+                         daemon=True).start()
 
     def _mail_btn_paint(self):
         try:
