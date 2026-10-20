@@ -1456,6 +1456,22 @@ WAKE_COOL = 25.0
 #    순차적으로 실행**해줬으면 좋겠어."
 #   → 물약이 0개인 채로 던전에 다시 넣으면 그대로 죽는다. **먼저 빼낸 뒤** 돌린다.
 #   ⚠ 여러 개가 걸리면 **전부 귀환시킨 다음** 하나씩 돌린다 (한꺼번에 돌리지 않는다).
+# 🧭 **물약 재실행은 던전 판정을 더 엄격하게 본다** (2026-10-20 사용자 신고:
+#   "에카를 돌리다가 물약이 없어서 다시 돌렸을 때 **다른 실행 버튼을 눌러서
+#    다른 사냥터에 가는** 문제점이 있더라").
+#   원인: 물약 문구는 **절전 화면**에 뜨므로 첫 판정이 흐린 화면에서 이뤄진다.
+#   게다가 악몽의섬은 장소그림이 **24장**(에카·잊섬·오만은 5장)이라
+#   **어느 화면에서나 1등**이 된다. 실측 2026-10-20 (16클라):
+#     확실한 판정   0.98 (1.61배) · 0.99 (1.64배)
+#     애매한 것     0.61 ~ 0.79 (1.10 ~ 1.31배)   ← 0.79 가 기준 0.75 를 넘었다
+#     잡음 범인     해적섬 사냥터 35px 4장 — 중간값이 0.63~0.65 로 전 클라에서 높다
+#   → 물약 재실행에만 **0.85 / 1.45** 를 쓴다. 못 넘으면 **돌리지 않는다** —
+#     엉뚱한 사냥터에 보내는 것보다 안 보내는 게 낫다 (사용자가 직접 돌릴 수 있다).
+#   ⚠ 마을감시·섬 실행기의 `PLACE_MATCH`(0.75)·`PLACE_RATIO`(1.25)는 그대로다.
+#     이 둘을 건드리면 그 기능들이 같이 깐깐해져 안 돌게 된다.
+P0_PLACE_MATCH = 0.85
+P0_PLACE_RATIO = 1.45
+
 P0_HOME_KEY  = "0"               # 귀환 키
 P0_HOME_WAIT = (3.5, 5.5)        # 귀환이 끝날 때까지 (마을에 도착)
 P0_HOME_GAP  = (1.5, 3.0)        # 클라 사이
@@ -5113,6 +5129,16 @@ class App(tk.Tk):
             activebackground="#1e8449", width=4, height=2,
             command=lambda: self._start_dgn2("fish")).pack(side="left", padx=(2,0))
 
+        # ▶ 전부 복구 — **낚시녹임 1cm 아래로 올렸다** (2026-10-20 사용자:
+        #   "전부복구 이거는 좀 위로 올려주라, 낚시녹임 1CM 밑으로 올려주고").
+        #   ⚠ 예전에는 `_warn_box` 안(경고 목록 바로 위)에 있어서, 목록이 길어지면
+        #     버튼이 아래로 밀려 손이 가는 자리가 매번 달라졌다.
+        self._warn_allbtn = tk.Button(
+            dc_col, text="▶ 전부 복구", font=("맑은 고딕", 8, "bold"),
+            bg="#8e44ad", fg="white", activebackground="#6c3483", pady=0,
+            width=12, command=self._fix_run_all)
+        self._warn_allbtn.pack(anchor="n", pady=(26, 0))   # ≈1cm 띄운다
+
         # 작업이 끝나면 여기에 큰 빨간 글씨로 '완료'가 1분간 뜬다
         self._done_var = tk.StringVar(value="")
         self._done_lbl = tk.Label(dc_col, textvariable=self._done_var,
@@ -5123,45 +5149,22 @@ class App(tk.Tk):
 
         # ⚠ 경고 목록 — F11 때 확인해서 뜬 것들. 내가 X를 누르기 전엔 안 사라진다
         self._warn_box = tk.Frame(dc_col)
-        self._warn_box.pack(anchor="n", pady=(2, 0))
+        # ⬆ **[▶ 전부 복구] 바로 아래**에 붙인다 (2026-10-20 사용자: "우편 지금 받기를
+        #   전부복구 밑에 붙여놔야지. 그리고 죽은 거 확인하면 그 밑에 순차적으로
+        #   표기해줘야지 — 5분 뒤 죽으면 자동복구(ON) 이게 있었던 것처럼 그 자리에
+        #   그냥 우편 지금받기가 있는 거야").
+        #   그래서 순서가 **낚시녹임 → (1cm) → ▶전부복구 → 📬우편받기 → 복구해야함 목록**
+        #   이 된다. '완료' 큰 글씨(`_done_lbl`)는 그 아래로 내려간다.
+        #   ⚠ `before=` 를 빼면 완료 글씨가 목록 위로 끼어든다.
+        self._warn_box.pack(anchor="n", pady=(1, 0), before=self._done_lbl)
         self._warn_hdr = tk.Label(self._warn_box, text="", font=("맑은 고딕", 9, "bold"),
                                   fg="white", bg="#c0392b")
-        # ▶ 전부 복구 — 목록에 뜬 슬롯을 **번호 순서대로 하나씩** 복구한다
-        self._warn_allbtn = tk.Button(
-            self._warn_box, text="▶ 전부 복구", font=("맑은 고딕", 8, "bold"),
-            bg="#8e44ad", fg="white", activebackground="#6c3483", pady=0,
-            command=self._fix_run_all)
-        self._warn_allbtn.pack(fill="x", pady=(1, 1))
-        # 🧹 **토글 셋을 한 줄에** (2026-10-20 사용자: "전부복구 밑에 이거 간소화해줘.
-        #    저렇게 띄워두면 내가 개별 복구를 어떻게 누르라는 거냐").
-        #    예전엔 한 줄에 하나씩이라 **6줄**이 쌓여 `복구해야함 NN` 목록을 밀어냈다.
-        #    ⚠ 여기에 버튼을 더 넣을 때는 **줄을 늘리지 말고 이 줄들에 끼울 것.**
-        _tgl = tk.Frame(self._warn_box); _tgl.pack(fill="x", pady=(0, 1))
-        self._warn_idlebtn = tk.Button(
-            _tgl, text="", font=("맑은 고딕", 7, "bold"), pady=0, width=7,
-            command=self._fix_idle_toggle)
-        self._warn_idlebtn.pack(side="left", expand=True, fill="x")
-        self._warn_clickbtn = tk.Button(
-            _tgl, text="", font=("맑은 고딕", 7, "bold"), pady=0, width=7,
-            command=self._fix_click_toggle)
-        self._warn_clickbtn.pack(side="left", expand=True, fill="x", padx=(1, 1))
-        self._warn_mailbtn = tk.Button(
-            _tgl, text="", font=("맑은 고딕", 7, "bold"), pady=0, width=7,
-            command=self._mail_toggle)
-        self._warn_mailbtn.pack(side="left", expand=True, fill="x")
-        self._fix_idle_btn_paint()
-        self._fix_click_btn_paint()
-        self._mail_btn_paint()
-        # ▶ 지금 받기 둘도 한 줄에
-        _now = tk.Frame(self._warn_box); _now.pack(fill="x", pady=(0, 1))
-        tk.Button(_now, text="📬 우편받기", font=("맑은 고딕", 7, "bold"), pady=0,
+        # 📬 우편 지금 받기 — **여기 하나만 남긴다** (2026-10-20 사용자:
+        #   "우편받기 버튼만 냅두고"). 나머지 토글·도감받기는 🟣 영웅 판 아래로 옮겼다.
+        tk.Button(self._warn_box, text="📬 우편 지금 받기 (전부)",
+                  font=("맑은 고딕", 8, "bold"), pady=0,
                   bg="#2471a3", fg="white", activebackground="#1a5276",
-                  command=self._mail_run_now).pack(side="left", expand=True, fill="x")
-        # 🗂 몬스터 도감 보상 받기 (2026-10-20) — 창은 사용자가 열어둔다
-        tk.Button(_now, text="🗂 도감받기", font=("맑은 고딕", 7, "bold"), pady=0,
-                  bg="#16a085", fg="white", activebackground="#117a65",
-                  command=self._mondex_run).pack(side="left", expand=True,
-                                                 fill="x", padx=(1, 0))
+                  command=self._mail_run_now).pack(fill="x", pady=(1, 1))
         self._warn_rows = tk.Frame(self._warn_box)
         self._warn_rows.pack(fill="x")
         self.after(900, self._warn_refresh)
@@ -5203,6 +5206,7 @@ class App(tk.Tk):
         _wtop = tk.Frame(winmgmt); _wtop.pack(anchor="w")
         self._build_winmgmt(_wtop)
         self._build_hero_grid(winmgmt)
+        self._build_fix_toggles(winmgmt)
 
         tk.Frame(front_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(4,8))
 
@@ -14725,7 +14729,8 @@ class App(tk.Tk):
         on = bool(self.cfg.get("fix_idle_on", True))
         # 🧹 한 줄에 셋이 들어가야 해서 **짧게** (2026-10-20). 눌렀을 때 상태줄에
         #    긴 설명이 나오므로 버튼 글자는 켬/끔만 알려주면 된다.
-        b.config(text=("😴 자동복구 ON" if on else "😴 자동복구 OFF"),
+        b.config(text=("😴 5분 쉬면 자동복구 ON" if on
+                       else "😴 5분 자동복구 OFF"),
                  bg=("#1e8449" if on else "#7f8c8d"), fg="white",
                  activebackground=("#186a3b" if on else "#626e6e"))
 
@@ -15292,7 +15297,8 @@ class App(tk.Tk):
             if not (b and b.winfo_exists()):
                 return
             on = bool(self.cfg.get("mail_auto", MAIL_AUTO_ON))
-            b.config(text=("📬 우편 ON" if on else "📬 우편 OFF"),
+            b.config(text=("📬 5분 쉬면 우편 자동받기 ON" if on
+                           else "📬 우편 자동받기 OFF"),
                      bg=("#2980b9" if on else "#7f8c8d"), fg="white")
         except Exception:
             pass
@@ -15306,16 +15312,45 @@ class App(tk.Tk):
         click_log(f"[우편] 자동받기 {'켬' if on else '끔'} (사용자)")
 
     # ── 🏠 물약 0개 — 먼저 귀환시키고 순차로 다시 돌린다 ──────────────
-    def _p0_go_home(self, si, anc, name=""):
+    def _p0_go_home(self, si, anc, name="", key=None, keys=None):
         """🏠 그 클라를 **귀환**시킨다 (절전이면 깨우고 숫자 0) → 됐으면 True.
 
         🚫 **못 깨우면 누르지 않는다** — 절전 화면에서 0 을 눌러봐야 소용없고,
-           그 상태로 던전에 넣으면 죽는다. 차라리 그 슬롯을 건너뛴다."""
+           그 상태로 던전에 넣으면 죽는다. 차라리 그 슬롯을 건너뛴다.
+        🧭 **깨운 뒤 장소를 다시 읽어 확인한다** (2026-10-20 사용자 신고:
+           "에카를 돌리다가 물약이 없어서 다시 돌렸을 때 **다른 사냥터에 가는**
+            문제가 있더라"). 물약 문구는 **절전 화면**에 뜨므로 첫 판정은 자는 화면에서
+           한다. 그때 점수가 전부 낮고 비슷하면(실측 #16: 0.69·0.56·0.54·0.43)
+           우연히 하나가 기준을 넘어 **엉뚱한 던전**이 뽑힐 수 있다.
+           깨우고 나면 HUD 가 또렷하므로 **한 번 더 보고, 다르면 돌리지 않는다.**"""
         try:
             if find_sleep_img("fix", anc)[0] is not None:
                 if not self._wake_until(anc, si + 1, tag="물약귀환", fkey="fix"):
                     click_log(f"[물약감시] 🏠 #{si+1:02d} 못 깨웠다 "
                               f"— 귀환도 실행도 하지 않는다")
+                    return False
+            # 🧭 깨어난 화면에서 **다시 확인** — 처음 판정은 자는 화면이라 흐리다
+            if key and keys:
+                try:
+                    import lineagem_island as _isl
+                    time.sleep(random.uniform(0.5, 0.9))
+                    _sv = _isl.place_scores(list(keys), anc)
+                    _r = sorted(_sv.items(), key=lambda kv: -kv[1]) if _sv else []
+                    _t2 = (_r[0][1] / _r[1][1]) if (len(_r) > 1 and _r[1][1] > 0) else 99.0
+                    _txt = " ".join(f"{k.split('_')[-1]}:{v:.2f}" for k, v in _r)
+                    _bad = (not _r or _r[0][0] != key
+                            or _r[0][1] < P0_PLACE_MATCH
+                            or _t2 < P0_PLACE_RATIO)
+                    if _bad:
+                        click_log(f"[물약감시] 🧭 #{si+1:02d} 깨우고 다시 보니 "
+                                  f"**{key} 가 아니다** ({_txt}) "
+                                  f"→ 엉뚱한 던전을 돌리느니 **돌리지 않는다**")
+                        return False
+                    click_log(f"[물약감시] 🧭 #{si+1:02d} 깨우고 확인 ✔ "
+                              f"{key} ({_r[0][1]:.2f} · {_t2:.2f}배)")
+                except Exception as _e:
+                    click_log(f"[물약감시] 🧭 #{si+1:02d} 다시 보기 오류: {_e} "
+                              f"— 돌리지 않는다")
                     return False
             self._focus_client_at(anc)
             time.sleep(random.uniform(0.3, 0.6))
@@ -15338,6 +15373,15 @@ class App(tk.Tk):
             return
         try:
             # ① 전부 귀환 — 죽지 않게 먼저 빼낸다
+            try:
+                import lineagem_island as _isl
+                # ⚠ DUNGEONS 는 **dict 목록**이다 — {"key":…, "label":…, "color":…}
+                #   장소그림이 **있는 던전만** 겨룬다 (스캔과 같은 목록이어야 한다)
+                _allk = [d["key"] for d in getattr(_isl, "DUNGEONS", [])
+                         if isinstance(d, dict) and d.get("key")
+                         and _isl.place_list(d["key"])]
+            except Exception:
+                _allk = []
             ok = []
             for i, (si, key, didx, v, pv) in enumerate(hits):
                 if getattr(self, "_stop_flag", False):
@@ -15345,7 +15389,7 @@ class App(tk.Tk):
                 anc = ancs.get(si)
                 if not anc:
                     continue
-                if self._p0_go_home(si, anc):
+                if self._p0_go_home(si, anc, key=key, keys=_allk):
                     ok.append((si, key, didx, v, pv))
                 if i < len(hits) - 1:
                     time.sleep(random.uniform(*P0_HOME_GAP))
@@ -26034,6 +26078,35 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _build_fix_toggles(self, parent):
+        """😴🖱📬🗂 — 🟣 영웅 판 **바로 아래 네 줄** (2026-10-20 사용자:
+        "그 밑에 다섯 개는 영웅 아이템 체크하는 거 밑으로 풀어서 다시 4줄로 해서
+         옮겨주고, 우편받기 버튼만 냅두고").
+
+        ⚠ 예전에는 `_warn_box` 안에 쌓여 `복구해야함 NN` 목록을 밀어냈다.
+          여기에 버튼을 더 넣을 때도 **이 판에** 넣을 것 — 경고 목록 쪽으로 되돌리지 말 것."""
+        box = tk.Frame(parent)
+        box.pack(anchor="w", pady=(3, 0), fill="x")
+        self._warn_idlebtn = tk.Button(
+            box, text="", font=("맑은 고딕", 8, "bold"), pady=0,
+            command=self._fix_idle_toggle)
+        self._warn_idlebtn.pack(fill="x", pady=(0, 1))
+        self._warn_clickbtn = tk.Button(
+            box, text="", font=("맑은 고딕", 8, "bold"), pady=0,
+            command=self._fix_click_toggle)
+        self._warn_clickbtn.pack(fill="x", pady=(0, 1))
+        self._warn_mailbtn = tk.Button(
+            box, text="", font=("맑은 고딕", 8, "bold"), pady=0,
+            command=self._mail_toggle)
+        self._warn_mailbtn.pack(fill="x", pady=(0, 1))
+        tk.Button(box, text="🗂 도감 보상받기 (열어둔 클라)",
+                  font=("맑은 고딕", 8, "bold"), pady=0,
+                  bg="#16a085", fg="white", activebackground="#117a65",
+                  command=self._mondex_run).pack(fill="x", pady=(0, 1))
+        self._fix_idle_btn_paint()
+        self._fix_click_btn_paint()
+        self._mail_btn_paint()
+
     def _build_hero_grid(self, parent):
         """🟣 영웅 아이템 판 — 슬롯마다 점 3개. 재배치 그리드 **바로 아래**.
 
@@ -26433,15 +26506,15 @@ class App(tk.Tk):
                 _ratio = (_tv / _2nd) if _2nd > 0 else 99.0
                 _dbgp.append("#%02d %s" % (si + 1, " ".join(
                     f"{k.split('_')[-1]}:{x:.2f}" for k, x in _rank)))
-                if _tv < _isl.PLACE_MATCH:
+                if _tv < P0_PLACE_MATCH:
                     click_log(f"[물약감시] #{si+1:02d} 물약 0개인데 **던전 밖**"
-                              f"(1등 {_top} {_tv:.2f} < {_isl.PLACE_MATCH:.2f}) "
+                              f"(1등 {_top} {_tv:.2f} < {P0_PLACE_MATCH:.2f}) "
                               f"→ 안 돌린다")
                     continue
-                if _ratio < _isl.PLACE_RATIO:
+                if _ratio < P0_PLACE_RATIO:
                     click_log(f"[물약감시] #{si+1:02d} **어느 던전인지 애매하다** "
                               f"(1등 {_top} {_tv:.2f} · 2등 {_rank[1][0]} {_2nd:.2f} "
-                              f"= {_ratio:.2f}배 < {_isl.PLACE_RATIO}배) "
+                              f"= {_ratio:.2f}배 < {P0_PLACE_RATIO}배) "
                               f"→ 엉뚱한 던전을 돌리느니 **안 돌린다**")
                     continue
                 _didx = dict((k, d) for d, k in keys)[_top]
