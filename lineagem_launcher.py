@@ -567,7 +567,14 @@ SLOW_CLICKS   = 8          # 슬롯당 좌표 칸 수 (안 쓰는 칸은 비워�
 MAGIC_CLICKS  = 18         # 🔮 마력의기운 제작! — 8 → 15 → 18칸 (2026-10-06 사용자 지시)
 OMANST_CLICKS = SLOW_CLICKS   # 🗝 오만 지배석 획득! — 8칸 그대로
 # 슬롯 키마다 칸 수 (처음 만들 때·칸을 늘릴 때 둘 다 여기를 본다)
-SLOW_CLICKS_BY = {"magic_slots": MAGIC_CLICKS, "omanst_slots": OMANST_CLICKS}
+# 🗂 몬스터도감!! — 좌표로 도감 화면까지 들어간 뒤 보상을 전부 받는다
+#    (2026-10-20 사용자: "도감은 내가 실행을 누를 수 있게 좌표를 만들어줘.
+#     오만 지배석 밑으로. 슬롯 16개 다. 하나씩 슬롯을 다 제대로 받았으면
+#     다음 슬롯으로 넘어가면 된다.")
+#    ⚠ 칸은 **늘리기만** 한다 — 줄이면 찍어둔 좌표가 날아간다.
+MONDEX_CLICKS = 8
+SLOW_CLICKS_BY = {"magic_slots": MAGIC_CLICKS, "omanst_slots": OMANST_CLICKS,
+                  "mondex_slots": MONDEX_CLICKS}
 SLOW_FKEYS    = ("magic", "omanst")
 SLOW_GAP_MIN  = 2.6        # 클릭 사이 (다른 런처 기본은 1.14~2.62초 — 두 배쯤 느리다)
 SLOW_GAP_MAX  = 5.2
@@ -628,6 +635,7 @@ DEFAULT_CFG = {
     "item_on":      False,              # 아이템정리 단축키 활성화 상태 (재시작 유지)
     "magic_slots":   None,              # 🔮 마력의기운 제작! — 16슬롯 × 좌표15 (느릿느릿)
     "omanst_slots":  None,              # 🗝 오만 지배석 획득! — 16슬롯 × 좌표8 (느릿느릿)
+    "mondex_slots":  None,              # 🗂 몬스터도감!! — 16슬롯 × 좌표8 (끝나면 보상 받기)
     "dollchk_slots": None,              # 인형확인용 — 처음 로드 때 변신확인용 복사
     "relic_slots":   None,              # 성물확인용 — 처음 로드 때 변신확인용 복사
     "coupon_slots":  None,              # 쿠폰등록 — 16슬롯 × 좌표9 (변신확인용 방식)
@@ -1531,7 +1539,7 @@ MONDEX_TEMPO   = (0.90, 1.15)
 MAIL_TEMPO     = (0.90, 1.12)    # 클라마다 제 속도 (들어갈 때 한 번 뽑는다)
 MAIL_HOLD      = 0.10            # 10% 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
 MAIL_HOLD_T    = (0.4, 1.0)
-SLEEP_WAKE = ("fix", "jakwi", "dragon")
+SLEEP_WAKE = ("fix", "jakwi", "dragon", "mondex")
 SLEEP_WAKE_KEY = "z"
 SLEEP_MATCH = 0.68      # 절전 화면 판정 기준.
                         # 실측 — 자는 중 0.73~1.00 / 깨어 있을 때 0.40~0.59.
@@ -5146,7 +5154,9 @@ class App(tk.Tk):
                 ("🔮 마력의기운\n제작!", "#8e44ad", self._open_magic_win,
                  lambda: self._start_dgn2("magic")),
                 ("🗝 오만 지배석\n획득!", "#935116", self._open_omanst_win,
-                 lambda: self._start_dgn2("omanst"))):
+                 lambda: self._start_dgn2("omanst")),
+                ("🗂 몬스터\n도감!!", "#16a085", self._open_mondex_win,
+                 lambda: self._start_dgn2("mondex"))):
             rr = tk.Frame(chk_col); rr.pack(anchor="n", pady=(0,4))
             tk.Button(rr, text=_t, font=("맑은 고딕", 9, "bold"), bg=_bg, fg="white",
                       width=9, height=2, command=_open).pack(side="left")
@@ -7267,6 +7277,7 @@ class App(tk.Tk):
         ("dungeon_slots",  "🏰 변신확인용"),
         ("magic_slots",    "🔮 마력의기운 제작!"),
         ("omanst_slots",   "🗝 오만 지배석 획득!"),
+        ("mondex_slots",   "🗂 몬스터도감!!"),
         ("fish_slots",     "🎣 낚시녹임"),
         ("market_slots",   "🔎 거래소검색"),
         ("coupon_slots",   "🎟 쿠폰등록"),
@@ -9911,6 +9922,7 @@ class App(tk.Tk):
                 "fix":     ("fix_slots",     "복구",       "🩹"),
                 "magic":   ("magic_slots",   "마력의기운 제작!", "🔮"),
                 "omanst":  ("omanst_slots",  "오만 지배석 획득!", "🗝"),
+                "mondex":  ("mondex_slots",  "몬스터도감!!", "🗂"),
                 "dollchk": ("dollchk_slots", "인형확인용", "🧸"),
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
@@ -11075,6 +11087,12 @@ class App(tk.Tk):
         """🗝 오만 지배석 획득! — 좌표만 누르는 창 (변신확인용과 같은 틀, 느릿느릿)."""
         self._open_section_win("_omanst_win", "🗝 오만 지배석 획득!",
                                lambda p: self._build_dgn2("omanst", p),
+                               w=470, h=620, pinnable=True)
+
+    def _open_mondex_win(self):
+        """🗂 몬스터도감!! — 좌표를 찍는 창. 좌표를 다 누르면 보상을 전부 받는다."""
+        self._open_section_win("_mondex_win", "🗂 몬스터도감!!",
+                               lambda p: self._build_dgn2("mondex", p),
                                w=470, h=620, pinnable=True)
 
     def _open_dollchk_win(self):
@@ -14265,6 +14283,10 @@ class App(tk.Tk):
                                 time.sleep(gap * c_mult)
                 # 👑 작위 — 좌표(메뉴→작위)를 다 눌렀으면 거기서 단계를 올린다
                 #    (웨이브가 아닌 개별·순차 실행에도 똑같이 적용, 2026-09-21)
+                # 🗂 몬스터도감 — 좌표(메뉴 → 도감)를 다 눌렀으면 **거기서 보상을
+                #    전부 받는다.** 이 슬롯이 끝나야 다음 슬롯으로 간다 (사용자 지시).
+                if fkey == "mondex" and _anchor and not getattr(self, stop, False):
+                    self._mondex_after(_anchor, name)
                 if fkey == "jakwi" and _anchor and not getattr(self, stop, False):
                     self._jakwi_rank_run(
                         _anchor, name, stop=stop,
@@ -14878,6 +14900,40 @@ class App(tk.Tk):
         except Exception as e:
             click_log(f"[도감] #{si+1:02d} {name} 오류: {e}")
         return got
+
+    def _mondex_after(self, anchor, name=""):
+        """🗂 좌표로 도감을 연 뒤 — 그 클라의 보상을 **전부** 받는다 → 받은 개수.
+
+        🚫 **도감 화면이 아니면 아무것도 누르지 않는다** — 좌표가 어긋났거나
+           창이 안 떴을 때 엉뚱한 곳을 누르느니 그만둔다 (이 저장소의 절대 규칙)."""
+        try:
+            rects = self._client_rects_by_slot() or []
+            L = T = None
+            si = 0
+            k = 1.0
+            for i, (l, t, r, b) in enumerate(rects):
+                if l <= anchor[0] < r and t <= anchor[1] < b:
+                    L, T, si = l, t, i
+                    k = (r - l) / float(MONDEX_BASE_W)
+                    break
+            if L is None:
+                click_log(f"[도감] [{name}] 그 좌표가 리니지M 창 밖이다 — 그만둔다")
+                return 0
+            ok, sc, _k = self._mondex_open((L + 60, T + 60))
+            if not ok:
+                click_log(f"[도감] [{name}] 도감 화면이 아니다 (일치도 {sc:.2f}, "
+                          f"기준 {MONDEX_MATCH}) — 좌표를 확인해주세요")
+                self.after(0, lambda n=name: self.status.set(
+                    f"🗂 [{n}] 도감 화면이 아닙니다 — 좌표를 확인해주세요"))
+                return 0
+            n = self._mondex_one(si, L, T, k, name)
+            click_log(f"[도감] 🗂 [{name}] 끝 — {n}개 받았다")
+            self.after(0, lambda c=n, nm=name: self.status.set(
+                f"🗂 [{nm}] 도감 보상 {c}개 받았습니다"))
+            return n
+        except Exception as e:
+            click_log(f"[도감] [{name}] 오류: {e}")
+            return 0
 
     def _mondex_run(self):
         """🗂 [도감 보상받기] 버튼 — 도감이 **열려 있는** 클라를 찾아 전부 받는다."""
@@ -21470,6 +21526,12 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("omanst", i),
                             prev=lambda i: self._preview_dgn2("omanst", i),
                             delete=lambda i: self._del_dgn2("omanst", i)),
+            "mondex":  dict(title="몬스터도감!!", key="mondex_slots",
+                            clicks=MONDEX_CLICKS, color="#16a085", enable=True, sel=True,
+                            reg=lambda s, c: self._reg_dgn2_click("mondex", s, c),
+                            test=lambda i: self._test_dgn2("mondex", i),
+                            prev=lambda i: self._preview_dgn2("mondex", i),
+                            delete=lambda i: self._del_dgn2("mondex", i)),
             "dollchk": dict(title="인형확인용", key="dollchk_slots", clicks=DUNGEON_CLICKS, color="#b9770e",
                             reg=lambda s, c: self._reg_dgn2_click("dollchk", s, c),
                             test=lambda i: self._test_dgn2("dollchk", i),
@@ -24755,7 +24817,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_lastrun_win","_lock_win","_scroll_win","_magic_win","_omanst_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_knight_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
+                 "_lastrun_win","_lock_win","_scroll_win","_magic_win","_omanst_win","_mondex_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_knight_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs
@@ -26818,7 +26880,7 @@ class App(tk.Tk):
         #    (2026-09-22 사용자 신고: "왜 작위는 예외냐"). 그래서 **아는 런처를 전부**
         #    훑어 멈춤 플래그를 세운다 — 새 런처가 생겨도 자동으로 포함된다.
         try:
-            for _fk in ("magic", "omanst",
+            for _fk in ("magic", "omanst", "mondex",
                         "incoupon", "inmail", "jakwi", "fix", "dollchk", "relic",
                         "dragon", "knight", "sched", "coupon", "market", "tj",
                         "eventshop", "fish", "circus", "circus2", "circus3",
