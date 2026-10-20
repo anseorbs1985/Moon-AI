@@ -766,6 +766,49 @@ def potion0_meta_w():
         return POTION0_BASE_W
 
 
+# 😴 **좌표1 은 '절전모드 해제' 버튼이다** (실측 2026-10-20: 16슬롯 전부
+#    창 왼쪽위 기준 (450, 94) — 절전 버튼 자리와 일치).
+#    깨어 있을 때 그 자리를 누르면 **게임 배경을 눌러 캐릭터가 걸어간다.**
+#    사용자(2026-10-20): "절전해제 상태이거나 절전해제 상태에서도 바로 실행될 수
+#    있도록 해줘" → **자고 있을 때만 누르고, 깨어 있으면 좌표2부터 간다.**
+SLEEP_MATCH  = 0.68      # 런처와 같은 값 (실측 검증됨 — 자는 클라 0.72~0.99)
+SLEEP_BASE_W = 494       # 그림을 자른 창 가로
+
+
+def sleep_img_path():
+    return os.path.join(IMG_DIR, "fix_sleep.png")
+
+
+def sleep_seen(anchor):
+    """그 클라가 **절전 화면인가** → (자나?, 점수).
+
+    `grab_window`(PrintWindow)로 그 창을 직접 찍으므로 **가려져 있어도 정확하다.**
+    ⚠ 그림이 없거나 못 보면 `(True, -1.0)` — **예전처럼 그냥 누르게** 두는
+      안전한 쪽이다 (그림을 등록 안 한 컴퓨터가 갑자기 멈추면 안 된다)."""
+    q = sleep_img_path()
+    if not os.path.exists(q) or not anchor:
+        return True, -1.0
+    try:
+        import cv2, numpy as np
+        got = grab_window(anchor)
+        if not got:
+            return True, -1.0
+        big, _ = got
+        t = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+        if t is None:
+            return True, -1.0
+        k = big.shape[1] / float(SLEEP_BASE_W)
+        if abs(k - 1.0) > 0.02:
+            t = cv2.resize(t, (max(3, int(t.shape[1] * k)),
+                               max(3, int(t.shape[0] * k))))
+        if big.shape[0] < t.shape[0] or big.shape[1] < t.shape[1]:
+            return True, -1.0
+        v = float(cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED).max())
+        return (v >= SLEEP_MATCH), v
+    except Exception:
+        return True, -1.0
+
+
 def potion0_seen(anchor):
     """그 클라 창에서 '체력 회복제가 0개' 문구를 찾는다 → (보임?, 점수).
 
@@ -6102,6 +6145,25 @@ class IslandApp(tk.Tk):
                 pass
             return True
 
+    def _wake_skip1(self, si, slot, name=""):
+        """좌표1 을 **건너뛸까** → 깨어 있으면 True.
+
+        좌표1 은 '절전모드 해제' 버튼이라, 깨어 있을 때 누르면 그 자리는
+        게임 배경이다 → **캐릭터가 그쪽으로 걸어간다.**
+        ⚠ 그림이 없거나 못 보면 False(= 예전처럼 누른다). 안전한 쪽으로 둔다."""
+        try:
+            anc = self._slot_anchor(slot)
+            if not anc:
+                return False
+            asleep, v = sleep_seen(anc)
+            if asleep:
+                return False                      # 자고 있다 → 눌러서 깨운다
+            self._rlog(f"😴 {si+1:02d} [{name}] 이미 깨어 있다 (일치도 {v:.2f}) "
+                       f"→ 좌표1(절전해제)은 누르지 않고 좌표2부터 간다")
+            return True
+        except Exception:
+            return False
+
     def _do_one_click(self, key, si, slot, j, lbl, move_set, tag=""):
         """슬롯의 j번째 자리 1개 실행 (드래그/방향키/클릭/녹화). 실행했으면 True."""
         name   = slot.get("name", f"#{si+1}")
@@ -6114,6 +6176,15 @@ class IslandApp(tk.Tk):
         c = coords[j] if j < len(coords) else None
         rec = recs.get(str(j))
         did = False
+        # 😴 **좌표1 은 '절전모드 해제' 버튼** — 깨어 있으면 누르지 않는다.
+        #    ⚠ 순차(`_run`)의 같은 자리와 **한 쌍이다** — 한쪽만 고치면
+        #      '개별은 되는데 전체실행은 안 된다' 가 또 생긴다.
+        if j == 0 and self._wake_skip1(si, slot, name):
+            try:
+                self._esc_close(si, self._slot_anchor(slot), name)
+            except Exception:
+                pass
+            return True
         # 🗡🃏 그림 자리(🖼/👁)와 카드 자리(🃏)는 **개별 실행과 똑같이** 처리한다.
         #    (2026-10-05 사용자: "개별로 하면 다 되는데 전체실행은 똑같은 지점에서
         #     멈춘다" — 전체실행은 이 함수를 타는데 여기에 처리가 없었다)
@@ -6933,7 +7004,9 @@ class IslandApp(tk.Tk):
                         #    못 고르면 `_omanst_try` 가 **스스로 True 를 돌려** 좌표를
                         #    안 누르게 한다 — 정복을 누르느니 아무것도 안 누른다.
                         #    ⚠ `continue` 로 빠져나가지 말 것 (뒤 간격·횟수가 건너뛰어진다).
-                        if self._omanst_try(key, si, slot, j):
+                        if j == 0 and self._wake_skip1(si, slot, name):
+                            pass                      # 깨어 있다 — 좌표1 은 안 누른다
+                        elif self._omanst_try(key, si, slot, j):
                             pass                      # 이미 골랐다 — 좌표는 안 누른다
                         elif j in move_set:
                             pyautogui.moveTo(*coords[j])

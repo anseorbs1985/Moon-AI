@@ -14683,7 +14683,7 @@ class App(tk.Tk):
             try:
                 if w == 0:
                     self._focus_client_at(anchor)
-                    time.sleep(random.uniform(0.20, 0.35))
+                    time.sleep(random.uniform(0.12, 0.24))    # 랜덤 폭은 유지
                     press_key(SLEEP_WAKE_KEY)
                     _how = f"'{SLEEP_WAKE_KEY.upper()}' 키"
                 else:
@@ -14695,10 +14695,13 @@ class App(tk.Tk):
                 return False
             _t0 = time.time()
             while time.time() - _t0 < SLEEP_WAKE_WAIT[1]:
-                time.sleep(0.25)
+                # ⏱ **자주 볼수록 빨리 넘어간다** (2026-10-20 "속도 좀 올리고").
+                #    0.25 → 0.12초. 깨어난 것을 **확인한 뒤** 넘어가므로
+                #    자주 보는 것은 안전한 쪽이다 (덜 풀린 채 넘어가지 않는다).
+                time.sleep(0.12)
                 if find_sleep_img(fkey, anchor)[0] is None:
                     click_log(f"[{tag}] {_who}깨어남 — {_how} ({w+1}번째)")
-                    time.sleep(random.uniform(0.35, 0.6))     # 화면 안정화
+                    time.sleep(random.uniform(0.25, 0.45))    # 화면 안정화
                     return True
         click_log(f"[{tag}] {_who}⚠ {SLEEP_WAKE_TRIES}번(Z + 글자 클릭) 해도 안 깨어남")
         return False
@@ -15643,13 +15646,26 @@ class App(tk.Tk):
         except Exception:
             _fg0 = None
         hw = self._client_hwnds_by_slot() or []
-        for si in slots:
+        # 🎲 **순서를 섞는다** — 늘 1→16 번 순서면 기계 같다 (2026-09-07 상시 규칙).
+        #    2026-10-20 사용자: "왜 순서대로 되는 거야? 내가 랜덤으로 해놨잖아."
+        #    `_run_seq`(F11 좌표 클릭)·`_run_slp`(절전모드)는 예전부터 섞는데
+        #    **여기만 번호 순서였다.**
+        _ord = [int(s) for s in slots]
+        random.shuffle(_ord)
+        _skip = []
+        for si in _ord:
             i = int(si) - 1
             if i < 0 or i >= len(hw):
                 continue
             l, t, r, b, hwnd = hw[i]
             cx, cy = (l + r) // 2, (t + b) // 2
+            # 😴 **방금 F11 이 좌표로 깨운 클라는 건드리지 않는다** (Z 두 번 방지)
+            if self._wake_recent((cx, cy)):
+                _skip.append(si)
+                continue
             self._wake_until((cx, cy), si, tag="경고확인")
+        if _skip:
+            click_log(f"[경고확인] 방금 깨운 {len(_skip)}개는 건너뜀 {_skip}")
         time.sleep(random.uniform(0.4, 0.7))      # 화면 안정화
         try:
             if _fg0:
@@ -18791,6 +18807,11 @@ class App(tk.Tk):
                 _hit += 1
                 self.after(0, lambda a=i: self.status.set(f"🔆 절전해제 {a+1}/{n} (랜덤 순서)..."))
                 pyautogui.click(x, y)
+                # 😴 **깨웠다고 적어둔다** — 안 그러면 바로 뒤에 도는 경고확인
+                #    (`_wake_slots`)이 **같은 클라를 Z 로 또 깨운다**
+                #    (2026-10-20 사용자: "절전을 해제하고 또 한 번 더 해제하는 거 같아").
+                #    16클라를 한 바퀴 더 도는 32초도 통째로 아낀다.
+                self._wake_mark((x, y))
                 if i < n - 1:
                     time.sleep(random.uniform(mn, mx))   # 슬롯간 간격 (설정값 그대로, 추가 간격 없음)
             _msg = (f"✔ 절전해제 완료 — {_hit}개 깨움"
