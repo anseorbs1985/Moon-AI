@@ -494,6 +494,21 @@ def _click(x, y):
         pass
 
 
+def potion0_img_list():
+    """물약 0개 견본 — `potion0.png` + `potion0_2.png` … **하나라도 맞으면 찾은 것.**
+
+    ⚠ **같은 문구인데 클라마다 다르게 그려진다** (실측 2026-10-20: #16 이 0.754 로
+      기준 0.80 에 못 미쳐 놓쳤다). 장소그림에서 다섯 번 겪은 것과 같은 성질이다.
+      → 기준을 내리지 말고 **그 클라에서 한 장 더 받는다.** 기준을 내리면
+        상점 글자 '체력 회복제 (각인)'(실측 0.683)을 오인한다."""
+    out = []
+    for n in range(1, 9):
+        q = os.path.join(IMG_DIR, "potion0.png" if n == 1 else f"potion0_{n}.png")
+        if os.path.exists(q):
+            out.append(q)
+    return out
+
+
 def potion0_img_path():
     return os.path.join(IMG_DIR, "potion0.png")
 
@@ -831,10 +846,8 @@ def potion0_seen(anchor):
         if not got:
             return False, 0.0
         big, _ = got
-        tpl0 = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
-        if tpl0 is None:
-            return False, 0.0
         thr = potion0_thr()
+        _qs = potion0_img_list() or [q]
 
         def _try(t):
             if (t is None or big.shape[0] < t.shape[0]
@@ -842,12 +855,12 @@ def potion0_seen(anchor):
                 return -1.0
             return float(cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED).max())
 
-        def _scaled(k):
+        def _scaled(t0, k):
             if abs(k - 1.0) < 0.02:
-                return tpl0
-            w = max(3, int(round(tpl0.shape[1] * k)))
-            h = max(3, int(round(tpl0.shape[0] * k)))
-            return cv2.resize(tpl0, (w, h),
+                return t0
+            w = max(3, int(round(t0.shape[1] * k)))
+            h = max(3, int(round(t0.shape[0] * k)))
+            return cv2.resize(t0, (w, h),
                               interpolation=cv2.INTER_CUBIC if k > 1
                               else cv2.INTER_AREA)
 
@@ -859,7 +872,16 @@ def potion0_seen(anchor):
         #      글자가 또렷해 비율 한 번이면 충분하다.
         #    🚫 클로드는 여기에 배율 훑기를 다시 넣지 말 것.
         k0 = big.shape[1] / float(max(1, potion0_meta_w()))
-        mx = _try(_scaled(k0))
+        mx = -1.0
+        for _q in _qs:                      # 🖼 견본을 차례로 — 하나라도 넘으면 끝
+            t0 = cv2.imdecode(np.fromfile(_q, np.uint8), cv2.IMREAD_COLOR)
+            if t0 is None:
+                continue
+            v = _try(_scaled(t0, k0))
+            if v > mx:
+                mx = v
+            if mx >= thr:
+                break
         return (mx >= thr), mx
     except Exception:
         return False, 0.0

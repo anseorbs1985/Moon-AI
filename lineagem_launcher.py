@@ -1448,6 +1448,19 @@ FIX_CLICK_GONE   = (1.2, 1.8)   # 지우기 전 마지막 확인까지의 사이
 #    들어갔고, 두 번째 Z 는 이미 깨어 있는 화면에서 **엉뚱한 창을 열었다.**
 WAKE_COOL = 25.0
 
+# ── 🏠 물약이 없으면 **먼저 귀환** (2026-10-20 사용자 요청) ────────────
+#   "악몽의섬이나 해적섬 등등에 물약이 없으면 네가 지금 다시 실행을 누르고 있잖아.
+#    그런데 이러면 **죽는 일이 발생**하더라고. 만약 저렇게 문구가 뜨면은 절전을
+#    해제하고 **숫자 0을 한 번 눌러줘** — 이게 귀환하는 건데 이렇게 하면 죽지 않잖아.
+#    여러 개가 한 번에 뜨면 절전을 해제하고 **저렇게 먼저 귀환을 한 다음에
+#    순차적으로 실행**해줬으면 좋겠어."
+#   → 물약이 0개인 채로 던전에 다시 넣으면 그대로 죽는다. **먼저 빼낸 뒤** 돌린다.
+#   ⚠ 여러 개가 걸리면 **전부 귀환시킨 다음** 하나씩 돌린다 (한꺼번에 돌리지 않는다).
+P0_HOME_KEY  = "0"               # 귀환 키
+P0_HOME_WAIT = (3.5, 5.5)        # 귀환이 끝날 때까지 (마을에 도착)
+P0_HOME_GAP  = (1.5, 3.0)        # 클라 사이
+P0_RUN_WAIT  = 600               # 한 슬롯 실행을 최대 이만큼 기다린다 (초)
+
 # ── 📬 우편 자동 받기 (2026-10-20 사용자 요청) ─────────────────────────
 #   "절전 상태에서 가운데 우편처럼 생긴 거 오른쪽 상단에 점이 있어. 그게 빨간색으로
 #    들어오면 네가 클릭해서 우편까지 좀 받아줬으면. 웨이브 주지 말고 그냥 하나씩
@@ -5119,34 +5132,36 @@ class App(tk.Tk):
             bg="#8e44ad", fg="white", activebackground="#6c3483", pady=0,
             command=self._fix_run_all)
         self._warn_allbtn.pack(fill="x", pady=(1, 1))
-        # 😴 5분 유휴 자동 복구 켬/끔 (2026-09-29 사용자 요청) — 끄면 목록에만 쌓인다
+        # 🧹 **토글 셋을 한 줄에** (2026-10-20 사용자: "전부복구 밑에 이거 간소화해줘.
+        #    저렇게 띄워두면 내가 개별 복구를 어떻게 누르라는 거냐").
+        #    예전엔 한 줄에 하나씩이라 **6줄**이 쌓여 `복구해야함 NN` 목록을 밀어냈다.
+        #    ⚠ 여기에 버튼을 더 넣을 때는 **줄을 늘리지 말고 이 줄들에 끼울 것.**
+        _tgl = tk.Frame(self._warn_box); _tgl.pack(fill="x", pady=(0, 1))
         self._warn_idlebtn = tk.Button(
-            self._warn_box, text="", font=("맑은 고딕", 8, "bold"), pady=0,
+            _tgl, text="", font=("맑은 고딕", 7, "bold"), pady=0, width=7,
             command=self._fix_idle_toggle)
-        self._warn_idlebtn.pack(fill="x", pady=(0, 1))
-        self._fix_idle_btn_paint()
-        # 🖱 리니지M 창을 클릭하면 그 클라의 십자가를 확인 (2026-09-30 사용자 요청)
+        self._warn_idlebtn.pack(side="left", expand=True, fill="x")
         self._warn_clickbtn = tk.Button(
-            self._warn_box, text="", font=("맑은 고딕", 8, "bold"), pady=0,
+            _tgl, text="", font=("맑은 고딕", 7, "bold"), pady=0, width=7,
             command=self._fix_click_toggle)
-        self._warn_clickbtn.pack(fill="x", pady=(0, 1))
-        self._fix_click_btn_paint()
-        # 📬 우편 자동받기 켬/끔 (2026-10-20 사용자 요청)
+        self._warn_clickbtn.pack(side="left", expand=True, fill="x", padx=(1, 1))
         self._warn_mailbtn = tk.Button(
-            self._warn_box, text="", font=("맑은 고딕", 8, "bold"), pady=0,
+            _tgl, text="", font=("맑은 고딕", 7, "bold"), pady=0, width=7,
             command=self._mail_toggle)
-        self._warn_mailbtn.pack(fill="x", pady=(0, 1))
+        self._warn_mailbtn.pack(side="left", expand=True, fill="x")
+        self._fix_idle_btn_paint()
+        self._fix_click_btn_paint()
         self._mail_btn_paint()
-        # 📬 지금 받기 — 자동이 못 받은 것·따로 받고 싶을 때 (2026-10-20 요청)
-        tk.Button(self._warn_box, text="📬 우편 지금 받기 (전부)",
-                  font=("맑은 고딕", 8, "bold"), pady=0,
+        # ▶ 지금 받기 둘도 한 줄에
+        _now = tk.Frame(self._warn_box); _now.pack(fill="x", pady=(0, 1))
+        tk.Button(_now, text="📬 우편받기", font=("맑은 고딕", 7, "bold"), pady=0,
                   bg="#2471a3", fg="white", activebackground="#1a5276",
-                  command=self._mail_run_now).pack(fill="x", pady=(0, 1))
+                  command=self._mail_run_now).pack(side="left", expand=True, fill="x")
         # 🗂 몬스터 도감 보상 받기 (2026-10-20) — 창은 사용자가 열어둔다
-        tk.Button(self._warn_box, text="🗂 도감 보상받기 (열어둔 클라)",
-                  font=("맑은 고딕", 8, "bold"), pady=0,
+        tk.Button(_now, text="🗂 도감받기", font=("맑은 고딕", 7, "bold"), pady=0,
                   bg="#16a085", fg="white", activebackground="#117a65",
-                  command=self._mondex_run).pack(fill="x", pady=(0, 1))
+                  command=self._mondex_run).pack(side="left", expand=True,
+                                                 fill="x", padx=(1, 0))
         self._warn_rows = tk.Frame(self._warn_box)
         self._warn_rows.pack(fill="x")
         self.after(900, self._warn_refresh)
@@ -14708,8 +14723,9 @@ class App(tk.Tk):
         if not b or not b.winfo_exists():
             return
         on = bool(self.cfg.get("fix_idle_on", True))
-        b.config(text=(f"😴 {FIX_IDLE_SEC//60}분 쉬면 자동복구 ON" if on
-                       else f"😴 {FIX_IDLE_SEC//60}분 자동복구 OFF"),
+        # 🧹 한 줄에 셋이 들어가야 해서 **짧게** (2026-10-20). 눌렀을 때 상태줄에
+        #    긴 설명이 나오므로 버튼 글자는 켬/끔만 알려주면 된다.
+        b.config(text=("😴 자동복구 ON" if on else "😴 자동복구 OFF"),
                  bg=("#1e8449" if on else "#7f8c8d"), fg="white",
                  activebackground=("#186a3b" if on else "#626e6e"))
 
@@ -15276,8 +15292,7 @@ class App(tk.Tk):
             if not (b and b.winfo_exists()):
                 return
             on = bool(self.cfg.get("mail_auto", MAIL_AUTO_ON))
-            b.config(text=("📬 5분 쉬면 우편 자동받기 ON" if on
-                           else "📬 우편 자동받기 OFF"),
+            b.config(text=("📬 우편 ON" if on else "📬 우편 OFF"),
                      bg=("#2980b9" if on else "#7f8c8d"), fg="white")
         except Exception:
             pass
@@ -15289,6 +15304,75 @@ class App(tk.Tk):
         self._mail_btn_paint()
         self.status.set("📬 우편 자동받기 " + ("켬 — 5분 쉬면 받습니다" if on else "끔"))
         click_log(f"[우편] 자동받기 {'켬' if on else '끔'} (사용자)")
+
+    # ── 🏠 물약 0개 — 먼저 귀환시키고 순차로 다시 돌린다 ──────────────
+    def _p0_go_home(self, si, anc, name=""):
+        """🏠 그 클라를 **귀환**시킨다 (절전이면 깨우고 숫자 0) → 됐으면 True.
+
+        🚫 **못 깨우면 누르지 않는다** — 절전 화면에서 0 을 눌러봐야 소용없고,
+           그 상태로 던전에 넣으면 죽는다. 차라리 그 슬롯을 건너뛴다."""
+        try:
+            if find_sleep_img("fix", anc)[0] is not None:
+                if not self._wake_until(anc, si + 1, tag="물약귀환", fkey="fix"):
+                    click_log(f"[물약감시] 🏠 #{si+1:02d} 못 깨웠다 "
+                              f"— 귀환도 실행도 하지 않는다")
+                    return False
+            self._focus_client_at(anc)
+            time.sleep(random.uniform(0.3, 0.6))
+            press_key(P0_HOME_KEY)
+            time.sleep(random.uniform(*P0_HOME_WAIT))
+            click_log(f"[물약감시] 🏠 #{si+1:02d} 귀환 (숫자 {P0_HOME_KEY}) "
+                      f"— 물약 0개로 다시 넣으면 죽으므로 먼저 뺀다")
+            return True
+        except Exception as e:
+            click_log(f"[물약감시] 🏠 #{si+1:02d} 귀환 오류: {e}")
+            return False
+
+    def _p0_home_then_run(self, hits, ancs):
+        """🏠 걸린 슬롯을 **전부 먼저 귀환**시키고 → **하나씩** 다시 돌린다.
+
+        ⚠ 한꺼번에 띄우지 않는다 (사용자: "순차적으로 실행해줬으면").
+          하나가 끝나야 다음을 띄운다 — 겹쳐 돌면 클릭이 엉킨다."""
+        if not self._try_busy("물약귀환"):
+            click_log("[물약감시] 🏠 다른 작업이 도는 중이라 미룬다")
+            return
+        try:
+            # ① 전부 귀환 — 죽지 않게 먼저 빼낸다
+            ok = []
+            for i, (si, key, didx, v, pv) in enumerate(hits):
+                if getattr(self, "_stop_flag", False):
+                    break
+                anc = ancs.get(si)
+                if not anc:
+                    continue
+                if self._p0_go_home(si, anc):
+                    ok.append((si, key, didx, v, pv))
+                if i < len(hits) - 1:
+                    time.sleep(random.uniform(*P0_HOME_GAP))
+            if not ok:
+                click_log("[물약감시] 🏠 귀환된 슬롯이 없다 — 아무것도 돌리지 않는다")
+                return
+            click_log(f"[물약감시] 🏠 {len(ok)}개 귀환 완료 "
+                      f"{[o[0]+1 for o in ok]} → 이제 **하나씩** 다시 돌린다")
+        finally:
+            self._clear_busy("물약귀환")
+        # ② 귀환한 것만 하나씩 — 하나가 끝나야 다음
+        for si, key, didx, v, pv in ok:
+            if getattr(self, "_stop_flag", False):
+                break
+            click_log(f"[물약감시] 💧 #{si+1:02d} 물약 0개 ({v:.2f}) · "
+                      f"{key} ({pv:.2f}) → 귀환 뒤 다시 실행")
+            self.after(0, lambda n=si, k=key: self.status.set(
+                f"💧 #{n+1:02d} 귀환 완료 — {k} 다시 돌립니다"))
+            try:
+                p = subprocess.Popen(
+                    ["pythonw", os.path.join(BASE, "lineagem_island.py"),
+                     str(didx), "--run", "--slot", str(si + 1)],
+                    cwd=BASE,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                p.wait(timeout=P0_RUN_WAIT)      # 하나가 끝나야 다음
+            except Exception as e:
+                click_log(f"[물약감시] #{si+1:02d} 실행 오류: {e}")
 
     def _wake_key(self, anchor):
         """그 좌표의 리니지M 창 손잡이 — '누구를 깨웠나' 를 기억하는 열쇠."""
@@ -15826,8 +15910,7 @@ class App(tk.Tk):
         if not b or not b.winfo_exists():
             return
         on = bool(self.cfg.get("fix_click_on", True))
-        b.config(text=("🖱 클릭하면 십자가 확인 ON" if on
-                       else "🖱 클릭 확인 OFF"),
+        b.config(text=("🖱 십자가 ON" if on else "🖱 십자가 OFF"),
                  bg=("#2471a3" if on else "#7f8c8d"), fg="white",
                  activebackground=("#1b5480" if on else "#626e6e"))
 
@@ -26443,23 +26526,16 @@ class App(tk.Tk):
                                   f"**적어두고 끝나면 돌린다**")
                     _pd[si] = (key, didx, now)
                 return
+            # 🏠 **먼저 전부 귀환시키고** 그 다음 하나씩 돌린다 (2026-10-20).
+            #    물약 0개인 채로 던전에 다시 넣으면 **그대로 죽는다.**
             for si, key, didx, v, pv in hits:
                 self._p0_watch_done[si] = now
                 getattr(self, "_p0_pend", {}).pop(si, None)
-                click_log(f"[물약감시] 💧 #{si+1:02d} 물약 0개 ({v:.2f}) · "
-                          f"{key} 안 ({pv:.2f}) → 그 슬롯만 다시 실행")
-                self.after(0, lambda n=si, k=key: self.status.set(
-                    f"💧 #{n+1:02d} 물약 0개 — {k} 그 슬롯만 다시 돌립니다"))
-                try:
-                    subprocess.Popen(
-                        ["pythonw",
-                         os.path.join(BASE, "lineagem_island.py"),
-                         str(didx), "--run", "--slot", str(si + 1)],
-                        cwd=BASE,
-                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-                except Exception as e:
-                    click_log(f"[물약감시] 실행 실패: {e}")
-                break                 # 한 번에 하나씩 — 다음 틱에서 그 다음 슬롯
+            click_log(f"[물약감시] 🏠 물약 0개 {len(hits)}개 "
+                      f"{[h[0]+1 for h in hits]} — 먼저 전부 귀환시킨다")
+            threading.Thread(target=self._p0_home_then_run,
+                             args=(list(hits), dict(ancs)), daemon=True).start()
+            return
         except Exception as e:
             try:
                 click_log(f"[물약감시] 오류: {e}")
