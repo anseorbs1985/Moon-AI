@@ -421,6 +421,12 @@ CARDFIX_CLICKS = 5     # 카드 확정 4장 + 선택 확정 = 5개
 #    로컬이 자기 좌표를 찍어두면 **그게 이긴다** (아래 `_cardfix_rels` 참고).
 CARDFIX_RELS = [[428, 59], [440, 255], [298, 233], [288, 227], [470, 18]]
 CARDFIX_BASE_WH = (491, 276)    # 위 좌표를 찍은 창 크기
+# 🚫 **비율로 늘려 쓰지 않는다** (2026-10-19 사고 — 사용자: "왜 다른 거까지 계속
+#    클릭을 하는 건데"). 491x276 좌표를 2504x1352 창에 5.1배로 늘려 눌렀더니
+#    게임 화면 아무 데나 찍혀 캐릭터가 움직이고 스킬이 나갔다.
+#    **게임 UI 는 창 크기에 비례해 커지지 않는다.**
+#    → 창 크기마다 좌표를 **따로 등록**하고, 등록이 없는 크기에서는 **안 누른다.**
+CARDFIX_SIZE_TOL = 0.03         # 창 크기가 이 안이면 같은 벌로 본다 (3%)
 # ⏱ 2026-10-19 사용자: "성공했는데 엄청나게 빠르다 시간을 좀만 늦추자
 #    **3배로 늦춰봐 랜덤으로 시간주고**" → 아래 셋을 그대로 3배로 넓혔다.
 #    🚫 랜덤 폭을 0으로 만들지 말 것 (범위째 3배 — "항상 사람이 하는 것처럼").
@@ -6053,13 +6059,43 @@ class App(tk.Tk):
             r.append(None)
         return r
 
-    def _cardfix_base(self):
-        """좌표를 찍은 **창 크기** — 이 컴퓨터 값이 먼저, 없으면 코드 기본값."""
-        bw = int(self.cfg.get("cardfix_base_w") or 0)
-        bh = int(self.cfg.get("cardfix_base_h") or 0)
-        if bw <= 0 or bh <= 0:
-            bw, bh = CARDFIX_BASE_WH
-        return bw, bh
+    def _cardfix_sets(self):
+        """등록된 좌표 **벌 전부** — [{"w":, "h":, "rels":[…]}, …]
+
+        창 크기마다 한 벌이다 (작은 창 한 벌 · 확대한 창 한 벌 …).
+        옛 `cardfix_rels` + `cardfix_base_w/h` 는 **첫 벌로 읽어준다** (호환)."""
+        out = []
+        for s in (self.cfg.get("cardfix_sets") or []):
+            try:
+                w, h = int(s.get("w") or 0), int(s.get("h") or 0)
+                rl = list(s.get("rels") or [])
+                if w > 0 and h > 0 and any(rl):
+                    out.append({"w": w, "h": h, "rels": rl})
+            except Exception:
+                pass
+        old = list(self.cfg.get("cardfix_rels") or [])
+        if any(old):
+            w = int(self.cfg.get("cardfix_base_w") or 0)
+            h = int(self.cfg.get("cardfix_base_h") or 0)
+            if w <= 0 or h <= 0:
+                w, h = CARDFIX_BASE_WH
+            if not any(abs(w - s["w"]) <= 4 for s in out):
+                out.insert(0, {"w": w, "h": h, "rels": old})
+        if not out:          # 아무것도 없으면 코드 기본값 (작은 창)
+            out = [{"w": CARDFIX_BASE_WH[0], "h": CARDFIX_BASE_WH[1],
+                    "rels": [list(x) for x in CARDFIX_RELS]}]
+        return out
+
+    def _cardfix_rels_for(self, nw, nh):
+        """그 창 크기에 **등록된** 좌표 → 없으면 None.
+
+        🚫 None 이면 **그 클라는 누르지 않는다.** 비율로 늘려 때우지 않는다 —
+           그게 2026-10-19 에 엉뚱한 곳을 누른 원인이다."""
+        for s in self._cardfix_sets():
+            if abs(nw - s["w"]) <= max(4, s["w"] * CARDFIX_SIZE_TOL):
+                rl = [r for r in s["rels"] if r]
+                return rl or None
+        return None
 
     def _cardfix_slot(self):
         """🃏 지금 **카드교체 화면인 클라**를 찾는다 → (슬롯0부터, 창left, 창top, 점수).
@@ -6175,13 +6211,13 @@ class App(tk.Tk):
         """클릭한 자리가 **어느 클라 창 안인지** 보고 그 창 기준(dx,dy)으로 저장."""
         j = getattr(self, "_cardfix_reg_j", 0)
         si = L = T = None
+        nw = nh = 0
         try:
             rects = self._client_rects_by_slot()
             for i, (l, t, r, b) in enumerate(rects or []):
                 if l <= x < r and t <= y < b:
                     si, L, T = i, l, t
-                    self.cfg["cardfix_base_w"] = int(r - l)   # 그때 창 가로
-                    self.cfg["cardfix_base_h"] = int(b - t)   # 그때 창 세로
+                    nw, nh = int(r - l), int(b - t)           # 그때 창 크기
                     break
         except Exception:
             pass
@@ -6194,12 +6230,27 @@ class App(tk.Tk):
             self.status.set("📍 그 자리는 리니지M 창 밖입니다 — 카드교체 화면 "
                             "안을 클릭하세요 (좌표 %d 은 그대로)" % (j + 1))
             return
-        rels = self._cardfix_rels()
-        rels[j] = [int(x) - L, int(y) - T]
-        self.cfg["cardfix_rels"] = rels
+        # 📐 **그 창 크기의 벌**에 넣는다 (없으면 새로 만든다).
+        #    창 크기마다 좌표를 따로 두므로, 확대한 창에서 찍어도 작은 창 좌표가
+        #    날아가지 않는다 (2026-10-19 — 비율 보정을 없애면서 함께 바꿨다).
+        sets = [dict(s) for s in self._cardfix_sets()]
+        tgt = None
+        for s in sets:
+            if abs(nw - s["w"]) <= max(4, s["w"] * CARDFIX_SIZE_TOL):
+                tgt = s
+                break
+        if tgt is None:
+            tgt = {"w": nw, "h": nh, "rels": [None] * CARDFIX_CLICKS}
+            sets.append(tgt)
+        rl = list(tgt["rels"])[:CARDFIX_CLICKS]
+        while len(rl) < CARDFIX_CLICKS:
+            rl.append(None)
+        rl[j] = [int(x) - L, int(y) - T]
+        tgt["rels"] = rl
+        self.cfg["cardfix_sets"] = sets
         save_cfg(self.cfg)
-        self.status.set("✔ 변신확정 좌표 %d 등록 — 창 기준 (%d,%d) · #%02d 에서 찍음"
-                        % (j + 1, rels[j][0], rels[j][1], si + 1))
+        self.status.set("✔ 변신확정 좌표 %d 등록 — 창 %dx%d 기준 (%d,%d) · #%02d 에서 찍음"
+                        % (j + 1, nw, nh, rl[j][0], rl[j][1], si + 1))
         self._cardfix_paint()
 
     def _cardfix_run(self, why="버튼"):
@@ -6231,7 +6282,7 @@ class App(tk.Tk):
                 pass
             return
         try:
-            rels = [r for r in self._cardfix_rels() if r]
+            rels = [r for s in self._cardfix_sets() for r in s["rels"] if r]
             if not rels:
                 click_log("[변신확정] 실행 안 함 — 좌표가 하나도 없다 (%s) "
                           "· 창에서 📍 로 찍어주세요" % why)
@@ -6285,16 +6336,21 @@ class App(tk.Tk):
     def _cardfix_one(self, si, L, T, v, got, rels, ai=1, an=1):
         """🃏 **한 클라**에서 좌표를 순서대로 누른다 (가로·세로 각각 비율 보정)."""
         try:
-            _bw, _bh = self._cardfix_base()
             _nw = int(got[4]) if len(got) > 4 else 0
             _nh = int(got[5]) if len(got) > 5 else 0
-            _kx = (_nw / float(_bw)) if (_bw > 0 and _nw > 0) else 1.0
-            _ky = (_nh / float(_bh)) if (_bh > 0 and _nh > 0) else _kx
-            click_log("[변신확정] (%d/%s) #%02d 화면 %.2f → 좌표 %d개"
-                      % (ai, an if an > 0 else "?", si + 1, v, len(rels))
-                      + ("" if (abs(_kx - 1.0) < 0.01 and abs(_ky - 1.0) < 0.01)
-                         else " · %dx%d→%dx%d 가로 %.2f배 세로 %.2f배"
-                              % (_bw, _bh, _nw, _nh, _kx, _ky)))
+            # 🚫 **그 창 크기에 등록된 좌표가 없으면 누르지 않는다.**
+            rels = self._cardfix_rels_for(_nw, _nh)
+            if not rels:
+                click_log("[변신확정] (%d/%s) #%02d 건너뜀 — 창 %dx%d 에 등록된 "
+                          "좌표가 없다 (등록된 크기: %s) · 그 크기에서 📍 로 "
+                          "찍어주세요"
+                          % (ai, an if an > 0 else "?", si + 1, _nw, _nh,
+                             ", ".join("%dx%d" % (s["w"], s["h"])
+                                       for s in self._cardfix_sets())))
+                return
+            click_log("[변신확정] (%d/%s) #%02d 화면 %.2f → 좌표 %d개 (창 %dx%d)"
+                      % (ai, an if an > 0 else "?", si + 1, v, len(rels),
+                         _nw, _nh))
             # ⏱ 이 셋트를 **얼마에 끝낼지** 먼저 뽑는다 (사용자 지시 0.7~1.5초).
             _budget = random.uniform(*CARDFIX_SET)
             _t0 = time.perf_counter()
@@ -6308,7 +6364,7 @@ class App(tk.Tk):
                     break
                 self.after(0, lambda a=ai, n=an, b=k, m=len(rels): self.status.set(
                     "🃏 변신확정 클라 %d/%d · 좌표 %d/%d..." % (a, n, b, m)))
-                click_at(L + int(dx * _kx), T + int(dy * _ky))
+                click_at(L + int(dx), T + int(dy))   # 🚫 비율 보정 없음
                 if k < len(rels):
                     # 남은 시간을 남은 칸수로 나눠 쓴다 — 칸마다 다시 재므로
                     # 한 칸이 길어져도 뒤에서 저절로 메워진다 (셋트 시간 유지).
@@ -6328,6 +6384,9 @@ class App(tk.Tk):
     def _cardfix_paint(self):
         """등록된 좌표를 창에 보여준다 — 됐는지 눈으로 보이게 (2026-09-16 규칙)."""
         try:
+            lb0 = getattr(self, "_cardfix_szlb", None)
+            if lb0 is not None and lb0.winfo_exists():
+                lb0.config(text="등록된 창 크기: " + self._cardfix_sizes_text())
             for j, lb in enumerate(getattr(self, "_cardfix_lbs", [])):
                 r = self._cardfix_rels()[j]
                 if r:
@@ -6356,9 +6415,15 @@ class App(tk.Tk):
         tk.Label(p, text="🃏 카드교체 화면에서 '카드 확정' 을 대신 눌러준다",
                  font=("맑은 고딕", 9, "bold")).pack(pady=(6, 2))
         tk.Label(p, text="미니맵 옆 「카드 교체」는 직접 누르세요. 들어가면 아래 "
-                         "좌표가 순서대로 눌립니다. 좌표는 창 기준이라 16클라 공용입니다.",
+                         "좌표가 순서대로 눌립니다. 좌표는 창 기준이라 같은 크기의 "
+                         "16클라에 모두 맞습니다.\n"
+                         "⚠ 창 크기마다 따로 찍어야 합니다 — 비율로 늘려 쓰면 "
+                         "엉뚱한 곳을 누릅니다. 확대한 창은 그 상태에서 다시 찍으세요.",
                  font=("맑은 고딕", 8), fg="#666", wraplength=400,
-                 justify="left").pack(pady=(0, 6))
+                 justify="left").pack(pady=(0, 2))
+        self._cardfix_szlb = tk.Label(p, text="", font=("맑은 고딕", 8, "bold"),
+                                      fg="#27ae60", wraplength=400, justify="left")
+        self._cardfix_szlb.pack(pady=(0, 6))
         self._cardfix_lbs = []
         for j in range(CARDFIX_CLICKS):
             row = tk.Frame(p); row.pack(fill="x", padx=12, pady=1)
@@ -6384,6 +6449,17 @@ class App(tk.Tk):
                        variable=self._cardfix_onv, font=("맑은 고딕", 8),
                        command=self._cardfix_on_set).pack(anchor="w", padx=12)
         self._cardfix_paint()
+
+    def _cardfix_sizes_text(self):
+        """지금 등록된 창 크기들 — 창에 보여준다 (2026-09-16 '됐는지 보이게' 규칙)."""
+        try:
+            out = []
+            for s in self._cardfix_sets():
+                n = len([r for r in s["rels"] if r])
+                out.append("%dx%d(좌표 %d개)" % (s["w"], s["h"], n))
+            return " · ".join(out) if out else "없음"
+        except Exception:
+            return "없음"
 
     def _cardfix_clear(self, j):
         rels = self._cardfix_rels()
