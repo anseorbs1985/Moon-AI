@@ -1521,111 +1521,21 @@ MAIL_OPEN_WAIT = (1.20, 2.00)    # 봉투를 누른 뒤 우편함을 보기까�
 MAIL_READ_WAIT = (0.45, 0.95)    # 화면을 '읽는' 시간 — 모두 받기를 누르기 전
 MAIL_STEP_WAIT = (0.55, 1.05)    # 받은 뒤 닫기까지
 MAIL_SLOT_GAP  = (3.0, 7.0)      # 클라 사이 — 웨이브 없이 하나씩 (그대로)
-# 📬 **[▶ 우편함 실행] 은 5분에 걸쳐 묶음으로 나눠 받는다** (2026-10-20 사용자 지시).
-#   사용자: *"한 번에 받지 말고 시간을 조정하면서 **5분에 걸쳐 랜덤으로** 받아줘…
-#   4개 슬롯 받고 **1~2분 사이**에 걸쳐서 다른 거 3개 받고 4개 받고 2개 받고
-#   이런 식으로 랜덤으로. **이건 사람이 하는 것처럼** 해줘."*
-#   2026-10-20 재지시 ①: *"너무 길다 2~3분 사이로 줄이자"*
-#   2026-10-20 재지시 ②: *"**50초~1분 20초**에 하자"*
-MAIL_SPREAD    = (50.0, 80.0)    # 전체 목표 시간 50초~1분 20초 (매번 다시 뽑는다)
-MAIL_BURST     = (2, 4)          # 한 묶음에 받을 개수 — 2~4개 랜덤
-MAIL_IN_GAP    = (8.0, 16.0)     # **묶음 안** 슬롯 사이 (10초·9초·15초처럼)
-MAIL_BURST_GAP = (60.0, 120.0)   # **묶음 사이** 1~2분
-MAIL_FIT       = (0.08, 1.60)    # 목표 시간에 맞추는 배수 한계
-# ⚠ **슬롯이 많으면 50~80초가 물리적으로 불가능하다** (실측 2026-10-20).
-#   한 슬롯 받는 데 약 4초 → **16슬롯이면 받는 것만 64초**다. 거기에 최소 간격
-#   (`MAIL_IN_MIN` 3초 · `MAIL_BURST_MIN` 6초)을 더하면 **바닥이 약 2분**이다.
-#   그래서 배수 하한을 0.08 까지 열어 **갈 수 있는 만큼만** 목표에 붙인다.
-#   슬롯 8개 이하면 50~80초에 그대로 들어간다 (평소 받을 곳은 1~8개다).
-#   🚫 `MAIL_IN_MIN`·`MAIL_BURST_MIN` 을 더 내려 억지로 맞추지 말 것 —
-#     그러면 **우편 창이 뜨기 전에 다음 클라로 넘어가 안 받고 지나간다.**
-# ⚠ **슬롯이 많으면 1~2분 쉼이 물리적으로 안 들어간다.** 16슬롯을 2~3분에 받으려면
-#   슬롯당 예산이 **약 9초**뿐이다 (150초 ÷ 16). 그래서 배수(`MAIL_FIT`)가 간격을
-#   크게 줄이는데, **너무 줄면 우편 창이 뜨기 전에 다음으로 넘어간다.**
-#   그래서 **줄인 뒤에도 이 아래로는 안 내려간다**:
-MAIL_IN_MIN    = 3.0             # 묶음 안 최소 (옛 MAIL_SLOT_GAP 하한과 같다)
-MAIL_BURST_MIN = 6.0             # 묶음 사이 최소 (50~80초 안에 들어가게 10→6)
-# ✋ **사람이 마우스를 움직이면 멈추고, 3분 조용해지면 이어서 받는다** (2026-10-20 지시)
-#   사용자: *"내가 그 시간 안에 뭔가 마우스를 움직이면 너가 그 이후에 다시 실행해줘…
-#   내가 마우스를 움직이면 우편 받는 거 멈춰 있다가 다시 움직여줘.
-#   **3분 동안 움직임이 없으면** 컴퓨터에."*
-MAIL_PAUSE_IDLE  = 3.0           # 만진 지 이것보다 짧으면 '지금 만지는 중' → 멈춘다
-MAIL_RESUME_IDLE = 180.0         # **3분** 움직임이 없으면 이어서 받는다
-MAIL_PAUSE_MAX   = 3600.0        # 기다리는 한계 (1시간) — 그 뒤엔 그만둔다
-#   ⚠ 판정은 **`precise_click.human_idle_seconds()`** 를 쓴다 —
-#     `idle_seconds()` 는 injected 를 전부 걸러 **원격에서는 사람 움직임이 사라진다.**
-#     `_system_idle_seconds()`(GetLastInputInfo) 는 **우리 클릭도 세므로** 쓰면
-#     우편을 누르는 그 순간 '사람이 만졌다' 가 되어 **영영 멈춘다.**
-#   → 실제로는 **슬롯이 적을 때** 1~2분 쉼이 그대로 살아난다 (4~8슬롯).
-#     16슬롯이면 '하나 받고 몇 초, 묶음 사이 20~30초' 가 된다 — 목표 시간이 우선.
-#   ⚠ 랜덤 폭을 0 으로 만들지 말 것 — 목표 시간은 **뽑은 값에 배수를 곱해** 맞춘다
-#     (2026-09-07 '항상 사람이 하는 것처럼' · 순서를 바꾸면 값이 굳는다).
-# ── 🗂 몬스터 도감 보상 받기 (2026-10-20 사용자 요청) ─────────────────
-#   "1번 창에 점 세 개를 클릭해놨거든. 제일 아래에 몬스터도감이라고 빨간점이
-#    들어온 게 있어. 이거를 내가 열어줄 거야. 그러면 안 받은 것들이 빨간점으로
-#    나타나거든. 저거를 네가 각각 빨간점을 다 클릭해서 보상을 받아줬으면."
-#   → **창은 사용자가 연다.** 런처는 열린 창을 찾아 빨간점만 받는다.
-#
-#   실측 2026-10-20 (창 491x276):
-#     분류 탭   x50 · y 50(전체) 80(신화) 110(전설) 140(영웅) 170(희귀)
-#               199(고급) 229(일반)  — 29~30px 간격, 빨간점은 x84
-#     목록 항목 x200 · y 52 부터 28px 간격 — 빨간점은 x≈298, 행 맨 위 +2
-#     보상 받기 (439, 220) 파란 버튼 — **회색이면 못 받는다**
-#     보상 팝업 저절로 안 닫힌다 → 빈 곳(150, 230) 클릭
-#   ⚠ 빨간점이 있어도 **파란 버튼이 없으면 누르지 않는다.** 그게 진짜 관문이다
-#     (실측: 빨간점 2곳 중 1곳은 받은 직후라 회색이었다).
-MONDEX_MATCH   = 0.80            # '몬스터 도감' 제목 기준 (실측 1.000 vs 0.50)
-MONDEX_BASE_W  = 491
-MONDEX_TAB_X   = 50              # 분류 탭을 누를 x
-# ⚠ 실측(2026-10-20)으로 맞춘 값 — 빨간점 y 가 영웅 148 · 희귀 178 · 고급 207
-#    · 일반 236 이다. 처음에 64 + 29.6 으로 잡았더니 4~6px 아래라
-#    **고급 탭을 빨간 3개로 보고 건너뛰었다.** 이 둘을 눈대중으로 바꾸지 말 것.
-MONDEX_TAB_Y0  = 60              # 첫 탭(전체)의 빨간점 y
-MONDEX_TAB_DY  = 29.3            # 탭 간격
-MONDEX_TAB_N   = 7               # 전체·신화·전설·영웅·희귀·고급·일반
-MONDEX_TAB_NAMES = ("전체", "신화", "전설", "영웅", "희귀", "고급", "일반")
-MONDEX_TAB_DOT = 84              # 탭 빨간점 x
-MONDEX_ROW_X   = 200             # 항목을 누를 x
-MONDEX_ROW_Y0  = 52              # 첫 항목 맨 위 y
-MONDEX_ROW_DY  = 28              # 항목 간격
-MONDEX_ROW_N   = 8               # 한 화면에 보이는 항목 수(넉넉히)
-MONDEX_ROW_DOT = 298             # 항목 빨간점 x
-# 🏅 보상 팝업은 **저절로 안 닫힌다** — 빈 자리를 눌러 닫는다.
-#    ⚠ (150, 248) 은 패널 **밖**이라 안 닫혔다 (실측). (150, 230) 이 검증된 자리다.
-#    닫혔는지는 **탭 열 밝기**로 확인한다 — 팝업이 뜨면 화면 전체가 어두워진다
-#    (실측: 팝업 10.5 · 닫힘 39.1).
-MONDEX_EMPTY   = (150, 230)      # 보상 팝업을 닫을 빈 자리
-MONDEX_DIM     = 20.0            # 탭 열 밝기가 이보다 어두우면 팝업이 떠 있다
-MONDEX_DIM_TRY = 3               # 닫힐 때까지 몇 번 더 눌러볼지
-# 🔁 받으면 **다음 단계가 바로 또 받을 수 있게** 되는 경우가 있다 (실측: 희귀 2행을
-#    받자 같은 자리에 또 빨간점이 떴다). 그래서 **더 받을 게 없을 때까지** 반복한다.
-MONDEX_PASSES  = 5               # 한 클라에서 몇 바퀴까지 돌지 (무한 반복 방지)
-# 🖐 **목록은 휠이 안 먹는다 — 끌어야 움직인다** (실측 2026-10-20).
-#    사용자: "지금 상태에서 안 보이면 그 밑에 있는 거야. 네가 휠로 올려.
-#            아니면 마우스를 클릭해서 위로 올리든지."
-#    `pyautogui.scroll(-1/-3/-100)` 전부 **1px 도 안 움직였다.** 모바일 게임이라
-#    손가락으로 쓸어 올리는 방식이라야 한다 → mouseDown → 조금씩 moveTo → mouseUp.
-#    ⚠ 휠(`scroll`)로 되돌리지 말 것. 실측으로 안 되는 것이 확인됐다.
-MONDEX_DRAG_X  = 250             # 끌 x (항목 글자가 없는 오른쪽)
-MONDEX_DRAG_Y0 = 220             # 끌기 시작 y
-MONDEX_DRAG_DY = 140             # 한 번에 끌어올릴 거리 (위로 = 목록이 내려간다)
-MONDEX_DRAG_N  = 8               # 한 분류에서 몇 번까지 내려볼지
-MONDEX_LIST    = (100, 48, 212, 202)   # 목록 구역 (x, y, w, h) — 바뀌었나 보는 곳
-MONDEX_SAME    = 1.5             # 끌어도 이만큼 안 바뀌면 바닥이다
-# ⏳ 마지막 좌표를 누른 뒤 **도감이 뜰 때까지 여러 번 본다** (2026-10-20 사고).
-#    예전엔 좌표를 누르자마자 **한 번만** 봤다 → 메뉴가 뜨는 중이라
-#    `도감 화면이 아니다 (0.32)` 로 16슬롯 전부 그냥 지나갔다.
-#    ⚠ 고정 sleep 하나로 때우지 말 것 — 뜨는 순간 넘어가야 빠르고 확실하다.
-MONDEX_OPEN_TRIES = 7            # 최대 7번 (약 5초)
-MONDEX_OPEN_GAP   = (0.5, 0.9)
-# 🔙 다 받았으면 **ESC 두 번** — 도감·메뉴를 닫고 사냥 화면으로 돌아간다
-#    (2026-10-20 사용자: "전부 눌렀으면 ESC 두 번 눌러줘야지 다시 사냥 화면으로").
-#    창이 몇 겹인지 바뀌면 `MONDEX_ESC` 숫자만 고친다.
-MONDEX_ESC        = 2
-MONDEX_ESC_GAP    = (0.4, 0.8)
-MONDEX_RED_MIN = 5               # 빨간 픽셀 몇 개부터 '빨간점'
-MONDEX_GAP     = (0.7, 1.5)      # 단계 사이 (사람처럼 랜덤)
-MONDEX_TEMPO   = (0.90, 1.15)
+# 📬 **[▶ 우편함 실행] · [📬 우편 지금 받기] — 쭉 받되 슬롯마다 랜덤 간격**
+#   (2026-10-20 최종 지시) 사용자: *"그냥 내가 버튼 누르면 너가 쭉 받아라…
+#   **40초~1분 동안에 알아서 랜덤으로 시간 각자 너가 랜덤으로 부여해서** 받아주라."*
+MAIL_SPREAD    = (40.0, 60.0)    # 전체 목표 40초~1분 (매번 다시 뽑는다)
+MAIL_ONE_SEC   = 4.0             # 한 슬롯 받는 데 드는 시간 (실측 약 4초)
+MAIL_IN_MIN    = 3.0             # 슬롯 사이 **최소** 간격 (옛 MAIL_SLOT_GAP 하한)
+#   남는 시간을 **슬롯마다 다른 비중(0.5~1.5)** 으로 나눠 각자 다른 값을 준다.
+#   ⚠ 랜덤 폭을 0 으로 만들지 말 것 (2026-09-07 '항상 사람이 하는 것처럼').
+#   ⚠ 슬롯이 많으면 목표를 넘는다 — 한 슬롯 4초이므로 **16슬롯은 받는 것만 64초**다.
+#     그때는 간격이 하한(3초)으로 깔려 약 105초가 된다. 기록에 그 사실을 남긴다.
+#   🚫 `MAIL_IN_MIN` 을 더 내려 억지로 맞추지 말 것 —
+#     내리면 **우편 창이 뜨기 전에 다음 클라로 넘어가 안 받고 지나간다.**
+#   🚫 묶음(2~4개 받고 1~2분 쉼)·'사람이 만지면 멈춤' 은 넣지 말 것 —
+#     2026-10-20 에 만들었다가 사용자 지시로 걷어냈다
+#     (*"이렇게 하면 아무것도 안 될 것 같다"* — 멈추면 영영 안 끝난다).
 MAIL_TEMPO     = (0.90, 1.12)    # 클라마다 제 속도 (들어갈 때 한 번 뽑는다)
 MAIL_HOLD      = 0.10            # 10% 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
 MAIL_HOLD_T    = (0.4, 1.0)
@@ -15348,80 +15258,55 @@ class App(tk.Tk):
                 return
             random.shuffle(got)                 # 늘 같은 순서면 기계 같다
             use = got if now else got[:MAIL_BATCH]
-            # 📬 **묶음으로 쪼갠다** — 2~4개 받고 1~2분 쉬고 또 2~4개 (사람처럼).
-            #    버튼으로 부른 것만 이렇게 하고, (지금은 안 도는) 자동 쪽은 예전 그대로.
-            _bursts = []
+            # 📬 **쭉 받는다 — 슬롯마다 랜덤 간격** (2026-10-20 최종 지시).
+            #    사용자: *"그냥 내가 버튼 누르면 너가 쭉 받아라. 지금 받는 걸 쭉 받는 걸
+            #    내가 원하는 시간대에 해서 받아줘. **40초~1분 동안에 알아서 랜덤으로
+            #    시간 각자 너가 랜덤으로 부여해서** 받아주라. 이게 제일 괜찮을 것 같아."*
+            #    🚫 묶음(2~4개 받고 1~2분 쉼)과 '사람이 만지면 멈춤' 은 **걷어냈다** —
+            #       사용자: *"이렇게 하면 아무것도 안 될 것 같다."* 멈추면 영영 안 끝난다.
+            #       클로드는 둘 다 다시 넣지 말 것.
             if now:
-                _k = 0
-                while _k < len(use):
-                    _b = random.randint(*MAIL_BURST)
-                    _bursts.append(use[_k:_k + _b])
-                    _k += _b
-                # 뽑은 간격들을 **목표 시간에 맞춰 배수로** 늘리거나 줄인다
                 _want = random.uniform(*MAIL_SPREAD)
-                _ins = [random.uniform(*MAIL_IN_GAP)
-                        for b in _bursts for _ in range(max(0, len(b) - 1))]
-                _bgs = [random.uniform(*MAIL_BURST_GAP)
-                        for _ in range(max(0, len(_bursts) - 1))]
-                _plan = sum(_ins) + sum(_bgs) + len(use) * 4.0   # 4초 = 한 슬롯 받는 시간
-                _fit = 1.0 if _plan <= 0 else max(MAIL_FIT[0],
-                                                  min(MAIL_FIT[1], _want / _plan))
-                #   줄이되 **하한 아래로는 안 내려간다** (창이 뜰 시간은 남긴다)
-                _ins = [max(MAIL_IN_MIN, g * _fit) for g in _ins]
-                _bgs = [max(MAIL_BURST_MIN, g * _fit) for g in _bgs]
-                _plan = sum(_ins) + sum(_bgs) + len(use) * 4.0   # 하한 적용 뒤 실제값
-                _fit = 1.0
-                click_log(f"[우편] 📬 받을 곳 {len(got)}개 — "
-                          f"{len(_bursts)}묶음 {[len(b) for b in _bursts]} 으로 "
-                          f"약 {int(_plan / 60)}분 {int(_plan % 60)}초에 "
-                          f"걸쳐 받는다 (목표 {int(_want)}초) "
-                          f"{[g[0] + 1 for g in use]}")
+                _need = len(use) * MAIL_ONE_SEC          # 받는 데 드는 시간
+                _room = max(0.0, _want - _need)          # 간격에 쓸 수 있는 시간
+                # **슬롯마다 다른 비중**으로 나눈다 → 5초·12초·8초… 처럼 각자 다르다
+                _wt = [random.uniform(0.5, 1.5) for _ in range(max(0, len(use) - 1))]
+                _ws = sum(_wt) or 1.0
+                _ins = [max(MAIL_IN_MIN, _room * x / _ws) for x in _wt]
+                _plan = sum(_ins) + _need
+                click_log(f"[우편] 📬 받을 곳 {len(got)}개 — 쭉 받는다 · "
+                          f"약 {int(_plan)}초 (목표 {int(_want)}초"
+                          + (f" · 받는 시간만 {int(_need)}초라 더 걸린다"
+                             if _plan > _want + 1 else "") + ") "
+                          f"간격 {[round(g, 1) for g in _ins]} {[g[0]+1 for g in use]}")
             else:
-                _bursts, _ins, _bgs = [use], [], []
+                _ins = []
                 click_log(f"[우편] 📬 받을 곳 {len(got)}개 — 이번에 {len(use)}개를 "
                           f"하나씩 받는다 {[g[0]+1 for g in use]}")
-            n, _done, _ii, _bi = 0, 0, 0, 0
+            n, _done = 0, 0
             _t0 = time.time()
-            _quit = False
-            for _bn, _burst in enumerate(_bursts):
-                if getattr(self, "_stop_flag", False) or _quit:
+            for i, (si, L_, T_, mx_, my_, sc, red) in enumerate(use):
+                if getattr(self, "_stop_flag", False):
                     break
-                if _bn:                      # 묶음 사이 — 1~2분 쉰다
-                    _w = _bgs[_bi] if _bi < len(_bgs) else random.uniform(*MAIL_BURST_GAP)
-                    _bi += 1
-                    click_log(f"[우편] ⏸ {_bn}묶음 끝 — {int(_w)}초 쉬고 다음 묶음")
-                    self.after(0, lambda s=int(_w), a=_done, m=len(use):
-                               self.status.set(f"📬 우편 {a}/{m} — {s}초 쉬는 중 (사람처럼)"))
-                    _end = time.time() + _w
-                    while time.time() < _end:
+                # 자동 쪽(지금은 꺼짐)만 '사람이 돌아오면 그만둔다' —
+                # 버튼으로 부른 것은 **끝까지 쭉** 받는다 (사용자 지시)
+                if not now and self._system_idle_seconds() < 5:
+                    click_log("[우편] 사람이 돌아와 멈춘다")
+                    break
+                if self._mail_one(si, L_, T_, mx_, my_):
+                    n += 1
+                _done += 1
+                if i < len(use) - 1:
+                    _g = (_ins[i] if i < len(_ins)
+                          else random.uniform(*MAIL_SLOT_GAP))
+                    self.after(0, lambda a=_done, m=len(use), s=_g:
+                               self.status.set(
+                                   f"📬 우편 받는 중 {a}/{m} — {s:.0f}초 뒤 다음"))
+                    _end = time.time() + _g
+                    while time.time() < _end:          # 쉬는 중에도 멈춤이 먹는다
                         if getattr(self, "_stop_flag", False):
                             break
-                        time.sleep(0.5)
-                for i, (si, L, T, mx_, my_, sc, red) in enumerate(_burst):
-                    if getattr(self, "_stop_flag", False):
-                        break
-                    # ✋ **버튼으로 부른 것** — 사람이 만지면 멈췄다가 3분 뒤 이어 간다
-                    #    (예전에는 '버튼은 예외' 라 사람이 만져도 계속 눌렀다.
-                    #     2026-10-20 사용자 지시로 바뀌었다 — 멈추고 **다시** 간다.)
-                    if now:
-                        if not self._mail_wait_human(f" (#{si+1:02d} 앞)"):
-                            _quit = True
-                            break
-                    # 자동 쪽(지금은 꺼짐)은 예전처럼 **그냥 그만둔다**
-                    elif self._system_idle_seconds() < 5:
-                        click_log("[우편] 사람이 돌아와 멈춘다")
-                        break
-                    if self._mail_one(si, L, T, mx_, my_):
-                        n += 1
-                    _done += 1
-                    if i < len(_burst) - 1:
-                        _g = (_ins[_ii] if _ii < len(_ins)
-                              else random.uniform(*MAIL_SLOT_GAP))
-                        _ii += 1
-                        self.after(0, lambda a=_done, m=len(use), s=_g:
-                                   self.status.set(
-                                       f"📬 우편 받는 중 {a}/{m} — {s:.0f}초 뒤 다음"))
-                        time.sleep(_g)
+                        time.sleep(0.3)
             if now:
                 click_log(f"[우편] ⏱ 실제 {int(time.time()-_t0)}초 걸렸다")
             click_log(f"[우편] 끝 — {n}개 받았다")
@@ -15432,40 +15317,6 @@ class App(tk.Tk):
         finally:
             self._mail_next_at = time.time() + random.uniform(*MAIL_NEXT)
             self._clear_busy("우편받기")
-
-    def _mail_wait_human(self, tag=""):
-        """✋ 사람이 마우스를 만지는 중이면 **멈췄다가 3분 조용해지면** 이어 간다.
-
-        → 계속 가도 되면 `True`, 그만둬야 하면 `False`.
-        ⚠ `human_idle_seconds()` 를 쓴다 (위 상수 주석의 이유 — 다른 것으로
-          바꾸면 원격에서 안 멈추거나, 우리 클릭에 스스로 멈춘다)."""
-        try:
-            import precise_click as _pc
-            _idle = _pc.human_idle_seconds()
-        except Exception:
-            return True                       # 감시를 못 쓰면 막지 않는다
-        if _idle >= MAIL_PAUSE_IDLE:
-            return True
-        click_log(f"[우편] ✋ 사람이 마우스를 움직였다 — 멈춘다"
-                  f"{tag} ({int(MAIL_RESUME_IDLE)}초 조용해지면 이어서 받는다)")
-        _t0 = time.time()
-        while time.time() - _t0 < MAIL_PAUSE_MAX:
-            if getattr(self, "_stop_flag", False):
-                click_log("[우편] ✋ 멈춘 동안 [■ 전체멈춤] — 그만둔다")
-                return False
-            try:
-                _idle = _pc.human_idle_seconds()
-            except Exception:
-                return True
-            if _idle >= MAIL_RESUME_IDLE:
-                click_log(f"[우편] ▶ {int(_idle)}초 동안 움직임이 없어 이어서 받는다 "
-                          f"({int(time.time()-_t0)}초 멈춰 있었다)")
-                return True
-            self.after(0, lambda s=int(MAIL_RESUME_IDLE - _idle):
-                       self.status.set(f"📬 ✋ 멈춤 — 조용해지고 {s}초 뒤 이어서 받습니다"))
-            time.sleep(1.0)
-        click_log(f"[우편] ✋ {int(MAIL_PAUSE_MAX/60)}분을 기다려도 계속 만져서 그만둔다")
-        return False
 
     def _mail_run_now(self):
         """📬 [지금 받기] — 자는 클라의 우편을 **전부** 받는다 (유휴 기다리지 않음)."""
