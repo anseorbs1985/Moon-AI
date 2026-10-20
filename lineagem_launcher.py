@@ -1462,9 +1462,17 @@ MAIL_RED_MIN   = 5               # 빨간 픽셀 몇 개부터 '우편 있음'
 MAIL_BASE_W    = 491             # 견본을 자른 창 가로
 MAIL_ICON_OFF  = (6, 7)          # 견본 왼쪽위 → 봉투 누를 자리
 MAIL_RED_BOX   = (12, -3, 9, 8)  # 견본 왼쪽위 기준 빨간점 칸 (dx, dy, w, h)
-MAIL_OPEN_WAIT = (1.2, 1.9)      # 봉투를 누른 뒤 우편함이 뜰 때까지
-MAIL_STEP_WAIT = (0.8, 1.5)      # 단계 사이 (사람처럼 랜덤)
-MAIL_SLOT_GAP  = (2.0, 4.0)      # 클라 사이 — 웨이브 없이 하나씩
+# ⏱ 2026-10-20 사용자: "너무 빠르게 순식간에 해버리면 기계가 하는 거 같잖아.
+#    사람이 하는 것처럼 좀 해. 랜덤 시간 좀 부여하고. 1~3초 사이로 하면 되지 않나."
+#    🚫 값 하나로 고정하지 말 것 — 범위 랜덤 + 클라마다 제 속도 + 가끔 멈칫.
+MAIL_FOCUS_WAIT = (0.7, 1.4)     # 창을 앞으로 올린 뒤 봉투를 누르기까지
+MAIL_OPEN_WAIT = (1.6, 3.0)      # 봉투를 누른 뒤 우편함을 보기까지
+MAIL_READ_WAIT = (1.0, 2.4)      # 화면을 '읽는' 시간 — 모두 받기를 누르기 전
+MAIL_STEP_WAIT = (1.2, 2.8)      # 받은 뒤 닫기까지
+MAIL_SLOT_GAP  = (3.0, 7.0)      # 클라 사이 — 웨이브 없이 하나씩
+MAIL_TEMPO     = (0.85, 1.25)    # 클라마다 제 속도 (들어갈 때 한 번 뽑는다)
+MAIL_HOLD      = 0.15            # 15% 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
+MAIL_HOLD_T    = (0.6, 1.8)
 SLEEP_WAKE = ("fix", "jakwi", "dragon")
 SLEEP_WAKE_KEY = "z"
 SLEEP_MATCH = 0.68      # 절전 화면 판정 기준.
@@ -14763,11 +14771,22 @@ class App(tk.Tk):
         🚫 버튼을 **못 찾으면 누르지 않는다** — 엉뚱한 곳을 누르느니 그만둔다
            (이 저장소의 절대 규칙)."""
         anc = (L + mx_, T + my_)
+        # 🧍 **이 클라만의 속도** — 들어갈 때 한 번 뽑아 내내 곱한다.
+        #    그래서 클라마다 리듬이 다르고, 같은 클라도 할 때마다 달라진다.
+        _tp = random.uniform(*MAIL_TEMPO)
+
+        def _rest(rng):
+            """사람처럼 쉰다 — 범위 랜덤 × 이 클라 속도, 가끔 한 박자 더."""
+            s = random.uniform(*rng) * _tp
+            if random.random() < MAIL_HOLD:
+                s += random.uniform(*MAIL_HOLD_T)
+            time.sleep(s)
+
         try:
             self._focus_client_at(anc)
-            time.sleep(random.uniform(0.25, 0.45))
+            _rest(MAIL_FOCUS_WAIT)
             click_at(L + mx_, T + my_)                     # ① 봉투
-            time.sleep(random.uniform(*MAIL_OPEN_WAIT))
+            _rest(MAIL_OPEN_WAIT)
             img = grab_window((L + 60, T + 60))
             if img is None:
                 click_log(f"[우편] #{si+1:02d} {name} 화면을 못 찍음 — 그만둔다")
@@ -14778,13 +14797,14 @@ class App(tk.Tk):
                           f"— 아무것도 누르지 않고 ESC")
                 press_key("esc")
                 return False
+            _rest(MAIL_READ_WAIT)                          # 화면을 '읽는' 틈
             click_at(L + got[0], T + got[1])               # ② 모두 받기
-            time.sleep(random.uniform(*MAIL_STEP_WAIT))
+            _rest(MAIL_STEP_WAIT)
             # ③ 닫기 — **ESC 를 쓴다.** 실측 2026-10-20: 빨간 ✕ 는 색으로 한 번도
             #    안 잡혔고(테두리가 얇다), ESC 로 깨끗이 닫혔다. 캡처도 한 번 아낀다.
             press_key("esc")
             click_log(f"[우편] 📬 #{si+1:02d} {name} 받았다 "
-                      f"(모두 받기 {got[0]},{got[1]})")
+                      f"(모두 받기 {got[0]},{got[1]} · 속도 {_tp:.2f}배)")
             return True
         except Exception as e:
             click_log(f"[우편] #{si+1:02d} {name} 오류: {e}")
