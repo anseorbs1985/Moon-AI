@@ -1513,6 +1513,18 @@ MONDEX_DIM_TRY = 3               # 닫힐 때까지 몇 번 더 눌러볼지
 # 🔁 받으면 **다음 단계가 바로 또 받을 수 있게** 되는 경우가 있다 (실측: 희귀 2행을
 #    받자 같은 자리에 또 빨간점이 떴다). 그래서 **더 받을 게 없을 때까지** 반복한다.
 MONDEX_PASSES  = 5               # 한 클라에서 몇 바퀴까지 돌지 (무한 반복 방지)
+# 🖐 **목록은 휠이 안 먹는다 — 끌어야 움직인다** (실측 2026-10-20).
+#    사용자: "지금 상태에서 안 보이면 그 밑에 있는 거야. 네가 휠로 올려.
+#            아니면 마우스를 클릭해서 위로 올리든지."
+#    `pyautogui.scroll(-1/-3/-100)` 전부 **1px 도 안 움직였다.** 모바일 게임이라
+#    손가락으로 쓸어 올리는 방식이라야 한다 → mouseDown → 조금씩 moveTo → mouseUp.
+#    ⚠ 휠(`scroll`)로 되돌리지 말 것. 실측으로 안 되는 것이 확인됐다.
+MONDEX_DRAG_X  = 250             # 끌 x (항목 글자가 없는 오른쪽)
+MONDEX_DRAG_Y0 = 220             # 끌기 시작 y
+MONDEX_DRAG_DY = 140             # 한 번에 끌어올릴 거리 (위로 = 목록이 내려간다)
+MONDEX_DRAG_N  = 8               # 한 분류에서 몇 번까지 내려볼지
+MONDEX_LIST    = (100, 48, 212, 202)   # 목록 구역 (x, y, w, h) — 바뀌었나 보는 곳
+MONDEX_SAME    = 1.5             # 끌어도 이만큼 안 바뀌면 바닥이다
 MONDEX_RED_MIN = 5               # 빨간 픽셀 몇 개부터 '빨간점'
 MONDEX_GAP     = (0.7, 1.5)      # 단계 사이 (사람처럼 랜덤)
 MONDEX_TEMPO   = (0.90, 1.15)
@@ -14762,62 +14774,107 @@ class App(tk.Tk):
         """[보상 받기] 파란 버튼 → (cx, cy). **회색이면 None** (= 못 받는다)."""
         return self._mail_btn(img, 0.78, 0.70, 1.00, 1.00, blue=True)
 
+    def _mondex_drag(self, L, T, k, up=True, tp=1.0):
+        """🖐 목록을 **끌어서** 움직인다 (휠은 안 먹는다 — 실측).
+
+        `up=True` 면 위로 끌어 **목록을 아래로** 내린다."""
+        try:
+            x = L + int(MONDEX_DRAG_X * k)
+            y0 = T + int(MONDEX_DRAG_Y0 * k)
+            dy = int(MONDEX_DRAG_DY * k) * (-1 if up else 1)
+            pyautogui.moveTo(x, y0)
+            time.sleep(random.uniform(0.15, 0.30) * tp)
+            pyautogui.mouseDown(x, y0)
+            time.sleep(random.uniform(0.08, 0.16))
+            for s in range(1, 9):          # 사람처럼 조금씩 민다
+                pyautogui.moveTo(x, y0 + int(dy * s / 8))
+                time.sleep(random.uniform(0.025, 0.05))
+            pyautogui.mouseUp(x, y0 + dy)
+            time.sleep(random.uniform(*MONDEX_GAP) * tp)
+            return True
+        except Exception:
+            return False
+
+    def _mondex_list(self, L, T, k):
+        """목록 구역만 잘라온다 — 끌어서 바뀌었는지 보는 데 쓴다."""
+        try:
+            img = grab_window((L + 60, T + 60))
+            if img is None:
+                return None
+            x, y, w, h = MONDEX_LIST
+            return img[int(y * k):int((y + h) * k), int(x * k):int((x + w) * k)].copy()
+        except Exception:
+            return None
+
+    def _mondex_rows(self, si, L, T, k, ti, tp):
+        """지금 보이는 항목들 중 **빨간점 있는 것**을 받는다 → 받은 개수."""
+        got = 0
+        for ri in range(MONDEX_ROW_N):
+            if getattr(self, "_stop_flag", False):
+                break
+            ry = MONDEX_ROW_Y0 + MONDEX_ROW_DY * ri
+            im2 = grab_window((L + 60, T + 60))
+            if im2 is None:
+                break
+            if self._mondex_red(im2, MONDEX_ROW_DOT, ry + 2, k) < MONDEX_RED_MIN:
+                continue
+            click_at(L + int(MONDEX_ROW_X * k), T + int((ry + 13) * k))
+            time.sleep(random.uniform(*MONDEX_GAP) * tp)
+            im3 = grab_window((L + 60, T + 60))
+            bb = self._mondex_claim_btn(im3) if im3 is not None else None
+            if not bb:
+                # 🚫 빨간점이 있어도 **파란 버튼이 없으면 누르지 않는다**
+                click_log(f"[도감] #{si+1:02d} {ti+1}번 분류 {ri+1}행 — "
+                          f"[보상 받기] 가 회색이라 넘어간다")
+                continue
+            click_at(L + bb[0], T + bb[1])
+            time.sleep(random.uniform(*MONDEX_GAP) * tp)
+            if not self._mondex_close_pop(L, T, k, tp):
+                click_log(f"[도감] #{si+1:02d} 보상 팝업이 안 닫힌다 — 그만둔다")
+                return got + 1
+            got += 1
+            click_log(f"[도감] 🗂 #{si+1:02d} {ti+1}번 분류 {ri+1}행 받았다")
+        return got
+
     def _mondex_one(self, si, L, T, k, name=""):
         """클라 하나의 도감 보상을 **전부** 받는다 → 받은 개수."""
         _tp = random.uniform(*MONDEX_TEMPO)
-
-        def _rest():
-            time.sleep(random.uniform(*MONDEX_GAP) * _tp)
-
         got = 0
         try:
             self._focus_client_at((L + 60, T + 60))
-            _rest()
-            # 들어가기 전에 **남아 있는 보상 팝업부터** 치운다 (어두우면 점이 안 보인다)
+            time.sleep(random.uniform(*MONDEX_GAP) * _tp)
+            # 들어가기 전에 **남아 있는 보상 팝업부터** 치운다
             self._mondex_close_pop(L, T, k, _tp)
             for _pass in range(MONDEX_PASSES):
-              _before = got
-              for ti in range(MONDEX_TAB_N):
-                  if getattr(self, "_stop_flag", False):
-                      break
-                  ty = MONDEX_TAB_Y0 + MONDEX_TAB_DY * ti
-                  img = grab_window((L + 60, T + 60))
-                  if img is None:
-                      break
-                  if self._mondex_red(img, MONDEX_TAB_DOT, ty, k) < MONDEX_RED_MIN:
-                      continue                       # 그 분류는 받을 게 없다
-                  click_at(L + int(MONDEX_TAB_X * k), T + int(ty * k))
-                  _rest()
-                  # 그 분류 안에서 빨간점이 있는 항목을 위에서부터
-                  for ri in range(MONDEX_ROW_N):
-                      if getattr(self, "_stop_flag", False):
-                          break
-                      ry = MONDEX_ROW_Y0 + MONDEX_ROW_DY * ri
-                      im2 = grab_window((L + 60, T + 60))
-                      if im2 is None:
-                          break
-                      if self._mondex_red(im2, MONDEX_ROW_DOT, ry + 2, k) < MONDEX_RED_MIN:
-                          continue
-                      click_at(L + int(MONDEX_ROW_X * k), T + int((ry + 13) * k))
-                      _rest()
-                      im3 = grab_window((L + 60, T + 60))
-                      bb = self._mondex_claim_btn(im3) if im3 is not None else None
-                      if not bb:
-                          # 🚫 빨간점이 있어도 **파란 버튼이 없으면 누르지 않는다**
-                          click_log(f"[도감] #{si+1:02d} {ti+1}번 분류 {ri+1}행 — "
-                                    f"[보상 받기] 가 회색이라 넘어간다")
-                          continue
-                      click_at(L + bb[0], T + bb[1])          # 보상 받기
-                      _rest()
-                      # 🏅 보상 팝업 — **닫힌 것을 확인하고** 다음으로 간다.
-                      #    안 닫히면 화면이 어두워 빨간점이 전부 0 으로 읽힌다 (실측).
-                      if not self._mondex_close_pop(L, T, k, _tp):
-                          click_log(f"[도감] #{si+1:02d} 보상 팝업이 안 닫힌다 — 그만둔다")
-                          return got + 1
-                      got += 1
-                      click_log(f"[도감] 🗂 #{si+1:02d} {ti+1}번 분류 {ri+1}행 받았다")
-              if got == _before:
-                  break          # 이번 바퀴에 하나도 못 받았다 = 끝
+                _before = got
+                for ti in range(MONDEX_TAB_N):
+                    if getattr(self, "_stop_flag", False):
+                        break
+                    ty = MONDEX_TAB_Y0 + MONDEX_TAB_DY * ti
+                    img = grab_window((L + 60, T + 60))
+                    if img is None:
+                        break
+                    if self._mondex_red(img, MONDEX_TAB_DOT, ty, k) < MONDEX_RED_MIN:
+                        continue                   # 그 분류는 받을 게 없다
+                    click_at(L + int(MONDEX_TAB_X * k), T + int(ty * k))
+                    time.sleep(random.uniform(*MONDEX_GAP) * _tp)
+                    # 🖐 맨 위로 올린 뒤, 한 화면씩 내리며 끝까지 본다
+                    self._mondex_drag(L, T, k, up=False, tp=_tp)
+                    for _sc in range(MONDEX_DRAG_N):
+                        if getattr(self, "_stop_flag", False):
+                            break
+                        got += self._mondex_rows(si, L, T, k, ti, _tp)
+                        _b4 = self._mondex_list(L, T, k)
+                        self._mondex_drag(L, T, k, up=True, tp=_tp)
+                        _af = self._mondex_list(L, T, k)
+                        if _b4 is None or _af is None:
+                            break
+                        import numpy as _np
+                        if float(_np.abs(_b4.astype(int) - _af.astype(int)).mean()) \
+                                < MONDEX_SAME:
+                            break              # 끌어도 안 바뀐다 = 바닥이다
+                if got == _before:
+                    break                      # 이번 바퀴에 하나도 못 받았다 = 끝
         except Exception as e:
             click_log(f"[도감] #{si+1:02d} {name} 오류: {e}")
         return got
