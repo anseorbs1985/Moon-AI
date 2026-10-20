@@ -322,6 +322,16 @@ def _watch_thread():
                     _WATCH["click_n"] = _WATCH.get("click_n", 0) + 1
                     _WATCH["click_xy"] = (int(lparam.contents.pt.x),
                                           int(lparam.contents.pt.y))
+                # 📬 **움직임까지 포함한 '사람이 만진 시각'** — `_OURS` 표식만 제외한다
+                #    (2026-10-20 우편 멈춤·재개용). `ts` 는 injected 를 전부 거르므로
+                #    **원격 데스크톱에서는 사람의 움직임까지 사라진다**(2026-09-16 실측).
+                #    그래서 클릭 세기와 **같은 기준**(표식 없는 것 = 사람)을 쓴다.
+                #    우리가 보낸 것은 click·moveTo·mouseDown/Up 전부 `_send` 를 지나
+                #    표식이 붙으므로 여기 안 걸린다 → 자동 클릭이 자기를 멈추지 않는다.
+                #    ⚠ 마우스만 본다. 키보드는 우리가 보낸 ESC 에 표식이 없어
+                #      '사람' 으로 오인돼 영영 멈추므로 쓰지 않는다.
+                if not ours:
+                    _WATCH["hts"] = time.time()
                 # ts·down·keys 는 예전 규칙(injected 제외) 그대로 둔다 —
                 # 용던고고의 '사람 손을 기다린다' 동작을 바꾸지 않기 위해서다.
                 if not (fl & (_LLMHF_INJECTED | _LLMHF_LOWER_IL_INJECTED)):
@@ -403,6 +413,22 @@ def idle_seconds():
     if not _WATCH["on"]:
         return 999.0
     return time.time() - (_WATCH["ts"] or 0.0)
+
+
+def human_idle_seconds():
+    """사람이 마우스를 마지막으로 만지고 지난 시간(초) — **움직임까지 포함**.
+
+    `idle_seconds()` 와 다른 점: **우리 표식(`_OURS`)만** 제외한다.
+    `idle_seconds()` 는 injected 를 전부 걸러서, **원격 데스크톱에서는 사람의
+    입력까지 사라져 늘 '유휴'** 로 보인다 (2026-09-16 실측). 그래서 '사람이
+    만지는 동안 멈춘다' 같은 판단에는 이쪽을 쓴다.
+
+    감시가 꺼져 있거나 아직 한 번도 안 만졌으면 **큰 값**(= 유휴)을 돌려준다 —
+    모를 때는 막지 않는 쪽이 안전하다."""
+    if not _WATCH["on"]:
+        return 999.0
+    _t = _WATCH.get("hts") or 0.0
+    return 999.0 if _t <= 0 else time.time() - _t
 
 
 def button_down():
