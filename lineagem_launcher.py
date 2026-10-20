@@ -1757,7 +1757,32 @@ RECLICK_WAIT_BY = {"dragon": [1.6, 2.0, 2.4, 2.8]}
 #    실측(2026-10-06, 2번 클라): 가운데(+0) 는 확인창이 안 뜨고 캐릭터만 걸어갔고,
 #    **오른쪽(+8) 에서 확인창이 일치도 1.00 으로 떴다.** 그래서 +8 이 맨 앞이다
 #    (가운데부터 누르면 헛클릭 한 번에 캐릭터가 걸어가 버린다).
-IMG_CLICK_OFFS = {("dragon", 4): [(8, 0), (0, 0), (4, 0), (12, 0)]}
+IMG_CLICK_OFFS = {("dragon", 4): [(0, 0), (8, 0), (-6, 0), (4, 0)]}
+# 🚨 **첫 자리를 가운데로 되돌렸다** (2026-10-21 — 기록 727건 실측).
+#   2026-10-06 에 `+8` 을 맨 앞에 뒀다. 그때 근거는 사용자가 #02 에서 **한 번** 눌러
+#   된 것이었는데, 그 뒤 2주치 기록을 세어 보니 **반대였다**:
+#       08-27~10-06 가운데   435/533 = **81.6%**   최저 63.6%
+#       10-07~10-20 첫 +8    140/194 = **72.2%**   최저 **22.2%** · 50%대 네 번
+#   마름모 템플릿이 **18×17** 이라 `+8` 은 거의 **가장자리**다 — 날개(애니메이션)나
+#   그 옆 땅을 눌러 '이동' 으로 먹힌다. 구역별로도 +8 이 더 나빴다:
+#       왼쪽(x<140)  +8 **0/11**  ·  가운데 4/22
+#   ⚠ 클로드는 `+8` 을 다시 맨 앞에 두지 말 것. 한 번의 관찰보다 기록 수백 건이 맞다.
+#   `-6` 은 셋째 자리에 뒀다 — 가운데·오른쪽이 다 안 될 때 반대쪽도 본다.
+
+# 🧍 **마름모가 '멀면' 걸어갈 시간을 더 준다** (2026-10-21 — 실측)
+#   캐릭터는 창 가운데쯤(x 245 근처)에 선다. 마름모가 멀면 클릭이 **'이동' 으로 먹혀**
+#   캐릭터가 그쪽으로 걸어간다 (2026-08-28 에 이미 실측). 727건 성공률:
+#       창내 x  55~139   5/ 34 = **15%**   ← 멀다 (왼쪽)
+#              140~159  87/136 =  64%
+#              160~199  98/117 =  84%
+#              240~299 377/393 = **96%**   ← 캐릭터 근처
+#              300~419   0/ 17 = ** 0%**   ← 멀다 (오른쪽 끝)
+#   그래서 **먼 자리일 때만** 대기를 길게 잡아 걸어갈 시간을 준다. 가까운 자리는
+#   지금 그대로라 **전체 시간은 거의 안 늘어난다** (하루 13건 중 먼 것은 1~3건).
+#   🚫 가까운 쪽 대기(`RECLICK_WAIT_BY`)를 같이 늘리지 말 것 — 2026-08-28 에
+#     "실패 슬롯이 전체를 잡아먹지 않게" 줄인 값이다.
+IMG_NEAR_X  = {("dragon", 4): (140, 300)}     # 창내 x 가 이 안이면 '가깝다'
+RECLICK_WAIT_FAR = {"dragon": [3.0, 4.5, 6.0, 8.0]}
 DRIFT_MAX  = 40           # 그림이 이만큼(px) 안에서 움직인 건 '같은 것'으로 본다.
                           # 더 멀면 다른 마름모라 겨냥을 옮기지 않는다 (엉뚱한 층 방지)
 
@@ -2127,7 +2152,7 @@ def zone_box(fkey, j, coord):
         return None
 
 
-def learn_img(fkey, j, patch, nm=""):
+def learn_img(fkey, j, patch, nm="", coord=None):
     """**성공이 확인된** 클릭 자리의 그림을 '이 컴퓨터 전용'으로 모아둔다.
 
     같은 아이콘도 배경(지형·몹·이펙트)과 날개 애니메이션에 따라 점수가
@@ -2148,6 +2173,43 @@ def learn_img(fkey, j, patch, nm=""):
             r = cv2.matchTemplate(patch, old, cv2.TM_CCOEFF_NORMED)
             if float(r.max()) >= 0.90:
                 return                      # 이미 있는 것과 비슷 — 안 모은다
+        # 🚨 **배경을 담은 그림인지 본다** (2026-10-21 — 위 설명 참조).
+        #    그 화면을 이 패치로 훑어 **1등(자기 자리) 과 2등**을 비교한다.
+        #    2등은 1등 주변(템플릿 크기)을 지운 뒤 고른다 — 같은 자리를 2등으로
+        #    세지 않으려고. 2등이 높으면 그 그림은 화면 아무 곳에나 맞는 것이다.
+        if coord is not None:
+            # 창을 직접 캡처한다(PrintWindow) — 런처가 덮고 있어도 정확하다.
+            # 📐 범위를 정해뒀으면 그 범위만, 없으면 창 전체를 본다.
+            big = grab_window(coord)
+            roi = None
+            if big is not None:
+                roi = big
+                try:
+                    bx = search_box(fkey, j, coord)
+                    rc = client_rect_at(coord[0], coord[1])
+                    if bx and rc:
+                        x0 = max(0, bx[0] - rc[0]); y0 = max(0, bx[1] - rc[1])
+                        x1 = min(big.shape[1], bx[2] - rc[0])
+                        y1 = min(big.shape[0], bx[3] - rc[1])
+                        if x1 - x0 >= patch.shape[1] and y1 - y0 >= patch.shape[0]:
+                            roi = big[y0:y1, x0:x1]
+                except Exception:
+                    roi = big
+            if roi is not None and roi.shape[0] >= patch.shape[0]                     and roi.shape[1] >= patch.shape[1]:
+                import numpy as _np
+                rr = cv2.matchTemplate(roi, patch, cv2.TM_CCOEFF_NORMED)
+                _, mx1, _, loc = cv2.minMaxLoc(rr)
+                th, tw = patch.shape[:2]
+                x0 = max(0, loc[0] - tw); y0 = max(0, loc[1] - th)
+                rr[y0:loc[1] + th, x0:loc[0] + tw] = -1.0
+                mx2 = float(rr.max()) if rr.size else 0.0
+                rat = (mx1 / mx2) if mx2 > 0.01 else 99.0
+                if mx2 > LEARN_NOISE_MAX or rat < LEARN_PEAK_RATIO:
+                    click_log(f"{fkey} [{nm}] 좌표{j+1} ⚠ 배경이 섞인 그림이라 "
+                              f"**배우지 않았다** (2등 {mx2:.3f} / 배수 {rat:.2f} — "
+                              f"2등 {LEARN_NOISE_MAX} 이하 · 배수 {LEARN_PEAK_RATIO} "
+                              f"이상이어야 한다)")
+                    return
         n = img_mine_free(fkey, j)
         os.makedirs(IMG_DIR_MINE, exist_ok=True)
         cv2.imencode(".png", patch)[1].tofile(img_mine_path(fkey, j, n))
@@ -2303,6 +2365,35 @@ IMG_DIR_MINE = os.path.join(os.environ.get("LOCALAPPDATA", BASE),
 #    **0.66 · 0.74 · 0.96** 으로 크게 흔들린다(실측). 그런데 전용 견본이 **4/4 로 꽉 차
 #    더 못 배우고 있었다.** 배우는 것은 **확인창이 뜬 자리뿐**이라 늘려도 안전하다.
 IMG_MAX = 10           # 한 좌표에 그림 몇 장까지
+
+# 🚨 **배경을 담은 그림은 배우지 않는다** (2026-10-21 — 층 이동 실패의 직접 원인)
+#   `learn_img` 는 '비슷한 그림이 있나'(0.90)만 봤고 **잡음 검사가 없었다.**
+#   그래서 배경이 섞인 패치가 쌓였고, 2026-10-21 에 전용 11장을 하나씩 재보니:
+#       공용·mine1~5·8·9   잡음 0.287~0.345   여유 0.205~0.263  ✔
+#       mine7              잡음 0.420         여유 0.130        ⚠
+#       mine6              잡음 0.446         여유 0.104        🚨
+#       mine10             잡음 0.495         여유 **0.055**    🚨
+#   (잡음 = 마름모가 **없는** 16클라에서 그 그림이 낸 최고 점수 · 기준 0.55)
+#   → 기준을 아슬아슬하게 넘겨 **마름모가 없는데 땅을 누르고 캐릭터가 걸어갔다.**
+#     기록의 `좌표5 그림 못 찾음 (최고 0.56~0.61)` 이 정확히 그 범위다.
+#     2026-08-27 에 검증했던 여유 0.25 가 **0.055 까지 깎여 있었다.**
+#   그래서 배울 때 **그 화면에서 1등(자기 자리) ÷ 2등**을 본다. 좋은 그림은 자기
+#   자리만 높고 2등은 낮다. 배경을 담았으면 2등도 높다 — 2026-08-27 의 배수 판정과
+#   같은 원리다 (아이콘 있을 때 2.23배 · 없을 때 1.00~1.20배).
+#   ⚠ 클로드는 이 검사를 없애지 말 것. 없애면 나쁜 그림이 다시 쌓여 같은 사고가 온다.
+#   📏 **실측으로 기준을 잡았다** (2026-10-21 · 마름모가 없는 16클라 · 📐 범위 안 ·
+#      '2등' = 1등 주변을 지운 뒤의 최고점 · 중간값):
+#          좋음  공용 **0.250** · mine1 **0.270**        ← 통과해야 한다
+#          경계  mine7 0.395                             (잡음 0.420 · 여유 0.130)
+#          나쁨  mine6 **0.416** · mine10 **0.433**      ← 걸러야 한다
+#      → `0.38` 이면 좋은 것은 여유 0.11 로 통과하고 나쁜 셋을 모두 거른다.
+#      ⚠ **0.42 로 올리지 말 것** — mine6(0.416)이 그대로 통과한다.
+#   ⚠ **배수로는 가릴 수 없다** — 같은 측정에서 좋은 것도 나쁜 것도 1.01~1.14 로
+#     똑같이 나왔다. 배울 때는 패치가 그 화면에서 떠낸 것이라 1등이 거의 1.00 이므로
+#     배수는 4.0(좋음)·2.3(나쁨)이 되어 둘 다 통과한다. **주 관문은 2등 값이다.**
+#     배수는 '패치가 그 화면에 실제로 있나' 를 보는 보조 장치로만 남긴다.
+LEARN_PEAK_RATIO = 1.40    # 자기 자리가 2등의 이 배수 이상이어야 배운다 (보조)
+LEARN_NOISE_MAX  = 0.38    # 2등이 이보다 높으면 배경을 담은 것 — 안 배운다 (주 관문)
 
 
 def img_mine_path(fkey, j, n):
@@ -13685,6 +13776,21 @@ class App(tk.Tk):
                     click_log(f"{fkey} [{nm}] 좌표{j+1} 📍 가운데가 아니라 "
                               f"{_offs[0][0]:+d},{_offs[0][1]:+d} 옮겨서 누른다 "
                               f"({ix},{iy}) → {coord}  (안 되면 다음 자리로)")
+                # 🧍 **먼 자리인지 지금 재둔다** (창 기준 x) — 재클릭 대기에 쓴다.
+                _far = False
+                try:
+                    _nx = IMG_NEAR_X.get((fkey, j))
+                    if _nx:
+                        _rc0 = client_rect_at(ix, iy)
+                        if _rc0:
+                            _relx = ix - _rc0[0]
+                            _far = not (_nx[0] <= _relx < _nx[1])
+                            if _far:
+                                click_log(f"{fkey} [{nm}] 좌표{j+1} 🧍 마름모가 "
+                                          f"**멀다** (창내 x {_relx}, 가까운 범위 "
+                                          f"{_nx[0]}~{_nx[1]}) — 걸어갈 시간을 더 준다")
+                except Exception:
+                    _far = False
                 _img_hit = True
                 _done.add((fkey, _slot_id))   # 그림 클릭은 이 슬롯에서 한 번만
         self._click_log(fkey, j, coord, slot, "클릭")
@@ -13796,7 +13902,9 @@ class App(tk.Tk):
             if has_img(fkey, j + 1):
                 _rtries = max(RECLICK_TRIES, RECLICK_TRIES_BY.get(fkey, 0))
                 for _try in range(_rtries):
-                    _ww = RECLICK_WAIT_BY.get(fkey) or RECLICK_WAIT
+                    # 🧍 멀면 걸어갈 시간을 더 준다 (가까우면 지금 그대로)
+                    _ww = ((RECLICK_WAIT_FAR.get(fkey) if locals().get("_far") else None)
+                           or RECLICK_WAIT_BY.get(fkey) or RECLICK_WAIT)
                     _w = _ww[min(_try, len(_ww) - 1)]
                     time.sleep(_w * random.uniform(0.9, 1.15))
                     _wx, _wy, _ws = find_image(fkey, j + 1, coord)
@@ -13805,7 +13913,7 @@ class App(tk.Tk):
                             click_log(f"{fkey} [{nm}] 좌표{j+1} 다시 눌러 창이 떴음 "
                                       f"(일치도 {_ws:.2f})")
                         # 창이 떴다 = 그 자리가 진짜였다는 증거 → 그 그림을 배워둔다
-                        learn_img(fkey, j, _learn, nm)
+                        learn_img(fkey, j, _learn, nm, coord)
                         learn_zone(fkey, j, coord)   # 성공한 '자리'도 모아둔다
                         break
                     # 🧍 **마지막 바퀴에서는 다시 누르지 않는다** (2026-10-06 사용자:
