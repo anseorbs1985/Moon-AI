@@ -1447,6 +1447,9 @@ FIX_CLICK_GONE   = (1.2, 1.8)   # 지우기 전 마지막 확인까지의 사이
 #    런처(용던고고·복구·작위)가 슬롯마다 또 깨운다. 서로를 몰라 **Z 가 두 번**
 #    들어갔고, 두 번째 Z 는 이미 깨어 있는 화면에서 **엉뚱한 창을 열었다.**
 WAKE_COOL = 25.0
+# ⏳ F11 십자가 스캔의 '자는 클라 깨우기' 가 **작업이 끝나기를 기다리는** 최대 시간.
+#    깨우기는 진짜 클릭이라 돌고 있는 작업의 좌표 클릭을 빼앗는다 (2026-10-19 실측).
+WAKE_BUSY_WAIT_MAX = 900.0
 
 # ── 🏠 물약이 없으면 **먼저 귀환** (2026-10-20 사용자 요청) ────────────
 #   "악몽의섬이나 해적섬 등등에 물약이 없으면 네가 지금 다시 실행을 누르고 있잖아.
@@ -2120,14 +2123,51 @@ def learn_img(fkey, j, patch, nm=""):
         pass
 
 
+def slot_last_reg(slot, nclk):
+    """그 슬롯에 **등록된 마지막 좌표**의 칸 번호 (하나도 없으면 -1)."""
+    try:
+        cl = (slot or {}).get("coords") or []
+        last = -1
+        for j in range(min(len(cl), nclk)):
+            if cl[j]:
+                last = j
+        return last
+    except Exception:
+        return nclk - 1
+
+
+def slot_cell_todo(fkey, slot, j, last_reg):
+    """그 슬롯에서 **칸 j 에 실제로 할 일이 있나.**
+
+    · 좌표가 등록돼 있으면 → 한다
+    · 그림만 지정된 자리(🖼)는 → **그 슬롯의 마지막 등록 좌표보다 앞일 때만** 한다
+
+    🚨 `has_img(fkey, j)` 는 **런처 전체 설정**이라 슬롯과 무관하게 참이 된다.
+      그것만 보면 **좌표 1개짜리 슬롯도 '아직 할 일이 남았다'** 로 판단해
+      빈 칸을 지나 그림 자리(용던고고 좌표5 마름모)까지 가서,
+      있지도 않은 마름모를 `IMG_TRIES` 만큼(1~1.5초씩) 찾다가 멈춘다.
+      2026-10-20 사용자 신고 *"좌표 한 개 클릭하는 것들은 바로 다음 슬롯으로
+      넘어가줘. 너무너무너무 느려"* 의 **진짜 원인이 이것이다.**
+      실측: #01·#05·#09 가 좌표1 하나뿐인데 `dragon_05.png` 가 있어서
+      매번 마름모를 찾으러 갔다.
+    ⚠ 클로드는 이 판정을 `has_img` 단독으로 되돌리지 말 것."""
+    try:
+        cl = (slot or {}).get("coords") or []
+        if j < len(cl) and cl[j]:
+            return True
+        return has_img(fkey, j) and j < last_reg
+    except Exception:
+        return False
+
+
 def _left_clicks(fkey, slot, j0, nclk):
     """그 슬롯에서 **실제로 누를 좌표가 몇 개 남았나**.
     빈 칸까지 세면 남은 일을 부풀려 계산해 간격을 쓸데없이 줄인다
     (2026-08-27 — 16×10=160 으로 세는 바람에 처음부터 페이스가 걸렸다)."""
     try:
-        cl = (slot or {}).get("coords") or []
+        _lr = slot_last_reg(slot, nclk)
         return sum(1 for j in range(max(0, j0), nclk)
-                   if (j < len(cl) and cl[j]) or has_img(fkey, j))
+                   if slot_cell_todo(fkey, slot, j, _lr))
     except Exception:
         return max(0, nclk - j0)
 
@@ -13827,7 +13867,7 @@ class App(tk.Tk):
             # ⚡ **남은 좌표가 없으면 바로 끝낸다** (2026-10-14 사용자 지시).
             #    예전에는 `j + 1 < nclk` 만 보고 **마지막 클릭 뒤에도 한 번 더 쉬고**,
             #    빈 좌표를 끝까지 훑었다 → 좌표가 적은 슬롯이 쓸데없이 느렸다.
-            if not any(((k < len(coords) and coords[k]) or has_img(fkey, k))
+            if not any(slot_cell_todo(fkey, slot, k, slot_last_reg(slot, nclk))
                        for k in range(j + 1, nclk)):
                 time.sleep(LAST_CLICK_GAP)
                 break
@@ -13930,7 +13970,9 @@ class App(tk.Tk):
                 st["prekey"] = True
                 self._press_prekey(fkey, _anc, st["slot"].get("name", f"#{si+1}"), icon)
             _cd = coords[j] if (j < len(coords) and coords[j]) else None
-            if _cd is None and has_img(fkey, j) and _anc:
+            if (_cd is None and _anc
+                    and slot_cell_todo(fkey, st["slot"], j,
+                                       slot_last_reg(st["slot"], nclk))):
                 _cd = _anc                        # 그림만 지정한 자리 — 창은 이 좌표로 찾는다
             if _cd is None:
                 st["due"] = time.time()          # 빈 자리는 기다리지 않고 통과
@@ -13998,7 +14040,8 @@ class App(tk.Tk):
             # ⚡ **남은 좌표가 없으면 바로 이 슬롯을 끝낸다** (2026-10-14 사용자 지시).
             #    마지막 클릭 뒤에 간격을 한 번 더 쉬지 않고, 빈 좌표도 훑지 않는다.
             #    그림만 지정한 자리(`has_img`)도 '남은 좌표'로 친다.
-            if not any(((k < len(coords) and coords[k]) or has_img(fkey, k))
+            if not any(slot_cell_todo(fkey, st["slot"], k,
+                                      slot_last_reg(st["slot"], nclk))
                        for k in range(st["j"], nclk)):
                 st["j"] = nclk
                 time.sleep(LAST_CLICK_GAP)
@@ -16386,6 +16429,23 @@ class App(tk.Tk):
                 self.status.set(f"😴 자는 클라 {len(_sl)}개를 깨우는 중… {_sl}")
                 def _job(sl=_sl, q=quiet):
                     try:
+                        # ⏳ **작업이 도는 중이면 끝날 때까지 기다린다** (2026-10-20).
+                        #   이 깨우기는 16클라를 돌며 창을 앞으로 올리고 Z·글자를
+                        #   **진짜 클릭**한다. 그래서 용던고고·스케줄이 도는 중에
+                        #   같이 돌면 **그 클릭을 빼앗아** 작업이 통째로 멈춘다.
+                        #   실측 2026-10-19 17:51:56~17:52:24 — 용던고고가 **28초**
+                        #   동안 한 번도 못 눌렀다 (그 사이 전부 [경고확인] 줄).
+                        #   건너뛰지 않고 **미루는** 이유: 그래야 십자가 목록이
+                        #   그 뒤에라도 만들어진다 (건너뛰면 영영 안 뜬다).
+                        #   ⚠ 클로드는 이 기다림을 없애지 말 것.
+                        _w0 = time.time()
+                        while (self._is_busy()
+                               and time.time() - _w0 < WAKE_BUSY_WAIT_MAX):
+                            time.sleep(5.0)
+                        if time.time() - _w0 > 2:
+                            click_log(f"[경고확인] ⏳ 작업이 끝나기를 "
+                                      f"{int(time.time()-_w0)}초 기다렸다 "
+                                      f"→ 이제 자는 클라 {len(sl)}개를 깨운다")
                         self._wake_slots(sl)
                     finally:
                         self._waking = False
