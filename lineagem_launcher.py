@@ -1474,6 +1474,48 @@ MAIL_OPEN_WAIT = (1.20, 2.00)    # 봉투를 누른 뒤 우편함을 보기까�
 MAIL_READ_WAIT = (0.45, 0.95)    # 화면을 '읽는' 시간 — 모두 받기를 누르기 전
 MAIL_STEP_WAIT = (0.55, 1.05)    # 받은 뒤 닫기까지
 MAIL_SLOT_GAP  = (3.0, 7.0)      # 클라 사이 — 웨이브 없이 하나씩 (그대로)
+# ── 🗂 몬스터 도감 보상 받기 (2026-10-20 사용자 요청) ─────────────────
+#   "1번 창에 점 세 개를 클릭해놨거든. 제일 아래에 몬스터도감이라고 빨간점이
+#    들어온 게 있어. 이거를 내가 열어줄 거야. 그러면 안 받은 것들이 빨간점으로
+#    나타나거든. 저거를 네가 각각 빨간점을 다 클릭해서 보상을 받아줬으면."
+#   → **창은 사용자가 연다.** 런처는 열린 창을 찾아 빨간점만 받는다.
+#
+#   실측 2026-10-20 (창 491x276):
+#     분류 탭   x50 · y 50(전체) 80(신화) 110(전설) 140(영웅) 170(희귀)
+#               199(고급) 229(일반)  — 29~30px 간격, 빨간점은 x84
+#     목록 항목 x200 · y 52 부터 28px 간격 — 빨간점은 x≈298, 행 맨 위 +2
+#     보상 받기 (439, 220) 파란 버튼 — **회색이면 못 받는다**
+#     보상 팝업 저절로 안 닫힌다 → 빈 곳(150, 230) 클릭
+#   ⚠ 빨간점이 있어도 **파란 버튼이 없으면 누르지 않는다.** 그게 진짜 관문이다
+#     (실측: 빨간점 2곳 중 1곳은 받은 직후라 회색이었다).
+MONDEX_MATCH   = 0.80            # '몬스터 도감' 제목 기준 (실측 1.000 vs 0.50)
+MONDEX_BASE_W  = 491
+MONDEX_TAB_X   = 50              # 분류 탭을 누를 x
+# ⚠ 실측(2026-10-20)으로 맞춘 값 — 빨간점 y 가 영웅 148 · 희귀 178 · 고급 207
+#    · 일반 236 이다. 처음에 64 + 29.6 으로 잡았더니 4~6px 아래라
+#    **고급 탭을 빨간 3개로 보고 건너뛰었다.** 이 둘을 눈대중으로 바꾸지 말 것.
+MONDEX_TAB_Y0  = 60              # 첫 탭(전체)의 빨간점 y
+MONDEX_TAB_DY  = 29.3            # 탭 간격
+MONDEX_TAB_N   = 7               # 전체·신화·전설·영웅·희귀·고급·일반
+MONDEX_TAB_DOT = 84              # 탭 빨간점 x
+MONDEX_ROW_X   = 200             # 항목을 누를 x
+MONDEX_ROW_Y0  = 52              # 첫 항목 맨 위 y
+MONDEX_ROW_DY  = 28              # 항목 간격
+MONDEX_ROW_N   = 8               # 한 화면에 보이는 항목 수(넉넉히)
+MONDEX_ROW_DOT = 298             # 항목 빨간점 x
+# 🏅 보상 팝업은 **저절로 안 닫힌다** — 빈 자리를 눌러 닫는다.
+#    ⚠ (150, 248) 은 패널 **밖**이라 안 닫혔다 (실측). (150, 230) 이 검증된 자리다.
+#    닫혔는지는 **탭 열 밝기**로 확인한다 — 팝업이 뜨면 화면 전체가 어두워진다
+#    (실측: 팝업 10.5 · 닫힘 39.1).
+MONDEX_EMPTY   = (150, 230)      # 보상 팝업을 닫을 빈 자리
+MONDEX_DIM     = 20.0            # 탭 열 밝기가 이보다 어두우면 팝업이 떠 있다
+MONDEX_DIM_TRY = 3               # 닫힐 때까지 몇 번 더 눌러볼지
+# 🔁 받으면 **다음 단계가 바로 또 받을 수 있게** 되는 경우가 있다 (실측: 희귀 2행을
+#    받자 같은 자리에 또 빨간점이 떴다). 그래서 **더 받을 게 없을 때까지** 반복한다.
+MONDEX_PASSES  = 5               # 한 클라에서 몇 바퀴까지 돌지 (무한 반복 방지)
+MONDEX_RED_MIN = 5               # 빨간 픽셀 몇 개부터 '빨간점'
+MONDEX_GAP     = (0.7, 1.5)      # 단계 사이 (사람처럼 랜덤)
+MONDEX_TEMPO   = (0.90, 1.15)
 MAIL_TEMPO     = (0.90, 1.12)    # 클라마다 제 속도 (들어갈 때 한 번 뽑는다)
 MAIL_HOLD      = 0.10            # 10% 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
 MAIL_HOLD_T    = (0.4, 1.0)
@@ -5063,6 +5105,11 @@ class App(tk.Tk):
             command=self._mail_toggle)
         self._warn_mailbtn.pack(fill="x", pady=(0, 1))
         self._mail_btn_paint()
+        # 🗂 몬스터 도감 보상 받기 (2026-10-20) — 창은 사용자가 열어둔다
+        tk.Button(self._warn_box, text="🗂 도감 보상받기 (열어둔 클라)",
+                  font=("맑은 고딕", 8, "bold"), pady=0,
+                  bg="#16a085", fg="white", activebackground="#117a65",
+                  command=self._mondex_run).pack(fill="x", pady=(0, 1))
         self._warn_rows = tk.Frame(self._warn_box)
         self._warn_rows.pack(fill="x")
         self.after(900, self._warn_refresh)
@@ -14650,6 +14697,171 @@ class App(tk.Tk):
             return True, float(sc)
         except Exception:
             return False, 0.0
+
+    # ── 🗂 몬스터 도감 보상 받기 ──────────────────────────────────────
+    @staticmethod
+    def _mondex_red(img, cx, cy, k):
+        """그 자리 둘레의 **빨간 픽셀 수** — 빨간점이 있으면 많다."""
+        try:
+            # 둘레 ±5 — 조금 어긋나도 점을 놓치지 않게 (실측으로 정한 값)
+            x0 = max(0, int(cx * k) - 5); y0 = max(0, int(cy * k) - 5)
+            c = img[y0:y0 + 11, x0:x0 + 11]
+            if c.size == 0:
+                return 0
+            B = c[:, :, 0].astype(int); G = c[:, :, 1].astype(int)
+            R = c[:, :, 2].astype(int)
+            return int((((R - B) > 60) & ((R - G) > 60) & (R > 110)).sum())
+        except Exception:
+            return 0
+
+    def _mondex_open(self, anc):
+        """그 클라에 **몬스터 도감이 열려 있나** → (열림?, 점수, 배율)."""
+        try:
+            import cv2, numpy as np
+            q = os.path.join(IMG_DIR, "mondex_title.png")
+            if not os.path.exists(q):
+                return False, -1.0, 1.0
+            img = grab_window(anc)
+            if img is None:
+                return False, -1.0, 1.0
+            t = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+            if t is None:
+                return False, -1.0, 1.0
+            k = img.shape[1] / float(MONDEX_BASE_W)
+            tt = t if abs(k - 1.0) <= 0.02 else cv2.resize(
+                t, (max(3, int(t.shape[1] * k)), max(3, int(t.shape[0] * k))))
+            if img.shape[0] < tt.shape[0] or img.shape[1] < tt.shape[1]:
+                return False, -1.0, k
+            _, mx, _, _ = cv2.minMaxLoc(
+                cv2.matchTemplate(img, tt, cv2.TM_CCOEFF_NORMED))
+            return (mx >= MONDEX_MATCH), float(mx), k
+        except Exception:
+            return False, -1.0, 1.0
+
+    def _mondex_dim(self, L, T, k):
+        """탭 열이 어두운가 = **보상 팝업이 떠 있는가** (실측 팝업 10.5 · 닫힘 39.1)."""
+        try:
+            img = grab_window((L + 60, T + 60))
+            if img is None:
+                return False
+            c = img[int(48 * k):int(260 * k), int(12 * k):int(100 * k)]
+            return bool(c.size and float(c.mean()) < MONDEX_DIM)
+        except Exception:
+            return False
+
+    def _mondex_close_pop(self, L, T, k, tp=1.0):
+        """보상 팝업을 **닫힐 때까지** 빈 자리를 눌러 닫는다 → 닫혔으면 True."""
+        for _ in range(MONDEX_DIM_TRY):
+            if not self._mondex_dim(L, T, k):
+                return True
+            click_at(L + int(MONDEX_EMPTY[0] * k), T + int(MONDEX_EMPTY[1] * k))
+            time.sleep(random.uniform(*MONDEX_GAP) * tp)
+        return not self._mondex_dim(L, T, k)
+
+    def _mondex_claim_btn(self, img):
+        """[보상 받기] 파란 버튼 → (cx, cy). **회색이면 None** (= 못 받는다)."""
+        return self._mail_btn(img, 0.78, 0.70, 1.00, 1.00, blue=True)
+
+    def _mondex_one(self, si, L, T, k, name=""):
+        """클라 하나의 도감 보상을 **전부** 받는다 → 받은 개수."""
+        _tp = random.uniform(*MONDEX_TEMPO)
+
+        def _rest():
+            time.sleep(random.uniform(*MONDEX_GAP) * _tp)
+
+        got = 0
+        try:
+            self._focus_client_at((L + 60, T + 60))
+            _rest()
+            # 들어가기 전에 **남아 있는 보상 팝업부터** 치운다 (어두우면 점이 안 보인다)
+            self._mondex_close_pop(L, T, k, _tp)
+            for _pass in range(MONDEX_PASSES):
+              _before = got
+              for ti in range(MONDEX_TAB_N):
+                  if getattr(self, "_stop_flag", False):
+                      break
+                  ty = MONDEX_TAB_Y0 + MONDEX_TAB_DY * ti
+                  img = grab_window((L + 60, T + 60))
+                  if img is None:
+                      break
+                  if self._mondex_red(img, MONDEX_TAB_DOT, ty, k) < MONDEX_RED_MIN:
+                      continue                       # 그 분류는 받을 게 없다
+                  click_at(L + int(MONDEX_TAB_X * k), T + int(ty * k))
+                  _rest()
+                  # 그 분류 안에서 빨간점이 있는 항목을 위에서부터
+                  for ri in range(MONDEX_ROW_N):
+                      if getattr(self, "_stop_flag", False):
+                          break
+                      ry = MONDEX_ROW_Y0 + MONDEX_ROW_DY * ri
+                      im2 = grab_window((L + 60, T + 60))
+                      if im2 is None:
+                          break
+                      if self._mondex_red(im2, MONDEX_ROW_DOT, ry + 2, k) < MONDEX_RED_MIN:
+                          continue
+                      click_at(L + int(MONDEX_ROW_X * k), T + int((ry + 13) * k))
+                      _rest()
+                      im3 = grab_window((L + 60, T + 60))
+                      bb = self._mondex_claim_btn(im3) if im3 is not None else None
+                      if not bb:
+                          # 🚫 빨간점이 있어도 **파란 버튼이 없으면 누르지 않는다**
+                          click_log(f"[도감] #{si+1:02d} {ti+1}번 분류 {ri+1}행 — "
+                                    f"[보상 받기] 가 회색이라 넘어간다")
+                          continue
+                      click_at(L + bb[0], T + bb[1])          # 보상 받기
+                      _rest()
+                      # 🏅 보상 팝업 — **닫힌 것을 확인하고** 다음으로 간다.
+                      #    안 닫히면 화면이 어두워 빨간점이 전부 0 으로 읽힌다 (실측).
+                      if not self._mondex_close_pop(L, T, k, _tp):
+                          click_log(f"[도감] #{si+1:02d} 보상 팝업이 안 닫힌다 — 그만둔다")
+                          return got + 1
+                      got += 1
+                      click_log(f"[도감] 🗂 #{si+1:02d} {ti+1}번 분류 {ri+1}행 받았다")
+              if got == _before:
+                  break          # 이번 바퀴에 하나도 못 받았다 = 끝
+        except Exception as e:
+            click_log(f"[도감] #{si+1:02d} {name} 오류: {e}")
+        return got
+
+    def _mondex_run(self):
+        """🗂 [도감 보상받기] 버튼 — 도감이 **열려 있는** 클라를 찾아 전부 받는다."""
+        if self._is_busy():
+            self.status.set("🗂 다른 작업이 도는 중입니다")
+            return
+        threading.Thread(target=self._mondex_work, daemon=True).start()
+
+    def _mondex_work(self):
+        if not self._try_busy("도감보상"):
+            return
+        try:
+            rects = self._client_rects_by_slot()
+            if not rects:
+                click_log("[도감] 리니지M 창 16개를 못 찾았다")
+                self.after(0, lambda: self.status.set("🗂 리니지M 창을 못 찾았습니다"))
+                return
+            opened = []
+            for si, (l, t, r, b) in enumerate(rects):
+                ok, sc, k = self._mondex_open(((l + r) // 2, (t + b) // 2))
+                if ok:
+                    opened.append((si, l, t, k, sc))
+            if not opened:
+                click_log("[도감] 몬스터 도감을 열어둔 클라가 없다 "
+                          "— 받을 클라에서 도감을 열어주세요")
+                self.after(0, lambda: self.status.set(
+                    "🗂 몬스터 도감을 열어둔 클라가 없습니다"))
+                return
+            click_log("[도감] 열린 클라 %s — 보상을 받는다"
+                      % [o[0] + 1 for o in opened])
+            n = 0
+            for si, l, t, k, sc in opened:
+                if getattr(self, "_stop_flag", False):
+                    break
+                n += self._mondex_one(si, l, t, k)
+            click_log(f"[도감] 끝 — {n}개 받았다")
+            self.after(0, lambda c=n: self.status.set(f"🗂 도감 보상 {c}개 받았습니다"))
+        except Exception as e:
+            click_log(f"[도감] 오류: {e}")
+        finally:
+            self._clear_busy("도감보상")
 
     # ── 📬 우편 자동 받기 ─────────────────────────────────────────────
     def _mail_tpls(self):
