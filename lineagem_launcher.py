@@ -1505,6 +1505,7 @@ MONDEX_TAB_X   = 50              # 분류 탭을 누를 x
 MONDEX_TAB_Y0  = 60              # 첫 탭(전체)의 빨간점 y
 MONDEX_TAB_DY  = 29.3            # 탭 간격
 MONDEX_TAB_N   = 7               # 전체·신화·전설·영웅·희귀·고급·일반
+MONDEX_TAB_NAMES = ("전체", "신화", "전설", "영웅", "희귀", "고급", "일반")
 MONDEX_TAB_DOT = 84              # 탭 빨간점 x
 MONDEX_ROW_X   = 200             # 항목을 누를 x
 MONDEX_ROW_Y0  = 52              # 첫 항목 맨 위 y
@@ -14846,7 +14847,9 @@ class App(tk.Tk):
             bb = self._mondex_claim_btn(im3) if im3 is not None else None
             if not bb:
                 # 🚫 빨간점이 있어도 **파란 버튼이 없으면 누르지 않는다**
-                click_log(f"[도감] #{si+1:02d} {ti+1}번 분류 {ri+1}행 — "
+                _tn = (MONDEX_TAB_NAMES[ti] if ti < len(MONDEX_TAB_NAMES)
+                       else str(ti + 1))
+                click_log(f"[도감] #{si+1:02d} {_tn} {ri+1}행 — "
                           f"[보상 받기] 가 회색이라 넘어간다")
                 continue
             click_at(L + bb[0], T + bb[1])
@@ -14855,11 +14858,20 @@ class App(tk.Tk):
                 click_log(f"[도감] #{si+1:02d} 보상 팝업이 안 닫힌다 — 그만둔다")
                 return got + 1
             got += 1
-            click_log(f"[도감] 🗂 #{si+1:02d} {ti+1}번 분류 {ri+1}행 받았다")
+            click_log(f"[도감] 🗂 #{si+1:02d} "
+                      f"{MONDEX_TAB_NAMES[ti] if ti < len(MONDEX_TAB_NAMES) else ti+1}"
+                      f" {ri+1}행 받았다")
         return got
 
     def _mondex_one(self, si, L, T, k, name=""):
-        """클라 하나의 도감 보상을 **전부** 받는다 → 받은 개수."""
+        """클라 하나의 도감 보상을 **전부** 받는다 → 받은 개수.
+
+        🧭 **분류를 하나씩 끝까지 끝내고 다음으로 간다** (2026-10-20 사용자:
+           "영웅은 영웅 다 클릭하고 빨간점이 없으면 넘어가고, 희귀도 마찬가지
+            순서대로 다 클릭해줘. 막 왔다갔다 하지 말고").
+           ⚠ 예전에는 7개 분류를 한 바퀴 돈 뒤 **처음부터 다시** 돌았다
+             (`for _pass` 가 바깥에 있었다). 그게 '왔다갔다' 의 정체다.
+             **바깥은 분류, 안쪽이 반복**이다 — 이 순서를 뒤집지 말 것."""
         _tp = random.uniform(*MONDEX_TEMPO)
         got = 0
         try:
@@ -14867,19 +14879,22 @@ class App(tk.Tk):
             time.sleep(random.uniform(*MONDEX_GAP) * _tp)
             # 들어가기 전에 **남아 있는 보상 팝업부터** 치운다
             self._mondex_close_pop(L, T, k, _tp)
-            for _pass in range(MONDEX_PASSES):
-                _before = got
-                for ti in range(MONDEX_TAB_N):
-                    if getattr(self, "_stop_flag", False):
-                        break
-                    ty = MONDEX_TAB_Y0 + MONDEX_TAB_DY * ti
-                    img = grab_window((L + 60, T + 60))
-                    if img is None:
-                        break
-                    if self._mondex_red(img, MONDEX_TAB_DOT, ty, k) < MONDEX_RED_MIN:
-                        continue                   # 그 분류는 받을 게 없다
-                    click_at(L + int(MONDEX_TAB_X * k), T + int(ty * k))
-                    time.sleep(random.uniform(*MONDEX_GAP) * _tp)
+            for ti in range(MONDEX_TAB_N):
+                if getattr(self, "_stop_flag", False):
+                    break
+                _tn = MONDEX_TAB_NAMES[ti] if ti < len(MONDEX_TAB_NAMES) else str(ti + 1)
+                ty = MONDEX_TAB_Y0 + MONDEX_TAB_DY * ti
+                img = grab_window((L + 60, T + 60))
+                if img is None:
+                    break
+                if self._mondex_red(img, MONDEX_TAB_DOT, ty, k) < MONDEX_RED_MIN:
+                    continue                   # 그 분류는 받을 게 없다 → 다음 분류
+                click_at(L + int(MONDEX_TAB_X * k), T + int(ty * k))
+                time.sleep(random.uniform(*MONDEX_GAP) * _tp)
+                _tgot = 0
+                # 🔁 **이 분류를 끝낼 때까지** 반복한다 (받으면 다음 단계가 또 열린다)
+                for _pass in range(MONDEX_PASSES):
+                    _before = got
                     # 🖐 맨 위로 올린 뒤, 한 화면씩 내리며 끝까지 본다
                     self._mondex_drag(L, T, k, up=False, tp=_tp)
                     for _sc in range(MONDEX_DRAG_N):
@@ -14895,8 +14910,15 @@ class App(tk.Tk):
                         if float(_np.abs(_b4.astype(int) - _af.astype(int)).mean()) \
                                 < MONDEX_SAME:
                             break              # 끌어도 안 바뀐다 = 바닥이다
-                if got == _before:
-                    break                      # 이번 바퀴에 하나도 못 받았다 = 끝
+                    _tgot += got - _before
+                    if got == _before:
+                        break                  # 이번 바퀴에 하나도 못 받았다 = 이 분류 끝
+                    im4 = grab_window((L + 60, T + 60))
+                    if im4 is None or self._mondex_red(
+                            im4, MONDEX_TAB_DOT, ty, k) < MONDEX_RED_MIN:
+                        break                  # 분류 빨간점이 사라졌다 = 이 분류 끝
+                click_log(f"[도감] #{si+1:02d} {_tn} 끝 — {_tgot}개 "
+                          f"→ 다음 분류로")
         except Exception as e:
             click_log(f"[도감] #{si+1:02d} {name} 오류: {e}")
         return got
