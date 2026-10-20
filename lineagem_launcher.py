@@ -1432,6 +1432,13 @@ FIX_CLICK_GONE   = (1.2, 1.8)   # 지우기 전 마지막 확인까지의 사이
 #    자는 화면은 마름모를 덮어서, 아무리 오래 보고 다시 눌러도 찾을 수 없다.
 #    `dragon` 을 넣으면 **이미 있는 깨우기 기능**이 그대로 동작한다
 #    (순차 경로·웨이브 경로 둘 다 들어 있다). 자고 있지 않으면 아무 일도 하지 않는다.
+# 😴 **방금 깨운 클라는 이 시간 안에 다시 깨우지 않는다** (2026-10-20 사용자 신고:
+#    "절전을 해제하고 또 한 번 더 절전을 해제하는 거 같아 그래서 다른 화면이
+#    켜져버리니까 아무것도 못 하고 있어").
+#    깨우는 길이 둘이다 — F11 감시(`_wake_slots`)가 16클라를 백그라운드로 훑고,
+#    런처(용던고고·복구·작위)가 슬롯마다 또 깨운다. 서로를 몰라 **Z 가 두 번**
+#    들어갔고, 두 번째 Z 는 이미 깨어 있는 화면에서 **엉뚱한 창을 열었다.**
+WAKE_COOL = 25.0
 SLEEP_WAKE = ("fix", "jakwi", "dragon")
 SLEEP_WAKE_KEY = "z"
 SLEEP_MATCH = 0.68      # 절전 화면 판정 기준.
@@ -6742,6 +6749,7 @@ class App(tk.Tk):
                     sx, sy, ss = find_sleep_img("jakwi", anc)
                     if sx is not None:
                         press_key(SLEEP_WAKE_KEY)
+                        self._wake_mark(anc)      # 다른 길이 또 누르지 않게
                         time.sleep(random.uniform(*SLEEP_WAKE_WAIT))
                         click_log(f"[단축키] {si+1:02d} {name} 절전 ({ss:.2f}) → 깨움")
                         self._after_wake_fix(anc, "단축키 배포")
@@ -10072,22 +10080,13 @@ class App(tk.Tk):
         도전이 몇 분씩 걸리는 사이 기다리던 클라가 **다시 잠들어** 있었다. 그 뒤
         좌표를 눌러도 아무 일도 안 일어나 '작위 창이 아님 (글자 0.31)' 로 포기했다
         (7·11·14번이 그래서 하나도 못 올렸다). 그래서 들어갈 때마다 확인한다."""
-        try:
-            if not has_sleep_img("jakwi"):
-                return False
-            sx, sy, ss = find_sleep_img("jakwi", anchor)
-            if sx is None:
-                return False
-            self._focus_client_at(anchor)
-            time.sleep(random.uniform(0.20, 0.35))
-            press_key(SLEEP_WAKE_KEY)
-            time.sleep(random.uniform(*SLEEP_WAKE_WAIT))
-            click_log(f"jakwi [{name}] 절전 (일치도 {ss:.2f}) → "
-                      f"'{SLEEP_WAKE_KEY.upper()}' 눌러 깨움")
+        # ⚠ `_wake_once` 를 쓴다 — **누르기 직전 재확인 + 방금 깨운 클라 건너뛰기**가
+        #    그대로 따라온다 (2026-10-20 'Z 가 두 번 들어가던' 사고).
+        #    쿨다운 25초는 승급 한 바퀴(몇 분)보다 짧아 '다시 잠든 것' 은 그대로 깨운다.
+        if self._wake_once("jakwi", anchor, name, "😴"):
             self._after_wake_fix(anchor, "작위")
             return True
-        except Exception:
-            return False
+        return False
 
     def _jakwi_enter(self, coords, stop=None, name=""):
         """등록해둔 좌표(메뉴 → 작위)를 눌러 작위 창으로 들어간다.
@@ -13758,22 +13757,9 @@ class App(tk.Tk):
             #    웨이브는 동시 3슬롯이라, 깨우는 것도 그 3개뿐이다.
             if j == 0 and not st.get("woke") and fkey in SLEEP_WAKE and _anc:
                 st["woke"] = True
-                try:
-                    if has_sleep_img(fkey):
-                        _sx, _sy, _ss = find_sleep_img(fkey, _anc)
-                        if _sx is not None:
-                            _nm0 = st["slot"].get("name", f"#{si+1:02d}")
-                            self._focus_client_at(_anc)
-                            time.sleep(random.uniform(0.20, 0.35))
-                            press_key(SLEEP_WAKE_KEY)
-                            time.sleep(random.uniform(*SLEEP_WAKE_WAIT))
-                            click_log(f"{fkey} [{_nm0}] 절전 (일치도 {_ss:.2f}) → "
-                                      f"'{SLEEP_WAKE_KEY.upper()}' 눌러 깨우고 시작")
-                            self.status.set(f"😴 [{_nm0}] 절전 — "
-                                            f"{SLEEP_WAKE_KEY.upper()} 눌러 깨움")
-                            self._after_wake_fix(_anc, f"{fkey} 웨이브")
-                except Exception:
-                    pass
+                _nm0 = st["slot"].get("name", f"#{si+1:02d}")
+                if self._wake_once(fkey, _anc, _nm0, "😴"):
+                    self._after_wake_fix(_anc, f"{fkey} 웨이브")
             if j == 0 and not st.get("prekey"):
                 # 슬롯 맨 앞에서 키 한 번 (좌표는 그대로, 키만 먼저)
                 st["prekey"] = True
@@ -14074,21 +14060,8 @@ class App(tk.Tk):
                 _anchor = slot_anchor(slot)
                 # 절전모드면 **Z 를 먼저 눌러 깨운다** (2026-08-29 사용자 지시).
                 # 평소엔 F11 만으로 되는데, 늦게 하면 절전으로 들어가 Z 가 필요하다.
-                if fkey in SLEEP_WAKE and has_sleep_img(fkey) and _anchor:
-                    try:
-                        _sx, _sy, _ss = find_sleep_img(fkey, _anchor)
-                        if _sx is not None:
-                            self._focus_client_at(_anchor)
-                            time.sleep(random.uniform(0.20, 0.35))
-                            press_key(SLEEP_WAKE_KEY)
-                            time.sleep(random.uniform(0.45, 0.75))
-                            click_log(f"{fkey} [{name}] 절전 상태 (일치도 {_ss:.2f}) "
-                                      f"→ '{SLEEP_WAKE_KEY.upper()}' 눌러 깨움")
-                            self.status.set(f"😴 [{name}] 절전 — "
-                                            f"{SLEEP_WAKE_KEY.upper()} 눌러 깨우고 시작")
-                            self._after_wake_fix(_anchor, f"{fkey} 순차")
-                    except Exception:
-                        pass
+                if self._wake_once(fkey, _anchor, name, "😴"):
+                    self._after_wake_fix(_anchor, f"{fkey} 순차")
                 # 슬롯 맨 앞에서 키 한 번 (인사이드 쿠폰등록의 'z')
                 self._press_prekey(fkey, _anchor, name, icon)
                 # 🩹 복구 — **첫 좌표를 누르기 전에 그 창을 앞으로 올린다** (2026-09-29).
@@ -14626,6 +14599,75 @@ class App(tk.Tk):
         except Exception:
             return False, 0.0
 
+    def _wake_key(self, anchor):
+        """그 좌표의 리니지M 창 손잡이 — '누구를 깨웠나' 를 기억하는 열쇠."""
+        try:
+            import win32gui, ctypes
+            hwnd = win32gui.WindowFromPoint((int(anchor[0]), int(anchor[1])))
+            root = ctypes.windll.user32.GetAncestor(hwnd, 2)      # GA_ROOT
+            return int(root) if root else None
+        except Exception:
+            return None
+
+    def _wake_mark(self, anchor):
+        """이 클라를 방금 깨웠다고 적어둔다 (다른 길이 또 누르지 않게)."""
+        try:
+            k = self._wake_key(anchor)
+            if k is None:
+                return
+            if not hasattr(self, "_woke_at"):
+                self._woke_at = {}
+            self._woke_at[k] = time.time()
+        except Exception:
+            pass
+
+    def _wake_recent(self, anchor):
+        """방금(`WAKE_COOL` 안에) 누가 깨운 클라인가."""
+        try:
+            k = self._wake_key(anchor)
+            if k is None:
+                return False
+            t0 = (getattr(self, "_woke_at", None) or {}).get(k, 0)
+            return (time.time() - t0) < WAKE_COOL
+        except Exception:
+            return False
+
+    def _wake_once(self, fkey, anchor, name="", icon=""):
+        """😴 그 클라가 **지금도** 자고 있을 때만 Z 를 한 번 누른다 → 눌렀으면 True.
+
+        🚫 **깨어 있으면 아무것도 하지 않는다** (2026-10-20 사용자: "화면이 절전모드
+           상태가 아니면 그냥 그 상태에서 좌표 클릭해주라").
+        🚫 **방금 누가 깨운 클라도 건드리지 않는다** — F11 감시와 런처별 깨우기가
+           서로를 몰라 Z 가 두 번 들어가 엉뚱한 창이 열렸다.
+        ⚠ 창을 앞으로 올리는 0.2~0.35초 **사이에 F11 감시가 깨울 수 있다.**
+           그래서 **누르기 직전에 한 번 더** 보고, 깨어 있으면 안 누른다.
+           이 재확인을 빼지 말 것 — 그게 두 번 눌리던 자리다."""
+        try:
+            if not (anchor and fkey in SLEEP_WAKE and has_sleep_img(fkey)):
+                return False
+            if self._wake_recent(anchor):
+                click_log(f"{fkey} [{name}] 방금 깨운 클라 — 다시 깨우지 않는다")
+                return False
+            _sx, _sy, _ss = find_sleep_img(fkey, anchor)
+            if _sx is None:
+                return False                  # 깨어 있다 → 그대로 좌표 클릭
+            self._focus_client_at(anchor)
+            time.sleep(random.uniform(0.20, 0.35))
+            if find_sleep_img(fkey, anchor)[0] is None:
+                self._wake_mark(anchor)
+                click_log(f"{fkey} [{name}] 그 사이 깨어났다 — Z 를 누르지 않는다")
+                return False
+            press_key(SLEEP_WAKE_KEY)
+            self._wake_mark(anchor)
+            time.sleep(random.uniform(*SLEEP_WAKE_WAIT))
+            click_log(f"{fkey} [{name}] 절전 (일치도 {_ss:.2f}) → "
+                      f"'{SLEEP_WAKE_KEY.upper()}' 눌러 깨우고 시작")
+            self.status.set(f"{icon} [{name}] 절전 — "
+                            f"{SLEEP_WAKE_KEY.upper()} 눌러 깨움")
+            return True
+        except Exception:
+            return False
+
     def _wake_until(self, anchor, si=None, tag="fix", fkey="fix"):
         """절전 화면이 사라질 때까지 깨운다 — **1번째는 Z, 2번째부터는 글자 클릭**.
 
@@ -14636,6 +14678,7 @@ class App(tk.Tk):
 
         돌려주는 값 — 깨어났으면 True."""
         _who = f"#{si:02d} " if si else ""
+        self._wake_mark(anchor)      # F11 감시가 깨운 것도 런처가 알아야 한다
         for w in range(SLEEP_WAKE_TRIES):
             try:
                 if w == 0:
