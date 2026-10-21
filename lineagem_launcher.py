@@ -1521,6 +1521,35 @@ P0_PLACE_MATCH = 0.85
 P0_PLACE_RATIO = 1.45
 
 P0_HOME_KEY  = "0"               # 귀환 키
+
+# ── 🔴 **붉은빛이 반짝이면 0번을 따따따따** (2026-10-21 사용자 요청) ───────
+#   사용자: *"화면이 1번 슬롯처럼 저렇게 **붉은빛이 반짝반짝**거리거나 하면은
+#   **0번을 4~8번 연속**으로 눌러줄 수 있어? 그냥 **따따따따** 연속으로 눌러주면
+#   좋겠는데. **절전모드 상태일 때만** 눌러주면 되거든."*
+#
+#   📏 실측 2026-10-21 — **'반짝'은 붉은 픽셀 비율이 왕복하는 것**이다.
+#   #01 을 1초마다 8번 재니:
+#       1.09% → 9.59% → 1.10% → 12.85% → 1.11% → 12.40% → 1.02% → 9.56%
+#       = 약 **2초 주기로 1% ↔ 12% 왕복** (절전점수는 내내 0.982~0.992)
+#   같은 때 나머지 절전 14클라는 **0.70 ~ 1.27%** 로 평평했다.
+#       → 기준 5% 면 위로 4.6%p · 아래로 3.7%p 여유. 아주 넓다.
+#
+#   ⚠ **한 번만 보면 절반을 놓친다** — 꺼진 순간(1.02~1.11%)은 평소와 구분이 안 된다.
+#     그래서 한 슬롯을 `RED_LOOKS` 번 보고 **한 번이라도 넘으면** 붉다고 본다.
+#   ⚠ **절전 조건이 결정적이다.** 같은 측정에서 #05 는 붉은 18.21% 였지만
+#     절전점수 0.409(밝기 130.8) = **깨어 있는 평소 화면**이었다. 절전을 함께 보지
+#     않으면 그 클라를 매번 눌렀을 것이다.
+#   🚫 그림 매칭으로 하지 말 것 — 반짝이므로 프레임마다 점수가 흔들린다.
+#     **색 비율**이 이 경우에 맞는 방법이다.
+RED_ON        = True             # 기본 켬 (coords.json 의 red_on 으로 끈다)
+RED_PCT       = 5.0              # 붉은 픽셀이 이 % 를 넘으면 '붉다' (실측 여유 3.7%p)
+RED_LOOKS     = 2                # 한 슬롯을 몇 번 볼까 (반짝이므로 — 2번이면 75%)
+RED_LOOK_GAP  = (0.45, 0.70)     # 볼 때마다 간격 (깜빡임 주기 약 2초)
+RED_KEYS      = (4, 8)           # 0번을 몇 번 누를까 (사용자: "4~8번 연속")
+RED_KEY_GAP   = (0.06, 0.13)     # 따따따따 — 키 사이 (사람처럼 흔든다)
+RED_COOL      = 300.0            # 한 슬롯을 다시 보기까지 (초)
+RED_TICK_MS   = 30000            # 확인 주기 (16클라 캡처 약 1초 · 1분당 2초)
+RED_SLEEP_MIN = 0.68             # 절전 판정 (SLEEP_MATCH 와 같은 값)
 P0_HOME_WAIT = (3.5, 5.5)        # 귀환이 끝날 때까지 (마을에 도착)
 P0_HOME_GAP  = (1.5, 3.0)        # 클라 사이
 P0_RUN_WAIT  = 600               # 한 슬롯 실행을 최대 이만큼 기다린다 (초)
@@ -1995,6 +2024,26 @@ def grab_window(coord):
         return cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
     except Exception:
         return None
+
+
+def sleep_score_img(img, fkey="fix"):
+    """**이미 캡처해둔 이미지**로 절전 점수만 낸다 (0.0~1.0 · 못 보면 -1.0).
+
+    `find_sleep_img` 는 좌표를 받아 **자기가 캡처**한다. 붉은반짝처럼
+    한 캡처로 **여러 가지를 같이 판정**할 때는 캡처를 또 하면 낭비이고,
+    더 중요하게 **다른 순간의 화면**을 보게 되어 판정이 어긋난다.
+    그림·기준은 `find_sleep_img` 와 **같은 것**을 쓴다 (`fix_sleep.png`)."""
+    try:
+        q = sleep_img_path(fkey)
+        if not (q and os.path.exists(q)) or img is None:
+            return -1.0
+        import cv2, numpy as np
+        tpl = cv2.imdecode(np.fromfile(q, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if tpl is None or img.shape[0] < tpl.shape[0] or img.shape[1] < tpl.shape[1]:
+            return -1.0
+        return float(cv2.matchTemplate(img, tpl, cv2.TM_CCOEFF_NORMED).max())
+    except Exception:
+        return -1.0
 
 
 def find_sleep_img(fkey, coord):
@@ -4524,6 +4573,8 @@ class App(tk.Tk):
         threading.Thread(target=self._itemreg_click_loop, daemon=True).start()
         # 🖱 사람이 리니지M 창을 클릭하면 그 클라의 십자가를 확인한다 (확인만)
         threading.Thread(target=self._fix_clickwatch_loop, daemon=True).start()
+        # 🔴 붉은빛이 반짝이면 0번을 따따따따 (2026-10-21 사용자 요청)
+        self.after(RED_TICK_MS, self._red_tick)
         self.after(1800, self._itemreg_refresh)
         # 🚫🚫 **런처가 클로드를 자동으로 켜지 않는다** (2026-10-21 사용자 지시 — 절대 규칙)
         #   사용자: *"너 왜 재시작 하거나 중간에 수시로 문서를 여는 거야?
@@ -5433,6 +5484,7 @@ class App(tk.Tk):
         self._build_winmgmt(_wtop)
         self._build_hero_grid(winmgmt)
         self._build_fix_toggles(winmgmt)
+        self._build_red_panel(winmgmt)       # 🔴 붉은반짝 → 0번 따따따따
 
         tk.Frame(front_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(4,8))
 
@@ -15815,6 +15867,192 @@ class App(tk.Tk):
         except Exception as e:
             click_log(f"[물약감시] 🏠 #{si+1:02d} 귀환 오류: {e}")
             return False
+
+    def _p0_ancs(self):
+        """슬롯번호 → 그 클라를 가리키는 **기준좌표**(등록된 첫 좌표).
+
+        🚫 `_client_rects_by_slot()` 을 쓰지 않는다 — 그건 **정확히 16개**일 때만
+           동작하는데 실측 2026-10-13 에 클라가 18개였다(격자 밖에 더 떠 있었다)
+           → None 이 돌아와 감시가 통째로 멈췄다. 등록된 좌표로 찾는 쪽이 튼튼하다."""
+        ancs = {}
+        try:
+            import lineagem_island as _isl
+            # ⚠ 섬 실행기에 `load_island` 같은 함수는 **없다** — 파일을 직접 읽는다
+            #   (물약감시가 쓰는 방식과 같게. 틀린 이름을 부르면 except 에 걸려
+            #    **조용히 빈 결과**가 되어 기능이 안 도는 것조차 모른다).
+            _ic = json.load(io.open(os.path.join(BASE, "island_coords.json"),
+                                    encoding="utf-8-sig")) or {}
+            for _key in [d["key"] for d in _isl.DUNGEONS[:4]]:
+                for si, slot in enumerate(_ic.get(_key) or []):
+                    if si in ancs or not isinstance(slot, dict):
+                        continue
+                    if not slot.get("enabled", True):
+                        continue
+                    a0 = _isl.IslandApp._slot_anchor(slot)
+                    if a0:
+                        ancs[si] = a0
+        except Exception:
+            pass
+        return ancs
+
+    # ── 🔴 붉은빛이 반짝이면 0번을 따따따따 (2026-10-21 사용자 요청) ────────
+    #   위 RED_* 상수의 실측 근거를 먼저 읽을 것.
+    @staticmethod
+    def _red_pct(img):
+        """그 화면의 **붉은 픽셀 비율**(%) — 'R 이 G·B 보다 크게 높은' 픽셀.
+
+        실측: 반짝이 켜진 순간 9.6~12.9% · 꺼진 순간 1.0~1.1% ·
+              평소 절전 0.70~1.27%. 기준 5% 면 넉넉히 갈린다."""
+        try:
+            import numpy as np
+            b = img[:, :, 0].astype(int)
+            g = img[:, :, 1].astype(int)
+            r = img[:, :, 2].astype(int)
+            m = (r > g + 35) & (r > b + 35) & (r > 70)
+            return float(m.mean()) * 100.0
+        except Exception:
+            return -1.0
+
+    def _red_thr(self):
+        """판에서 고친 기준 % (없으면 코드 기본 `RED_PCT`).
+
+        ⚠ `_red_pct` 는 `@staticmethod` 라 `self.cfg` 를 못 본다 — 그래서
+          기준을 읽는 것은 **이 함수로 따로** 뺐다."""
+        try:
+            return float(self.cfg.get("red_pct") or RED_PCT)
+        except Exception:
+            return RED_PCT
+
+    def _red_slot_on(self, si):
+        """그 슬롯을 볼까 — 판의 점이 켜져 있나 (기본 켬)."""
+        try:
+            d = self.cfg.get("red_slots") or {}
+            return bool(d.get("%02d" % (si + 1), True))
+        except Exception:
+            return True
+
+    def _red_one(self, anc):
+        """🔴 한 번 보고 (붉은%, 절전점수) — **캡처 한 번으로 둘 다** 본다.
+
+        ⚠ 캡처를 두 번 하면 **다른 순간의 화면**을 보게 되어 판정이 어긋난다
+          (반짝이는 중이라 1초 사이에 1% ↔ 12% 로 바뀐다)."""
+        try:
+            img = grab_window(anc)
+            if img is None:
+                return -1.0, -1.0
+            return self._red_pct(img), sleep_score_img(img)
+        except Exception:
+            return -1.0, -1.0
+
+    def _red_press(self, si, anc, pct, slp):
+        """🔴 그 클라를 앞으로 올리고 **0번을 4~8번 따따따따**."""
+        try:
+            # 판에서 고친 횟수를 쓴다 — 그 값을 **상한**으로 4~그 값 사이 랜덤
+            # (사용자: "4~8번 연속" · 항상 사람처럼 흔든다)
+            try:
+                _mx = max(1, min(20, int(self.cfg.get("red_keys")
+                                         or RED_KEYS[1])))
+            except Exception:
+                _mx = RED_KEYS[1]
+            n = random.randint(min(RED_KEYS[0], _mx), _mx)
+            try:
+                self._focus_client_at(anc)
+            except Exception:
+                pass
+            time.sleep(random.uniform(0.25, 0.45))
+            press_key(P0_HOME_KEY, times=n, gap=RED_KEY_GAP)
+            click_log(f"[붉은반짝] 🔴 #{si+1:02d} 붉은빛 {pct:.1f}% "
+                      f"(기준 {self._red_thr()}%) · 절전 {slp:.2f} → "
+                      f"숫자 {P0_HOME_KEY} 를 **{n}번 따따따따** 눌렀다")
+            return True
+        except Exception as e:
+            click_log(f"[붉은반짝] #{si+1:02d} 오류: {e}")
+            return False
+
+    def _red_tick(self):
+        """🔴 주기 확인 — 무거운 일은 **백그라운드 스레드**로 넘긴다.
+
+        ⚠ `self.after` 틱 안에서 화면을 긁으면 창이 그만큼 멈춘다
+          (2026-09-16: 1분에 1.92초 정지 사고). 반드시 스레드로."""
+        try:
+            self.after(RED_TICK_MS, self._red_tick)
+        except Exception:
+            pass
+        try:
+            if not self.cfg.get("red_on", RED_ON):
+                return
+            if getattr(self, "_red_busy", False):
+                return
+            self._red_busy = True
+            threading.Thread(target=self._red_scan, daemon=True).start()
+        except Exception:
+            self._red_busy = False
+
+    def _red_scan(self):
+        """🔴 16클라를 보고 붉은빛 + 절전이면 0번을 누른다.
+
+        ⚠ **'바퀴'로 두 번 본다** — 슬롯마다 `sleep` 으로 기다리면
+          16슬롯 × 0.55초 = **10.5초**가 걸렸다(실측). 전 슬롯을 한 바퀴 돌면
+          그 자체로 약 1초가 지나므로, **두 바퀴 = 약 2초**에 두 순간을 본다.
+          깜빡임 주기가 약 2초라 그 절반 간격으로 보는 셈이다."""
+        try:
+            if self._is_busy():
+                return                      # 작업 중에는 끼어들지 않는다
+            ancs = self._p0_ancs()
+            if not ancs:
+                self._red_why("리니지M 창을 못 찾음")
+                return
+            now = time.time()
+            self._red_done = getattr(self, "_red_done", {})
+            todo = [si for si in sorted(ancs)
+                    if self._red_slot_on(si)
+                    and now - self._red_done.get(si, 0) >= RED_COOL]
+            if not todo:
+                return
+            best, slp = {}, {}
+            hit = None
+            _thr = self._red_thr()          # 판에서 고친 기준을 쓴다
+            for lap in range(max(1, RED_LOOKS)):
+                for si in todo:
+                    p, s = self._red_one(ancs[si])
+                    if p > best.get(si, -1.0):
+                        best[si] = p
+                    if s > slp.get(si, -1.0):
+                        slp[si] = s
+                    if (best[si] >= _thr and slp[si] >= RED_SLEEP_MIN
+                            and hit is None):
+                        hit = si            # 한 틱에 하나만 (겹치면 엉킨다)
+                if hit is not None:
+                    break
+                # 다음 바퀴는 **절전인 슬롯만** 본다 (깨어 있는 것은 대상이 아니다)
+                todo = [si for si in todo if slp.get(si, -1.0) >= RED_SLEEP_MIN]
+                if not todo:
+                    break
+            rows = [f"{si+1:02d}:{best.get(si,-1):.1f}%"
+                    + ("😴" if slp.get(si, -1) >= RED_SLEEP_MIN else "깸")
+                    for si in sorted(best)]
+            if rows and (hit is not None
+                         or now - getattr(self, "_red_log_at", 0) > 600):
+                self._red_log_at = now
+                click_log(f"[붉은반짝] 확인 (기준 {_thr}% · 절전 {RED_SLEEP_MIN}) "
+                          + " ".join(rows[:16]))
+            if hit is not None:
+                self._red_done[hit] = now
+                self._red_press(hit, ancs[hit], best[hit], slp[hit])
+        except Exception as e:
+            self._red_why(f"오류: {e}")
+        finally:
+            self._red_busy = False
+
+    def _red_why(self, msg):
+        """안 한 이유를 남긴다 — 조용히 실패하면 원격에서 못 짚는다
+        (이 저장소에서 일곱 번 겪은 실수)."""
+        try:
+            if time.time() - getattr(self, "_red_why_at", 0) > 600:
+                self._red_why_at = time.time()
+                click_log(f"[붉은반짝] 확인 안 함 — {msg}")
+        except Exception:
+            pass
 
     def _p0_home_then_run(self, hits, ancs):
         """🏠 걸린 슬롯을 **전부 먼저 귀환**시키고 → **하나씩** 다시 돌린다.
@@ -26728,6 +26966,169 @@ class App(tk.Tk):
             os.replace(tmp, p)
         except Exception:
             pass
+
+    # ── 🔴 붉은반짝 판 — 아주 작게, 떼어낼 수 있다 (2026-10-21 사용자 요청) ──
+    def _red_panel_detached(self):
+        try:
+            w = getattr(self, "_red_panel", None)
+            return bool(w and w.winfo_exists() and w.winfo_manager() == "wm")
+        except Exception:
+            return False
+
+    def _red_detach_toggle(self):
+        """📤/📥 — 판을 **독립 창으로 떼거나 되붙인다.**
+
+        ⚠ 슬롯판(`_night_detach_toggle`)에서 검증된 방식 그대로다:
+          `wm geometry +x+y` 는 **창 테두리** 기준인데 `winfo_rootx` 는 **내부**
+          기준이라, 그대로 넣으면 제목줄만큼 **왼쪽 위로 튄다**(실측 x+8 · y+31).
+          그래서 `wm manage` 직후 **얼마나 어긋났는지 재서 그만큼 되돌린다.**"""
+        w = getattr(self, "_red_panel", None)
+        if not (w and w.winfo_exists()):
+            return
+        try:
+            if self._red_panel_detached():
+                w.wm_forget(w)
+                w.pack(anchor="w", pady=(4, 0), padx=1, in_=self._red_panel_home)
+                self.cfg["red_detach"] = False
+                save_cfg(self.cfg)
+                self._red_detach_btn.config(text="📤")
+                return
+            x0, y0 = w.winfo_rootx(), w.winfo_rooty()
+            w.wm_manage(w)
+            w.wm_title("🔴 붉은반짝 → 0번")
+            w.wm_attributes("-topmost", False)
+            w.wm_protocol("WM_DELETE_WINDOW", self._red_detach_toggle)
+            w.update_idletasks()
+            try:                        # 테두리만큼 어긋난 것을 되돌린다
+                import win32gui
+                h = int(w.wm_frame(), 16)
+                l, t, _r, _b = win32gui.GetWindowRect(h)
+                w.wm_geometry("+%d+%d" % (x0 + (x0 - w.winfo_rootx()),
+                                          y0 + (y0 - w.winfo_rooty())))
+            except Exception:
+                w.wm_geometry("+%d+%d" % (x0, y0))
+            self.cfg["red_detach"] = True
+            save_cfg(self.cfg)
+            self._red_detach_btn.config(text="📥")
+        except Exception as e:
+            try:
+                self.status.set(f"🔴 판 떼기 실패: {e}")
+            except Exception:
+                pass
+
+    def _red_slot_toggle(self, si):
+        """점 하나 — 그 슬롯을 볼까/말까."""
+        try:
+            d = dict(self.cfg.get("red_slots") or {})
+            k = "%02d" % (si + 1)
+            d[k] = not d.get(k, True)
+            self.cfg["red_slots"] = d
+            save_cfg(self.cfg)
+            self._red_paint()
+        except Exception:
+            pass
+
+    def _red_paint(self):
+        """점 색을 지금 설정대로 — 켜짐 빨강 · 꺼짐 회색."""
+        for si, b in (getattr(self, "_red_dots", None) or {}).items():
+            try:
+                on = self._red_slot_on(si)
+                b.config(bg="#c0392b" if on else "#4a4a4a",
+                         activebackground="#e74c3c" if on else "#5a5a5a")
+            except Exception:
+                pass
+
+    def _red_on_toggle(self):
+        try:
+            self.cfg["red_on"] = not self.cfg.get("red_on", RED_ON)
+            save_cfg(self.cfg)
+            self._red_sync()
+        except Exception:
+            pass
+
+    def _red_sync(self):
+        try:
+            on = self.cfg.get("red_on", RED_ON)
+            self._red_on_btn.config(text="🔴 켬" if on else "⚫ 끔",
+                                    bg="#c0392b" if on else "#555",
+                                    fg="white")
+        except Exception:
+            pass
+
+    def _build_red_panel(self, parent):
+        """🔴 **붉은빛이 반짝이면 0번을 따따따따** — 아주 작은 판.
+
+        사용자: *"이걸 내가 설정이 가능하도록 해줬으면. 예전에 귀환주문서 만든
+        것처럼 하면 좋긴 한데 **판때기를 떼서 아주 작게 아래에** 넣고 싶거든."*
+
+        · 점 16개 = 슬롯별 켬/끔 (영웅 판과 같은 세로 배치라 눈이 바로 따라간다)
+        · `[🔴 켬/⚫ 끔]` · `[0번 n회]` · `[기준 n%]` · `[📤 떼기]`
+        · 🚫 **절전일 때만** 누른다 — 깨어 있는 화면은 붉은 UI 가 많다(실측 18%)
+        ⚠ 위젯을 더 넣을 때는 **이 판(box) 안**에 넣을 것 — 밖에 넣으면
+          떼어낼 때 따라가지 않는다 (2026-09-16 슬롯판 교훈)."""
+        self._red_panel_home = parent
+        box = tk.LabelFrame(parent, text=" 🔴 붉은반짝 → 0번 따따따따 ",
+                            font=("맑은 고딕", 8, "bold"), fg="#c0392b",
+                            bd=2, relief="groove")
+        box.pack(anchor="w", pady=(4, 0), padx=1)
+        self._red_panel = box
+        top = tk.Frame(box); top.pack(fill="x", padx=3, pady=(2, 0))
+        self._red_on_btn = tk.Button(top, font=("맑은 고딕", 7, "bold"),
+                                     width=5, relief="raised",
+                                     command=self._red_on_toggle)
+        self._red_on_btn.pack(side="left")
+        # 0번을 몇 번 누를까 (사용자: 4~8번)
+        self._red_n = tk.StringVar(value=str(self.cfg.get("red_keys")
+                                             or RED_KEYS[1]))
+        def _save_n(*_a):
+            try:
+                v = max(1, min(20, int(self._red_n.get())))
+                self.cfg["red_keys"] = v
+                save_cfg(self.cfg)
+            except Exception:
+                pass
+        tk.Label(top, text=" 0번", font=("맑은 고딕", 7)).pack(side="left")
+        _e = tk.Spinbox(top, from_=1, to=20, width=2, justify="center",
+                        font=("맑은 고딕", 7), textvariable=self._red_n,
+                        command=_save_n)
+        _e.pack(side="left")
+        _e.bind("<FocusOut>", _save_n)
+        tk.Label(top, text="회", font=("맑은 고딕", 7)).pack(side="left")
+        # 기준 %
+        self._red_p = tk.StringVar(value=str(self.cfg.get("red_pct") or RED_PCT))
+        def _save_p(*_a):
+            try:
+                v = max(1.0, min(50.0, float(self._red_p.get())))
+                self.cfg["red_pct"] = v
+                save_cfg(self.cfg)
+            except Exception:
+                pass
+        tk.Label(top, text=" 기준", font=("맑은 고딕", 7)).pack(side="left")
+        _e2 = tk.Spinbox(top, from_=1, to=50, increment=1, width=3,
+                         justify="center", font=("맑은 고딕", 7),
+                         textvariable=self._red_p, command=_save_p)
+        _e2.pack(side="left")
+        _e2.bind("<FocusOut>", _save_p)
+        tk.Label(top, text="%", font=("맑은 고딕", 7)).pack(side="left")
+        self._red_detach_btn = tk.Button(top, text="📤", font=("맑은 고딕", 7),
+                                         width=2, command=self._red_detach_toggle)
+        self._red_detach_btn.pack(side="right")
+        # 점 16개 — 영웅 판과 같은 세로(열 우선) 배치
+        gr = tk.Frame(box); gr.pack(padx=3, pady=(1, 3))
+        self._red_dots = {}
+        for idx in range(16):
+            r, c = idx % 4, idx // 4
+            cell = tk.Frame(gr); cell.grid(row=r, column=c, padx=3, pady=1)
+            tk.Label(cell, text=f"{idx+1:02d}", font=("맑은 고딕", 7),
+                     fg="#888").pack(side="left")
+            b = tk.Button(cell, width=1, height=1, bd=1, relief="raised",
+                          command=lambda i=idx: self._red_slot_toggle(i))
+            b.pack(side="left", padx=(1, 0))
+            self._red_dots[idx] = b
+        self._red_paint()
+        self._red_sync()
+        if self.cfg.get("red_detach"):
+            self.after(1500, self._red_detach_toggle)
 
     def _build_fix_toggles(self, parent):
         """😴🖱📬🗂 — 🟣 영웅 판 **바로 아래 네 줄** (2026-10-20 사용자:
