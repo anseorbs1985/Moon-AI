@@ -573,6 +573,16 @@ AWAKEN_SEE_WAIT  = (0.7, 1.1, 1.6)   # 클릭 뒤 이 시각들(초)에 한 번�
 #    ⚠ `AWAKEN_MATCH` 는 건드리지 말 것 — 그건 **버튼을 누를 때** 쓰는 기준이고,
 #      글자가 반쯤 켜진 상태도 잡아야 해서 낮게 두는 것이 맞다.
 AWAKEN_SEEN_MATCH = 0.90
+# 🚨 **머무는 동안은 기준이 따로다** (2026-10-21 사고 — 각성 도중에 창이 사라졌다)
+#   사용자: *"왜 여기에서 사라지냐고. 각성하는 도중이잖아!!"*
+#   실측: **각성 연출 중에 탭줄 점수가 0.82~0.86 으로 떨어진다** (평소 0.999).
+#   띄울 때 쓰는 0.90 을 그대로 쓰니 아슬아슬하게 미달해 **멈추고 닫혔다.**
+#   목적이 반대다 — **띄우는 것**은 오탐을 막아야 해서 높아야 하고,
+#   **머무는 것**은 놓치는 쪽(=그냥 둔다)이 안전하므로 낮아야 한다.
+AWAKEN_STAY_MATCH = 0.65   # 각성 화면에 '아직 있나' — 멈춤·닫기 판정
+AWAKEN_GONE_N     = 3      # 연속 이만큼 미달해야 멈춘다 (점수가 흔들리므로)
+# 📏 실측 근거 — 각성 화면 0.82~1.00 · 각성이 아닌 화면 0.47
+#   → 0.65 면 위 0.17 · 아래 0.18 여유. 🚫 0.90 으로 되돌리지 말 것.
 # 🖼 사용자가 "이게 각성화면이다" 라고 직접 잘라 등록하는 그림 (2026-10-01 사용자 제안:
 #    "내가 어떤 게 각성화면인지 알려줄까?"). 이게 있으면 **이것만** 보고 판정한다 —
 #    `awaken_auto` 는 다른 화면에서도 0.72 가 나와 오탐을 냈다.
@@ -6382,9 +6392,12 @@ class App(tk.Tk):
                 return False, "리니지M 창을 못 찾음"
             if r[0] != rect0[0]:
                 return False, f"다른 창으로 바뀜 ([{rect0[5]}] → [{r[5]}])"
-            ok, which, sc = self._awaken_screen_seen()
+            # 머무름 판정이라 **낮은 기준**을 쓴다 — 각성 연출 중에 0.82 까지
+            # 떨어지므로 띄울 때 기준(0.90)으로 보면 멈춰버린다 (2026-10-21)
+            ok, which, sc = self._awaken_screen_seen(thr=AWAKEN_STAY_MATCH)
             if not ok:
-                return False, f"각성 화면이 아님 ({which or '-'} {sc:.2f})"
+                return False, (f"각성 화면이 아님 ({which or '-'} {sc:.2f}"
+                               f" · 기준 {AWAKEN_STAY_MATCH})")
             return True, ""
         except Exception:
             return True, ""           # 모르면 막지 않는다
@@ -6459,6 +6472,7 @@ class App(tk.Tk):
                 self.status.set(f"✨ 버튼 그림이 없습니다 ({nm}.png)"); return
         self._awaken_stop = False
         self._awaken_busy = True
+        self._awaken_gone = 0           # 연속 미달 센 것을 비우고 시작한다
         # 🔙 **런처를 맨 뒤로** (2026-10-20 사용자 지시 — 절대 규칙).
         #   사용자: *"각성할 때 가끔 메인런처가 앞으로 튀어나오는 현상이 있더라.
         #   내가 뭔가 실행하거나 그러면 맨 뒤로 보내줘."*
@@ -6629,7 +6643,8 @@ class App(tk.Tk):
                 #    `_awaken_close_auto` 가 '화면이 아직 각성인가' 를 보지는 않으므로
                 #    여기서 직접 확인한다.
                 try:
-                    _ok, _w, _s = self._awaken_screen_seen()
+                    _ok, _w, _s = self._awaken_screen_seen(
+                        thr=AWAKEN_STAY_MATCH)
                     if not _ok:
                         self._awaken_latch = False
                         self._awaken_close_auto(
@@ -16314,8 +16329,12 @@ class App(tk.Tk):
             pass
 
     # ── ✨ 각성 화면에 들어가면 런처를 자동으로 띄운다 (2026-10-01 사용자 요청) ──
-    def _awaken_screen_seen(self):
+    def _awaken_screen_seen(self, thr=None):
         """지금 **제일 큰 리니지M 창**이 각성 화면인가 → (맞나, 무엇으로, 점수).
+
+        `thr` 을 주면 그 기준으로 본다 — **머무는 동안**(멈춤·닫기 판정)은
+        `AWAKEN_STAY_MATCH`(0.65)를 넘긴다. 각성 연출 중에 점수가 0.82 까지
+        떨어지므로 띄울 때 기준(0.90)을 그대로 쓰면 창이 사라진다 (2026-10-21).
 
         '자동 등록'(`awaken_auto`) 글자를 먼저 본다 — 각성 화면에만 있고
         [각성] 버튼이 꺼져 있어도(재료 없음) 그대로 보이므로 가장 확실하다.
@@ -16332,7 +16351,7 @@ class App(tk.Tk):
             # ⚠ `has_img(fkey, 좌표번호)` 는 dgn2 런처용이라 여기선 쓸 수 없다.
             # 🖼 사용자가 직접 등록한 '각성화면 표시' 가 있으면 **그것만** 본다
             if os.path.exists(awaken_screen_img_path()):
-                return self._awaken_seen_by_img(rect)
+                return self._awaken_seen_by_img(rect, thr)
 
             def _have(nm):
                 return os.path.exists(os.path.join(IMG_DIR, f"{nm}.png"))
@@ -16349,7 +16368,8 @@ class App(tk.Tk):
             best = ("", 0.0)
             for nm in order:
                 # 화면 판정은 **엄격한 기준**으로 본다 (버튼 누르는 기준보다 높다)
-                x, y, v, _l = self._awaken_find(nm, rect, thr=AWAKEN_SEEN_MATCH)
+                x, y, v, _l = self._awaken_find(
+                    nm, rect, thr=(AWAKEN_SEEN_MATCH if thr is None else thr))
                 if v > best[1]:
                     best = (nm, float(v))
                 if x is not None:
@@ -16358,7 +16378,7 @@ class App(tk.Tk):
         except Exception:
             return False, "", 0.0
 
-    def _awaken_seen_by_img(self, rect):
+    def _awaken_seen_by_img(self, rect, thr=None):
         """🖼 사용자가 등록한 '각성화면 표시' 로 판정한다 → (맞나, 이름, 점수).
 
         등록할 때 **드래그한 자리를 창 왼쪽위 기준으로** 함께 저장해뒀으므로
@@ -16366,6 +16386,7 @@ class App(tk.Tk):
         걸리지 않는다. 창을 **직접 캡처**(PrintWindow)하므로 런처가 앞에 있어도 정확하다."""
         try:
             import cv2, numpy as np
+            _thr = AWAKEN_SEEN_MATCH if thr is None else float(thr)
             t = cv2.imdecode(np.fromfile(awaken_screen_img_path(), np.uint8),
                              cv2.IMREAD_COLOR)
             big = grab_window((rect[1] + 40, rect[2] + 40))
@@ -16388,9 +16409,9 @@ class App(tk.Tk):
                     continue
                 v = float(cv2.matchTemplate(big, tt, cv2.TM_CCOEFF_NORMED).max())
                 best = max(best, v)
-                if best >= AWAKEN_SEEN_MATCH:
+                if best >= _thr:
                     break
-            return best >= AWAKEN_SEEN_MATCH, AWAKEN_SCREEN, best
+            return best >= _thr, AWAKEN_SCREEN, best
         except Exception:
             return False, AWAKEN_SCREEN, 0.0
 
@@ -16506,25 +16527,41 @@ class App(tk.Tk):
         ⚠ 확인 한 번이 **146ms** 다 (큰 창 2504x1352 캡처 123ms + 매칭 23ms — 실측
           2026-10-21). 주기 `AWAKEN_WATCH_MS`(800ms)를 더 줄이기 전에 이것을 볼 것."""
         try:
-            ok, which, sc = self._awaken_screen_seen()
-            if not ok:
-                if busy:
-                    if not getattr(self, "_awaken_stop", False):
-                        self._awaken_stop = True
-                        click_log(
-                            "[각성자동] ⚡ 돌고 있는 중에 화면이 바뀌었다 "
-                            f"({which or '-'} {sc:.2f} · 기준 {AWAKEN_SEEN_MATCH}) "
-                            "→ **즉시 멈추라고 했다** (끝나면 창도 닫는다)")
-                        try:
-                            self.after(0, lambda: self.status.set(
-                                "✨ 화면이 바뀌어 멈추는 중..."))
-                        except Exception:
-                            pass
-                    return
-                self._awaken_latch = False   # 다음에 들어오면 다시 띄운다
-                self._awaken_close_auto(
-                    f"화면이 바뀌었다 (가장 닮은 것 {which or '-'} {sc:.2f} · "
-                    f"기준 {AWAKEN_SEEN_MATCH})")
+            # 🚨 **머무름 기준**으로 본다 (띄울 때 기준 0.90 이 아니다).
+            #    각성 연출 중 0.82 까지 떨어져 창이 사라진 사고 — 2026-10-21.
+            ok, which, sc = self._awaken_screen_seen(thr=AWAKEN_STAY_MATCH)
+            if ok:
+                self._awaken_gone = 0        # 보였다 — 센 것을 버린다
+                return
+            # 🚨 **한 번 안 보여도 멈추지 않는다** — 연속 AWAKEN_GONE_N 번이어야.
+            #    점수가 흔들리는 판정은 반드시 연속 확인한다 (이 저장소의 확립된
+            #    규칙 — `WARN_GONE_N`·`FIX_SEE_TRIES` 와 같다).
+            n = int(getattr(self, "_awaken_gone", 0)) + 1
+            self._awaken_gone = n
+            if n < AWAKEN_GONE_N:
+                click_log(f"[각성자동] 화면이 안 보인다 {n}/{AWAKEN_GONE_N} "
+                          f"({which or '-'} {sc:.2f} · 기준 {AWAKEN_STAY_MATCH})"
+                          " — 아직 멈추지 않는다")
+                return
+            self._awaken_gone = 0
+            if busy:
+                if not getattr(self, "_awaken_stop", False):
+                    self._awaken_stop = True
+                    click_log(
+                        "[각성자동] ⚡ 돌고 있는 중에 화면이 바뀌었다 "
+                        f"({which or '-'} {sc:.2f} · 기준 {AWAKEN_STAY_MATCH}"
+                        f" · {AWAKEN_GONE_N}번 연속) "
+                        "→ **즉시 멈추라고 했다** (끝나면 창도 닫는다)")
+                    try:
+                        self.after(0, lambda: self.status.set(
+                            "✨ 화면이 바뀌어 멈추는 중..."))
+                    except Exception:
+                        pass
+                return
+            self._awaken_latch = False       # 다음에 들어오면 다시 띄운다
+            self._awaken_close_auto(
+                f"화면이 바뀌었다 (가장 닮은 것 {which or '-'} {sc:.2f} · "
+                f"기준 {AWAKEN_STAY_MATCH} · {AWAKEN_GONE_N}번 연속)")
         except Exception:
             pass
         finally:
