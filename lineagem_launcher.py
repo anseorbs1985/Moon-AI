@@ -1540,6 +1540,16 @@ P0_HOME_KEY  = "0"               # 귀환 키
 #   ⚠ 감시를 못 켠 환경에서는 999초(=유휴)를 돌려주므로 **막지 않는다** —
 #     모를 때는 예전처럼 도는 쪽이 안전하다 (갑자기 기능이 죽으면 더 혼란스럽다).
 AUTO_QUIET = 10.0        # 사람이 마우스를 만진 뒤 이만큼은 자동 작업을 미룬다
+
+# ✨ **각성 창은 '화면이 바뀌면' 스스로 닫힌다** (2026-10-21 사용자 재지시)
+#   사용자: *"각성 화면에서만 띄우고 **화면 바뀌면 꺼주라니까 왜 또 말 안 듣냐**"*
+#   예전 방식은 **사람이 클라를 클릭할 때만** 확인했다 → 각성 화면을 나간 뒤
+#   아무것도 클릭하지 않으면 **창이 그대로 남았다.**
+#   → 창이 **떠 있는 동안만** 그 창 하나를 주기로 확인한다.
+#     창이 닫혀 있으면 틱이 즉시 빠져나오므로 **평소 부하 0**.
+#   실측: 창 하나 캡처+판정 약 60ms → 2초마다면 **3%**, 그것도 각성 창을
+#        열어둔 동안만. 백그라운드 스레드라 화면은 멈추지 않는다.
+AWAKEN_WATCH_MS = 2000   # 각성 창이 떠 있을 때만 — 이 주기로 그 창을 확인한다
 P0_HOME_WAIT = (3.5, 5.5)        # 귀환이 끝날 때까지 (마을에 도착)
 P0_HOME_GAP  = (1.5, 3.0)        # 클라 사이
 P0_RUN_WAIT  = 600               # 한 슬롯 실행을 최대 이만큼 기다린다 (초)
@@ -4543,6 +4553,8 @@ class App(tk.Tk):
         threading.Thread(target=self._itemreg_click_loop, daemon=True).start()
         # 🖱 사람이 리니지M 창을 클릭하면 그 클라의 십자가를 확인한다 (확인만)
         threading.Thread(target=self._fix_clickwatch_loop, daemon=True).start()
+        # ✨ 각성 창이 떠 있는 동안만 그 화면을 지켜본다 (화면이 바뀌면 닫는다)
+        self.after(AWAKEN_WATCH_MS, self._awaken_watch_tick)
         self.after(1800, self._itemreg_refresh)
         # 🚫🚫 **런처가 클로드를 자동으로 켜지 않는다** (2026-10-21 사용자 지시 — 절대 규칙)
         #   사용자: *"너 왜 재시작 하거나 중간에 수시로 문서를 여는 거야?
@@ -16280,6 +16292,53 @@ class App(tk.Tk):
             self.status.set(f"🖼 저장 실패: {e}")
         self._open_awaken_win(reuse=True)
 
+    def _awaken_watch_tick(self):
+        """✨ **각성 창이 떠 있는 동안만** 그 화면을 지켜본다 → 아니면 닫는다.
+
+        사용자: *"각성 화면에서만 띄우고 화면 바뀌면 꺼주라."*
+        예전에는 **사람이 클라를 클릭할 때만** 확인해서, 화면을 나간 뒤 아무것도
+        클릭하지 않으면 **창이 그대로 남았다.** 이제 스스로 확인한다.
+
+        · 창이 없거나 숨겨져 있으면 **즉시 빠져나온다** → 평소 부하 0
+        · 돌고 있으면(`_awaken_busy`) 건드리지 않는다
+        ⚠ 화면을 긁는 것은 **백그라운드 스레드**로 (2026-09-16: 틱에서 긁으면
+          창이 그만큼 멈춘다)."""
+        try:
+            self.after(AWAKEN_WATCH_MS, self._awaken_watch_tick)
+        except Exception:
+            pass
+        try:
+            win = getattr(self, "_awaken_win", None)
+            if not (win and win.winfo_exists()):
+                return                      # 창이 없다 — 부하 0
+            try:
+                if not win.winfo_viewable():
+                    return                  # 이미 숨겨져 있다
+            except Exception:
+                return
+            if getattr(self, "_awaken_busy", False):
+                return                      # 돌고 있다
+            if getattr(self, "_awaken_watching", False):
+                return
+            self._awaken_watching = True
+            threading.Thread(target=self._awaken_watch_check, daemon=True).start()
+        except Exception:
+            self._awaken_watching = False
+
+    def _awaken_watch_check(self):
+        """각성 화면인지 보고, 아니면 창을 닫는다 (스레드)."""
+        try:
+            ok, which, sc = self._awaken_screen_seen()
+            if not ok:
+                self._awaken_latch = False   # 다음에 들어오면 다시 띄운다
+                self._awaken_close_auto(
+                    f"화면이 바뀌었다 (가장 닮은 것 {which or '-'} {sc:.2f} · "
+                    f"기준 {AWAKEN_SEEN_MATCH})")
+        except Exception:
+            pass
+        finally:
+            self._awaken_watching = False
+
     def _awaken_close_auto(self, why="각성 화면을 벗어났다"):
         """✨ **각성 화면을 벗어나면 각성 창을 치운다** (2026-10-21 사용자 요청).
 
@@ -16375,10 +16434,6 @@ class App(tk.Tk):
                     self._awaken_latch = False
                     click_log("[각성자동] 각성 화면을 벗어났다 — "
                               "다음에 각성 화면이 뜨면 다시 띄운다")
-                    # ✨ **창도 같이 치운다** (2026-10-21 사용자 요청) —
-                    #    ⚠ 이 줄은 `if` 블록 **안**이어야 한다. 밖으로 빼면
-                    #      아래 `elif` 가 떨어져 나가 문법이 깨진다 (한 번 밟았다).
-                    self._awaken_close_auto()
                 # **실패도 기록한다** — 이게 없어서 "왜 안 가져오냐" 를 못 짚었다.
                 # 2초에 한 줄만 남겨 로그가 넘치지 않게 한다.
                 elif time.time() - getattr(self, "_awaken_no_log", 0.0) > 2.0:
@@ -16386,6 +16441,12 @@ class App(tk.Tk):
                     click_log(f"[각성자동] 각성 화면이 아님 — 가장 닮은 것 "
                               f"{which or '-'} 일치도 {sc:.2f} (기준 {AWAKEN_SEEN_MATCH}) "
                               f"· 클릭 {tuple(xy)} · 창 {rw}x{rh}")
+                # ✨ **걸쇠와 무관하게 창을 닫는다** (2026-10-21 재지시:
+                #    "각성 화면에서만 띄우고 화면 바뀌면 꺼주라니까 왜 또 말 안 듣냐")
+                #    ⚠ 예전에는 `if _awaken_latch:` **안**에 있어서 **사용자가 직접
+                #      버튼으로 창을 열면 걸쇠가 없어 안 닫혔다.** 기록에 '벗어났다' 는
+                #      찍히고 '닫았다' 는 없던 이유다. 걸쇠 안으로 다시 넣지 말 것.
+                self._awaken_close_auto()
                 return
             # 🔒 걸쇠가 걸려 있다 = 이미 띄웠거나 사용자가 껐다 → **다시 띄우지 않는다.**
             #    (사용자: "내가 끄면 안 나타나야지")
