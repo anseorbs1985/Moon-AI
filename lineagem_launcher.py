@@ -1561,7 +1561,15 @@ AUTO_QUIET = 10.0        # 사람이 마우스를 만진 뒤 이만큼은 자동
 #     창이 닫혀 있으면 틱이 즉시 빠져나오므로 **평소 부하 0**.
 #   실측: 창 하나 캡처+판정 약 60ms → 2초마다면 **3%**, 그것도 각성 창을
 #        열어둔 동안만. 백그라운드 스레드라 화면은 멈추지 않는다.
-AWAKEN_WATCH_MS = 800   # 각성 창이 떠 있을 때만 — 이 주기로 그 창을 확인한다
+AWAKEN_WATCH_MS = 500   # 각성 창이 떠 있을 때만 — 이 주기로 그 창을 확인한다
+# ⚠ 확인 한 번이 **146ms** (큰 창 2504x1352 캡처 123ms + 매칭 23ms, 실측
+#   2026-10-21). 500ms 면 한 코어의 약 29% — 각성 창을 **열어둔 동안만** 쓰고
+#   백그라운드 스레드라 화면은 멈추지 않는다. 캡처는 입력을 보내지 않으므로
+#   각성 클릭을 방해하지도 않는다.
+#   화면이 바뀐 뒤 반응: 0.5초(주기) + 0.15초(확인) + 0.34초(대기 루프가
+#   `_awaken_stop` 을 보는 간격) = **최악 약 1초**. 예전엔 돌고 있으면
+#   감시가 아예 멈춰 **20초 넘게** 창이 남았다.
+# 🚫 이보다 더 줄이지 말 것 — 캡처가 146ms 라 300ms 면 절반을 캡처에 쓴다.
 P0_HOME_WAIT = (3.5, 5.5)        # 귀환이 끝날 때까지 (마을에 도착)
 P0_HOME_GAP  = (1.5, 3.0)        # 클라 사이
 P0_RUN_WAIT  = 600               # 한 슬롯 실행을 최대 이만큼 기다린다 (초)
@@ -16452,7 +16460,7 @@ class App(tk.Tk):
         클릭하지 않으면 **창이 그대로 남았다.** 이제 스스로 확인한다.
 
         · 창이 없거나 숨겨져 있으면 **즉시 빠져나온다** → 평소 부하 0
-        · 돌고 있으면(`_awaken_busy`) 건드리지 않는다
+        · **돌고 있어도 확인한다** — 닫지는 않고 `_awaken_stop` 만 세운다
         ⚠ 화면을 긁는 것은 **백그라운드 스레드**로 (2026-09-16: 틱에서 긁으면
           창이 그만큼 멈춘다)."""
         try:
@@ -16468,20 +16476,51 @@ class App(tk.Tk):
                     return                  # 이미 숨겨져 있다
             except Exception:
                 return
-            if getattr(self, "_awaken_busy", False):
-                return                      # 돌고 있다
+            # ⚡ **돌고 있어도 확인한다** (2026-10-21 사용자: *"화면이 바뀌면 좀
+            #    빠르게 각성을 닫아주라니까 왜 이렇게 느리냐"*).
+            #    예전에는 `_awaken_busy` 면 그냥 돌아가서, 각성이 도는 동안
+            #    **감시가 통째로 멈췄다.** 그 사이 대기가 길어 최악 20초 넘게
+            #    창이 남았다 (버튼 대기 4.1초 + 터치 대기 8.1초 × 2단계).
+            #    돌고 있을 때는 **닫지 않고 `_awaken_stop` 만 세운다** —
+            #    각 대기 루프가 그것을 보고 0.34초 안에 빠져나오고,
+            #    멈춘 뒤 `_run_awaken` 의 `finally` 가 화면을 보고 닫는다.
+            _busy = bool(getattr(self, "_awaken_busy", False))
+            if _busy and getattr(self, "_awaken_stop", False):
+                return                      # 이미 멈추라고 해뒀다
             if getattr(self, "_awaken_watching", False):
                 return
             self._awaken_watching = True
-            threading.Thread(target=self._awaken_watch_check, daemon=True).start()
+            threading.Thread(target=self._awaken_watch_check,
+                             args=(_busy,), daemon=True).start()
         except Exception:
             self._awaken_watching = False
 
-    def _awaken_watch_check(self):
-        """각성 화면인지 보고, 아니면 창을 닫는다 (스레드)."""
+    def _awaken_watch_check(self, busy=False):
+        """각성 화면인지 보고, 아니면 멈추거나 창을 닫는다 (스레드).
+
+        · **돌고 있으면**(`busy`) `_awaken_stop` 만 세운다 — 대기 루프가 그것을
+          보고 **0.34초 안에** 빠져나오고, `_run_awaken` 의 `finally` 가
+          화면을 다시 보고 창까지 닫는다.
+          🚫 여기서 창을 닫지 말 것 — 돌고 있는 중에 창이 사라지면 안 된다.
+        · 안 돌고 있으면 예전처럼 바로 닫는다.
+        ⚠ 확인 한 번이 **146ms** 다 (큰 창 2504x1352 캡처 123ms + 매칭 23ms — 실측
+          2026-10-21). 주기 `AWAKEN_WATCH_MS`(800ms)를 더 줄이기 전에 이것을 볼 것."""
         try:
             ok, which, sc = self._awaken_screen_seen()
             if not ok:
+                if busy:
+                    if not getattr(self, "_awaken_stop", False):
+                        self._awaken_stop = True
+                        click_log(
+                            "[각성자동] ⚡ 돌고 있는 중에 화면이 바뀌었다 "
+                            f"({which or '-'} {sc:.2f} · 기준 {AWAKEN_SEEN_MATCH}) "
+                            "→ **즉시 멈추라고 했다** (끝나면 창도 닫는다)")
+                        try:
+                            self.after(0, lambda: self.status.set(
+                                "✨ 화면이 바뀌어 멈추는 중..."))
+                        except Exception:
+                            pass
+                    return
                 self._awaken_latch = False   # 다음에 들어오면 다시 띄운다
                 self._awaken_close_auto(
                     f"화면이 바뀌었다 (가장 닮은 것 {which or '-'} {sc:.2f} · "
