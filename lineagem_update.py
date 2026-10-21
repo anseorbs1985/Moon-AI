@@ -1188,9 +1188,9 @@ def ensure_logon_start():
 
     · 런처: 예약 작업 `LineageM_Logon` (로그온 40초 뒤 워치독 실행).
       워치독은 **이미 켜져 있으면 아무것도 하지 않으므로** 중복 걱정이 없다.
-    · 클로드: 시작프로그램 폴더에 바로가기. 스토어 앱이라 경로가 아니라
-      **앱 ID(AUMID)** 로 띄워야 확실하다 → `explorer.exe shell:AppsFolder 뒤에 앱 ID`.
-      그 컴퓨터에 클로드가 없으면 조용히 건너뛴다.
+    · 🚫 **클로드는 자동으로 켜지 않는다** (2026-10-21 사용자 지시). 예전에 만들던
+      시작프로그램 바로가기가 **로그온 때마다 문서 폴더를 열어** 지웠다 (아래 ② 참조).
+      클로드 앱은 사용자가 직접 켠다.
 
     ⚠ 이건 '실행은 사용자가 시킬 때만'(2026-08-10)의 **런처를 켜두는 예약** 쪽이다 —
       창을 살려둘 뿐 **클릭 작업을 시작하지 않는다.** 클로드는 여기에
@@ -1211,23 +1211,33 @@ def ensure_logon_start():
                     + (r.stderr or r.stdout or "").strip()[:60])
     except Exception:
         pass
-    # ② 클로드 — 시작프로그램 바로가기 (스토어 앱이라 앱 ID 로 띄운다)
+    # ② 🚫🚫 **클로드 시작프로그램 바로가기는 만들지 않는다 — 지운다**
+    #    (2026-10-21 사용자 지시 — 절대 규칙)
+    #
+    #    사용자: *"너 왜 재시작 하거나 중간에 수시로 문서를 여는 거야?
+    #    **문서폴더 절대 열지 말아라 — 내가 열지 않는 한 너가 자동으로 열지 마!!!!"*
+    #
+    #    🚨 원인 — 2026-10-14 에 내가 만든 그 바로가기가 **깨져 있었다**:
+    #        만들어진 것   Args : shell:AppsFolderClaude_pzs8sxrjxfjjc!Claude
+    #        올바른 것     Args : shell:AppsFolder\Claude_pzs8sxrjxfjjc!Claude
+    #                                            ↑ 백슬래시가 사라졌다
+    #    PowerShell 명령을 Python 문자열로 적을 때
+    #        "$s.Arguments = 'shell:AppsFolder' + $a.AppID; "
+    #    의 `'` 를 **Python 이 `'` 로 읽어** 백슬래시가 없어진 것이다.
+    #    그래서 explorer 가 그 인수를 못 알아듣고 **로그온할 때마다
+    #    기본 폴더(문서·내 PC) 창을 열었다.**
+    #
+    #    ⚠ 고쳐서 다시 만들지 말 것. 사용자가 "자동으로 열지 마" 라고 했고,
+    #      `explorer.exe` 로 앱을 띄우는 방식은 **인수가 조금만 틀어져도 폴더가 열린다.**
+    #      클로드 앱은 **사용자가 직접** 켠다.
+    #    ⚠ 런처 자동 시작(① `LineageM_Logon`)은 **그대로 둔다** —
+    #      그것은 `pythonw lineagem_watchdog.py` 라 explorer 와 아무 관계가 없다.
     try:
-        ps = (
-            "$a = Get-StartApps | Where-Object { $_.Name -match 'Claude' } | "
-            "Select-Object -First 1; "
-            "if ($a) { "
-            "$p = Join-Path ([Environment]::GetFolderPath('Startup')) 'Claude.lnk'; "
-            "if (-not (Test-Path $p)) { "
-            "$w = New-Object -ComObject WScript.Shell; $s = $w.CreateShortcut($p); "
-            "$s.TargetPath = \"$env:WINDIR\\explorer.exe\"; "
-            "$s.Arguments = 'shell:AppsFolder\' + $a.AppID; "
-            "$s.Description = '재부팅 후 클로드 자동 실행'; $s.Save(); "
-            "Write-Output 'made' } }"
-        )
-        r = sh(["powershell", "-NoProfile", "-Command", ps])
-        if "made" in (r.stdout or ""):
-            log("   ✔ 재부팅 후 클로드 자동 실행 바로가기 등록")
+        _sp = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows",
+                           "Start Menu", "Programs", "Startup", "Claude.lnk")
+        if os.path.exists(_sp):
+            os.remove(_sp)
+            log("   🚫 로그온 때 문서 폴더를 열던 'Claude.lnk' 바로가기를 지웠습니다")
     except Exception:
         pass
 

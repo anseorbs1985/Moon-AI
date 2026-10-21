@@ -4525,9 +4525,24 @@ class App(tk.Tk):
         # 🖱 사람이 리니지M 창을 클릭하면 그 클라의 십자가를 확인한다 (확인만)
         threading.Thread(target=self._fix_clickwatch_loop, daemon=True).start()
         self.after(1800, self._itemreg_refresh)
-        # 런처가 켜질 때 클로드도 같이 켠다 — 클로드는 뒤, 런처는 앞
-        # (2026-08-29 사용자 지시). 이미 떠 있으면 새로 켜지 않는다.
-        self.after(2500, self._start_claude_behind)
+        # 🚫🚫 **런처가 클로드를 자동으로 켜지 않는다** (2026-10-21 사용자 지시 — 절대 규칙)
+        #   사용자: *"너 왜 재시작 하거나 중간에 수시로 문서를 여는 거야?
+        #   정말 그건 큰일날 일이야. **절대 열면 안 된다.** 재시작하거나 중간에
+        #   문서를 여는 행위 자체를 하지 마라. **문서폴더 절대 열지 말아라 —
+        #   내가 열지 않는 한 너가 자동으로 열지 마!!!!"*
+        #
+        #   범인은 `_start_claude_behind` 였다. 클로드가 스토어 앱이라
+        #   **`explorer.exe shell:appsFolder\<앱ID>`** 로 띄우는데,
+        #   그 앱 ID 로 못 찾으면 **explorer 가 그냥 폴더 창(문서·내 PC)을 연다.**
+        #   이 줄은 **런처가 켜질 때마다** 돌았다 — 업데이트·워치독 재시작·
+        #   4:50 자동시작·로그온 전부 이 길을 지나므로 "재시작하거나 중간에 수시로"
+        #   문서 창이 열렸다. `_claude_running()` 이 클로드를 못 보면(최소화·
+        #   제목 변경) **매번 또 explorer 를 불렀다.**
+        #
+        #   ⚠ 2026-08-29 의 '런처가 켜질 때 클로드도 같이 켠다' 규칙은 **폐지한다.**
+        #   ⚠ 클로드는 이 호출을 되살리지 말 것. 클로드 앱은 **사용자가 직접** 켠다.
+        #   ⚠ 어떤 이유로든 `explorer.exe`·`os.startfile` 을 **자동으로** 부르지 말 것 —
+        #     사용자가 누른 버튼([📁 그림폴더]·[📋 클릭기록] 등)에서만 쓴다.
         # 클로드 창을 런처가 챙기는 동작(주목 감시 + 화면 가운데 유지)은
         # local_config.json 의 manage_claude 로 끌 수 있다 (머신별, 기본 켬).
         # 작업 중에는 클로드를 강제로 내리지 않는다(예전 시작 버스트 제거).
@@ -4883,7 +4898,7 @@ class App(tk.Tk):
         except Exception:
             return False
 
-    def _start_claude_behind(self):
+    def _start_claude_behind(self, by_user=False):
         """런처가 켜질 때 **클로드도 같이 켠다 — 단, 뒤에** (2026-08-29 사용자 지시).
 
         이미 떠 있으면 새로 켜지 않는다. 켠 뒤에는 **클로드만** 뒤로 보낸다.
@@ -4894,6 +4909,14 @@ class App(tk.Tk):
         try:
             if self._claude_running():
                 self.after(1200, self._claude_to_back)
+                return
+            # 🚫 **자동으로는 절대 여기까지 오지 않는다** (2026-10-21 사용자 지시).
+            #    `explorer.exe shell:appsFolder\<앱ID>` 는 앱을 못 찾으면
+            #    **폴더 창을 열어버린다.** 사용자가 [💬 클로드] 를 직접 누른
+            #    경우만 허용한다 (`by_user=True`).
+            if not by_user:
+                click_log("[클로드] 자동으로는 켜지 않는다 — "
+                          "explorer 가 폴더 창을 열 수 있다 (2026-10-21 사용자 지시)")
                 return
             subprocess.Popen(["explorer.exe",
                               "shell:appsFolder\\" + self.CLAUDE_AUMID])
@@ -24172,9 +24195,9 @@ class App(tk.Tk):
                     pyautogui.moveTo(int(_hv[0]), int(_hv[1]))   # 한 번 더 확실히
                     time.sleep(random.uniform(0.2, 0.4))
                 if self.cfg.get("google_acc"):
-                    hover_click(*self.cfg["google_acc"]); time.sleep(2)
+                    self._lclick("google_acc", hover=True); time.sleep(2)
                 if self.cfg.get("confirm_btn"):
-                    hover_click(*self.cfg["confirm_btn"])
+                    self._lclick("confirm_btn", hover=True)
                     time.sleep(10)  # 계정 전환 후 로딩(약 8~10초) 대기
                 # 전환 후 재검증 — 퍼플 hwnd가 새로 생기므로 다시 찾아 앞으로 + 아이디 재표시
                 _re = win32gui.FindWindow(None, "PURPLE")
@@ -24279,9 +24302,9 @@ class App(tk.Tk):
                     pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
                     time.sleep(random.uniform(0.2, 0.4))
                 if self.cfg.get("google_acc"):
-                    hover_click(*self.cfg["google_acc"]); time.sleep(2)
+                    self._lclick("google_acc", hover=True); time.sleep(2)
                 if self.cfg.get("confirm_btn"):
-                    hover_click(*self.cfg["confirm_btn"]); time.sleep(3)
+                    self._lclick("confirm_btn", hover=True); time.sleep(3)
                 self.status.set("✔ 퍼플 지정계정 전환 완료")
 
             # 원래 상태로 복원 후 최소화
@@ -26599,6 +26622,54 @@ class App(tk.Tk):
                         f"(최고 {best:.2f}) · 엉뚱한 곳을 누르지 않았습니다")
         return None
 
+    def _login_spot_ok(self, x, y, what=""):
+        """🚫🚫 **그 자리가 퍼플·리니지M 이 아니면 누르지 않는다** → (허용?, 무엇)
+
+        2026-10-21 사용자 지시 — 절대 규칙:
+        *"좌표등록 — 리니지 접속할 때 **리니지 퍼플 이외, 또 리니지M 클라이언트
+        이외 것들은 클릭하지 말아라.** 왜 중간에 인터넷을 클릭하거나 왜 다른
+        이상한 것들을 클릭하는 거야. 사람 미치는 짓이야. 하지 마."*
+
+        접속 좌표는 **퍼플 창의 절대좌표**다. 그래서 퍼플이 꺼져 있거나 뒤로
+        밀려 있으면 **그 자리에 있는 다른 창이 눌린다** — 실측(2026-10-21,
+        퍼플이 꺼진 상태)에서 그 자리를 덮고 있던 것들:
+            `Claude`(Chrome_WidgetWin_1 · 681,287 1724x1038) ·
+            `Program Manager`(바탕화면) · 인터넷 창 등
+        그래서 인터넷이 눌리고 엉뚱한 것이 눌렸다.
+
+        **클릭은 맨 위 창이 받는다** → `WindowFromPoint` 로 그 자리의 맨 위 창을
+        보고, 퍼플·리니지M 이 아니면 **누르지 않고 중단한다.**
+        (`game_window_at` 은 '가려져도 게임 창을 찾는' 함수라 여기엔 쓰면 안 된다 —
+         퍼플이 뒤에 있어도 True 가 되어 **덮고 있는 창이 눌린다.**)
+
+        허용하는 것:
+          · 제목에 `Purple`·`퍼플` (퍼플 런처)
+          · 제목이 `리니지` 로 시작 (퍼플 안의 리니지 창·리니지M 클라)
+          · 클래스 `ngptop`(퍼플 상단바) · `CEFCLIENT`(퍼플 옆 패널)
+        🚫 **런처 자신(`리니지M 자동 실행`)은 막는다** — 제목이 `리니지M` 으로
+           시작해 그냥 두면 통과한다 (2026-10-20 에 같은 함정을 밟았다).
+        ⚠ 클로드는 이 관문을 느슨하게 만들지 말 것. 모르는 창이면 **막는 쪽**이다."""
+        try:
+            import win32gui
+            h = win32gui.WindowFromPoint((int(x), int(y)))
+            root = ctypes.windll.user32.GetAncestor(h, 2) or h   # GA_ROOT
+            title = win32gui.GetWindowText(root) or ""
+            cls = win32gui.GetClassName(root) or ""
+        except Exception:
+            return True, "확인 못 함"          # 모르면 막지 않는다 (옛 동작)
+        low = title.lower()
+        if title.startswith("리니지M 자동 실행"):
+            return False, f"[{title}] (메인런처 자신)"
+        # ⚠ 퍼플 상단바는 **제목이 `ngptop`** 이고 클래스는 `GLFW30` 이다
+        #   (실측 2026-10-21 — 처음에 거꾸로 봐서 프로필 자리를 막았다).
+        #   옆 패널은 제목 `index.html?type=live` · 클래스 `CEFCLIENT`.
+        if ("purple" in low or "퍼플" in title
+                or title.startswith("리니지")
+                or "ngptop" in low or "index.html" in low
+                or cls in ("ngptop", "CEFCLIENT")):
+            return True, f"[{title or cls}]"
+        return False, f"[{title or '제목없음'}] 클래스 {cls}"
+
     def _lclick(self, key, hover=False, move_only=False):
         """접속 단계 하나를 누른다. 실패하면 **False** (부르는 쪽이 멈춘다)."""
         p = self._lpoint(key)
@@ -26607,6 +26678,21 @@ class App(tk.Tk):
                                                          LOGIN_IDX[key]):
                 click_log(f"[접속] ✘ {LOGIN_NAME.get(key, key)} — "
                           f"좌표도 그림도 없습니다 → 중단")
+            return False
+        # 🚫 **퍼플·리니지M 이 아니면 누르지 않는다** (2026-10-21 사용자 지시).
+        #    `move_only`(마우스만 올리는 자리)도 똑같이 막는다 — 엉뚱한 창에
+        #    커서를 올리면 그 창이 반응할 수 있다.
+        ok, who = self._login_spot_ok(p[0], p[1], key)
+        if not ok:
+            click_log(f"[접속] 🚫 {LOGIN_NAME.get(key, key)} 자리 "
+                      f"({int(p[0])},{int(p[1])}) 에 있는 창이 "
+                      f"{who} — **퍼플도 리니지M도 아니라 누르지 않았다.** "
+                      f"퍼플이 꺼졌거나 다른 창이 덮고 있습니다 → 접속 중단")
+            try:
+                self.status.set(f"🚫 {LOGIN_NAME.get(key, key)} 자리에 {who} 가 "
+                                f"있어 누르지 않았습니다 — 퍼플을 띄워주세요")
+            except Exception:
+                pass
             return False
         if move_only:
             pyautogui.moveTo(int(p[0]), int(p[1]))
@@ -28052,10 +28138,10 @@ class App(tk.Tk):
                             if not self._wait(1): self.status.set("멈춤"); return
                             pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
                         if self.cfg.get("google_acc"):
-                            hover_click(*self.cfg["google_acc"])
+                            self._lclick("google_acc", hover=True)
                             if not self._wait(2): self.status.set("멈춤"); return
                         if self.cfg.get("confirm_btn"):
-                            hover_click(*self.cfg["confirm_btn"])
+                            self._lclick("confirm_btn", hover=True)
                             self.status.set("계정 전환 로딩 대기 중... (약 10초)")
                             if not self._wait(10): self.status.set("멈춤"); return
 
