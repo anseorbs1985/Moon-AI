@@ -27192,6 +27192,15 @@ class App(tk.Tk):
         tk.Label(row2, text="초마다", font=("맑은 고딕", 7)).pack(side="left")
         self._red_load = tk.Label(row2, font=("맑은 고딕", 7), fg="#888")
         self._red_load.pack(side="left", padx=(4, 0))
+        # 📏 **실측 범위를 그 자리에 적어둔다** — 기준을 올리면 놓치고
+        #    내리면 오탐이 난다. 숫자를 보여줘야 사용자가 판단할 수 있다
+        #    (2026-10-21: 기준을 7% 로 올리신 것을 보고 넣었다 — 반짝이 약하면
+        #     9.6% 까지 내려오므로 7% 는 여유가 2.6%p 뿐이다).
+        tk.Label(box, font=("맑은 고딕", 7), fg="#777", justify="left",
+                 text="실측 — 반짝일 때 9.6~12.9% · 평소 0.7~1.3%
+"
+                      "기준 5% 권장 (절전일 때만 누르므로 깨어 있는 클라는 제외)"
+                 ).pack(anchor="w", padx=4, pady=(1, 0))
         # 점 16개 — 영웅 판과 같은 세로(열 우선) 배치
         gr = tk.Frame(box); gr.pack(padx=3, pady=(1, 3))
         self._red_dots = {}
