@@ -449,6 +449,39 @@ CARDFIX_SLOT_GAP = (0.80, 1.40) # 클라 사이 (셋트와 별개)
 CARDFIX_FOCUS  = (0.20, 0.38)   # 창을 앞으로 올린 뒤 첫 클릭까지
 CARDFIX_START  = (0.08, 0.16)   # 화면을 본 뒤 첫 클릭까지 (전 0.50 고정)
 CARDFIX_MATCH  = 0.75           # 화면 판정 기준 (cardfix_meta.json 이 있으면 그 값)
+
+# 🚨 **너무 줄여야 하는 그림은 쓰지 않는다** (2026-10-21 실측 — 멋대로 클릭의 씨앗)
+#   큰 화면(2504px)에서 자른 `cardfix_screen_2` 를 작은 창(491px)에 쓰려면
+#   **5배 축소**(k=0.196)해야 하는데, 줄이면 **흐려져 아무 화면에나 맞는다.**
+#   '카드교체가 아닌' 16클라에 대본 잡음 (기준 0.75):
+#       k 0.196 → **0.594**  여유 +0.156  🚨   ← 지금까지 쓰고 있던 것
+#       k 0.400 → 0.565      여유 +0.185  🚨
+#       k 0.500 → 0.497      여유 +0.253
+#       k 0.600 → 0.438      여유 +0.312  ✔
+#       k 1.000 → 0.267      여유 +0.483  ✔
+#       작은 그림 k=1.00 → 0.433  여유 +0.317  ✔ (이것이 정상 수준)
+#   2026-10-19 에 '작은 그림을 크게 키우면 흐려진다' 는 쟀는데
+#   **반대 방향(큰 그림을 작게 줄이는 것)도 똑같이 위험**하다는 것을 안 쟀다.
+#   ⚠ **키우는 쪽(k>1)은 제한하지 않는다** — 흐려져 '놓치는' 쪽이라 안전하다
+#     (실측 5.1배 → 진짜가 0.561 로 기준 미달 = 안 누른다).
+#   ⚠ 0.55 보다 내리지 말 것. 올리는 것은 안전하다(그 그림을 안 쓸 뿐).
+CARDFIX_MIN_K  = 0.55
+
+# ✋ **사람이 만지는 중이면 변신확정을 돌리지 않는다** (2026-10-21 사용자 지시)
+#   사용자: *"가끔 어느 때 내가 전혀 다른 작업을 하는데 너가 클릭을 알아서 할 때가
+#   있거든. 각성을 하는 건 아닌데 내가 합성을 하려고 하는데 너가 여기저기 클릭할 때도
+#   있고."*
+#   변신확정은 **창을 앞으로 올리고 좌표 5개를 누른다.** 사람이 작업하는 중에
+#   끼어들면 보던 화면이 뒤로 가고 포커스를 빼앗겨 **엉뚱한 곳이 눌린 것처럼** 된다.
+#   실측 기록(10-21 07:10:38~07:11:25)에 변신확정이 거의 쉬지 않고 돌아
+#   클라 3개→2개→3개→1개 를 처리한 흔적이 남아 있다.
+#   → 사람이 **손을 멈춘 뒤에만** 돈다. 계속 만지는 중이면 그냥 넘긴다.
+#   ⚠ 판정은 **`precise_click.human_idle_seconds()`** 를 쓴다 —
+#     `_system_idle_seconds`(GetLastInputInfo)는 **우리 클릭도 세어** 영영 멈추고,
+#     `precise_click.idle_seconds()`는 **원격에서 사람 입력까지 걸러** 절대 안 멈춘다
+#     (2026-10-20 에 우편에서 세 함수를 실측으로 가린 그 결론 그대로).
+CARDFIX_QUIET     = 1.0    # 사람이 만진 뒤 이만큼 조용해지면 돈다
+CARDFIX_QUIET_MAX = 8.0    # 그래도 계속 만지면 포기한다 (끼어들지 않는다)
 CARDFIX_BASE_W = 491            # 그림을 자른 창 가로
 CARDFIX_SEE_COOL = 0.6          # 화면을 다시 보기까지 (초) — 전 2.0 (클릭을
                                 #   눌렀는데 2초나 무시되던 것을 줄였다)
@@ -1891,6 +1924,11 @@ def cardfix_seen(coord):
             if t is None:
                 continue
             k = big.shape[1] / float(bw or CARDFIX_BASE_W)
+            # 🚨 **너무 줄여야 하면 그 그림은 쓰지 않는다** (위 CARDFIX_MIN_K 설명).
+            #    줄이면 흐려져 아무 화면에나 0.59 로 맞는다 — 실측으로 확인했다.
+            #    ⚠ 키우는 쪽은 막지 않는다 (놓치는 쪽이라 안전하다).
+            if k < CARDFIX_MIN_K:
+                continue
             if abs(k - 1.0) > 0.01:
                 t = cv2.resize(t, (max(3, int(t.shape[1] * k)),
                                    max(3, int(t.shape[0] * k))))
@@ -6656,10 +6694,20 @@ class App(tk.Tk):
                 for _i, got in enumerate(rest, 1):
                     if getattr(self, "_stop_flag", False):
                         break
+                    # ✋ **클라를 넘어갈 때마다** 사람이 만지는지 본다
+                    #    (2026-10-21). 여러 클라를 도는 동안 사용자가 손을 대면
+                    #    그 자리에서 멈춘다 — 남은 것은 다음 클릭에 다시 잡힌다.
+                    if not self._cardfix_quiet_wait("#%02d 앞" % (got[0] + 1)):
+                        click_log("[변신확정] ✋ 사람이 만져 여기서 멈춘다 — "
+                                  "%d개 했고 %d개 남겼다 (다음에 다시 잡힌다)"
+                                  % (n_done + _i - 1, len(rest) - _i + 1))
+                        n_done += _i - 1
+                        break
                     si, L, T, v = got[0], got[1], got[2], got[3]
                     self._cardfix_one(si, L, T, v, got, rels,
                                       n_done + _i, _tot)
-                n_done += len(rest)
+                else:
+                    n_done += len(rest)
             click_log("[변신확정] 끝 — 클라 %d개 처리" % n_done)
             self.after(0, lambda n=n_done: self.status.set(
                 "✔ 변신확정 완료 — 클라 %d개" % n))
@@ -6850,6 +6898,46 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _cardfix_quiet_wait(self, why=""):
+        """✋ **사람이 손을 멈출 때까지** 기다린다 → 돌아도 되면 True.
+
+        변신확정은 **창을 앞으로 올리고 좌표 5개를 누른다.** 사람이 작업하는 중에
+        끼어들면 보던 화면이 뒤로 가고 포커스를 빼앗겨 **엉뚱한 곳이 눌린 것처럼**
+        된다 (2026-10-21 사용자 신고: *"내가 합성을 하려고 하는데 너가 여기저기
+        클릭할 때도 있고"*).
+
+        · 사람이 **`CARDFIX_QUIET` 초 조용해지면** 돈다 — 카드교체 화면을 열고
+          손을 떼면 1초 뒤 바로 시작하므로 느려지지 않는다.
+        · **`CARDFIX_QUIET_MAX` 까지 기다려도 계속 만지면 포기한다** (False).
+          작업 중인 사람을 방해하지 않는 쪽을 고른다. 다음 클릭에 또 기회가 온다.
+        ⚠ `human_idle_seconds()` 를 쓴다 — 우리 클릭은 안 세고, 원격에서도
+          사람 움직임을 잡는 **유일한** 함수다 (2026-10-20 실측으로 가린 결론)."""
+        try:
+            import precise_click as _pc
+            _f = getattr(_pc, "human_idle_seconds", None)
+            if _f is None:
+                return True                 # 그 기능이 없는 판이면 막지 않는다
+            t0 = time.time()
+            while True:
+                if getattr(self, "_cardfix_stop", False) or self._stop_flag:
+                    return False
+                idle = float(_f())
+                if idle >= CARDFIX_QUIET:
+                    if time.time() - t0 > 0.3:
+                        click_log("[변신확정] ✋ 사람이 손을 멈춰 %.1f초 기다렸다 "
+                                  "→ 이제 시작한다%s"
+                                  % (time.time() - t0, (" (%s)" % why) if why else ""))
+                    return True
+                if time.time() - t0 >= CARDFIX_QUIET_MAX:
+                    click_log("[변신확정] ✋ **사람이 계속 만지는 중이라 돌리지 않는다** "
+                              "(%.0f초 기다렸다 · 마지막 입력 %.1f초 전)%s — "
+                              "작업을 방해하지 않으려고 넘긴다"
+                              % (CARDFIX_QUIET_MAX, idle, (" · " + why) if why else ""))
+                    return False
+                time.sleep(0.15)
+        except Exception:
+            return True
+
     def _cardfix_check_body(self, now, xy=None):
         """🃏 화면을 보고, 카드교체 화면이면 **여기서 바로** 확정한다.
 
@@ -6886,6 +6974,12 @@ class App(tk.Tk):
             #    저 런처를 띄우지 말고 **자동으로 확정**해주라").
             #    창은 `-topmost` 라 카드교체 화면을 덮어 클릭을 먹는다.
             if self.cfg.get("cardfix_auto"):
+                # ✋ **사람이 작업 중이면 끼어들지 않는다** (2026-10-21 사용자 지시).
+                #    걸쇠를 풀어줘야 손을 뗀 뒤 다음 클릭에 다시 기회가 온다.
+                if not self._cardfix_quiet_wait("#%02d" % (si + 1)):
+                    self._cardfix_latch = False
+                    self._cardfix_open_at = 0.0
+                    return
                 # ⚠ **직접 부른다** — `self.after` 로 UI 스레드에 넘기면 조용히
                 #    흘려버리는 일이 있었다 (2026-10-19 실측, 위 주석 참고).
                 time.sleep(random.uniform(*CARDFIX_START))
@@ -16130,6 +16224,47 @@ class App(tk.Tk):
             self.status.set(f"🖼 저장 실패: {e}")
         self._open_awaken_win(reuse=True)
 
+    def _awaken_close_auto(self, why="각성 화면을 벗어났다"):
+        """✨ **각성 화면을 벗어나면 각성 창을 치운다** (2026-10-21 사용자 요청).
+
+        사용자: *"각성 화면을 벗어나면 각성 창을 알아서 닫아줬으면 좋겠어."*
+        (2026-10-01 의 *"끄는 건 내가 끌게"* 는 이 지시로 **바뀌었다.**)
+
+        · **`destroy` 가 아니라 `withdraw`(숨김)** 다 — 사용자가 고쳐둔 횟수가
+          날아가지 않는다. 다시 각성 화면에 들어가면 `_open_awaken_win(reuse=True)`
+          이 `deiconify` 로 **그대로** 되살린다. 화면에서는 똑같이 사라진다.
+        · 🚫 **돌고 있으면 닫지 않는다** — 작업 중에 창이 사라지면 안 된다.
+        · 끄려면 `coords.json` 의 `awaken_close_on` 을 false 로.
+        ⚠ 창 조작은 **Tk 객체**라 `self.after(0, …)` 로 UI 스레드에 넘겨야 한다.
+          2026-10-19 의 '스레드에서 after 로 일을 넘기지 말 것' 은 **클릭 같은 일**
+          이야기다 — 창을 숨기는 것은 흘려져도 손해가 없다(사용자가 직접 닫으면 된다)."""
+        try:
+            if not self.cfg.get("awaken_close_on", True):
+                return
+            if getattr(self, "_awaken_busy", False):
+                return                      # 돌고 있다 — 건드리지 않는다
+            win = getattr(self, "_awaken_win", None)
+            if not (win and win.winfo_exists()):
+                return
+            try:
+                if not win.winfo_viewable():
+                    return                  # 이미 숨겨져 있다
+            except Exception:
+                pass
+            click_log("[각성자동] %s → 각성 창을 닫았다 "
+                      "(다시 각성 화면에 들어가면 그대로 되살아난다)" % why)
+            self.after(0, lambda w=win: self._awaken_hide(w))
+        except Exception:
+            pass
+
+    def _awaken_hide(self, win):
+        """각성 창 숨기기 — UI 스레드에서만 부른다."""
+        try:
+            if win and win.winfo_exists():
+                win.withdraw()
+        except Exception:
+            pass
+
     def _awaken_autoshow(self, xy):
         """사람이 **크게 띄운 리니지M 창**을 클릭했을 때, 각성 화면이면 런처를 띄운다.
 
@@ -16184,6 +16319,10 @@ class App(tk.Tk):
                     self._awaken_latch = False
                     click_log("[각성자동] 각성 화면을 벗어났다 — "
                               "다음에 각성 화면이 뜨면 다시 띄운다")
+                    # ✨ **창도 같이 치운다** (2026-10-21 사용자 요청) —
+                    #    ⚠ 이 줄은 `if` 블록 **안**이어야 한다. 밖으로 빼면
+                    #      아래 `elif` 가 떨어져 나가 문법이 깨진다 (한 번 밟았다).
+                    self._awaken_close_auto()
                 # **실패도 기록한다** — 이게 없어서 "왜 안 가져오냐" 를 못 짚었다.
                 # 2초에 한 줄만 남겨 로그가 넘치지 않게 한다.
                 elif time.time() - getattr(self, "_awaken_no_log", 0.0) > 2.0:
