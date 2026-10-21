@@ -1521,6 +1521,25 @@ P0_PLACE_MATCH = 0.85
 P0_PLACE_RATIO = 1.45
 
 P0_HOME_KEY  = "0"               # 귀환 키
+
+# ── ✋ **사람이 쓰는 중이면 자동 작업은 끼어들지 않는다** ─────────────────
+#   (2026-10-21 사용자 지시 — 절대 규칙)
+#   사용자: *"지금 상당히 너 마음대로 클릭을 하는데, 내가 **변신쪽이나 합성쪽이나
+#   제작쪽에 뭔가를 작업하려면** 너 맘대로 좌표를 찍어버리는데… **내가 명령한 것만
+#   딱딱 좀 해라.**"* (다른 로컬에서 일어난 일)
+#
+#   좌표를 누르는 자동 작업은 **창을 앞으로 올리고 클릭**한다. 사람이 무언가를
+#   하는 중에 끼어들면 보던 화면이 뒤로 가고 포커스를 빼앗겨 **엉뚱한 곳이 눌린다.**
+#   → **마우스를 만진 뒤 `AUTO_QUIET` 초는 아무 자동 작업도 시작하지 않는다.**
+#
+#   ⚠ 판정은 **`precise_click.human_idle_seconds()`** 뿐이다 (2026-10-20 에 세 함수를
+#     실측으로 가린 결론):
+#       `_system_idle_seconds`(GetLastInputInfo) → **우리 클릭도 세어** 영영 멈춘다
+#       `precise_click.idle_seconds()`           → 원격에서 **사람 입력까지 걸러** 안 멈춘다
+#       `human_idle_seconds()`                   → 우리 표식만 제외 → 원격에서도 맞다 ✔
+#   ⚠ 감시를 못 켠 환경에서는 999초(=유휴)를 돌려주므로 **막지 않는다** —
+#     모를 때는 예전처럼 도는 쪽이 안전하다 (갑자기 기능이 죽으면 더 혼란스럽다).
+AUTO_QUIET = 10.0        # 사람이 마우스를 만진 뒤 이만큼은 자동 작업을 미룬다
 P0_HOME_WAIT = (3.5, 5.5)        # 귀환이 끝날 때까지 (마을에 도착)
 P0_HOME_GAP  = (1.5, 3.0)        # 클라 사이
 P0_RUN_WAIT  = 600               # 한 슬롯 실행을 최대 이만큼 기다린다 (초)
@@ -15077,6 +15096,12 @@ class App(tk.Tk):
             # ✅ **기본 켬 그대로** — 2026-10-20 에 잠깐 껐다가 사용자 지시로 되살렸다:
             #   *"전부 끄면 안 돼. 그럼 **상시로 깨우는 우편 자동받기만** 꺼줘."*
             #   끈 것은 우편 자동받기(`MAIL_AUTO_ON`) 하나뿐이다.
+            # ✋ 사람이 쓰는 중이면 미룬다 (2026-10-21 사용자 지시).
+            #    유휴 5분 조건이 있지만 `_system_idle_seconds` 는 **우리 클릭도 세어**
+            #    사람이 안 만져도 유휴가 리셋될 수 있다 — 사람 기준으로 한 번 더 본다.
+            if self._human_busy():
+                self._human_wait_log("유휴복구")
+                return
             if not self.cfg.get("fix_idle_on", True):
                 self._fix_idle_done = False
             else:
@@ -15415,6 +15440,14 @@ class App(tk.Tk):
         """🗂 [도감 보상받기] 버튼 — 도감이 **열려 있는** 클라를 찾아 전부 받는다."""
         if self._is_busy():
             self.status.set("🗂 다른 작업이 도는 중입니다")
+            return
+        # ✋ 사람이 쓰는 중이면 끼어들지 않는다 (2026-10-21 사용자 지시)
+        if self._human_busy():
+            self._human_wait_log("도감")
+            try:
+                self.status.set("✋ 사람이 쓰는 중 — 손을 뗀 뒤 다시 눌러주세요")
+            except Exception:
+                pass
             return
         # 🔙 **런처를 맨 뒤로** (2026-10-20 사용자 지시 — 절대 규칙).
         #   사용자: *"내가 버튼을 누르면 런처를 맨 뒤로 보내고 해야 하는데
@@ -26858,6 +26891,32 @@ class App(tk.Tk):
             pass
 
     # ── 💧 물약 0개 상시 감시 — 그 슬롯만 다시 돌린다 ─────────────────────
+    def _human_busy(self, sec=None):
+        """✋ **사람이 지금 컴퓨터를 쓰는 중인가** → True 면 자동 작업을 미룬다.
+
+        위 `AUTO_QUIET` 설명을 먼저 읽을 것. 좌표를 누르는 자동 작업은 전부
+        이것을 보고, 사람이 쓰는 중이면 **그 틱을 건너뛴다**(다음 틱에 또 기회가 온다).
+        ⚠ 판정 함수가 없거나 감시가 꺼진 환경에서는 **막지 않는다.**"""
+        try:
+            import precise_click as _pc
+            f = getattr(_pc, "human_idle_seconds", None)
+            if f is None:
+                return False
+            return float(f()) < float(sec or AUTO_QUIET)
+        except Exception:
+            return False
+
+    def _human_wait_log(self, who):
+        """미룬 이유를 남긴다 (같은 줄은 5분에 한 번) — 조용히 실패하지 않게."""
+        try:
+            k = "_hw_" + who
+            if time.time() - getattr(self, k, 0) > 300:
+                setattr(self, k, time.time())
+                click_log(f"[{who}] ✋ 사람이 컴퓨터를 쓰는 중이라 미룬다 "
+                          f"(마우스를 만진 뒤 {AUTO_QUIET:.0f}초는 끼어들지 않는다)")
+        except Exception:
+            pass
+
     def _p0_watch_tick(self):
         """`P0_WATCH_MS` 마다 16클라를 훑어 '체력 회복제가 0개' 를 찾는다
         (2026-10-17 사용자 지시로 2분 → 1분. 문구가 잠깐 떴다 사라져서
@@ -27052,6 +27111,10 @@ class App(tk.Tk):
         try:
             if not _isl.potion0_on():
                 return self._p0_why("[💧 자동 OFF] 로 꺼져 있음")
+            # ✋ 사람이 쓰는 중이면 **보지도 않는다** (2026-10-21 사용자 지시)
+            if self._human_busy():
+                self._human_wait_log("물약감시")
+                return
             if not os.path.exists(_isl.potion0_img_path()):
                 return self._p0_why("물약 0개 그림이 없음")
             # 섬 실행기가 이미 돌고 있으면 건드리지 않는다
