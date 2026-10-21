@@ -1543,13 +1543,35 @@ P0_HOME_KEY  = "0"               # 귀환 키
 #     **색 비율**이 이 경우에 맞는 방법이다.
 RED_ON        = True             # 기본 켬 (coords.json 의 red_on 으로 끈다)
 RED_PCT       = 5.0              # 붉은 픽셀이 이 % 를 넘으면 '붉다' (실측 여유 3.7%p)
-RED_LOOKS     = 2                # 한 슬롯을 몇 번 볼까 (반짝이므로 — 2번이면 75%)
-RED_LOOK_GAP  = (0.45, 0.70)     # 볼 때마다 간격 (깜빡임 주기 약 2초)
 RED_KEYS      = (4, 8)           # 0번을 몇 번 누를까 (사용자: "4~8번 연속")
 RED_KEY_GAP   = (0.06, 0.13)     # 따따따따 — 키 사이 (사람처럼 흔든다)
 RED_COOL      = 300.0            # 한 슬롯을 다시 보기까지 (초)
-RED_TICK_MS   = 30000            # 확인 주기 (16클라 캡처 약 1초 · 1분당 2초)
 RED_SLEEP_MIN = 0.68             # 절전 판정 (SLEEP_MATCH 와 같은 값)
+
+# 💡 **가볍게 만든 두 가지** (2026-10-21 실측 — 사용자: "계속 확인해야 하는데
+#    부담이 많이 걸려? 렉이 생길까?")
+#   ① 붉은% 는 **픽셀을 1/4 간격으로** 샘플링한다. 붉은빛은 화면 전체에 퍼지므로
+#      (평균 R42 vs G14·B14) 전부 셀 필요가 없다:
+#          전체 픽셀  0.776%  2.64 ms
+#          1/4 간격   0.731%  **0.07 ms**  ← 38배 빠르고 차이는 0.045%p (무의미)
+#   ② **절전 매칭은 '붉은 후보' 에만** 한다 (13.4 ms × 16 = 0.2초 절약).
+#      붉지 않으면 절전인지 알 필요가 없다.
+#   → 16슬롯 한 바퀴 **0.86초 → 0.74초** (실측)
+#
+# 📏 **주기별 부하와 놓칠 확률** (실측 · 한 바퀴 0.74초 · 깜빡임 2초 주기)
+#     주기   CPU      붉은빛이 30초 지속될 때 놓칠 확률
+#      5초   14.9%     1.6%
+#     10초  **7.4%**  12.5%   ← 기본값 (균형점)
+#     15초    5.0%    25.0%
+#     30초    2.5%    50.0%   ← 처음 기본값. **이것 때문에 놓쳤다**
+#   ⚠ 백그라운드 스레드라 **화면이 멈추지는 않는다.** CPU 만 쓴다.
+#     16클라가 돌고 있어 체감되면 판에서 주기를 늘린다.
+RED_TICK_SEC  = 10               # 확인 주기(초) — 판에서 고친다 (red_tick)
+RED_TICK_PICK = (5, 10, 15, 30, 60)   # 판 드롭다운에 보일 값
+RED_STEP      = 4                # 붉은% 샘플 간격 (1/4 → 38배 빠름)
+RED_LOOKS     = 1                # 한 바퀴만 — 후보가 나오면 그 슬롯만 다시 본다
+RED_RECHECK   = 3                # 후보를 몇 번 더 볼까 (반짝임 확인)
+RED_RECHECK_GAP = (0.45, 0.75)   # 후보 재확인 간격
 P0_HOME_WAIT = (3.5, 5.5)        # 귀환이 끝날 때까지 (마을에 도착)
 P0_HOME_GAP  = (1.5, 3.0)        # 클라 사이
 P0_RUN_WAIT  = 600               # 한 슬롯 실행을 최대 이만큼 기다린다 (초)
@@ -4574,7 +4596,7 @@ class App(tk.Tk):
         # 🖱 사람이 리니지M 창을 클릭하면 그 클라의 십자가를 확인한다 (확인만)
         threading.Thread(target=self._fix_clickwatch_loop, daemon=True).start()
         # 🔴 붉은빛이 반짝이면 0번을 따따따따 (2026-10-21 사용자 요청)
-        self.after(RED_TICK_MS, self._red_tick)
+        self.after(RED_TICK_SEC * 1000, self._red_tick)
         self.after(1800, self._itemreg_refresh)
         # 🚫🚫 **런처가 클로드를 자동으로 켜지 않는다** (2026-10-21 사용자 지시 — 절대 규칙)
         #   사용자: *"너 왜 재시작 하거나 중간에 수시로 문서를 여는 거야?
@@ -15905,9 +15927,11 @@ class App(tk.Tk):
               평소 절전 0.70~1.27%. 기준 5% 면 넉넉히 갈린다."""
         try:
             import numpy as np
-            b = img[:, :, 0].astype(int)
-            g = img[:, :, 1].astype(int)
-            r = img[:, :, 2].astype(int)
+            # 1/4 간격만 본다 — 38배 빠르고 결과는 같다 (위 설명 참조)
+            s = img[::RED_STEP, ::RED_STEP]
+            b = s[:, :, 0].astype(int)
+            g = s[:, :, 1].astype(int)
+            r = s[:, :, 2].astype(int)
             m = (r > g + 35) & (r > b + 35) & (r > 70)
             return float(m.mean()) * 100.0
         except Exception:
@@ -15931,16 +15955,20 @@ class App(tk.Tk):
         except Exception:
             return True
 
-    def _red_one(self, anc):
-        """🔴 한 번 보고 (붉은%, 절전점수) — **캡처 한 번으로 둘 다** 본다.
+    def _red_one(self, anc, want_sleep=False):
+        """🔴 한 번 보고 (붉은%, 절전점수) — 절전은 `want_sleep` 일 때만 잰다.
 
-        ⚠ 캡처를 두 번 하면 **다른 순간의 화면**을 보게 되어 판정이 어긋난다
-          (반짝이는 중이라 1초 사이에 1% ↔ 12% 로 바뀐다)."""
+        ⚠ **절전 매칭(13.4ms)은 '붉은 후보' 에만** 한다 — 붉지 않으면 절전인지
+          알 필요가 없다. 16슬롯이면 0.2초가 절약된다 (실측).
+        ⚠ 캡처는 **한 번만** — 두 번 찍으면 **다른 순간의 화면**을 보게 되어
+          판정이 어긋난다 (반짝이는 중이라 1초 사이에 1% ↔ 12%)."""
         try:
             img = grab_window(anc)
             if img is None:
                 return -1.0, -1.0
-            return self._red_pct(img), sleep_score_img(img)
+            p = self._red_pct(img)
+            s = sleep_score_img(img) if want_sleep else -1.0
+            return p, s
         except Exception:
             return -1.0, -1.0
 
@@ -15975,7 +16003,7 @@ class App(tk.Tk):
         ⚠ `self.after` 틱 안에서 화면을 긁으면 창이 그만큼 멈춘다
           (2026-09-16: 1분에 1.92초 정지 사고). 반드시 스레드로."""
         try:
-            self.after(RED_TICK_MS, self._red_tick)
+            self.after(max(3, self._red_tick_sec()) * 1000, self._red_tick)
         except Exception:
             pass
         try:
@@ -15988,13 +16016,23 @@ class App(tk.Tk):
         except Exception:
             self._red_busy = False
 
-    def _red_scan(self):
-        """🔴 16클라를 보고 붉은빛 + 절전이면 0번을 누른다.
+    def _red_tick_sec(self):
+        """판에서 고친 확인 주기(초)."""
+        try:
+            v = int(self.cfg.get("red_tick") or RED_TICK_SEC)
+            return max(3, min(300, v))
+        except Exception:
+            return RED_TICK_SEC
 
-        ⚠ **'바퀴'로 두 번 본다** — 슬롯마다 `sleep` 으로 기다리면
-          16슬롯 × 0.55초 = **10.5초**가 걸렸다(실측). 전 슬롯을 한 바퀴 돌면
-          그 자체로 약 1초가 지나므로, **두 바퀴 = 약 2초**에 두 순간을 본다.
-          깜빡임 주기가 약 2초라 그 절반 간격으로 보는 셈이다."""
+    def _red_scan(self):
+        """🔴 한 바퀴 훑고, **붉은 후보만** 다시 본다.
+
+        ⚠ 예전에는 **항상 두 바퀴**를 돌았다. 그런데 평소에는 붉은 것이 하나도
+          없으므로 두 번째 바퀴가 통째로 낭비다. 지금은 한 바퀴(0.74초)만 돌고,
+          **기준을 넘은 슬롯만** `RED_RECHECK` 번 더 본다 — 보통 0개라 공짜다.
+        ⚠ 한 바퀴만 보면 꺼진 순간을 보고 놓칠 수 있다(약 50%). 그래서 **주기를
+          짧게**(기본 10초) 가져간다 — 붉은빛이 30초 지속되면 3번 보므로
+          놓칠 확률이 12.5% 로 떨어진다 (실측 계산)."""
         try:
             if self._is_busy():
                 return                      # 작업 중에는 끼어들지 않는다
@@ -16004,41 +16042,46 @@ class App(tk.Tk):
                 return
             now = time.time()
             self._red_done = getattr(self, "_red_done", {})
+            _thr = self._red_thr()
             todo = [si for si in sorted(ancs)
                     if self._red_slot_on(si)
                     and now - self._red_done.get(si, 0) >= RED_COOL]
             if not todo:
                 return
-            best, slp = {}, {}
+            # ── 한 바퀴: 붉은% 만 (절전은 아직 안 본다)
+            seen, cand = {}, []
+            for si in todo:
+                p, _s = self._red_one(ancs[si], want_sleep=False)
+                seen[si] = p
+                if p >= _thr:
+                    cand.append(si)
+            # ── 후보만 다시 본다 (반짝임·절전 확인)
             hit = None
-            _thr = self._red_thr()          # 판에서 고친 기준을 쓴다
-            for lap in range(max(1, RED_LOOKS)):
-                for si in todo:
-                    p, s = self._red_one(ancs[si])
-                    if p > best.get(si, -1.0):
-                        best[si] = p
-                    if s > slp.get(si, -1.0):
-                        slp[si] = s
-                    if (best[si] >= _thr and slp[si] >= RED_SLEEP_MIN
-                            and hit is None):
-                        hit = si            # 한 틱에 하나만 (겹치면 엉킨다)
-                if hit is not None:
-                    break
-                # 다음 바퀴는 **절전인 슬롯만** 본다 (깨어 있는 것은 대상이 아니다)
-                todo = [si for si in todo if slp.get(si, -1.0) >= RED_SLEEP_MIN]
-                if not todo:
-                    break
-            rows = [f"{si+1:02d}:{best.get(si,-1):.1f}%"
-                    + ("😴" if slp.get(si, -1) >= RED_SLEEP_MIN else "깸")
-                    for si in sorted(best)]
-            if rows and (hit is not None
-                         or now - getattr(self, "_red_log_at", 0) > 600):
+            for si in cand:
+                best, slp = seen[si], -1.0
+                for i in range(max(1, RED_RECHECK)):
+                    if i:
+                        time.sleep(random.uniform(*RED_RECHECK_GAP))
+                    p, s = self._red_one(ancs[si], want_sleep=True)
+                    best = max(best, p)
+                    slp = max(slp, s)
+                    if best >= _thr and slp >= RED_SLEEP_MIN:
+                        break
+                if best >= _thr and slp >= RED_SLEEP_MIN:
+                    hit = (si, best, slp)
+                    break                   # 한 틱에 하나만 (겹치면 엉킨다)
+                click_log(f"[붉은반짝] #{si+1:02d} 붉은빛 {best:.1f}% 이지만 "
+                          f"절전이 아니다 (절전점수 {slp:.2f} · 기준 "
+                          f"{RED_SLEEP_MIN}) → 누르지 않는다")
+            if hit or now - getattr(self, "_red_log_at", 0) > 600:
                 self._red_log_at = now
-                click_log(f"[붉은반짝] 확인 (기준 {_thr}% · 절전 {RED_SLEEP_MIN}) "
-                          + " ".join(rows[:16]))
-            if hit is not None:
-                self._red_done[hit] = now
-                self._red_press(hit, ancs[hit], best[hit], slp[hit])
+                rows = [f"{si+1:02d}:{seen[si]:.1f}%" for si in sorted(seen)]
+                click_log(f"[붉은반짝] 확인 (기준 {_thr}% · "
+                          f"{self._red_tick_sec()}초마다) " + " ".join(rows[:16]))
+            if hit:
+                si, pct, slp = hit
+                self._red_done[si] = now
+                self._red_press(si, ancs[si], pct, slp)
         except Exception as e:
             self._red_why(f"오류: {e}")
         finally:
@@ -27046,6 +27089,23 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _red_load_lbl(self):
+        """⏱ 지금 주기의 **실측 부하와 놓칠 확률**을 한 줄로 보여준다.
+
+        근거(2026-10-21 실측): 16슬롯 한 바퀴 **0.74초** ·
+        깜빡임 주기 약 2초라 한 번 보면 약 50% 로 잡는다."""
+        try:
+            sec = self._red_tick_sec()
+            lap = 0.74                       # 실측 한 바퀴 (초)
+            pct = lap / sec * 100.0
+            n = max(1, int(30 // sec))       # 붉은빛이 30초 지속될 때 보는 횟수
+            miss = (0.5 ** n) * 100.0
+            self._red_load.config(
+                text=f"CPU {pct:.1f}% · 놓칠 {miss:.0f}%",
+                fg="#c0392b" if pct > 15 else ("#b9770e" if pct > 8 else "#777"))
+        except Exception:
+            pass
+
     def _red_sync(self):
         try:
             on = self.cfg.get("red_on", RED_ON)
@@ -27113,6 +27173,25 @@ class App(tk.Tk):
         self._red_detach_btn = tk.Button(top, text="📤", font=("맑은 고딕", 7),
                                          width=2, command=self._red_detach_toggle)
         self._red_detach_btn.pack(side="right")
+        # ⏱ 확인 주기 + **실측 부하를 그대로 보여준다** (사용자: "부담이 많이
+        #    걸려? 렉이 생길까?" — 숫자를 보고 직접 고르게 한다)
+        row2 = tk.Frame(box); row2.pack(fill="x", padx=3)
+        tk.Label(row2, text="확인", font=("맑은 고딕", 7)).pack(side="left")
+        self._red_t = tk.StringVar(value=str(self._red_tick_sec()))
+        def _save_t(*_a):
+            try:
+                self.cfg["red_tick"] = max(3, min(300, int(self._red_t.get())))
+                save_cfg(self.cfg)
+                self._red_load_lbl()
+            except Exception:
+                pass
+        om = tk.OptionMenu(row2, self._red_t,
+                           *[str(v) for v in RED_TICK_PICK], command=_save_t)
+        om.config(font=("맑은 고딕", 7), width=3, padx=1, pady=0)
+        om.pack(side="left")
+        tk.Label(row2, text="초마다", font=("맑은 고딕", 7)).pack(side="left")
+        self._red_load = tk.Label(row2, font=("맑은 고딕", 7), fg="#888")
+        self._red_load.pack(side="left", padx=(4, 0))
         # 점 16개 — 영웅 판과 같은 세로(열 우선) 배치
         gr = tk.Frame(box); gr.pack(padx=3, pady=(1, 3))
         self._red_dots = {}
@@ -27127,6 +27206,7 @@ class App(tk.Tk):
             self._red_dots[idx] = b
         self._red_paint()
         self._red_sync()
+        self._red_load_lbl()
         if self.cfg.get("red_detach"):
             self.after(1500, self._red_detach_toggle)
 
