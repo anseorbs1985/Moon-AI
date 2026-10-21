@@ -525,16 +525,16 @@ AWAKEN_BOX = {
 # ⚡ **30% 당겼다** (2026-10-20 사용자 지시: *"각성하는 거 속도를 30%만 당겨주라"*).
 #   네 간격을 전부 ×0.70 했다. **랜덤 폭(비율)은 그대로** 남겼다 —
 #   값 하나로 고정하지 않는다 (2026-09-07 '항상 사람이 하는 것처럼').
-AWAKEN_GAP     = (0.35, 0.63)   # 버튼 하나 누르고 다음까지 (0.5~0.9 × 0.70)
-AWAKEN_ROUND   = (0.63, 1.05)   # 한 바퀴 끝내고 다음 바퀴까지 (0.9~1.5 × 0.70)
-AWAKEN_WAIT    = (0.28, 0.49)   # '버튼이 켜졌나' 다시 보는 간격 (0.4~0.7 × 0.70)
-AWAKEN_TGAP    = (0.35, 0.63)   # 터치 안내를 누른 뒤 (0.5~0.9 × 0.70)
+AWAKEN_GAP     = (0.25, 0.44)   # 버튼 하나 누르고 다음까지 (×0.70 두 번)
+AWAKEN_ROUND   = (0.44, 0.74)   # 한 바퀴 끝내고 다음 바퀴까지 (×0.70 두 번)
+AWAKEN_WAIT    = (0.20, 0.34)   # '버튼이 켜졌나' 다시 보는 간격 (×0.70 두 번)
+AWAKEN_TGAP    = (0.25, 0.44)   # 터치 안내를 누른 뒤 (×0.70 두 번)
 AWAKEN_MAX     = 40    # 안전장치 — 이 횟수를 넘기면 멈춘다 (창에서 바꿀 수 있다)
 # ⚠ 간격을 줄인 만큼 **횟수를 늘려 '기다리는 총 시간' 은 그대로** 뒀다.
 #   8회 × 0.55초 ≈ 4.4초  →  11회 × 0.385초 ≈ 4.2초.
 #   이것을 8 로 되돌리면 **재료가 있는데도 '[각성] 버튼이 안 뜸' 으로 중단**된다
 #   (화면 연출이 느린 클라에서). 간격만 줄이고 횟수를 안 늘리면 안 된다.
-AWAKEN_SEE     = 11    # 버튼이 켜지기를 몇 번까지 기다릴지 (AWAKEN_WAIT 간격)
+AWAKEN_SEE     = 15    # 버튼이 켜지기를 몇 번까지 기다릴지 (AWAKEN_WAIT 간격)
 AWAKEN_JITTER  = (0.90, 1.15)   # 사람처럼 — 간격을 매번 조금씩 흔든다
 AWAKEN_TEMPO   = (0.85, 1.25)   # 이번 실행의 '자기 속도' — 시작할 때 한 번 뽑아 내내 곱한다
 AWAKEN_PAUSE_P = 0.12           # 이 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
@@ -1549,7 +1549,7 @@ AUTO_QUIET = 10.0        # 사람이 마우스를 만진 뒤 이만큼은 자동
 #     창이 닫혀 있으면 틱이 즉시 빠져나오므로 **평소 부하 0**.
 #   실측: 창 하나 캡처+판정 약 60ms → 2초마다면 **3%**, 그것도 각성 창을
 #        열어둔 동안만. 백그라운드 스레드라 화면은 멈추지 않는다.
-AWAKEN_WATCH_MS = 2000   # 각성 창이 떠 있을 때만 — 이 주기로 그 창을 확인한다
+AWAKEN_WATCH_MS = 800   # 각성 창이 떠 있을 때만 — 이 주기로 그 창을 확인한다
 P0_HOME_WAIT = (3.5, 5.5)        # 귀환이 끝날 때까지 (마을에 도착)
 P0_HOME_GAP  = (1.5, 3.0)        # 클라 사이
 P0_RUN_WAIT  = 600               # 한 슬롯 실행을 최대 이만큼 기다린다 (초)
@@ -6341,6 +6341,34 @@ class App(tk.Tk):
         except Exception:
             return None, None, 0.0, 0.0
 
+    def _awaken_alive(self, rect0):
+        """✨ **아직 그 각성 화면인가** → (계속해도 되나, 왜 멈추나)
+
+        2026-10-21 사용자: *"각성이 끝나고 바로 멈추는 게 아니고 **다른 화면에서
+        클릭을 하는 경우**가 생기더라. **화면이 변경되면 딱 멈추고 딱 사라지고**
+        이런 반응이 정말 빨리 딱딱 맞춰줬으면."*
+
+        🚨 예전에는 **`rect`(창 위치)를 루프 시작 때 한 번만** 구하고 끝까지 썼다.
+           그래서 사용자가 **다른 클라를 크게 띄우면 옛 창 좌표로 계속 눌렀다.**
+           게다가 '터치 안내' 를 누를 때는 **화면 가운데를 그냥** 누르므로,
+           그 사이 화면이 바뀌면 엉뚱한 곳이 눌린다.
+        → 이제 **누르기 직전마다** ① 같은 창인가 ② 아직 각성 화면인가 를 본다.
+          하나라도 아니면 **그 자리에서 멈춘다.**
+        ⚠ 비용은 탭줄 판정 약 60ms — 회차당 두세 번이라 체감되지 않는다.
+        ⚠ 멈추면 `_run_awaken` 의 `finally` 가 **창까지 닫는다**(딱 사라진다)."""
+        try:
+            r = self._awaken_win_rect()
+            if not r:
+                return False, "리니지M 창을 못 찾음"
+            if r[0] != rect0[0]:
+                return False, f"다른 창으로 바뀜 ([{rect0[5]}] → [{r[5]}])"
+            ok, which, sc = self._awaken_screen_seen()
+            if not ok:
+                return False, f"각성 화면이 아님 ({which or '-'} {sc:.2f})"
+            return True, ""
+        except Exception:
+            return True, ""           # 모르면 막지 않는다
+
     def _run_awaken(self, times=None):
         """✨ 각성강화 — 화면을 읽어 [자동 등록] → [경험치 합성] 을 반복한다.
 
@@ -6389,6 +6417,14 @@ class App(tk.Tk):
                 _nap(0.3, 0.5)
                 for t in range(n_max):
                     if getattr(self, "_awaken_stop", False):
+                        break
+                    # ✨ **회차를 시작하기 전에** 아직 그 각성 화면인지 본다
+                    #    (2026-10-21 — 화면이 바뀌면 딱 멈춘다)
+                    _al, _why = self._awaken_alive(rect)
+                    if not _al:
+                        click_log(f"[각성강화] {t+1}회째 — {_why} → **딱 멈춘다**")
+                        self.after(0, lambda w=_why: self.status.set(
+                            f"✨ {w} — 멈췄습니다"))
                         break
                     self.after(0, lambda t=t: self.status.set(
                         f"✨ 각성강화 — {t+1}/{n_max}회째"))
@@ -6450,6 +6486,17 @@ class App(tk.Tk):
                             # 두 번째 터치 안내 = 결과가 떠 있다. 누르기 전에 읽는다.
                             _, _, fv, _ = self._awaken_find(AWAKEN_FAIL, rect)
                             ok = fv < AWAKEN_MATCH      # 실패 글자가 없으면 성공
+                        # ✨ **가운데를 누르기 직전에** 한 번 더 확인한다 —
+                        #    여기는 그림 자리가 아니라 **좌표를 그냥 누르는** 곳이라
+                        #    화면이 바뀌어 있으면 엉뚱한 것을 누른다 (2026-10-21).
+                        _al, _why = self._awaken_alive(rect)
+                        if not _al:
+                            click_log(f"[각성강화] {t+1}회째 터치 직전 — {_why} "
+                                      f"→ **누르지 않고 멈춘다**")
+                            self.after(0, lambda w=_why: self.status.set(
+                                f"✨ {w} — 누르지 않고 멈췄습니다"))
+                            bad = True
+                            break
                         click_hold(rect[1] + rect[3]//2, rect[2] + int(rect[4]*0.42),
                                    ms=random.uniform(60, 110))
                         _nap(*AWAKEN_TGAP)
@@ -6476,6 +6523,20 @@ class App(tk.Tk):
                 self.after(0, lambda: self.status.set(f"✨ 각성강화 오류: {e}"))
             finally:
                 self._awaken_busy = False
+                # ✨ **멈추면 창도 딱 사라진다** (2026-10-21 사용자 지시:
+                #    "화면이 변경되면 딱 멈추고 딱 사라지고… 다른 거 클릭하면
+                #     내가 또 꺼야 하고 손이 계속 간단 말이야")
+                #    각성 화면에 그대로 있으면 **닫지 않는다** — 이어서 또 돌릴 수 있게.
+                #    `_awaken_close_auto` 가 '화면이 아직 각성인가' 를 보지는 않으므로
+                #    여기서 직접 확인한다.
+                try:
+                    _ok, _w, _s = self._awaken_screen_seen()
+                    if not _ok:
+                        self._awaken_latch = False
+                        self._awaken_close_auto(
+                            f"각성이 끝났고 화면도 바뀌었다 ({_w or '-'} {_s:.2f})")
+                except Exception:
+                    pass
         threading.Thread(target=_go, daemon=True).start()
 
     # ── 🃏 변신확정!! ─────────────────────────────────────────────────────
