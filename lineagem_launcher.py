@@ -535,7 +535,19 @@ AWAKEN_MAX     = 40    # 안전장치 — 이 횟수를 넘기면 멈춘다 (창
 #   이것을 8 로 되돌리면 **재료가 있는데도 '[각성] 버튼이 안 뜸' 으로 중단**된다
 #   (화면 연출이 느린 클라에서). 간격만 줄이고 횟수를 안 늘리면 안 된다.
 AWAKEN_SEE     = 15    # 버튼이 켜지기를 몇 번까지 기다릴지 (AWAKEN_WAIT 간격)
-AWAKEN_JITTER  = (0.90, 1.15)   # 사람처럼 — 간격을 매번 조금씩 흔든다
+AWAKEN_JITTER  = (0.85, 1.15)   # 사람처럼 — 간격을 매번 흔든다 (±15%)
+# 🧍 **가끔 한 박자 더 쉰다** (2026-10-21 사용자: *"이거 3~15% 랜덤을 좀 줘,
+#   시간을 너무 일률적이잖아 클릭하는 것들이"*). 간격 폭(±15%)만으로는 리듬이
+#   비슷해 보인다 — 사람은 가끔 멈칫한다 (2026-09-07 상시 규칙의 4번).
+AWAKEN_PAUSE_P = 0.12           # 이 확률로
+AWAKEN_PAUSE   = (0.18, 0.55)   # 이만큼 더 쉰다
+# 🧹 **결과 화면을 눌러 치운다** (2026-10-21 사용자: *"지금 각성에 실패했다는
+#   화면에서 자꾸 멈춰. 여기에서 다음으로 계속 안 넘어가"*)
+#   실측(멈춘 그 화면을 그대로 캡처) — `awaken_touch 0.996` · `awaken_fail 0.998` ·
+#   **`awaken_auto 0.338`** : 결과 화면이 [자동 등록] 을 가려서 못 찾고 멈췄다.
+#   터치를 한 번 더 누르면 치워진다.
+AWAKEN_CLEAR   = 4              # 몇 번까지 눌러 치울지
+AWAKEN_CGAP    = (0.45, 0.80)   # 누른 뒤 사라졌나 다시 볼 때까지
 AWAKEN_TEMPO   = (0.85, 1.25)   # 이번 실행의 '자기 속도' — 시작할 때 한 번 뽑아 내내 곱한다
 AWAKEN_PAUSE_P = 0.12           # 이 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
 AWAKEN_PAUSE   = (0.7, 2.0)     # 그때 더 쉬는 시간(초)
@@ -6369,6 +6381,59 @@ class App(tk.Tk):
         except Exception:
             return True, ""           # 모르면 막지 않는다
 
+    def _awaken_clear_result(self, rect, why=""):
+        """🧹 **결과 화면을 눌러 치운다** → 치웠나(True/False).
+
+        2026-10-21 사용자: *"지금 각성에 실패했다는 화면에서 자꾸 멈춰.
+        여기에서 다음으로 계속 안 넘어가. 여기에서 멈춰 있어."*
+
+        원인은 **결과 화면이 안 치워진 것**이다. 멈춘 그 화면을 그대로 캡처해
+        재보니 `awaken_touch 0.996` · `awaken_fail 0.998` 인데
+        **`awaken_auto 0.338`** — 결과 화면이 [자동 등록] 을 가려 못 찾고 멈췄다.
+
+        🚫 **'터치 안내가 보일 때만' 누른다.** 안 보이는데 가운데를 누르면
+           엉뚱한 것을 누른다 (이 저장소의 절대 규칙). 그래서 누를 때마다
+           `_awaken_alive` 로 같은 창·같은 화면인지 다시 본다.
+        """
+        hit = 0
+        for i in range(AWAKEN_CLEAR):
+            if getattr(self, "_awaken_stop", False):
+                return False
+            tx, ty, tv, _tl = self._awaken_find(AWAKEN_TOUCH, rect)
+            if tx is None:
+                return hit > 0          # 치울 것이 없다 / 다 치웠다
+            _, _, fv, _ = self._awaken_find(AWAKEN_FAIL, rect)
+            _al, _w = self._awaken_alive(rect)
+            if not _al:
+                click_log(f"[각성강화] 🧹 결과 화면 치우기 — {_w} "
+                          f"→ 누르지 않는다")
+                return False
+            click_hold(rect[1] + rect[3] // 2,
+                       rect[2] + int(rect[4] * 0.42),
+                       ms=random.uniform(60, 110))
+            hit += 1
+            click_log(f"[각성강화] 🧹 결과 화면이 남아 있다{why} "
+                      f"(터치 {tv:.2f} · 실패글자 {fv:.2f}) "
+                      f"→ 눌러 치운다 ({i + 1}/{AWAKEN_CLEAR})")
+            time.sleep(random.uniform(*AWAKEN_CGAP))
+        return self._awaken_find(AWAKEN_TOUCH, rect)[0] is None
+
+    def _awaken_shot(self, rect, tag):
+        """멈출 때 **그 화면을 남긴다** — 다음에 원인을 바로 짚게.
+        조용히 멈추면 원격에서 아무것도 못 짚는다 (이 저장소의 반복된 교훈)."""
+        try:
+            import cv2
+            big = grab_window((rect[1] + 40, rect[2] + 40))
+            if big is None:
+                return ""
+            d = os.path.join(IMG_DIR_MINE, "_awaken")
+            os.makedirs(d, exist_ok=True)
+            f = os.path.join(d, f"{time.strftime('%m%d_%H%M%S')}_{tag}.png")
+            cv2.imencode(".png", big)[1].tofile(f)
+            return f
+        except Exception:
+            return ""
+
     def _run_awaken(self, times=None):
         """✨ 각성강화 — 화면을 읽어 [자동 등록] → [경험치 합성] 을 반복한다.
 
@@ -6408,8 +6473,12 @@ class App(tk.Tk):
             tempo = random.uniform(*AWAKEN_TEMPO)
 
             def _nap(lo, hi):
-                time.sleep(random.uniform(lo, hi)
-                           * random.uniform(*AWAKEN_JITTER) * tempo)
+                t_ = (random.uniform(lo, hi)
+                      * random.uniform(*AWAKEN_JITTER) * tempo)
+                # 🧍 가끔 멈칫 — 리듬이 일률적으로 보이지 않게
+                if random.random() < AWAKEN_PAUSE_P:
+                    t_ += random.uniform(*AWAKEN_PAUSE)
+                time.sleep(t_)
             try:
                 click_log(f"[각성강화] 시작 — {rect[5]} ({rect[3]}x{rect[4]}) "
                           f"· 최대 {n_max}회 · 이번 속도 {tempo:.2f}배")
@@ -6431,8 +6500,14 @@ class App(tk.Tk):
                     # ① [자동 등록] — 재료를 채운다
                     ax, ay, av, _al = self._awaken_find(AWAKEN_AUTO, rect)
                     if ax is None:
+                        # 🧹 결과 화면이 가리고 있을 수 있다 — 치우고 한 번 더
+                        if self._awaken_clear_result(rect, " ([자동 등록] 앞)"):
+                            ax, ay, av, _al = self._awaken_find(AWAKEN_AUTO, rect)
+                    if ax is None:
+                        _sp = self._awaken_shot(rect, "auto")
                         click_log(f"[각성강화] {t+1}회째 [자동 등록] 을 못 찾음 "
-                                  f"(최고 {av:.2f}) → 중단")
+                                  f"(최고 {av:.2f}) → 중단"
+                                  + (f" · 화면 {_sp}" if _sp else ""))
                         self.after(0, lambda: self.status.set(
                             "✨ [자동 등록] 을 못 찾았습니다 — 각성 화면이 맞나요?"))
                         break
@@ -6453,10 +6528,22 @@ class App(tk.Tk):
                             break
                         gx = None
                         _nap(*AWAKEN_WAIT)
+                    if gx is None and self._awaken_clear_result(rect, " ([각성] 앞)"):
+                        # 🧹 결과 화면이 가리고 있었다 — 치웠으니 다시 본다
+                        for _ in range(AWAKEN_SEE):
+                            if getattr(self, "_awaken_stop", False):
+                                break
+                            gx, gy, gv, gl = self._awaken_find(AWAKEN_GO, rect)
+                            if gx is not None and gl >= AWAKEN_LIT:
+                                break
+                            gx = None
+                            _nap(*AWAKEN_WAIT)
                     if gx is None:
+                        _sp = self._awaken_shot(rect, "go")
                         click_log(f"[각성강화] {t+1}회째 [각성] 버튼이 안 뜸 "
                                   f"(일치도 {gv:.2f} · 밝기 {gl:.0f}/{AWAKEN_LIT:.0f}) "
-                                  f"— 재료가 떨어진 듯 → 중단")
+                                  f"— 재료가 떨어진 듯 → 중단"
+                                  + (f" · 화면 {_sp}" if _sp else ""))
                         self.after(0, lambda: self.status.set(
                             "✨ [각성] 버튼이 안 뜹니다 — 재료가 떨어진 것 같습니다"))
                         break
@@ -6502,6 +6589,10 @@ class App(tk.Tk):
                         _nap(*AWAKEN_TGAP)
                     if bad:
                         break
+                    # 🧹 결과 화면이 **아직 남아 있으면** 치운다 — 남은 채로
+                    #    다음 회차에 들어가면 [자동 등록] 이 가려져 멈춘다
+                    #    (2026-10-21 사용자가 겪은 바로 그 증상)
+                    self._awaken_clear_result(rect, " (회차 끝)")
                     done += 1
                     click_log(f"[각성강화] {t+1}회째 "
                               + ("✨ 성공!" if ok else "실패")
