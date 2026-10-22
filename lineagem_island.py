@@ -342,7 +342,8 @@ OMANST_MATCH    = 0.85          # '정화' 글자 일치 기준
 #     생존 줄  생존 1.000 > 정화 0.731 > 정복 0.722
 #     정화 줄  **정화 1.000** > 정복 0.750 > 생존 0.646   → 1.33배
 #   ⚠ 이미 한 줄이 선택돼 밝기가 다른 화면에서는 0.781 vs 0.769 = 1.02배 →
-#     배수에 걸려 **아무것도 안 누른다** (그게 맞다. 이미 골라진 상태다).
+#     배수에 걸려 1~3판에서는 넘어간다. **마지막 판에는 그래도 누른다**
+#     (`force` — 사용자 2026-10-22: "아무것도 누르지 않고 넘어가는 건 없어").
 OMANST_RATIO    = 1.15          # 정화가 정복·생존보다 이 배수 이상이어야 고른다
 # 실측 자리 (창 491×276 기준 비율) — 창 크기가 달라도 맞는다
 OMANST_PANEL  = (240 / 491, 65 / 276, 170 / 491, 90 / 276)   # 퀘스트 세 줄이 있는 곳
@@ -363,6 +364,18 @@ OMANST_INK    = 3               # 세로로 이만큼 안 찬 열은 **잡음**�
 #   **정화Ⅰ 을 '5' 로** 세었다. 1~2픽셀을 버리면 그 전처럼 깨끗해진다.
 #   🚫 **6 이상으로 올리지 말 것** — 진짜 막대(6)까지 버린다.
 
+# 🏢 **어느 퀘스트를 고를 것인가** — `jh` 정화 · `sj` 생존 · `jb` 정복
+#   화면에 세 줄이 뜨고 그 중 하나만 고른다. 세 글자가 서로 닮아서
+#   **반드시 세 장을 겨뤄야** 한다 (한 장만 대면 엉뚱한 줄을 고른다 — 2026-10-22 사고).
+#   종류를 바꾸려면 이 한 줄만 고치면 된다. 그림 세 장은 이미 다 있다.
+OMANST_KIND   = "jh"
+OMANST_NAMES  = {"jh": "정화", "jb": "정복", "sj": "생존"}
+OMANST_LOOSE  = 0.70            # **마지막 판** 기준 (겨루기 배수는 1.0 로 푼다)
+OMANST_FLOOR  = 0.62            # **무조건 고를 때**의 바닥 — 이것도 못 넘으면 창이 안 뜬 것
+# 📏 실측 2026-10-22 (16클라) — 퀘스트 창이 **없는** 화면 0.469~0.520 ·
+#   창이 **있으면** 0.73(이미 한 줄 선택됨)~1.00(평소) → 0.62 면 양쪽 여유 0.10.
+#   🚫 바닥을 없애지 말 것 — 퀘스트 창이 안 떴을 때 엉뚱한 곳을 누른다.
+
 
 def omanst_img_path(which="jh"):
     """퀘스트 종류 글자 그림 — `jh` 정화 · `jb` 정복 · `sj` 생존.
@@ -372,17 +385,26 @@ def omanst_img_path(which="jh"):
     return os.path.join(IMG_DIR, "omanst_%s.png" % which)
 
 
-def omanst_read(big):
-    """퀘스트 화면에서 **정화 줄의 자리와 로마숫자**를 읽는다.
+def omanst_read(big, kind=None, loose=False, force=False):
+    """퀘스트 화면에서 **원하는 종류 줄의 자리와 로마숫자**를 읽는다.
 
-    돌려주는 값: `(창안 x, 창안 y, 숫자)` — 못 읽으면 `(None, None, 0)`.
-    숫자는 Ⅰ~Ⅲ 이면 1~3, **Ⅳ·Ⅴ 처럼 V 가 섞이면 9** (원하지 않는다는 뜻).
+    돌려주는 값: `(창안 x, 창안 y, 숫자, 점수)` — 못 읽으면 `(None, None, 0, 0.0)`.
+    숫자는 Ⅰ~Ⅲ 이면 1~3, **Ⅳ·Ⅴ 처럼 V 가 섞이면 9**.
 
-    `정화` 를 그림으로 찾고 **그 오른쪽 잉크 덩어리**만 센다 — 로마숫자 견본이
-    없어도 되고, 줄 위치가 흔들려도 따라간다 (실측 일치도 1.00)."""
-    q = omanst_img_path()
+    · `kind`  원하는 종류 (`OMANST_KIND` 기본) — `jh` 정화 · `sj` 생존 · `jb` 정복
+    · `loose` **마지막 판** — 기준을 `OMANST_LOOSE` 로 낮추고 겨루기 배수를 1.0 으로
+      (그 종류가 **1등이기만 하면** 고른다)
+    · `force` **무조건** — 겨루기를 안 본다. 바닥(`OMANST_FLOOR`)만 넘으면 그 종류
+      그림의 **최고점 자리**를 돌려준다.
+      사용자 2026-10-22: *"마지막에 새로고침을 다 했어도 안 되면 그냥 선택하라고.
+      **아무것도 누르지 않고 넘어가는 건 없어.**"*
+
+    그 종류 글자를 그림으로 찾고 **그 오른쪽 잉크 덩어리**만 세어 로마숫자를 읽는다 —
+    숫자 견본이 없어도 되고, 줄 위치가 흔들려도 따라간다."""
+    kind = kind or OMANST_KIND
+    q = omanst_img_path(kind)
     if not os.path.exists(q) or big is None:
-        return None, None, 0
+        return None, None, 0, 0.0
     try:
         import cv2, numpy as np
         h, w = big.shape[0], big.shape[1]
@@ -391,35 +413,52 @@ def omanst_read(big):
         panel = big[py:py + ph, px:px + pw]
         tpl = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
         if tpl is None or panel.shape[0] < tpl.shape[0] or panel.shape[1] < tpl.shape[1]:
-            return None, None, 0
+            return None, None, 0, 0.0
         res = cv2.matchTemplate(panel, tpl, cv2.TM_CCOEFF_NORMED)
-        # 🏆 **정복·생존과 겨룬다** — 정화가 1등일 때만 인정한다 (2026-10-22)
-        _other = None
-        for _w in ("jb", "sj"):
-            _p2 = omanst_img_path(_w)
-            if not os.path.exists(_p2):
-                continue
-            _t2 = cv2.imdecode(np.fromfile(_p2, np.uint8), cv2.IMREAD_COLOR)
-            if (_t2 is None or panel.shape[0] < _t2.shape[0]
-                    or panel.shape[1] < _t2.shape[1]):
-                continue
-            _r2 = cv2.matchTemplate(panel, _t2, cv2.TM_CCOEFF_NORMED)
-            if _r2.shape != res.shape:
-                continue
-            _other = _r2 if _other is None else np.maximum(_other, _r2)
-        if _other is None:
-            # 정복·생존 그림이 없는 컴퓨터 — 예전처럼 정화만 본다
-            if float(res.max()) < OMANST_MATCH:
-                return None, None, 0
+        best = float(res.max())
+        if force:
+            # 🎯 **무조건 고른다** — 겨루기를 안 본다. 바닥만 넘으면 1등 자리.
+            #   📏 실측 2026-10-22: 퀘스트 창이 **없는** 16클라 0.469~0.520 ·
+            #      창이 **있으면** 0.73~1.00 → 바닥 0.62 면 양쪽 여유 0.10.
+            #   🚫 바닥을 없애지 말 것 — 퀘스트 창이 안 떴을 때 엉뚱한 곳을 누른다.
+            if best < OMANST_FLOOR:
+                return None, None, 0, best
             _loc = np.unravel_index(res.argmax(), res.shape)
         else:
-            _ok = (res >= OMANST_MATCH) & (res >= _other * OMANST_RATIO)
-            if not bool(_ok.any()):
-                return None, None, 0        # 정화 줄이 없다 (정복·생존뿐이다)
-            _rr = np.where(_ok, res, -1.0)
-            _loc = np.unravel_index(_rr.argmax(), _rr.shape)
+            # 🏆 **세 장을 겨룬다** — 그 종류가 1등일 때만 인정한다 (2026-10-22 사고).
+            #   글자가 서로 닮아서 한 장만 대면, 그 글자가 없을 때 **가장 닮은 다른
+            #   글자를 고른다** (실측 #09: 정화 그림이 정복 줄에서 1등이었다).
+            thr = OMANST_LOOSE if loose else OMANST_MATCH
+            ratio = 1.0 if loose else OMANST_RATIO
+            other = None
+            for k2 in ("jh", "jb", "sj"):
+                if k2 == kind:
+                    continue
+                p2 = omanst_img_path(k2)
+                if not os.path.exists(p2):
+                    continue
+                t2 = cv2.imdecode(np.fromfile(p2, np.uint8), cv2.IMREAD_COLOR)
+                if (t2 is None or panel.shape[0] < t2.shape[0]
+                        or panel.shape[1] < t2.shape[1]):
+                    continue
+                r2 = cv2.matchTemplate(panel, t2, cv2.TM_CCOEFF_NORMED)
+                if r2.shape != res.shape:
+                    continue
+                other = r2 if other is None else np.maximum(other, r2)
+            if other is None:
+                # 다른 두 장이 없는 컴퓨터 — 예전처럼 한 장만 본다
+                if best < thr:
+                    return None, None, 0, best
+                _loc = np.unravel_index(res.argmax(), res.shape)
+            else:
+                ok = (res >= thr) & (res >= other * ratio)
+                if not bool(ok.any()):
+                    return None, None, 0, best
+                rr = np.where(ok, res, -1.0)
+                _loc = np.unravel_index(rr.argmax(), rr.shape)
         jx, jy = int(_loc[1]) + px, int(_loc[0]) + py
-        # 🔢 '정화' 오른쪽의 잉크 덩어리를 센다
+        sc = float(res[_loc[0], _loc[1]])
+        # 🔢 글자 오른쪽의 잉크 덩어리를 센다
         g = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
         band = g[jy:jy + tpl.shape[0], jx + tpl.shape[1]:jx + tpl.shape[1] + 22]
         cols = (band > 120).sum(axis=0)
@@ -433,69 +472,75 @@ def omanst_read(big):
         if st is not None:
             runs.append((st, len(cols)))
         if not runs:
-            return jx, jy, 0
+            return jx, jy, 0, sc
         if any((r[1] - r[0]) >= OMANST_WIDE for r in runs):
-            return jx, jy, 9                # V 가 섞였다 (Ⅳ·Ⅴ) — 원하지 않는다
-        return jx, jy, len(runs)            # 좁은 막대 개수 = Ⅰ·Ⅱ·Ⅲ
+            return jx, jy, 9, sc            # V 가 섞였다 (Ⅳ·Ⅴ)
+        return jx, jy, len(runs), sc        # 좁은 막대 개수 = Ⅰ·Ⅱ·Ⅲ
     except Exception:
-        return None, None, 0
+        return None, None, 0, 0.0
 
 
 def omanst_pick(app, anchor, slot, log=None):
-    """🏢 **정화 줄을 골라 누른다** — 세 번까지 새로고침하며 (2026-10-15 사용자 요청).
+    """🏢 **원하는 종류 줄을 골라 누른다** — 세 번까지 새로고침하며.
 
-    돌려주는 값: 골랐으면 True, 끝내 못 골랐으면 False(= 등록된 좌표로 그냥 누른다).
+    돌려주는 값: 골랐으면 True, 그 글자를 화면에서 아예 못 봤으면 False.
 
-    **정화만 고른다. 정복·생존은 어떤 경우에도 누르지 않는다** (2026-10-15 사용자 지시).
+    **그 종류만 고른다. 다른 종류는 어떤 경우에도 누르지 않는다.**
 
     · 그 슬롯이 고른 우선순위(`omanst_pref`, 기본 Ⅱ→Ⅲ)에 맞으면 **바로 고른다**
-    · 아니면 **새로고침**(아데나) — 처음 1번 + 새로고침 3번 = `OMANST_TRIES`(4)번 본다
-    · **마지막 판에서는 숫자를 안 보고** 정화면 고른다 (Ⅰ 이어도 고른다)
-      (사용자: "새로고침 세 번 하고 안 되면 무조건 정화에서만 선택")
-    · **정화가 아예 없으면 아무것도 고르지 않는다** (좌표도 누르지 않는다)
+    · 아니면 **새로고침**(아데나만) — 처음 1번 + 새로고침 3번 = `OMANST_TRIES`(4)번
+    · 🎯 **마지막 판에는 뭐가 나오든 고른다** — Ⅰ 이어도, Ⅳ·Ⅴ 여도, 숫자를 못 읽어도.
+      겨루기로 못 가리면 그 종류 그림의 **1등 자리를 그대로** 고른다.
+      사용자 2026-10-22: *"새로고침 3번 하고 안 나오면 그냥 무조건 클릭한다.
+      뭐가 나오든. **아무것도 누르지 않고 넘어가는 건 없어.**"*
+      🚫 클로드는 여기에 '애매하면 안 누른다' 를 다시 넣지 말 것.
     ⚠ 고르기만 한다 — **수락은 다음 좌표(클릭25)가 누른다.**
       새로고침을 누르면 고른 줄이 풀리므로 **고른 뒤에 수락**해야 한다."""
     import time, random
     pref = omanst_pref_of(slot)
     _L = log or (lambda m: None)
+    kname = OMANST_NAMES.get(OMANST_KIND, OMANST_KIND)
+    NM = {0: "못읽음", 1: "Ⅰ", 2: "Ⅱ", 3: "Ⅲ", 9: "Ⅳ·Ⅴ"}
+
+    def _take(ox, oy, x, y, n, sc, why):
+        try:
+            app._focus_client_at(anchor) if hasattr(app, "_focus_client_at") else None
+        except Exception:
+            pass
+        _click(ox + x + 6, oy + y + 6)   # 글자 자리를 누르면 그 줄이 골라진다
+        time.sleep(random.uniform(0.5, 0.9))
+        _L("[오만의탑] %s %s 선택 ✔ (%.2f%s) — 수락은 다음 좌표가 누른다"
+           % (kname, NM.get(n, n), sc, why))
+        return True
+
     for t in range(1, OMANST_TRIES + 1):
         got = grab_window(anchor)
         if not got:
             _L("[오만의탑] 창을 못 찍어 중단")
             return False
         big, (ox, oy) = got
-        x, y, n = omanst_read(big)
-        nm = {0: "못읽음", 1: "Ⅰ", 2: "Ⅱ", 3: "Ⅲ", 9: "Ⅳ·Ⅴ"}.get(n, str(n))
         last = (t == OMANST_TRIES)
+        x, y, n, sc = omanst_read(big, loose=last)
+        why = ""
+        if x is None and last:
+            # 🎯 겨루기로 못 가렸다 → **무조건** 그 종류 1등 자리를 고른다
+            x, y, n, sc = omanst_read(big, force=True)
+            why = " · 겨루기로 못 가려 1등 자리"
         want = (n in pref) if pref else (n > 0)
-        if last and x is not None:
-            # 🎯 **마지막 판은 정화면 무조건 고른다** — 숫자를 못 읽어도 고른다.
-            #   `omanst_read` 가 **정화가 1등일 때만** 자리를 돌려주므로,
-            #   `x` 가 있다는 것 자체가 **그 줄이 정화라는 뜻**이다.
-            #   사용자 2026-10-22: "새로고침해도 안 나오면 그냥 무조건 정화쪽에서
-            #   클릭하라니까 정화 정화 정화 라고". 예전엔 `n > 0` 이라
-            #   **숫자만 못 읽어도 정화를 찾았는데 안 눌렀다.**
-            want = True
-        _L(f"[오만의탑] {t}/{OMANST_TRIES}판 — 정화 {nm} "
-           f"(원하는 것 {pref or '아무거나'}) → {'고른다' if want else '새로고침'}")
-        if want and x is not None:
-            try:
-                app._focus_client_at(anchor) if hasattr(app, "_focus_client_at") else None
-            except Exception:
-                pass
-            _click(ox + x + 6, oy + y + 6)   # 정화 글자 자리를 누르면 그 줄이 골라진다
-            time.sleep(random.uniform(0.5, 0.9))
-            _L(f"[오만의탑] 정화 {nm} 선택 ✔ (수락은 다음 좌표가 누른다)")
-            return True
         if last:
-            # 🚫 **정화가 없으면 아무것도 고르지 않는다** (2026-10-15 사용자:
-            #    "정화만 해당하는 거야. 왜 정복을 선택하는 거야")
-            #    예전엔 False 를 돌려줘 **등록된 좌표(3번째 줄)를 그냥 눌렀고**,
-            #    그 줄이 정복이면 **정복이 선택됐다.** 그게 이 사고의 원인이다.
-            #    아무것도 안 고르면 수락이 회색이라 그냥 지나간다 — 그게 낫다.
-            _L("[오만의탑] ⚠ 정화 줄이 없다 — **아무것도 고르지 않는다** "
-               "(정복·생존은 절대 고르지 않는다)")
-            return True
+            want = True                  # 🎯 마지막 판은 **뭐가 나오든**
+        _L("[오만의탑] %d/%d판 — %s %s (%.2f) · 원하는 것 %s → %s"
+           % (t, OMANST_TRIES, kname, NM.get(n, n), sc, pref or "아무거나",
+              "고른다" if (want and x is not None)
+              else ("새로고침" if not last else "못 찾음")))
+        if want and x is not None:
+            return _take(ox, oy, x, y, n, sc, why)
+        if last:
+            # 여기는 그 글자를 **화면에서 아예 못 본 것** (퀘스트 창이 안 떴거나 가려짐).
+            # 바닥(OMANST_FLOOR)도 못 넘었다는 뜻이라, 누르면 엉뚱한 곳을 찍는다.
+            _L("[오만의탑] ⚠ %s 글자를 화면에서 못 찾았다 (최고 %.2f · 바닥 %s) "
+               "— 퀘스트 창이 안 뜬 것 같다" % (kname, sc, OMANST_FLOOR))
+            return False
         # 💰 **아데나인지 확인하고** 새로고침한다 (다야면 절대 안 누른다).
         #    사용자 2026-10-15: "다야는 절대 쓰지 말고."
         try:
@@ -507,13 +552,14 @@ def omanst_pick(app, anchor, slot, log=None):
         except Exception:
             _rb = 0.0
         if _rb < OMANST_COIN_RB:
-            _L(f"[오만의탑] ⚠ 새로고침이 아데나가 아니다 (동전 R-B {_rb:+.0f}) "
-               f"— **누르지 않는다**. 정화가 있으면 그대로 고른다")
+            _L("[오만의탑] ⚠ 새로고침이 아데나가 아니다 (동전 R-B %+.0f) "
+               "— 누르지 않는다. 지금 것을 그대로 고른다" % _rb)
+            if x is None:
+                x, y, n, sc = omanst_read(big, force=True)
+                why = " · 아데나가 없어 1등 자리"
             if x is not None:
-                _click(ox + x + 6, oy + y + 6)
-                time.sleep(random.uniform(0.5, 0.9))
-                _L(f"[오만의탑] 정화 {nm} 선택 ✔ (아데나가 없어 더 안 돌림)")
-                return True
+                return _take(ox, oy, x, y, n, sc, why)
+            _L("[오만의탑] ⚠ %s 글자를 못 찾았다 (최고 %.2f)" % (kname, sc))
             return False
         # 🔄 새로고침 (아데나). 누르면 고른 줄이 풀리므로 다시 읽고 고른다.
         rx = ox + int(big.shape[1] * OMANST_REFRESH[0])
@@ -521,6 +567,7 @@ def omanst_pick(app, anchor, slot, log=None):
         _click(rx, ry)
         time.sleep(random.uniform(1.8, 2.6))
     return False
+
 
 
 def _click(x, y):
