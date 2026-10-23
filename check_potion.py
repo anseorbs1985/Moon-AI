@@ -6,7 +6,7 @@
 메인에서도 로컬에서도 그냥 돌리면 된다. **아무것도 클릭하지 않는다.**
 2026-10-17 — 로컬에서 "물약이 없는데 다시 실행을 안 한다" 를 짚으려고 만들었다.
 """
-import os, sys, json, glob, time
+import io, os, sys, json, glob, time
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -51,6 +51,36 @@ except Exception:
     line("   기준 창 가로    ✘ potion0_meta.json 없음 — 창 크기가 다르면 못 잡는다")
 line("   PLACE_MAX %d · PLACE_MATCH %.2f · PLACE_RATIO %.2f"
      % (isl.PLACE_MAX, isl.PLACE_MATCH, isl.PLACE_RATIO))
+
+# 🚨 **물약 재실행 전용 기준** — 이 두 값이 옛날 것이면 16/16 전부 막힌다.
+#    2026-10-23: 1.45 로 올려둔 탓에 실측 배수 1.15~1.33 이 **하나도 못 넘어**
+#    물약 0개가 떠도 사흘간 한 번도 안 돌았다 → 1.12 로 내렸다.
+_pm = _pr = None
+try:
+    _lp = os.path.join(HERE, "lineagem_launcher.py")
+    _s = io.open(_lp, encoding="utf-8").read() if os.path.exists(_lp) else ""
+    for _ln in _s.splitlines():
+        for _k in ("P0_PLACE_MATCH", "P0_PLACE_RATIO"):
+            if _ln.startswith(_k):
+                _v = float(_ln.split("=", 1)[1].split("#")[0].strip())
+                if _k.endswith("MATCH"):
+                    _pm = _v
+                else:
+                    _pr = _v
+except Exception:
+    pass
+if _pr is None:
+    line("   ✘ P0_PLACE_RATIO 를 못 읽었다 — 런처 코드가 아주 옛날 것이다")
+else:
+    line("   물약재실행 기준  P0_PLACE_MATCH %.2f · P0_PLACE_RATIO %.2f"
+         % (_pm or 0, _pr))
+    if _pr > 1.20:
+        line("   🚨 **P0_PLACE_RATIO 가 %.2f — 옛 코드다. 물약감시가 통째로 막힌다.**"
+             % _pr)
+        line("      실측 배수는 1.15~1.33 이라 1.45 는 아무도 못 넘는다.")
+        line("      → 런처의 [🔄 업데이트] 를 누른 뒤 다시 돌려주세요 (1.12 가 되어야 한다)")
+    else:
+        line("   ✔ 새 코드다 (배수 %.2f ≤ 1.20)" % _pr)
 
 # ── ② 켜져 있나 ───────────────────────────────────────────────────────────
 head("② 켜져 있나")
