@@ -6570,6 +6570,13 @@ class App(tk.Tk):
         n_max = int(times or self.cfg.get("awaken_times") or AWAKEN_MAX)
 
         def _go():
+            # ⚠ **`nonlocal rect` 가 꼭 있어야 한다** (2026-10-23 사고).
+            #    아래에서 `rect = _r2`(회차마다 창을 다시 찾는다)를 하는 순간
+            #    파이썬이 `rect` 를 **이 함수의 지역변수**로 보고, 바깥의
+            #    `rect = self._awaken_win_rect()` 를 못 읽어
+            #    **UnboundLocalError 로 각성이 시작하자마자 죽었다.**
+            #    🚫 중첩 함수에서 바깥 변수에 **대입**할 때는 반드시 nonlocal.
+            nonlocal rect
             done = 0
             # 🧍 사람처럼 — 이번 실행의 '자기 속도'를 한 번 뽑아 내내 곱한다.
             #    돌릴 때마다 리듬이 달라진다 (2026-09-07 상시 규칙).
