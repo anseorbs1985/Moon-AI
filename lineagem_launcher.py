@@ -6409,16 +6409,19 @@ class App(tk.Tk):
                 else:
                     ox = oy = 0
             bv, bloc, bt = 0.0, None, t
+            _tried = _skipped = 0
             for s in (1.00, 0.92, 0.85, 1.08, 1.15):   # 창을 키운 정도가 달라도
                 tt = (t if s == 1.00 else cv2.resize(t, None, fx=s, fy=s,
                       interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_CUBIC))
                 if tt.shape[0] > big.shape[0] or tt.shape[1] > big.shape[1]:
+                    _skipped += 1
                     continue
+                _tried += 1
                 _, v, _, lo = cv2.minMaxLoc(
                     cv2.matchTemplate(big, tt, cv2.TM_CCOEFF_NORMED))
                 if v > bv:
                     bv, bloc, bt = v, lo, tt
-            if bloc is None:
+            if bloc is None and _tried == 0:
                 # 🚨 **그림이 칸보다 커서 한 번도 비교하지 못했다** (2026-10-23).
                 #    크기 보정이 0.85~1.15배뿐이라, **큰 창(2504px)에서 자른 그림**을
                 #    **작은 창(491px)** 에 쓰려면 0.20배가 필요해 전부 건너뛴다.
@@ -6434,6 +6437,12 @@ class App(tk.Tk):
                               f"(그림은 큰 창 기준으로 잘려 있습니다)")
                 except Exception:
                     pass
+                return None, None, float(bv), 0.0
+            if bloc is None:
+                # 비교는 했는데 최고점이 0 이하였다 — **그림이 그 화면에 없을 뿐**
+                # 이다(정상). ⚠ 여기를 '크기 때문' 으로 적지 말 것 —
+                # 실측 10-23: `awaken_touch 403x45` 가 칸 `1001x270` 보다 **작은데도**
+                # "칸보다 커서 못 본다" 고 적혀 **거짓 경고**가 남았다.
                 return None, None, float(bv), 0.0
             # 자리·밝기는 **점수와 상관없이** 늘 계산해 돌려준다 —
             # 확인(🔍) 버튼이 '못 찾았을 때도 얼마나 닮았나'를 보여줘야 하기 때문.
