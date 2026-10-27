@@ -740,8 +740,16 @@ OMANST_CLICKS = SLOW_CLICKS   # 🗝 오만 지배석 획득! — 8칸 그대로
 #     다음 슬롯으로 넘어가면 된다.")
 #    ⚠ 칸은 **늘리기만** 한다 — 줄이면 찍어둔 좌표가 날아간다.
 MONDEX_CLICKS = 8
+# 🎖 휘장 제작!! — 좌표 10칸 (2026-10-27 사용자 요청)
+#    *"좌표는 10개로 만들어줘 찍을 수 있게. 그리고 **안 찍는 건 넘기고 시간 주지 마
+#      바로바로 넘겨.** 16개 각 슬롯별로 만들 수 있게 해주고 그냥 클릭만 하는 거니까."*
+#    ⚠ **느릿느릿(SLOW_FKEYS)에 넣지 않았다** — 보통 속도로 돈다.
+#    ⚠ 빈 칸은 애초에 `order` 에 안 들어가므로 **시간을 주지 않고 바로 넘어간다.**
+BADGE_CLICKS  = 10
+# ⚠ 아래 표는 이름이 SLOW_ 지만 **'빈 칸으로 슬롯을 만든다'** 는 뜻이다
+#   (느린 간격은 SLOW_FKEYS 가 정한다 — 둘을 헷갈리지 말 것).
 SLOW_CLICKS_BY = {"magic_slots": MAGIC_CLICKS, "omanst_slots": OMANST_CLICKS,
-                  "mondex_slots": MONDEX_CLICKS}
+                  "mondex_slots": MONDEX_CLICKS, "badge_slots": BADGE_CLICKS}
 SLOW_FKEYS    = ("magic", "omanst", "mondex")
 SLOW_GAP_MIN  = 2.6        # 클릭 사이 (다른 런처 기본은 1.14~2.62초 — 두 배쯤 느리다)
 SLOW_GAP_MAX  = 5.2
@@ -803,6 +811,7 @@ DEFAULT_CFG = {
     "magic_slots":   None,              # 🔮 마력의기운 제작! — 16슬롯 × 좌표15 (느릿느릿)
     "omanst_slots":  None,              # 🗝 오만 지배석 획득! — 16슬롯 × 좌표8 (느릿느릿)
     "mondex_slots":  None,              # 🗂 몬스터도감!! — 16슬롯 × 좌표8 (끝나면 보상 받기)
+    "badge_slots":   None,              # 🎖 휘장 제작!! — 16슬롯 × 좌표10 (그냥 클릭만)
     "dollchk_slots": None,              # 인형확인용 — 처음 로드 때 변신확인용 복사
     "relic_slots":   None,              # 성물확인용 — 처음 로드 때 변신확인용 복사
     "coupon_slots":  None,              # 쿠폰등록 — 16슬롯 × 좌표9 (변신확인용 방식)
@@ -5605,7 +5614,9 @@ class App(tk.Tk):
                 ("🗝 오만 지배석\n획득!", "#935116", self._open_omanst_win,
                  lambda: self._start_dgn2("omanst")),
                 ("🗂 몬스터\n도감!!", "#16a085", self._open_mondex_win,
-                 lambda: self._start_dgn2("mondex"))):
+                 lambda: self._start_dgn2("mondex")),
+                ("🎖 휘장" + chr(10) + "제작!!", "#b03a2e", self._open_badge_win,
+                 lambda: self._start_dgn2("badge"))):
             rr = tk.Frame(chk_col); rr.pack(anchor="n", pady=(0,4))
             tk.Button(rr, text=_t, font=("맑은 고딕", 9, "bold"), bg=_bg, fg="white",
                       width=9, height=2, command=_open).pack(side="left")
@@ -8027,6 +8038,7 @@ class App(tk.Tk):
         ("magic_slots",    "🔮 마력의기운 제작!"),
         ("omanst_slots",   "🗝 오만 지배석 획득!"),
         ("mondex_slots",   "🗂 몬스터도감!!"),
+        ("badge_slots",    "🎖 휘장 제작!!"),
         ("fish_slots",     "🎣 낚시녹임"),
         ("market_slots",   "🔎 거래소검색"),
         ("coupon_slots",   "🎟 쿠폰등록"),
@@ -10672,6 +10684,7 @@ class App(tk.Tk):
                 "magic":   ("magic_slots",   "마력의기운 제작!", "🔮"),
                 "omanst":  ("omanst_slots",  "오만 지배석 획득!", "🗝"),
                 "mondex":  ("mondex_slots",  "몬스터도감!!", "🗂"),
+                "badge":   ("badge_slots",   "휘장 제작!!", "🎖"),
                 "dollchk": ("dollchk_slots", "인형확인용", "🧸"),
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
@@ -11837,6 +11850,16 @@ class App(tk.Tk):
         self._open_section_win("_omanst_win", "🗝 오만 지배석 획득!",
                                lambda p: self._build_dgn2("omanst", p),
                                w=470, h=620, pinnable=True)
+
+    def _open_badge_win(self):
+        """🎖 휘장 제작!! — 좌표 10칸만 누르는 창 (2026-10-27 사용자 요청).
+
+        그냥 클릭만 한다 — 그림·연속클릭 없음. **느릿느릿이 아니라 보통 속도**이고
+        **안 찍은 칸은 시간을 주지 않고 바로 넘어간다.**
+        [📋 전체붙임] 으로 한 슬롯을 16슬롯에 퍼뜨릴 수 있다 (창 위치 자동보정)."""
+        self._open_section_win("_badge_win", "🎖 휘장 제작!!",
+                               lambda p: self._build_dgn2("badge", p),
+                               w=470, h=560, pinnable=True)
 
     def _open_mondex_win(self):
         """🗂 몬스터도감!! — 좌표를 찍는 창. 좌표를 다 누르면 보상을 전부 받는다."""
@@ -22932,6 +22955,12 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("omanst", i),
                             prev=lambda i: self._preview_dgn2("omanst", i),
                             delete=lambda i: self._del_dgn2("omanst", i)),
+            "badge":   dict(title="휘장 제작!!", key="badge_slots",
+                            clicks=BADGE_CLICKS, color="#b03a2e", enable=True, sel=True,
+                            reg=lambda s, c: self._reg_dgn2_click("badge", s, c),
+                            test=lambda i: self._test_dgn2("badge", i),
+                            prev=lambda i: self._preview_dgn2("badge", i),
+                            delete=lambda i: self._del_dgn2("badge", i)),
             "mondex":  dict(title="몬스터도감!!", key="mondex_slots",
                             clicks=MONDEX_CLICKS, color="#16a085", enable=True, sel=True,
                             reg=lambda s, c: self._reg_dgn2_click("mondex", s, c),
@@ -26338,7 +26367,7 @@ class App(tk.Tk):
         attrs = {"_settings_win","_hunt_win","_mail_win","_past_win2",
                  "_sched_win","_dungeon_win","_daya_win","_pass_win","_seq_win",
                  "_dc_win","_accounts_win","_doll_win","_wdoff_win","_item_win",
-                 "_lastrun_win","_lock_win","_scroll_win","_magic_win","_omanst_win","_mondex_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_knight_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
+                 "_lastrun_win","_lock_win","_scroll_win","_magic_win","_omanst_win","_mondex_win","_badge_win","_dollchk_win","_relic_win","_tj_win","_coupon_win","_market_win","_dragon_win","_knight_win","_fish_win","_circus_win","_circus2_win","_circus3_win",
                  "_eventshop_win","_reroll_win","_verify_win"}
         attrs |= getattr(self, "_section_attrs", set())
         wins = [getattr(self, a) for a in attrs
@@ -28598,7 +28627,7 @@ class App(tk.Tk):
         #    (2026-09-22 사용자 신고: "왜 작위는 예외냐"). 그래서 **아는 런처를 전부**
         #    훑어 멈춤 플래그를 세운다 — 새 런처가 생겨도 자동으로 포함된다.
         try:
-            for _fk in ("magic", "omanst", "mondex",
+            for _fk in ("magic", "omanst", "mondex", "badge",
                         "incoupon", "inmail", "jakwi", "fix", "dollchk", "relic",
                         "dragon", "knight", "sched", "coupon", "market", "tj",
                         "eventshop", "fish", "circus", "circus2", "circus3",
