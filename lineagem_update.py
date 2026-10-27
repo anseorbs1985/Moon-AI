@@ -866,8 +866,32 @@ txt = tk.Text(root, font=("맑은 고딕", 9))
 txt.pack(fill="both", expand=True, padx=6, pady=6)
 
 
+def _ulog_path():
+    """업데이트 기록 파일 — LOCALAPPDATA/MoonAI/update_log.txt"""
+    d = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        pass
+    return os.path.join(d, "update_log.txt")
+
+
 def log(m):
-    txt.insert("end", m + "\n"); txt.see("end"); root.update()
+    """업데이트 창에 쓰고 **파일에도 남긴다**.
+
+    ⚠ 예전에는 창에만 남아서 창을 닫으면 **로컬에서 원인을 짚을 수 없었다**
+      (2026-10-27 "재시작을 또 해야 먹힌다" 를 진단할 자료가 0이었다).
+      클로드는 이 파일 기록을 지우지 말 것 — 로컬 진단의 유일한 통로다.
+      보는 법: LOCALAPPDATA/MoonAI/update_log.txt (최근 것이 맨 아래)"""
+    try:
+        txt.insert("end", m + "\n"); txt.see("end"); root.update()
+    except Exception:
+        pass
+    try:
+        with open(_ulog_path(), "a", encoding="utf-8") as f:
+            f.write(time.strftime("%m-%d %H:%M:%S ") + str(m) + chr(10))
+    except Exception:
+        pass
 
 
 def sh(args, cwd=None):
@@ -1064,9 +1088,124 @@ def log_trouble(reason):
         pass
 
 
+def _any_py_running():
+    """런처·섬실행기·OCR 이 **하나라도** 남았나 — 창이 아니라 **프로세스**로 본다.
+
+    ⚠ `_launcher_running()` 은 **런처 창**만 본다. 섬/던전 실행기는 `--run` 으로
+      켜지면 창을 숨기므로(withdraw) 창으로는 안 보인다 → 옛 코드의 섬 실행기가
+      남아 있는데 "전부 죽었다" 로 판단했다 (2026-10-27 사용자 신고의 원인 ②)."""
+    r = sh(["powershell", "-NoProfile", "-Command",
+            "(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine "
+            "-match 'lineagem_launcher|lineagem_island|lineagem_ocr"
+            "|lineagem_dungeon' } | Measure-Object).Count"])
+    try:
+        return int((r.stdout or "0").strip().split()[0]) > 0
+    except Exception:
+        return _launcher_running()      # 못 세면 옛 방식으로
+
+
+def _code_md5(name="lineagem_launcher.py"):
+    """바탕화면 코드 파일의 지문 — 런처가 `click_log` 에 남기는 것과 **같은 계산**
+    (`code_stamp()` = md5 앞 8자리)."""
+    import hashlib
+    try:
+        with open(os.path.join(DESK, name), "rb") as f:
+            return hashlib.md5(f.read()).hexdigest()[:8]
+    except Exception:
+        return ""
+
+
+def _clear_pycache(log=None):
+    """파이썬 캐시를 지운다 (2026-10-27).
+
+    `shutil.copy2` 는 **mtime 을 보존**하므로, 크기와 mtime 이 옛것과 같으면
+    파이썬이 **옛 `.pyc` 를 그대로 쓴다.** 런처는 `lineagem_island`·
+    `precise_click` 을 import 하므로 그 모듈이 옛 코드로 돌 수 있다.
+    지우는 비용은 0 이고, 다음 실행에서 새로 만들어진다."""
+    import shutil
+    n = 0
+    for d in (os.path.join(DESK, "__pycache__"),
+              os.path.join(REPO, "__pycache__") if REPO else None):
+        if not d:
+            continue
+        try:
+            if os.path.isdir(d):
+                shutil.rmtree(d, ignore_errors=True)
+                n += 1
+        except Exception:
+            pass
+    if n and log:
+        log("   파이썬 캐시(__pycache__) %d곳을 지웠습니다" % n)
+
+
+def _spawn_launcher(log=None):
+    """**무조건 새로 띄운다** — 떠 있는지 묻지 않는다 (워치독 → 직접 실행)."""
+    sh(["schtasks", "/Run", "/TN", "LineageM_Watchdog"])
+    for _ in range(15):
+        time.sleep(1)
+        if _launcher_running():
+            return True
+    if log:
+        log("   워치독으로 안 떴습니다 → 런처 직접 실행")
+    exe = sys.executable.replace("python.exe", "pythonw.exe")
+    try:
+        subprocess.Popen([exe, os.path.join(DESK, "lineagem_launcher.py")],
+                         creationflags=0x00000008 | 0x00000200)   # DETACHED
+    except Exception as e:
+        if log:
+            log("   ⚠ 직접 실행도 실패: %r" % (e,))
+    for _ in range(15):
+        time.sleep(1)
+        if _launcher_running():
+            return True
+    return False
+
+
+def _launcher_code_ok(since, log=None):
+    """새로 뜬 런처가 **새 코드**인가 — `click_log` 의 `[재시작] 켜짐` 줄을 읽는다.
+
+    런처는 켜질 때 `code_stamp()`(크기·시각·md5 앞 8자리)를 남긴다. 그 지문이
+    바탕화면 파일과 다르면 **옛 프로세스가 살아남은 것**이다 — 사용자가 말한
+    *"재시작을 안 하면 안 먹혀, 예전 버전 그대로라서"* 가 바로 이것이다.
+
+    `since` = 띄우기 **전** click_log 의 크기 → 그 뒤에 추가된 줄만 본다
+    (옛 줄을 읽으면 지난 번 지문을 보고 통과시켜 버린다).
+    ⚠ 판단할 수 없으면 **True**(막지 않는다) — 모를 때 재시작을 반복하면 더 나쁘다."""
+    want = _code_md5()
+    if not want:
+        return True
+    p = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI",
+                     "click_log.txt")
+    for _ in range(20):                 # 런처가 그 줄을 쓸 때까지 최대 20초
+        time.sleep(1)
+        try:
+            with open(p, "rb") as f:
+                f.seek(since)
+                tail = f.read().decode("utf-8", "replace")
+        except Exception:
+            return True
+        for ln in reversed(tail.split(chr(10))):
+            if "[재시작] 켜짐" not in ln or "지문 " not in ln:
+                continue
+            got = ln.split("지문 ", 1)[1][:8]
+            if got == want:
+                if log:
+                    log("   ✔ 새 코드로 떴습니다 (지문 %s)" % got)
+                return True
+            if log:
+                log("   ⚠ **옛 코드로 떴습니다** — 지문 %s (새 코드는 %s)"
+                    % (got, want))
+            return False
+    if log:
+        log("   (새 런처가 기록을 안 남겨 코드 확인은 건너뜁니다)")
+    return True
+
+
 def kill_launchers(log=None):
     """런처·섬실행기·OCR 을 **전부** 종료하고, 하나도 안 남을 때까지 확인한다.
-    돌려주는 값: 전부 죽었으면 True."""
+    돌려주는 값: 전부 죽었으면 True.
+    ⚠ 확인은 **프로세스**(`_any_py_running`)로 한다 — 런처 '창' 만 보면
+      창을 숨긴 섬/던전 실행기가 남아 있는데 '다 죽었다' 가 된다 (2026-10-27)."""
     _ps = ("Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' OR "
            "Name='python.exe'\" | Where-Object { $_.CommandLine -match "
            "'lineagem_launcher|lineagem_island|lineagem_ocr|lineagem_dungeon' } | "
@@ -1075,27 +1214,58 @@ def kill_launchers(log=None):
         sh(["powershell", "-NoProfile", "-Command", _ps])
         for _ in range(10):
             time.sleep(1)
-            if not _launcher_running():
+            if not _any_py_running():
                 return True
         if log and _try == 0:
             log("   ⚠ 런처가 안 죽었습니다 — 한 번 더 종료합니다")
-    return not _launcher_running()
+    return not _any_py_running()
 
 
 def force_restart_launcher(log=None):
-    """🔁 **옛 런처를 반드시 죽이고 새로 띄운다** (2026-10-14 사용자 지시).
+    """🔁 **옛 런처를 반드시 죽이고, 새 코드로 떴는지 확인한다** (2026-10-27).
 
-    예전 `ensure_launcher()` 는 *"떠 있으면 그대로"* 라, 종료가 실패했거나 워치독이
-    먼저 되살렸으면 **옛 프로세스가 그대로 남았다**:
-      · 새 코드가 안 올라간다 ("재시작 안 하면 적용이 안 되는 건가?")
-      · 낡은 프로세스가 **옛 좌표를 저장**한다 ("좌표가 돌아간다")
-    업데이트의 목적은 **새 코드로 바꾸는 것**이라 옛 프로세스를 남기면 안 한 것과 같다.
-    ⚠ '떠 있으면 그대로' 로 되돌리지 말 것."""
-    if log:
-        log("   옛 런처를 종료합니다 (전부 내려갈 때까지 확인)")
-    if not kill_launchers(log) and log:
-        log("   ⚠ 아직 남아 있습니다 — 그래도 새로 띄워봅니다")
-    return ensure_launcher()
+    사용자: *"업데이트하면 자동 재시작을 하는데 **다시 또 재시작을 해야지만
+    먹히는 것들이 있어.** 재시작을 안 하면 안 먹혀, 예전 버전 그대로라서."*
+
+    예전 구멍 — 종료가 실패하면 **그냥 넘어갔다**:
+        if not kill_launchers(log): log("아직 남아 있습니다")
+        return ensure_launcher()     # "떠 있으면 그대로" → 옛 런처가 그대로 산다
+    옛 프로세스가 살아 있으면 `ensure_launcher` 는 **아무것도 띄우지 않고** True
+    를 돌려줬다. 그래서 새 코드가 안 올라가고, 사용자가 손으로 한 번 더 재시작해야
+    먹혔다. (낡은 프로세스가 **옛 좌표를 저장**하는 사고도 같은 뿌리다.)
+
+    지금 하는 일 — 최대 2바퀴:
+      ① 프로세스 단위로 **전부 종료**(`_any_py_running` 으로 확인)
+      ② `__pycache__` 삭제 (copy2 가 mtime 을 보존해 옛 .pyc 가 살 수 있다)
+      ③ **무조건 새로 띄운다** (`_spawn_launcher` — 떠 있는지 묻지 않는다)
+      ④ **지문으로 새 코드인지 확인** → 다르면 한 바퀴 더
+
+    ⚠ 클로드는 이것을 `ensure_launcher()` 한 줄로 되돌리지 말 것 — 그러면
+      "두 번 재시작해야 먹힌다" 가 그대로 돌아온다.
+      (`ensure_launcher` 자체는 4:50·로그온 자동 시작처럼 **켜두기만 하면 되는**
+       곳에서 쓰므로 그대로 남겨둔다.)"""
+    p = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI",
+                     "click_log.txt")
+    for _try in (1, 2):
+        if log:
+            log("   옛 런처를 종료합니다 (%d/2 — 전부 내려갈 때까지 확인)" % _try)
+        if not kill_launchers(log) and log:
+            log("   ⚠ 아직 남아 있습니다 — 그래도 새로 띄워봅니다")
+        _clear_pycache(log)
+        try:
+            since = os.path.getsize(p)
+        except Exception:
+            since = 0
+        if not _spawn_launcher(log):
+            if log:
+                log("   ⚠ 런처가 안 떴습니다")
+            continue
+        if _launcher_code_ok(since, log):
+            return True
+        if _try == 1 and log:
+            log("   → 옛 프로세스가 남아 있었습니다. "
+                "한 번 더 확실히 내리고 띄웁니다")
+    return _launcher_running()
 
 
 def ensure_launcher():
