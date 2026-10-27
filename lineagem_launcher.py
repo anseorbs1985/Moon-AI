@@ -295,6 +295,7 @@ def key_of_didx(didx):
 PRE2_WAIT          = 10.0
 FIX_SLOW_MULT      = 2.2       # 2회차 간격·창 올리는 틈 배수
 CHECK_TRIES_SLOW   = 8         # 2회차 👁 '무료' 확인 횟수 (1회차는 CHECK_TRIES=4)
+FIX_ESC_TRIES      = 2         # 복구 전 열린 창을 ESC 로 닫아보는 횟수
 # 🔍 복구를 누르기 전 **십자가를 몇 번 보나** (2026-10-11 사용자 신고:
 #    "복구에 실패하는 게 너무 많아, 꼼꼼히 잘 좀 보고 해줘").
 #    십자가 점수는 기준(0.55) 바로 옆에서 흔들린다 — 실측 있을 때 0.57~0.85 ·
@@ -1643,6 +1644,13 @@ AWAKEN_WATCH_MS = 500   # 각성 창이 떠 있을 때만 — 이 주기로 그 
 # 🚫 이보다 더 줄이지 말 것 — 캡처가 146ms 라 300ms 면 절반을 캡처에 쓴다.
 P0_HOME_WAIT = (3.5, 5.5)        # 귀환이 끝날 때까지 (마을에 도착)
 P0_HOME_GAP  = (1.5, 3.0)        # 클라 사이
+# 🧭 깨운 뒤 장소를 다시 볼 때 — **화면이 그려질 때까지 기다렸다 여러 번** 본다.
+#    2026-10-27 실측: 자는 화면 에카 1.00 → 깨운 0.9초 뒤 전부 0.42~0.46(안 그려짐)
+#    → 정상 건이 거부됐다. 🚫 이 기다림·횟수를 줄이지 말 것.
+P0_RECHECK_WAIT  = (1.3, 1.9)    # 깨운 뒤 첫 확인까지
+P0_RECHECK_GAP   = (0.6, 1.0)    # 다시 볼 때 간격
+P0_RECHECK_TRIES = 4             # 보일 때까지 몇 번
+
 P0_RUN_WAIT  = 600               # 한 슬롯 실행을 최대 이만큼 기다린다 (초)
 
 # ── 📬 우편 자동 받기 (2026-10-20 사용자 요청) ─────────────────────────
@@ -16152,21 +16160,45 @@ class App(tk.Tk):
             if key and keys:
                 try:
                     import lineagem_island as _isl
-                    time.sleep(random.uniform(0.5, 0.9))
-                    _sv = _isl.place_scores(list(keys), anc)
-                    _r = sorted(_sv.items(), key=lambda kv: -kv[1]) if _sv else []
-                    _t2 = (_r[0][1] / _r[1][1]) if (len(_r) > 1 and _r[1][1] > 0) else 99.0
-                    _txt = " ".join(f"{k.split('_')[-1]}:{v:.2f}" for k, v in _r)
-                    _bad = (not _r or _r[0][0] != key
-                            or _r[0][1] < P0_PLACE_MATCH
-                            or _t2 < P0_PLACE_RATIO)
-                    if _bad:
-                        click_log(f"[물약감시] 🧭 #{si+1:02d} 깨우고 다시 보니 "
-                                  f"**{key} 가 아니다** ({_txt}) "
-                                  f"→ 엉뚱한 던전을 돌리느니 **돌리지 않는다**")
+                    time.sleep(random.uniform(*P0_RECHECK_WAIT))
+                    _res, _txt = None, ""
+                    for _t in range(P0_RECHECK_TRIES):
+                        if _t:
+                            time.sleep(random.uniform(*P0_RECHECK_GAP))
+                        _sv = _isl.place_scores(list(keys), anc)
+                        _r = sorted(_sv.items(), key=lambda kv: -kv[1]) if _sv else []
+                        if not _r:
+                            continue
+                        _t2 = (_r[0][1] / _r[1][1]) if (len(_r) > 1 and _r[1][1] > 0) else 99.0
+                        _txt = " ".join(f"{k.split('_')[-1]}:{v:.2f}" for k, v in _r)
+                        # ✔ 그 던전이 또렷하면 바로 통과
+                        if (_r[0][0] == key and _r[0][1] >= P0_PLACE_MATCH
+                                and _t2 >= P0_PLACE_RATIO):
+                            _res = True
+                            click_log(f"[물약감시] 🧭 #{si+1:02d} 깨우고 확인 ✔ "
+                                      f"{key} ({_r[0][1]:.2f} · {_t2:.2f}배"
+                                      f"{'' if _t == 0 else f' · {_t+1}번째'})")
+                            break
+                        # 🚫 **다른 던전이 또렷하면** 그 자리에서 거부 (원래 목적)
+                        if (_r[0][0] != key and _r[0][1] >= P0_PLACE_MATCH
+                                and _t2 >= P0_PLACE_RATIO):
+                            _res = False
+                            click_log(f"[물약감시] 🧭 #{si+1:02d} 깨우고 다시 보니 "
+                                      f"**{key} 가 아니라 {_r[0][0]} 다** ({_txt}) "
+                                      f"→ 엉뚱한 던전을 돌리느니 **돌리지 않는다**")
+                            break
+                        # 그 밖 = **아직 안 그려졌다** → 한 번 더 본다
+                    if _res is False:
                         return False
-                    click_log(f"[물약감시] 🧭 #{si+1:02d} 깨우고 확인 ✔ "
-                              f"{key} ({_r[0][1]:.2f} · {_t2:.2f}배)")
+                    if _res is None:
+                        # 🧭 끝내 아무것도 또렷하지 않다 = **장소를 못 읽은 것**이지
+                        #    '다른 던전' 이 아니다. 첫 판정(자는 화면)이 또렷했으므로
+                        #    그것을 믿고 진행한다. 2026-10-27 실측: 자는 화면 1.00 →
+                        #    깨운 직후 0.42~0.46 (HUD 가 아직 안 그려짐).
+                        #    🚫 여기서 거부하면 정상 건이 통째로 죽는다 (10-24~10-26).
+                        click_log(f"[물약감시] 🧭 #{si+1:02d} 깨운 뒤 "
+                                  f"{P0_RECHECK_TRIES}번 봐도 장소가 흐리다 ({_txt}) "
+                                  f"— **첫 판정({key})을 믿고 진행한다**")
                 except Exception as _e:
                     click_log(f"[물약감시] 🧭 #{si+1:02d} 다시 보기 오류: {_e} "
                               f"— 돌리지 않는다")
@@ -16207,6 +16239,9 @@ class App(tk.Tk):
                     break
                 anc = ancs.get(si)
                 if not anc:
+                    # 🗒 조용히 건너뛰지 않는다 — 기록이 없으면 원격에서 못 짚는다
+                    click_log(f"[물약감시] 🏠 #{si+1:02d} 기준좌표가 없어 "
+                              f"귀환하지 못했다 (그 던전 슬롯에 좌표가 없다)")
                     continue
                 if self._p0_go_home(si, anc, key=key, keys=_allk):
                     ok.append((si, key, didx, v, pv))
@@ -17059,6 +17094,35 @@ class App(tk.Tk):
                     _woke = self._wake_until(_anc, si, tag="fix")
         except Exception:
             pass
+        # ── ①-2 열려 있는 창은 **ESC 로 닫는다** (2026-10-27 사용자 요청) ──
+        # 사용자: "화면에 다른 화면이 떠 있으면 ESC 를 누르고 십자가를 눌러
+        #          다시 실행시켜줘."
+        # 인벤토리·상점이 열려 있으면 십자가를 **가려서** 못 찾고, 찾아도
+        # 그 자리 클릭을 창이 먹는다 — 복구 실패의 큰 몫이다.
+        # ⚠ **깨운 뒤**에 본다 — 절전 화면 위에서는 아무것도 못 읽는다
+        #    (2026-10-17 섬 실행기에서 같은 함정을 밟았다).
+        # 🚫 등록 그림(`click_templates/esc_*.png`)이 **보일 때만** 누른다 —
+        #    무조건 ESC 를 누르면 시스템 메뉴가 열린다.
+        try:
+            import lineagem_island as _isl0
+            _ea = slot_anchor((self.cfg.get("fix_slots") or [])[idx])
+            if _ea and _isl0.esc_list():
+                for _et in range(FIX_ESC_TRIES):
+                    _op, _es, _ew = _isl0.esc_win_open(_ea)
+                    if not _op:
+                        break
+                    click_log(f"fix #{si:02d} 창이 열려 있다 "
+                              f"({_ew.replace('.png','')} {_es:.2f}) → ESC 로 "
+                              f"닫는다 ({_et+1}/{FIX_ESC_TRIES})")
+                    self.status.set(f"🚪 복구 #{si:02d} — 열린 창을 ESC 로 닫는 중…")
+                    self._focus_client_at(_ea)
+                    time.sleep(random.uniform(0.12, 0.22))
+                    press_esc(1)
+                    time.sleep(random.uniform(0.30, 0.55))
+                else:
+                    click_log(f"fix #{si:02d} ⚠ 창이 안 닫혔다 — 그래도 진행한다")
+        except Exception as _ee:
+            click_log(f"fix #{si:02d} ESC 닫기 건너뜀: {_ee}")
         # ── ② 깨운 뒤에 십자가가 있는지 확인한다 ──
         # **깨어 있는 화면에서 십자가가 없으면 = 이미 복구된 것 → 목록에서 지운다.**
         # (2026-09-30 사용자 지시: "복구해서 십자가가 없어졌으면 알아서 지워야지,
@@ -27511,8 +27575,12 @@ class App(tk.Tk):
         마을 그림이 없으면 아무 일도 하지 않는다 (등록 안 한 컴퓨터는 그대로).
         ⏰ 2시간 예약은 건드리지 않는다 — 빈 시간을 메울 뿐이다."""
         import lineagem_island as _isl
-        key = IDLE_RERUN_KEY
+        key = IDLE_RERUN_KEY          # 이 함수가 보는 던전 (악몽의섬)
         now = time.time()
+        # 🧭 **그 캐릭이 실제로 어느 던전에서 나왔는지** — 물약 0개를 본 그때
+        #    물약감시가 겨뤄서 적어둔 것. 마을에서는 장소 이름이 마을이라
+        #    던전을 알 길이 없어, 이 기록이 없으면 돌리지 않는다.
+        _seen_key = getattr(self, "_p0_seen_key", None) or {}
         seen = getattr(self, "_idle_since", None)
         if seen is None:
             seen = self._idle_since = {}
@@ -27574,6 +27642,15 @@ class App(tk.Tk):
                 getattr(self, "_idle_need", {}).pop(si, None)
                 continue
             t0 = seen.setdefault(si, now)
+            # 🧭 **그 캐릭이 돌던 던전** — 모르면 돌리지 않는다.
+            #    사용자 지시(2026-10-17)대로 대상은 악몽의섬뿐이다. 다른 던전에서
+            #    나온 캐릭을 악몽의섬으로 보내는 것이 10-27 신고의 원인이었다.
+            _from = _seen_key.get(si)
+            if _from != key:
+                _note.append(f"#{si+1:02d} 마을 — "
+                             + (f"{_from} 에서 나왔다 → {key} 만 다시 돌린다"
+                                if _from else "어느 던전이었는지 몰라 안 돌린다"))
+                continue
             _ver = "라스타바드" if (slot.get("rasta") or {}) else "악몽의섬"
             _mins = (now - t0) / 60.0
             # 🧪 **물약이 없어서 나온 것인가** — 아니면(= 죽은 것) 그냥 둔다.
@@ -27764,6 +27841,14 @@ class App(tk.Tk):
                               f"→ 엉뚱한 던전을 돌리느니 **안 돌린다**")
                     continue
                 _didx = dict((k, d) for d, k in keys)[_top]
+                # 🧭 **이 캐릭이 어느 던전에서 물약이 떨어졌는지** 적어둔다.
+                #    마을감시는 마을 이름만 보이므로 던전을 알 길이 없다 —
+                #    예전에는 IDLE_RERUN_KEY(악몽의섬) 고정이라 **에카에서 나온
+                #    캐릭도 악몽의섬으로 보냈다** (2026-10-27 사용자 신고).
+                _sk = getattr(self, "_p0_seen_key", None)
+                if _sk is None:
+                    _sk = self._p0_seen_key = {}
+                _sk[si] = _top
                 # 🚦 **고른 던전에서 그 슬롯이 실제로 돌 수 있나** (2026-10-16).
                 #    기준좌표는 '아무 던전' 에서 모으므로, 잊혀진섬 #03 이 ON 이면
                 #    `ancs[3]` 이 생긴다. 그 캐릭이 에스카로스에 있으면 에카를 고르는데
