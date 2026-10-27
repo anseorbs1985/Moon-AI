@@ -751,6 +751,18 @@ BADGE_CLICKS  = 11   # 10 → 11 (2026-10-27 사용자: "좌표 하나만 더 11
 #    · 좌표를 안 찍어도 된다 — 그 슬롯의 **첫 등록 좌표**로 창을 앞으로 올린 뒤 누른다.
 #    · 그래서 이 칸은 `order` 에 **강제로 들어간다** (빈 칸이라고 건너뛰지 않는다).
 ESC_CELLS = {"badge": BADGE_CLICKS - 1}
+# 🌊 휘장 제작!! — **동시 2슬롯 번갈아(웨이브)** (2026-10-27 사용자 요청)
+#    *"슬롯별로 웨이브 2개씩만 주고 **한 개 완성하면 다른 거 한 개 바로 랜덤으로**
+#      들어가주고. 사람이 하는 것처럼 좀 **빠르면서**, **부하가 많이 걸려서 팅겨서는
+#      안 되고**, 각 슬롯별·좌표별 랜덤을 주고."*
+#    웨이브가 이미 전부 해준다 — 슬롯마다 자기 속도(tempo 0.82~1.28) · 출발 흩기
+#    (0.7~2.3초) · `random.choice` 로 랜덤 투입 · `EARLY_IN` 으로 끝나기 전에 다음
+#    슬롯 미리 넣기 · 창 전환 쉼(SWITCH_PAUSE)으로 팅김 방지.
+#    ⚠ **창 전환 쉼은 줄이지 말 것** — 비활성 창의 첫 클릭은 '창 띄우기' 로만
+#      먹히고 사라진다 (2026-08-24). 빠르게 하려면 `BADGE_GAP` 만 줄인다.
+BADGE_LANES    = 2
+BADGE_GAP      = (0.8, 1.6)   # 좌표 사이 (여기에 슬롯별 tempo 가 또 곱해진다)
+BADGE_SLOT_GAP = (0.8, 2.0)   # 다음 슬롯을 들여보내기까지
 # ⚠ 아래 표는 이름이 SLOW_ 지만 **'빈 칸으로 슬롯을 만든다'** 는 뜻이다
 #   (느린 간격은 SLOW_FKEYS 가 정한다 — 둘을 헷갈리지 말 것).
 SLOW_CLICKS_BY = {"magic_slots": MAGIC_CLICKS, "omanst_slots": OMANST_CLICKS,
@@ -14747,6 +14759,11 @@ class App(tk.Tk):
                     and slot_cell_todo(fkey, st["slot"], j,
                                        slot_last_reg(st["slot"], nclk))):
                 _cd = _anc                        # 그림만 지정한 자리 — 창은 이 좌표로 찾는다
+            # ⎋ ESC 칸은 좌표가 없어도 **반드시** 돈다 — 창은 슬롯 첫 좌표로 찾는다.
+            #   ⚠ 순차 경로(`order` 강제 포함)와 **짝**이다. 한쪽만 고치면
+            #     '개별은 되는데 전체는 안 된다' 가 또 생긴다 (이 저장소의 단골 사고).
+            if _cd is None and ESC_CELLS.get(fkey) == j and _anc:
+                _cd = _anc
             if _cd is None:
                 st["due"] = time.time()          # 빈 자리는 기다리지 않고 통과
                 continue
@@ -14909,6 +14926,16 @@ class App(tk.Tk):
                 self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=3,
                                     gap=JAKWI_GAP_CLICK, slot_gap=JAKWI_SLOT_GAP,
                                     keep_order=True)
+                return
+            if fkey == "badge" and slot_idx is None and len(targets) > 1:
+                # 🎖 휘장 제작!! — 동시 2슬롯 번갈아, 순서 랜덤, 하나 끝나기 전에
+                #    다음 슬롯을 미리 들여보낸다(EARLY_IN). 간격은 슬롯·좌표마다 랜덤.
+                self.status.set(f"🎖 휘장 제작!! — {len(targets)}슬롯 · "
+                                f"동시 {BADGE_LANES}슬롯 번갈아 · 순서 랜덤 "
+                                f"(좌표 {BADGE_GAP[0]:.1f}~{BADGE_GAP[1]:.1f}초)")
+                self._run_dgn2_wave(fkey, targets, nclk, icon, stop,
+                                    lanes=BADGE_LANES, gap=BADGE_GAP,
+                                    slot_gap=BADGE_SLOT_GAP)
                 return
             if fkey == "circus" and slot_idx is None and len(targets) > 1:
                 # 서커스 이벤트등록: 동시 2슬롯, 간격·슬롯투입 모두 10~20% 할증
