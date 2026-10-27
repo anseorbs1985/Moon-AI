@@ -751,6 +751,12 @@ BADGE_CLICKS  = 11   # 10 → 11 (2026-10-27 사용자: "좌표 하나만 더 11
 #    · 좌표를 안 찍어도 된다 — 그 슬롯의 **첫 등록 좌표**로 창을 앞으로 올린 뒤 누른다.
 #    · 그래서 이 칸은 `order` 에 **강제로 들어간다** (빈 칸이라고 건너뛰지 않는다).
 ESC_CELLS = {"badge": BADGE_CLICKS - 1}
+# ⎋ **몇 번 누르나** — 2026-10-28 사용자: *"확인 누르고 **ESC를 두 번** 눌러야 해."*
+#    실측으로 확인했다 — 제작 결과창의 [확인] 을 누르면 메뉴 패널이 남고,
+#    **ESC 1번으로는 안 닫히고 2번째에 닫혔다.**
+#    ⚠ 다 닫힌 뒤의 ESC 는 "게임을 종료 하시겠습니까?" 를 띄우지만,
+#      **다음 ESC 가 그 창을 닫으므로**(ESC = 취소) 2번은 안전하다.
+ESC_CELL_TIMES = {"badge": 2}
 # 🌊 휘장 제작!! — **동시 2슬롯 번갈아(웨이브)** (2026-10-27 사용자 요청)
 #    *"슬롯별로 웨이브 2개씩만 주고 **한 개 완성하면 다른 거 한 개 바로 랜덤으로**
 #      들어가주고. 사람이 하는 것처럼 좀 **빠르면서**, **부하가 많이 걸려서 팅겨서는
@@ -762,7 +768,8 @@ ESC_CELLS = {"badge": BADGE_CLICKS - 1}
 #      먹히고 사라진다 (2026-08-24). 빠르게 하려면 `BADGE_GAP` 만 줄인다.
 BADGE_LANES    = 2
 BADGE_GAP      = (0.8, 1.6)   # 좌표 사이 (여기에 슬롯별 tempo 가 또 곱해진다)
-BADGE_SLOT_GAP = (0.8, 2.0)   # 다음 슬롯을 들여보내기까지
+BADGE_SLOT_GAP = (1.0, 6.0)   # 다음 슬롯을 들여보내기까지 — 2026-10-28 사용자:
+                              #  "슬롯별로 시간을 좀 더 줘 1~6초 사이로"
 # ⚠ 아래 표는 이름이 SLOW_ 지만 **'빈 칸으로 슬롯을 만든다'** 는 뜻이다
 #   (느린 간격은 SLOW_FKEYS 가 정한다 — 둘을 헷갈리지 말 것).
 SLOW_CLICKS_BY = {"magic_slots": MAGIC_CLICKS, "omanst_slots": OMANST_CLICKS,
@@ -14145,8 +14152,9 @@ class App(tk.Tk):
             if _ea:
                 self._focus_client_at(_ea)
                 time.sleep(random.uniform(0.20, 0.38))
-            press_esc(1)
-            click_log(f"{fkey} [{_en}] 좌표{j+1} ⎋ ESC 를 눌렀다")
+            _et = ESC_CELL_TIMES.get(fkey, 1)
+            press_esc(_et)
+            click_log(f"{fkey} [{_en}] 좌표{j+1} ⎋ ESC 를 {_et}번 눌렀다")
             self.status.set(f"⎋ [{_en}] 좌표{j+1} — ESC")
             return "ESC"
         if j in HOVER_INDICES.get(fkey, ()):
