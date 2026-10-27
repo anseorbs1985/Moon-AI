@@ -27527,6 +27527,23 @@ class App(tk.Tk):
             root = ctypes.windll.user32.GetAncestor(h, 2) or h   # GA_ROOT
             title = win32gui.GetWindowText(root) or ""
             cls = win32gui.GetClassName(root) or ""
+            # 🟣 **그 창을 만든 프로그램**을 본다 — 제목이 없는 창도 가린다.
+            #    구글 계정 목록은 **제목 없는 WPF 팝업**(HwndWrapper[Purple.exe;;…])
+            #    이라 제목으로는 절대 못 알아본다 (2026-10-28 실측으로 확인).
+            exe = ""
+            try:
+                import win32process
+                _t, _pid = win32process.GetWindowThreadProcessId(root)
+                _k = ctypes.windll.kernel32
+                _hp = _k.OpenProcess(0x1000, False, int(_pid))   # QUERY_LIMITED_INFORMATION
+                if _hp:
+                    _b = ctypes.create_unicode_buffer(1024)
+                    _n = ctypes.c_ulong(1024)
+                    if _k.QueryFullProcessImageNameW(_hp, 0, _b, ctypes.byref(_n)):
+                        exe = (_b.value or "").split("\\")[-1].lower()
+                    _k.CloseHandle(_hp)
+            except Exception:
+                exe = ""
         except Exception:
             return True, "확인 못 함"          # 모르면 막지 않는다 (옛 동작)
         low = title.lower()
@@ -27535,9 +27552,19 @@ class App(tk.Tk):
         # ⚠ 퍼플 상단바는 **제목이 `ngptop`** 이고 클래스는 `GLFW30` 이다
         #   (실측 2026-10-21 — 처음에 거꾸로 봐서 프로필 자리를 막았다).
         #   옆 패널은 제목 `index.html?type=live` · 클래스 `CEFCLIENT`.
+        clow = cls.lower()
+        # 🟣 **프로그램이 퍼플·리니지M 이면 통과** — 가장 확실하다.
+        #    제목이 비어도, 클래스가 처음 보는 것이어도 그 프로그램의 창이면 맞다.
+        #    🚫 그래도 느슨해지지 않는다 — Claude(chrome.exe)·바탕화면(explorer.exe)
+        #       은 그대로 막힌다. 2026-10-28 사용자 신고의 직접 원인이 이것이었다:
+        #       구글 계정 목록 = [제목없음] HwndWrapper[Purple.exe;;…] 를 막아
+        #       **접속이 거기서 매번 끊겼다.**
+        if exe and ("purple" in exe or "lineagem" in exe or "ngp" in exe):
+            return True, f"[{title or cls}] ({exe})"
         if ("purple" in low or "퍼플" in title
                 or title.startswith("리니지")
                 or "ngptop" in low or "index.html" in low
+                or "purple" in clow                      # HwndWrapper[Purple.exe;;…]
                 or cls in ("ngptop", "CEFCLIENT")):
             return True, f"[{title or cls}]"
         return False, f"[{title or '제목없음'}] 클래스 {cls}"
