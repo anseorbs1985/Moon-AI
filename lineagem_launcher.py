@@ -27126,6 +27126,67 @@ class App(tk.Tk):
                         f"(최고 {best:.2f}) · 엉뚱한 곳을 누르지 않았습니다")
         return None
 
+    def _purple_unmin(self, tag=""):
+        """🟣 **최소화된 퍼플만 풀어준다** → 되살렸으면 True (2026-10-27).
+
+        접속 좌표는 **퍼플 창의 절대좌표**다. 퍼플이 최소화되면 그 창이
+        `-32000,-32000` 으로 가버려서 **좌표 자리에는 다른 창만 남는다** →
+        10-21 관문이 "퍼플도 리니지M도 아니다" 로 **전부 막는다.**
+        사용자가 본 *"퍼플전환을 안 해준다, 클릭을 안 해"* 가 바로 이것이다.
+
+        실측 2026-10-27 (퍼플 최소화 상태에서 접속 좌표 자리):
+            리니지M (753,505) → [Claude]            게임실행 → [Claude]
+            멀티플레이       → [Program Manager]     확인     → [Claude]
+
+        ⚠ **최소화만 푼다**(`SW_RESTORE`=9). 크기·위치는 건드리지 않는다 —
+          좌표가 지금 창 크기 기준이라 `maximize()` 를 하면 전부 어긋난다
+          (`_maximize_purple` 은 4시 퍼플확인 전용 · 접속에서 쓰지 말 것).
+        ⚠ 2026-10-14 에 걷어낸 `_purple_front`(누르기 **전마다** 앞으로 올리기)와
+          다르다 — 이건 **접속 시작에 한 번**, 그리고 **최소화일 때만** 이다.
+          클로드는 이것을 '누를 때마다' 로 늘리지 말 것 (그래서 한 번 망쳤다).
+        ⚠ 전환 동작(프로필→구글계정→확인)은 **넣지 않는다** — 2026-10-27 에
+          사용자가 "퍼플만 띄우면 된다" 를 골랐다."""
+        try:
+            import win32gui
+            hits = []
+
+            def _cb(h, _):
+                try:
+                    t = win32gui.GetWindowText(h) or ""
+                except Exception:
+                    return True
+                if "purple" in t.lower() or "퍼플" in t:
+                    hits.append((h, t))
+                return True
+
+            win32gui.EnumWindows(_cb, None)
+            woke = []
+            for h, t in hits:
+                try:
+                    if win32gui.IsIconic(h):
+                        win32gui.ShowWindow(h, 9)      # SW_RESTORE
+                        woke.append(t or "제목없음")
+                except Exception:
+                    pass
+            if woke:
+                click_log(f"[접속] {tag} 🟣 최소화돼 있던 퍼플을 되살렸다 "
+                          f"{woke} — 크기는 건드리지 않았다")
+                time.sleep(random.uniform(1.0, 1.6))   # 좌표가 제자리로 돌아올 틈
+                try:
+                    still = [t for h, t in hits if win32gui.IsIconic(h)]
+                except Exception:
+                    still = []
+                if still:
+                    click_log(f"[접속] ⚠ 아직 최소화 상태 {still} — "
+                              f"관문이 막을 수 있습니다 (퍼플을 직접 띄워주세요)")
+                return True
+            if not hits:
+                click_log(f"[접속] ⚠ {tag} 퍼플 창을 못 찾았다 — "
+                          f"퍼플이 꺼져 있으면 접속 클릭은 전부 막힙니다")
+        except Exception as e:
+            click_log(f"[접속] ⚠ 퍼플 최소화 확인 실패 {e!r}")
+        return False
+
     def _login_spot_ok(self, x, y, what=""):
         """🚫🚫 **그 자리가 퍼플·리니지M 이 아니면 누르지 않는다** → (허용?, 무엇)
 
@@ -28521,6 +28582,11 @@ class App(tk.Tk):
             if not self._wait(1): self.status.set("멈춤"); return
 
             # ── 현재 퍼플 아이디 그대로 접속 ────────────────────────────────
+            # 🟣 **최소화된 퍼플을 먼저 되살린다** (2026-10-27 사용자 선택).
+            #    최소화돼 있으면 창이 -32000 으로 가서 접속 좌표 자리에
+            #    Claude·바탕화면만 남고 관문이 전부 막는다 = '클릭을 안 해'.
+            #    크기는 안 바꾼다 — 좌표가 지금 창 크기 기준이라 어긋난다.
+            self._purple_unmin("[접속 시작]")
             try: win.activate()
             except: pass
             if not self._wait(1): self.status.set("멈춤"); return
