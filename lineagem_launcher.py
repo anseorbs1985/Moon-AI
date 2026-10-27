@@ -667,6 +667,60 @@ DOLL_LEAD_MIN  = 0.5   # 슬롯의 '첫 클릭 전' 여유(바로 클릭하지 �
 DOLL_LEAD_MAX  = 1.0
 DOLL_SLOT_MIN  = 2.0   # 슬롯 간 간격(초) — 2~4초 랜덤
 DOLL_SLOT_MAX  = 4.0
+
+# 🚩 **완성된 것만 받는다** (2026-10-27 사용자 요청)
+#    "밝은 거 완성된 걸 확인해서 한 개 완성됐으면 하나만 하고 나오고, 두 개면 두 개,
+#     세 개면 세 개. 전체적으로 눌렀을 때 **없는 것들은 알아서 패스**했으면."
+#
+#    화면 아래 원형 3개(변신·인형·성물) **아래 깃발**이 '받을 것이 있다' 는 표시다.
+#    ⚠ 원형 자체의 밝기로 보면 안 된다 — 실측(2026-10-27): 보상을 다 받은 뒤에도
+#      원형 밝기는 216~224 로 그대로였고, **깃발만 사라졌다.**
+#      (원형 밝기는 '0/5 인가 아닌가' 를 뜻한다)
+#    📏 실측 16클라: 받을 것 있음 **35~74** · 없음 **0**  → 중간값이 아예 없다
+DOLL_FLAG_RX  = (0.415, 0.500, 0.581)   # 변신·인형·성물 원 가운데 x (창 대비)
+DOLL_FLAG_RY  = 0.9317                  # 깃발 줄 y (창 대비)
+DOLL_FLAG_MIN = 12                      # 밝은 픽셀 이 개수를 넘으면 '받을 것 있음'
+DOLL_FLAG_LV  = 90                      # 밝다고 볼 밝기
+# 🚫 **창이 열려 있으면 하단 HUD 가 가려져 깃발을 못 읽는다** (2026-10-27 실측).
+#    인벤토리가 덮인 #09 를 재니 0·0·37 → **159·94·52** 로 치솟아 '있다' 고 오판했다.
+#    그래서 **원형 3개의 밝기가 정상 범위인지** 먼저 본다 —
+#    실측: 꺼짐 124~130 · 켜짐 216~225 · **가려짐 56**.
+#    범위를 벗어나면 '못 읽음' 으로 보고 **예전처럼 전부 누른다**(막지 않는다).
+DOLL_RING_RY  = 0.8561                  # 원형 3개 가운데 y (창 대비)
+#    ⚠ **원형 3개는 '절전모드' 화면에만 뜬다** (2026-10-27 실측) — 깨어 있는
+#      클라는 그 자리가 게임 화면이라 읽을 수 없다. 그래서 밝기가 아래 두 구간
+#      중 하나에 **정확히** 들어야 '제대로 보고 있다' 고 본다.
+#      실측: 꺼짐 124~130 · 켜짐 216~225 · 가려짐 56 · 게임 화면 102·181·206
+DOLL_RING_OFF = (112, 145)              # 원형 '꺼짐'(0/5) 밝기 구간
+DOLL_RING_ON  = (200, 240)              # 원형 '켜짐' 밝기 구간
+DOLL_SEE_TRIES = 3                      # 가려져 있으면 몇 번 더 보나
+DOLL_SEE_GAP   = (0.4, 0.7)             # 다시 볼 때 간격
+DOLL_NAMES    = ("변신", "인형", "성물")  # 원형 왼쪽부터
+# 좌표 17칸 구조 — 2026-10-27 에 #09 를 **실제로 눌러보며** 확인했다:
+#   칸1              하단 '인형' 버튼 → 마법인형 탐험 창
+#   칸2~5  / 칸6     인형 처리 / '성령 수집 바로가기' → 성물 창
+#   칸7~10 / 칸11    성물 처리 / '용병 파견 바로가기' → 변신 창
+#   칸12~15 / 칸16   변신 처리 / 창 닫기 ✕
+#   칸17             마무리
+#
+# 🚫 **'바로가기' 로 빈 창을 거치지 않는다** (2026-10-27 사용자 지시):
+#    *"작업이 안 된 거는 안 돼. 다른 거 클릭하고 나올 때도 제대로 못 나오고
+#      너무 오토 같잖아. **딱 완성된 것들만** 해줬으면. 옆으로 넘어가는 것들도
+#      완성된 것들만 하고 나왔으면."*
+#    → 완성된 카테고리마다 **하단 버튼으로 그 창을 직접 열고 → 처리 → 닫고 나온다.**
+#      받을 것이 없는 창은 **아예 들르지 않는다.**
+#    하단 버튼 자리는 **칸1(인형) 을 기준으로 x 만 옮겨** 계산한다 —
+#    사용자가 찍은 좌표가 기준이라 창이 조금 달라도 맞는다
+#    (검증: 칸1 (246,235) ↔ 계산값 (247,238) · 오차 3px).
+DOLL_WORK  = 4    # 한 묶음에서 '처리' 칸 수 (재발행 → 획득 → …)
+DOLL_MOVE  = 1    # 그 뒤 '이동/닫기' 칸 수
+DOLL_STEP  = DOLL_WORK + DOLL_MOVE                 # 한 묶음 = 5칸
+# 칸 수에서 묶음 수를 역산한다 — 17칸이면 3묶음, 12칸이면 2묶음.
+#   (사용자가 '인형,성물!!'(12칸)·'전부다!!'(17칸) 를 섞어 만들어 두었다.
+#    이제 **몇 칸이든 상관없다** — 완성된 것만 골라 누르므로.)
+def doll_groups(n):
+    """등록 좌표 수 → 묶음 수 (안 맞으면 0)"""
+    return (n - 2) // DOLL_STEP if n >= 2 + DOLL_STEP and (n - 2) % DOLL_STEP == 0 else 0
 # 씹힘 방지용 추가 좌표간 간격 (사냥·전체실행·인형탐험 제외 전 기능)
 # 2026-08-05: 너무 빠른 느낌이라 전체 10~20% 완화 (0.9~1.6 → 0.99~1.92)
 # ── 🔮 마력의기운 제작! · 🗝 오만 지배석 획득! (2026-10-06 사용자 요청) ──────
@@ -23784,6 +23838,91 @@ class App(tk.Tk):
         self._minimize_all()
         threading.Thread(target=self._run_task, args=("인형탐험", self._run_doll_standalone), daemon=True).start()
 
+    def _doll_flags(self, anc):
+        """🚩 그 클라의 **변신·인형·성물** 중 '받을 것이 있는' 것을 읽는다.
+
+        원 아래 **깃발 줄**의 밝은 픽셀 수로 본다 (실측 있음 35~74 · 없음 0).
+        🚫 원형 자체의 밝기로 보지 말 것 — 보상을 받은 뒤에도 그대로다.
+        창을 **직접 캡처**하므로(PrintWindow) 가려져 있어도 정확하고,
+        절전 화면에서도 하단 HUD 는 보인다 (실측 확인).
+        못 읽으면 None — 그때는 **막지 않고 예전처럼 전부 누른다.**"""
+        try:
+            import cv2, numpy as np
+            img = grab_window(anc)
+            if img is None:
+                return None
+            H, W = img.shape[:2]
+            gr = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            # ① 화면이 가려지지 않았는지 — 원형 3개 밝기로 본다
+            ry = int(DOLL_RING_RY * H)
+            for k in range(3):
+                cx = int(DOLL_FLAG_RX[k] * W)
+                v = float(np.percentile(gr[max(0, ry - 11):ry + 11,
+                                           max(0, cx - 11):cx + 11], 95))
+                if not (DOLL_RING_OFF[0] <= v <= DOLL_RING_OFF[1]
+                        or DOLL_RING_ON[0] <= v <= DOLL_RING_ON[1]):
+                    return None   # 창이 덮였거나 깨어 있다 → 읽지 않는다
+            # ② 깃발 줄
+            cy = int(DOLL_FLAG_RY * H)
+            out = {}
+            for k, nm in enumerate(DOLL_NAMES):
+                cx = int(DOLL_FLAG_RX[k] * W)
+                box = gr[max(0, cy - 7):cy + 7, max(0, cx - 16):cx + 20]
+                out[nm] = (int((box > DOLL_FLAG_LV).sum()) >= DOLL_FLAG_MIN)
+            return out, W
+        except Exception:
+            return None
+
+    def _doll_pick(self, active):
+        """🚩 **완성된 개수만큼만** 누르도록 슬롯의 좌표를 골라낸다.
+
+        원본 설정(`doll_slots`)은 **건드리지 않는다** — 쓸 칸만 추린 사본을 넘긴다.
+        그래서 웨이브(여러 슬롯)·순차(한 슬롯) **양쪽에 그대로 적용**된다.
+        좌표가 17칸이 아니면 예전처럼 전부 누른다 (안 쓰는 컴퓨터는 그대로)."""
+        out, note = [], []
+        for i, h in active:
+            reg = [c for c in h.get("coords", []) if c]
+            if not reg:
+                continue
+            ng = doll_groups(len(reg))
+            if not ng:
+                out.append((i, h)); note.append(f"#{i+1:02d} {len(reg)}칸(모르는 구조→그대로)")
+                continue
+            got = None
+            for _t in range(DOLL_SEE_TRIES):
+                if _t:
+                    time.sleep(random.uniform(*DOLL_SEE_GAP))
+                got = self._doll_flags(reg[0])
+                if got is not None:
+                    break
+            if got is None:
+                out.append((i, h))
+                note.append(f"#{i+1:02d} 창이 덮여 못읽음({DOLL_SEE_TRIES}번)→그대로")
+                continue
+            fl, W = got
+            got = [c for c in DOLL_NAMES if fl.get(c)]
+            if not got:
+                note.append(f"#{i+1:02d} 0개→건너뜀")
+                continue
+            # 🚩 완성된 것만 — 그 창을 **직접 열고 처리하고 닫는다**
+            work = reg[1:1 + DOLL_WORK]              # 재발행 → 획득 → … (창마다 같은 자리)
+            shut = reg[1 + (ng - 1) * DOLL_STEP + DOLL_WORK]   # 마지막 묶음의 끝 = 닫기 ✕
+            ax, ay = reg[0]                  # 칸1 = 하단 '인형' 버튼
+            use = []
+            for cat in got:
+                k = DOLL_NAMES.index(cat)
+                dx = int(round((DOLL_FLAG_RX[k] - DOLL_FLAG_RX[1]) * W))
+                use.append((ax + dx, ay))    # 하단 그 카테고리 버튼
+                use += work
+                use.append(shut)             # 닫고 나온다
+            use.append(reg[-1])              # 마무리
+            h2 = dict(h); h2["coords"] = use
+            out.append((i, h2))
+            note.append(f"#{i+1:02d} {len(got)}개({'·'.join(got)}) "
+                        f"{len(reg)}칸→{len(use)}칸")
+        click_log("[인형탐험] 🚩 완성 확인 — " + " | ".join(note))
+        return out
+
     def _run_doll_standalone(self):
         self._run_doll()
         self._set_btn("btn_doll_run", state="normal", bg="#b9770e", text="▶  인형탐험 실행")
@@ -23852,6 +23991,11 @@ class App(tk.Tk):
             slots = list(enumerate(self.cfg.get("doll_slots", [])))
             active = [(i, h) for i, h in slots
                       if h.get("enabled", True) and any(c for c in h.get("coords", []))]
+            # 🚩 **완성된 것만** — 없는 슬롯은 알아서 건너뛴다 (2026-10-27)
+            active = self._doll_pick(active)
+            if not active:
+                self.status.set("🧸 인형탐험 — 받을 것이 있는 슬롯이 없습니다")
+                return
             random.shuffle(active)   # 슬롯 실행 순서 매번 랜덤
             if len(active) > 1:
                 # (2026-08-10) 3슬롯씩 번갈아(웨이브) — 마우스는 하나뿐이라
