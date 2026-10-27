@@ -27593,12 +27593,24 @@ class App(tk.Tk):
             except Exception:
                 pass
             return False
+        # 🗒 **누른 것을 반드시 남긴다** (2026-10-28).
+        #    예전에는 **성공 경로에 기록이 0줄**이라, 접속이 엉뚱한 곳을 눌러도
+        #    "9단계 중 어디까지 갔는지" 조차 알 수 없었다 (그림이 없으면
+        #    `_lpoint` 도 기록을 안 남긴다). 이 저장소에서 **열한 번째**로 겪은
+        #    '조용한 실패' 다. 🚫 이 기록을 지우지 말 것.
+        _j   = LOGIN_IDX.get(key)
+        _n   = (_j + 1) if _j is not None else 0
+        _how = ("그림" if (_j is not None and has_img(LOGIN_FKEY, _j)) else "좌표")
+        _act = ("마우스만 올림" if move_only
+                else ("올렸다 눌렀다" if hover else "눌렀다"))
         if move_only:
             pyautogui.moveTo(int(p[0]), int(p[1]))
         elif hover:
             hover_click(int(p[0]), int(p[1]))
         else:
             pyautogui.click(int(p[0]), int(p[1]))
+        click_log(f"[접속] {_n}/{len(LOGIN_STEPS)} {LOGIN_NAME.get(key, key)} — "
+                  f"{_how} ({int(p[0])},{int(p[1])}) {_act} · {who}")
         return True
 
     # ── 🟣 영웅(보라) 아이템 — 런처 목록에 남긴다 (클라 밖) ───────────────
