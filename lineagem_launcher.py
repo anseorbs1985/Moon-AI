@@ -745,7 +745,12 @@ MONDEX_CLICKS = 8
 #      바로바로 넘겨.** 16개 각 슬롯별로 만들 수 있게 해주고 그냥 클릭만 하는 거니까."*
 #    ⚠ **느릿느릿(SLOW_FKEYS)에 넣지 않았다** — 보통 속도로 돈다.
 #    ⚠ 빈 칸은 애초에 `order` 에 안 들어가므로 **시간을 주지 않고 바로 넘어간다.**
-BADGE_CLICKS  = 10
+BADGE_CLICKS  = 11   # 10 → 11 (2026-10-27 사용자: "좌표 하나만 더 11개씩으로")
+# ⎋ **그 칸은 좌표를 누르지 않고 ESC 를 누른다** (0부터 센 번호)
+#    2026-10-27 사용자: *"그 **11번에는 esc를 넣어줘**"*
+#    · 좌표를 안 찍어도 된다 — 그 슬롯의 **첫 등록 좌표**로 창을 앞으로 올린 뒤 누른다.
+#    · 그래서 이 칸은 `order` 에 **강제로 들어간다** (빈 칸이라고 건너뛰지 않는다).
+ESC_CELLS = {"badge": BADGE_CLICKS - 1}
 # ⚠ 아래 표는 이름이 SLOW_ 지만 **'빈 칸으로 슬롯을 만든다'** 는 뜻이다
 #   (느린 간격은 SLOW_FKEYS 가 정한다 — 둘을 헷갈리지 말 것).
 SLOW_CLICKS_BY = {"magic_slots": MAGIC_CLICKS, "omanst_slots": OMANST_CLICKS,
@@ -14120,6 +14125,18 @@ class App(tk.Tk):
     def _do_click_or_wheel(self, fkey, j, coord, slot=None):
         """휠 칸수가 지정된 자리면 클릭 대신 휠을 그만큼 위로 굴린다.
         HOVER_INDICES 에 적힌 자리는 클릭하지 않고 '마우스만 올려놓는다'."""
+        # ⎋ **ESC 칸** — 좌표를 누르지 않고 ESC 만 보낸다 (2026-10-27 사용자 요청)
+        #    좌표를 안 찍어도 되게, 없으면 **그 슬롯의 첫 등록 좌표**로 창을 올린다.
+        if ESC_CELLS.get(fkey) == j:
+            _ea = coord or next((c for c in (slot or {}).get("coords") or [] if c), None)
+            _en = (slot or {}).get("name", "?")
+            if _ea:
+                self._focus_client_at(_ea)
+                time.sleep(random.uniform(0.20, 0.38))
+            press_esc(1)
+            click_log(f"{fkey} [{_en}] 좌표{j+1} ⎋ ESC 를 눌렀다")
+            self.status.set(f"⎋ [{_en}] 좌표{j+1} — ESC")
+            return "ESC"
         if j in HOVER_INDICES.get(fkey, ()):
             self._click_log(fkey, j, coord, slot, "마우스올림")
             move_at(*coord)                   # 커서는 그대로, 그 자리에 올림 신호만
@@ -15060,6 +15077,11 @@ class App(tk.Tk):
                                   f"(십자가가 씹힐 수 있다)")
                 order = [j for j in range(nclk)
                          if coords[j] or (has_img(fkey, j) and _anchor)]
+                # ⎋ ESC 칸은 좌표가 없어도 **반드시** 넣는다 (맨 마지막 칸)
+                _ec = ESC_CELLS.get(fkey)
+                if (_ec is not None and _ec < nclk and _ec not in order
+                        and any(coords)):
+                    order.append(_ec)
                 # 쿠폰: 클릭5(입력칸)가 등록돼 있으면 그 직후, 없으면 클릭4 직후에 붙여넣기
                 paste_after = (self._paste_idx_or_default(fkey, slot)
                                if fkey in self.PASTE_FKEYS else None)
