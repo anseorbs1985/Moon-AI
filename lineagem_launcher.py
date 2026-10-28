@@ -621,6 +621,17 @@ AWAKEN_SEEN_MATCH = 0.90
 #      ② 실패 화면에서 멈추는 등 **멈추는 사고가 반복**돼 사용자가 되돌리라고 했다.
 #   (아래 STAY/GONE 값은 다시 켤 때를 위해 남겨둔다 — 꺼져 있으면 쓰이지 않는다.)
 AWAKEN_GUARD      = False
+# 🕐 **버튼이 가려지면 중단하지 말고 기다린다** (2026-10-28 사용자 지시:
+#    *"너무 자주 멈춘다 … 좀 제대로 가동될 수 있게 해줘"*)
+#    실측 — 10-27 11:03 에 멈춘 화면(`_awakenB7_110351_auto.png`)을 열어보니
+#    **각성 화면은 멀쩡한데 오른쪽에 '빠른 소환' 창이 열려** [자동 등록] 을
+#    덮고 있었다 (최고 0.32). **끝난 게 아니라 잠깐 가려진 것**이다.
+#    → 그 창이 닫히면 **이어서** 한다. 기다리는 동안 상태줄에 남은 시간을 보여준다.
+#    ⚠ '재료 없음'(글자는 또렷한데 **밝기만 낮다**)은 그대로 중단한다 —
+#      그건 기다려도 안 바뀐다 (2026-10-22 에 가른 그 판정 그대로).
+AWAKEN_WAIT_BACK  = 180.0        # 가려졌을 때 돌아오기를 기다리는 한도(초)
+AWAKEN_BACK_GAP   = (0.8, 1.4)   # 기다리며 다시 보는 간격
+AWAKEN_RESTART_WAIT = 20.0       # 시작을 눌렀을 때 돌던 것이 멈추기를 기다리는 한도(초)
 AWAKEN_STAY_MATCH = 0.65   # 각성 화면에 '아직 있나' — 멈춤·닫기 판정 (GUARD 켤 때만)
 AWAKEN_GONE_N     = 3      # 연속 이만큼 미달해야 멈춘다 (점수가 흔들리므로)
 # 📏 실측 근거 — 각성 화면 0.82~1.00 · 각성이 아닌 화면 0.47
@@ -6844,7 +6855,32 @@ class App(tk.Tk):
         [경험치 합성] 은 재료가 없으면 **회색**이라, 글자를 찾은 자리의 **밝기**로
         켜졌는지 가린다 — 가루 체크칸에서 검증된 방법과 같다."""
         if getattr(self, "_awaken_busy", False):
-            self.status.set("✨ 이미 돌고 있습니다"); return
+            # 🔁 **돌고 있으면 멈추고 다시 시작한다** (2026-10-28 사용자 지시:
+            #    *"그냥 멈춤 버튼 누르지 않고, 그냥 멈췄다가 다시 하면
+            #      시작 버튼만 눌러도 작동할 수 있게 해줘"*)
+            #    예전에는 "이미 돌고 있습니다" 로 거부해서, 사용자가 [■ 멈춤] 을
+            #    먼저 누르고 다시 시작해야 했다. 각성은 한 회차가 길어서
+            #    (버튼 대기 + 결과 치우기) **멈춘 것처럼 보여도 아직 돌고 있다.**
+            self._awaken_stop = True
+            self.status.set("✨ 돌던 것을 멈추고 다시 시작합니다…")
+            click_log("[각성강화] 🔁 시작을 눌렀다 — 돌던 것을 멈추고 다시 시작한다")
+
+            def _again():
+                for _ in range(int(AWAKEN_RESTART_WAIT * 10)):
+                    if not getattr(self, "_awaken_busy", False):
+                        break
+                    time.sleep(0.1)
+                if getattr(self, "_awaken_busy", False):
+                    click_log("[각성강화] 🔁 돌던 것이 "
+                              f"{AWAKEN_RESTART_WAIT:.0f}초 안에 안 멈췄다 — 다시 시작 못 함")
+                    self.after(0, lambda: self.status.set(
+                        "✨ 돌던 것이 안 멈춥니다 — 잠시 뒤 시작을 다시 눌러주세요"))
+                    return
+                time.sleep(0.4)
+                self._run_awaken(times)
+
+            threading.Thread(target=_again, daemon=True).start()
+            return
         rect = self._awaken_win_rect()
         if not rect:
             self.status.set("✨ 리니지M 창을 못 찾았습니다"); return
@@ -6938,6 +6974,33 @@ class App(tk.Tk):
                             # 🧹 결과 화면이 가리고 있을 수 있다 — 한 번 치워본다
                             self._awaken_clear_result(rect, " ([자동 등록] 앞)")
                         _nap(*AWAKEN_WAIT)
+                    if ax is None and not getattr(self, "_awaken_stop", False):
+                        # 🕐 **가려진 것일 수 있다 — 중단하지 말고 기다린다**
+                        _t0 = time.time(); _said = -99
+                        while time.time() - _t0 < AWAKEN_WAIT_BACK:
+                            if getattr(self, "_awaken_stop", False):
+                                break
+                            _r3 = self._awaken_win_rect()
+                            if _r3:
+                                rect = _r3
+                            ax, ay, av, _al = self._awaken_find(AWAKEN_AUTO, rect)
+                            if ax is not None:
+                                click_log(f"[각성강화] 🕐 {int(time.time()-_t0)}초 "
+                                          f"기다렸더니 [자동 등록] 이 보인다 "
+                                          f"(일치도 {av:.2f}) → 이어서 한다")
+                                break
+                            _e = int(time.time() - _t0)
+                            if _e >= _said + 10:
+                                if _said < 0:
+                                    click_log(f"[각성강화] 🕐 {t+1}회째 [자동 등록] 이 "
+                                              f"안 보인다 (최고 {av:.2f}) — 가려진 것일 수 "
+                                              f"있어 {int(AWAKEN_WAIT_BACK)}초까지 "
+                                              f"기다린다 (멈추려면 [■ 멈춤])")
+                                _said = _e
+                                self.after(0, lambda e=_e, v=av: self.status.set(
+                                    f"✨ 화면이 가려졌나 봅니다 — 돌아오면 이어서 합니다 "
+                                    f"({e}/{int(AWAKEN_WAIT_BACK)}초 · 최고 {v:.2f})"))
+                            _nap(*AWAKEN_BACK_GAP)
                     if ax is None:
                         _sp = self._awaken_shot(rect, "auto")
                         click_log(f"[각성강화] {t+1}회째 [자동 등록] 을 못 찾음 "
@@ -6980,6 +7043,37 @@ class App(tk.Tk):
                                 break
                             gx = None
                             _nap(*AWAKEN_WAIT)
+                    if (gx is None and gv < AWAKEN_MATCH
+                            and not getattr(self, "_awaken_stop", False)):
+                        # 🕐 **일치도까지 낮다 = 가려진 것** → 중단하지 말고 기다린다
+                        #    (재료 없음은 '글자는 또렷하고 밝기만 낮다' 라 여기 안 온다)
+                        _t0 = time.time(); _said = -99
+                        while time.time() - _t0 < AWAKEN_WAIT_BACK:
+                            if getattr(self, "_awaken_stop", False):
+                                break
+                            _r3 = self._awaken_win_rect()
+                            if _r3:
+                                rect = _r3
+                            gx, gy, gv, gl = self._awaken_find(AWAKEN_GO, rect)
+                            if gx is not None and gl >= AWAKEN_LIT:
+                                click_log(f"[각성강화] 🕐 {int(time.time()-_t0)}초 "
+                                          f"기다렸더니 [각성] 이 보인다 "
+                                          f"(일치도 {gv:.2f} 밝기 {gl:.0f}) → 이어서 한다")
+                                break
+                            gx = None
+                            _e = int(time.time() - _t0)
+                            if _e >= _said + 10:
+                                if _said < 0:
+                                    click_log(f"[각성강화] 🕐 {t+1}회째 [각성] 자리가 "
+                                              f"가려졌다 (일치도 {gv:.2f}) — "
+                                              f"{int(AWAKEN_WAIT_BACK)}초까지 기다린다 "
+                                              f"(멈추려면 [■ 멈춤])")
+                                _said = _e
+                                self.after(0, lambda e=_e, v=gv: self.status.set(
+                                    f"✨ [각성] 자리가 가려졌나 봅니다 — 돌아오면 "
+                                    f"이어서 합니다 ({e}/{int(AWAKEN_WAIT_BACK)}초 "
+                                    f"· 최고 {v:.2f})"))
+                            _nap(*AWAKEN_BACK_GAP)
                     if gx is None:
                         _sp = self._awaken_shot(rect, "go")
                         _why = ("재료가 떨어진 듯" if gv >= AWAKEN_MATCH
