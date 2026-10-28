@@ -632,6 +632,13 @@ AWAKEN_GUARD      = False
 AWAKEN_WAIT_BACK  = 180.0        # 가려졌을 때 돌아오기를 기다리는 한도(초)
 AWAKEN_BACK_GAP   = (0.8, 1.4)   # 기다리며 다시 보는 간격
 AWAKEN_RESTART_WAIT = 20.0       # 시작을 눌렀을 때 돌던 것이 멈추기를 기다리는 한도(초)
+# 🔁 **[각성] 이 회색이면 [자동 등록] 을 다시 눌러본다** (2026-10-28)
+#    실측 — 10-28 21:00:55 에 '재료가 떨어진 듯' 으로 멈춘 화면
+#    (`_awakenB8_210055_go.png`)을 열어보니 **오른쪽에 마법인형 카드가
+#    그대로 9장 있었다.** 재료는 있는데 가운데가 비어 있고 '경험치 합성' 이
+#    **0 원 회색**이었다 — 즉 **[자동 등록] 이 안 먹은 것**이지 재료가 없는 게 아니다.
+#    → 글자는 또렷한데(일치도 ≥ AWAKEN_MATCH) 회색이면 **다시 채워본다.**
+AWAKEN_AUTO_RETRY = 2
 AWAKEN_STAY_MATCH = 0.65   # 각성 화면에 '아직 있나' — 멈춤·닫기 판정 (GUARD 켤 때만)
 AWAKEN_GONE_N     = 3      # 연속 이만큼 미달해야 멈춘다 (점수가 흔들리므로)
 # 📏 실측 근거 — 각성 화면 0.82~1.00 · 각성이 아닌 화면 0.47
@@ -6985,10 +6992,23 @@ class App(tk.Tk):
                                 rect = _r3
                             ax, ay, av, _al = self._awaken_find(AWAKEN_AUTO, rect)
                             if ax is not None:
-                                click_log(f"[각성강화] 🕐 {int(time.time()-_t0)}초 "
-                                          f"기다렸더니 [자동 등록] 이 보인다 "
-                                          f"(일치도 {av:.2f}) → 이어서 한다")
-                                break
+                                # 🚫 **각성 화면인지 한 번 더 본다** (2026-10-28 사용자:
+                                #    "화면 돌아가도 가끔 버튼을 눌러버려서 다른 걸
+                                #     클릭할 때가 많아"). 다른 화면에서 비슷한 글자를
+                                #    집어 **엉뚱한 곳을 누르는** 것을 막는다.
+                                _sok, _sw, _sv = self._awaken_screen_seen(
+                                    AWAKEN_STAY_MATCH)
+                                if not _sok:
+                                    click_log(f"[각성강화] 🚫 [자동 등록] 비슷한 것을 "
+                                              f"찾았지만(일치도 {av:.2f}) **각성 화면이 "
+                                              f"아니다**({_sw or '-'} {_sv:.2f}) "
+                                              f"→ 누르지 않고 더 기다린다")
+                                    ax = None
+                                else:
+                                    click_log(f"[각성강화] 🕐 {int(time.time()-_t0)}초 "
+                                              f"기다렸더니 [자동 등록] 이 보인다 "
+                                              f"(일치도 {av:.2f}) → 이어서 한다")
+                                    break
                             _e = int(time.time() - _t0)
                             if _e >= _said + 10:
                                 if _said < 0:
@@ -7043,6 +7063,33 @@ class App(tk.Tk):
                                 break
                             gx = None
                             _nap(*AWAKEN_WAIT)
+                    if (gx is None and gv >= AWAKEN_MATCH
+                            and not getattr(self, "_awaken_stop", False)):
+                        # 🔁 **글자는 또렷한데 회색** = 재료가 안 채워진 것일 수 있다
+                        #    (재료가 진짜 없을 때와 겉보기가 같다 — 그래서 눌러본다)
+                        for _r in range(AWAKEN_AUTO_RETRY):
+                            if getattr(self, "_awaken_stop", False):
+                                break
+                            bx, by2, bv2, _bl = self._awaken_find(AWAKEN_AUTO, rect)
+                            if bx is None:
+                                break
+                            click_log(f"[각성강화] 🔁 {t+1}회째 [각성] 이 회색이다 "
+                                      f"(일치도 {gv:.2f} 밝기 {gl:.0f}) — [자동 등록] 을 "
+                                      f"다시 눌러본다 ({_r+1}/{AWAKEN_AUTO_RETRY})")
+                            click_hold(bx, by2, ms=random.uniform(60, 110))
+                            _nap(*AWAKEN_GAP)
+                            for _ in range(AWAKEN_SEE):
+                                if getattr(self, "_awaken_stop", False):
+                                    break
+                                gx, gy, gv, gl = self._awaken_find(AWAKEN_GO, rect)
+                                if gx is not None and gl >= AWAKEN_LIT:
+                                    break
+                                gx = None
+                                _nap(*AWAKEN_WAIT)
+                            if gx is not None:
+                                click_log(f"[각성강화] 🔁 [자동 등록] 을 다시 누르니 "
+                                          f"[각성] 이 켜졌다 (밝기 {gl:.0f}) → 이어서 한다")
+                                break
                     if (gx is None and gv < AWAKEN_MATCH
                             and not getattr(self, "_awaken_stop", False)):
                         # 🕐 **일치도까지 낮다 = 가려진 것** → 중단하지 말고 기다린다
@@ -7056,10 +7103,19 @@ class App(tk.Tk):
                                 rect = _r3
                             gx, gy, gv, gl = self._awaken_find(AWAKEN_GO, rect)
                             if gx is not None and gl >= AWAKEN_LIT:
-                                click_log(f"[각성강화] 🕐 {int(time.time()-_t0)}초 "
-                                          f"기다렸더니 [각성] 이 보인다 "
-                                          f"(일치도 {gv:.2f} 밝기 {gl:.0f}) → 이어서 한다")
-                                break
+                                _sok, _sw, _sv = self._awaken_screen_seen(
+                                    AWAKEN_STAY_MATCH)
+                                if not _sok:
+                                    click_log(f"[각성강화] 🚫 [각성] 비슷한 것을 찾았지만"
+                                              f"(일치도 {gv:.2f}) **각성 화면이 아니다**"
+                                              f"({_sw or '-'} {_sv:.2f}) → 누르지 않는다")
+                                    gx = None
+                                else:
+                                    click_log(f"[각성강화] 🕐 {int(time.time()-_t0)}초 "
+                                              f"기다렸더니 [각성] 이 보인다 "
+                                              f"(일치도 {gv:.2f} 밝기 {gl:.0f}) "
+                                              f"→ 이어서 한다")
+                                    break
                             gx = None
                             _e = int(time.time() - _t0)
                             if _e >= _said + 10:
