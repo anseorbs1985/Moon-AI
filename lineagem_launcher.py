@@ -1985,6 +1985,14 @@ CHAR_PANEL_L    = 360   # 클릭 x 기준 왼쪽으로 이만큼이 패널
 CHAR_PANEL_R    = 50    # 오른쪽으로 이만큼
 CHAR_PANEL_T    = 200   # 패널을 훑을 세로 범위 (10개면 위로 더 올라간다)
 CHAR_PANEL_B    = 150   # 화면 아래에서 이만큼은 뺀다 (하단바·작업표시줄)
+# 🚨 **패널이 안 떠 있으면 배경을 줄로 센다** — 반드시 걸러야 한다 (2026-10-28 실측)
+#    멀티 패널이 닫힌 화면(성·하늘)을 그대로 세어보니 **12줄**이 나왔다.
+#    그대로 두면 **엉뚱한 배경 12곳을 누른다.** 두 가지로 가른다:
+#        ① 왼쪽 끝 편차   패널 **0px**(전부 x2147) ↔ 배경 **73px**
+#        ② 줄 간격        패널 **96.3 ±2** ↔ 배경 **60~134** (제각각)
+#    둘 다 통과한 묶음이 CHAR_ROW_MIN 줄 이상일 때만 믿는다.
+CHAR_ROW_ALIGN   = 15     # 줄들의 왼쪽 끝이 이 안에 모여 있어야 한다
+CHAR_ROW_GAP_TOL = 0.20   # 간격이 중앙값의 ±이만큼 안이어야 한다
 
 # 🔁 **두 바퀴 누른다** (2026-10-28 사용자 지시: *"항상 잘 클릭해야 해.
 #    두 번씩 하던지 안 눌러졌다고 생각하면 너가 다시 누르던지 알아서 해"*)
@@ -2062,8 +2070,42 @@ def char_rows_find(cfg, log=None):
                 if h >= CHAR_ROW_H_MIN:
                     xs = _np.where(m[run:i].any(axis=0))[0]
                     if len(xs) and (xs.max() - xs.min()) >= CHAR_ROW_W_MIN:
-                        out.append((cx, y0 + run + h // 2))
+                        out.append((y0 + run + h // 2, int(xs.min()), int(xs.max())))
                 run = None
+        # ① 왼쪽 끝이 모여 있는 묶음만 남긴다 (패널은 한 덩어리라 G 로고 x 가 같다)
+        if len(out) >= 2:
+            best = []
+            for v in sorted(o[1] for o in out):
+                grp = [o for o in out if abs(o[1] - v) <= CHAR_ROW_ALIGN]
+                if len(grp) > len(best):
+                    best = grp
+            out = best
+        # ② 간격이 **등록 좌표의 간격**과 맞는 가장 긴 묶음만
+        #    🎯 기준은 그 컴퓨터가 찍어둔 `char_btns` 의 간격이다 — 그것이
+        #       **그 화면의 진짜 줄 간격**이라 배경을 확실히 거른다.
+        #       실측: 등록 간격 중앙값 96 ↔ 배경 142·175·307·319 (전부 밖)
+        #    ⚠ 등록 좌표가 2개 미만이면 기준이 없으므로 **줄 세기를 쓰지 않는다**.
+        bys = sorted(c[1] for c in btns)
+        if len(bys) < 2:
+            if log:
+                log("[접속] 🎮 등록 좌표가 2개 미만이라 줄 간격 기준이 없다 — 좌표를 쓴다")
+            return None
+        _bg = [bys[i + 1] - bys[i] for i in range(len(bys) - 1)]
+        gm = sorted(_bg)[len(_bg) // 2]
+        if len(out) >= 3:
+            gaps = [out[i + 1][0] - out[i][0] for i in range(len(out) - 1)]
+            cur = [0]; best = [0]
+            for i, g in enumerate(gaps):
+                if gm and abs(g - gm) <= gm * CHAR_ROW_GAP_TOL:
+                    cur.append(i + 1)
+                else:
+                    if len(cur) > len(best):
+                        best = cur
+                    cur = [i + 1]
+            if len(cur) > len(best):
+                best = cur
+            out = [out[i] for i in best]
+        out = [(cx, y) for y, _lx, _rx in out]
         if not (CHAR_ROW_MIN <= len(out) <= CHAR_ROW_MAX):
             if log:
                 log(f"[접속] 🎮 멀티 줄을 {len(out)}개로 봤다 — 믿지 않고 "
