@@ -3134,12 +3134,28 @@ def floor_mine_path(fkey, fl, n):
     return os.path.join(IMG_DIR_MINE, f"{fkey}_floor{int(fl):02d}_mine{n+1}.png")
 
 
+# 🏢 **공용 변형** — `dragon_floor06_b.png` … `_h.png` (2026-10-28)
+#    층 그림은 **한 장으로는 못 가린다**. 실측(16클라, 메인):
+#        공용 1장만        → 제대로 읽음 9 · **틀림 5**
+#        변형 7장(6층)+3장(5층) → 제대로 읽음 12 · **틀림 0**
+#    전용(`%LOCALAPPDATA%`)은 그 컴퓨터만이라 **배포가 안 된다** →
+#    공용에 `_b`~`_h` 를 둬서 **로컬 21대도 같이 받게** 했다.
+#    ⚠ 층마다 **장수를 비슷하게** 넣을 것 — `_floor_score` 가 '그 층 중 최고점'
+#      이라, 한 층만 많으면 그 층이 유리해진다.
+FLOOR_MORE = "bcdefgh"          # 공용 변형 꼬리글자
+
+
 def floor_img_list(fkey, fl):
-    """그 층에서 찾아볼 그림 전부 (공용 1장 + 이 컴퓨터 전용 최대 4장)."""
+    """그 층에서 찾아볼 그림 전부
+    (공용 1장 + **공용 변형 `_b`~`_h`** + 이 컴퓨터 전용 최대 IMG_MAX 장)."""
     out = []
     try:
         if os.path.exists(floor_img_path(fkey, fl)):
             out.append(floor_img_path(fkey, fl))
+        for _s in FLOOR_MORE:
+            _p = floor_img_path(fkey, fl)[:-4] + f"_{_s}.png"
+            if os.path.exists(_p):
+                out.append(_p)
         for n in range(IMG_MAX):
             p = floor_mine_path(fkey, fl, n)
             if os.path.exists(p):
