@@ -1959,6 +1959,81 @@ KEYCFG_BIG_W       = 1000          # 이 폭을 넘으면 '최대화됨' 으로 
 # 캐릭터 접속 버튼 — 너무 늦게 눌린다는 지적으로 대기를 20% 줄임 (2026-08-29)
 CHAR_WAIT_FIRST = 4.8   # 멀티플레이 클릭 → 첫 캐릭터까지 (전 6초)
 CHAR_WAIT_EACH  = 2.4   # 캐릭터 사이 (전 3초)
+
+# 🎮 멀티플레이 캐릭터 버튼 — **좌표 개수가 아니라 화면에 보이는 만큼** 누른다
+#    (2026-10-28 사용자 지시: *"저게 지금 좌표상으로는 8개 되어있는데 10개도 나타날 수가
+#     있어 계정마다 좀 달라서 … 활성화되어 있는 멀티 버튼은 다 접속을 해주라는 거야"*)
+#
+#    실측(2026-10-28 메인, 퍼플 2560x1392) — 멀티 플레이 패널의 각 줄은
+#    **왼쪽 구글 G 로고(컬러)부터 오른쪽 플레이 버튼까지** 한 덩어리로 잡힌다:
+#        y603~631 · 699~727 · 795~823 · 892~922 · 990~1018 · 1083~1114 · 1180~1210
+#        전부 x2147~2505 (폭 358) · 중심 간격 평균 96.3px
+#        맨 아래 ✕ 버튼은 h11 · x2475~2529 (폭 54) → **폭으로 걸러진다**
+#    등록된 char_btns 의 y (619·715·814·905·1001·1099·1196) 와 거의 일치한다.
+#
+#    ⚠ 플레이 버튼의 보라색 링은 **회전 애니메이션**이라 각도가 매번 다르다 —
+#      그림(matchTemplate)으로 세면 안 된다. 그래서 **줄 자체**를 센다.
+#    ⚠ 못 세면 **예전처럼 `char_btns` 좌표를 그대로** 쓴다 (안전).
+CHAR_ROWS_ON    = True
+CHAR_ROW_SAT    = 60    # 컬러 채도 — G 로고가 이보다 진하면 '그 줄에 뭔가 있다'
+CHAR_ROW_V      = 110   # 그 픽셀의 밝기
+CHAR_ROW_H_MIN  = 18    # 줄 높이 최소 (✕ 버튼 h11 을 거른다)
+CHAR_ROW_W_MIN  = 200   # 줄 가로폭 최소 (✕ 버튼 폭 54 를 거른다)
+CHAR_ROW_MIN    = 3     # 이보다 적게 잡히면 믿지 않고 좌표를 쓴다
+CHAR_ROW_MAX    = 14    # 이보다 많이 잡히면 뭔가 잘못 본 것이다
+CHAR_PANEL_L    = 360   # 클릭 x 기준 왼쪽으로 이만큼이 패널
+CHAR_PANEL_R    = 50    # 오른쪽으로 이만큼
+CHAR_PANEL_T    = 200   # 패널을 훑을 세로 범위 (10개면 위로 더 올라간다)
+CHAR_PANEL_B    = 150   # 화면 아래에서 이만큼은 뺀다 (하단바·작업표시줄)
+
+
+def char_rows_find(cfg, log=None):
+    """멀티 플레이 패널에서 **지금 보이는 줄**의 클릭 자리를 위→아래 순서로 돌려준다.
+
+    돌려주는 값: [(x, y), …]  ·  못 세면 **None** (부르는 쪽이 좌표로 떨어진다).
+    기준은 등록된 `char_btns` — 그 x 평균을 클릭 x 로, 그 둘레를 패널로 본다.
+    컴퓨터마다 자기 좌표를 쓰므로 로컬 21대에서도 그대로 동작한다."""
+    if not CHAR_ROWS_ON:
+        return None
+    btns = [c for c in (cfg.get("char_btns") or []) if c]
+    if not btns:
+        return None
+    try:
+        import numpy as _np
+        from PIL import ImageGrab as _IG
+        cx = int(sum(c[0] for c in btns) / len(btns))
+        sw, sh = pyautogui.size()
+        x0 = max(0, cx - CHAR_PANEL_L); x1 = min(sw, cx + CHAR_PANEL_R)
+        y0 = CHAR_PANEL_T;              y1 = max(y0 + 50, sh - CHAR_PANEL_B)
+        a = _np.array(_IG.grab(bbox=(x0, y0, x1, y1)))[:, :, :3].astype(int)
+        sat = a.max(axis=2) - a.min(axis=2)
+        m = (sat > CHAR_ROW_SAT) & (a.max(axis=2) > CHAR_ROW_V)
+        rows = m.sum(axis=1)
+        out = []; run = None
+        for i, v in enumerate(list(rows) + [0]):
+            if v >= 3 and run is None:
+                run = i
+            elif v < 3 and run is not None:
+                h = i - run
+                if h >= CHAR_ROW_H_MIN:
+                    xs = _np.where(m[run:i].any(axis=0))[0]
+                    if len(xs) and (xs.max() - xs.min()) >= CHAR_ROW_W_MIN:
+                        out.append((cx, y0 + run + h // 2))
+                run = None
+        if not (CHAR_ROW_MIN <= len(out) <= CHAR_ROW_MAX):
+            if log:
+                log(f"[접속] 🎮 멀티 줄을 {len(out)}개로 봤다 — 믿지 않고 "
+                    f"등록 좌표 {len(btns)}개를 쓴다")
+            return None
+        if log:
+            log(f"[접속] 🎮 멀티 줄 {len(out)}개 — y " +
+                " ".join(str(p[1]) for p in out) + f" (등록 좌표는 {len(btns)}개)")
+        return out
+    except Exception as e:
+        if log:
+            log(f"[접속] 🎮 멀티 줄을 못 셌다 ({type(e).__name__}: {e}) — 등록 좌표를 쓴다")
+        return None
+
 # 🚫 지금 안 쓰는 런처 — 화면에 만들지 않는다 (2026-09-20 사용자 지시).
 # 위젯을 만드는 데 하나당 약 1.8ms 씩 들어서, 안 만들면 그만큼 바로 빨라진다.
 # **코드도 좌표도 지우지 않았다** — 다시 쓰려면 여기서 이름만 빼면 그대로 돌아온다.
@@ -29015,11 +29090,18 @@ class App(tk.Tk):
                         win32gui.SetForegroundWindow(_hwnd)
                 except: pass
 
-                for i, (cx, cy) in enumerate(self.cfg.get("char_btns", [])):
+                # 🎮 **화면에 보이는 줄만큼** 누른다 (계정마다 8~10개로 다르다)
+                #    못 세면 예전처럼 등록된 `char_btns` 좌표를 그대로 쓴다.
+                _rows = char_rows_find(self.cfg, click_log)
+                _from = "화면" if _rows else "좌표"
+                if not _rows:
+                    _rows = [c for c in (self.cfg.get("char_btns") or []) if c]
+                for i, (cx, cy) in enumerate(_rows):
                     if self._stop_flag: self.status.set("멈춤"); return
                     if acc_idx == 0 and i == 0:
                         self._run_char01_t = time.time()   # 캐릭터01 접속 시각 (4분30초 제한 측정)
-                    self.status.set(f"[{acc_idx+1}/{total}] 캐릭터 #{i+1} 클릭...")
+                    self.status.set(f"[{acc_idx+1}/{total}] 캐릭터 #{i+1}/{len(_rows)} 클릭...")
+                    click_log(f"[접속] 🎮 캐릭터 #{i+1}/{len(_rows)} ({cx},{cy}) 눌렀다 · {_from}")
                     pyautogui.click(cx, cy)
                     # 캐릭터 사이 간격도 20% 앞당김 (3 → 2.4초)
                     if not self._wait(CHAR_WAIT_EACH): self.status.set("멈춤"); return
