@@ -1986,6 +1986,40 @@ CHAR_PANEL_R    = 50    # 오른쪽으로 이만큼
 CHAR_PANEL_T    = 200   # 패널을 훑을 세로 범위 (10개면 위로 더 올라간다)
 CHAR_PANEL_B    = 150   # 화면 아래에서 이만큼은 뺀다 (하단바·작업표시줄)
 
+# 🔁 **두 바퀴 누른다** (2026-10-28 사용자 지시: *"항상 잘 클릭해야 해.
+#    두 번씩 하던지 안 눌러졌다고 생각하면 너가 다시 누르던지 알아서 해"*)
+#
+#    ⚠ **왜 '확인하고 재클릭' 이 아닌가** — 플레이 버튼의 보라 링으로 '실행 중'을
+#      가리려 했으나 **링이 회전 애니메이션**이라 값이 못 쓸 만큼 흔들린다.
+#      실측 (2026-10-28 · 7줄 × 0.7초 간격 8회 · 전부 실행 중인 상태):
+#          y620: 154 63 188 69 160 124 102 179     전체 **최소 54 · 최대 193**
+#      최소 54 는 '링 없음' 과 겹칠 수 있어 기준을 세울 수 없다.
+#      → 판정을 포기하고 **두 바퀴** 돈다. 애매하면 한 번 더 누르는 쪽이 맞다.
+#    📏 대신 **누르기 직전 링 값을 기록**한다. 접속 시작 때는 전부 '대기' 이므로
+#      그 숫자가 쌓이면 **대기 상태의 링 값**을 알게 되어, 다음에 제대로 된
+#      '눌렸나' 판정을 만들 수 있다. 🚫 이 기록을 지우지 말 것.
+CHAR_PASSES     = 2            # 위→아래를 몇 바퀴 도나
+CHAR_PASS2_GAP  = (0.6, 1.0)   # 2바퀴째 간격 — 확인 사살이라 짧게
+CHAR_PASS_GAP   = (2.5, 4.0)   # 바퀴와 바퀴 사이
+
+
+def char_ring_px(cx, cy):
+    """플레이 버튼의 **보라 링 픽셀 수** (버튼 둘레 32x32 칸).
+
+    ⚠ 지금은 **기록용**이다 — 이 값으로 '실행 중'을 판정하지 말 것
+      (회전 애니메이션이라 실측 54~193 으로 흔들린다).
+    못 재면 -1."""
+    try:
+        import numpy as _np
+        from PIL import ImageGrab as _IG
+        a = _np.array(_IG.grab(bbox=(int(cx) - 16, int(cy) - 16,
+                                     int(cx) + 16, int(cy) + 16)))[:, :, :3].astype(int)
+        g, b = a[:, :, 1], a[:, :, 2]          # ImageGrab 은 RGB 순서
+        return int(((b > 150) & (b - g > 80)).sum())
+    except Exception:
+        return -1
+
+
 
 def char_rows_find(cfg, log=None):
     """멀티 플레이 패널에서 **지금 보이는 줄**의 클릭 자리를 위→아래 순서로 돌려준다.
@@ -29096,15 +29130,29 @@ class App(tk.Tk):
                 _from = "화면" if _rows else "좌표"
                 if not _rows:
                     _rows = [c for c in (self.cfg.get("char_btns") or []) if c]
-                for i, (cx, cy) in enumerate(_rows):
-                    if self._stop_flag: self.status.set("멈춤"); return
-                    if acc_idx == 0 and i == 0:
-                        self._run_char01_t = time.time()   # 캐릭터01 접속 시각 (4분30초 제한 측정)
-                    self.status.set(f"[{acc_idx+1}/{total}] 캐릭터 #{i+1}/{len(_rows)} 클릭...")
-                    click_log(f"[접속] 🎮 캐릭터 #{i+1}/{len(_rows)} ({cx},{cy}) 눌렀다 · {_from}")
-                    pyautogui.click(cx, cy)
-                    # 캐릭터 사이 간격도 20% 앞당김 (3 → 2.4초)
-                    if not self._wait(CHAR_WAIT_EACH): self.status.set("멈춤"); return
+                for _p in range(CHAR_PASSES):
+                    if _p:
+                        # 🔁 2바퀴째 — 첫 바퀴에서 씹힌 것을 확인 사살한다
+                        _g = random.uniform(*CHAR_PASS_GAP)
+                        click_log(f"[접속] 🔁 {_p+1}바퀴째 — {_g:.1f}초 뒤 다시 누른다")
+                        if not self._wait(_g): self.status.set("멈춤"); return
+                        # 그 사이 줄이 늘었을 수 있다 (목록은 **위로** 늘어난다)
+                        _r2 = char_rows_find(self.cfg, click_log)
+                        if _r2:
+                            _rows = _r2
+                    for i, (cx, cy) in enumerate(_rows):
+                        if self._stop_flag: self.status.set("멈춤"); return
+                        if acc_idx == 0 and i == 0 and _p == 0:
+                            self._run_char01_t = time.time()   # 캐릭터01 접속 시각 (4분30초 제한 측정)
+                        _ring = char_ring_px(cx, cy)           # 📏 기록용 (판정에 쓰지 않는다)
+                        self.status.set(f"[{acc_idx+1}/{total}] 캐릭터 #{i+1}/{len(_rows)} "
+                                        f"클릭... ({_p+1}/{CHAR_PASSES}바퀴)")
+                        click_log(f"[접속] 🎮 {_p+1}바퀴 캐릭터 #{i+1}/{len(_rows)} "
+                                  f"({cx},{cy}) 눌렀다 · {_from} · 누르기 전 링 {_ring}")
+                        pyautogui.click(cx, cy)
+                        # 1바퀴는 평소 간격, 2바퀴째는 확인 사살이라 짧게
+                        _w = CHAR_WAIT_EACH if _p == 0 else random.uniform(*CHAR_PASS2_GAP)
+                        if not self._wait(_w): self.status.set("멈춤"); return
 
                 # 캐릭터 버튼 완료 후 항상 위 해제
                 try:
