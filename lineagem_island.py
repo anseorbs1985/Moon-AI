@@ -371,6 +371,10 @@ OMANST_INK    = 3               # 세로로 이만큼 안 찬 열은 **잡음**�
 OMANST_KIND   = "jh"
 OMANST_NAMES  = {"jh": "정화", "jb": "정복", "sj": "생존"}
 OMANST_LOOSE  = 0.70            # **마지막 판** 기준 (겨루기 배수는 1.0 로 푼다)
+OMANST_NUM_SPAN  = 40         # 숫자 띠 밝기 폭이 이보다 좁으면 안 읽는다
+OMANST_NUM_CUT   = 0.45       # 어두운 줄에서 쓰는 적응형 기준 (min + 폭×이값)
+OMANST_ROW_BAND  = 13 / 276   # 📏 **세 번째 줄 띠** 반폭 (창 높이 비율)
+OMANST_ROW_OFF   = 6          # _take 가 글자 좌상단 +6 을 누른다 (그만큼 되돌린다)
 OMANST_FLOOR  = 0.62            # **무조건 고를 때**의 바닥 — 이것도 못 넘으면 창이 안 뜬 것
 # 📏 실측 2026-10-22 (16클라) — 퀘스트 창이 **없는** 화면 0.469~0.520 ·
 #   창이 **있으면** 0.73(이미 한 줄 선택됨)~1.00(평소) → 0.62 면 양쪽 여유 0.10.
@@ -385,7 +389,15 @@ def omanst_img_path(which="jh"):
     return os.path.join(IMG_DIR, "omanst_%s.png" % which)
 
 
-def omanst_read(big, kind=None, loose=False, force=False):
+def _row_only(res, band):
+    """세 번째 줄 띠 **밖을 버린다** — 그 밖에서는 절대 고르지 않는다."""
+    import numpy as np
+    m = np.full(res.shape, -1.0, np.float32)
+    m[band[0]:band[1], :] = res[band[0]:band[1], :]
+    return m
+
+
+def omanst_read(big, kind=None, loose=False, force=False, row_y=None):
     """퀘스트 화면에서 **원하는 종류 줄의 자리와 로마숫자**를 읽는다.
 
     돌려주는 값: `(창안 x, 창안 y, 숫자, 점수)` — 못 읽으면 `(None, None, 0, 0.0)`.
@@ -415,8 +427,25 @@ def omanst_read(big, kind=None, loose=False, force=False):
         if tpl is None or panel.shape[0] < tpl.shape[0] or panel.shape[1] < tpl.shape[1]:
             return None, None, 0, 0.0
         res = cv2.matchTemplate(panel, tpl, cv2.TM_CCOEFF_NORMED)
+        # 📏 **세 번째 줄 띠만 본다** (2026-10-29 사용자 지시).
+        #   정화는 **항상 위에서 세 번째**다. 등록된 클릭24 자리가 그 줄이고
+        #   16슬롯 전부 **창안 (298,143)** 으로 같다(실측).
+        #   띠 밖을 아예 버리므로 **겨루기도 force 도 다른 줄로 갈 수 없다.**
+        #   🚫 이 띠를 없애지 말 것 — 없애면 다시 다른 줄·다른 층을 누른다.
+        # 🏆 **띠 안에서는 겨루기를 하지 않는다** (2026-10-29 실측).
+        #   세 번째 줄은 **항상 정화**라 종류를 가릴 이유가 없고, 가리려 하면
+        #   오히려 틀린다 — 선택된 줄은 밝아서 정복 글자가 정화 템플릿에
+        #   0.78~0.84 로 끌린다(#06·#09 실측). 바닥(OMANST_FLOOR)만 본다.
+        _band = None
+        if row_y is not None:
+            _b = max(4, int(h * OMANST_ROW_BAND))
+            _ty = int(row_y) - OMANST_ROW_OFF - py        # 패널 안 글자 좌상단 y
+            _band = (max(0, _ty - _b), min(res.shape[0], _ty + _b + 1))
+            if _band[0] >= _band[1]:
+                return None, None, 0, 0.0
+            res = _row_only(res, _band)
         best = float(res.max())
-        if force:
+        if force or _band is not None:
             # 🎯 **무조건 고른다** — 겨루기를 안 본다. 바닥만 넘으면 1등 자리.
             #   📏 실측 2026-10-22: 퀘스트 창이 **없는** 16클라 0.469~0.520 ·
             #      창이 **있으면** 0.73~1.00 → 바닥 0.62 면 양쪽 여유 0.10.
@@ -444,6 +473,8 @@ def omanst_read(big, kind=None, loose=False, force=False):
                 r2 = cv2.matchTemplate(panel, t2, cv2.TM_CCOEFF_NORMED)
                 if r2.shape != res.shape:
                     continue
+                if _band is not None:
+                    r2 = _row_only(r2, _band)   # ⚠ 겨루기 상대도 **같은 띠**로 잘라야 맞다
                 other = r2 if other is None else np.maximum(other, r2)
             if other is None:
                 # 다른 두 장이 없는 컴퓨터 — 예전처럼 한 장만 본다
@@ -461,16 +492,31 @@ def omanst_read(big, kind=None, loose=False, force=False):
         # 🔢 글자 오른쪽의 잉크 덩어리를 센다
         g = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
         band = g[jy:jy + tpl.shape[0], jx + tpl.shape[1]:jx + tpl.shape[1] + 22]
-        cols = (band > 120).sum(axis=0)
-        cols = np.where(cols >= OMANST_INK, cols, 0)   # 1~2픽셀 잡음은 버린다
-        runs, st = [], None
-        for i, v in enumerate(cols):
-            if v and st is None:
-                st = i
-            elif not v and st is not None:
-                runs.append((st, i)); st = None
-        if st is not None:
-            runs.append((st, len(cols)))
+
+        def _runs(thr):
+            c2 = (band > thr).sum(axis=0)
+            c2 = np.where(c2 >= OMANST_INK, c2, 0)    # 1~2픽셀 잡음은 버린다
+            out, st2 = [], None
+            for i2, v2 in enumerate(c2):
+                if v2 and st2 is None:
+                    st2 = i2
+                elif not v2 and st2 is not None:
+                    out.append((st2, i2)); st2 = None
+            if st2 is not None:
+                out.append((st2, len(c2)))
+            return out
+
+        runs = _runs(120)
+        if not runs:
+            # 🔢 **선택 안 된 줄은 글자가 어두워 120 을 못 넘는다** (2026-10-29).
+            #   그 띠 안의 밝기 폭으로 기준을 잡아 한 번 더 본다.
+            #   ⚠ 폭이 좁으면(창이 안 떴거나 캄캄) 읽지 않는다 — 잡음을 세게 된다.
+            try:
+                _mn, _mx = int(band.min()), int(band.max())
+            except Exception:
+                _mn = _mx = 0
+            if _mx - _mn >= OMANST_NUM_SPAN:
+                runs = _runs(_mn + (_mx - _mn) * OMANST_NUM_CUT)
         if not runs:
             return jx, jy, 0, sc
         if any((r[1] - r[0]) >= OMANST_WIDE for r in runs):
@@ -519,18 +565,28 @@ def omanst_pick(app, anchor, slot, log=None):
             _L("[오만의탑] 창을 못 찍어 중단")
             return False
         big, (ox, oy) = got
+        # 📏 등록된 **클릭24 = 세 번째 줄**. 그 창안 y 를 띠 중심으로 쓴다.
+        _ry = None
+        try:
+            _c = (slot or {}).get("coords") or []
+            if len(_c) > OMANST_PICK_IDX and _c[OMANST_PICK_IDX]:
+                _ry = int(_c[OMANST_PICK_IDX][1]) - oy
+        except Exception:
+            _ry = None
         last = (t == OMANST_TRIES)
-        x, y, n, sc = omanst_read(big, loose=last)
+        x, y, n, sc = omanst_read(big, loose=last, row_y=_ry)
         why = ""
         if x is None and last:
             # 🎯 겨루기로 못 가렸다 → **무조건** 그 종류 1등 자리를 고른다
-            x, y, n, sc = omanst_read(big, force=True)
+            x, y, n, sc = omanst_read(big, force=True, row_y=_ry)
             why = " · 겨루기로 못 가려 1등 자리"
         want = (n in pref) if pref else (n > 0)
         if last:
             want = True                  # 🎯 마지막 판은 **뭐가 나오든**
-        _L("[오만의탑] %d/%d판 — %s %s (%.2f) · 원하는 것 %s → %s"
-           % (t, OMANST_TRIES, kname, NM.get(n, n), sc, pref or "아무거나",
+        _L("[오만의탑] %d/%d판 — %s %s (%.2f)%s · 원하는 것 %s → %s"
+           % (t, OMANST_TRIES, kname, NM.get(n, n), sc,
+              (" · 세번째줄 창안y %d" % _ry) if _ry is not None else " · ⚠ 줄 고정 안 됨",
+              pref or "아무거나",
               "고른다" if (want and x is not None)
               else ("새로고침" if not last else "못 찾음")))
         if want and x is not None:
@@ -555,7 +611,7 @@ def omanst_pick(app, anchor, slot, log=None):
             _L("[오만의탑] ⚠ 새로고침이 아데나가 아니다 (동전 R-B %+.0f) "
                "— 누르지 않는다. 지금 것을 그대로 고른다" % _rb)
             if x is None:
-                x, y, n, sc = omanst_read(big, force=True)
+                x, y, n, sc = omanst_read(big, force=True, row_y=_ry)
                 why = " · 아데나가 없어 1등 자리"
             if x is not None:
                 return _take(ox, oy, x, y, n, sc, why)
