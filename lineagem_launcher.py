@@ -5530,7 +5530,7 @@ class App(tk.Tk):
         tk.Button(_aw, text="▶", font=("맑은 고딕", 8, "bold"),
                   bg="#6c3483", fg="white", activebackground="#512e5f",
                   width=2, height=2,
-                  command=lambda: self._run_awaken()).pack(side="left", padx=(2, 0))
+                  command=lambda: self._run_awaken(by_user=True, src="메인런처 ▶")).pack(side="left", padx=(2, 0))
         tk.Button(btn_row, text="🔑 계정\n관리",
             font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
             activebackground="#0e6655", width=7, height=2,
@@ -5797,7 +5797,7 @@ class App(tk.Tk):
         self._warn_allbtn = tk.Button(
             dc_col, text="▶ 전부 복구", font=("맑은 고딕", 8, "bold"),
             bg="#8e44ad", fg="white", activebackground="#6c3483", pady=0,
-            width=12, command=self._fix_run_all)
+            width=12, height=2, command=self._fix_run_all)
         self._warn_allbtn.pack(anchor="n", pady=(26, 0))   # ≈1cm 띄운다
 
         # 작업이 끝나면 여기에 큰 빨간 글씨로 '완료'가 1분간 뜬다
@@ -6860,13 +6860,29 @@ class App(tk.Tk):
         except Exception:
             return ""
 
-    def _run_awaken(self, times=None):
+    def _run_awaken(self, times=None, by_user=False, src=""):
         """✨ 각성강화 — 화면을 읽어 [자동 등록] → [경험치 합성] 을 반복한다.
 
         좌표를 찍지 않는다. 지금 화면에서 **제일 큰 리니지M 창**을 찾아
         그 안에서 버튼 글자를 찾아 누른다 (창을 키운 정도가 달라도 된다).
         [경험치 합성] 은 재료가 없으면 **회색**이라, 글자를 찾은 자리의 **밝기**로
         켜졌는지 가린다 — 가루 체크칸에서 검증된 방법과 같다."""
+        # 🚫 **사용자가 ▶ 를 눌렀을 때만 돈다** (2026-10-29 사용자 지시:
+        #    *"시작 버튼도 안 눌렀는데 너가 알아서 해버리는 문제가 발생하고 있고"*).
+        #    코드상 자동 경로는 없지만 앞으로 생겨도 **여기서 막힌다.**
+        #    막힌 것은 기록에 남아 '무엇이 불렀는지' 를 바로 짚을 수 있다.
+        #    🚫 클로드는 이 관문을 빼지 말 것 — 새 호출은 사용자가 누른
+        #       버튼에서만 `by_user=True` 로 부른다.
+        if not by_user:
+            try:
+                import traceback
+                w = [x.strip() for x in "".join(
+                    traceback.format_stack(limit=4)[:-1]).splitlines() if x.strip()]
+                click_log("[각성강화] 🚫 ▶ 를 누르지 않았는데 각성을 시작하려 했다 "
+                          "— 막았다 · 부른 곳: " + " / ".join(w[-2:]))
+            except Exception:
+                pass
+            return
         if getattr(self, "_awaken_busy", False):
             # 🔁 **돌고 있으면 멈추고 다시 시작한다** (2026-10-28 사용자 지시:
             #    *"그냥 멈춤 버튼 누르지 않고, 그냥 멈췄다가 다시 하면
@@ -6890,7 +6906,7 @@ class App(tk.Tk):
                         "✨ 돌던 것이 안 멈춥니다 — 잠시 뒤 시작을 다시 눌러주세요"))
                     return
                 time.sleep(0.4)
-                self._run_awaken(times)
+                self._run_awaken(times, by_user=True, src="다시 시작")
 
             threading.Thread(target=_again, daemon=True).start()
             return
@@ -6940,7 +6956,8 @@ class App(tk.Tk):
                 time.sleep(t_)
             try:
                 click_log(f"[각성강화] 시작 — {rect[5]} ({rect[3]}x{rect[4]}) "
-                          f"· 최대 {n_max}회 · 이번 속도 {tempo:.2f}배")
+                          f"· 최대 {n_max}회 · 이번 속도 {tempo:.2f}배"
+                          f" · 누른 곳: {src or '?'}")
                 self._focus_client_at((rect[1] + 40, rect[2] + 40))
                 _nap(0.3, 0.5)
                 for t in range(n_max):
@@ -7895,7 +7912,7 @@ class App(tk.Tk):
                 n = AWAKEN_MAX
             self.cfg["awaken_times"] = n; save_cfg(self.cfg)
             _refresh()
-            self._run_awaken(n)
+            self._run_awaken(n, by_user=True, src="각성강화 창 [▶ 각성 시작]")
 
         br = tk.Frame(win); br.pack(pady=(8, 4))
         tk.Button(br, text="▶ 각성 시작", font=("맑은 고딕", 12, "bold"),
