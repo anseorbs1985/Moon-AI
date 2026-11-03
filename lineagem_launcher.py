@@ -2775,6 +2775,174 @@ def purple_running():
         return []
 
 
+# ⭐ **녹화 패널의 ★ 즐겨찾기** — 녹화 파일이 아니라 **Local Storage(leveldb)** 에 있다.
+#    zone\<GUID>\lm\cache\Local Storage\leveldb\000003.log
+#      키 `_file://\x00\x01purple_macro_favorites`
+#      값 {"r0":{"name":제목,"macroKey":"r0","createdAtFavorite":밀리초}, …}
+#    🧭 **패널 차례는 `createdAtFavorite` 내림차순** (늦게 누른 별이 위) — 실측으로 확인.
+#       그래서 1번이 가장 큰 값을 갖게 적어야 폴더 순서대로 보인다.
+#    이 zone 들은 .ldb(sst) 가 없고 **로그 한 개**에 전부 들어 있어서 그 로그만 다시 쓰면 된다.
+#    🚫 값만 고치려고 바이트를 덧붙이지 말 것 — **마지막 상태를 읽어 통째로 다시 쓴다.**
+REC_FAV_N = 5                 # 앞에서 몇 개에 ★ 를 켤지 (2026-11-03 사용자: "1~5번까지만")
+_LS_BLOCK = 32768
+_LS_HDR = 7
+_LS_CRCT = []
+
+
+def _ls_table():
+    """crc32c 표 — **쓸 때 만든다.** 모듈 맨 위의 for 문은 도구에 따라
+    건너뛰어져 표가 비는 일이 있다 (실측: 표가 빈 채로 IndexError)."""
+    if not _LS_CRCT:
+        for i in range(256):
+            c = i
+            for _ in range(8):
+                c = (c >> 1) ^ (0x82F63B78 if c & 1 else 0)
+            _LS_CRCT.append(c)
+    return _LS_CRCT
+
+
+def _ls_crc(b):
+    t = _ls_table()
+    c = 0xFFFFFFFF
+    for x in b:
+        c = t[(c ^ x) & 0xFF] ^ (c >> 8)
+    c ^= 0xFFFFFFFF
+    return (((c >> 15) | (c << 17)) + 0xA282EAD8) & 0xFFFFFFFF
+
+
+def _ls_var(b, i):
+    n, sh = 0, 0
+    while True:
+        c = b[i]; i += 1
+        n |= (c & 0x7F) << sh
+        if not (c & 0x80):
+            return n, i
+        sh += 7
+
+
+def _ls_putvar(n):
+    o = bytearray()
+    while True:
+        c = n & 0x7F
+        n >>= 7
+        if n:
+            o.append(c | 0x80)
+        else:
+            o.append(c); return bytes(o)
+
+
+def ls_read(path):
+    """로그의 **마지막 상태** → {키: 값} (bytes)"""
+    import struct
+    b = open(path, "rb").read()
+    st, frag, pos = {}, b"", 0
+    while pos + _LS_HDR <= len(b):
+        off = pos % _LS_BLOCK
+        if _LS_BLOCK - off < _LS_HDR:
+            pos += _LS_BLOCK - off
+            continue
+        _crc, ln, ty = struct.unpack("<IHB", b[pos:pos + _LS_HDR])
+        if ty == 0 and ln == 0:
+            pos += _LS_BLOCK - off
+            continue
+        data = b[pos + _LS_HDR:pos + _LS_HDR + ln]
+        pos += _LS_HDR + ln
+        if ty == 1:
+            batch = data
+        elif ty == 2:
+            frag = data; continue
+        elif ty == 3:
+            frag += data; continue
+        elif ty == 4:
+            batch = frag + data; frag = b""
+        else:
+            continue
+        if len(batch) < 12:
+            continue
+        cnt = struct.unpack("<I", batch[8:12])[0]
+        i = 12
+        for _ in range(cnt):
+            if i >= len(batch):
+                break
+            t = batch[i]; i += 1
+            kl, i = _ls_var(batch, i); k = batch[i:i + kl]; i += kl
+            if t == 1:
+                vl, i = _ls_var(batch, i); st[k] = batch[i:i + vl]; i += vl
+            else:
+                st.pop(k, None)
+    return st
+
+
+def ls_write(path, st, seq=1):
+    """{키: 값} 을 로그로 새로 쓴다 (임시파일 → 바꿔치기)."""
+    import struct
+    out = bytearray()
+
+    def _emit(batch):
+        i, first = 0, True
+        while True:
+            off = len(out) % _LS_BLOCK
+            room = _LS_BLOCK - off - _LS_HDR
+            if room <= 0:
+                out.extend(b"\x00" * (_LS_BLOCK - off)); continue
+            take = min(room, len(batch) - i)
+            last = (i + take) >= len(batch)
+            ty = 1 if (first and last) else (2 if first else (4 if last else 3))
+            seg = batch[i:i + take]
+            out.extend(struct.pack("<IHB", _ls_crc(bytes([ty]) + seg), take, ty) + seg)
+            i += take; first = False
+            if last:
+                return
+
+    for n, (k, v) in enumerate(st.items()):
+        _emit(struct.pack("<QI", seq + n, 1) + b"\x01"
+              + _ls_putvar(len(k)) + k + _ls_putvar(len(v)) + v)
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(bytes(out))
+    os.replace(tmp, path)
+
+
+def ls_log_path(guid):
+    """그 클라의 Local Storage 로그 — 없으면 None"""
+    d = os.path.join(purple_zone_root(), guid, "lm", "cache", "Local Storage", "leveldb")
+    try:
+        fs = [os.path.join(d, f) for f in os.listdir(d) if f.lower().endswith(".log")]
+        return max(fs, key=os.path.getmtime) if fs else None
+    except Exception:
+        return None
+
+
+def fav_make(recs, n_star=None):
+    """합친 녹화에서 **앞 n개**에 ★ 를 켠 값을 만든다 (1번이 맨 위로 오게)."""
+    n_star = REC_FAV_N if n_star is None else n_star
+    ks = list(recs)[:max(0, n_star)]
+    base = int(time.time() * 1000)
+    out = {}
+    for i, k in enumerate(ks):
+        # 1번이 가장 큰 값 → 패널 맨 위
+        out[k] = {"name": str((recs[k] or {}).get("title") or k),
+                  "macroKey": k,
+                  "createdAtFavorite": base + (len(ks) - i) * 1000}
+    return out
+
+
+def fav_write(guid, recs, n_star=None):
+    """그 클라의 ★ 를 맞춘다 → (됐나, 설명)"""
+    p = ls_log_path(guid)
+    if not p:
+        return False, "Local Storage 가 없다"
+    try:
+        st = ls_read(p)
+        fav = fav_make(recs, n_star)
+        st[b"_file://\x00\x01purple_macro_favorites"] = (
+            b"\x00" + json.dumps(fav, ensure_ascii=False).encode("utf-16-le"))
+        ls_write(p, st)
+        return True, "★ %d개" % len(fav)
+    except Exception as e:
+        return False, "%s: %s" % (type(e).__name__, e)
+
+
 def rec_make_dirs(rows=None):
     """폴더 `1` ~ `6` 과 `_백업` 을 만들어 둔다."""
     try:
@@ -6062,29 +6230,36 @@ class App(tk.Tk):
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
                     if os.path.exists(dst):
                         shutil.copy2(dst, os.path.join(bk, f"{i+1:02d}_{nm}.json"))
+                    _lp = ls_log_path(g)       # ★ 가 든 로그도 백업
+                    if _lp and os.path.exists(_lp):
+                        shutil.copy2(_lp, os.path.join(bk, f"{i+1:02d}_{nm}_즐겨찾기.log"))
                     tmp = dst + ".tmp"
                     with open(tmp, "w", encoding="utf-8") as _f:
                         _f.write(blob)
                     os.replace(tmp, dst)       # 쓰다가 죽어도 파일이 안 깨진다
+                    # ⭐ ★ 즐겨찾기도 같이 맞춘다 (앞 REC_FAV_N 개)
+                    _fok, _fwhy = fav_write(g, recs)
+                    if not _fok:
+                        skip.append(f"#{i+1:02d} {nm} — ★ 못 맞춤 ({_fwhy})")
                     done.append(f"#{i+1:02d} {nm}")
                 except Exception as e:
                     skip.append(f"#{i+1:02d} {nm} — 쓰기 실패 {type(e).__name__}: {e}")
-            click_log(f"[녹화교체] 녹화 {len(recs)}개로 {len(done)}개 클라를 채웠다 "
-                      f"· 실패 {len(skip)}개 · 백업 {bk}")
+            click_log(f"[녹화교체] 녹화 {len(recs)}개 + ★ {REC_FAV_N}개로 "
+                      f"{len(done)}개 클라를 채웠다 · 실패 {len(skip)}개 · 백업 {bk}")
             for l in note + bad:
                 click_log("[녹화교체]   " + l)
             for l in done + skip:
                 click_log("[녹화교체]   " + l)
             _msg("🎹 녹화교체 끝",
-                 f"녹화 {len(recs)}개로 **{len(done)}개 클라**를 채웠습니다."
+                 f"녹화 {len(recs)}개 + ★ 앞 {REC_FAV_N}개로 "
+                 f"**{len(done)}개 클라**를 채웠습니다."
                  + (f"  (실패 {len(skip)}개)" if skip else "") + chr(10) + chr(10)
                  + chr(10).join(note) + chr(10) + chr(10)
                  + "이전 것은 백업했습니다:" + chr(10) + bk
                  + ((chr(10) + chr(10) + chr(10).join(bad + skip)) if (bad or skip) else "")
                  + chr(10) + chr(10)
                  + "※ 켜져 있던 클라는 **녹화 창을 닫았다 다시 열어야** 보입니다."
-                 + chr(10) + "※ ★ 즐겨찾기는 따로 저장돼 있어 어긋날 수 있습니다 —"
-                 + " 패널에서 다시 눌러주세요.")
+                 + chr(10) + f"※ ★ 는 앞 {REC_FAV_N}개에 켜고 1번이 맨 위로 오게 했습니다.")
             self.after(0, lambda: self.status.set(
                 f"🎹 녹화 교체 — 녹화 {len(recs)}개로 {len(done)}개 클라를 채웠습니다 (백업함)"))
         except Exception as e:
