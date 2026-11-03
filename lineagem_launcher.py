@@ -5648,14 +5648,26 @@ class App(tk.Tk):
         self._upd_count_var = tk.StringVar(
             value="🔄 업데이트 " + str(int(_uc.get("update_count", 0))) + "회"
                   + ("  (" + str(_uc.get("update_last")) + ")" if _uc.get("update_last") else ""))
-        _ur = tk.Frame(self); _ur.pack(fill="x")
+        # 🧭 **위쪽 줄들을 한 덩어리로 묶어 통째로 오른쪽으로 보낸다** (2026-11-03
+        #    사용자 지시 *"위에 클로드 혈레 등등 … 오른쪽으로 이동시켜주라"*).
+        #    하나씩 오른쪽 정렬하면 줄끼리 어긋난다 — 묶어서 옮기면
+        #    **줄 사이 정렬(혈레이드가 TJ 위에 오는 것 등)이 그대로 유지**된다.
+        #    끄려면 FRONT_ROW_EAST = False (예전처럼 왼쪽).
+        if FRONT_ROW_EAST:
+            _topwrap = tk.Frame(self); _topwrap.pack(anchor="e")
+        else:
+            _topwrap = self
+        self._topwrap = _topwrap
+        # 🧭 줄 자체를 **오른쪽 끝**에 붙인다 (fill="x" 면 안쪽 버튼이 왼쪽에 남는다)
+        _E = dict(anchor="e") if FRONT_ROW_EAST else dict(fill="x")
+        _ur = tk.Frame(_topwrap); _ur.pack(**_E)
         tk.Label(_ur, textvariable=self._upd_count_var, font=("맑은 고딕", 8, "bold"),
                  fg="#8a6d2f").pack(side="left", padx=(14, 0), pady=(2, 0))
 
         # 혈레이드 · 제자리 (나란히) / 그 아래 맨뒤로 (두 버튼 폭만큼 길게)
         BTN, GAP, LEFT = 46, 6, 30
         WIDE = BTN * 2 + GAP                      # 맨뒤로 가로 길이 = 혈레이드~제자리 끝
-        top_row = tk.Frame(self); top_row.pack(fill="x")
+        top_row = tk.Frame(_topwrap); top_row.pack(**_E)
         self._boost_btn = tk.Canvas(top_row, width=BTN, height=BTN, highlightthickness=0,
                                     bg=self.cget("bg"), cursor="hand2")
         self._boost_btn.pack(side="left", padx=(LEFT, 0), pady=(2, 0))
@@ -5673,6 +5685,11 @@ class App(tk.Tk):
         home_c.create_text(BTN // 2, BTN // 2, text="📍 제\n자리", fill="white",
                            font=("맑은 고딕", 7, "bold"), justify="center")
         home_c.bind("<Button-1>", lambda e: self._go_home())
+        # 🔁 **제자리 ↔ 혈레이드 자리 바꿈** (2026-11-03 사용자 요청).
+        #    만드는 순서는 그대로 두고 pack 순서만 바꾼다 — 바깥 여백(LEFT)은
+        #    늘 '앞에 오는 쪽' 이 가져야 줄 끝에 맞는다.
+        home_c.pack_configure(padx=(LEFT, 0))
+        self._boost_btn.pack_configure(padx=(GAP, 0), after=home_c)
         # 거래소검색 — 제자리 오른쪽 (쿠폰등록과 같은 방식: 좌표 클릭 + 글 붙여넣기)
         mk = tk.Frame(top_row); mk.pack(side="left", padx=(GAP, 0), pady=(2, 0))
         tk.Button(mk, text="🔎 거래소검색", font=("맑은 고딕", 8, "bold"),
@@ -5682,7 +5699,7 @@ class App(tk.Tk):
                   bg="#27ae60", fg="white", activebackground="#1e8449", width=11,
                   command=lambda: self._start_dgn2("market")).pack(side="top", pady=(2, 0))
         # 맨뒤로 — 위 두 버튼 폭에 맞춘 긴 버튼 (좌·우 끝 정렬)
-        back_row = tk.Frame(self); back_row.pack(fill="x")
+        back_row = tk.Frame(_topwrap); back_row.pack(**_E)
         self._back_circle = tk.Canvas(back_row, width=WIDE, height=34, highlightthickness=0,
                                       bg=self.cget("bg"), cursor="hand2")
         self._back_circle.pack(side="left", padx=(LEFT, 0), pady=(3, 0))
@@ -5694,7 +5711,11 @@ class App(tk.Tk):
         self._back_circle.bind("<Button-1>", lambda e: (self._back_and_claude() or "break"))
 
         # 계정 수
-        row_acc = tk.Frame(self); row_acc.pack(fill="x", padx=16, pady=2)
+        row_acc = tk.Frame(_topwrap)
+        if FRONT_ROW_EAST:
+            row_acc.pack(anchor="e", padx=(0, 16), pady=2)
+        else:
+            row_acc.pack(fill="x", padx=16, pady=2)
         tk.Label(row_acc, text="전환할 계정 수:", font=("맑은 고딕", 9)).pack(side="left")
         self.acc_count = tk.IntVar(value=2)
         tk.Spinbox(row_acc, from_=1, to=16, textvariable=self.acc_count,
@@ -5702,7 +5723,7 @@ class App(tk.Tk):
 
         # 실행 / 멈춤
         # 가운데정렬이면 창을 넓힐 때마다 버튼이 오른쪽으로 밀린다 → 왼쪽 고정
-        btn_row = tk.Frame(self); btn_row.pack(pady=6, anchor="w", padx=(38, 0))
+        btn_row = tk.Frame(_topwrap); btn_row.pack(pady=6, anchor="w", padx=(38, 0))
         # TJ성공!! (동그라미 버튼) + 실행 — 계정관리 왼쪽
         tjcol = tk.Frame(btn_row); tjcol.pack(side="left", padx=(0, 6), anchor="n")
         self._tjcol = tjcol
@@ -5726,11 +5747,6 @@ class App(tk.Tk):
                   bg="#c0392b", fg="white", activebackground="#7b241c",
                   width=6, height=2,
                   command=self._raise_claude).pack()
-        tk.Button(cl_col, text="🔄 런처" + chr(10) + "재시작",
-                  font=("맑은 고딕", 8, "bold"),
-                  bg="#2c3e50", fg="white", activebackground="#1b2631",
-                  width=6, height=2,
-                  command=self._restart_launcher).pack(pady=(2, 0))
         # 🃏 변신확정!! — 👑 작위!! **바로 위** (2026-10-19 사용자 요청)
         _cf = tk.Frame(cl_col); _cf.pack(pady=(2, 0))
         tk.Button(_cf, text="🃏 변신" + chr(10) + "확정!!", font=("맑은 고딕", 8, "bold"),
@@ -5875,9 +5891,23 @@ class App(tk.Tk):
                   command=lambda: self._start_dgn2("coupon")).pack(side="top", pady=(1, 0))
 
         # 쿠폰등록과 좌표저장 사이: 빨간 동그라미 업데이트 버튼 (git pull + 재시작)
-        upd = tk.Canvas(btn_row, width=78, height=78, highlightthickness=0,
+        # 🔄 **런처 재시작은 업데이트 바로 위** (2026-11-03 사용자 요청
+        #    *"업데이트 위에 런처 재시작 버튼 올려줘"*). 예전엔 💬 클로드 아래에
+        #    있었는데, 둘 다 '다시 띄우는' 일이라 나란히 두는 게 찾기 쉽다.
+        upd_col = tk.Frame(btn_row); upd_col.pack(side="left", padx=(6, 0))
+        # 🔄 런처 재시작 — **TJ성공!! 과 같은 58x58 동그라미** (2026-11-03 사용자 요청
+        #    *"런처 재시작 버튼도 TJ성공!! 이 크기로 해줘"*). 업데이트 동그라미와
+        #    위아래로 나란히 놓는다.
+        _rs = tk.Canvas(upd_col, width=58, height=58, highlightthickness=0,
                         bg=self.cget("bg"), cursor="hand2")
-        upd.pack(side="left", padx=(6, 0))
+        _rs.pack(side="top", pady=(0, 3))
+        _rs.create_oval(2, 2, 56, 56, fill="#2c3e50", outline="#1b2631", width=3)
+        _rs.create_text(29, 29, text="🔄 런처" + chr(10) + "재시작", fill="white",
+                        font=("맑은 고딕", 7, "bold"), justify="center")
+        _rs.bind("<Button-1>", lambda e: self._restart_launcher())
+        upd = tk.Canvas(upd_col, width=78, height=78, highlightthickness=0,
+                        bg=self.cget("bg"), cursor="hand2")
+        upd.pack(side="top")
         upd.create_oval(3, 3, 75, 75, fill="#c0392b", outline="#7b241c", width=3)
         upd.create_text(39, 29, text="🔄", font=("맑은 고딕", 13))
         upd.create_text(39, 52, text="업데이트", fill="white", font=("맑은 고딕", 9, "bold"))
@@ -5915,6 +5945,23 @@ class App(tk.Tk):
         self._btnrow_pad = tk.Frame(btn_row, width=0, height=1)
         self._btnrow_pad.pack(side="left")
 
+        # 🧭 **클로드 열과 업데이트를 맨 오른쪽으로** (2026-11-03 사용자 지시).
+        #    이 줄(btn_row)이 가장 넓어서, 줄을 오른쪽에 붙여도 안쪽 열은
+        #    줄 **왼쪽 끝**에 남아 클라 뒤에 가린다. pack 순서만 맨 뒤로 보낸다.
+        #    · 💬 클로드 열 — 오른쪽에서 두 번째
+        #    · 🔄 업데이트(+그 위 런처재시작) — **맨 오른쪽**
+        #      (*"TJ성공은 왼쪽으로 보내고 그자리에 업데이트 버튼을 가져와"*)
+        #    · TJ성공!! — **맨 왼쪽 그대로** (만든 자리가 맨 앞이라 아무것도 안 한다)
+        #    🚫 만드는 자리(코드 위치)는 옮기지 말 것 — 안의 위젯 참조가 틀어진다.
+        if FRONT_ROW_EAST:
+            try:
+                cl_col.pack_configure(side="left", padx=(6, 0), anchor="n",
+                                      after=self._btnrow_pad)
+                upd_col.pack_configure(side="left", padx=(6, 0), anchor="n",
+                                       after=cl_col)
+            except Exception:
+                pass
+
         # 다야 카운트 데이터 변수 (UI는 별도 창)
         self._cnt_total_var = tk.StringVar(value="합계: 0")
         self._cnt_date_var  = tk.StringVar(value="")   # 마지막 확정 측정 일시
@@ -5939,7 +5986,11 @@ class App(tk.Tk):
         tk.Frame(self, height=1, bg="#ccc").pack(fill="x", padx=10, pady=3)
 
         # ── 섹션 버튼 행 (좌표등록·과거섬·스케줄·사냥 등 직접 표시) ──
-        self._sec_row = tk.Frame(self); self._sec_row.pack(pady=4, anchor="w", padx=(38, 0))
+        self._sec_row = tk.Frame(self)
+        if FRONT_ROW_EAST:
+            self._sec_row.pack(pady=4, anchor="e", padx=(0, 0))
+        else:
+            self._sec_row.pack(pady=4, anchor="w", padx=(38, 0))
         self._build_sec_row()
 
         # ── 배열창 재배치(슬롯별 그리드) + 다야 수량 ──
@@ -19668,6 +19719,10 @@ class App(tk.Tk):
                 pass
             # 2) 맨뒤로/혈레이드/제자리 ← TJ성공!! 좌측 라인에 일렬로
             try:
+                # 🧭 오른쪽 정렬일 때는 이 맞춤을 쓰지 않는다 — 줄마다 오른쪽 끝에
+                #    붙여놨는데 왼쪽 여백을 주면 화면 밖으로 밀려난다.
+                if FRONT_ROW_EAST:
+                    raise RuntimeError("오른쪽 정렬 — 왼쪽 맞춤 안 씀")
                 bx = self._tjcol.winfo_rootx() - self.winfo_rootx()
                 if 0 <= bx < 800:
                     self._back_circle.pack_configure(padx=(bx, 0))
