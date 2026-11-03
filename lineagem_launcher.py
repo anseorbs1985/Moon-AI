@@ -111,6 +111,11 @@ CLICK_SLOTS    = 16
 GROUP_SIZE     = 8
 HUNT_SLOTS     = 16
 HUNT_CLICKS    = 5
+# 🏹 사냥 — **좌표 사이 간격** (2026-11-03 사용자 지시: *"그냥 랜덤 시간 전부 다 주고
+#    개별실행도 그냥 0.7~1.9초 이런 거 랜덤 시간 이렇게 줘"*). 전 0.15~0.5초.
+#    전체 시간은 이게 다 더해진 것이다 — 16슬롯 × 좌표5 기준 **약 3분**.
+#    🚫 값 하나로 고정하지 말 것 (항상 사람이 하는 것처럼 — 2026-09-07).
+HUNT_GAP       = (0.7, 1.9)
 HUNT_INTERVAL  = 1.4   # 사냥 슬롯 내 클릭 간격(초) — 실제 0.8~1.0초 랜덤
 HUNT_SLOT_INTERVAL = 3.5  # 사냥 슬롯 간 간격(초) — 실제로 2~4초 랜덤
 CLICK_INNER_INTERVAL = 2.5   # 클릭 슬롯 내 클릭 간격(초, 클릭1→클릭2)
@@ -2459,6 +2464,130 @@ def cardfix_seen(coord):
         return (best >= thr), best
     except Exception:
         return False, 0.0
+
+
+# 🖱 **마우스만 올리는 자리를 그림으로 찾는다** (2026-11-03 사용자 요청:
+#    *"과거섬이나 이렇게 마우스 올리는 거 있잖아, 이게 **위치가 좀 변동이 되거든**.
+#      2번을 보면 플레이 버튼이 네 번째에 있는데 다른 건 세 번째에 있고 …
+#      이걸 **이미지로 인식해서 그 위에 마우스를 올리**고 그랬으면 좋겠는데"*).
+#    옆 패널(CEFCLIENT)의 아이콘 순서가 클라마다 달라서 **등록 좌표가 어긋난다.**
+#    그림으로 찾으면 몇 번째에 있든 맞는다.
+#    🚫 **못 찾으면 등록 좌표에 올린다** — 그림을 안 넣은 컴퓨터가 멈추면 안 된다.
+HOVER_IMG_FKEYS = ("past", "sched")   # 이 런처의 '마우스 올림' 칸에 쓴다
+HOVER_MATCH     = 0.70                # 판정 기준
+HOVER_IMG_MAX   = 4                   # 이 컴퓨터 전용 그림 장수
+HOVER_SPAN      = (1.00, 0.92, 1.08)  # 창 크기가 달라도 맞게 조금씩 키워/줄여 본다
+
+
+def hover_img_path(fkey):
+    """공용 그림 (저장소 click_templates — 업데이트로 로컬에도 간다)"""
+    return os.path.join(IMG_DIR, f"hover_{fkey}.png")
+
+
+def hover_img_list(fkey):
+    """공용 1장 + **이 컴퓨터 전용** 몇 장 (같은 자리라도 클라마다 조금씩 다르다)"""
+    out = []
+    p = hover_img_path(fkey)
+    if os.path.exists(p):
+        out.append(p)
+    for k in range(1, HOVER_IMG_MAX + 1):
+        q = os.path.join(IMG_DIR_MINE, f"hover_{fkey}_mine{k}.png")
+        if os.path.exists(q):
+            out.append(q)
+    return out
+
+
+def grab_hwnd(hwnd):
+    """아무 창이나 **직접 캡처** (PrintWindow) → BGR. 가려져 있어도 정확하다."""
+    try:
+        import win32gui, win32ui, numpy as np, cv2
+        from ctypes import windll
+        from PIL import Image
+        l, t, r, b = win32gui.GetWindowRect(hwnd)
+        w, h = r - l, b - t
+        if w < 4 or h < 4:
+            return None, (l, t)
+        hdc = win32gui.GetWindowDC(hwnd)
+        mfc = win32ui.CreateDCFromHandle(hdc); save = mfc.CreateCompatibleDC()
+        bmp = win32ui.CreateBitmap(); bmp.CreateCompatibleBitmap(mfc, w, h)
+        save.SelectObject(bmp)
+        windll.user32.PrintWindow(hwnd, save.GetSafeHdc(), 2)
+        info = bmp.GetInfo(); bits = bmp.GetBitmapBits(True)
+        im = Image.frombuffer("RGB", (info["bmWidth"], info["bmHeight"]),
+                              bits, "raw", "BGRX", 0, 1)
+        try:
+            win32gui.DeleteObject(bmp.GetHandle()); save.DeleteDC()
+            mfc.DeleteDC(); win32gui.ReleaseDC(hwnd, hdc)
+        except Exception:
+            pass
+        return cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR), (l, t)
+    except Exception:
+        return None, (0, 0)
+
+
+def panel_hwnd_at(x, y):
+    """그 점을 품은 창 — **옆 패널(CEFCLIENT) 을 먼저** 본다 (플레이 버튼이 거기 있다)."""
+    try:
+        import win32gui
+        best = [None, None]
+
+        def _cb(h, _):
+            if not win32gui.IsWindowVisible(h):
+                return
+            try:
+                l, t, r, b = win32gui.GetWindowRect(h)
+            except Exception:
+                return
+            if not (l <= x < r and t <= y < b):
+                return
+            c = win32gui.GetClassName(h) or ""
+            if c == "CEFCLIENT":
+                best[0] = h
+            elif c == "GLFW30":
+                best[1] = h
+        win32gui.EnumWindows(_cb, None)
+        return best[0] or best[1]
+    except Exception:
+        return None
+
+
+def hover_spot(fkey, coord):
+    """🖱 등록 좌표가 있는 패널에서 **그림을 찾아** 올릴 자리를 돌려준다.
+
+    → (화면x, 화면y, 일치도) · 못 찾으면 (None, None, 최고점수).
+    🚫 못 찾았다고 멈추지 말 것 — 부르는 쪽이 등록 좌표로 떨어진다."""
+    ps = hover_img_list(fkey)
+    if not (ps and coord):
+        return None, None, -1.0
+    h = panel_hwnd_at(int(coord[0]), int(coord[1]))
+    if not h:
+        return None, None, -1.0
+    big, (ox, oy) = grab_hwnd(h)
+    if big is None:
+        return None, None, -1.0
+    try:
+        import cv2, numpy as np
+        best = (-1.0, 0, 0, 0, 0)
+        for p in ps:
+            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            if t is None:
+                continue
+            for sc in HOVER_SPAN:
+                tt = (t if abs(sc - 1.0) < 0.02 else
+                      cv2.resize(t, (max(3, int(round(t.shape[1] * sc))),
+                                     max(3, int(round(t.shape[0] * sc))))))
+                if big.shape[0] < tt.shape[0] or big.shape[1] < tt.shape[1]:
+                    continue
+                _n, mx, _l, ml = cv2.minMaxLoc(
+                    cv2.matchTemplate(big, tt, cv2.TM_CCOEFF_NORMED))
+                if mx > best[0]:
+                    best = (float(mx), ml[0], ml[1], tt.shape[1], tt.shape[0])
+        if best[0] < HOVER_MATCH:
+            return None, None, float(best[0])
+        return (int(ox + best[1] + best[3] // 2),
+                int(oy + best[2] + best[4] // 2), float(best[0]))
+    except Exception:
+        return None, None, -1.0
 
 
 def sleep_img_path(fkey):
@@ -13499,6 +13628,173 @@ class App(tk.Tk):
         self.status.set("🏢 층을 읽는 중…")
         threading.Thread(target=_go, daemon=True).start()
 
+    def _hover_move(self, fkey, coord, name="", move_fn=None):
+        """🖱 그 자리에 커서를 올린다 — **그림이 있으면 그림을 찾아** 그 자리에.
+
+        옆 패널의 아이콘 순서가 클라마다 달라 등록 좌표가 어긋난다 (2026-11-03
+        사용자: *"플레이 버튼이 네 번째에 있는데 다른 건 세 번째에 있고"*).
+        🚫 못 찾으면 **등록 좌표** 에 올린다 — 그림을 안 넣은 컴퓨터도 그대로 돈다."""
+        _f = move_fn or move_at
+        try:
+            if not hover_img_list(fkey):
+                _f(*coord)
+                return coord
+            hx, hy, hv = hover_spot(fkey, coord)
+            if hx is None:
+                click_log(f"[{fkey}] 🖱 [{name}] 올릴 그림을 못 찾음 "
+                          f"(최고 {hv:.2f} · 기준 {HOVER_MATCH}) → "
+                          f"등록 좌표 {tuple(coord)} 에 올린다")
+                _f(*coord)
+                return coord
+            if abs(hx - coord[0]) > 3 or abs(hy - coord[1]) > 3:
+                click_log(f"[{fkey}] 🖱 [{name}] 그림으로 찾음 (일치도 {hv:.2f}) "
+                          f"{tuple(coord)} → ({hx},{hy}) 에 올린다")
+            _f(hx, hy)
+            return (hx, hy)
+        except Exception as e:
+            click_log(f"[{fkey}] 🖱 올리기 오류 {type(e).__name__}: {e} → 등록 좌표")
+            try:
+                _f(*coord)
+            except Exception:
+                pass
+            return coord
+
+    def _grab_hover_image(self, fkey, btn=None):
+        """🖱 '마우스를 올릴 것'(옆 패널의 플레이 버튼 등)을 드래그해 등록한다."""
+        self._hover_target = (fkey, btn)
+        self.status.set("🖱 마우스를 올릴 **버튼/아이콘**을 작게 드래그하세요 "
+                        "(옆 패널의 ▶ 같은 것 · ESC 취소)")
+        for w in self._section_wins():
+            try:
+                w.withdraw()
+            except Exception:
+                pass
+        self.withdraw()
+        self.after(250, lambda: _PotionAreaOverlay(self, self._on_hover_image))
+
+    def _on_hover_image(self, x, y, w, h):
+        self.deiconify()
+        for wn in self._section_wins():
+            try:
+                wn.deiconify()
+            except Exception:
+                pass
+        tgt = getattr(self, "_hover_target", None)
+        if not tgt:
+            return
+        fkey, btn = tgt
+        if w < 5 or h < 5:
+            self.status.set("🖱 너무 작습니다 — 다시 드래그해주세요")
+            return
+        try:
+            from PIL import ImageGrab
+            import numpy as np, cv2
+            im = ImageGrab.grab(bbox=(x, y, x + w, y + h),
+                                all_screens=True).convert("RGB")
+            g = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2GRAY)
+            if float(g.std()) < 3.0:
+                self.status.set("🖱 무늬가 없는 자리입니다 — 버튼·아이콘을 "
+                                "잘라주세요 (저장 안 함)")
+                return
+            p = hover_img_path(fkey)
+            if not os.path.exists(p):
+                os.makedirs(IMG_DIR, exist_ok=True)
+                im.save(p)
+                where = "공용"
+            else:
+                os.makedirs(IMG_DIR_MINE, exist_ok=True)
+                where = None
+                for k in range(1, HOVER_IMG_MAX + 1):
+                    q = os.path.join(IMG_DIR_MINE, f"hover_{fkey}_mine{k}.png")
+                    if not os.path.exists(q):
+                        im.save(q)
+                        where = f"이 컴퓨터 전용 {k}장째"
+                        break
+                if where is None:
+                    self.status.set(f"🖱 전용 그림이 이미 {HOVER_IMG_MAX}장입니다 "
+                                    f"(오른쪽 클릭으로 지운 뒤 다시)")
+                    return
+            self._hover_btn_sync(fkey, btn)
+            self.status.set(f"🖱 올릴 그림 저장 ({w}×{h} · {where}) — "
+                            f"이제 그 그림을 찾아 그 위에 올립니다")
+        except Exception as e:
+            self.status.set(f"🖱 저장 실패: {e}")
+
+    def _del_hover_image(self, fkey, btn=None):
+        """오른쪽 클릭 — 전용이 있으면 **전용만** 전부, 없으면 공용을 지운다."""
+        try:
+            mine = [os.path.join(IMG_DIR_MINE, f"hover_{fkey}_mine{k}.png")
+                    for k in range(1, HOVER_IMG_MAX + 1)]
+            mine = [q for q in mine if os.path.exists(q)]
+            if mine:
+                for q in mine:
+                    os.remove(q)
+                self.status.set(f"🖱 이 컴퓨터 전용 {len(mine)}장을 지웠습니다 "
+                                f"(공용은 남음)")
+            elif os.path.exists(hover_img_path(fkey)):
+                os.remove(hover_img_path(fkey))
+                self.status.set("🖱 공용 그림을 지웠습니다 — 이제 등록 좌표에 올립니다")
+            else:
+                self.status.set("🖱 지울 그림이 없습니다")
+            self._hover_btn_sync(fkey, btn)
+        except Exception as e:
+            self.status.set(f"🖱 지우기 실패: {e}")
+
+    def _hover_btn_sync(self, fkey, btn):
+        try:
+            n = len(hover_img_list(fkey))
+            if btn and btn.winfo_exists():
+                btn.config(text=("🖱 올릴그림" if not n else
+                                 ("🖱있음" if n == 1 else f"🖱{n}장")),
+                           bg=("#5d6d7e" if not n else "#6c3483"))
+        except Exception:
+            pass
+
+    def _hover_probe(self, fkey):
+        """🔍 16슬롯에서 지금 그림이 어디에 잡히는지 — **아무것도 누르지 않는다.**"""
+        if not hover_img_list(fkey):
+            self.status.set("🖱 먼저 [🖱 올릴그림] 으로 버튼을 잘라 등록해주세요")
+            return
+        key = self._grid_spec(fkey)["key"]
+        rows = []
+        for si, sl in enumerate(self.cfg.get(key, []) or []):
+            cs = (sl or {}).get("coords") or []
+            c = cs[1] if len(cs) > 1 else None
+            if not c:
+                rows.append(f"#{si+1:02d} 좌표2 없음")
+                continue
+            hx, hy, hv = hover_spot(fkey, c)
+            if hx is None:
+                rows.append(f"#{si+1:02d} ✘ 못 찾음 (최고 {hv:.2f})")
+            else:
+                rows.append(f"#{si+1:02d} ✔ {hv:.2f}  ({c[0]},{c[1]}) → ({hx},{hy})"
+                            + ("   ← 어긋나 있었다"
+                               if abs(hx - c[0]) > 3 or abs(hy - c[1]) > 3 else ""))
+        txt = NL.join(rows)
+        click_log(f"[{fkey}] 🖱 올릴자리 확인 — " + " | ".join(rows))
+        messagebox.showinfo(
+            f"🖱 마우스 올릴 자리 — {fkey}",
+            f"기준 {HOVER_MATCH} · 그림 {len(hover_img_list(fkey))}장"
+            + NL + NL + txt)
+
+    def _hover_row(self, parent, fkey):
+        """과거섬·스케줄 창에 붙이는 한 줄 (등록 / 확인)"""
+        hr = tk.Frame(parent)
+        hr.pack(pady=(0, 2))
+        tk.Label(hr, text="마우스 올릴 자리(좌표2):", font=("맑은 고딕", 8),
+                 fg="#555").pack(side="left")
+        b = tk.Button(hr, text="🖱 올릴그림", font=("맑은 고딕", 8, "bold"),
+                      fg="white", width=10)
+        b.config(command=lambda f=fkey, bb=b: self._grab_hover_image(f, bb))
+        b.pack(side="left", padx=(4, 2))
+        b.bind("<Button-3>", lambda _e, f=fkey, bb=b: self._del_hover_image(f, bb))
+        self._hover_btn_sync(fkey, b)
+        tk.Button(hr, text="🔍 16클라 확인", font=("맑은 고딕", 8),
+                  bg="#2874a6", fg="white", width=13,
+                  command=lambda f=fkey: self._hover_probe(f)).pack(side="left")
+        tk.Label(hr, text="(그림이 있으면 그걸 찾아 올립니다)",
+                 font=("맑은 고딕", 7), fg="#888").pack(side="left", padx=(4, 0))
+
     def _grab_sleep_image(self, fkey, btn=None):
         """😴 절전모드 화면을 드래그해 등록한다.
         슬롯을 시작하기 전에 이게 보이면 Z 를 한 번 눌러 깨우고 진행한다."""
@@ -16238,6 +16534,7 @@ class App(tk.Tk):
             font=("맑은 고딕", 8), bg="#922b21", fg="white", width=18,
             command=self._group_copy_past).pack(side="left", padx=(8,0))
 
+        self._hover_row(parent, "past")
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
         self._build_slot_grid(parent, "past")   # 4×4 그리드 (화면 배치와 동일)
 
@@ -20504,6 +20801,7 @@ class App(tk.Tk):
         tk.Button(pr, text="🔒 클릭1=과거섬",
             font=("맑은 고딕", 8), bg="#95a5a6", fg="white", width=14,
             state="disabled").pack(side="left", padx=(4,0))
+        self._hover_row(parent, "sched")
 
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
         self._build_slot_grid(parent, "sched")   # 4×4 그리드 (화면 배치와 동일)
@@ -26975,7 +27273,8 @@ class App(tk.Tk):
                 if self._past_stop: break
                 if coords[1]:
                     self.status.set(f"🏝 [{name}] 마우스 이동...")
-                    pyautogui.moveTo(*coords[1])
+                    self._hover_move("past", coords[1], name,
+                                     move_fn=lambda x, y: pyautogui.moveTo(x, y))
                     nap(random.uniform(3.0, 5.0) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._past_stop: break
                 if len(coords) > 2 and coords[2]:
@@ -27177,7 +27476,7 @@ class App(tk.Tk):
                 if coords[1]:
                     self.status.set(f"📅 [{name}] 마우스 이동...")
                     self._wait_user_free("_sched_stop")
-                    move_at(*coords[1])
+                    self._hover_move("sched", coords[1], name)
                     nap(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._sched_stop: break
                 if len(coords) > 2 and coords[2]:
@@ -27592,7 +27891,7 @@ class App(tk.Tk):
             if len(coords) > 1 and coords[1]:
                 self.status.set(f"📅 [{name}] #{si+1:02d} 마우스 이동...")
                 self._wait_user_free("_sched_stop")
-                move_at(*coords[1])
+                self._hover_move("sched", coords[1], name)
                 nap(random.uniform(0.1, 0.6)
                            + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
             if self._sched_stop:
@@ -27663,7 +27962,7 @@ class App(tk.Tk):
                 if coords[1]:
                     self.status.set(f"📅 [{name}] 마우스 이동...")
                     self._wait_user_free("_sched_stop")
-                    move_at(*coords[1])
+                    self._hover_move("sched", coords[1], name)
                     nap(random.uniform(1.8, 3.0))     # 이동 뒤 여유
                 if len(coords) > 2 and coords[2]:
                     self.status.set(f"📅 [{name}] 클릭2...  (좌표2와 한 묶음)")
@@ -30326,7 +30625,7 @@ class App(tk.Tk):
                     nap(random.uniform(0.05, 0.15))
                     if j < HUNT_CLICKS - 1:
                         # 슬롯 안 좌표간 클릭 간격 (랜덤)
-                        interval = random.uniform(0.15, 0.5)
+                        interval = random.uniform(*HUNT_GAP)
                         _t_c = time.time()
                         if not self._hunt_wait(interval):
                             self.status.set("사냥 멈춤"); return
