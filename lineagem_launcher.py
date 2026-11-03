@@ -2642,6 +2642,156 @@ def hover_spot(fkey, coord, hwnd=None):
         return None, None, -1.0
 
 
+# 🎹 **퍼플 마우스·키 녹화(records.json) 를 16클라에 한 번에 교체** (2026-11-03 사용자 요청:
+#    *"플레이 버튼을 누르면 마우스키녹화 설정을 할 수 있는 게 있어 … 이걸 다 수동으로 해야
+#      하는 번거로움을 줄여줬으면 … 내가 파일을 올리면 너가 전부 교체 작업을 해줬으면"*).
+#
+#    퍼플은 **클라마다 폴더가 따로** 있다:
+#        %LOCALAPPDATA%\Purple\zone\<GUID>\lm\records\records.json   ← 녹화 (여기)
+#        %LOCALAPPDATA%\Purple\zone\<GUID>\lm\virtualkey\*.cfg        ← 가상 키보드
+#
+#    🔑 **슬롯 ↔ 폴더 짝은 `LineageM.exe` 의 명령줄로 맞춘다** —
+#       `-presenceId:"MKR_LINM_PURPLE:<GUID>"` 가 그 클라의 zone 이다.
+#       창 → 프로세스 → GUID 로 이어지므로 **클라를 껐다 켜도, 자리를 바꿔도** 따라간다.
+#    🚫 `purple_zone.config` 의 창 위치로 맞추지 말 것 — 클라를 **끌 때** 저장되는 값이라
+#       낡아 있다 (2026-11-03 실측: 16개 중 **3개만** 지금 자리와 맞았다).
+REC_DROP_DIR = os.path.join(BASE, "키설정교체")     # 파일을 넣는 자리 (바탕화면)
+REC_ZONE_MAP = os.path.join(os.environ.get("LOCALAPPDATA", BASE),
+                            "MoonAI", "purple_zones.json")   # 기억해둔 짝
+
+
+def purple_zone_root():
+    return os.path.join(os.environ.get("LOCALAPPDATA", ""), "Purple", "zone")
+
+
+def rec_path(guid):
+    return os.path.join(purple_zone_root(), guid, "lm", "records", "records.json")
+
+
+def slot_zones_live():
+    """지금 켜져 있는 클라로 **슬롯 → (캐릭이름, zone GUID)** 를 만든다.
+
+    클라가 꺼져 있으면 빈 목록. 그래서 **켜져 있을 때 기억해 둔다**(`REC_ZONE_MAP`)."""
+    try:
+        import re as _re, subprocess as _sp, win32gui, win32process
+        out = _sp.run(["powershell", "-NoProfile", "-Command",
+                       "Get-CimInstance Win32_Process -Filter \"Name='LineageM.exe'\" | "
+                       "ForEach-Object { $_.ProcessId.ToString() + '|' + $_.CommandLine }"],
+                      capture_output=True, text=True, encoding="utf-8",
+                      errors="replace", creationflags=0x08000000)
+        pid2 = {}
+        for line in (out.stdout or "").split(chr(10)):
+            if "|" not in line:
+                continue
+            pid, cl = line.split("|", 1)
+            m = _re.search(r"MKR_LINM_PURPLE:([0-9A-Fa-f\-]{36})", cl)
+            if m:
+                try:
+                    pid2[int(pid.strip())] = m.group(1).upper()
+                except Exception:
+                    pass
+        if not pid2:
+            return []
+        wins = []
+
+        def _cb(h, _):
+            if not win32gui.IsWindowVisible(h):
+                return
+            t = win32gui.GetWindowText(h) or ""
+            if (t.startswith("리니지M") and "자동 실행" not in t and t != "ngptop"
+                    and win32gui.GetClassName(h) == "GLFW30"):
+                r = win32gui.GetWindowRect(h)
+                _th, pid = win32process.GetWindowThreadProcessId(h)
+                wins.append((r[0], r[1], t, pid))
+        win32gui.EnumWindows(_cb, None)
+        cols = {}
+        for l, t, nm, pid in wins:
+            k = next((c for c in cols if abs(c - l) < 200), l)
+            cols.setdefault(k, []).append((t, nm, pid))
+        out2 = []
+        for k in sorted(cols):
+            for _t, nm, pid in sorted(cols[k]):
+                g = pid2.get(pid)
+                if g:
+                    out2.append((nm.replace("리니지M l ", "").strip(), g))
+        return out2
+    except Exception:
+        return []
+
+
+def slot_zones_save(rows):
+    try:
+        os.makedirs(os.path.dirname(REC_ZONE_MAP), exist_ok=True)
+        json.dump({"at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                   "slots": [{"name": a, "zone": b} for a, b in rows]},
+                  open(REC_ZONE_MAP, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def slot_zones_saved():
+    try:
+        d = json.load(open(REC_ZONE_MAP, encoding="utf-8-sig"))
+        return [(x.get("name", ""), x.get("zone", "")) for x in (d.get("slots") or [])], \
+               d.get("at", "")
+    except Exception:
+        return [], ""
+
+
+def purple_running():
+    """퍼플·클라가 하나라도 켜져 있나 → (켜진 것 이름들)"""
+    try:
+        import subprocess as _sp
+        out = _sp.run(["powershell", "-NoProfile", "-Command",
+                       "Get-Process -Name LineageM,Purple,purpleon,purpleonp "
+                       "-ErrorAction SilentlyContinue | "
+                       "Group-Object ProcessName | "
+                       "ForEach-Object { $_.Name + ':' + $_.Count }"],
+                      capture_output=True, text=True, encoding="utf-8",
+                      errors="replace", creationflags=0x08000000)
+        return [x.strip() for x in (out.stdout or "").split(chr(10)) if x.strip()]
+    except Exception:
+        return []
+
+
+def rec_drop_files():
+    """넣어둔 파일 → {슬롯번호(1부터): 경로} · 전체용은 0 번에."""
+    out = {}
+    try:
+        if not os.path.isdir(REC_DROP_DIR):
+            return out
+        for f in sorted(os.listdir(REC_DROP_DIR)):
+            p = os.path.join(REC_DROP_DIR, f)
+            if not os.path.isfile(p) or not f.lower().endswith(".json"):
+                continue
+            if f.startswith("읽어주세요"):
+                continue
+            if f.startswith("전체"):
+                out[0] = p
+                continue
+            m = re.match(r"\s*(\d{1,2})", f)
+            if m and 1 <= int(m.group(1)) <= 16:
+                out[int(m.group(1))] = p
+    except Exception:
+        pass
+    return out
+
+
+def rec_file_ok(p):
+    """진짜 녹화 파일인가 → (맞나, 설명)"""
+    try:
+        d = json.load(open(p, encoding="utf-8-sig"))
+        r = d.get("records") if isinstance(d, dict) else None
+        if not isinstance(r, dict):
+            return False, "'records' 가 없다 — 녹화 파일이 아닌 듯"
+        n = len(r)
+        ev = sum(len((v or {}).get("events") or []) for v in r.values()
+                 if isinstance(v, dict))
+        return True, f"녹화 {n}개 · 이벤트 {ev}개"
+    except Exception as e:
+        return False, f"읽기 실패 {type(e).__name__}"
+
+
 def sleep_img_path(fkey):
     """**절전모드 화면** 그림 — 이게 보이면 시작 전에 Z 를 한 번 눌러 깨운다.
 
@@ -5711,6 +5861,103 @@ class App(tk.Tk):
         info = self._coord_save_info()
         lb.config(text=(f"저장 {info['time'][5:16]}" if info else "저장본 없음"))
 
+    # ── 🎹 퍼플 마우스·키 녹화 교체 ─────────────────────────────────────
+    def _rec_zone_remember(self):
+        """클라가 켜져 있을 때 **슬롯 ↔ zone 짝을 기억**해 둔다 (교체는 끈 뒤에 하므로)."""
+        rows = slot_zones_live()
+        if len(rows) >= 2:
+            slot_zones_save(rows)
+            click_log(f"[녹화교체] 🔑 슬롯↔퍼플폴더 {len(rows)}개를 기억했다 "
+                      + " ".join(f"#{i+1:02d}{a}" for i, (a, _b) in enumerate(rows)))
+        return rows
+
+    def _rec_swap_open(self):
+        """[🎹 녹화교체] — 무거운 일은 전부 스레드에서."""
+        self.status.set("🎹 퍼플 폴더를 확인하는 중...")
+        threading.Thread(target=self._rec_swap_work, daemon=True).start()
+
+    def _rec_swap_work(self):
+        try:
+            import shutil
+            os.makedirs(REC_DROP_DIR, exist_ok=True)
+            files = rec_drop_files()
+            live = slot_zones_live()
+            if live:
+                slot_zones_save(live)
+            rows, at = (live, "지금") if live else slot_zones_saved()
+            running = purple_running()
+
+            def _msg(t, m):
+                self.after(0, lambda: messagebox.showinfo(t, m))
+
+            if not rows:
+                _msg("🎹 녹화교체",
+                     "퍼플 클라를 아직 한 번도 못 봤습니다." + chr(10) + chr(10)
+                     + "16개 클라를 **켜둔 상태로** 이 버튼을 한 번 눌러주세요 —"
+                     + chr(10) + "그때 슬롯↔폴더 짝을 기억해 둡니다."
+                     + chr(10) + "그 뒤에 클라를 끄고 다시 누르면 교체합니다.")
+                self.after(0, lambda: self.status.set("🎹 슬롯↔폴더 짝을 아직 모릅니다"))
+                return
+
+            tbl = chr(10).join(
+                "#%02d  %-14s %s" % (i + 1, a, b[:8]) for i, (a, b) in enumerate(rows))
+            if not files:
+                _msg("🎹 녹화교체 — 넣을 파일이 없습니다",
+                     f"넣는 자리: {REC_DROP_DIR}" + chr(10) + chr(10)
+                     + "01.json  02.json … 16.json   (앞 두 자리가 슬롯 번호)" + chr(10)
+                     + "전체.json                      (하나만 넣으면 16개 전부 같게)"
+                     + chr(10) + chr(10) + f"지금 아는 짝 ({at}):" + chr(10) + tbl)
+                try:
+                    os.startfile(REC_DROP_DIR)       # 사용자가 누른 버튼이라 열어도 된다
+                except Exception:
+                    pass
+                self.after(0, lambda: self.status.set("🎹 폴더에 파일을 넣고 다시 눌러주세요"))
+                return
+
+            if running:
+                _msg("🎹 먼저 퍼플을 꺼주세요",
+                     "켜져 있는 것: " + ", ".join(running) + chr(10) + chr(10)
+                     + "켜진 채로 바꾸면 **퍼플이 끌 때 도로 덮어씁니다.**" + chr(10)
+                     + "퍼플과 16클라를 전부 끈 뒤 다시 눌러주세요." + chr(10) + chr(10)
+                     + "(슬롯↔폴더 짝은 방금 기억해 뒀습니다)" + chr(10) + tbl)
+                self.after(0, lambda: self.status.set("🎹 퍼플을 끄고 다시 눌러주세요"))
+                return
+
+            # ── 교체 ──
+            bk = os.path.join(REC_DROP_DIR, "_백업", time.strftime("%Y%m%d_%H%M%S"))
+            os.makedirs(bk, exist_ok=True)
+            done, skip = [], []
+            for i, (nm, g) in enumerate(rows):
+                src = files.get(i + 1) or files.get(0)
+                if not src:
+                    skip.append(f"#{i+1:02d} {nm} — 넣은 파일 없음")
+                    continue
+                ok, why = rec_file_ok(src)
+                if not ok:
+                    skip.append(f"#{i+1:02d} {nm} — {os.path.basename(src)}: {why}")
+                    continue
+                dst = rec_path(g)
+                try:
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    if os.path.exists(dst):
+                        shutil.copy2(dst, os.path.join(bk, f"{i+1:02d}_{nm}.json"))
+                    shutil.copy2(src, dst)
+                    done.append(f"#{i+1:02d} {nm} ← {os.path.basename(src)} ({why})")
+                except Exception as e:
+                    skip.append(f"#{i+1:02d} {nm} — 복사 실패 {type(e).__name__}: {e}")
+            click_log(f"[녹화교체] 바꿈 {len(done)}개 · 건너뜀 {len(skip)}개 · 백업 {bk}")
+            for l in done + skip:
+                click_log("[녹화교체]   " + l)
+            _msg("🎹 녹화교체 끝",
+                 f"바꿈 {len(done)}개 · 건너뜀 {len(skip)}개" + chr(10)
+                 + f"이전 것은 백업했습니다:" + chr(10) + bk + chr(10) + chr(10)
+                 + chr(10).join(done + ([""] + skip if skip else [])))
+            self.after(0, lambda: self.status.set(
+                f"🎹 녹화 교체 — 바꿈 {len(done)}개 · 건너뜀 {len(skip)}개 (백업함)"))
+        except Exception as e:
+            click_log(f"[녹화교체] 오류 {type(e).__name__}: {e}")
+            self.after(0, lambda: self.status.set(f"🎹 녹화교체 오류: {e}"))
+
     def _save_coord_snapshot(self):
         """지금 좌표를 이 컴퓨터에 저장 — 나중에 [♻ 좌표복구]로 이 시점으로 되돌림.
         빈/깨진 좌표는 저장하지 않는다 (복구본이 오염되면 복구 자체가 무의미)."""
@@ -6349,6 +6596,11 @@ class App(tk.Tk):
                                    width=9, height=1, pady=2,
                                    command=self._toggle_dark)
         self._dark_btn.pack(side="top", pady=(1, 0))
+        # 🎹 퍼플 마우스·키 녹화를 16클라에 한 번에 교체
+        tk.Button(sv, text="🎹 녹화교체", font=("맑은 고딕", 8, "bold"),
+                  bg="#16a085", fg="white", activebackground="#0e6655",
+                  width=9, height=1, pady=2,
+                  command=self._rec_swap_open).pack(side="top", pady=(1, 0))
         self._refresh_coord_save_lbl()
         self.after(1500, self._refresh_lock_btn)
         self.after(300, self._apply_dark_all)     # 저장해둔 화면 밝기 적용
