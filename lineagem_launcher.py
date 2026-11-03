@@ -22250,6 +22250,13 @@ class App(tk.Tk):
         canvas.bind("<MouseWheel>", _wheel)
         inner.bind("<MouseWheel>", _wheel)
 
+        # 📋 전체붙임 — 2026-11-03 추가 (예전엔 등록/× 뿐이었다)
+        _dcp = tk.Frame(inner); _dcp.pack(fill="x", padx=3, pady=(0, 3))
+        tk.Button(_dcp, text="📋 전체붙임", font=("맑은 고딕", 8, "bold"),
+                  bg="#8e44ad", fg="white", activebackground="#6c3483",
+                  command=lambda: self._flat_paste_all("dc")).pack(side="left")
+        tk.Label(_dcp, text="한 슬롯 [복사] 뒤 누르면 16슬롯에 (창 위치 자동보정)",
+                 font=("맑은 고딕", 7), fg="#888").pack(side="left", padx=(6, 0))
         self._dc_slot_vars = []
         for i in range(DC_SLOTS):
             row = tk.Frame(inner, bd=1, relief="groove"); row.pack(fill="x", padx=3, pady=1)
@@ -22265,6 +22272,13 @@ class App(tk.Tk):
                       command=lambda x=i: self._reg_dc_coord(x)).pack(side="right", padx=2)
             tk.Button(row, text="×", font=("맑은 고딕", 7), fg="red", width=2,
                       command=lambda x=i: self._del_dc_coord(x)).pack(side="right")
+            # 복사 / 붙임 / 👁 — 다른 런처와 같은 공용 도우미 (2026-11-03 추가)
+            tk.Button(row, text="복사", font=("맑은 고딕", 7), bg="#2980b9", fg="white", width=3,
+                      command=lambda x=i: self._flat_copy("dc", x)).pack(side="right", padx=(0, 2))
+            tk.Button(row, text="붙임", font=("맑은 고딕", 7), bg="#8e44ad", fg="white", width=3,
+                      command=lambda x=i: self._flat_paste("dc", x)).pack(side="right", padx=(0, 2))
+            tk.Button(row, text="👁", font=("맑은 고딕", 7), bg="#566573", fg="white", width=2,
+                      command=lambda x=i: self._flat_preview("dc", x)).pack(side="right", padx=(0, 2))
             row.bind("<MouseWheel>", _wheel)
 
         self._refresh_dc_toggle()
@@ -23267,6 +23281,11 @@ class App(tk.Tk):
         tk.Button(hr, text="🔀 그룹복사 (#01→전체)",
             font=("맑은 고딕", 8), bg="#8e44ad", fg="white", width=18,
             command=self._group_copy_doll).pack(side="left", padx=(8,0))
+        # 📋 전체붙임 — 2026-11-03 추가. 🔀 그룹복사는 **위치 보정이 없어**
+        #    16슬롯이 전부 #01 클라를 누른다. 이쪽은 슬롯마다 클라 위치로 보정한다.
+        tk.Button(hr, text="📋 전체붙임", font=("맑은 고딕", 8, "bold"),
+            bg="#6c3483", fg="white", activebackground="#4a235a", width=10,
+            command=self._doll_paste_all).pack(side="left", padx=(4, 0))
         tk.Button(hr, text="👁 전체보기", font=("맑은 고딕", 8),
                   bg="#566573", fg="white",
                   command=lambda: self._slots_preview_all(
@@ -24506,6 +24525,13 @@ class App(tk.Tk):
         slots = self.cfg.get(sp["key"]) or [None] * 16
         svlist = []
         setattr(self, sp["vars_attr"], svlist)
+        # 📋 전체붙임 — 한 슬롯 [복사] 뒤 누르면 16슬롯에 (창 위치 자동보정)
+        _pr = tk.Frame(parent); _pr.pack(pady=(2, 0))
+        tk.Button(_pr, text="📋 전체붙임", font=("맑은 고딕", 8, "bold"),
+                  bg="#8e44ad", fg="white", activebackground="#6c3483",
+                  command=lambda f=fkey: self._flat_paste_all(f)).pack(side="left")
+        tk.Label(_pr, text="한 슬롯 [복사] 뒤 누르면 16슬롯에 (창 위치 자동보정)",
+                 font=("맑은 고딕", 7), fg="#888").pack(side="left", padx=(6, 0))
         wg = tk.Frame(parent); wg.pack(padx=6, pady=4)
         for idx in range(16):
             r, c = idx % 4, idx // 4
@@ -24597,6 +24623,9 @@ class App(tk.Tk):
             "seq":   dict(title="절전해제",     key="seq_slots",   reg=self._reg_seq_coord,   dele=self._del_seq_coord,   vars_attr="_seq_slot_vars"),
             "slp":   dict(title="절전모드",     key="slp_slots",   reg=self._reg_slp_coord,   dele=self._del_slp_coord,   vars_attr="_slp_slot_vars"),
             "wdoff": dict(title="주말던전끄기", key="wdoff_slots", reg=self._reg_wdoff_coord, dele=self._del_wdoff_coord, vars_attr="_wdoff_slot_vars"),
+            # 🎯 일반던전충전 — 2026-11-03 추가. 예전엔 [등록]/[×] 뿐이라
+            #    복사·붙임·미리보기·전체붙임이 전혀 없었다.
+            "dc":    dict(title="일반던전충전", key="dc_slots",    reg=self._reg_dc_coord,    dele=self._del_dc_coord,    vars_attr="_dc_slot_vars"),
         }[fkey]
 
     def _flat_del(self, fkey, idx):
@@ -24633,6 +24662,57 @@ class App(tk.Tk):
         vl = getattr(self, sp["vars_attr"], None)
         if vl and idx < len(vl): vl[idx].set(f"({int(x)},{int(y)})")
         self.status.set(f"✔ {sp['title']} #{idx+1:02d} 붙여넣기 완료{note}")
+
+    def _flat_paste_all(self, fkey):
+        """📋 전체붙임 — 복사한 좌표를 **16슬롯 전부**에 붙인다 (2026-11-03).
+
+        슬롯마다 클라이언트 창 위치를 자동보정하므로 그 클라에 맞는 자리에 들어간다.
+        복사한 원본 슬롯은 건드리지 않는다. 되돌릴 수 없으니 한 번 물어본다.
+        (좌표 1개짜리 런처용 — 여러 좌표짜리는 `_grid_paste_all`)"""
+        sp = self._flat_spec(fkey)
+        clip = getattr(self, "_flat_clip", None)
+        if not clip or clip.get("f") != fkey:
+            self.status.set(f"먼저 {sp['title']} 슬롯에서 [복사]를 누르세요"); return
+        src = clip["src"]
+        rects = self._client_rects_by_slot()
+        if not rects:
+            if not messagebox.askyesno(
+                    "전체붙임",
+                    "리니지M 클라이언트 16개를 못 찾았습니다. 위치 보정 없이 원본 좌표 "
+                    "그대로 전부 붙일까요? (16슬롯이 전부 같은 자리가 됩니다)"):
+                return
+        elif not messagebox.askyesno(
+                "전체붙임",
+                f"#{src+1:02d} 의 좌표를 16슬롯 전부에 붙입니다. 슬롯마다 클라 위치로 "
+                f"자동보정됩니다. 기존 좌표는 덮어써집니다. 계속할까요?"):
+            return
+        slots = self.cfg.get(sp["key"]) or [None] * 16
+        while len(slots) < 16:
+            slots.append(None)
+        bx, by = clip["coord"]
+        cnt = 0
+        for idx in range(16):
+            if idx == src:
+                continue                       # 원본은 그대로
+            x, y = int(bx), int(by)
+            if rects:
+                x += rects[idx][0] - rects[src][0]
+                y += rects[idx][1] - rects[src][1]
+            slots[idx] = [x, y]
+            cnt += 1
+        self.cfg[sp["key"]] = slots
+        save_cfg(self.cfg)
+        vl = getattr(self, sp["vars_attr"], None)
+        if vl:
+            for idx in range(min(16, len(vl))):
+                c = slots[idx] if idx < len(slots) else None
+                try:
+                    vl[idx].set(f"({c[0]},{c[1]})" if c else "미등록")
+                except Exception:
+                    pass
+        self.status.set(f"✔ {sp['title']} 전체붙임 완료 — #{src+1:02d} 좌표를 "
+                        f"{cnt}개 슬롯에 붙였습니다"
+                        + ("" if rects else " (⚠ 클라 감지 실패 — 위치 보정 없음)"))
 
     def _flat_preview(self, fkey, idx):
         sp = self._flat_spec(fkey)
@@ -24727,6 +24807,59 @@ class App(tk.Tk):
         reg = sum(1 for c in shifted if c)
         self.status.set(f"✔ #{idx+1:02d}에 붙여넣기 완료 ({reg}/{DOLL_CLICKS})"
                         + (f" · 이름 '{_nm}'" if _nm and _nm != "미등록" else "") + note)
+
+    def _doll_paste_all(self):
+        """📋 전체붙임 — 복사한 슬롯을 **16슬롯 전부**에 (창 위치 자동보정, 2026-11-03).
+
+        🔀 그룹복사(#01→전체)는 **보정이 없어** 16슬롯이 전부 #01 클라를 누른다.
+        이쪽은 `_paste_doll_slot` 과 같은 보정을 슬롯마다 적용한다.
+        복사한 원본 슬롯은 건드리지 않는다."""
+        import copy
+        clip = getattr(self, "_doll_clipboard", None)
+        src = getattr(self, "_doll_clip_src", None)
+        if not clip or src is None:
+            self.status.set("먼저 슬롯에서 [복사]를 누르세요"); return
+        rects = self._client_rects_by_slot()
+        if not rects:
+            if not messagebox.askyesno(
+                    "전체붙임",
+                    "리니지M 클라이언트 16개를 못 찾았습니다. 위치 보정 없이 원본 좌표 "
+                    "그대로 전부 붙일까요? (16슬롯이 전부 같은 자리가 됩니다)"):
+                return
+        elif not messagebox.askyesno(
+                "전체붙임",
+                f"#{src+1:02d} 의 좌표를 16슬롯 전부에 붙입니다. 슬롯마다 클라 위치로 "
+                f"자동보정됩니다. 기존 좌표는 덮어써집니다. 계속할까요?"):
+            return
+        _nm = getattr(self, "_doll_clip_name", "")
+        cnt = 0
+        for idx in range(min(DOLL_SLOTS, len(self.cfg.get("doll_slots") or []))):
+            if idx == src:
+                continue                       # 원본은 그대로
+            shifted = copy.deepcopy(clip)
+            if rects:
+                dx = rects[idx][0] - rects[src][0]
+                dy = rects[idx][1] - rects[src][1]
+                for c in shifted:
+                    if c:
+                        c[0] += dx; c[1] += dy
+            self.cfg["doll_slots"][idx]["coords"] = shifted
+            if _nm and _nm != "미등록":
+                self.cfg["doll_slots"][idx]["name"] = _nm
+            cnt += 1
+        if _nm and _nm != "미등록":
+            self._doll_preset_ts = time.time()   # 이름칸 자동저장이 되돌리지 않게
+            for idx in range(min(DOLL_SLOTS, len(getattr(self, "_doll_name_vars", [])))):
+                if idx != src:
+                    try:
+                        self._doll_name_vars[idx].set(_nm)
+                    except Exception:
+                        pass
+        save_cfg(self.cfg); self._refresh_doll_display()
+        _n = sum(1 for c in clip if c)
+        self.status.set(f"✔ 인형탐험 전체붙임 완료 — #{src+1:02d} 의 좌표 {_n}개를 "
+                        f"{cnt}개 슬롯에 붙였습니다"
+                        + ("" if rects else " (⚠ 클라 감지 실패 — 위치 보정 없음)"))
 
     def _doll_wait(self, sec):
         end = time.time() + sec
