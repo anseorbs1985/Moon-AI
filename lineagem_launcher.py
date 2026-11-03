@@ -1700,6 +1700,10 @@ NIGHT_ALIGN = False
 #    끄려면 False (예전처럼 왼쪽 정렬).
 FRONT_ROW_EAST = True
 
+# 💬 실행 멘트(상태줄) 글 너비 — 클라 오른쪽 빈 자리에 맞춘다 (2026-11-03).
+#    넓히면 왼쪽이 클라 뒤로 들어가 안 보이고, 좁히면 줄이 많아져 길어진다.
+STATUS_WRAP = 168
+
 WARN_GONE_N = 4   # 2026-11-03: 3 → 4 (지울 때는 더 조심한다)
 # 😴 사람이 컴퓨터를 이만큼 안 만지면, 목록에 남은 복구를 스스로 돌린다
 # (2026-09-29 사용자 요청: "5분 동안 아무런 작업이 없을 때 내가 놓친 복구가 있으면 해줘")
@@ -5979,9 +5983,23 @@ class App(tk.Tk):
         self._layout_preview_visible = False
 
         self.status = tk.StringVar(value="버튼을 눌러 시작하세요")
-        self.status_label_widget = tk.Label(self, textvariable=self.status, font=("맑은 고딕", 8),
-                 fg="#555", wraplength=600)
-        self.status_label_widget.pack(pady=(0, 2))
+        # 💬 **실행 멘트(상태줄)를 오른쪽 끝으로** (2026-11-03 사용자 요청
+        #    *"가운데 실행 멘트를 각성강화!!·업데이트 밑에 … 내가 볼 수 있도록"*
+        #    *"우측으로 쭉 가져오면 좋겠는데"*).
+        #    런처가 오른쪽 벽에 붙어 있고 가운데는 클라 뒤라 안 보인다.
+        #    ✨ 각성강화!!·🔄 업데이트 **바로 아래**, 클라 오른쪽 빈 자리에 둔다.
+        #    wraplength 는 그 빈 자리 폭(약 150~170px)에 맞춘다 — 넓히면
+        #    왼쪽이 클라 뒤로 들어가 안 보인다.
+        if FRONT_ROW_EAST:
+            self.status_label_widget = tk.Label(
+                _topwrap, textvariable=self.status, font=("맑은 고딕", 8),
+                fg="#555", wraplength=STATUS_WRAP, justify="center")
+            self.status_label_widget.pack(anchor="e", padx=(0, 4), pady=(2, 2))
+        else:
+            self.status_label_widget = tk.Label(self, textvariable=self.status,
+                                                font=("맑은 고딕", 8),
+                                                fg="#555", wraplength=600)
+            self.status_label_widget.pack(pady=(0, 2))
 
         tk.Frame(self, height=1, bg="#ccc").pack(fill="x", padx=10, pady=3)
 
@@ -6110,8 +6128,11 @@ class App(tk.Tk):
                                   fg="white", bg="#c0392b")
         # 📬 우편 지금 받기 — **여기 하나만 남긴다** (2026-10-20 사용자:
         #   "우편받기 버튼만 냅두고"). 나머지 토글·도감받기는 🟣 영웅 판 아래로 옮겼다.
+        #   높이는 **1.5배**로 — [▶ 전부 복구](height=2 ≈ 36px) 보다 조금 작게
+        #   (2026-11-03 사용자 요청). ⚠ Tk 의 `height` 는 **글자 줄 수**라 1.5줄을
+        #   못 준다. 그래서 `pady` 로 위아래를 늘린다 (20px → 약 30px).
         tk.Button(self._warn_box, text="📬 우편 지금 받기 (전부)",
-                  font=("맑은 고딕", 8, "bold"), pady=0,
+                  font=("맑은 고딕", 8, "bold"), pady=5,
                   bg="#2471a3", fg="white", activebackground="#1a5276",
                   command=self._mail_run_now).pack(fill="x", pady=(1, 1))
         self._warn_rows = tk.Frame(self._warn_box)
@@ -27671,8 +27692,13 @@ class App(tk.Tk):
         title = aw.get("title", "")
         self.status.set(f"#{slot_idx+1:02d} 지정 창: [{title[:30]}]  {aw['w']}x{aw['h']}  @{aw['x']},{aw['y']}")
 
-    _FIXED_W = 491
-    _FIXED_H = 276
+    # 🪟 창을 못 재었을 때만 쓰는 **예비값** (2026-11-03).
+    #    예전에는 이 값을 **저장할 때 그대로 박아 넣어서**, 창을 546x307 로 키워도
+    #    `위치 전체저장` 이 늘 491x276 으로 저장했다. 그래서 [재배치] 를 누르면
+    #    창이 491x276 으로 줄어들었다. 이제 **지금 창의 실제 크기**를 저장한다.
+    #    🚫 클로드는 저장할 때 이 값을 다시 쓰지 말 것 — 재는 데 실패했을 때만 쓴다.
+    _FIXED_W = 546
+    _FIXED_H = 307
 
     def _find_hwnd_for_slot(self, aw, wins):
         """1) HWND  2) 창 제목 번호  3) 가장 가까운 위치 순으로 찾기"""
@@ -27808,7 +27834,10 @@ class App(tk.Tk):
         try:
             rect = win32gui.GetWindowRect(hwnd)
             x, y = rect[0], rect[1]
-            w, h = self._FIXED_W, self._FIXED_H
+            # 🪟 **지금 창의 실제 크기**를 저장한다 (고정값을 박지 않는다)
+            w, h = rect[2] - rect[0], rect[3] - rect[1]
+            if w < 100 or h < 100:            # 최소화 등 — 못 쟀을 때만 예비값
+                w, h = self._FIXED_W, self._FIXED_H
             aw["x"], aw["y"], aw["w"], aw["h"] = x, y, w, h
             aw["cx"], aw["cy"] = x + w // 2, y + h // 2
             save_cfg(self.cfg)
@@ -27817,12 +27846,17 @@ class App(tk.Tk):
             self.status.set(f"#{slot_idx+1} 저장 오류: {e}")
 
     def _save_all_window_pos(self):
-        """지정된 모든 슬롯의 현재 창 위치를 저장 (크기 491×276 고정)"""
+        """지정된 모든 슬롯의 **지금 창 위치와 크기**를 그대로 저장한다.
+
+        🚫 예전에는 크기를 491x276 으로 박아 넣어서, 창을 키워도 저장이 안 되고
+           [재배치] 를 누르면 창이 491x276 으로 줄어들었다 (2026-11-03 사용자 신고
+           *"해상도가 잘못 저장이 되는 거 같아"*). 고정값을 쓰지 말 것."""
         slots = self.cfg.get("hunt_slots", [])
         wins = self._get_purple_hwnds()
         if not wins:
             self.status.set("리니지M 창을 찾을 수 없습니다."); return
         count = 0
+        sizes = []
         for i, slot in enumerate(slots):
             aw = slot.get("assigned_window")
             if not aw: continue
@@ -27831,13 +27865,19 @@ class App(tk.Tk):
             try:
                 rect = win32gui.GetWindowRect(hwnd)
                 x, y = rect[0], rect[1]
-                w, h = self._FIXED_W, self._FIXED_H
+                # 🪟 **지금 창의 실제 크기**를 저장한다
+                w, h = rect[2] - rect[0], rect[3] - rect[1]
+                if w < 100 or h < 100:        # 최소화 등 — 못 쟀을 때만 예비값
+                    w, h = self._FIXED_W, self._FIXED_H
                 aw["x"], aw["y"], aw["w"], aw["h"] = x, y, w, h
                 aw["cx"], aw["cy"] = x + w // 2, y + h // 2
+                sizes.append(f"{w}x{h}")
                 count += 1
             except: pass
         save_cfg(self.cfg)
-        self.status.set(f"✔ {count}개 창 위치 저장 완료 (491×276 고정)")
+        _kinds = sorted(set(sizes))
+        _sz = _kinds[0] if len(_kinds) == 1 else ("크기 " + str(len(_kinds)) + "가지: " + " ".join(_kinds))
+        self.status.set(f"✔ {count}개 창 위치·크기 저장 완료 ({_sz})")
 
     def _restore_all_windows(self):
         self._restore_by_position()
