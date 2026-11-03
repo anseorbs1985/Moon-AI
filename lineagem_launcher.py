@@ -2536,18 +2536,43 @@ def grab_window(coord):
 #      ·`_fix_clickwatch_loop` 등)에는 쓰지 않는다** — 깃발이 세워진 동안
 #      기다림이 0 이 되어 **CPU 를 100% 로 돌리기 때문**이다. 그것들은 time.sleep 그대로.
 _STOP_EVT = threading.Event()
+_STOP_AT  = [0.0]          # 깃발을 세운 시각
+NAP_STOP_TTL = 3.0         # 이보다 오래 세워져 있으면 '굳은 것' 으로 보고 무시
 
 
 def nap(sec):
-    """잠깐 쉰다 — [■ 멈춤] 이 눌리면 **즉시** 깨어난다 (안 눌리면 time.sleep 과 같다)."""
+    """잠깐 쉰다 — [■ 멈춤] 이 눌리면 **즉시** 깨어난다 (안 눌리면 time.sleep 과 같다).
+
+    🚨 **깃발이 세워진 채로 굳으면 모든 기다림이 0 이 된다** — 그러면 런처가
+       좌표를 **순식간에 쏟아붓는다** (2026-11-03 사용자: *"사냥런처 왜 이렇게
+       엄청나게 빠르게 슬롯을 클릭하는 거야? 순식간에 해버리는데?"*).
+       깃발을 내리는 곳(`_start_pause`·`_run_task`·도감·우편·각성)을 하나라도
+       안 지나는 길이 생기면 바로 이 사고가 난다.
+    ✅ 그래서 **깃발에 시효를 둔다** — `_STOP_AT` 에 세운 시각을 적어두고,
+       `NAP_STOP_TTL`(3초)이 지나면 **굳은 것으로 보고 무시한다.**
+       멈춤은 그 3초 안에 이미 다 전달된다(기다리던 스레드는 즉시 깨어나고,
+       각 런처는 자기 `_xxx_stop` 플래그를 보고 빠져나간다).
+    🚫 클로드는 이 시효를 없애지 말 것 — 없애면 '굳으면 전부 즉시 클릭' 으로 돌아간다."""
     try:
-        if sec and sec > 0:
-            _STOP_EVT.wait(sec)
+        if not (sec and sec > 0):
+            return
+        if _STOP_EVT.is_set() and (time.time() - _STOP_AT[0]) > NAP_STOP_TTL:
+            _STOP_EVT.clear()          # 너무 오래 세워져 있었다 — 굳은 것이다
+        _STOP_EVT.wait(sec)
     except Exception:
         try:
             time.sleep(sec)
         except Exception:
             pass
+
+
+def nap_stop():
+    """[■ 멈춤] — 기다리던 것을 전부 깨운다."""
+    try:
+        _STOP_AT[0] = time.time()
+        _STOP_EVT.set()
+    except Exception:
+        pass
 
 
 def nap_clear():
@@ -30108,8 +30133,11 @@ class App(tk.Tk):
 
     def _stop(self):
         # ⏹ **맨 먼저** 깃발을 세운다 — 기다리던 스레드가 즉시 깨어난다 (2026-11-03)
+        nap_stop()
         try:
-            _STOP_EVT.set()
+            click_log("[멈춤] ■ 눌림 — 기다리던 것을 전부 깨운다 "
+                      f"(돌던 작업 {self._busy_task!r} · 대기열 "
+                      f"{len(getattr(self, '_task_queue', []) or [])}개)")
         except Exception:
             pass
         try:
@@ -30258,13 +30286,21 @@ class App(tk.Tk):
             active = [(i, h) for i, h in all_slots
                       if h.get("enabled", True) and any(c for c in h.get("coords", []))]
             _hunt_t0 = time.time()   # 사냥 전체 소요시간 측정 (3분=180초 목표)
+            # 🗒 **왜 빨랐는지/느렸는지 짚을 수 있게 남긴다** (2026-11-03 사용자 신고:
+            #    *"왜 이렇게 엄청나게 빠르게 슬롯을 클릭하는 거야"*). 사냥은 지금까지
+            #    click_log 에 한 줄도 안 남겨서 원인을 볼 수가 없었다.
+            click_log(f"[사냥] 시작 — ON 슬롯 {len(active)}개 · 멈춤깃발 "
+                      f"{'세워짐(⚠ 기다림이 0 이 된다)' if _STOP_EVT.is_set() else '내려감'}")
+            _hw = []
             for slot_done, (i, h) in enumerate(active):
                 if self._hunt_stop: self.status.set("사냥 멈춤"); return
                 # 슬롯 전 대기 — 전체 3분(180초) 안에 들도록 축소: 2~12 → 1~4
                 slot_delay = random.uniform(1.0, 4.0)
                 name = h.get("name", f"#{i+1}")
                 self.status.set(f"[{name}] {slot_delay:.0f}초 후 실행...")
+                _t_s = time.time()
                 if not self._hunt_wait(slot_delay): self.status.set("사냥 멈춤"); return
+                _hw.append((slot_delay, time.time() - _t_s))
                 for j, coord in enumerate(h["coords"]):
                     if not coord: continue
                     if self._hunt_stop: self.status.set("사냥 멈춤"); return
@@ -30292,6 +30328,11 @@ class App(tk.Tk):
             # 사냥 전체 소요시간 기록 (180초 목표 확인)
             _he = time.time() - _hunt_t0
             _hmark = "✔180초이내" if _he <= 180 else "⚠180초초과!"
+            if _hw:
+                _want = sum(a for a, _b in _hw); _got = sum(b for _a, b in _hw)
+                click_log(f"[사냥] 끝 — {len(active)}슬롯 {_he:.1f}초 · "
+                          f"슬롯 대기 정한 {_want:.1f}초 / 실제 {_got:.1f}초"
+                          + ("  🚨 **기다림이 먹히지 않았다**" if _got < _want * 0.5 else ""))
             _hmsg = f"✔ 사냥 완료! ({len(active)}개)  [소요 {_he:.1f}초 {_hmark}]"
             try:
                 with open(os.path.join(LOGS_DIR, "run_timing.txt"), "a", encoding="utf-8") as _f:
