@@ -303,6 +303,15 @@ def key_of_didx(didx):
 #     그 이후에 다음 좌표들 클릭해줘."
 #    ①→② 사이는 예전처럼 짧게(0.7~1.3초) 가고, **② 뒤에만** 길게 쉰다.
 PRE2_WAIT          = 10.0
+# 🟣 퍼플을 앞으로 올린 뒤 기다리는 시간 (창이 다 그려질 틈)
+PURPLE_FRONT_WAIT = 0.8
+# 🔄 계정 전환을 **처음부터 다시** 해볼 횟수 (메뉴가 닫히는 경우)
+PROFILE_SWITCH_TRIES = 3
+PROFILE_SWITCH_GAP   = (1.2, 2.0)
+# 🪟 게임 창이 다 뜨는 것을 기다리는 설정 (창 수가 멈출 때까지)
+PURPLE_SETTLE_MAX   = 90.0    # 이보다 오래 기다리지 않는다
+PURPLE_SETTLE_TICK  = 2.0     # 몇 초마다 세나
+PURPLE_SETTLE_STILL = 3       # 이만큼 연속으로 안 변하면 다 마쳤다고 본다
 FIX_SLOW_MULT      = 2.2       # 2회차 간격·창 올리는 틈 배수
 CHECK_TRIES_SLOW   = 8         # 2회차 👁 '무료' 확인 횟수 (1회차는 CHECK_TRIES=4)
 FIX_ESC_TRIES      = 2         # 복구 전 열린 창을 ESC 로 닫아보는 횟수
@@ -6868,6 +6877,18 @@ class App(tk.Tk):
 
     # ── UI 빌드 ────────────────────────────────────────────────────────
     def _build_ui(self):
+        # ╔═ 🗂 **세로바 전용 집** — 맨 오른쪽에 **창 전싼끼** ══╗
+        # ║ 2026-11-04 사용자: *"세로바 만든 거 전지적으로 메인런춘에
+        # ║ 길게 만들고 위에 있는 것들 왼쪽으로 전부 밀어"*
+        # ║ 🧭 `pack` 은 **먼젌 붙인 쪽이 자리를 먼젌 가진다** —
+        # ║ 이걸 맨 처음에 `side="right", fill="y"` 로 붙이면
+        # ║ **창 전체 높이**를 차지하고, 나중에 붙는 배너·위줄·
+        # ║ 섹션행·front_row 는 **남은 왼쪽 자리**에 쌓인다.
+        # ║ 🚫 이것보다 먼젌 다른 것을 `pack` 하면 세로바가 전체
+        # ║    높이를 못 차지한다 — **여기가 첫 줄이어야 한다.**
+        # ╚══════════════════════════════════════╝
+        self._dc_host = tk.Frame(self)
+        self._dc_host.pack(side="right", fill="y")
         # ── 상단 배너: 다크+골드 그라데이션 (리니지M 느낌) ──
         self._build_banner()
 
@@ -7272,7 +7293,12 @@ class App(tk.Tk):
         self._front_row = front_row   # 정렬 보정용 (일반던전충전 열 ← TJ 좌측 라인)
 
         # 배열창 재배치 왼쪽: (1행) 일반던전충전+실행  (2행) 인형탐험+실행 — 각 버튼 옆에 실행
-        dc_col = tk.Frame(front_row); dc_col.pack(side="left", padx=(2,2), anchor="n")
+        # 🗂 **front_row 가 아니라 `_dc_host` 에 넣는다** — 그래야
+        #    이 열이 **창 전싼끼** 떨어지고, 접었다 폴 때
+        #    **위아래가 전혀 안 변한다** (2026-11-04 사용자:
+        #    *"한눈에 삑 열리게 위아래 변동 없이"*).
+        dc_col = tk.Frame(self._dc_host)
+        dc_col.pack(side="top", fill="both", expand=True, padx=(2, 2))
         self._dc_col = dc_col        # 🗂 접어도 **이 열만** 남는다
         # ── 매일 해야 하는 것 (네모 박스) : 용던고고!!! / 스케줄 ──
         daily = tk.LabelFrame(dc_col, text=" 매일 ", font=("맑은 고딕", 8, "bold"),
@@ -7431,13 +7457,25 @@ class App(tk.Tk):
             pass
         self._memo_box.bind("<KeyRelease>", lambda e: self._fold_memo_save())
         self._memo_box.bind("<FocusOut>", lambda e: self._fold_memo_save(now=True))
+        # ■ **멈춤 · 🔄 업데이트** — 혈레이드 바로 위
+        #    (2026-11-04 사용자: *"혈레이드 업데이트 위에 멈춤버튼
+        #     배치하고 그 옆에 업데이트버튼"*).
+        #    🚫 멈춤은 ⏰ 2시간 반복 예약을 건드리지 않는다 (2026-08-15 지침).
+        _k0 = tk.Frame(_keep); _k0.pack(anchor="n", pady=(0, 2))
+        tk.Button(_k0, text="■\n멈춤", font=("맑은 고딕", 8, "bold"),
+                  bg="#922b21", fg="white", activebackground="#641e16",
+                  width=6, height=2, command=self._stop).pack(side="left")
+        tk.Button(_k0, text="🔄\n업데이트", font=("맑은 고딕", 8, "bold"),
+                  bg="#c0392b", fg="white", activebackground="#7b241c",
+                  width=6, height=2, command=self._run_updater).pack(side="left", padx=(2, 0))
         _k1 = tk.Frame(_keep); _k1.pack(anchor="n")
         tk.Button(_k1, text="🔥 혈\n레이드", font=("맑은 고딕", 8, "bold"),
                   bg="#c0392b", fg="white", activebackground="#7b241c",
                   width=6, height=2, command=self._memo_boost).pack(side="left")
-        tk.Button(_k1, text="🔄\n업데이트", font=("맑은 고딕", 8, "bold"),
-                  bg="#c0392b", fg="white", activebackground="#7b241c",
-                  width=6, height=2, command=self._run_updater).pack(side="left", padx=(2, 0))
+        # 📍 제자리 — 혈레이드 옆 (사용자 지시). 창을 제자리로 돌린다.
+        tk.Button(_k1, text="📍\n제자리", font=("맑은 고딕", 8, "bold"),
+                  bg="#5d6d7e", fg="white", activebackground="#34495e",
+                  width=6, height=2, command=self._go_home).pack(side="left", padx=(2, 0))
         _k2 = tk.Frame(_keep); _k2.pack(anchor="n", pady=(2, 0), fill="x")
         tk.Button(_k2, text="💾 좌표저장", font=("맑은 고딕", 8, "bold"),
                   bg="#1e8449", fg="white", activebackground="#145a32",
@@ -7447,6 +7485,14 @@ class App(tk.Tk):
                   bg="#7d3c98", fg="white", activebackground="#5b2c6f",
                   height=1, pady=2,
                   command=self._restore_coord_snapshot).pack(side="top", fill="x", pady=(2, 0))
+        # ▶ **전체 자동실행** — 좌표복구 바로 아래 (2026-11-04 사용자:
+        #    *"좌표복구 밑에 전체자동실행바 배치"*).
+        #    위에 있는 [▶ 전체 자동 실행] 과 **같은 함수**를 부른다 —
+        #    길이 둘이면 반드시 어긋난다 (이 살장소의 반복된 사고).
+        tk.Button(_k2, text="▶ 전체 자동실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#196f3d", fg="white", activebackground="#0e4429",
+                  height=1, pady=4,
+                  command=self._start).pack(side="top", fill="x", pady=(3, 0))
         # 💬 **지금 무슨 일을 하는지** — 좌표저장/복구 바로 아래 (2026-11-04 사용자:
         #    *"좌표지정이랑 좌표복구 밑에 현재 상황 멘트를 볼 수 있게 해줘"*).
         #    접으면 위쪽 상태줄이 같이 숨겨지므로 **여기가 유일한 상태 표시**다.
@@ -7630,7 +7676,7 @@ class App(tk.Tk):
             _sep_r = tk.Frame(front_row, width=2, bg="#bbb")
             _sep_r.pack(side="left", fill="y", padx=(8, 8), after=night_col)
             chk_col.pack_configure(side="left", padx=(4, 8), anchor="n", after=_sep_r)
-            dc_col.pack_configure(side="left", padx=(4, 8), anchor="n", after=chk_col)
+            pass   # 🗂 dc_col 은 `_dc_host`(루트 오른쪽) 에 있다
             # 열을 옮겼으니 창 크기를 다시 맞춘다 (안 하면 오른쪽이 잘린다)
             for _ms in (600, 1600, 3000):
                 self.after(_ms, self._fit_main_height)
@@ -7816,8 +7862,8 @@ class App(tk.Tk):
         self._fold_snap()
         # 🧭 배너(제목 띠)도 같이 접는다 — 글자가 커서 **창 폭이 630px 아래로
         #    안 내려간다**. 제목은 창 제목줄에 그대로 남는다.
-        keep = (getattr(self, "_front_row", None),)
-        dc = getattr(self, "_dc_col", None)
+        keep = (getattr(self, "_dc_host", None),)
+        dc = getattr(self, "_dc_col", None)      # 🗂 이 열은 `_dc_host` 에 있다
         try:
             if fold:
                 for w, _i in self._fold_all:
@@ -7855,9 +7901,11 @@ class App(tk.Tk):
         #    (2026-11-04 사용자: *"변화 없이 펼쳐지게 해줘야 해"*)
         #    펼쳤을 때도 이렇게 해야 [▶ 접기] 가 화면 밖으로 밀리지 않는다.
         try:
-            self._front_row.pack_configure(fill="y", expand=True,
-                                           padx=((0, 2) if fold else (0, 0)))
-            dc.pack_configure(fill="y", expand=True)
+            # 🧱 세로바는 **접으나 펴나 창 전체 높이** — 그래서 여닫다
+            #    펴도 **위아래가 전혀 움직이지 않는다.**
+            self._dc_host.pack_configure(side="right", fill="y",
+                                         padx=((0, 2) if fold else (0, 0)))
+            dc.pack_configure(fill="both", expand=True)
             # [▶ 접기] 를 **맨 먼저** 아래에 붙여 자리를 잡고, 나머지를 순서대로.
             for _w, _i in getattr(self, "_fold_dc", ()):
                 try: _w.pack_forget()
@@ -21540,10 +21588,14 @@ class App(tk.Tk):
             except Exception:
                 _ch = 39
         _wb = max(200, work_bottom - _ch)      # 안쪽 높이로 환산한 바닥
-        # 🗂 접었으면 **위아래로 꽉** (2026-11-04 사용자: "위아래도 꽉차게 해주고")
-        if getattr(self, "_fold_on", False):
-            y = 0
-            needed = max(300, _wb)
+        # 🧱 **접으나 펴나 가득 설 높이** (2026-11-04 사용자:
+        #    *"접기 열기 펼치기 하면 바로 한눈에 삑 열리게
+        #      위아래 변동 없이 — 세로바가 다시 작아지면서
+        #      아래로 가니걸 불편해"*). 높이·y 를 동일하게 둔다.
+        #    🚫 펴을 때만 내용 높이로 되돌리지 말 것 — 그러면 창이
+        #       줄었다 컴지며 아래로 내려가 사용자가 짜즜낸 그 동작이 된다.
+        y = 0
+        needed = max(300, _wb)
         # 창 하단이 작업표시줄 아래로 잘리지 않도록 위로 올리고, 그래도 넘치면 높이 축소
         if y + needed > _wb:
             y = max(0, _wb - needed)
@@ -30433,6 +30485,31 @@ class App(tk.Tk):
     #      (같은 토큰을 두 곳에서 물어보면 서로 명령을 가로챈다).
 
     # ── 🔐 접속(로그인) 단계를 그림으로 ────────────────────────────────────
+    def _cover_who(self, x, y):
+        """그 자리의 **맨 위 창**이 무엇인지 (덮여서 못 찾는 경우를 짚으려고)."""
+        try:
+            import win32gui, win32process, ctypes
+            h = win32gui.WindowFromPoint((int(x), int(y)))
+            while True:
+                p = win32gui.GetParent(h)
+                if not p:
+                    break
+                h = p
+            t = win32gui.GetWindowText(h) or "(제목없음)"
+            try:
+                _a, pid = win32process.GetWindowThreadProcessId(h)
+                hp = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+                b = ctypes.create_unicode_buffer(520); n = ctypes.c_ulong(520)
+                ctypes.windll.kernel32.QueryFullProcessImageNameW(
+                    hp, 0, b, ctypes.byref(n))
+                ctypes.windll.kernel32.CloseHandle(hp)
+                exe = b.value.split("\\")[-1]
+            except Exception:
+                exe = "?"
+            return f"[{t[:24]}] ({exe})"
+        except Exception:
+            return "[알 수 없음]"
+
     def _lpoint(self, key):
         """그 단계를 **어디를 눌러야 하나**. 돌려주는 값: (x, y) 또는 None.
 
@@ -30464,8 +30541,14 @@ class App(tk.Tk):
                 return (x, y)
             if t < LOGIN_TRIES - 1:
                 nap(random.uniform(*LOGIN_WAIT))
+        # 🚨 **누가 그 자리를 덮고 있나** — 2026-11-04 에 찾은 진짜 원인이다.
+        #    접속 좌표가 **리니지M 클라 격자 안**이라, 캐릭터를 띄우면 게임 창이
+        #    앞으로 나와 **퍼플 메뉴를 덮고** 그림이 전부 0.4대로 떨어진다.
+        #    그 창 이름을 남겨야 원격에서 짚을 수 있다.
+        _cv = self._cover_who(base[0], base[1])
         click_log(f"[접속] ✘ {nm} 그림을 못 찾음 (최고 {best:.2f}, "
-                  f"{LOGIN_TRIES}번 봤다) → **아무것도 누르지 않고 중단**")
+                  f"{LOGIN_TRIES}번 봤다) → **아무것도 누르지 않고 중단** "
+                  f"· 그 자리 맨 위 창 {_cv}")
         self.status.set(f"✘ 접속 중단 — '{nm}' 그림을 못 찾았습니다 "
                         f"(최고 {best:.2f}) · 엉뚱한 곳을 누르지 않았습니다")
         return None
@@ -31273,7 +31356,148 @@ class App(tk.Tk):
             except Exception:
                 pass
 
+    def _purple_front_once(self, tag=""):
+        """🟣 퍼플을 **앞으로** 한 번 올린다 (최소화면 되살린다).
+
+        🚨 **왜 필요한가** (2026-11-04 실측으로 찾은 접속 실패의 진짜 원인):
+           접속 좌표는 전부 **퍼플 창의 절대좌표**인데, 그 자리가
+           **리니지M 클라 격자 안**이다 (예: `계정 변경`(2135,605) 는 4열 2줄 클라
+           (1806,387)~(2352,694) 안). 캐릭터를 띄우면 **게임 창이 앞으로 나와
+           퍼플 메뉴를 덮고**, 그 뒤 그림 찾기가 전부 실패한다.
+           실측 11-04 07:23 — 7단계가 `1.00` 으로 성공한 **5초 뒤** 같은 그림이
+           `0.45` 로 떨어졌다. 그림·범위는 멀쩡했다 (같은 화면에서 다시 재니 1.000).
+
+        ⚠ **메뉴가 열리기 전**(프로필을 누르기 전)에만 부른다. 메뉴가 떠 있을 때
+           올리면 그 팝업이 닫힐 수 있다.
+        🚫 2026-10-14 에 걷어낸 `_purple_front`(누를 때마다 올리기)와 **다르다** —
+           그때 망친 것은 '프로필 전환을 한 번 더 넣은 것' 과 '매번 올리기' 였다.
+           여기서는 **전환을 시작하기 직전 한 번**만 올린다.
+        """
+        try:
+            import win32gui, win32con, win32process, ctypes
+            tgt = []
+
+            def _cb(h, _):
+                try:
+                    if not win32gui.IsWindowVisible(h):
+                        return
+                    _a, pid = win32process.GetWindowThreadProcessId(h)
+                    hp = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+                    if not hp:
+                        return
+                    b = ctypes.create_unicode_buffer(520); n = ctypes.c_ulong(520)
+                    ctypes.windll.kernel32.QueryFullProcessImageNameW(
+                        hp, 0, b, ctypes.byref(n))
+                    ctypes.windll.kernel32.CloseHandle(hp)
+                    if "purple" in b.value.split("\\")[-1].lower():
+                        r = win32gui.GetWindowRect(h)
+                        if (r[2] - r[0]) > 600 and (r[3] - r[1]) > 400:
+                            tgt.append(h)
+                except Exception:
+                    pass
+            win32gui.EnumWindows(_cb, None)
+            if not tgt:
+                click_log(f"[접속] {tag} 🟣 퍼플 창을 못 찾았다 — 그대로 진행한다")
+                return False
+            h = tgt[0]
+            if win32gui.IsIconic(h):
+                win32gui.ShowWindow(h, win32con.SW_RESTORE)   # 🚫 크기는 안 건드린다
+            try:
+                win32gui.SetForegroundWindow(h)
+            except Exception:
+                win32gui.ShowWindow(h, win32con.SW_SHOW)
+            nap(PURPLE_FRONT_WAIT)
+            click_log(f"[접속] {tag} 🟣 퍼플을 앞으로 올렸다 "
+                      f"(게임 창이 덮으면 그림을 못 찾는다)")
+            return True
+        except Exception as e:
+            click_log(f"[접속] {tag} 🟣 퍼플 올리기 실패 {type(e).__name__}: {e}")
+            return False
+
+    def _purple_wait_settle(self, tag="", maxw=PURPLE_SETTLE_MAX):
+        """🪟 **게임 창이 다 뜨는 것을 기다린다** (새 창 수가 멈출 때까지).
+
+        🚨 **2026-11-04 실측으로 찾은 접속 실패의 진짜 원인**:
+           캐릭터를 띄우면 새 게임 창이 하나씩 뜨면서 **포커스를 가져가고,
+           그순간 퍼플의 계정 메뉴(WPF 팝업)가 통째로 닫힌다.**
+           기록 11-04 07:48 — 7단계 `계정 변경` 을 **1.00** 으로 잡은 **5초 뒤**
+           같은 그림이 **0.45** 로 떨어졌다 (그 사이에 메뉴가 사라졌다).
+           그래서 전환을 시작하기 전에 **창이 더 안 뜨는지** 확인한다.
+        ⚠ 창 수만 센다 — 화면을 긁지 않으므로 부하가 거의 없다."""
+        import time as _t
+        try:
+            import win32gui
+        except Exception:
+            return
+
+        def _cnt():
+            n = [0]
+
+            def _cb(h, _):
+                try:
+                    if win32gui.IsWindowVisible(h):
+                        t = win32gui.GetWindowText(h) or ""
+                        if t.startswith("리니지M") and "자동 실행" not in t:
+                            n[0] += 1
+                except Exception:
+                    pass
+                return True
+            try:
+                win32gui.EnumWindows(_cb, None)
+            except Exception:
+                pass
+            return n[0]
+
+        t0 = _t.time()
+        last = _cnt()
+        same = 0
+        while _t.time() - t0 < maxw:
+            if getattr(self, "_stop_flag", False):
+                return
+            nap(PURPLE_SETTLE_TICK)
+            c = _cnt()
+            if c == last:
+                same += 1
+                if same >= PURPLE_SETTLE_STILL:
+                    break
+            else:
+                same = 0
+                last = c
+        click_log(f"[접속] {tag} 🪟 게임 창이 자리잡았다 — "
+                  f"지금 {last}개 · {int(_t.time() - t0)}초 기다렸다 "
+                  f"(새 창이 뜨면 퍼플 메뉴가 닫힌다)")
+
     def _profile_switch_once(self, tag=""):
+        """🔄 계정 전환 — **메뉴가 닫히면 처음부터 다시** (최대 n번).
+
+        🚫 '못 찾으면 좌표로라도 눌러보자' 를 넣지 말 것 — 그걸 없애달라는
+           지시였다. 다시 하는 것은 **메뉴를 다시 여는 것**이지 헛끔을 누르는 게 아니다.
+        ⚠ 다시 하기 전에 **ESC 로 반쥐 열린 메뉴를 닫는다** — 안 닫고 프로필을
+           다시 누르면 그 클릭이 메뉴를 **닫아버려** 똑같이 실패한다
+           (11-04 07:19 에 실제로 그렇게 됐다)."""
+        self._purple_wait_settle(tag)
+        for _t2 in range(PROFILE_SWITCH_TRIES):
+            if getattr(self, "_stop_flag", False):
+                return False
+            if self._profile_switch_try(tag):
+                return True
+            if _t2 >= PROFILE_SWITCH_TRIES - 1:
+                break
+            click_log(f"[접속] {tag} 🔄 메뉴가 닫혔나 보다 — "
+                      f"ESC 로 정리하고 **처음부터 다시** 한다 "
+                      f"({_t2 + 2}/{PROFILE_SWITCH_TRIES})")
+            self.status.set(f"{tag} 메뉴가 닫혔습니다 — 다시 엽니다 "
+                            f"({_t2 + 2}/{PROFILE_SWITCH_TRIES})")
+            # 🚨 ESC 는 **퍼플을 앞으로 올린 뒤에** 누른다 — 게임 창에 가면
+            #    "게임을 종료 하시겠습니까?" 가 뜨는 자리다 (2026-10-27 교훈).
+            self._purple_front_once(tag)
+            try:
+                pyautogui.press("esc")
+            except Exception:
+                pass
+            nap(random.uniform(*PROFILE_SWITCH_GAP))
+        return False
+    def _profile_switch_try(self, tag=""):
         """🔁 프로필(구글 계정) **전환 한 번** — 프로필 → (마우스 올림) → 구글 계정 → 확인.
 
         계정을 바꿀 때 쓰던 네 단계 그대로다. **두 군데에 같은 코드가 있던 것을
@@ -31281,6 +31505,9 @@ class App(tk.Tk):
         어긋나는 일을 막는다.
 
         돌려주는 값: 끝까지 갔으면 True, 그림을 못 찾았거나 멈춤이면 False."""
+        # 🟣 **게임 창이 퍼플을 덮으면 아래 그림을 전부 못 찾는다** —
+        #    전환을 시작하기 **직전 한 번만** 올린다 (메뉴가 열리기 전이라 안전).
+        self._purple_front_once(tag)
         self.status.set(f"{tag} 프로필 클릭...")
         if not self._lclick("profile_btn"):
             return False
