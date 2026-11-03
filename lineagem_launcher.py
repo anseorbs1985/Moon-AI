@@ -1680,6 +1680,26 @@ WARN_IDLE_MS = 10000    # 5분이 지난 뒤 **목록에 남은 슬롯만** 다�
 #     작업영역 안으로 가로·세로를 잘라준다)
 MAIN_WIN_POS = (527, 140)
 
+# 🧱 **오른쪽 벽에 붙인다** (2026-11-03 사용자 지시
+#    *"예전에 클라 사이에 용던고고 보이는 것처럼 메인런처를 오른쪽으로
+#      이동시켜서 벽에 붙여줘"*).
+#    켜면 `MAIN_WIN_POS` 의 x 는 쓰지 않고 **화면 오른쪽 끝 - 창 가로** 로 둔다
+#    (y 는 그대로). 창 가로가 컴퓨터마다 달라도 늘 오른쪽에 딱 붙는다.
+#    끄려면 False — 그러면 예전처럼 `MAIN_WIN_POS` 자리로 간다.
+MAIN_WIN_RIGHT = True
+
+# 🚫 악몽의섬 슬롯판 왼쪽을 [🎟 쿠폰등록] 에 맞추던 기능 (2026-09-20) — 껐다.
+#    2026-11-03 에 용던고고·인사이드 열을 슬롯판 오른쪽으로 옮기면서,
+#    이 맞춤이 넣는 큰 왼쪽 여백이 그 두 열을 창 밖으로 밀어냈다.
+NIGHT_ALIGN = False
+
+# 🧭 아래 줄(front_row)을 **창 오른쪽 끝에 붙인다** (2026-11-03).
+#    자주 쓰는 두 열을 맨 오른쪽으로 보냈는데, 아래 줄이 왼쪽 정렬이라
+#    창 오른쪽에 180px 쯤 빈 자리가 남아 그 두 열이 클라 위에 걸렸다.
+#    오른쪽 정렬로 바꾸면 그 두 열이 **클라 오른쪽 빈 자리**까지 나온다.
+#    끄려면 False (예전처럼 왼쪽 정렬).
+FRONT_ROW_EAST = True
+
 WARN_GONE_N = 4   # 2026-11-03: 3 → 4 (지울 때는 더 조심한다)
 # 😴 사람이 컴퓨터를 이만큼 안 만지면, 목록에 남은 복구를 스스로 돌린다
 # (2026-09-29 사용자 요청: "5분 동안 아무런 작업이 없을 때 내가 놓친 복구가 있으면 해줘")
@@ -5924,7 +5944,11 @@ class App(tk.Tk):
 
         # ── 배열창 재배치(슬롯별 그리드) + 다야 수량 ──
         tk.Frame(self, height=1, bg="#ccc").pack(fill="x", padx=10, pady=(4,2))
-        front_row = tk.Frame(self); front_row.pack(pady=4, anchor="w", padx=(38, 0))
+        front_row = tk.Frame(self)
+        if FRONT_ROW_EAST:
+            front_row.pack(pady=4, anchor="e", padx=(0, 0))   # 🧭 오른쪽 끝에 붙임
+        else:
+            front_row.pack(pady=4, anchor="w", padx=(38, 0))
         self._front_row = front_row   # 정렬 보정용 (일반던전충전 열 ← TJ 좌측 라인)
 
         # 배열창 재배치 왼쪽: (1행) 일반던전충전+실행  (2행) 인형탐험+실행 — 각 버튼 옆에 실행
@@ -6146,6 +6170,25 @@ class App(tk.Tk):
         for _ms in (400, 1200, 2500):
             self.after(_ms, self._align_night_col)
         self._build_night_grid(night_col)
+
+        # 🧭 **자주 쓰는 두 열을 맨 오른쪽으로** (2026-11-03 사용자 지시
+        #    *"용던고고 위아래 줄을 맨 오른쪽으로 보내주고 그 왼쪽편에
+        #      인사이드 쿠폰등록 등등 위아래 전부"*).
+        #    런처를 오른쪽 벽에 붙이면(MAIN_WIN_RIGHT) 이 두 열이
+        #    **클라 오른쪽 빈 자리에 걸려** 클라를 가리지 않고 보인다.
+        #    만드는 자리는 그대로 두고 **pack 순서만** 바꾼다 — 150줄을 옮기면
+        #    그 안의 위젯 참조가 전부 틀어진다.
+        #    🚫 클로드는 dc_col/chk_col 을 만드는 위치를 옮기지 말 것.
+        try:
+            _sep_r = tk.Frame(front_row, width=2, bg="#bbb")
+            _sep_r.pack(side="left", fill="y", padx=(8, 8), after=night_col)
+            chk_col.pack_configure(side="left", padx=(4, 8), anchor="n", after=_sep_r)
+            dc_col.pack_configure(side="left", padx=(4, 8), anchor="n", after=chk_col)
+            # 열을 옮겼으니 창 크기를 다시 맞춘다 (안 하면 오른쪽이 잘린다)
+            for _ms in (600, 1600, 3000):
+                self.after(_ms, self._fit_main_height)
+        except Exception:
+            pass
 
         # 서브창 핸들 초기화
         self._settings_win = None
@@ -8987,7 +9030,15 @@ class App(tk.Tk):
     def _align_night_col(self):
         """악몽의섬 슬롯판의 왼쪽을 [🎟 쿠폰등록] 버튼의 왼쪽에 맞춘다
         (2026-09-20 사용자 요청). 픽셀을 코드에 박아두면 버튼이 하나만 바뀌어도
-        어긋나므로, **지금 화면에서 두 자리를 재서** 그 차이만큼 왼쪽 여백을 준다."""
+        어긋나므로, **지금 화면에서 두 자리를 재서** 그 차이만큼 왼쪽 여백을 준다.
+
+        🚫 **2026-11-03 부터 쓰지 않는다.** 자주 쓰는 두 열(용던고고·인사이드)을
+           슬롯판 **오른쪽**으로 옮겼는데, 이 맞춤이 슬롯판 왼쪽에 600px 가까운
+           여백을 넣어 **그 두 열을 창 밖으로 밀어냈다.** 맞춤은 모양새뿐이고
+           밀려난 열은 아예 안 보이므로 맞춤을 포기한다.
+           다시 켜려면 NIGHT_ALIGN = True (그러면 두 열이 다시 잘린다)."""
+        if not NIGHT_ALIGN:
+            return
         try:
             cg = getattr(self, "_coupon_group", None)
             col = getattr(self, "_night_col", None)
@@ -19565,6 +19616,8 @@ class App(tk.Tk):
         #    (자리를 코드에 고정했으므로 — 2026-11-03). 세로는 위에서 이미 잘랐다.
         try:
             _sw = self.winfo_screenwidth()
+            if MAIN_WIN_RIGHT:
+                x = max(0, _sw - w)      # 🧱 오른쪽 벽에 딱 붙인다
             if x + w > _sw:
                 x = max(0, _sw - w)
                 if x + w > _sw:
@@ -19598,6 +19651,8 @@ class App(tk.Tk):
             # 1) 일반던전충전 열(front_row) ← TJ성공!! 좌측 라인
             #    (TJ가 기준 — 실행 버튼들이 클라이언트에 가리지 않게 왼쪽으로 당김)
             try:
+                if FRONT_ROW_EAST:
+                    raise RuntimeError("오른쪽 정렬 — 왼쪽 맞춤은 쓰지 않는다")
                 tj_bx = self._tjcol.winfo_rootx() - self.winfo_rootx()
                 dxf = self._dc_open_btn.winfo_rootx() - self._tjcol.winfo_rootx()
                 if getattr(self, "_frontrow_padx", None) is None:
@@ -27138,10 +27193,14 @@ class App(tk.Tk):
 
     def _go_home(self):
         """[📍 제자리] — 런처를 고정 위치로 되돌린다."""
-        pos = MAIN_WIN_POS   # 코드 고정 — 모든 컴퓨터 동일
+        # 🧱 `_target_geometry` 가 오른쪽 벽 붙이기까지 계산해준다 (2026-11-03)
+        try:
+            _w, _h, _x, _y = self._target_geometry()
+        except Exception:
+            _x, _y = int(MAIN_WIN_POS[0]), int(MAIN_WIN_POS[1])
         try:
             self.deiconify()
-            self.geometry(f"+{int(pos[0])}+{int(pos[1])}")
+            self.geometry(f"+{int(_x)}+{int(_y)}")
         except Exception:
             pass
 
