@@ -2463,6 +2463,48 @@ def grab_window(coord):
         return None
 
 
+# 🖼 **그림을 창 크기에 맞춰 늘려서 찾는다** (2026-11-03).
+#    그림(`fix_sleep.png`·`check_ref.png` 등)과 `check_area_rel` 은 전부
+#    **491x276 창에서** 만든 것이다. 창을 546x307 로 키우자
+#      절전 그림  0.63  (기준 0.68) → **못 잡음**
+#      보정하면   0.83            → 넉넉히 통과
+#    그래서 **16클라가 전부 자고 있는데 "자는 클라 0개"** 가 됐고,
+#    📬 우편 지금받기가 아무것도 못 받았다 (사용자 신고 2026-11-03).
+#    🚫 클로드는 그림을 쓸 때 이 보정을 빼지 말 것. 창이 491 이면 k=1.0 이라
+#       값이 하나도 안 바뀌므로 안 쓰는 컴퓨터는 영향이 없다.
+IMG_BASE_W = 491          # 그림·영역을 만든 기준 창 가로
+
+
+def img_k(win_w):
+    """지금 창 가로에 맞는 배율."""
+    try:
+        return max(0.3, min(3.0, float(win_w) / IMG_BASE_W))
+    except Exception:
+        return 1.0
+
+
+def match_scaled(big, tpl, k, spans=(1.0, 0.97, 1.03)):
+    """배율 k 둘레로 조금씩 바꿔가며 가장 잘 맞는 것 → (점수, x, y, 쓴배율, 크기).
+
+    배율을 ±3% 흔드는 이유: 창 테두리 때문에 가로비와 세로비가 1~2% 어긋난다."""
+    import cv2
+    best = (-1.0, 0, 0, 1.0, (tpl.shape[1], tpl.shape[0]))
+    for sp in spans:
+        kk = k * sp
+        if abs(kk - 1.0) < 0.02:
+            t = tpl
+        else:
+            t = cv2.resize(tpl, (max(3, int(round(tpl.shape[1] * kk))),
+                                 max(3, int(round(tpl.shape[0] * kk)))))
+        if big.shape[0] < t.shape[0] or big.shape[1] < t.shape[1]:
+            continue
+        _n, mx, _l, ml = cv2.minMaxLoc(
+            cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED))
+        if mx > best[0]:
+            best = (float(mx), int(ml[0]), int(ml[1]), kk, (t.shape[1], t.shape[0]))
+    return best
+
+
 def find_sleep_img(fkey, coord):
     """그 클라가 절전 화면인가 — **창을 직접 캡처**해서 본다(가려져도 정확)."""
     q = sleep_img_path(fkey)
@@ -2476,12 +2518,11 @@ def find_sleep_img(fkey, coord):
         tpl = cv2.imdecode(np.fromfile(q, dtype=np.uint8), cv2.IMREAD_COLOR)
         if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
             return None, None, 0.0
-        res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
-        _n, mx, _l, ml = cv2.minMaxLoc(res)
+        # 🖼 창 크기에 맞춰 늘려서 찾는다 (491 창이면 k=1.0 — 예전과 같다)
+        mx, lx, ly, _kk, (tw, th) = match_scaled(big, tpl, img_k(big.shape[1]))
         if mx < SLEEP_MATCH:
             return None, None, float(mx)
-        return (int(ml[0] + tpl.shape[1] // 2),
-                int(ml[1] + tpl.shape[0] // 2), float(mx))
+        return int(lx + tw // 2), int(ly + th // 2), float(mx)
     except Exception:
         return None, None, 0.0
 
@@ -18258,6 +18299,19 @@ class App(tk.Tk):
         dx, dy, w, h = rel
         M = WARN_MARGIN   # 클라마다 자리가 어긋나므로 주변까지 넓게 훑는다
                           # (2026-08-29: 20 → 60. 10개 떠 있어도 몇 개를 놓쳤다)
+        # 🖼 **영역과 기준 그림을 창 크기에 맞춰 늘린다** (2026-11-03).
+        #    `check_area_rel` 과 `check_ref.png` 는 491 창에서 만든 것이라,
+        #    546 창에서는 **훑는 자리도 밀리고 그림도 작다**.
+        _k = img_k((hw[0][2] - hw[0][0]) if hw else IMG_BASE_W)
+        if abs(_k - 1.0) > 0.02:
+            dx, dy = int(round(dx * _k)), int(round(dy * _k))
+            w, h = int(round(w * _k)), int(round(h * _k))
+            M = int(round(M * _k))
+            try:
+                ref = ref.resize((max(3, int(round(ref.width * _k))),
+                                  max(3, int(round(ref.height * _k)))))
+            except Exception:
+                pass
         hit, slept, _scores = [], [], []
         _sleep_t = None
         try:
@@ -18291,8 +18345,8 @@ class App(tk.Tk):
                                           cv2.COLOR_RGB2BGR)
                         if (_b.shape[0] >= _sleep_t.shape[0]
                                 and _b.shape[1] >= _sleep_t.shape[1]):
-                            _m = float(cv2.matchTemplate(
-                                _b, _sleep_t, cv2.TM_CCOEFF_NORMED).max())
+                            _m = match_scaled(_b, _sleep_t,
+                                              img_k(_b.shape[1]))[0]
                             if _m >= SLEEP_MATCH:
                                 slept.append(i + 1)
                 except Exception:
