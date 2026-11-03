@@ -4043,9 +4043,17 @@ def _floor_grab(fkey, coord):
     ar = floor_area(fkey)
     if ar:
         dx, dy, w, h = ar
-        x1 = max(0, dx - FLOOR_PAD); y1 = max(0, dy - FLOOR_PAD)
-        x2 = min(big.shape[1], dx + w + FLOOR_PAD)
-        y2 = min(big.shape[0], dy + h + FLOOR_PAD)
+        # 🖼 **창 크기에 맞춰 늘린다** (2026-11-03). 이 자리는 491 창에서 잡은 것이라
+        #    546 창에서는 층 글씨가 dx448 -> 약 498 로 옮겨간다. 그대로 쓰면
+        #    **글씨가 범위 밖**이라 층을 영영 못 읽는다 (사용자 신고: 오토를 안 누른다).
+        _k = img_k(big.shape[1])
+        if abs(_k - 1.0) > 0.02:
+            dx, dy = int(round(dx * _k)), int(round(dy * _k))
+            w, h = int(round(w * _k)), int(round(h * _k))
+        _pad = max(FLOOR_PAD, int(round(FLOOR_PAD * _k)))
+        x1 = max(0, dx - _pad); y1 = max(0, dy - _pad)
+        x2 = min(big.shape[1], dx + w + _pad)
+        y2 = min(big.shape[0], dy + h + _pad)
         if x2 - x1 > 4 and y2 - y1 > 4:
             big = big[y1:y2, x1:x2]
     return big
@@ -4068,9 +4076,13 @@ def floor_img_flat(path):
         return False
 
 
-def _floor_score(big, fkey, fl):
-    """그 화면에서 'N층' 그림이 얼마나 맞는지 (0.0~1.0). 여러 장이면 제일 높은 값."""
+def _floor_score(big, fkey, fl, win_w=None):
+    """그 화면에서 'N층' 그림이 얼마나 맞는지 (0.0~1.0). 여러 장이면 제일 높은 값.
+
+    `win_w` = 그 클라 **창 가로**. 그림은 491 창에서 자른 것이라 창이 커지면
+    그만큼 늘려서 봐야 한다 (안 늘리면 546 창에서 아예 못 찾는다)."""
     import cv2, numpy as np
+    _FS_K = img_k(win_w) if win_w else 1.0
     best = 0.0
     for p in floor_img_list(fkey, fl):
         if floor_img_flat(p):
@@ -4080,8 +4092,10 @@ def _floor_score(big, fkey, fl):
         tpl = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
         if tpl is None:
             continue
-        for sc in (1.00, 0.92, 1.08):            # 컴퓨터마다 창 크기가 달라서
-            t = (tpl if sc == 1.00 else
+        # 🖼 **창 크기(k) 둘레로** 훑는다 (2026-11-03). 예전엔 1.00 둘레
+        #    ±8% 만 봐서, 546 창(+11.2%)은 **아예 범위 밖**이었다.
+        for sc in (_FS_K, _FS_K * 0.94, _FS_K * 1.06):
+            t = (tpl if abs(sc - 1.00) < 0.02 else
                  cv2.resize(tpl, None, fx=sc, fy=sc, interpolation=cv2.INTER_AREA))
             if t.shape[0] > big.shape[0] or t.shape[1] > big.shape[1]:
                 continue
@@ -4377,7 +4391,13 @@ def floor_scores2(fkey, coord):
         big = _floor_grab(fkey, coord)
         if big is None:
             return dig, bool(dig)
-        old = {fl: _floor_score(big, fkey, fl)
+        _ww = None
+        try:
+            _raw = grab_window(coord)
+            _ww = _raw.shape[1] if _raw is not None else None
+        except Exception:
+            pass
+        old = {fl: _floor_score(big, fkey, fl, _ww)
                for fl in FLOOR_LIST if floor_img_list(fkey, fl)}
         return (old, False) if old else (dig, bool(dig))
     except Exception:
