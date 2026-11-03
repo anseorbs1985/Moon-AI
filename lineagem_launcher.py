@@ -4055,19 +4055,26 @@ def floor_dig_cut(coord):
         ch = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
         if ch is None:
             return None, 0.0
-        reg = big[int(100*ky):int(130*ky), max(0, W-70):max(1, W-18)]
+        reg = big[int(100*ky):int(130*ky),
+                  max(0, W-int(round(70*ky))):max(1, W-int(round(18*ky)))]
         if reg.size == 0:
             return None, 0.0
-        bv, bx, by, bs = -1.0, 0, 0, 1.0
-        s = 1.0 - FLOOR_DIG_SPAN
-        while s <= 1.0 + FLOOR_DIG_SPAN + 1e-9:
+        bv, bx, by, bs = -1.0, 0, 0, ky
+        # 🔎 **배율을 창 크기(ky) 둘레로 훑는다** (2026-11-03). 예전엔 1.0 둘레
+        #    ±6% 만 훑어서, 545x307(+11%) 처럼 키운 창은 '층' 글자를 영영 못 찾았다
+        #    (실측 chung 0.59 — 기준 0.55 를 겨우 넘거나 못 넘었다).
+        #    491x276 이면 ky = 1.0 이라 예전과 똑같다.
+        s = ky * (1.0 - FLOOR_DIG_SPAN)
+        _smax = ky * (1.0 + FLOOR_DIG_SPAN)
+        while s <= _smax + 1e-9:
             t = cv2.resize(ch, None, fx=s, fy=s, interpolation=cv2.INTER_CUBIC)
             if t.shape[0] <= reg.shape[0] and t.shape[1] <= reg.shape[1]:
                 _, v, _, lo = cv2.minMaxLoc(
                     cv2.matchTemplate(reg, t, cv2.TM_CCOEFF_NORMED))
                 if v > bv:
-                    bv, bx, by, bs = v, (W-70)+lo[0], int(100*ky)+lo[1], s
-            s += FLOOR_DIG_STEP
+                    bv, bx, by, bs = (v, (W-int(round(70*ky)))+lo[0],
+                                      int(100*ky)+lo[1], s)
+            s += FLOOR_DIG_STEP * ky
         if bv < FLOOR_CHUNG_MIN:
             return None, bv
         x0 = bx - int(round(9*bs)) - 1
@@ -4154,7 +4161,16 @@ def floor_scores(fkey, coord):
 #   🚫 클로드는 기준을 내리지 말 것 — 화염던전 0.67 과 여유 0.08 뿐이다.
 FLOOR_NUM_ON    = True
 FLOOR_NUM_MIN   = 0.75      # 이 점수를 못 넘으면 '못 읽음' (= 오토 안 누름)
-FLOOR_NUM_NEAR  = 3         # 창 가로가 이만큼 차이나는 견본까지 쓴다
+FLOOR_NUM_NEAR  = 0         # 창 가로가 **정확히 같은** 견본만 쓴다 (2026-11-03)
+#   예전에는 3 이라 494 짜리 창에 **491 견본을 갖다 댔다.** 그런데 실측
+#   2026-11-03 (같은 순간 16클라, 화면을 눈으로 읽어 정답과 대조):
+#     폭이 3px만 달라도 **같은 층끼리가 -0.049** 까지 떨어졌다
+#       (#02-#10 둘 다 5층인데 491 vs 494)
+#     반대로 **폭이 정확히 같으면** 같은 층 0.990~0.999 · 다른 층 0.838~0.901
+#   즉 눈금은 **크기가 큰가가 아니라 폭이 같은가** 였다.
+#   클로드는 이 값을 다시 올리지 말 것 — 틀린 견본을 끌어다 써서 다른 층을
+#   내 층으로 읽으면 엉뚱한 층에서 오토가 눌려 퀘스트가 깨진다.
+#   견본이 없는 폭은 예전 그림 방식으로 내려가므로 지금보다 나빠지지 않는다.
 FLOOR_NAME_W    = 66        # 던전 이름 줄 폭 (오른쪽 끝 기준) — 용의계곡 실측 65~66
 FLOOR_NAME_Y    = (104, 134)
 FLOOR_NAME_X0   = 390       # 이 왼쪽은 안 본다 (HUD 오른쪽에만 있다)
@@ -4189,11 +4205,20 @@ def floor_num_read(big):
     import cv2, numpy as np
     try:
         H, W = big.shape[0], big.shape[1]
-        y_a, y_b = FLOOR_NAME_Y
-        g0 = cv2.cvtColor(big[y_a:min(H, y_b), FLOOR_NAME_X0:W - 10], cv2.COLOR_BGR2GRAY)
+        # 🔎 **창 크기에 맞춰 늘린다** (2026-11-03). 아래 숫자들은 491x276 기준이라
+        #    545x307 처럼 키운 창에서는 그대로 쓰면 엉뚱한 자리를 본다.
+        #    491x276 이면 kk = 1.0 이라 **예전과 값이 하나도 안 바뀐다.**
+        kk = H / 276.0
+        y_a, y_b = int(round(FLOOR_NAME_Y[0] * kk)), int(round(FLOOR_NAME_Y[1] * kk))
+        _x0b = int(round(FLOOR_NAME_X0 * kk))
+        _nw = int(round(FLOOR_NAME_W * kk))
+        _rowh = max(5, int(round(6 * kk)))      # 이름 줄 높이
+        _dw = max(6, int(round(7 * kk)))        # 숫자 조각 가로
+        g0 = cv2.cvtColor(big[y_a:min(H, y_b), _x0b:W - int(round(10 * kk))],
+                          cv2.COLOR_BGR2GRAY)
         m = (g0 > FLOOR_NAME_INK)
         rs = m.sum(axis=1)
-        rr = [k for k, v in enumerate(rs) if v >= 8]
+        rr = [k for k, v in enumerate(rs) if v >= int(round(8 * kk))]
         if not rr:
             return None, "이름줄 없음"
         y0 = rr[0]; y1 = y0
@@ -4203,11 +4228,11 @@ def floor_num_read(big):
             else:
                 break
         cc = np.where(m[y0:y1 + 1].sum(axis=0) >= 1)[0]
-        if len(cc) < 20:
+        if len(cc) < int(round(20 * kk)):
             return None, "글자가 적다"
-        x1 = FLOOR_NAME_X0 + int(cc.max())
-        x0 = max(0, x1 - FLOOR_NAME_W + 1)        # ★ 오른쪽 끝 기준 — 왼쪽 잡음 배제
-        g = cv2.cvtColor(big[y_a + y0:y_a + y0 + 6, x0:x1 + 1], cv2.COLOR_BGR2GRAY)
+        x1 = _x0b + int(cc.max())
+        x0 = max(0, x1 - _nw + 1)                 # ★ 오른쪽 끝 기준 — 왼쪽 잡음 배제
+        g = cv2.cvtColor(big[y_a + y0:y_a + y0 + _rowh, x0:x1 + 1], cv2.COLOR_BGR2GRAY)
         c = (g > FLOOR_NAME_INK).sum(axis=0)
         runs = []; st = None
         for k, v in enumerate(c):
@@ -4221,9 +4246,10 @@ def floor_num_read(big):
             return None, "글자 덩어리 %d개" % len(runs)
         a, b = runs[-3]                            # 아이콘 → '층' → **숫자**
         cx = (a + b) // 2
-        d = g[:, max(0, cx - 3):max(0, cx - 3) + 7]
-        if d.shape != (6, 7):
-            return None, "숫자 조각 %s" % (d.shape,)
+        _off = _dw // 2
+        d = g[:, max(0, cx - _off):max(0, cx - _off) + _dw]
+        if d.shape != (_rowh, _dw):
+            return None, "숫자 조각 %s (바라던 %dx%d)" % (d.shape, _dw, _rowh)
         sc = {}
         for (lv, tw), lst in floor_num_tpls().items():
             if abs(tw - W) > FLOOR_NUM_NEAR:
