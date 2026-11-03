@@ -2763,18 +2763,11 @@ def purple_running():
 
 
 def rec_make_dirs(rows=None):
-    """폴더 `1` ~ `6` 과 `_백업` 을 만들어 둔다. 이미 있으면 그대로."""
+    """폴더 `1` ~ `6` 과 `_백업` 을 만들어 둔다."""
     try:
         os.makedirs(REC_DROP_DIR, exist_ok=True)
-        have = set()
-        for d in os.listdir(REC_DROP_DIR):
-            if os.path.isdir(os.path.join(REC_DROP_DIR, d)):
-                m = re.match(r"\s*(\d{1,2})\s*$", d)
-                if m:
-                    have.add(int(m.group(1)))
         for i in range(1, REC_SLOTS + 1):
-            if i not in have:
-                os.makedirs(os.path.join(REC_DROP_DIR, str(i)), exist_ok=True)
+            os.makedirs(os.path.join(REC_DROP_DIR, str(i)), exist_ok=True)
         os.makedirs(os.path.join(REC_DROP_DIR, "_백업"), exist_ok=True)
     except Exception:
         pass
@@ -2791,15 +2784,17 @@ def _rec_newest_json(d):
 
 
 def rec_drop_files():
-    """넣어둔 것 → {폴더번호: 파일경로}. 폴더 번호 = **런처 슬롯 번호**.
+    """폴더 `1`~`6` 에서 → {번호: 파일경로}. 빈 폴더는 없다.
 
-    폴더 안의 **.json** 을 본다 — 파일 이름은 아무래도 좋다.
-    여러 개 넣었으면 **가장 최근 것**을 쓴다. 빈 폴더는 건너뛴다."""
+    🧭 **폴더 번호 = 퍼플 [마우스·키 녹화 설정] 의 칸 번호** (2026-11-03 사용자:
+       *"그 공간이 1~6까지 해줘, 그럼 순서대로 해두고 그걸 너가 교체만 해주면 된다"*).
+       한 폴더에 **녹화 하나**(내보내기 한 파일)를 넣는다.
+    여러 개 넣었으면 그 폴더에서 **가장 최근 것**."""
     out = {}
     try:
         if not os.path.isdir(REC_DROP_DIR):
             return out
-        for f in sorted(os.listdir(REC_DROP_DIR)):
+        for f in os.listdir(REC_DROP_DIR):
             p = os.path.join(REC_DROP_DIR, f)
             if not os.path.isdir(p) or f.startswith("_"):
                 continue
@@ -2812,6 +2807,33 @@ def rec_drop_files():
     except Exception:
         pass
     return out
+
+
+def rec_build(files):
+    """폴더 1~6 의 녹화를 **순서대로 합쳐** 하나의 records 로 만든다.
+
+    → (records dict, 설명줄 목록, 잘못된 것 목록)
+    키는 **`r0` 부터 다시** 매긴다 (넣은 파일의 키는 제각각이라 그대로 두면 겹친다).
+    🚫 넣지 않은 번호는 **빈 자리로 두지 않고 당긴다** — 퍼플 패널은 그냥 줄줄이 뜬다."""
+    recs, note, bad = {}, [], []
+    for n in sorted(files):
+        p = files[n]
+        try:
+            d = json.load(open(p, encoding="utf-8-sig"))
+            r = d.get("records") if isinstance(d, dict) else None
+            if not isinstance(r, dict) or not r:
+                bad.append(f"{n}번 {os.path.basename(p)} — 녹화가 없습니다")
+                continue
+            for _k, v in r.items():
+                if not isinstance(v, dict) or not v.get("events"):
+                    continue
+                key = f"r{len(recs)}"
+                recs[key] = v
+                note.append(f"{n}번 → {key}  {str(v.get('title'))[:28]} "
+                            f"({len(v.get('events') or [])} 이벤트)")
+        except Exception as e:
+            bad.append(f"{n}번 {os.path.basename(p)} — 읽기 실패 {type(e).__name__}")
+    return recs, note, bad
 
 
 def rec_file_ok(p):
@@ -5921,7 +5943,7 @@ class App(tk.Tk):
             if live:
                 slot_zones_save(live)
             rows, at = (live, "지금") if live else slot_zones_saved()
-            files = rec_drop_files()
+            files = rec_drop_files()      # {번호: 파일}
             running = purple_running()
 
             def _msg(t, m):
@@ -5936,18 +5958,17 @@ class App(tk.Tk):
                 self.after(0, lambda: self.status.set("🎹 슬롯↔폴더 짝을 아직 모릅니다"))
                 return
 
-            tbl = chr(10).join(
-                "폴더 %d  →  #%02d %s" % (i + 1, i + 1, a)
-                for i, (a, _b) in enumerate(rows[:REC_SLOTS]))
+            tbl = "  ".join("#%02d %s" % (i + 1, a) for i, (a, _b) in enumerate(rows))
             if not files:
                 _msg("🎹 녹화교체 — 폴더에 파일을 넣어주세요",
-                     REC_DROP_DIR + chr(10)
+                     "폴더 1~6 에 **녹화를 하나씩** 넣고 다시 누르세요."
+                     + chr(10) + chr(10) + REC_DROP_DIR + chr(10)
                      + "    1" + chr(92) + "  2" + chr(92) + "  3" + chr(92)
                      + "  4" + chr(92) + "  5" + chr(92) + "  6" + chr(92)
                      + chr(10) + chr(10)
-                     + "그 폴더에 .json 을 넣고 다시 누르면 됩니다."
-                     + chr(10) + "파일 이름은 아무래도 좋습니다. 빈 폴더는 건너뜁니다."
-                     + chr(10) + chr(10) + tbl)
+                     + "퍼플 [마우스·키 녹화 설정] 에서 하나씩 **내보내기** 한 것을"
+                     + chr(10) + "넣으면 됩니다. 넣은 순서(1→6)대로 채웁니다."
+                     + chr(10) + chr(10) + "지금 클라:" + chr(10) + tbl)
                 try:
                     os.startfile(REC_DROP_DIR)       # 사용자가 누른 버튼이라 열어도 된다
                 except Exception:
@@ -5980,7 +6001,8 @@ class App(tk.Tk):
                             + "    클라를 다시 켜야 새 녹화가 보입니다." + chr(10)
                             + "  · 바꾸기 전에 그 클라에서 녹화를 저장하면"
                             + " **옛것으로 도로 덮어씁니다.**" + chr(10) + chr(10)
-                            + "지금 바꿀까요?")
+                            + "16클라의 녹화를 **전부 지우고** 넣은 파일로 채웁니다."
+                            + chr(10) + "지금 할까요?")
                     except Exception:
                         _ans[0] = False
                     _ev.set()
@@ -5994,35 +6016,44 @@ class App(tk.Tk):
             bk = os.path.join(REC_DROP_DIR, "_백업", time.strftime("%Y%m%d_%H%M%S"))
             os.makedirs(bk, exist_ok=True)
             done, skip = [], []
+            recs, note, bad = rec_build(files)
+            if not recs:
+                _msg("🎹 쓸 수 있는 녹화가 없습니다",
+                     (chr(10).join(bad) if bad else "폴더 1~6 이 비어 있습니다"))
+                self.after(0, lambda: self.status.set("🎹 쓸 수 있는 녹화가 없습니다"))
+                return
+            blob = json.dumps({"records": recs}, ensure_ascii=False)
             for i, (nm, g) in enumerate(rows):
-                src = files.get(i + 1)      # 폴더 N = 슬롯 N
-                if not src:
-                    continue                # 빈 폴더는 조용히 건너뛴다
-                ok, why = rec_file_ok(src)
-                if not ok:
-                    skip.append(f"폴더 {i+1} → #{i+1:02d} {nm} — "
-                                f"{os.path.basename(src)}: {why}")
-                    continue
                 dst = rec_path(g)
                 try:
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
                     if os.path.exists(dst):
                         shutil.copy2(dst, os.path.join(bk, f"{i+1:02d}_{nm}.json"))
-                    shutil.copy2(src, dst)
-                    done.append(f"폴더 {i+1} → #{i+1:02d} {nm} "
-                                f"← {os.path.basename(src)} ({why})")
+                    tmp = dst + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as _f:
+                        _f.write(blob)
+                    os.replace(tmp, dst)       # 쓰다가 죽어도 파일이 안 깨진다
+                    done.append(f"#{i+1:02d} {nm}")
                 except Exception as e:
-                    skip.append(f"폴더 {i+1} → #{i+1:02d} {nm} — 복사 실패 "
-                                f"{type(e).__name__}: {e}")
-            click_log(f"[녹화교체] 바꿈 {len(done)}개 · 건너뜀 {len(skip)}개 · 백업 {bk}")
+                    skip.append(f"#{i+1:02d} {nm} — 쓰기 실패 {type(e).__name__}: {e}")
+            click_log(f"[녹화교체] 녹화 {len(recs)}개로 {len(done)}개 클라를 채웠다 "
+                      f"· 실패 {len(skip)}개 · 백업 {bk}")
+            for l in note + bad:
+                click_log("[녹화교체]   " + l)
             for l in done + skip:
                 click_log("[녹화교체]   " + l)
             _msg("🎹 녹화교체 끝",
-                 f"바꿈 {len(done)}개 · 건너뜀 {len(skip)}개" + chr(10)
-                 + f"이전 것은 백업했습니다:" + chr(10) + bk + chr(10) + chr(10)
-                 + chr(10).join(done + ([""] + skip if skip else [])))
+                 f"녹화 {len(recs)}개로 **{len(done)}개 클라**를 채웠습니다."
+                 + (f"  (실패 {len(skip)}개)" if skip else "") + chr(10) + chr(10)
+                 + chr(10).join(note) + chr(10) + chr(10)
+                 + "이전 것은 백업했습니다:" + chr(10) + bk
+                 + ((chr(10) + chr(10) + chr(10).join(bad + skip)) if (bad or skip) else "")
+                 + chr(10) + chr(10)
+                 + "※ 켜져 있던 클라는 **녹화 창을 닫았다 다시 열어야** 보입니다."
+                 + chr(10) + "※ ★ 즐겨찾기는 따로 저장돼 있어 어긋날 수 있습니다 —"
+                 + " 패널에서 다시 눌러주세요.")
             self.after(0, lambda: self.status.set(
-                f"🎹 녹화 교체 — 바꿈 {len(done)}개 · 건너뜀 {len(skip)}개 (백업함)"))
+                f"🎹 녹화 교체 — 녹화 {len(recs)}개로 {len(done)}개 클라를 채웠습니다 (백업함)"))
         except Exception as e:
             click_log(f"[녹화교체] 오류 {type(e).__name__}: {e}")
             self.after(0, lambda: self.status.set(f"🎹 녹화교체 오류: {e}"))
