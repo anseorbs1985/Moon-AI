@@ -4101,6 +4101,114 @@ def floor_scores(fkey, coord):
     return floor_scores2(fkey, coord)[0]
 
 
+# ═══ 🔢 층 숫자 읽기 — **HUD 던전 이름 줄에서 숫자만** (2026-10-29) ═══
+#   사용자: *"층이 대부분 제대로 들어가는데 오토를 안 누른다 … 제대로 눌렀으면 좋겠어"*
+#
+#   예전 방식("N층" 두 글자 그림 + 고정 범위)은 **틀리게 읽었다** — 실측 10-29:
+#   5층 화면을 6층 0.97~1.00 으로 "확인됨" 처리해 **틀린 층에서 오토를 눌렀다.**
+#   원인: 고정 범위(dx448 dy106)가 슬롯마다 어긋난다. 같은 491x276 창인데도
+#   글자 y 가 110 / 117 로 11px 달랐다.
+#
+#   새 방식 — **글자를 찾아 상대 위치로 읽는다. 고정 좌표를 쓰지 않는다.**
+#     ① HUD 에서 '던전 이름 줄'(밝기>140 의 첫 덩어리, 높이 6~7px)을 찾는다
+#     ② 그 줄의 **오른쪽 끝**에서 왼쪽 FLOOR_NAME_W(66)px 가 이름이다
+#        (오른쪽 끝은 '층' 이 아니라 **사람 아이콘** 이다 — 실측)
+#     ③ 열 덩어리로 나눠 **뒤에서 3번째**가 숫자다 (아이콘 → '층' → 숫자)
+#     ④ 그 6x7 조각을 **같은 창 가로**의 숫자 견본과 비교한다
+#
+#   ⚠ **창 가로별로 견본을 나눈다.** 같은 크기끼리는 픽셀이 완전히 일치하지만
+#      크기가 다르면 5와 6이 섞인다 — 실측: 창크기 무시 11/13 · 같은 것만 4/4.
+#   📏 검증 2026-10-29 (16클라, 눈으로 읽은 정답과 대조):
+#      용의계곡 13슬롯 **13/13 정확 · 틀림 0 · 못읽음 0** (점수 0.84~1.00)
+#      화염던전 3슬롯 → 0.59~0.67 로 **자동으로 걸러짐** (기준 0.75)
+#   🚫 클로드는 기준을 내리지 말 것 — 화염던전 0.67 과 여유 0.08 뿐이다.
+FLOOR_NUM_ON    = True
+FLOOR_NUM_MIN   = 0.75      # 이 점수를 못 넘으면 '못 읽음' (= 오토 안 누름)
+FLOOR_NUM_NEAR  = 3         # 창 가로가 이만큼 차이나는 견본까지 쓴다
+FLOOR_NAME_W    = 66        # 던전 이름 줄 폭 (오른쪽 끝 기준) — 용의계곡 실측 65~66
+FLOOR_NAME_Y    = (104, 134)
+FLOOR_NAME_X0   = 390       # 이 왼쪽은 안 본다 (HUD 오른쪽에만 있다)
+FLOOR_NAME_INK  = 140       # 글자로 칠 밝기
+_FLOOR_NUM_CACHE = {}
+
+def floor_num_tpls():
+    """`dragon_num_<층>_<창가로>_<n>.png` 를 모아 {(층, 창가로): [그림…]} 으로."""
+    global _FLOOR_NUM_CACHE
+    if _FLOOR_NUM_CACHE:
+        return _FLOOR_NUM_CACHE
+    import glob, cv2, numpy as np
+    out = {}
+    for p in glob.glob(os.path.join(IMG_DIR, "dragon_num_*.png")):
+        try:
+            b = os.path.basename(p)[:-4].split("_")      # dragon num 층 창 n
+            img = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_GRAYSCALE)
+            if img is not None:
+                out.setdefault((int(b[2]), int(b[3])), []).append(img)
+        except Exception:
+            pass
+    _FLOOR_NUM_CACHE = out
+    return out
+
+def floor_num_have(win_w):
+    """그 창 가로에 쓸 견본이 **두 층 이상** 있나 (없으면 예전 방식으로 간다)."""
+    tp = floor_num_tpls()
+    return len({lv for (lv, tw) in tp if abs(tw - win_w) <= FLOOR_NUM_NEAR}) >= 2
+
+def floor_num_read(big):
+    """화면에서 층 숫자를 읽는다 → (층, 설명). 못 읽으면 (None, 이유)."""
+    import cv2, numpy as np
+    try:
+        H, W = big.shape[0], big.shape[1]
+        y_a, y_b = FLOOR_NAME_Y
+        g0 = cv2.cvtColor(big[y_a:min(H, y_b), FLOOR_NAME_X0:W - 10], cv2.COLOR_BGR2GRAY)
+        m = (g0 > FLOOR_NAME_INK)
+        rs = m.sum(axis=1)
+        rr = [k for k, v in enumerate(rs) if v >= 8]
+        if not rr:
+            return None, "이름줄 없음"
+        y0 = rr[0]; y1 = y0
+        for k in rr[1:]:
+            if k - y1 <= 1:
+                y1 = k
+            else:
+                break
+        cc = np.where(m[y0:y1 + 1].sum(axis=0) >= 1)[0]
+        if len(cc) < 20:
+            return None, "글자가 적다"
+        x1 = FLOOR_NAME_X0 + int(cc.max())
+        x0 = max(0, x1 - FLOOR_NAME_W + 1)        # ★ 오른쪽 끝 기준 — 왼쪽 잡음 배제
+        g = cv2.cvtColor(big[y_a + y0:y_a + y0 + 6, x0:x1 + 1], cv2.COLOR_BGR2GRAY)
+        c = (g > FLOOR_NAME_INK).sum(axis=0)
+        runs = []; st = None
+        for k, v in enumerate(c):
+            if v and st is None:
+                st = k
+            elif not v and st is not None:
+                runs.append((st, k - 1)); st = None
+        if st is not None:
+            runs.append((st, len(c) - 1))
+        if len(runs) < 3:
+            return None, "글자 덩어리 %d개" % len(runs)
+        a, b = runs[-3]                            # 아이콘 → '층' → **숫자**
+        cx = (a + b) // 2
+        d = g[:, max(0, cx - 3):max(0, cx - 3) + 7]
+        if d.shape != (6, 7):
+            return None, "숫자 조각 %s" % (d.shape,)
+        sc = {}
+        for (lv, tw), lst in floor_num_tpls().items():
+            if abs(tw - W) > FLOOR_NUM_NEAR:
+                continue
+            v = max(float(cv2.matchTemplate(d, t, cv2.TM_CCOEFF_NORMED).max()) for t in lst)
+            sc[lv] = max(sc.get(lv, -9.0), v)
+        if len(sc) < 2:
+            return None, "창%d 견본 부족 %s" % (W, sorted(sc))
+        o = sorted(sc.items(), key=lambda kv: -kv[1])
+        if o[0][1] < FLOOR_NUM_MIN:
+            return None, "점수 %.2f < %s" % (o[0][1], FLOOR_NUM_MIN)
+        return o[0][0], "%d층 %.2f / %d층 %.2f" % (o[0][0], o[0][1], o[1][0], o[1][1])
+    except Exception as e:
+        return None, "오류 %s" % e
+
 def floor_scores2(fkey, coord):
     """위와 같되 **숫자 견본으로 잰 것인지**도 알려준다 → (점수맵, 숫자방식?).
     기준값이 방식마다 다르기 때문에 이 구분이 필요하다."""
@@ -4125,6 +4233,18 @@ def floor_seen(fkey, fl, coord, sc_map=None, dig=None):
     - 그 층 점수가 기준(FLOOR_MATCH) 을 넘어야 하고
     - 등록된 층이 둘 이상이면 **그 층이 1등**이어야 하며 2등과 FLOOR_RATIO 배 차이가 나야 한다.
     """
+    # 🔢 **숫자 읽기를 먼저 쓴다** (2026-10-29) — 그 창 가로 견본이 있을 때만.
+    #    견본이 없는 컴퓨터는 예전 그림 방식으로 내려간다 (로컬 호환).
+    if FLOOR_NUM_ON and sc_map is None:
+        try:
+            _big = _floor_grab(fkey, coord)
+            if _big is not None and floor_num_have(_big.shape[1]):
+                _n, _why = floor_num_read(_big)
+                if _n is None:
+                    return False, 0.0, "숫자를 못 읽음 (%s)" % _why
+                return (_n == fl), 1.0, ("숫자 %s" % _why)
+        except Exception:
+            pass
     if sc_map is None:
         sc, dig = floor_scores2(fkey, coord)
     else:
