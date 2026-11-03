@@ -305,6 +305,8 @@ def key_of_didx(didx):
 PRE2_WAIT          = 10.0
 # 🟣 퍼플을 앞으로 올린 뒤 기다리는 시간 (창이 다 그려질 틈)
 PURPLE_FRONT_WAIT = 0.8
+# 📝 적어둘 칸 글씨색 — 굵은 빨강 (2026-11-04 사용자 지시)
+MEMO_FG = "#e03131"
 # 🔄 계정 전환을 **처음부터 다시** 해볼 횟수 (메뉴가 닫히는 경우)
 PROFILE_SWITCH_TRIES = 3
 PROFILE_SWITCH_GAP   = (1.2, 2.0)
@@ -5737,7 +5739,14 @@ def apply_dark(w, on=True):
                     except Exception: pass
         elif cls in ("Entry", "Text", "Listbox", "Spinbox"):
             if on:
-                try: w.configure(bg=DARK_BG2, fg=DARK_FG, insertbackground=DARK_FG)
+                # 📝 `_keep_fg` 를 달아둔 칸은 **글씨색을 지킨다**
+                #    (적어둘 칸은 굵은 빨강이어야 한다 — 2026-11-04 사용자 지시).
+                #    🚫 이 확인을 빼면 어두운 화면이 다시 흰 글씨로 덮어쓴다.
+                try:
+                    if getattr(w, "_keep_fg", False):
+                        w.configure(bg=DARK_BG2, insertbackground=DARK_FG)
+                    else:
+                        w.configure(bg=DARK_BG2, fg=DARK_FG, insertbackground=DARK_FG)
                 except Exception: pass
         elif cls == "Button":
             bg = str(w.cget("bg")); lb = _lum(w, bg)
@@ -7048,8 +7057,8 @@ class App(tk.Tk):
             activebackground="#0e6655", width=7, height=2,
             command=self._open_accounts_win).pack(side="left", padx=(0, 6))
         self.btn_start = tk.Button(btn_row, text="▶  전체 자동 실행",
-            font=("맑은 고딕", 12, "bold"), bg="#c8a951", fg="white",
-            activebackground="#a88930", width=15, height=2, command=self._start)
+            font=("맑은 고딕", 12, "bold"), bg="#f1c40f", fg="#1a1a1a",
+            activebackground="#d4ac0d", width=15, height=2, command=self._start)
         self.btn_start.pack(side="left", padx=(0, 4))
         # 멈춤 버튼이 아래 줄로 옮겨간 자리 — 오른쪽 버튼들(업데이트·좌표저장)이
         # 예전 위치를 그대로 지키도록 같은 폭의 빈칸을 둔다
@@ -7440,16 +7449,20 @@ class App(tk.Tk):
         _mt = tk.Frame(_keep); _mt.pack(anchor="n", fill="x")
         tk.Label(_mt, text="📝", font=("맑은 고딕", 8)).pack(side="left")
         self._memo_size = tk.StringVar(value=str(int(self.cfg.get("fold_memo_size", 9))))
-        _om = tk.OptionMenu(_mt, self._memo_size, *[str(v) for v in (8, 9, 10, 12, 14, 16)],
+        _om = tk.OptionMenu(_mt, self._memo_size, *[str(v) for v in (8, 9, 10, 12, 14, 16, 18, 20)],
                             command=lambda _v: self._fold_memo_size())
         _om.config(font=("맑은 고딕", 7), width=2, padx=0, pady=0,
                    highlightthickness=0, bd=1)
         try: _om["menu"].config(font=("맑은 고딕", 8))
         except Exception: pass
         _om.pack(side="left", padx=(2, 0))
+        # 📝 **굵은 빨강** (2026-11-04 사용자 지시) · 최대 20pt.
+        #    어두운 화면에서도 보이게 바탕은 건드리지 않고 글씨만 바꾼다.
         self._memo_box = tk.Text(_keep, height=2, width=10, wrap="word", bd=1,
-                                 relief="sunken",
-                                 font=("맑은 고딕", int(self.cfg.get("fold_memo_size", 9))))
+                                 relief="sunken", fg=MEMO_FG,
+                                 font=("맑은 고딕",
+                                       int(self.cfg.get("fold_memo_size", 9)), "bold"))
+        self._memo_box._keep_fg = True      # ↑ 어두운 화면이 글씨색을 덮지 않게
         self._memo_box.pack(anchor="n", fill="x", pady=(1, 3))
         try:
             self._memo_box.insert("1.0", str(self.cfg.get("fold_memo", "") or ""))
@@ -7489,8 +7502,10 @@ class App(tk.Tk):
         #    *"좌표복구 밑에 전체자동실행바 배치"*).
         #    위에 있는 [▶ 전체 자동 실행] 과 **같은 함수**를 부른다 —
         #    길이 둘이면 반드시 어긋난다 (이 살장소의 반복된 사고).
+        # 🟡 **노란 버튼** (2026-11-04 사용자 지시). 노랑 바탕에는
+        #    흰 글씨가 안 보이므로 글씨는 검정으로 둔다.
         tk.Button(_k2, text="▶ 전체 자동실행", font=("맑은 고딕", 8, "bold"),
-                  bg="#196f3d", fg="white", activebackground="#0e4429",
+                  bg="#f1c40f", fg="#1a1a1a", activebackground="#d4ac0d",
                   height=1, pady=4,
                   command=self._start).pack(side="top", fill="x", pady=(3, 0))
         # 💬 **지금 무슨 일을 하는지** — 좌표저장/복구 바로 아래 (2026-11-04 사용자:
@@ -7783,7 +7798,8 @@ class App(tk.Tk):
         """📝 적어둘 칸의 글자 크기를 바꾼다."""
         try:
             v = max(7, min(20, int(self._memo_size.get())))
-            self._memo_box.config(font=("맑은 고딕", v))
+            # ⚠ 굵기·색을 빼면 크기를 바꿀 때 평범해진다 — 함께 넣는다.
+            self._memo_box.config(font=("맑은 고딕", v, "bold"), fg=MEMO_FG)
             self.cfg["fold_memo_size"] = v
             save_cfg(self.cfg)
         except Exception:
