@@ -5865,6 +5865,33 @@ class IslandApp(tk.Tk):
             order = grid16(wins, 0, 1)
             if order and 0 <= si < 16:
                 hwnd = order[si][4]
+                # 🚨 **슬롯 번호로 고른 창과 좌표가 가리키는 창이 같은가** (2026-11-03)
+                #    사용자 신고: *"섬/던전 실행기에 실행 누르면 **다른 곳으로 가는**
+                #    문제점이 좀 있는 것 같다."* 이 둘이 다르면 **그 창을 앞으로
+                #    올려놓고 다른 클라를 누르는 것**이라 정확히 그 증상이 된다
+                #    (좌표를 다른 컴퓨터 배치에서 찍었거나 클라 순서가 바뀐 경우).
+                #    슬롯이 바뀔 때 **한 번만** 본다 — 비용은 WindowFromPoint 1회.
+                #    🚫 클로드는 이 검사를 지우지 말 것 — 이것 말고는 짚을 길이 없다.
+                try:
+                    if coord and getattr(self, "_focus_chk", None) != si:
+                        self._focus_chk = si
+                        _l, _t, _r, _b = win32gui.GetWindowRect(hwnd)
+                        _cx, _cy = int(coord[0]), int(coord[1])
+                        if not (_l <= _cx < _r and _t <= _cy < _b):
+                            _h3 = win32gui.WindowFromPoint((_cx, _cy))
+                            _u3 = ctypes.windll.user32
+                            _u3.GetAncestor.restype = ctypes.c_void_p
+                            _u3.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+                            _r3 = _u3.GetAncestor(ctypes.c_void_p(_h3), 2)
+                            _nm = win32gui.GetWindowText(int(_r3)) if _r3 else "?"
+                            self._rlog(
+                                f"⚠ #{si+1:02d} 좌표가 **다른 창**을 가리킨다 — "
+                                f"슬롯 창 [{win32gui.GetWindowText(hwnd)}] "
+                                f"({_l},{_t})~({_r},{_b}) 인데 "
+                                f"좌표 ({_cx},{_cy}) 는 [{_nm}] 안이다 "
+                                f"→ 그 슬롯 좌표를 다시 찍어주세요")
+                except Exception:
+                    pass
             if hwnd is None and coord:            # 슬롯 감지 실패 → 좌표로 찾는다
                 h2 = win32gui.WindowFromPoint((int(coord[0]), int(coord[1])))
                 u = ctypes.windll.user32
@@ -6429,7 +6456,12 @@ class IslandApp(tk.Tk):
             self._play_events(rec, name)
             did = True
         if did:
-            self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) 실행")
+            # 📍 **누른 좌표를 남긴다** (2026-11-03) — "다른 곳으로 간다" 는 신고를
+            #    짚을 유일한 통로다. 좌표만 있으면 어느 클라 창인지 계산할 수 있다.
+            #    창 제목을 매번 찾지 않으므로 **비용 0**.
+            #    🚫 클로드는 이 좌표 기록을 지우지 말 것.
+            _xy = (f" ({c[0]},{c[1]})" if c else "") + (" +녹화" if rec else "")
+            self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) 실행{_xy}")
             # 🚪 **첫 좌표(절전해제)를 누른 바로 다음에** 창을 확인한다.
             #    ⚠ 그 전에 보면 절전 화면이 인벤토리를 덮고 있어 **안 보인다.**
             #    ⚠ 순차(`_run`)의 같은 자리와 **한 쌍이다** — 한쪽만 걸면
@@ -7207,7 +7239,10 @@ class IslandApp(tk.Tk):
                         did = True
                     if not did:
                         continue
-                    self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) 실행")
+                    # 📍 누른 좌표를 남긴다 (2026-11-03) — 웨이브와 **한 쌍**이다
+                    _cj = coords[j] if j < len(coords) else None
+                    _xy = (f" ({_cj[0]},{_cj[1]})" if _cj else "") + (" +녹화" if rec else "")
+                    self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) 실행{_xy}")
                     # 🚪 **첫 좌표(절전해제)를 누른 바로 다음에** 창을 확인한다.
                     #    ⚠ 그 전에 보면 **절전 화면이 인벤토리를 덮고 있어 안 보인다**
                     #      (2026-08-29 복구에서 똑같이 겪었다: "순서가 중요하다 —
