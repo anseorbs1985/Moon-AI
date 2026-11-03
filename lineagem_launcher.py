@@ -2655,7 +2655,15 @@ def hover_spot(fkey, coord, hwnd=None):
 #       창 → 프로세스 → GUID 로 이어지므로 **클라를 껐다 켜도, 자리를 바꿔도** 따라간다.
 #    🚫 `purple_zone.config` 의 창 위치로 맞추지 말 것 — 클라를 **끌 때** 저장되는 값이라
 #       낡아 있다 (2026-11-03 실측: 16개 중 **3개만** 지금 자리와 맞았다).
-REC_DROP_DIR = os.path.join(BASE, "키설정교체")     # 파일을 넣는 자리 (바탕화면)
+REC_DROP_DIR = os.path.join(BASE, "키설정교체")     # 파일을 넣는 자리 (런처 폴더)
+#    🧭 **폴더 1~6 에 넣기만 하면 된다** (2026-11-03 사용자 지시:
+#       *"그냥 폴더에 파일을 넣을 수 있게 해줘. 그 공간이 **1~6까지** 해줘.
+#         그럼 순서대로 해두고 그러면 그걸 너가 교체만 해주면 된다고.
+#         굳이 (16개) 다 만들 필요가 있나도 싶다"*).
+#    🚫 **파일 이름 규칙을 만들지 말 것** · 🚫 **★ 고르는 창을 만들지 말 것** —
+#       둘 다 만들었다가 *"너무 어렵게 해놨어"* · *"이게 맞는지 전혀 모르겠어"* 를 들었다.
+#       폴더 번호 = 런처 슬롯 번호. 그게 전부다.
+REC_SLOTS = 6                                      # 만들어 둘 폴더 개수
 REC_ZONE_MAP = os.path.join(os.environ.get("LOCALAPPDATA", BASE),
                             "MoonAI", "purple_zones.json")   # 기억해둔 짝
 
@@ -2754,105 +2762,19 @@ def purple_running():
         return []
 
 
-def rec_fav_get():
-    """⭐ 즐겨찾기 순서 — [슬롯번호(1부터), …]. 비어 있으면 아직 안 정한 것."""
-    try:
-        d = json.load(open(REC_ZONE_MAP, encoding="utf-8-sig"))
-        return [int(x) for x in (d.get("fav") or []) if 1 <= int(x) <= 16]
-    except Exception:
-        return []
-
-
-def rec_fav_set(fav):
-    """⭐ 순서를 저장한다 (짝 기억 파일에 같이 둔다)."""
-    try:
-        d = {}
-        if os.path.exists(REC_ZONE_MAP):
-            try:
-                d = json.load(open(REC_ZONE_MAP, encoding="utf-8-sig"))
-            except Exception:
-                d = {}
-        d["fav"] = list(fav)
-        os.makedirs(os.path.dirname(REC_ZONE_MAP), exist_ok=True)
-        json.dump(d, open(REC_ZONE_MAP, "w", encoding="utf-8"),
-                  ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-
-def rec_fav_dirs(rows, fav):
-    """⭐ 누른 순서대로 `01 스크롤` · `02 황금` … 폴더를 맞춘다.
-
-    🧭 번호는 **즐겨찾기 순서**다 (2026-11-03 사용자: *"위에 즐겨찾기도 클릭할 수
-       있게 별표시를 해주면 내가 순서대로 클릭을 할게"*).
-    🚫 **폴더 안의 파일을 잃지 않게** 이름만 바꾼다(`os.rename`).
-       번호가 서로 자리를 바꿀 때 부딪히므로 **두 걸음**으로 바꾼다
-       (먼저 임시 이름 → 그 다음 최종 이름)."""
+def rec_make_dirs(rows=None):
+    """폴더 `1` ~ `6` 과 `_백업` 을 만들어 둔다. 이미 있으면 그대로."""
     try:
         os.makedirs(REC_DROP_DIR, exist_ok=True)
-        os.makedirs(os.path.join(REC_DROP_DIR, "_백업"), exist_ok=True)
-        # 지금 있는 번호 폴더 (번호 → 폴더이름)
-        have = {}
-        for d in os.listdir(REC_DROP_DIR):
-            if not os.path.isdir(os.path.join(REC_DROP_DIR, d)) or d.startswith("_"):
-                continue
-            m = re.match(r"\s*(\d{1,2})", d)
-            if m and 1 <= int(m.group(1)) <= 16:
-                have[int(m.group(1))] = d
-        want = {}
-        for k, si in enumerate(fav, 1):
-            nm = rows[si - 1][0] if 0 <= si - 1 < len(rows) else ""
-            want[k] = (f"{k:02d} {nm}".strip())
-        # ① 바꿔야 하는 것들을 임시 이름으로
-        tmp = {}
-        for k, d in have.items():
-            if k in want and want[k] != d:
-                t = os.path.join(REC_DROP_DIR, f"_옮기는중_{k:02d}")
-                try:
-                    os.rename(os.path.join(REC_DROP_DIR, d), t)
-                    tmp[k] = t
-                except Exception:
-                    pass
-        # ② 최종 이름으로
-        for k, name in want.items():
-            dst = os.path.join(REC_DROP_DIR, name)
-            if k in tmp:
-                try:
-                    os.rename(tmp[k], dst)
-                    continue
-                except Exception:
-                    pass
-            if k not in have or want[k] == have.get(k):
-                os.makedirs(dst, exist_ok=True)
-        # ③ 번호를 뺀 슬롯의 폴더는 **지우지 않는다** (파일이 들어 있을 수 있다)
-        os.makedirs(os.path.join(REC_DROP_DIR, "전체"), exist_ok=True)
-    except Exception:
-        pass
-
-
-def rec_make_dirs(rows):
-    """번호 폴더를 만들어 둔다 — `01 불화설` · `02 나이를` … 그리고 `전체`.
-
-    🧭 사용자는 **그 폴더에 파일을 넣기만** 한다 (2026-11-03 지시:
-       *"녹화교체에 폴더를 순서대로 올릴 수 있게 해주고 넌 그걸 교체만 해주면 되는데
-         너무 어렵게 해놨어"*). 파일 이름 규칙은 없다.
-    🚫 이미 있는 폴더는 **이름을 바꾸지 않는다** — 넣어둔 파일이 날아간다.
-       (캐릭이 바뀌면 이름표만 어긋날 뿐, 번호가 기준이다)"""
-    try:
-        os.makedirs(REC_DROP_DIR, exist_ok=True)
-        have = {}
+        have = set()
         for d in os.listdir(REC_DROP_DIR):
             if os.path.isdir(os.path.join(REC_DROP_DIR, d)):
-                m = re.match(r"\s*(\d{1,2})", d)
+                m = re.match(r"\s*(\d{1,2})\s*$", d)
                 if m:
-                    have[int(m.group(1))] = d
-        for i in range(16):
-            if (i + 1) in have:
-                continue
-            nm = rows[i][0] if i < len(rows) else ""
-            os.makedirs(os.path.join(REC_DROP_DIR, f"{i+1:02d} {nm}".strip()),
-                        exist_ok=True)
-        os.makedirs(os.path.join(REC_DROP_DIR, "전체"), exist_ok=True)
+                    have.add(int(m.group(1)))
+        for i in range(1, REC_SLOTS + 1):
+            if i not in have:
+                os.makedirs(os.path.join(REC_DROP_DIR, str(i)), exist_ok=True)
         os.makedirs(os.path.join(REC_DROP_DIR, "_백업"), exist_ok=True)
     except Exception:
         pass
@@ -2869,40 +2791,24 @@ def _rec_newest_json(d):
 
 
 def rec_drop_files():
-    """넣어둔 것 → {슬롯번호(1부터): 경로} · `전체` 폴더는 0 번에.
+    """넣어둔 것 → {폴더번호: 파일경로}. 폴더 번호 = **런처 슬롯 번호**.
 
-    **번호 폴더 안의 .json** 을 본다 (이름은 아무래도 좋다).
-    예전처럼 폴더 바로 밑에 `01.json` 식으로 둔 것도 그대로 받는다."""
+    폴더 안의 **.json** 을 본다 — 파일 이름은 아무래도 좋다.
+    여러 개 넣었으면 **가장 최근 것**을 쓴다. 빈 폴더는 건너뛴다."""
     out = {}
     try:
         if not os.path.isdir(REC_DROP_DIR):
             return out
         for f in sorted(os.listdir(REC_DROP_DIR)):
             p = os.path.join(REC_DROP_DIR, f)
-            if os.path.isdir(p):
-                if f.startswith("_"):
-                    continue
-                q = _rec_newest_json(p)
-                if not q:
-                    continue
-                if f.startswith("전체"):
-                    out[0] = q
-                    continue
-                m = re.match(r"\s*(\d{1,2})", f)
-                if m and 1 <= int(m.group(1)) <= 16:
-                    out[int(m.group(1))] = q
+            if not os.path.isdir(p) or f.startswith("_"):
                 continue
-            # (옛 방식) 폴더 바로 밑의 01.json · 전체.json 도 받아준다
-            if not (os.path.isfile(p) and f.lower().endswith(".json")):
+            m = re.match(r"\s*(\d{1,2})\s*$", f)
+            if not m:
                 continue
-            if f.startswith("읽어주세요"):
-                continue
-            if f.startswith("전체"):
-                out.setdefault(0, p)
-                continue
-            m = re.match(r"\s*(\d{1,2})", f)
-            if m and 1 <= int(m.group(1)) <= 16:
-                out.setdefault(int(m.group(1)), p)
+            q = _rec_newest_json(p)
+            if q:
+                out[int(m.group(1))] = q
     except Exception:
         pass
     return out
@@ -6002,132 +5908,6 @@ class App(tk.Tk):
                       + " ".join(f"#{i+1:02d}{a}" for i, (a, _b) in enumerate(rows)))
         return rows
 
-    def _rec_win(self):
-        """🎹 녹화교체 창 — ★ 를 즐겨찾기 순서대로 누르고 [▶ 교체]."""
-        w = getattr(self, "_recwin", None)
-        if w is not None and w.winfo_exists():
-            w.deiconify(); w.lift(); self._rec_win_fill(); return
-        w = tk.Toplevel(self); self._recwin = w
-        w.title("🎹 녹화교체 — 즐겨찾기 순서대로 ★ 를 눌러주세요")
-        w.geometry("560x640")
-        tk.Label(w, text="즐겨찾기 순서대로 ★ 를 누르세요 (누른 순서가 1, 2, 3 …)",
-                 font=("맑은 고딕", 9, "bold"), fg="#16a085").pack(anchor="w", padx=8, pady=(8, 0))
-        tk.Label(w, text="번호를 매긴 만큼만 폴더가 생깁니다. 그 폴더에 .json 을 넣고 [▶ 교체].",
-                 font=("맑은 고딕", 8), fg="#777").pack(anchor="w", padx=8)
-        bar = tk.Frame(w); bar.pack(fill="x", padx=8, pady=6)
-        tk.Button(bar, text="🔄 클라 다시 읽기", font=("맑은 고딕", 8, "bold"),
-                  bg="#2874a6", fg="white", width=14,
-                  command=self._rec_win_reload).pack(side="left")
-        tk.Button(bar, text="✖ 번호 전부 지우기", font=("맑은 고딕", 8),
-                  bg="#7f8c8d", fg="white", width=16,
-                  command=self._rec_fav_clear).pack(side="left", padx=(4, 0))
-        tk.Button(bar, text="📁 폴더 열기", font=("맑은 고딕", 8),
-                  bg="#5d6d7e", fg="white", width=11,
-                  command=self._rec_open_dir).pack(side="left", padx=(4, 0))
-        tk.Button(bar, text="▶ 교체", font=("맑은 고딕", 9, "bold"),
-                  bg="#16a085", fg="white", activebackground="#0e6655", width=9,
-                  command=self._rec_swap_open).pack(side="right")
-        self._rec_body = tk.Frame(w); self._rec_body.pack(fill="both", expand=True, padx=8)
-        self._rec_msg = tk.Label(w, text="", font=("맑은 고딕", 8), fg="#555",
-                                 anchor="w", justify="left", wraplength=540)
-        self._rec_msg.pack(fill="x", padx=8, pady=(0, 8))
-        try:
-            apply_dark(w, self.cfg.get("dark_ui", True))
-        except Exception:
-            pass
-        self._rec_win_fill()
-
-    def _rec_win_reload(self):
-        def go():
-            rows = slot_zones_live()
-            if rows:
-                slot_zones_save(rows)
-                self.after(0, lambda: self._rec_set_msg(
-                    f"🔑 클라 {len(rows)}개를 다시 읽었습니다"))
-            else:
-                self.after(0, lambda: self._rec_set_msg(
-                    "⚠ 켜진 클라를 못 찾았습니다 — 클라를 켜고 다시 눌러주세요"))
-            self.after(0, self._rec_win_fill)
-        threading.Thread(target=go, daemon=True).start()
-        self._rec_set_msg("클라를 읽는 중...")
-
-    def _rec_set_msg(self, t):
-        try:
-            if getattr(self, "_rec_msg", None) and self._rec_msg.winfo_exists():
-                self._rec_msg.config(text=t)
-        except Exception:
-            pass
-        self.status.set(t)
-
-    def _rec_open_dir(self):
-        try:
-            os.makedirs(REC_DROP_DIR, exist_ok=True)
-            os.startfile(REC_DROP_DIR)      # 사용자가 누른 버튼이라 열어도 된다
-        except Exception as e:
-            self._rec_set_msg(f"폴더 열기 실패: {e}")
-
-    def _rec_fav_clear(self):
-        rec_fav_set([])
-        self._rec_set_msg("번호를 전부 지웠습니다 (폴더는 그대로 둡니다)")
-        self._rec_win_fill()
-
-    def _rec_fav_tap(self, si):
-        """★ 한 번 — 번호가 없으면 **다음 번호**, 있으면 빼고 나머지를 당긴다."""
-        fav = rec_fav_get()
-        if si in fav:
-            fav = [x for x in fav if x != si]
-        else:
-            fav.append(si)
-        rec_fav_set(fav)
-        rows, _at = slot_zones_saved()
-        rec_fav_dirs(rows, fav)
-        self._rec_set_msg("즐겨찾기 " + (" → ".join(
-            f"{k}.{(rows[x-1][0] if 0 <= x-1 < len(rows) else x)}"
-            for k, x in enumerate(fav, 1)) if fav else "(아직 없음)"))
-        self._rec_win_fill()
-
-    def _rec_win_fill(self):
-        bd = getattr(self, "_rec_body", None)
-        if bd is None or not bd.winfo_exists():
-            return
-        for ch in bd.winfo_children():
-            ch.destroy()
-        rows, at = slot_zones_saved()
-        fav = rec_fav_get()
-        files = rec_drop_files()
-        hd = tk.Frame(bd); hd.pack(fill="x")
-        tk.Label(hd, text=f"짝 기억 {at or '없음'}", font=("맑은 고딕", 8),
-                 fg="#888").pack(side="left")
-        if not rows:
-            tk.Label(bd, text="클라를 아직 못 봤습니다 — 클라를 켜고 [🔄 클라 다시 읽기]",
-                     font=("맑은 고딕", 9), fg="#c0392b").pack(anchor="w", pady=6)
-            return
-        for i, (nm, g) in enumerate(rows):
-            si = i + 1
-            n = (fav.index(si) + 1) if si in fav else 0
-            r = tk.Frame(bd); r.pack(fill="x", pady=1)
-            tk.Button(r, text=("★%d" % n) if n else "☆",
-                      font=("맑은 고딕", 9, "bold"), width=4,
-                      bg=("#f1c40f" if n else "#95a5a6"),
-                      fg=("#5b4a00" if n else "white"),
-                      command=lambda x=si: self._rec_fav_tap(x)).pack(side="left")
-            tk.Label(r, text="#%02d %-12s" % (si, nm), font=("맑은 고딕", 9),
-                     width=18, anchor="w").pack(side="left", padx=(6, 0))
-            if n:
-                p = files.get(n)
-                tk.Label(r, text="폴더 %02d" % n, font=("맑은 고딕", 8),
-                         fg="#2874a6", width=8, anchor="w").pack(side="left")
-                tk.Label(r, text=("✔ " + os.path.basename(p)) if p else "(파일 없음)",
-                         font=("맑은 고딕", 8),
-                         fg=("#1e8449" if p else "#c0392b"),
-                         anchor="w").pack(side="left")
-            else:
-                tk.Label(r, text="—", font=("맑은 고딕", 8), fg="#aaa").pack(side="left")
-        if files.get(0):
-            tk.Label(bd, text="전체₩ " + os.path.basename(files[0])
-                     + "  ← 번호 폴더에 없는 슬롯은 이걸 씁니다",
-                     font=("맑은 고딕", 8), fg="#7d3c98").pack(anchor="w", pady=(4, 0))
-
     def _rec_swap_open(self):
         """[🎹 녹화교체] — 무거운 일은 전부 스레드에서."""
         self.status.set("🎹 퍼플 폴더를 확인하는 중...")
@@ -6136,16 +5916,11 @@ class App(tk.Tk):
     def _rec_swap_work(self):
         try:
             import shutil
-            os.makedirs(REC_DROP_DIR, exist_ok=True)
+            rec_make_dirs()
             live = slot_zones_live()
             if live:
                 slot_zones_save(live)
             rows, at = (live, "지금") if live else slot_zones_saved()
-            _fav = rec_fav_get()
-            if _fav:
-                rec_fav_dirs(rows, _fav)     # ⭐ 즐겨찾기 번호로 폴더를 맞춘다
-            else:
-                rec_make_dirs(rows)          # 아직 안 정했으면 1~16 그대로
             files = rec_drop_files()
             running = purple_running()
 
@@ -6162,21 +5937,17 @@ class App(tk.Tk):
                 return
 
             tbl = chr(10).join(
-                "#%02d  %-14s %s" % (i + 1, a, b[:8]) for i, (a, b) in enumerate(rows))
+                "폴더 %d  →  #%02d %s" % (i + 1, i + 1, a)
+                for i, (a, _b) in enumerate(rows[:REC_SLOTS]))
             if not files:
-                _msg("🎹 녹화교체 — 넣을 파일이 없습니다",
-                     "폴더를 만들어 뒀습니다. **번호 폴더에 파일을 넣기만** 하세요."
-                     + chr(10) + chr(10) + REC_DROP_DIR + chr(10)
-                     + "    01 불화설" + chr(92) + "   ← 여기에 넣으면 #01 클라로"
-                     + chr(10)
-                     + "    02 나이를" + chr(92) + chr(10)
-                     + "       …" + chr(10)
-                     + "    16 아웃로" + chr(92) + chr(10)
-                     + "    전체" + chr(92) + "        ← 여기에 하나 넣으면 16개 전부 같게"
+                _msg("🎹 녹화교체 — 폴더에 파일을 넣어주세요",
+                     REC_DROP_DIR + chr(10)
+                     + "    1" + chr(92) + "  2" + chr(92) + "  3" + chr(92)
+                     + "  4" + chr(92) + "  5" + chr(92) + "  6" + chr(92)
                      + chr(10) + chr(10)
-                     + "파일 이름은 아무래도 좋습니다 (.json 이기만 하면 됩니다)."
-                     + chr(10) + "여러 개 넣으면 **가장 최근 것**을 씁니다."
-                     + chr(10) + chr(10) + f"지금 아는 짝 ({at}):" + chr(10) + tbl)
+                     + "그 폴더에 .json 을 넣고 다시 누르면 됩니다."
+                     + chr(10) + "파일 이름은 아무래도 좋습니다. 빈 폴더는 건너뜁니다."
+                     + chr(10) + chr(10) + tbl)
                 try:
                     os.startfile(REC_DROP_DIR)       # 사용자가 누른 버튼이라 열어도 된다
                 except Exception:
@@ -6223,17 +5994,14 @@ class App(tk.Tk):
             bk = os.path.join(REC_DROP_DIR, "_백업", time.strftime("%Y%m%d_%H%M%S"))
             os.makedirs(bk, exist_ok=True)
             done, skip = [], []
-            fav = rec_fav_get()
             for i, (nm, g) in enumerate(rows):
-                # ⭐ 번호는 **즐겨찾기 순서**다 — 폴더 01 = ★1 을 누른 슬롯
-                _k = (fav.index(i + 1) + 1) if (i + 1) in fav else None
-                src = (files.get(_k) if _k else None) or files.get(0)
+                src = files.get(i + 1)      # 폴더 N = 슬롯 N
                 if not src:
-                    skip.append(f"#{i+1:02d} {nm} — 넣은 파일 없음")
-                    continue
+                    continue                # 빈 폴더는 조용히 건너뛴다
                 ok, why = rec_file_ok(src)
                 if not ok:
-                    skip.append(f"#{i+1:02d} {nm} — {os.path.basename(src)}: {why}")
+                    skip.append(f"폴더 {i+1} → #{i+1:02d} {nm} — "
+                                f"{os.path.basename(src)}: {why}")
                     continue
                 dst = rec_path(g)
                 try:
@@ -6241,9 +6009,11 @@ class App(tk.Tk):
                     if os.path.exists(dst):
                         shutil.copy2(dst, os.path.join(bk, f"{i+1:02d}_{nm}.json"))
                     shutil.copy2(src, dst)
-                    done.append(f"#{i+1:02d} {nm} ← {os.path.basename(src)} ({why})")
+                    done.append(f"폴더 {i+1} → #{i+1:02d} {nm} "
+                                f"← {os.path.basename(src)} ({why})")
                 except Exception as e:
-                    skip.append(f"#{i+1:02d} {nm} — 복사 실패 {type(e).__name__}: {e}")
+                    skip.append(f"폴더 {i+1} → #{i+1:02d} {nm} — 복사 실패 "
+                                f"{type(e).__name__}: {e}")
             click_log(f"[녹화교체] 바꿈 {len(done)}개 · 건너뜀 {len(skip)}개 · 백업 {bk}")
             for l in done + skip:
                 click_log("[녹화교체]   " + l)
@@ -6899,7 +6669,7 @@ class App(tk.Tk):
         tk.Button(sv, text="🎹 녹화교체", font=("맑은 고딕", 8, "bold"),
                   bg="#16a085", fg="white", activebackground="#0e6655",
                   width=9, height=1, pady=2,
-                  command=self._rec_win).pack(side="top", pady=(1, 0))
+                  command=self._rec_swap_open).pack(side="top", pady=(1, 0))
         self._refresh_coord_save_lbl()
         self.after(1500, self._refresh_lock_btn)
         self.after(300, self._apply_dark_all)     # 저장해둔 화면 밝기 적용
