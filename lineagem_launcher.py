@@ -12180,6 +12180,10 @@ class App(tk.Tk):
         tk.Button(row, text="▶", font=("맑은 고딕", 8), width=3,
                   bg="#1e8449", fg="white",
                   command=lambda: self._test_grid_click(fkey, idx, j)).pack(side="left", padx=(2, 0))
+        # 👁 — 그 좌표를 점으로 보여주고 끌어서 고친다 (2026-11-03)
+        tk.Button(row, text="👁", font=("맑은 고딕", 8), width=3,
+                  bg="#566573", fg="white",
+                  command=lambda: self._grid_preview_one(fkey, idx, j)).pack(side="left", padx=(2, 0))
         # 좌표를 찍고 오면 이 줄을 다시 그려야 한다 (_jakwi_refresh 가 찾아 쓴다)
         self._jakwi_widgets[j] = dict(frame=row, cv=cv, cb=cb, mv=mv, mb=mb,
                                       ev=ev, eb=eb, ib=ib)
@@ -23655,6 +23659,15 @@ class App(tk.Tk):
                           bg="#27ae60" if on else "#7f8c8d", fg="white",
                           command=lambda x=idx, c=j: self._reg_doll_click(x, c))
             b.pack(); self._doll_pop_btns.append(b)
+            # ▶ 그 좌표 하나만 눌러보기 · 👁 점으로 보고 끌어서 고치기 (2026-11-03)
+            tk.Button(cc, text="▶", font=("맑은 고딕", 7), width=4, pady=0,
+                      bg="#1e8449", fg="white",
+                      command=lambda x=idx, c=j:
+                      self._test_doll_click(x, c)).pack(pady=(1, 0))
+            tk.Button(cc, text="👁", font=("맑은 고딕", 7), width=4, pady=0,
+                      bg="#566573", fg="white",
+                      command=lambda x=idx, c=j:
+                      self._doll_preview_one(x, c)).pack(pady=(1, 0))
 
         bot = tk.Frame(win); bot.pack(pady=(4,10))
         tk.Button(bot, text="👁 미리보기", font=("맑은 고딕", 8), bg="#566573", fg="white",
@@ -24087,6 +24100,11 @@ class App(tk.Tk):
                       bg="#1e8449", fg="white",
                       command=lambda x=idx, c=j, f=fkey:
                       self._test_grid_click(f, x, c)).pack(pady=(1, 0))
+            # 👁 — 그 좌표를 화면에 점으로 보여주고 **끌어서 고친다** (2026-11-03)
+            tk.Button(cc, text="👁", font=("맑은 고딕", 7), width=4, pady=0,
+                      bg="#566573", fg="white",
+                      command=lambda x=idx, c=j, f=fkey:
+                      self._grid_preview_one(f, x, c)).pack(pady=(1, 0))
             if sp.get("img"):
                 # 🖼 — 이 자리에서 찾을 '그림'을 드래그로 잘라 저장한다.
                 #      그림이 있으면 실행 때 그림을 찾아 누르고, 못 찾으면 그 슬롯은 끝.
@@ -24294,6 +24312,89 @@ class App(tk.Tk):
         except Exception:
             pass
         return None
+
+    def _test_doll_click(self, idx, j):
+        """▶ 인형탐험 좌표 하나만 눌러본다 (2026-11-03).
+
+        그 자리에 리니지M 창이 있어야 누른다 — 없으면 **누르지 않고** 알려준다
+        (좌표가 어긋났을 때 엉뚱한 곳을 누르지 않게)."""
+        try:
+            coords = (self.cfg["doll_slots"][idx].get("coords") or [])
+            c = coords[j] if j < len(coords) else None
+        except Exception:
+            c = None
+        if not c:
+            self.status.set(f"인형탐험 #{idx+1:02d} 좌표{j+1} — 아직 안 찍혔습니다"); return
+        import precise_click as _pc
+        if not _pc.game_window_at(int(c[0]), int(c[1])):
+            self.status.set(f"⚠ 인형탐험 #{idx+1:02d} 좌표{j+1} ({c[0]},{c[1]}) — "
+                            f"그 자리에 리니지M 창이 없어 누르지 않았습니다")
+            return
+        self._minimize_claude()
+        self._send_to_back()
+        time.sleep(0.25)
+        click_at(int(c[0]), int(c[1]))
+        self.status.set(f"▶ 인형탐험 #{idx+1:02d} 좌표{j+1} ({c[0]},{c[1]}) 눌렀습니다")
+
+    def _preview_one_coord(self, title, key, idx, j, reg_fn, refresh_fn=None):
+        """👁 **좌표 한 줄 미리보기** — 2026-11-03 사용자 요청
+        (*"1,2,3,4 … 각각 실행버튼만 있잖아, 수정이 가능하도록 미리보기를 만들어줘"*).
+
+        그 슬롯의 좌표를 **전부** 화면에 점으로 그려 어디가 어딘지 보이게 하고,
+        · 점을 **끌면** 그 좌표가 그 자리로 저장된다
+        · 점을 **누르면** 그 좌표를 다시 찍는다 (등록 화면으로)
+        · 고른 줄(j)이 아직 안 찍혔으면 바로 등록으로 보낸다
+
+        ⚠ `save_fn` 을 반드시 넘긴다 — 안 넘기면 **옮긴 것이 조용히 사라진다**
+          (2026-08-29 사고: "전부 좌표 이동시켰는데 왜 원상복귀하냐")."""
+        slots = self.cfg.get(key) or []
+        if idx >= len(slots) or not isinstance(slots[idx], dict):
+            self.status.set(f"{title} #{idx+1:02d} — 슬롯이 없습니다"); return
+        coords = slots[idx].get("coords") or []
+        if j >= len(coords) or not coords[j]:
+            self.status.set(f"{title} #{idx+1:02d} 좌표{j+1} — 아직 안 찍혔습니다. "
+                            f"지금 찍어주세요")
+            reg_fn(idx, j); return
+        items, dots = [], []
+        for n, c in enumerate(coords):
+            if c and len(c) >= 2:
+                items.append(n); dots.append((c[0], c[1], str(n + 1)))
+        if not dots:
+            self.status.set(f"{title} #{idx+1:02d} — 등록된 좌표가 없습니다"); return
+
+        def rereg(dot_idx):
+            if dot_idx is None:
+                self.deiconify(); return          # 창만 닫은 것
+            reg_fn(idx, items[dot_idx] if dot_idx < len(items) else j)
+
+        def _save(dot_idx, nx, ny):
+            c = items[dot_idx]
+            self.cfg[key][idx]["coords"][c] = [int(nx), int(ny)]
+            save_cfg(self.cfg)
+            if refresh_fn:
+                try:
+                    refresh_fn()
+                except Exception:
+                    pass
+            self.status.set(f"✔ {title} #{idx+1:02d} 좌표{c+1} 이동 저장: ({nx},{ny})")
+
+        _nm = (slots[idx].get("name") or "").strip()
+        _nm = "" if _nm == "미등록" else (" " + _nm)
+        self._open_dot_preview(
+            f"{title} #{idx+1:02d}{_nm} — 좌표{j+1} "
+            f"(점을 끌면 저장 · 점을 누르면 다시 찍기)",
+            dots, rereg_fn=rereg, save_fn=_save, dot_r=5)
+
+    def _grid_preview_one(self, fkey, idx, j):
+        """👁 공용 슬롯 팝업·작위 줄에서 좌표 하나 미리보기."""
+        sp = self._grid_spec(fkey)
+        self._preview_one_coord(sp["title"], sp["key"], idx, j, sp["reg"],
+                                self._refresh_ui)
+
+    def _doll_preview_one(self, idx, j):
+        """👁 인형탐험 좌표 팝업에서 좌표 하나 미리보기."""
+        self._preview_one_coord("인형탐험", "doll_slots", idx, j,
+                                self._reg_doll_click, self._refresh_doll_display)
 
     def _test_grid_click(self, fkey, idx, j):
         """좌표 하나만 눌러보기 — 등록한 자리가 맞는지 확인용."""
