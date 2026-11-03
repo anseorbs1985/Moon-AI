@@ -1652,6 +1652,27 @@ SCHED_WAVE_TO = 12
 FIX_WATCH_N = 60        # 1초마다 60번 ≈ 60초 지켜본다
 FIX_WATCH_MS = 1000     # 확인 간격(ms) — 짧을수록 '없앤 즉시' 사라진다
 WARN_MATCH  = 0.55      # 십자가 판정 기준 (2026-08-29: 0.60 → 0.55, 놓치는 것 줄이려고)
+# 🚨 **점수 하나로 가리지 않는다 — 16클라 겨루기로 가린다** (2026-11-03 사용자 신고:
+#    *"십자가가 안 떠 있는데 너가 복구를 띄우는 문제가 있어"*).
+#    창을 491 → 546 으로 키우자 **잡음 천장이 0.51 → 0.56 으로 올라** 기준(0.55)을
+#    넘겨 **없는 십자가가 떴다**. 실측(click_log):
+#      491 창  잡음 0.36~0.51            → 오탐 0
+#      546 창  잡음 0.41~0.56            → 11-03 20:32 #16 · 20:39 #06·#13 오탐
+#    🚫 기준(WARN_MATCH)을 올려 해결하지 말 것 — 진짜 십자가가 0.62 쯤에서도 나와
+#       **떠 있는데 못 잡는** 더 나쁜 쪽으로 간다 (`FIX_SEE_TRIES` 주석 참조).
+#    ✅ 잡음은 16클라가 **거의 똑같다**(폭 0.15 안). 그래서 그 바닥값의 배수로 가린다:
+#       `점수 ≥ WARN_MATCH` **그리고** `점수 ≥ 바닥 × WARN_RATIO`.
+#       바닥 = 16클라 점수의 **아래 4분의 1 지점**(p25) — 십자가가 여러 개 떠 있어도
+#       (최대 12개까지) 바닥은 잡음에 머문다.
+#       실측 적용: 바닥 0.43 × 1.35 = 0.58 → **0.56 오탐 막힘** · 진짜(0.62~0.90) 통과.
+#    ⚠ 창 크기가 바뀌면 잡음도 함께 오르내리는데, 배수 판정은 **저절로 따라간다** —
+#       그게 절대 점수보다 나은 이유다 (층 겨루기·장소 겨루기와 같은 규칙).
+WARN_RATIO  = 1.35      # 바닥(p25) 대비 이 배수를 넘어야 '떠 있다'
+WARN_BASE_MIN = 4       # 이만큼은 모여야 바닥을 계산한다 (한 슬롯만 볼 때는 전 값을 쓴다)
+WARN_HIGH   = 0.72      # 🛟 **이만큼 높으면 배수를 안 보고 바로 '떠 있다'**.
+#    겨루기만 두면 **16개 전부 십자가일 때** 바닥도 높아져 하나도 못 잡는다.
+#    실측 잡음 천장은 546 창에서 0.56 이라 0.72 는 넉넉히 위다.
+#    🚫 이 값을 0.6 아래로 내리지 말 것 — 그러면 겨루기가 무력해진다.
 WARN_MARGIN = 60        # 경고영역 주변 이만큼 더 넓게 훑는다 (전 20)
 WARN_TICK_MS = 5000     # F11 뒤 지켜보는 간격(ms) — 전 15초
 WARN_IDLE_MS = 10000    # 5분이 지난 뒤 **목록에 남은 슬롯만** 다시 보는 간격(ms)
@@ -1742,6 +1763,16 @@ FIX_CLICK_GONE   = (1.2, 1.8)   # 지우기 전 마지막 확인까지의 사이
 #    런처(용던고고·복구·작위)가 슬롯마다 또 깨운다. 서로를 몰라 **Z 가 두 번**
 #    들어갔고, 두 번째 Z 는 이미 깨어 있는 화면에서 **엉뚱한 창을 열었다.**
 WAKE_COOL = 25.0
+# 😴 **F11 로 한 번 깨웠으면 런처가 또 깨우지 않는다** (2026-11-03 사용자 신고:
+#    *"너 마음대로 깨우고 그다음에 f11로 깨우는 현상이 있어"* —
+#     용던고고는 F11(절전해제)을 먼저 돌리고 시작하는데, 그 직후 첫 바퀴에서
+#     슬롯마다 Z 를 또 눌러 **같은 클라가 두 번 깨워졌다**).
+#    경고확인(`WAKE_COOL` 25초)과 **따로 둔다** — 그쪽을 늘리면 십자가 목록을
+#    만들 때 '방금 깨움' 으로 계속 건너뛰어 목록이 비어버린다.
+#    ⚠ 너무 길게 두지 말 것 — 용던고고 한 바퀴는 3~4분이라, 그 사이 다시 잠든
+#      클라는 **깨워야 한다**(2026-10-06: 그게 마름모를 못 찾던 진짜 원인이었다).
+#      120초면 '첫 바퀴는 안 깨우고, 늦게 도는 슬롯은 깨운다' 가 된다.
+WAKE_COOL_RUN = 120.0
 # ⏳ F11 십자가 스캔의 '자는 클라 깨우기' 가 **작업이 끝나기를 기다리는** 최대 시간.
 #    깨우기는 진짜 클릭이라 돌고 있는 작업의 좌표 클릭을 빼앗는다 (2026-10-19 실측).
 WAKE_BUSY_WAIT_MAX = 900.0
@@ -1957,9 +1988,18 @@ MAIL_HOLD      = 0.10            # 10% 확률로 한 박자 더 쉰다 (사람�
 MAIL_HOLD_T    = (0.4, 1.0)
 SLEEP_WAKE = ("fix", "jakwi", "dragon", "mondex")
 SLEEP_WAKE_KEY = "z"
-SLEEP_MATCH = 0.68      # 절전 화면 판정 기준.
-                        # 실측 — 자는 중 0.73~1.00 / 깨어 있을 때 0.40~0.59.
-                        # 0.60 은 깨어 있는 0.59 와 너무 붙어 위험했다 (2026-09-02)
+SLEEP_MATCH = 0.76      # 절전 화면 판정 기준.
+# 실측 491 창 — 자는 중 0.72~1.00 / 깨어 있을 때 0.39~0.50  → 0.68 이면 넉넉했다.
+# 실측 546 창 (2026-11-03, click_log) — **둘 다 0.15 쯤 올라간다**:
+#      자는 중 **0.85** (16클라가 전부 같다 — 절전 화면은 똑같으므로)
+#      깨어 있을 때 **0.45 ~ 0.65**
+#   0.68 로 두면 깨어 있는 0.65 와 **0.03** 밖에 안 남아, 조금만 흔들려도
+#   깨어 있는 클라를 '절전' 으로 보고 **멋대로 Z 를 누른다**
+#   (사용자 신고: "너 마음대로 깨우고 그다음에 f11로 깨우는 현상이 있어").
+#   → **0.76** = 0.65 와 0.85 의 가운데. 위아래로 0.09~0.11 씩 여유.
+# ⚠ 기준을 만질 때는 **양쪽을 다 재라** — ① 자는 클라가 통과하는가
+#   ② 깨어 있는 클라가 막히는가. 한쪽만 재면 기능이 통째로 죽는다 (2026-10-23 교훈).
+# ⚠ 창 크기를 또 바꾸면 이 값을 다시 재야 한다 (`click_log` 의 `[절전해제] 점수` 줄).
 SLEEP_WAKE_WAIT = (1.2, 2.5)   # Z 를 누른 뒤 깨어났는지 확인하며 기다리는 시간(초)
 SLEEP_WAKE_TRIES = 3           # 안 깨어나면 몇 번까지 다시 누를지
 # 🔆 **이미 깨어 있는 클라는 절전해제를 누르지 않는다** (2026-10-18 사용자 지시):
@@ -2472,6 +2512,40 @@ def grab_window(coord):
 #    📬 우편 지금받기가 아무것도 못 받았다 (사용자 신고 2026-11-03).
 #    🚫 클로드는 그림을 쓸 때 이 보정을 빼지 말 것. 창이 491 이면 k=1.0 이라
 #       값이 하나도 안 바뀌므로 안 쓰는 컴퓨터는 영향이 없다.
+# ⏹ **[■ 멈춤] 을 누르면 기다리던 것이 전부 즉시 깨어난다** (2026-11-03 사용자 요청
+#    *"멈춰버튼을 누르면 바로 즉각적으로 반응해서 멈춰줬으면 좋겠어. 한참 후에
+#      멈춰지는 게 좀 답답해. 특히 연속적으로 이뤄지는 거 같이 멈춰줘야 해"*).
+#    예전에는 루프 중간의 `nap(1~3초)` 가 **끝나야** 멈춤 깃발을 봤다.
+#    실측: 한 좌표 간격이 2~3초 + 그림 찾기 재시도까지 겹치면 **10초 넘게** 걸렸다.
+#    `nap()` 은 그 기다림을 **깃발 하나로 깨우는 Event** 로 바꾼 것이라,
+#    누른 **즉시** 모든 스레드가 빠져나온다.
+#    🚫 클로드는 실행 경로의 기다림에 `time.sleep` 을 다시 쓰지 말 것 — `nap` 을 쓴다.
+#    ⚠ **항상 도는 감시 루프(`*_hotkey_loop`·`_popup_guard_loop`·`_watch_and_restart`
+#      ·`_fix_clickwatch_loop` 등)에는 쓰지 않는다** — 깃발이 세워진 동안
+#      기다림이 0 이 되어 **CPU 를 100% 로 돌리기 때문**이다. 그것들은 time.sleep 그대로.
+_STOP_EVT = threading.Event()
+
+
+def nap(sec):
+    """잠깐 쉰다 — [■ 멈춤] 이 눌리면 **즉시** 깨어난다 (안 눌리면 time.sleep 과 같다)."""
+    try:
+        if sec and sec > 0:
+            _STOP_EVT.wait(sec)
+    except Exception:
+        try:
+            time.sleep(sec)
+        except Exception:
+            pass
+
+
+def nap_clear():
+    """새 작업을 시작할 때 — 멈춤 깃발을 내려 다시 기다릴 수 있게."""
+    try:
+        _STOP_EVT.clear()
+    except Exception:
+        pass
+
+
 IMG_BASE_W = 491          # 그림·영역을 만든 기준 창 가로
 
 
@@ -2505,6 +2579,36 @@ def match_scaled(big, tpl, k, spans=(1.0, 0.97, 1.03)):
     return best
 
 
+def sleep_spot_screen(fkey, coord):
+    """😴 그 클라의 **'절전모드 해제' 글자 자리**를 화면 좌표로 돌려준다.
+
+    없으면 None. 자고 있지 않으면 None.
+
+    🚨 **왜 필요한가** (2026-11-03 실측 — 사용자 신고 *"너 마음대로 깨우고
+       그다음에 f11로 깨우는 현상이 있어"* 의 뿌리):
+       `seq_slots`(절전해제 좌표)의 **창 안 상대 자리가 슬롯마다 다르다** —
+       실측 1열 546 · 2열 456 · 3열 379 · 4열 329. 그런데 글자는 16클라 **전부
+       창 안 (507,107)** 에 있다. 1~4번은 546 이라 **창(가로 546) 밖**이고
+       그 자리는 옆바(CEFCLIENT)라, F11 이 **엉뚱한 창을 눌러 안 깨어났다.**
+       → 그래서 바로 뒤에 도는 런처가 Z 로 또 깨웠다 = 사용자가 본 '두 번 깨움'.
+    ✅ 글자를 **그림으로 찾아** 그 자리를 누르면 좌표가 틀어져도·창 크기가 달라도
+       항상 맞는다 (`_wake_until` 이 2026-09-30 부터 쓰는 방법과 같다).
+    ⚠ `find_sleep_img` 가 주는 자리는 **창 안(창 왼쪽위 기준)** 이다 —
+       화면 좌표로 바꾸지 않으면 엉뚱한 곳을 누른다."""
+    try:
+        sx, sy, sv = find_sleep_img(fkey, coord)
+        if sx is None:
+            return None
+        import precise_click as _pc, win32gui
+        h = _pc.game_window_at(int(coord[0]), int(coord[1]))
+        if not h:
+            return None
+        l, t, _r, _b = win32gui.GetWindowRect(h)
+        return (int(l + sx), int(t + sy), float(sv))
+    except Exception:
+        return None
+
+
 def find_sleep_img(fkey, coord):
     """그 클라가 절전 화면인가 — **창을 직접 캡처**해서 본다(가려져도 정확)."""
     q = sleep_img_path(fkey)
@@ -2534,11 +2638,11 @@ def hover_click(x, y, wait=(0.35, 0.65)):
     계정전환 팝업의 [확인] 이 그런 자리다 (2026-08-29 사용자 요청)."""
     try:
         pyautogui.moveTo(int(x), int(y))
-        time.sleep(random.uniform(*wait))
+        nap(random.uniform(*wait))
         pyautogui.moveTo(int(x), int(y))      # 한 번 더 — 확실히 올라가 있게
-        time.sleep(random.uniform(0.08, 0.16))
+        nap(random.uniform(0.08, 0.16))
         pyautogui.mouseDown(int(x), int(y))
-        time.sleep(random.uniform(0.07, 0.13))
+        nap(random.uniform(0.07, 0.13))
         pyautogui.mouseUp(int(x), int(y))
         return True
     except Exception:
@@ -2553,7 +2657,7 @@ def press_key(k, times=1, gap=(0.12, 0.25)):
     try:
         for i in range(max(1, int(times))):
             if i:
-                time.sleep(random.uniform(*gap))
+                nap(random.uniform(*gap))
             pyautogui.press(k)
         return True
     except Exception:
@@ -2620,7 +2724,7 @@ def press_esc(times=1, gap=(0.18, 0.32)):
     try:
         for i in range(max(1, int(times))):
             if i:
-                time.sleep(random.uniform(*gap))
+                nap(random.uniform(*gap))
             pyautogui.press("esc")
             ok = True
     except Exception:
@@ -3529,7 +3633,7 @@ def itemreg_name_blue(xy, wait=True):
         if time.time() >= _end:
             return (_last[0], _last[1], _last[2] + " · %.1f초 기다렸는데 못 읽음"
                     % ITEMREG_SEE_MAX)
-        time.sleep(random.uniform(*ITEMREG_SEE_GAP))
+        nap(random.uniform(*ITEMREG_SEE_GAP))
 
 
 def _itemreg_name_blue1(xy):
@@ -3770,7 +3874,7 @@ def jakwi_stamp_ok(coord, tx, ty, k, wait=True):
             if sat >= JAKWI_STAMP_SAT:
                 return ((r - g) <= 50.0,
                         f"도장 R{r:.0f} G{g:.0f} B{b:.0f} (R-G {r-g:+.0f}, 채도 {sat:.0f})")
-            time.sleep(random.uniform(0.4, 0.7))
+            nap(random.uniform(0.4, 0.7))
         return None, f"도장이 안 찍힘 (채도 {sat:.0f} < {JAKWI_STAMP_SAT})"
     except Exception as e:
         return None, f"도장 확인 실패 {e!r}"
@@ -4376,7 +4480,7 @@ def floor_num_try(coord, tries=1):
         except Exception as e:
             why = "오류 %s" % e
         if t < tries - 1:
-            time.sleep(random.uniform(*FLOOR_WAIT))
+            nap(random.uniform(*FLOOR_WAIT))
     return None, why
 
 
@@ -4996,9 +5100,9 @@ def click_hold(x, y, ms=None):
         hold = hold / 1000.0
     try:
         pyautogui.moveTo(int(x), int(y))
-        time.sleep(random.uniform(0.05, 0.12))
+        nap(random.uniform(0.05, 0.12))
         pyautogui.mouseDown(int(x), int(y))
-        time.sleep(hold)
+        nap(hold)
         pyautogui.mouseUp(int(x), int(y))
         return "꾹클릭"
     except Exception:
@@ -5043,9 +5147,9 @@ def close_purple_popup_if_visible(cfg, status_fn=None):
         status_fn("⚠ 퍼플 팝업 감지 — 자동으로 닫는 중...")
     if chk:
         pyautogui.click(*chk)
-        time.sleep(0.4)
+        nap(0.4)
     pyautogui.click(*cls)
-    time.sleep(0.3)
+    nap(0.3)
     if status_fn:
         status_fn("✔ 퍼플 팝업 닫기 완료")
 
@@ -5090,7 +5194,7 @@ class WindowSizeLock:
         self._paused_until = 0
         while self._running:
             if time.time() < self._paused_until:
-                time.sleep(0.3); continue
+                nap(0.3); continue
             for hwnd, rect in list(self._locks.items()):
                 try:
                     if not win32gui.IsWindow(hwnd):
@@ -5105,7 +5209,7 @@ class WindowSizeLock:
                                             self.SWP_NOZORDER | self.SWP_NOACTIVATE)
                 except Exception:
                     pass
-            time.sleep(0.3)
+            nap(0.3)
 
 
 class App(tk.Tk):
@@ -5509,7 +5613,7 @@ class App(tk.Tk):
                     creationflags=0x08000000)
             except Exception:
                 pass
-            time.sleep(1.0)
+            nap(1.0)
             # 3) 복사 — 실패하면 최대 3번까지 재시도 (파일 점유 대비), 복사 후 검증
             done, failed = [], []
             for f, src in sources.items():
@@ -5528,7 +5632,7 @@ class App(tk.Tk):
                         ok = False
                     if ok:
                         break
-                    time.sleep(0.7)
+                    nap(0.7)
                 (done if ok else failed).append(f)
             if failed:
                 messagebox.showerror("좌표 복구",
@@ -5771,9 +5875,23 @@ class App(tk.Tk):
                   command=lambda: self._start_dgn2("market")).pack(side="top", pady=(2, 0))
         # 맨뒤로 — 위 두 버튼 폭에 맞춘 긴 버튼 (좌·우 끝 정렬)
         back_row = tk.Frame(_topwrap); back_row.pack(**_E)
+        # ⏹ **[■ 멈춤] — 맨뒤로 왼쪽** (2026-11-03 사용자 요청:
+        #    *"멈춰 버튼을 혈레이드 밑에 맨뒤로 왼쪽 옆에 배치해줘"*).
+        #    누르면 `_stop()` — 돌고 있는 작업 + **대기열(연속 실행)** + 섬/던전
+        #    실행기 같은 별도 프로세스까지 **전부** 끈다. `_STOP_EVT` 를 세우므로
+        #    기다리던 스레드가 **즉시** 깨어난다 (예전엔 간격이 끝나야 멈췄다).
+        #    ⚠ ⏰ 2시간 반복 예약은 여기서 끄지 않는다 — 그건 [⏰] 버튼 (2026-08-15 규칙).
+        self._stop_wide = tk.Canvas(back_row, width=72, height=34, highlightthickness=0,
+                                    bg=self.cget("bg"), cursor="hand2")
+        self._stop_wide.pack(side="left", padx=(LEFT, 0), pady=(3, 0))
+        self._stop_wide.create_rectangle(2, 2, 70, 32, fill="#c0392b",
+                                         outline="#7b241c", width=2)
+        self._stop_wide.create_text(36, 17, text="■ 멈춤", fill="white",
+                                    font=("맑은 고딕", 9, "bold"))
+        self._stop_wide.bind("<Button-1>", lambda e: (self._stop() or "break"))
         self._back_circle = tk.Canvas(back_row, width=WIDE, height=34, highlightthickness=0,
                                       bg=self.cget("bg"), cursor="hand2")
-        self._back_circle.pack(side="left", padx=(LEFT, 0), pady=(3, 0))
+        self._back_circle.pack(side="left", padx=(GAP, 0), pady=(3, 0))
         self._back_circle.create_rectangle(2, 2, WIDE - 2, 32, fill="#5d6d7e",
                                            outline="#34495e", width=2)
         self._back_circle.create_text(WIDE // 2, 17, text="⬇ 맨뒤로", fill="white",
@@ -7236,7 +7354,7 @@ class App(tk.Tk):
             click_log(f"[각성강화] 🧹 결과 화면이 남아 있다{why} "
                       f"(터치 {tv:.2f} · 실패글자 {fv:.2f}) "
                       f"→ 눌러 치운다 ({i + 1}/{AWAKEN_CLEAR})")
-            time.sleep(random.uniform(*AWAKEN_CGAP))
+            nap(random.uniform(*AWAKEN_CGAP))
         return self._awaken_find(AWAKEN_TOUCH, rect)[0] is None
 
     def _awaken_shot(self, rect, tag):
@@ -7293,14 +7411,14 @@ class App(tk.Tk):
                 for _ in range(int(AWAKEN_RESTART_WAIT * 10)):
                     if not getattr(self, "_awaken_busy", False):
                         break
-                    time.sleep(0.1)
+                    nap(0.1)
                 if getattr(self, "_awaken_busy", False):
                     click_log("[각성강화] 🔁 돌던 것이 "
                               f"{AWAKEN_RESTART_WAIT:.0f}초 안에 안 멈췄다 — 다시 시작 못 함")
                     self.after(0, lambda: self.status.set(
                         "✨ 돌던 것이 안 멈춥니다 — 잠시 뒤 시작을 다시 눌러주세요"))
                     return
-                time.sleep(0.4)
+                nap(0.4)
                 self._run_awaken(times, by_user=True, src="다시 시작")
 
             threading.Thread(target=_again, daemon=True).start()
@@ -7313,6 +7431,7 @@ class App(tk.Tk):
                 self.status.set(f"✨ 버튼 그림이 없습니다 ({nm}.png)"); return
         self._awaken_stop = False
         self._awaken_busy = True
+        nap_clear()      # ⏹ 새 작업 — 멈춤 깃발 내리기 (2026-11-03)
         self._awaken_gone = 0           # 연속 미달 센 것을 비우고 시작한다
         # 🔙 **런처를 맨 뒤로** (2026-10-20 사용자 지시 — 절대 규칙).
         #   사용자: *"각성할 때 가끔 메인런처가 앞으로 튀어나오는 현상이 있더라.
@@ -7348,7 +7467,7 @@ class App(tk.Tk):
                 # 🧍 가끔 멈칫 — 리듬이 일률적으로 보이지 않게
                 if random.random() < AWAKEN_PAUSE_P:
                     t_ += random.uniform(*AWAKEN_PAUSE)
-                time.sleep(t_)
+                nap(t_)
             try:
                 click_log(f"[각성강화] 시작 — {rect[5]} ({rect[3]}x{rect[4]}) "
                           f"· 최대 {n_max}회 · 이번 속도 {tempo:.2f}배"
@@ -7817,7 +7936,7 @@ class App(tk.Tk):
             except Exception:
                 self._cardfix_saved_wins = None
             self.withdraw()
-            time.sleep(0.2)
+            nap(0.2)
             CoordOverlay(self, mode="cardfix")
         self.after(3000, _go)
 
@@ -7982,7 +8101,7 @@ class App(tk.Tk):
             _coord = (L + 60, T + 60)
             if not self._cardfix_front(_coord):
                 self._focus_client_at(_coord)
-                time.sleep(random.uniform(*CARDFIX_FOCUS))
+                nap(random.uniform(*CARDFIX_FOCUS))
             for k, (dx, dy) in enumerate(rels, 1):
                 if getattr(self, "_stop_flag", False):
                     break
@@ -7994,11 +8113,11 @@ class App(tk.Tk):
                     # 한 칸이 길어져도 뒤에서 저절로 메워진다 (셋트 시간 유지).
                     _left = _budget - (time.perf_counter() - _t0)
                     _g = max(CARDFIX_MIN_GAP, _left / (len(rels) - k))
-                    time.sleep(_g * random.uniform(*CARDFIX_JIT))
+                    nap(_g * random.uniform(*CARDFIX_JIT))
             click_log("[변신확정] (%d/%s) #%02d 끝 — %.2f초 (목표 %.2f초)"
                       % (ai, an if an > 0 else "?", si + 1,
                          time.perf_counter() - _t0, _budget))
-            time.sleep(random.uniform(*CARDFIX_SLOT_GAP))
+            nap(random.uniform(*CARDFIX_SLOT_GAP))
         except Exception as e:
             try:
                 click_log("[변신확정] #%02d 오류: %s" % (si + 1, e))
@@ -8168,7 +8287,7 @@ class App(tk.Tk):
                               "작업을 방해하지 않으려고 넘긴다"
                               % (CARDFIX_QUIET_MAX, idle, (" · " + why) if why else ""))
                     return False
-                time.sleep(0.15)
+                nap(0.15)
         except Exception:
             return True
 
@@ -8216,7 +8335,7 @@ class App(tk.Tk):
                     return
                 # ⚠ **직접 부른다** — `self.after` 로 UI 스레드에 넘기면 조용히
                 #    흘려버리는 일이 있었다 (2026-10-19 실측, 위 주석 참고).
-                time.sleep(random.uniform(*CARDFIX_START))
+                nap(random.uniform(*CARDFIX_START))
                 self._cardfix_work("자동", first=got)
             else:
                 self.after(0, lambda: self._open_cardfix_win(reuse=True))
@@ -8387,7 +8506,7 @@ class App(tk.Tk):
                                     win32con.SW_MAXIMIZE if want_big else win32con.SW_RESTORE)
             except Exception:
                 pass
-            time.sleep(random.uniform(*KEYCFG_MAX_WAIT))
+            nap(random.uniform(*KEYCFG_MAX_WAIT))
             try:
                 l, t, r, b = win32gui.GetWindowRect(hwnd)
             except Exception:
@@ -8405,7 +8524,7 @@ class App(tk.Tk):
         anc = (rect[0] + 40, rect[1] + 40)
         try:
             self._focus_client_at(anc)
-            time.sleep(random.uniform(0.25, 0.4))
+            nap(random.uniform(0.25, 0.4))
             # ① 절전이면 먼저 깨운다 (우리 런처의 검증된 방식 그대로)
             try:
                 if has_sleep_img("jakwi"):
@@ -8413,7 +8532,7 @@ class App(tk.Tk):
                     if sx is not None:
                         press_key(SLEEP_WAKE_KEY)
                         self._wake_mark(anc)      # 다른 길이 또 누르지 않게
-                        time.sleep(random.uniform(*SLEEP_WAKE_WAIT))
+                        nap(random.uniform(*SLEEP_WAKE_WAIT))
                         click_log(f"[단축키] {si+1:02d} {name} 절전 ({ss:.2f}) → 깨움")
                         self._after_wake_fix(anc, "단축키 배포")
             except Exception:
@@ -8422,7 +8541,7 @@ class App(tk.Tk):
             # ② 최대화 — 패널·버튼이 보이려면 반드시 필요하다
             if not self._keycfg_maximize(hwnd, True):
                 return False, "창을 최대화하지 못함"
-            time.sleep(random.uniform(0.3, 0.5))
+            nap(random.uniform(0.3, 0.5))
             big = win32gui.GetWindowRect(hwnd)
             brect = (big[0], big[1], big[2]-big[0], big[3]-big[1])
             if _st(): return None, "멈춤"
@@ -8431,33 +8550,33 @@ class App(tk.Tk):
             if ix is None:
                 return False, f"조작키 아이콘을 못 찾음 (최고 {iv:.2f})"
             click_hold(ix, iy, ms=random.uniform(60, 110))
-            time.sleep(random.uniform(*KEYCFG_PANEL_WAIT))
+            nap(random.uniform(*KEYCFG_PANEL_WAIT))
             # ③ 커서를 치운다 — 그 자리에 두면 툴팁이 [가져오기] 를 가린다
             move_at(brect[0] + brect[2]//3, brect[1] + brect[3]//2)
-            time.sleep(random.uniform(0.18, 0.28))
+            nap(random.uniform(0.18, 0.28))
             if _st(): return None, "멈춤"
             px, py, pv = self._keycfg_find(KEYCFG_IMPORT, brect)
             if px is None:
                 return False, f"[가져오기] 를 못 찾음 (최고 {pv:.2f})"
             click_hold(px, py, ms=random.uniform(60, 110))
-            time.sleep(random.uniform(*KEYCFG_DIALOG_WAIT))
+            nap(random.uniform(*KEYCFG_DIALOG_WAIT))
             # 파일창에 경로를 붙여넣는다 (한글 경로도 안전하게)
             self._set_clipboard_text(src)
-            time.sleep(0.15)
+            nap(0.15)
             pyautogui.hotkey("ctrl", "a")
-            time.sleep(0.1)
+            nap(0.1)
             self._paste_ctrl_v()
-            time.sleep(0.2)
+            nap(0.2)
             pyautogui.press("enter")
-            time.sleep(random.uniform(*KEYCFG_LOAD_WAIT))
+            nap(random.uniform(*KEYCFG_LOAD_WAIT))
             # ④⑤ 포커스를 준 뒤 Esc — '조작키 표시' 를 꺼야 다음 계정이 최대화된다
             try:
                 win32gui.SetForegroundWindow(hwnd)
             except Exception:
                 pass
-            time.sleep(random.uniform(*KEYCFG_FOCUS_WAIT))
+            nap(random.uniform(*KEYCFG_FOCUS_WAIT))
             pyautogui.press("esc")
-            time.sleep(random.uniform(*KEYCFG_CLOSE_WAIT))
+            nap(random.uniform(*KEYCFG_CLOSE_WAIT))
             if not win32gui.IsWindow(hwnd):
                 return False, "Esc 뒤 창이 사라짐 — 게임이 종료됐을 수 있습니다"
             return True, f"적용함 (아이콘 {iv:.2f} · 가져오기 {pv:.2f})"
@@ -8583,7 +8702,7 @@ class App(tk.Tk):
                     self.after(0, lambda i=i, r=r, why=why: self._keycfg_lbl[i].config(
                         text=("✔ " if r else ("· " if r is None else "✘ ")) + why,
                         fg=("#117864" if r else ("#7f8c8d" if r is None else "#c0392b"))))
-                    time.sleep(random.uniform(0.8, 1.4))   # 사람처럼 한 박자
+                    nap(random.uniform(0.8, 1.4))   # 사람처럼 한 박자
                 self.after(0, lambda: self.status.set(
                     f"⌨ 단축키 배포 끝 — {ok}/{len(ts)}개 적용"))
                 click_log(f"[단축키] 끝 — {ok}/{len(ts)}개 적용")
@@ -8627,10 +8746,10 @@ class App(tk.Tk):
                 rc, h = rects[0], hwnds[0]
                 self.after(0, lambda: self.status.set("🔍 1번을 최대화해 확인합니다…"))
                 self._focus_client_at((rc[0]+40, rc[1]+40))
-                time.sleep(0.3)
+                nap(0.3)
                 if not self._keycfg_maximize(h, True):
                     self.after(0, lambda: self.status.set("🔍 1번 최대화 실패")); return
-                time.sleep(0.5)
+                nap(0.5)
                 big = win32gui.GetWindowRect(h)
                 br = (big[0], big[1], big[2]-big[0], big[3]-big[1])
                 _, _, v1 = self._keycfg_find(KEYCFG_ICON, br, thr=2.0)
@@ -9753,7 +9872,7 @@ class App(tk.Tk):
                 self._run_return_worker(slot.get("name", f"#{i+1}"),
                                         slot.get("coords", []))
                 if n < len(todo) - 1:
-                    time.sleep(random.uniform(2.0, 4.0))
+                    nap(random.uniform(2.0, 4.0))
         finally:
             self._return_batch = False
             self._return_running = False
@@ -10778,7 +10897,7 @@ class App(tk.Tk):
         CLICK_INTERVAL = 2.0   # island 실행 간격과 동일 (클릭 사이 대기)
         SETTLE_DELAY   = 0.7   # 좌표 이동 후 클릭 전 대기 (씹힘 방지)
         try:
-            time.sleep(2)
+            nap(2)
             for j, c in enumerate(coords):
                 if getattr(self, "_return_stop", False):
                     break
@@ -10786,9 +10905,9 @@ class App(tk.Tk):
                     continue
                 self.after(0, lambda n=name, j=j: self.status.set(f"🌀 귀환주문서 [{n}] 클릭{j+1}..."))
                 pyautogui.moveTo(*c)
-                time.sleep(SETTLE_DELAY)     # 커서 안착 후 클릭 → 씹힘 방지
+                nap(SETTLE_DELAY)     # 커서 안착 후 클릭 → 씹힘 방지
                 pyautogui.click()
-                time.sleep(CLICK_INTERVAL + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                nap(CLICK_INTERVAL + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
             self.after(0, lambda n=name: self.status.set(f"✔ 귀환주문서 [{n}] 완료"))
         except Exception as e:
             self.after(0, lambda e=e: self.status.set(f"귀환주문서 오류: {e}"))
@@ -11058,7 +11177,7 @@ class App(tk.Tk):
             if self._reroll_win and self._reroll_win.winfo_exists():
                 self._reroll_win.deiconify()
             self.status.set("영역이 너무 작습니다. 다시 시도하세요"); return
-        time.sleep(0.2)   # 오버레이가 완전히 사라진 뒤 캡처
+        nap(0.2)   # 오버레이가 완전히 사라진 뒤 캡처
         try:
             from PIL import ImageGrab
             img = ImageGrab.grab(bbox=(x, y, x+w, y+h), all_screens=True)
@@ -11167,20 +11286,20 @@ class App(tk.Tk):
             count += 1
             t0 = time.time()
             while self._reroll_running and time.time() - t0 < wait:
-                time.sleep(0.05)
+                nap(0.05)
         if not self._reroll_running:
             self.after(0, lambda: self._reroll_status("리롤 종료", "#555"))
 
     def _reroll_found(self, confirm):
         # 발견 시: 확인(획득) 버튼 자동 클릭 → 소리 알림 → 런처 앞으로
         if confirm:
-            time.sleep(0.3)
+            nap(0.3)
             try: pyautogui.click(confirm[0], confirm[1])
             except Exception: pass
         try:
             import winsound
             for _ in range(3):
-                winsound.Beep(1000, 180); time.sleep(0.06)
+                winsound.Beep(1000, 180); nap(0.06)
         except Exception:
             pass
         self.after(0, self._keep_launcher_front)
@@ -11361,7 +11480,7 @@ class App(tk.Tk):
         self._reg_tj_slot_idx  = slot_idx
         self._reg_tj_click_idx = click_idx
         self.status.set(f"3초 후 TJ성공!! #{slot_idx+1} [좌표{click_idx+1}] 위치 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="tj")])
 
     def on_tj_coord(self, x, y):
@@ -11421,13 +11540,13 @@ class App(tk.Tk):
                 s = slots[slot_idx] if slot_idx < len(slots) else None
                 if s and any(s.get("coords", [])):
                     name = s.get("name", f"#{slot_idx+1}")
-                    time.sleep(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))
+                    nap(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))
                     for j, c in enumerate(s.get("coords", [])):
                         if not c: continue
                         if getattr(self, "_tj_stop", False): break
                         self.status.set(f"⭕ [{name}] 좌표{j+1}...")
                         pyautogui.click(*c)
-                        time.sleep(random.uniform(TJ_MIN, TJ_MAX))
+                        nap(random.uniform(TJ_MIN, TJ_MAX))
                 return
             # 전체 실행 — 웨이브 방식: 좌표1을 전 슬롯에 쫙 → 좌표2 웨이브는 30% 앞당겨
             # → 좌표3은 더 빠르게 (점점 몰아치는 템포, 웨이브마다 슬롯 순서 랜덤)
@@ -11435,7 +11554,7 @@ class App(tk.Tk):
                        if any(s.get("coords", []))]
             if not targets:
                 self.status.set("TJ성공!!: 등록된 좌표가 없습니다"); return
-            time.sleep(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))
+            nap(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))
             speed = 1.0
             for phase in range(TJ_CLICKS):
                 if getattr(self, "_tj_stop", False): break
@@ -11445,7 +11564,7 @@ class App(tk.Tk):
                     while time.time() < wait_end:
                         if getattr(self, "_tj_stop", False): break
                         self.status.set(f"⭕ 닫기(좌표3)까지 {int(wait_end - time.time())}초 대기...")
-                        time.sleep(0.5)
+                        nap(0.5)
                     if getattr(self, "_tj_stop", False): break
                 wave = [(i, s) for i, s in targets
                         if s.get("coords", [None]*TJ_CLICKS)[phase]]
@@ -11455,7 +11574,7 @@ class App(tk.Tk):
                     name = s.get("name", f"#{si+1}")
                     self.status.set(f"⭕ 좌표{phase+1} 웨이브 [{name}] ({k+1}/{len(wave)})...")
                     pyautogui.click(*s["coords"][phase])
-                    time.sleep(random.uniform(TJ_MIN, TJ_MAX) * speed)
+                    nap(random.uniform(TJ_MIN, TJ_MAX) * speed)
                 speed *= 0.7   # 다음 웨이브는 30% 앞당김
             self.status.set("✔ TJ성공!! 완료!" if not getattr(self, "_tj_stop", False) else "TJ성공!! 멈춤")
         except Exception as e:
@@ -11745,7 +11864,7 @@ class App(tk.Tk):
             x, y, v, k = jakwi_find(nm, anchor)
             if x is not None:
                 return x, y, k
-            time.sleep(random.uniform(*JAKWI_WAIT))
+            nap(random.uniform(*JAKWI_WAIT))
         return None, None, k
 
     def _jakwi_wake(self, anchor, name="", stop=None):
@@ -11771,9 +11890,9 @@ class App(tk.Tk):
             if stop and getattr(self, stop, False):
                 return
             self._focus_client_at(c)
-            time.sleep(random.uniform(0.15, 0.30))
+            nap(random.uniform(0.15, 0.30))
             click_hold(c[0], c[1], ms=random.uniform(60, 110))
-            time.sleep(random.uniform(0.9, 1.4))
+            nap(random.uniform(0.9, 1.4))
 
     def _jakwi_try_once(self, anchor, name, k0, stop=None):
         """승급 심사 화면에서 **한 번 도전**한다 → (성공?, 설명).
@@ -11791,7 +11910,7 @@ class App(tk.Tk):
             _on, _lit, xy, k = jakwi_dust_on(anchor)
             if xy is not None:
                 break
-            time.sleep(random.uniform(*JAKWI_WAIT))
+            nap(random.uniform(*JAKWI_WAIT))
         if xy is None:
             return None, "가루 줄을 못 찾음"
         x, y = xy
@@ -11803,7 +11922,7 @@ class App(tk.Tk):
         else:
             click_hold(x + int(JAKWI_DUST_OFF[0]*k), y + int(JAKWI_DUST_OFF[1]*k),
                        ms=random.uniform(60, 110))
-            time.sleep(random.uniform(*JAKWI_WAIT))
+            nap(random.uniform(*JAKWI_WAIT))
             _on, _lit, _xy2, k = jakwi_dust_on(anchor)
             if not _on:
                 return None, f"가루 체크가 안 켜짐 (칸 밝기 {_lit:.0f})"
@@ -11822,7 +11941,7 @@ class App(tk.Tk):
             return None, "결과 화면이 안 뜸"
         # 제목이 보여도 두루마리는 아직 자리를 안 잡았다 — 바로 끌면 **매번** 씹혀서
         # 재시도로 4초씩 버렸다. 한 박자 쉬는 게 훨씬 싸다 (2026-09-22).
-        time.sleep(random.uniform(*JAKWI_RESULT_SETTLE))
+        nap(random.uniform(*JAKWI_RESULT_SETTLE))
         # 두루마리 열기 — 화면 밖으로 나가면 잘려서 안 먹으므로 아래끝을 넘지 않게
         sx = tx + int(JAKWI_SCROLL_OFF[0]*k)
         sy = ty + int(JAKWI_SCROLL_OFF[1]*k)
@@ -11847,14 +11966,14 @@ class App(tk.Tk):
             # 커서를 먼저 올려놓고 한 박자 쉰 뒤 누른다 — 이동과 누름이 한 번에
             # 나가면 첫 끌기가 늘 씹혔다 (2026-09-22 실측: 매 회 1/4 재시도)
             pyautogui.moveTo(gx, gy)
-            time.sleep(random.uniform(0.10, 0.18))
+            nap(random.uniform(0.10, 0.18))
             pyautogui.mouseDown(gx, gy)
-            time.sleep(DRAG_HOLD * random.uniform(0.85, 1.25))
+            nap(DRAG_HOLD * random.uniform(0.85, 1.25))
             for st2 in range(1, steps + 1):
                 pyautogui.moveTo(gx, gy + int(d * st2 / steps))
-                time.sleep(DRAG_STEP_WAIT * random.uniform(0.7, 1.6))
+                nap(DRAG_STEP_WAIT * random.uniform(0.7, 1.6))
             pyautogui.mouseUp(gx, gey)
-            time.sleep(random.uniform(0.9, 1.4))
+            nap(random.uniform(0.9, 1.4))
             op, ov = jakwi_scroll_open(anchor)
             if op:
                 opened = True
@@ -11868,7 +11987,7 @@ class App(tk.Tk):
         if rc:      # 화면을 눌러 결과창을 닫는다 → 승급 심사 화면으로 돌아온다
             click_hold(rc[0] + int(245*k), rc[1] + int(250*k),
                        ms=random.uniform(60, 110))
-        time.sleep(random.uniform(*JAKWI_WAIT))
+        nap(random.uniform(*JAKWI_WAIT))
         # 한 번을 **10초 내외**로 맞춘다 (2026-09-22 사용자 지시) — 빨리 끝났으면
         # 남는 만큼 쉰다. 목표 시간 자체도 랜덤이라 리듬이 일정하지 않다.
         _want = random.uniform(*JAKWI_ONCE_SEC)
@@ -11876,7 +11995,7 @@ class App(tk.Tk):
         while _left > 0:
             if _st():
                 return None, "멈춤"
-            time.sleep(min(0.2, _left))
+            nap(min(0.2, _left))
             _left -= 0.2
         return ok, dwhy
 
@@ -11939,7 +12058,7 @@ class App(tk.Tk):
                         act, rows, k, why, ai = jakwi_rank_read(anchor)
                         if act:
                             break
-                        time.sleep(random.uniform(*JAKWI_WAIT))
+                        nap(random.uniform(*JAKWI_WAIT))
                     if _back or act:
                         break
                 if _back:
@@ -11966,7 +12085,7 @@ class App(tk.Tk):
                 click_log(f"jakwi [{name}] 클라 창을 못 찾음 → 중단")
                 return "창을 못 찾음"
             self._focus_client_at(anchor)
-            time.sleep(random.uniform(0.2, 0.35))
+            nap(random.uniform(0.2, 0.35))
             click_hold(rc[0] + int(JAKWI_CLICK_X*k), rc[1] + rows[ai-1],
                        ms=random.uniform(60, 110))
             self.status.set(f"👑 [{name}] "
@@ -12279,7 +12398,7 @@ class App(tk.Tk):
             import numpy as np
             prev = grab_window(coord); base = []
             for _ in range(n):
-                time.sleep(0.05)
+                nap(0.05)
                 cur = grab_window(coord)
                 if prev is None or cur is None or prev.shape != cur.shape:
                     return None, None
@@ -12299,7 +12418,7 @@ class App(tk.Tk):
             thr = max(noise * 2.0, 0.8)
             t0 = time.time(); calm = 0
             while time.time() - t0 < cap:
-                time.sleep(0.05)
+                nap(0.05)
                 cur = grab_window(coord)
                 if cur is None or cur.shape != prev.shape:
                     return None
@@ -12376,7 +12495,7 @@ class App(tk.Tk):
         while time.time() < end:
             if not alive():
                 return False
-            time.sleep(min(0.15, end - time.time()))
+            nap(min(0.15, end - time.time()))
         return True
 
     def _run_jakwi_loop(self):
@@ -12486,7 +12605,7 @@ class App(tk.Tk):
         (px 를 숫자로 적게 하니 감이 안 온다는 사용자 지적 — 그냥 찍게 했다)"""
         self._reg_jakwi_end_j = j
         self.status.set(f"3초 후 작위 {j+1}번 — 어디까지 내릴지(놓을 자리) 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                   CoordOverlay(self, mode="jakwiend")])
 
     def on_jakwi_end_coord(self, x, y):
@@ -12594,7 +12713,7 @@ class App(tk.Tk):
                 self._run_seq()
             except Exception as e:
                 self.after(0, lambda err=e: self.status.set(f"⚠ 절전해제 실패: {err}"))
-            time.sleep(1.2)                  # 마지막 클릭이 먹고 화면이 뜰 시간
+            nap(1.2)                  # 마지막 클릭이 먹고 화면이 뜰 시간
 
             def _back():
                 self._wins_show(saved)        # ③ 창을 먼저 되올린다
@@ -12617,7 +12736,7 @@ class App(tk.Tk):
             self._run_seq()
         except Exception as e:
             self.after(0, lambda err=e: self.status.set(f"⚠ 절전해제 실패: {err}"))
-        time.sleep(1.0)                      # 마지막 클릭이 먹을 시간
+        nap(1.0)                      # 마지막 클릭이 먹을 시간
         self._dragon_deadline = time.time() + DRAGON_BUDGET   # 여기서부터 시간을 잰다
         # 목표 시간은 실제 클릭 수로 정해지므로 여기서는 고정 숫자를 말하지 않는다
         # (2026-09-07 — 슬롯이 적으면 더 빨리 끝난다)
@@ -13812,7 +13931,7 @@ class App(tk.Tk):
         key, title, _ = self._dgn2_info(fkey)
         self._reg_dgn2 = (fkey, slot_idx, click_idx)
         self.status.set(f"3초 후 {title} #{slot_idx+1} [클릭{click_idx+1}] 위치 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="dgn2")])
 
     def on_dgn2_coord(self, x, y):
@@ -13894,9 +14013,9 @@ class App(tk.Tk):
             return False
         try:
             self._focus_client_at(anchor)
-            time.sleep(random.uniform(0.20, 0.40))
+            nap(random.uniform(0.20, 0.40))
             press_key(k)
-            time.sleep(random.uniform(*PREKEY_WAIT))
+            nap(random.uniform(*PREKEY_WAIT))
             click_log(f"{fkey} [{name}] 시작 전 '{k.upper()}' 한 번 누름")
             self.status.set(f"{icon} [{name}] '{k.upper()}' 누르고 시작")
             return True
@@ -13968,7 +14087,7 @@ class App(tk.Tk):
                     win32gui.SetForegroundWindow(root)
                 except Exception:
                     pass
-            time.sleep(0.25)
+            nap(0.25)
             return win32gui.GetForegroundWindow() == root
         except Exception:
             return False
@@ -13976,24 +14095,24 @@ class App(tk.Tk):
     def _paste_at(self, coord, txt, label=""):
         """붙여넣기 자리 — 진짜 커서로 눌러 그 창을 앞으로 세운 뒤 Ctrl+V, Enter.
         (커서 없는 클릭은 창을 활성화하지 못해 Ctrl+V가 엉뚱한 곳으로 간다)"""
-        pyautogui.moveTo(*coord); time.sleep(0.15)
+        pyautogui.moveTo(*coord); nap(0.15)
         pyautogui.click()
         try:
-            time.sleep(random.uniform(1.3, 1.7))
+            nap(random.uniform(1.3, 1.7))
             _fw = self._focus_client_at(coord)
             self._coupon_log(f"{label} 창 활성화 {'성공' if _fw else '실패/불필요'} {tuple(coord)}")
             ok = self._set_clipboard_text(txt)
             self._coupon_log(f"{label} 클립보드 복사 {'성공' if ok else '실패'}: {txt!r}")
-            time.sleep(0.15)
+            nap(0.15)
             self._paste_ctrl_v()
             self._coupon_log(f"{label} Ctrl+V 전송 완료")
-            time.sleep(random.uniform(0.6, 0.9))
+            nap(random.uniform(0.6, 0.9))
             # 입력칸이 살아 있으면 다음 클릭을 게임이 씹으므로 Enter로 입력 확정
             self._send_key_input_cp(0x1C, 0x0008)
-            time.sleep(0.08)
+            nap(0.08)
             self._send_key_input_cp(0x1C, 0x0008 | 0x0002)
             self._coupon_log(f"{label} Enter(입력 확정) 전송 완료")
-            time.sleep(random.uniform(0.5, 0.8))
+            nap(random.uniform(0.5, 0.8))
             return True
         except Exception as e:
             self._coupon_log(f"{label} 붙여넣기 오류: {e!r}")
@@ -14001,9 +14120,9 @@ class App(tk.Tk):
 
     def _paste_ctrl_v(self):
         # Ctrl(0x1D)+V(0x2F) 스캔코드 순서대로 누르고 떼기 — 게임 프레임이 놓치지 않게 여유 있게
-        self._send_key_input_cp(0x1D, 0x0008);          time.sleep(0.12)
-        self._send_key_input_cp(0x2F, 0x0008);          time.sleep(0.12)
-        self._send_key_input_cp(0x2F, 0x0008 | 0x0002); time.sleep(0.08)
+        self._send_key_input_cp(0x1D, 0x0008);          nap(0.12)
+        self._send_key_input_cp(0x2F, 0x0008);          nap(0.12)
+        self._send_key_input_cp(0x2F, 0x0008 | 0x0002); nap(0.08)
         self._send_key_input_cp(0x1D, 0x0008 | 0x0002)
 
     def _type_text_cp(self, text, stop_attr=None):
@@ -14015,9 +14134,9 @@ class App(tk.Tk):
             if stop_attr and getattr(self, stop_attr, False):
                 return
             self._send_key_input_cp(u, 0x0004)              # KEYEVENTF_UNICODE down
-            time.sleep(0.03)
+            nap(0.03)
             self._send_key_input_cp(u, 0x0004 | 0x0002)     # up
-            time.sleep(random.uniform(0.04, 0.09))
+            nap(random.uniform(0.04, 0.09))
 
     @staticmethod
     def _coupon_log(msg):
@@ -14043,7 +14162,7 @@ class App(tk.Tk):
         u32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
         for _ in range(5):
             if u32.OpenClipboard(0): break
-            time.sleep(0.05)
+            nap(0.05)
         else:
             return False
         try:
@@ -14199,7 +14318,7 @@ class App(tk.Tk):
             if secs >= 3.0:
                 self.status.set(f"⏳ [{name}] 좌표{j+1} 다음까지 {left:.0f}초 "
                                 f"(이번 대기 {secs:.1f}초)")
-            time.sleep(min(0.4, max(0.05, left)))
+            nap(min(0.4, max(0.05, left)))
 
     def _open_click_log(self):
         """클릭 기록 파일을 연다 — 어느 클릭이 리니지M 창에 안 갔는지 볼 수 있다."""
@@ -14764,7 +14883,7 @@ class App(tk.Tk):
                               f"→ 좌표{j+1} 진행")
                     return True
                 if t < FLOOR_TRIES - 1:
-                    time.sleep(random.uniform(*FLOOR_WAIT))
+                    nap(random.uniform(*FLOOR_WAIT))
             _all = " ".join(f"{k}층 {v:.2f}" for k, v in sorted(last.items()))
             # 🏢 **'확실히 다른 층' 과 '그냥 못 읽음' 은 다르다** (2026-10-06).
             #    · 다른 층이 기준을 넘고 내 층보다 뚜렷이 높다 → **틀린 층. 절대 안 누른다.**
@@ -14854,7 +14973,7 @@ class App(tk.Tk):
             if getattr(self, stop, False):
                 click_log(f"{fkey} 🔁 멈춤 — 남은 {len(todo)-_hit-_no}슬롯은 그대로")
                 break
-            time.sleep(random.uniform(*FLOOR_RETRY_WAIT))
+            nap(random.uniform(*FLOOR_RETRY_WAIT))
             ok, sc, why = False, 0.0, ""
             last = {}
             # 🔢 여기서도 **숫자 읽기를 먼저** (2026-11-03) — 본 경로와 같은 규칙
@@ -14870,7 +14989,7 @@ class App(tk.Tk):
                 if ok or getattr(self, stop, False):
                     break
                 if t < FLOOR_RETRY_TRIES - 1:
-                    time.sleep(random.uniform(*FLOOR_WAIT))
+                    nap(random.uniform(*FLOOR_WAIT))
             _all = " ".join(f"{k}층 {v:.2f}" for k, v in sorted(last.items()))
             if ok and not getattr(self, stop, False):
                 _hit += 1
@@ -14918,7 +15037,7 @@ class App(tk.Tk):
                 self._click_log(fkey, b, c, slot, f"다시({_r+1}/{times})")
                 click_at(*c)
                 _did.append(b + 1)
-                time.sleep(random.uniform(0.5, 0.9))
+                nap(random.uniform(0.5, 0.9))
             if not _did:
                 click_log(f"{fkey} [{nm}] 🔄 좌표{back+1}~{j} 에 등록된 좌표가 없어 "
                           f"되돌아갈 수 없음 — 이 슬롯 중단")
@@ -14929,7 +15048,7 @@ class App(tk.Tk):
                       f"({_r+1}/{times}, 최고 {best:.2f}) — {_w:.1f}초 기다렸다 다시 봅니다")
             self.status.set(f"🔄 [{nm}] 좌표{j+1} 못 찾음 — "
                             f"좌표{_did[0]}부터 다시 ({_r+1}/{times})")
-            time.sleep(_w)
+            nap(_w)
             for _t in range(max(1, IMG_TRIES_BY.get((fkey, j), IMG_TRIES))):
                 if getattr(self, stop, False):
                     return None, None, best
@@ -14943,7 +15062,7 @@ class App(tk.Tk):
                     self._note(fkey, nm,
                                f"좌표{j+1} 못 찾아 좌표{_did[0]}부터 다시 → 찾음")
                     return ix, iy, sc
-                time.sleep(random.uniform(1.0, 1.5))
+                nap(random.uniform(1.0, 1.5))
         click_log(f"{fkey} [{nm}] 🔄 {times}번 다시 했지만 좌표{j+1} 을 끝내 못 찾음 "
                   f"(최고 {best:.2f}) → 이 슬롯 중단")
         return None, None, best
@@ -14958,7 +15077,7 @@ class App(tk.Tk):
             _en = (slot or {}).get("name", "?")
             if _ea:
                 self._focus_client_at(_ea)
-                time.sleep(random.uniform(0.20, 0.38))
+                nap(random.uniform(0.20, 0.38))
             _et = ESC_CELL_TIMES.get(fkey, 1)
             press_esc(_et)
             click_log(f"{fkey} [{_en}] 좌표{j+1} ⎋ ESC 를 {_et}번 눌렀다")
@@ -14993,10 +15112,10 @@ class App(tk.Tk):
             sx, sy = int(coord[0]), int(coord[1])
             ey = sy + int(d)                       # 양수 = 아래로
             pyautogui.mouseDown(sx, sy)
-            time.sleep(DRAG_HOLD * random.uniform(0.85, 1.25))   # 드래그로 인식될 시간
+            nap(DRAG_HOLD * random.uniform(0.85, 1.25))   # 드래그로 인식될 시간
             for _st in range(1, DRAG_STEPS + 1):
                 pyautogui.moveTo(sx, sy + int(d * _st / DRAG_STEPS))
-                time.sleep(DRAG_STEP_WAIT * random.uniform(0.7, 1.6))
+                nap(DRAG_STEP_WAIT * random.uniform(0.7, 1.6))
             pyautogui.mouseUp(sx, ey)              # 끝에서 바로 놓기 → 관성 스크롤
             _w = f"끌기▼{abs(d)}" if d > 0 else f"끌기▲{abs(d)}"
             self._click_log(fkey, j, coord, slot, _w)
@@ -15008,7 +15127,7 @@ class App(tk.Tk):
             # 휠도 커서를 옮기지 않고 그 자리에 메시지로 보낸다 (실패하면 예전 방식)
             import ctypes
             pyautogui.moveTo(*coord)
-            time.sleep(0.08)
+            nap(0.08)
             if abs(int(n)) >= 10:
                 # 많이 굴려야 하는 자리 (예: 맨 끝까지 내리기) — 적은 양을 여러 번
                 # 나눠 보낸다. 한 번에 크게 보내면 게임이 무시하는 일이 있다.
@@ -15022,14 +15141,14 @@ class App(tk.Tk):
                     except Exception:
                         pyautogui.scroll((d if n > 0 else -d) * 120)
                     left -= d
-                    time.sleep(random.uniform(0.03, 0.07))
+                    nap(random.uniform(0.03, 0.07))
             else:
                 for _ in range(WHEEL_UP_TIMES):
                     try:
                         ctypes.windll.user32.mouse_event(0x0800, 0, 0, int(n) * 120, 0)
                     except Exception:
                         pyautogui.scroll(int(n) * 120)
-                    time.sleep(random.uniform(0.12, 0.25))
+                    nap(random.uniform(0.12, 0.25))
             return (f"휠▼{abs(n)}" if n < 0 else f"휠▲{n}")
         # 이 자리에 그림을 지정해뒀으면 그림을 찾아 그 자리를 누른다.
         # 못 찾으면 "이미지없음" 을 돌려줘서 그 슬롯을 여기서 끝낸다 (사용자 지시).
@@ -15075,7 +15194,7 @@ class App(tk.Tk):
                     # 화면이 아직 다 안 그려졌을 때 배경 무늬를 집는 사고가 있었다
                     # (2026-08-28 주이 슬롯: 맨 땅을 0.61 로 눌렀다).
                     # 진짜 아이콘은 잠시 뒤에도 같은 자리에 있고 보통 점수가 오른다.
-                    time.sleep(random.uniform(0.5, 0.8))
+                    nap(random.uniform(0.5, 0.8))
                     _cx, _cy, _cs = find_image(fkey, j, coord)
                     if (_cx is None or abs(_cx - ix) > CONFIRM_PX
                             or abs(_cy - iy) > CONFIRM_PX):
@@ -15100,7 +15219,7 @@ class App(tk.Tk):
                     self.status.set(f"🖼 [{nm}] 좌표{j+1} "
                                     f"{'창이 뜨기를' if _own_coord else '그림을'} "
                                     f"기다리는 중… ({_t+1}/{_tries}, 지금 {sc:.2f})")
-                    time.sleep(random.uniform(0.25, 0.45) if _chk_only
+                    nap(random.uniform(0.25, 0.45) if _chk_only
                                else random.uniform(1.0, 1.5))
             if ix is not None and is_check_only(fkey, j):
                 # 👁 확인만 — 그림이 보였으니 **누르지 않고** 다음 좌표로 넘어간다
@@ -15206,7 +15325,7 @@ class App(tk.Tk):
             # '창 띄우기'로만 먹히고 사라진다 (좌표 클릭과 똑같이 들어가게, 2026-08-27)
             try:
                 self._focus_client_at(coord)
-                time.sleep(random.uniform(0.25, 0.45))
+                nap(random.uniform(0.25, 0.45))
             except Exception:
                 pass
             try:      # 그 자리에 지금 '어느 창'이 떠 있는지 기록 (가려져 있으면 여기서 드러난다)
@@ -15222,7 +15341,7 @@ class App(tk.Tk):
             # 그래서 먼저 그 자리에 커서를 올리고 잠깐 뒤에 누른다 (2026-08-27)
             try:
                 move_at(*coord)
-                time.sleep(random.uniform(0.35, 0.6))
+                nap(random.uniform(0.35, 0.6))
             except Exception:
                 pass
         if _img_hit:
@@ -15278,7 +15397,7 @@ class App(tk.Tk):
                         coord = (_fx + _o2[0], _fy + _o2[1])
                         _ic, _iy0 = _fx, _fy      # 기준도 새 자리로 옮긴다
                         move_at(*coord)
-                        time.sleep(random.uniform(0.12, 0.22))
+                        nap(random.uniform(0.12, 0.22))
             except Exception:
                 pass
             _learn = grab_patch(fkey, j, coord)   # 성공하면 배울 그림 (미리 떠 둔다)
@@ -15291,12 +15410,12 @@ class App(tk.Tk):
             for _k in range(1, _rep):
                 if getattr(self, f"_{fkey}_stop", False):
                     break
-                time.sleep(random.uniform(INMAIL_TAP_MIN, INMAIL_TAP_MAX))
+                nap(random.uniform(INMAIL_TAP_MIN, INMAIL_TAP_MAX))
                 click_at(*coord)
             if _rep > 1:
                 self._click_log(fkey, j, coord, slot, f"연속{_rep}회")
         if _img_hit:
-            time.sleep(random.uniform(0.35, 0.55))  # 게임이 클릭을 처리할 시간
+            nap(random.uniform(0.35, 0.55))  # 게임이 클릭을 처리할 시간
             # 눌렀는데 '뜨기로 한 창'이 안 뜨면 = 게임이 그 클릭을 안 먹은 것.
             # 아이콘이 아닌 '창'을 보고 판단하므로 두 번 눌릴 염려가 없다
             # (2026-08-27 사용자 지시 — 씹혔을 때 스스로 회복하게).
@@ -15308,7 +15427,7 @@ class App(tk.Tk):
                     _ww = ((RECLICK_WAIT_FAR.get(fkey) if locals().get("_far") else None)
                            or RECLICK_WAIT_BY.get(fkey) or RECLICK_WAIT)
                     _w = _ww[min(_try, len(_ww) - 1)]
-                    time.sleep(_w * random.uniform(0.9, 1.15))
+                    nap(_w * random.uniform(0.9, 1.15))
                     _wx, _wy, _ws = find_image(fkey, j + 1, coord)
                     if _wx is not None:
                         if _try:
@@ -15371,13 +15490,13 @@ class App(tk.Tk):
                     coord = (_rx, _ry)
                     try:
                         self._focus_client_at(coord)
-                        time.sleep(random.uniform(0.35, 0.55))
+                        nap(random.uniform(0.35, 0.55))
                         move_at(*coord)
-                        time.sleep(random.uniform(0.5, 0.8))
+                        nap(random.uniform(0.5, 0.8))
                     except Exception:
                         pass
                     click_hold(*coord, ms=random.uniform(*_hold))
-                    time.sleep(random.uniform(0.35, 0.55))
+                    nap(random.uniform(0.35, 0.55))
                 else:
                     self._note(fkey, nm, f"좌표{j+1} {RECLICK_TRIES}번 눌러도 창이 안 뜸")
                     _win_fail = True
@@ -15469,14 +15588,14 @@ class App(tk.Tk):
             #    빈 좌표를 끝까지 훑었다 → 좌표가 적은 슬롯이 쓸데없이 느렸다.
             if not any(slot_cell_todo(fkey, slot, k, slot_last_reg(slot, nclk))
                        for k in range(j + 1, nclk)):
-                time.sleep(LAST_CLICK_GAP)
+                nap(LAST_CLICK_GAP)
                 break
             _g = self._slot_gap(slot, j)
             _base = _g if _g is not None else random.uniform(*gap)
             _base *= getattr(self, "_pace_now", 1.0)   # 웨이브가 정한 페이스
             if fkey in EXTRA_GAPS:
                 _base += extra_gap(fkey, j)   # 기다림은 줄이지 않는다
-            time.sleep(_base * random.uniform(*slow))
+            nap(_base * random.uniform(*slow))
         st["j"] = nclk
         return done
 
@@ -15549,7 +15668,7 @@ class App(tk.Tk):
             ready = [si for si in alive if state[si]["due"] <= now]
             if not ready:
                 nxt = min(state[si]["due"] for si in alive)
-                time.sleep(max(0.05, min(nxt - now, 1.0)))
+                nap(max(0.05, min(nxt - now, 1.0)))
                 continue
             si = random.choice(ready)
             st = state[si]
@@ -15584,13 +15703,13 @@ class App(tk.Tk):
                 continue
             if si != last_si:
                 # 다른 창으로 넘어갈 여유 — 좌표가 적은 실행이면 그만큼 짧게 (×_sw)
-                time.sleep(max(SWITCH_FLOOR,
+                nap(max(SWITCH_FLOOR,
                                random.uniform(*SWITCH_PAUSE) * _sw))
                 if fkey in self.FOCUS_FIRST:
                     # 비활성 창의 첫 클릭은 '창 띄우기'로만 먹히고 사라진다
                     try:
                         self._focus_client_at(coords[j])
-                        time.sleep(random.uniform(0.25, 0.45))
+                        nap(random.uniform(0.25, 0.45))
                     except Exception:
                         pass
                 last_si = si
@@ -15628,7 +15747,7 @@ class App(tk.Tk):
             while (j in ATOMIC_NEXT.get(fkey, ()) and j + 1 < nclk
                    and j + 1 < len(coords) and coords[j + 1]
                    and not getattr(self, stop, False)):
-                time.sleep(random.uniform(0.35, 0.8))   # 올려둔 채 잠깐 뒤 바로
+                nap(random.uniform(0.35, 0.8))   # 올려둔 채 잠깐 뒤 바로
                 _a2 = self._do_click_or_wheel(fkey, j + 1, coords[j + 1], st["slot"])
                 done += 1
                 if _a2 == "이미지없음":
@@ -15649,7 +15768,7 @@ class App(tk.Tk):
                                       slot_last_reg(st["slot"], nclk))
                        for k in range(st["j"], nclk)):
                 st["j"] = nclk
-                time.sleep(LAST_CLICK_GAP)
+                nap(LAST_CLICK_GAP)
                 continue
             _g = self._slot_gap(st["slot"], j)          # 칸에 적어둔 초가 있으면 그걸로
             _base = _g if _g is not None else random.uniform(*gap)
@@ -15672,7 +15791,7 @@ class App(tk.Tk):
             if random.random() < 0.10:             # 가끔 한 번씩 더 쉰다 (사람처럼)
                 _base += random.uniform(0.5, 1.6)
             st["due"] = time.time() + _base * random.uniform(*slow)   # 10~20% 할증
-            time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
+            nap(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
         _el = int(time.time() - _t0)
         # 상한(RUN_BUDGET)이 아니라 **이번 실행의 목표**와 비교해야 한다 — 상한과 비교하면
         # 목표를 44초 넘겨도 늘 '✔ 안에 끝남' 이 찍혀 문제가 보이지 않는다 (2026-09-18).
@@ -15905,7 +16024,7 @@ class App(tk.Tk):
                             _up = bool(self._focus_client_at(_anchor))
                         except Exception:
                             _up = False
-                        time.sleep(random.uniform(*FIX_FOCUS_WAIT) * _fm0)
+                        nap(random.uniform(*FIX_FOCUS_WAIT) * _fm0)
                         if _up:
                             if _ft:
                                 click_log(f"fix #{si+1:02d} 창을 {_ft+1}번째에 앞으로 "
@@ -15984,7 +16103,7 @@ class App(tk.Tk):
                     if n < len(order) - 1:
                         if fkey == "eventshop" and j == 0:
                             # 이벤트상점: 클릭1 → 4초 × 1.15~1.30 랜덤 증가 후 클릭2
-                            time.sleep(4.0 * random.uniform(1.15, 1.30))
+                            nap(4.0 * random.uniform(1.15, 1.30))
                         elif fkey in SLOW_FKEYS:
                             # 🐢 느릿느릿 — 사람이 보고 누르는 속도 (2026-10-06 사용자:
                             #    "급한 게 아니라서 사람이 클릭했겠다 싶을 정도로 느릿느릿")
@@ -15998,12 +16117,12 @@ class App(tk.Tk):
                         else:
                             _cg = self._slot_gap(slot, j)    # 칸에 적어둔 초가 있으면 그걸로
                             if _cg is not None:
-                                time.sleep(_cg * random.uniform(1.0, 1.10))
+                                nap(_cg * random.uniform(1.0, 1.10))
                             else:
                                 gap = random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX)
                                 if fkey == "eventshop":
                                     gap *= random.uniform(1.15, 1.25)   # 좌표별 15~25% 추가 증가
-                                time.sleep(gap * c_mult)
+                                nap(gap * c_mult)
                 # 👑 작위 — 좌표(메뉴→작위)를 다 눌렀으면 거기서 단계를 올린다
                 #    (웨이브가 아닌 개별·순차 실행에도 똑같이 적용, 2026-09-21)
                 # 🗂 몬스터도감 — 좌표(메뉴 → 도감)를 다 눌렀으면 **거기서 보상을
@@ -16026,7 +16145,7 @@ class App(tk.Tk):
                     if slot_idx is None and tn < len(targets) - 1:
                         g = COUPON_SLOT_GAP * random.uniform(1.02, 1.18)
                         self._coupon_log(f"슬롯 간격 {g:.2f}초 대기")
-                        time.sleep(g)
+                        nap(g)
             if fkey == "dragon":
                 _bud = int((getattr(self, "_run_budget", {}) or {}).get("dragon")
                            or RUN_BUDGET.get("dragon", DRAGON_BUDGET))
@@ -16460,7 +16579,7 @@ class App(tk.Tk):
                 return False, float(sc)
             sx, sy = rc[0] + int(x), rc[1] + int(y)
             self._focus_client_at(anchor)
-            time.sleep(random.uniform(0.18, 0.32))
+            nap(random.uniform(0.18, 0.32))
             click_hold(sx, sy, ms=random.uniform(0.07, 0.13))
             return True, float(sc)
         except Exception:
@@ -16537,7 +16656,7 @@ class App(tk.Tk):
             if not self._mondex_dim(L, T, k):
                 return True
             click_at(L + int(MONDEX_EMPTY[0] * k), T + int(MONDEX_EMPTY[1] * k))
-            time.sleep(random.uniform(*MONDEX_GAP) * tp)
+            nap(random.uniform(*MONDEX_GAP) * tp)
         return not self._mondex_dim(L, T, k)
 
     def _mondex_claim_btn(self, img):
@@ -16553,14 +16672,14 @@ class App(tk.Tk):
             y0 = T + int(MONDEX_DRAG_Y0 * k)
             dy = int(MONDEX_DRAG_DY * k) * (-1 if up else 1)
             pyautogui.moveTo(x, y0)
-            time.sleep(random.uniform(0.15, 0.30) * tp)
+            nap(random.uniform(0.15, 0.30) * tp)
             pyautogui.mouseDown(x, y0)
-            time.sleep(random.uniform(0.08, 0.16))
+            nap(random.uniform(0.08, 0.16))
             for s in range(1, 9):          # 사람처럼 조금씩 민다
                 pyautogui.moveTo(x, y0 + int(dy * s / 8))
-                time.sleep(random.uniform(0.025, 0.05))
+                nap(random.uniform(0.025, 0.05))
             pyautogui.mouseUp(x, y0 + dy)
-            time.sleep(random.uniform(*MONDEX_GAP) * tp)
+            nap(random.uniform(*MONDEX_GAP) * tp)
             return True
         except Exception:
             return False
@@ -16589,7 +16708,7 @@ class App(tk.Tk):
             if self._mondex_red(im2, MONDEX_ROW_DOT, ry + 2, k) < MONDEX_RED_MIN:
                 continue
             click_at(L + int(MONDEX_ROW_X * k), T + int((ry + 13) * k))
-            time.sleep(random.uniform(*MONDEX_GAP) * tp)
+            nap(random.uniform(*MONDEX_GAP) * tp)
             im3 = grab_window((L + 60, T + 60))
             bb = self._mondex_claim_btn(im3) if im3 is not None else None
             if not bb:
@@ -16600,7 +16719,7 @@ class App(tk.Tk):
                           f"[보상 받기] 가 회색이라 넘어간다")
                 continue
             click_at(L + bb[0], T + bb[1])
-            time.sleep(random.uniform(*MONDEX_GAP) * tp)
+            nap(random.uniform(*MONDEX_GAP) * tp)
             if not self._mondex_close_pop(L, T, k, tp):
                 click_log(f"[도감] #{si+1:02d} 보상 팝업이 안 닫힌다 — 그만둔다")
                 return got + 1
@@ -16623,7 +16742,7 @@ class App(tk.Tk):
         got = 0
         try:
             self._focus_client_at((L + 60, T + 60))
-            time.sleep(random.uniform(*MONDEX_GAP) * _tp)
+            nap(random.uniform(*MONDEX_GAP) * _tp)
             # 들어가기 전에 **남아 있는 보상 팝업부터** 치운다
             self._mondex_close_pop(L, T, k, _tp)
             for ti in range(MONDEX_TAB_N):
@@ -16637,7 +16756,7 @@ class App(tk.Tk):
                 if self._mondex_red(img, MONDEX_TAB_DOT, ty, k) < MONDEX_RED_MIN:
                     continue                   # 그 분류는 받을 게 없다 → 다음 분류
                 click_at(L + int(MONDEX_TAB_X * k), T + int(ty * k))
-                time.sleep(random.uniform(*MONDEX_GAP) * _tp)
+                nap(random.uniform(*MONDEX_GAP) * _tp)
                 _tgot = 0
                 # 🔁 **이 분류를 끝낼 때까지** 반복한다 (받으면 다음 단계가 또 열린다)
                 for _pass in range(MONDEX_PASSES):
@@ -16670,7 +16789,7 @@ class App(tk.Tk):
             #    ⚠ 안 닫으면 그 클라가 도감을 띄운 채 남아 사냥을 못 한다.
             for _e in range(MONDEX_ESC):
                 press_key("esc")
-                time.sleep(random.uniform(*MONDEX_ESC_GAP))
+                nap(random.uniform(*MONDEX_ESC_GAP))
             click_log(f"[도감] 🔙 #{si+1:02d} ESC {MONDEX_ESC}번 — 사냥 화면으로")
         except Exception as e:
             click_log(f"[도감] #{si+1:02d} {name} 오류: {e}")
@@ -16705,7 +16824,7 @@ class App(tk.Tk):
                     break
                 if getattr(self, "_stop_flag", False):
                     break
-                time.sleep(random.uniform(*MONDEX_OPEN_GAP))
+                nap(random.uniform(*MONDEX_OPEN_GAP))
             if not ok:
                 click_log(f"[도감] [{name}] 도감 화면이 아니다 (일치도 {sc:.2f}, "
                           f"기준 {MONDEX_MATCH}) — {MONDEX_OPEN_TRIES}번 봤다 "
@@ -16727,6 +16846,7 @@ class App(tk.Tk):
         if self._is_busy():
             self.status.set("🗂 다른 작업이 도는 중입니다")
             return
+        nap_clear()      # ⏹ 새 작업 — 멈춤 깃발 내리기 (2026-11-03)
         # ✋ 사람이 쓰는 중이면 끼어들지 않는다 (2026-10-21 사용자 지시)
         if self._human_busy():
             self._human_wait_log("도감")
@@ -16916,7 +17036,7 @@ class App(tk.Tk):
             s = random.uniform(*rng) * _tp
             if random.random() < MAIL_HOLD:
                 s += random.uniform(*MAIL_HOLD_T)
-            time.sleep(s)
+            nap(s)
 
         try:
             self._focus_client_at(anc)
@@ -17034,7 +17154,7 @@ class App(tk.Tk):
                     while time.time() < _end:          # 쉬는 중에도 멈춤이 먹는다
                         if getattr(self, "_stop_flag", False):
                             break
-                        time.sleep(0.3)
+                        nap(0.3)
             if now:
                 click_log(f"[우편] ⏱ 실제 {int(time.time()-_t0)}초 걸렸다")
             click_log(f"[우편] 끝 — {n}개 받았다")
@@ -17051,6 +17171,7 @@ class App(tk.Tk):
         if self._is_busy():
             self.status.set("📬 다른 작업이 도는 중입니다")
             return
+        nap_clear()      # ⏹ 새 작업 — 멈춤 깃발 내리기 (2026-11-03)
         self.status.set("📬 받을 곳을 찾는 중...")
         # 🔙 **런처를 맨 뒤로** — 앞에 있으면 그 자리 클릭을 런처가 먹는다
         #   (2026-10-20 사용자 지시 · 도감과 같은 이유)
@@ -17105,11 +17226,11 @@ class App(tk.Tk):
             if key and keys:
                 try:
                     import lineagem_island as _isl
-                    time.sleep(random.uniform(*P0_RECHECK_WAIT))
+                    nap(random.uniform(*P0_RECHECK_WAIT))
                     _res, _txt = None, ""
                     for _t in range(P0_RECHECK_TRIES):
                         if _t:
-                            time.sleep(random.uniform(*P0_RECHECK_GAP))
+                            nap(random.uniform(*P0_RECHECK_GAP))
                         _sv = _isl.place_scores(list(keys), anc)
                         _r = sorted(_sv.items(), key=lambda kv: -kv[1]) if _sv else []
                         if not _r:
@@ -17149,9 +17270,9 @@ class App(tk.Tk):
                               f"— 돌리지 않는다")
                     return False
             self._focus_client_at(anc)
-            time.sleep(random.uniform(0.3, 0.6))
+            nap(random.uniform(0.3, 0.6))
             press_key(P0_HOME_KEY)
-            time.sleep(random.uniform(*P0_HOME_WAIT))
+            nap(random.uniform(*P0_HOME_WAIT))
             click_log(f"[물약감시] 🏠 #{si+1:02d} 귀환 (숫자 {P0_HOME_KEY}) "
                       f"— 물약 0개로 다시 넣으면 죽으므로 먼저 뺀다")
             return True
@@ -17191,7 +17312,7 @@ class App(tk.Tk):
                 if self._p0_go_home(si, anc, key=key, keys=_allk):
                     ok.append((si, key, didx, v, pv))
                 if i < len(hits) - 1:
-                    time.sleep(random.uniform(*P0_HOME_GAP))
+                    nap(random.uniform(*P0_HOME_GAP))
             if not ok:
                 click_log("[물약감시] 🏠 귀환된 슬롯이 없다 — 아무것도 돌리지 않는다")
                 return
@@ -17218,7 +17339,23 @@ class App(tk.Tk):
                 click_log(f"[물약감시] #{si+1:02d} 실행 오류: {e}")
 
     def _wake_key(self, anchor):
-        """그 좌표의 리니지M 창 손잡이 — '누구를 깨웠나' 를 기억하는 열쇠."""
+        """그 좌표의 리니지M 창 손잡이 — '누구를 깨웠나' 를 기억하는 열쇠.
+
+        🚨 **`game_window_at` 을 먼저 쓴다** (2026-11-03).
+           `WindowFromPoint` 는 **맨 위 창**을 돌려주므로, 런처·클로드가 그 자리를
+           덮고 있으면 **그 창의 손잡이**가 열쇠가 된다. 그러면 F11 이 적어둔 열쇠와
+           런처가 보는 열쇠가 **서로 달라져** '방금 깨웠다' 를 못 알아보고
+           **같은 클라를 두 번 깨운다**.
+           `game_window_at` 은 게임 창만 보고 **사각형 포함**으로 찾으므로
+           가려져 있어도 같은 답을 준다 (2026-10-20 `_focus_client_at` 과 같은 교훈).
+           🚫 이 순서를 되돌리지 말 것."""
+        try:
+            from precise_click import game_window_at
+            h = game_window_at(int(anchor[0]), int(anchor[1]))
+            if h:
+                return int(h)
+        except Exception:
+            pass
         try:
             import win32gui, ctypes
             hwnd = win32gui.WindowFromPoint((int(anchor[0]), int(anchor[1])))
@@ -17239,14 +17376,14 @@ class App(tk.Tk):
         except Exception:
             pass
 
-    def _wake_recent(self, anchor):
-        """방금(`WAKE_COOL` 안에) 누가 깨운 클라인가."""
+    def _wake_recent(self, anchor, cool=None):
+        """방금(`cool` 초 안에) 누가 깨운 클라인가 (기본 `WAKE_COOL`)."""
         try:
             k = self._wake_key(anchor)
             if k is None:
                 return False
             t0 = (getattr(self, "_woke_at", None) or {}).get(k, 0)
-            return (time.time() - t0) < WAKE_COOL
+            return (time.time() - t0) < (cool or WAKE_COOL)
         except Exception:
             return False
 
@@ -17263,21 +17400,22 @@ class App(tk.Tk):
         try:
             if not (anchor and fkey in SLEEP_WAKE and has_sleep_img(fkey)):
                 return False
-            if self._wake_recent(anchor):
-                click_log(f"{fkey} [{name}] 방금 깨운 클라 — 다시 깨우지 않는다")
+            if self._wake_recent(anchor, WAKE_COOL_RUN):
+                click_log(f"{fkey} [{name}] 방금(F11 등) 깨운 클라 — 다시 깨우지 않는다"
+                          f" ({WAKE_COOL_RUN:.0f}초 안)")
                 return False
             _sx, _sy, _ss = find_sleep_img(fkey, anchor)
             if _sx is None:
                 return False                  # 깨어 있다 → 그대로 좌표 클릭
             self._focus_client_at(anchor)
-            time.sleep(random.uniform(0.20, 0.35))
+            nap(random.uniform(0.20, 0.35))
             if find_sleep_img(fkey, anchor)[0] is None:
                 self._wake_mark(anchor)
                 click_log(f"{fkey} [{name}] 그 사이 깨어났다 — Z 를 누르지 않는다")
                 return False
             press_key(SLEEP_WAKE_KEY)
             self._wake_mark(anchor)
-            time.sleep(random.uniform(*SLEEP_WAKE_WAIT))
+            nap(random.uniform(*SLEEP_WAKE_WAIT))
             click_log(f"{fkey} [{name}] 절전 (일치도 {_ss:.2f}) → "
                       f"'{SLEEP_WAKE_KEY.upper()}' 눌러 깨우고 시작")
             self.status.set(f"{icon} [{name}] 절전 — "
@@ -17301,7 +17439,7 @@ class App(tk.Tk):
             try:
                 if w == 0:
                     self._focus_client_at(anchor)
-                    time.sleep(random.uniform(0.12, 0.24))    # 랜덤 폭은 유지
+                    nap(random.uniform(0.12, 0.24))    # 랜덤 폭은 유지
                     press_key(SLEEP_WAKE_KEY)
                     _how = f"'{SLEEP_WAKE_KEY.upper()}' 키"
                 else:
@@ -17316,10 +17454,10 @@ class App(tk.Tk):
                 # ⏱ **자주 볼수록 빨리 넘어간다** (2026-10-20 "속도 좀 올리고").
                 #    0.25 → 0.12초. 깨어난 것을 **확인한 뒤** 넘어가므로
                 #    자주 보는 것은 안전한 쪽이다 (덜 풀린 채 넘어가지 않는다).
-                time.sleep(0.12)
+                nap(0.12)
                 if find_sleep_img(fkey, anchor)[0] is None:
                     click_log(f"[{tag}] {_who}깨어남 — {_how} ({w+1}번째)")
-                    time.sleep(random.uniform(0.25, 0.45))    # 화면 안정화
+                    nap(random.uniform(0.25, 0.45))    # 화면 안정화
                     return True
         click_log(f"[{tag}] {_who}⚠ {SLEEP_WAKE_TRIES}번(Z + 글자 클릭) 해도 안 깨어남")
         return False
@@ -17415,7 +17553,7 @@ class App(tk.Tk):
                       if _in_list else (FIX_CLICK_DELAY, FIX_CLICK_RETRY))
             _saw_sleep = False
             for k, _d in enumerate(_looks):
-                time.sleep(random.uniform(*_d))
+                nap(random.uniform(*_d))
                 if self._is_busy():
                     return
                 hit = self._check_hits(only={si})
@@ -17792,7 +17930,7 @@ class App(tk.Tk):
             ok, which, sc = False, "", 0.0
             _t0 = time.time()
             for _w in AWAKEN_SEE_WAIT:
-                time.sleep(max(0.0, _w - (time.time() - _t0)))
+                nap(max(0.0, _w - (time.time() - _t0)))
                 ok, which, sc = self._awaken_screen_seen()
                 if ok:
                     break
@@ -18089,9 +18227,9 @@ class App(tk.Tk):
                               f"닫는다 ({_et+1}/{FIX_ESC_TRIES})")
                     self.status.set(f"🚪 복구 #{si:02d} — 열린 창을 ESC 로 닫는 중…")
                     self._focus_client_at(_ea)
-                    time.sleep(random.uniform(0.12, 0.22))
+                    nap(random.uniform(0.12, 0.22))
                     press_esc(1)
-                    time.sleep(random.uniform(0.30, 0.55))
+                    nap(random.uniform(0.30, 0.55))
                 else:
                     click_log(f"fix #{si:02d} ⚠ 창이 안 닫혔다 — 그래도 진행한다")
         except Exception as _ee:
@@ -18126,7 +18264,7 @@ class App(tk.Tk):
                                   f"한 번만 봤으면 복구를 안 하고 지웠을 것")
                     break
                 if _t < FIX_SEE_TRIES - 1:
-                    time.sleep(random.uniform(*FIX_SEE_GAP))
+                    nap(random.uniform(*FIX_SEE_GAP))
             if hit is not None and not _seen:
                 _still_sleep = int(si) in getattr(self, "_last_sleep", set())
                 if _woke and not _still_sleep:
@@ -18332,7 +18470,7 @@ class App(tk.Tk):
                                   max(3, int(round(ref.height * _k)))))
             except Exception:
                 pass
-        hit, slept, _scores = [], [], []
+        hit, slept, _scores, _raw = [], [], [], []
         _sleep_t = None
         try:
             if has_sleep_img("fix"):
@@ -18354,8 +18492,7 @@ class App(tk.Tk):
                 im = _full.crop((x0, y0, x1, y1)).convert("L")
                 _sc = self._img_match(im, ref)
                 _scores.append((i + 1, round(_sc, 2)))
-                if _sc >= WARN_MATCH:   # 있다 = 떠 있다
-                    hit.append(i + 1)
+                _raw.append((i + 1, float(_sc)))   # 겨루기는 루프가 끝난 뒤
                 # 같은 캡처로 '지금 자고 있나'도 본다 — 자는 동안은 십자가가 가려서
                 # 안 보이므로, 그걸 '복구됨'으로 오해해 지우면 안 된다 (2026-08-29)
                 try:
@@ -18373,7 +18510,22 @@ class App(tk.Tk):
                     pass
             except Exception:
                 pass
-        # 🩹 **한 슬롯만 본 결과로 전체 기록을 지우지 않는다** (2026-10-03).
+        # 🚨 **겨루기로 가린다** — 점수 ≥ 기준 **그리고** ≥ 바닥 × 배수 (2026-11-03).
+        #    바닥은 이번에 본 16클라의 p25. 한 슬롯만 봤을 때는 마지막 전체 확인의
+        #    바닥을 쓴다 (한 개만 보고는 잡음 수준을 알 수 없으므로).
+        _base = None
+        if len(_raw) >= WARN_BASE_MIN:
+            _v = sorted(x[1] for x in _raw)
+            _base = _v[len(_v) // 4]
+            self._warn_base = _base
+        else:
+            _base = getattr(self, "_warn_base", None)
+        _need = WARN_MATCH
+        if _base:
+            _need = max(WARN_MATCH, min(WARN_HIGH, _base * WARN_RATIO))
+        self._warn_need = _need
+        hit = [sn for sn, v in _raw if v >= _need]
+        # 🩹 **한 슬롯만 본 결과로 전체 기록을 지우지 않습니다** (2026-10-03).
         #    `only` 를 주면 그 슬롯만 훑는데, 예전엔 `slept` 를 통째로 덮어써서
         #    **나머지 15개의 '자고 있음' 표시가 사라졌다.** 그러면 바로 뒤에
         #    `_run_fix_slot`/`_fix_verify` 가 `_last_sleep` 을 보고 "안 자고 있는데
@@ -18432,7 +18584,7 @@ class App(tk.Tk):
                         _w0 = time.time()
                         while (self._is_busy()
                                and time.time() - _w0 < WAKE_BUSY_WAIT_MAX):
-                            time.sleep(5.0)
+                            nap(5.0)
                         if time.time() - _w0 > 2:
                             click_log(f"[경고확인] ⏳ 작업이 끝나기를 "
                                       f"{int(time.time()-_w0)}초 기다렸다 "
@@ -18493,7 +18645,10 @@ class App(tk.Tk):
             _ss = getattr(self, "_last_scores", []) or []
             click_log("[경고확인] 십자가 점수 " +
                       " ".join(f"{a:02d}:{b:.2f}" for a, b in _ss) +
-                      f"  (기준 {WARN_MATCH}) → 뜬 곳 {hit}")
+                      f"  (기준 {getattr(self, '_warn_need', WARN_MATCH):.2f}"
+                      f" = max({WARN_MATCH}, 바닥 "
+                      f"{getattr(self, '_warn_base', 0) or 0:.2f}×{WARN_RATIO}))"
+                      f" → 뜬 곳 {hit}")
         except Exception:
             pass
         _msg = f"⚠ 경고 확인 — 뜬 곳 {len(hit)}개 {hit or ''}"
@@ -18535,7 +18690,7 @@ class App(tk.Tk):
             self._wake_until((cx, cy), si, tag="경고확인")
         if _skip:
             click_log(f"[경고확인] 방금 깨운 {len(_skip)}개는 건너뜀 {_skip}")
-        time.sleep(random.uniform(0.4, 0.7))      # 화면 안정화
+        nap(random.uniform(0.4, 0.7))      # 화면 안정화
         try:
             if _fg0:
                 import win32gui
@@ -19078,7 +19233,7 @@ class App(tk.Tk):
         res = {}
         for tries in range(3):
             if tries:
-                time.sleep(0.7)
+                nap(0.7)
                 nc = self._scroll_grab()
                 if nc:
                     for i in range(len(crops)):
@@ -19898,14 +20053,14 @@ class App(tk.Tk):
             if not all(abs(px[i] - col[i]) <= PURPLE_POPUP_TOL for i in range(3)):
                 return
             p0 = pyautogui.position()
-            time.sleep(0.15)
+            nap(0.15)
             if pyautogui.position() != p0:      # 마우스를 쓰는 중이면 다음 기회에
                 return
             back = pyautogui.position()
             chk = self.cfg.get("purple_popup_checkbox")
             if chk:
-                pyautogui.click(*chk); time.sleep(0.35)
-            pyautogui.click(*cls); time.sleep(0.2)
+                pyautogui.click(*chk); nap(0.35)
+            pyautogui.click(*cls); nap(0.2)
             try: pyautogui.moveTo(*back)        # 커서 원위치
             except Exception: pass
             self.after(0, lambda: self.status.set("✔ 퍼플 팝업 자동으로 닫음"))
@@ -20152,7 +20307,7 @@ class App(tk.Tk):
         try:
             self.status.set("2초 후 패스권 실행...")
             self.after(0, self._minimize_all)
-            time.sleep(2)
+            nap(2)
             slots = self.cfg.get("pass_slots", [])
             if slot_idx is not None:
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
@@ -20169,9 +20324,9 @@ class App(tk.Tk):
                     self.status.set(f"🎫 [{name}] {PASS_LABELS[ci]}...")
                     pyautogui.click(*coord)
                     if ci < len(coords) - 1:
-                        time.sleep(random.uniform(PASS_INNER_MIN, PASS_INNER_MAX) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                        nap(random.uniform(PASS_INNER_MIN, PASS_INNER_MAX) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._pass_stop: break
-                time.sleep(random.uniform(PASS_SLOT_MIN, PASS_SLOT_MAX))
+                nap(random.uniform(PASS_SLOT_MIN, PASS_SLOT_MAX))
             self.status.set("✔ 패스권 등록 완료!")
         except Exception as e:
             self.status.set(f"오류: {e}")
@@ -20189,7 +20344,7 @@ class App(tk.Tk):
         self._reg_pass_slot_idx  = slot_idx
         self._reg_pass_click_idx = click_idx
         self.status.set(f"3초 후 패스권 #{slot_idx+1} [{PASS_LABELS[click_idx]}] 위치 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="pass")])
 
     def on_pass_coord(self, x, y):
@@ -20376,7 +20531,7 @@ class App(tk.Tk):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
         def _cap():
             import ctypes
-            time.sleep(0.3)
+            nap(0.3)
             end = time.time() + 5
             captured = None
             while time.time() < end:
@@ -20388,7 +20543,7 @@ class App(tk.Tk):
                         break
                 if captured is not None:
                     break
-                time.sleep(0.02)
+                nap(0.02)
             if captured is None:
                 self.after(0, lambda: self.status.set("단축키 지정 취소 (시간초과)"))
                 return
@@ -20430,7 +20585,7 @@ class App(tk.Tk):
         self._reg_item_click_idx = click_idx
         what = "쓸어올리기 시작점" if click_idx == 2 else f"클릭{click_idx+1}"
         self.status.set(f"3초 후 아이템정리 #{slot_idx+1} [{what}] 위치 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="item")])
 
     def on_item_coord(self, x, y):
@@ -20496,7 +20651,7 @@ class App(tk.Tk):
         try:
             self.status.set("2초 후 아이템정리 실행...")
             self.after(0, self._send_to_back)
-            time.sleep(2)
+            nap(2)
             slots = self.cfg.get("item_slots", [])
             if slot_idx is not None:
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
@@ -20512,12 +20667,12 @@ class App(tk.Tk):
                 if coords[0]:
                     self.status.set(f"🧹 [{name}] 클릭1...")
                     click_at(*coords[0])
-                    time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                    nap(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._item_stop: break
                 if coords[1]:
                     self.status.set(f"🧹 [{name}] 클릭2...")
                     click_at(*coords[1])
-                    time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                    nap(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._item_stop: break
                 if len(coords) > 2 and coords[2]:
                     # 클릭3 = 누른 채 위로 쓸어올리기 (같은 자리에서 2회 반복)
@@ -20527,16 +20682,16 @@ class App(tk.Tk):
                         self.status.set(f"🧹 [{name}] 위로 쓸어올리기 "
                                         f"{rep+1}/{ITEM_SWIPE_COUNT}... (이때만 커서를 씁니다)")
                         pyautogui.mouseDown(sx, sy)
-                        time.sleep(0.09)              # 드래그로 인식될 시간
+                        nap(0.09)              # 드래그로 인식될 시간
                         steps = 6                     # 빠른 플릭 — 속도가 높을수록 관성 스크롤이 세짐
                         for st in range(1, steps + 1):
                             pyautogui.moveTo(sx, sy - int(ITEM_SWIPE_DIST * st / steps))
-                            time.sleep(0.005)
+                            nap(0.005)
                         pyautogui.mouseUp(sx, sy - ITEM_SWIPE_DIST)   # 끝에서 바로 놓기 → 관성 스크롤
                         if rep < ITEM_SWIPE_COUNT - 1:
-                            time.sleep(random.uniform(0.4, 0.7))   # 다음 쓸어올리기 전 잠깐 대기
+                            nap(random.uniform(0.4, 0.7))   # 다음 쓸어올리기 전 잠깐 대기
                 if self._item_stop: break
-                time.sleep(4)
+                nap(4)
             self.status.set("✔ 아이템정리 완료!")
         except Exception as e:
             self.status.set(f"오류: {e}")
@@ -20656,7 +20811,7 @@ class App(tk.Tk):
         def _rereg():
             self._char_rereg_idx = idx
             self.status.set(f"3초 후 캐릭터 #{idx+1} 위치 클릭하세요!")
-            self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+            self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                       CoordOverlay(self, mode="char_rereg")])
         def _save(_i, nx, ny, i=idx):
             bl = self.cfg.setdefault("char_btns", [])
@@ -21035,7 +21190,7 @@ class App(tk.Tk):
     def _wait(self, sec):
         for _ in range(int(sec * 10)):
             if self._stop_flag: return False
-            time.sleep(0.1)
+            nap(0.1)
         return True
 
     # 커서를 쓰지 않는(메시지로 클릭하는) 런처 — 사용자가 마우스를 써도 안 기다린다
@@ -21075,7 +21230,7 @@ class App(tk.Tk):
                 shown = True
             if time.time() - t0 > limit:        # 너무 오래 붙잡고 있지 않게
                 return True
-            time.sleep(0.06)
+            nap(0.06)
 
     def _wait_mouse_idle(self, stop_flag_name, idle_sec=1.5, fkey=None):
         """마우스를 쓰는 중이면 대기. 안 쓰면 즉시 True.
@@ -21086,7 +21241,7 @@ class App(tk.Tk):
         CHECK = 0.1
         prev = pyautogui.position()
         # 움직임이 없으면 즉시 통과
-        time.sleep(CHECK)
+        nap(CHECK)
         cur = pyautogui.position()
         if cur == prev:
             return not getattr(self, stop_flag_name, False)
@@ -21097,7 +21252,7 @@ class App(tk.Tk):
         while True:
             if getattr(self, stop_flag_name, False):
                 return False
-            time.sleep(CHECK)
+            nap(CHECK)
             cur = pyautogui.position()
             if cur != prev:
                 last_move = time.time()
@@ -21108,13 +21263,13 @@ class App(tk.Tk):
     def _click_wait(self, sec):
         for _ in range(int(sec * 10)):
             if self._click_stop: return False
-            time.sleep(0.1)
+            nap(0.1)
         return True
 
     def _hunt_wait(self, sec):
         for _ in range(int(sec * 10)):
             if self._hunt_stop: return False
-            time.sleep(0.1)
+            nap(0.1)
         return True
 
     # ── 좌표 등록 ─────────────────────────────────────────────────────
@@ -21134,7 +21289,7 @@ class App(tk.Tk):
             try:
                 if self.cfg.get("profile_reveal_btn"):
                     pyautogui.click(*self.cfg["profile_reveal_btn"])
-                    time.sleep(1)
+                    nap(1)
                 ocr_id = self._ocr_profile_id()
                 if ocr_id:
                     self.cfg["profile_target_id"] = ocr_id
@@ -21387,7 +21542,7 @@ class App(tk.Tk):
         """드래그 영역 확정 후 — 오버레이가 사라진 다음 그 영역을 캡처해 기준으로 저장."""
         def _do():
             try:
-                time.sleep(0.4)   # 오버레이(반투명) 잔상이 사라진 뒤 캡처
+                nap(0.4)   # 오버레이(반투명) 잔상이 사라진 뒤 캡처
                 from PIL import ImageGrab
                 x, y, w, h = region["x"], region["y"], region["w"], region["h"]
                 img = ImageGrab.grab(bbox=(x, y, x+w, y+h), all_screens=True)
@@ -21409,7 +21564,7 @@ class App(tk.Tk):
             try:
                 if self.cfg.get("profile_reveal_btn"):
                     pyautogui.click(*self.cfg["profile_reveal_btn"])
-                    time.sleep(2)
+                    nap(2)
             except Exception:
                 pass
             self.after(0, lambda: _ProfileRefOverlay(self))
@@ -21475,7 +21630,7 @@ class App(tk.Tk):
         try:
             if self.cfg.get("profile_reveal_btn"):
                 pyautogui.click(*self.cfg["profile_reveal_btn"])
-                time.sleep(1)
+                nap(1)
             from PIL import ImageGrab
             ax, ay, aw, ah = area["x"], area["y"], area["w"], area["h"]
             img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
@@ -21627,7 +21782,7 @@ class App(tk.Tk):
     def _reg_seq_coord(self, idx):
         self._seq_reg_idx = idx
         self.status.set(f"3초 후 절전해제 #{idx+1} 위치를 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="seq")])
 
     def on_seq_coord(self, x, y):
@@ -21702,23 +21857,45 @@ class App(tk.Tk):
         try:
             # 클릭 좌표를 런처/연속클릭 창이 가리지 않도록 확실히 최소화 후 실행
             self.after(0, self._seq_hide)
-            time.sleep(0.15)
+            nap(0.15)
             mn = float(self.cfg.get("seq_min", SEQ_MIN))
             mx = float(self.cfg.get("seq_max", SEQ_MAX))
             if mx < mn:
                 mn, mx = mx, mn
-            random.shuffle(coords)   # 매 실행마다 클릭 순서 무작위
-            n = len(coords)
             # 🔆 **이미 깨어 있으면 누르지 않는다** (2026-10-18 사용자 지시).
             #    절전 그림이 없으면 확인을 건너뛰고 예전처럼 전부 누른다.
+            #    ⚠ 아래 '16클라 창 직접' 이 이 값을 보므로 **반드시 먼저** 정한다.
             _chk = SEQ_SKIP_AWAKE and bool(sleep_img_path("fix")
                                            and os.path.exists(sleep_img_path("fix")))
+            # 🪟 **절전 그림이 있으면 16클라 창을 직접 돈다** (2026-11-03).
+            #    등록 좌표(`seq_slots`)의 **창 안 상대 자리가 슬롯마다 다르고**
+            #    1~4번은 아예 **창 밖(옆바)** 이라(실측 546/456/379/329, 창 가로 546)
+            #    그 좌표로는 `grab_window` 가 창을 못 찾아 **'이미 깨어 있음' 으로
+            #    건너뛰었다.** 그래서 F11 이 4개를 못 깨우고, 바로 뒤에 도는 런처가
+            #    Z 로 또 깨웠다 = 사용자가 본 '두 번 깨움'.
+            #    창 가운데를 기준으로 삼으면 **좌표가 틀어져도·창 크기가 달라도** 맞다.
+            #    🚫 되돌리지 말 것. 절전 그림이 없을 때만 등록 좌표를 쓴다.
+            _rc = None
+            if _chk:
+                try:
+                    _rc = self._client_rects_by_slot()
+                except Exception:
+                    _rc = None
+            if _rc and len(_rc) >= 4:
+                coords = [((l + r) // 2, (t + b) // 2) for (l, t, r, b) in _rc]
+                click_log(f"[절전해제] 🪟 리니지M 창 {len(coords)}개를 직접 돕니다 "
+                          f"(등록 좌표 {len(seq)}개는 쓰지 않습니다 — 창 안 자리가 "
+                          f"슬롯마다 어긋나 있습니다)")
+            random.shuffle(coords)   # 매 실행마다 클릭 순서 무작위
+            n = len(coords)
             _hit, _skip, _sc = 0, 0, []
+            _moved = []            # 등록 좌표와 다른 자리를 누른 것 (기록용)
             _cut = False
             for i, (x, y) in enumerate(coords):
                 if self._seq_stop_now():
                     _cut = True
                     break
+                _cx, _cy = x, y
                 if _chk:
                     _sx, _sy, _sv = find_sleep_img("fix", (x, y))
                     _sc.append(f"{_sv:.2f}" + ("😴" if _sx is not None else "✔"))
@@ -21727,16 +21904,28 @@ class App(tk.Tk):
                         self.after(0, lambda a=i, s=_skip: self.status.set(
                             f"🔆 절전해제 {a+1}/{n} — 이미 깨어 있어 건너뜀 ({s}개)"))
                         continue
+                    # 😴 **글자를 찾은 자리를 누른다** (2026-11-03). 등록 좌표의
+                    #    창 안 상대 자리가 슬롯마다 달라(실측 546/456/379/329)
+                    #    1~4번은 **창 밖(옆바)** 을 누르고 있었다 → 안 깨어났고,
+                    #    바로 뒤 런처가 Z 로 또 깨웠다(사용자가 본 '두 번 깨움').
+                    #    🚫 등록 좌표만 쓰도록 되돌리지 말 것.
+                    _sp = sleep_spot_screen("fix", (x, y))
+                    if _sp:
+                        _cx, _cy = _sp[0], _sp[1]
+                        if abs(_cx - x) > 8 or abs(_cy - y) > 8:
+                            _moved.append(f"{i+1}:({x},{y})->({_cx},{_cy})")
                 _hit += 1
                 self.after(0, lambda a=i: self.status.set(f"🔆 절전해제 {a+1}/{n} (랜덤 순서)..."))
-                pyautogui.click(x, y)
+                pyautogui.click(_cx, _cy)
                 # 😴 **깨웠다고 적어둔다** — 안 그러면 바로 뒤에 도는 경고확인
                 #    (`_wake_slots`)이 **같은 클라를 Z 로 또 깨운다**
                 #    (2026-10-20 사용자: "절전을 해제하고 또 한 번 더 해제하는 거 같아").
                 #    16클라를 한 바퀴 더 도는 32초도 통째로 아낀다.
-                self._wake_mark((x, y))
+                self._wake_mark((_cx, _cy))
+                if (_cx, _cy) != (x, y):
+                    self._wake_mark((x, y))      # 등록 좌표로도 적어둔다
                 if i < n - 1:
-                    time.sleep(random.uniform(mn, mx))   # 슬롯간 간격 (설정값 그대로, 추가 간격 없음)
+                    nap(random.uniform(mn, mx))   # 슬롯간 간격 (설정값 그대로, 추가 간격 없음)
             # 🗒 **왜 그렇게 했는지 항상 남긴다** (2026-10-20).
             #   예전엔 건너뛴 수가 0 이면 아무 말도 없어서, 멈춤 깃발 때문에
             #   아무것도 안 했을 때도 `0개 깨움` 한 줄뿐이라 원인을 짚을 수 없었다.
@@ -21753,6 +21942,9 @@ class App(tk.Tk):
             if _sc:
                 click_log(f"[절전해제] 점수 {' '.join(_sc)} "
                           f"(기준 {SLEEP_MATCH:.2f} · 😴=깨움 ✔=건너뜀)")
+            if _moved:
+                click_log("[절전해제] 😴 등록 좌표가 글자와 어긋나 **찾은 자리**를 "
+                          "눌렀습니다 — " + " ".join(_moved))
             self.after(0, lambda m=_msg: self.status.set(m))
         except Exception as e:
             self.after(0, lambda err=e: self.status.set(f"절전해제 오류: {err}"))
@@ -21807,9 +21999,9 @@ class App(tk.Tk):
                     if not opened:
                         continue
                     self._focus_client_at(anc)
-                    time.sleep(random.uniform(0.12, 0.22))
+                    nap(random.uniform(0.12, 0.22))
                     press_esc(1)
-                    time.sleep(random.uniform(0.30, 0.55))
+                    nap(random.uniform(0.30, 0.55))
                     _o, _s, _w = _isl.esc_win_open(anc)
                     (left if _o else shut).append(
                         f"#{si+1:02d}({who.replace('.png','')} {sc:.2f})")
@@ -21838,7 +22030,7 @@ class App(tk.Tk):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
         def _cap():
             import ctypes
-            time.sleep(0.3)  # 이전 클릭이 떼질 시간
+            nap(0.3)  # 이전 클릭이 떼질 시간
             end = time.time() + 5
             captured = None
             while time.time() < end:
@@ -21850,7 +22042,7 @@ class App(tk.Tk):
                         break
                 if captured is not None:
                     break
-                time.sleep(0.02)
+                nap(0.02)
             if captured is None:
                 self.after(0, lambda: self.status.set("단축키 지정 취소 (시간초과)"))
                 return
@@ -21934,7 +22126,7 @@ class App(tk.Tk):
     def _reg_slp_coord(self, idx):
         self._slp_reg_idx = idx
         self.status.set(f"3초 후 절전모드 #{idx+1} 위치를 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="slp")])
 
     def on_slp_coord(self, x, y):
@@ -21975,7 +22167,7 @@ class App(tk.Tk):
         self._slp_running = True
         try:
             self.after(0, self._seq_hide)
-            time.sleep(0.15)
+            nap(0.15)
             mn = float(self.cfg.get("slp_min", SEQ_MIN))
             mx = float(self.cfg.get("slp_max", SEQ_MAX))
             if mx < mn: mn, mx = mx, mn
@@ -21985,7 +22177,7 @@ class App(tk.Tk):
                 self.after(0, lambda a=i: self.status.set(f"🌙 절전모드 {a+1}/{n} (랜덤 순서)..."))
                 pyautogui.click(x, y)
                 if i < n - 1:
-                    time.sleep(random.uniform(mn, mx))
+                    nap(random.uniform(mn, mx))
             self.after(0, lambda: self.status.set(f"✔ 절전모드 완료 ({n}개)"))
         except Exception as e:
             self.after(0, lambda err=e: self.status.set(f"절전모드 오류: {err}"))
@@ -21998,7 +22190,7 @@ class App(tk.Tk):
         self.status.set("절전모드에 쓸 키를 누르세요... (5초 안에, ESC=취소)")
         def _cap():
             import ctypes
-            time.sleep(0.3)
+            nap(0.3)
             end = time.time() + 5
             captured = None
             while time.time() < end:
@@ -22009,7 +22201,7 @@ class App(tk.Tk):
                         captured = vk; break
                 if captured is not None:
                     break
-                time.sleep(0.02)
+                nap(0.02)
             if captured is None or captured == 0x1B:
                 self.after(0, lambda: self.status.set("절전모드 단축키 지정 취소"))
                 return
@@ -22138,7 +22330,7 @@ class App(tk.Tk):
     def _reg_wdoff_coord(self, idx):
         self._wdoff_reg_idx = idx
         self.status.set(f"3초 후 주말던전끄기 #{idx+1} 위치를 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="wdoff")])
 
     def on_wdoff_coord(self, x, y):
@@ -22201,7 +22393,7 @@ class App(tk.Tk):
         self._wdoff_running = True
         try:
             self.after(0, self._seq_hide)   # 런처/창 최소화 (연속클릭과 동일)
-            time.sleep(0.5)
+            nap(0.5)
             mn = float(self.cfg.get("wdoff_min", WDOFF_MIN))
             mx = float(self.cfg.get("wdoff_max", WDOFF_MAX))
             if mx < mn:
@@ -22212,7 +22404,7 @@ class App(tk.Tk):
                 self.after(0, lambda a=i: self.status.set(f"🚪 주말던전끄기 {a+1}/{n} (랜덤 순서)..."))
                 pyautogui.click(x, y)
                 if i < n - 1:
-                    time.sleep(random.uniform(mn, mx))
+                    nap(random.uniform(mn, mx))
             self.after(0, lambda: self.status.set(f"✔ 주말던전끄기 완료 ({n}개)"))
         except Exception as e:
             self.after(0, lambda err=e: self.status.set(f"주말던전끄기 오류: {err}"))
@@ -22225,7 +22417,7 @@ class App(tk.Tk):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
         def _cap():
             import ctypes
-            time.sleep(0.3)
+            nap(0.3)
             end = time.time() + 5
             captured = None
             while time.time() < end:
@@ -22237,7 +22429,7 @@ class App(tk.Tk):
                         break
                 if captured is not None:
                     break
-                time.sleep(0.02)
+                nap(0.02)
             if captured is None:
                 self.after(0, lambda: self.status.set("단축키 지정 취소 (시간초과)"))
                 return
@@ -22393,7 +22585,7 @@ class App(tk.Tk):
     def _reg_dc_coord(self, idx):
         self._dc_reg_idx = idx
         self.status.set(f"3초 후 일반던전충전 #{idx+1} 위치를 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="dc")])
 
     def on_dc_coord(self, x, y):
@@ -22436,7 +22628,7 @@ class App(tk.Tk):
         try:
             # 클릭 좌표를 런처/창이 가리지 않도록 최소화 후 실행(연속클릭과 동일)
             self.after(0, self._seq_hide)
-            time.sleep(0.15)
+            nap(0.15)
             mn = float(self.cfg.get("dc_min", DC_MIN))
             mx = float(self.cfg.get("dc_max", DC_MAX))
             if mx < mn:
@@ -22458,9 +22650,9 @@ class App(tk.Tk):
                 for k in range(taps):
                     click_at(x, y)
                     if k < taps - 1:
-                        time.sleep(intervals[k])
+                        nap(intervals[k])
                 if i < n - 1:
-                    time.sleep(random.uniform(mn, mx) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                    nap(random.uniform(mn, mx) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
             self.after(0, lambda: self.status.set(f"✔ 일반던전충전 완료 ({n}개 좌표)"))
         except Exception as e:
             self.after(0, lambda err=e: self.status.set(f"일반던전충전 오류: {err}"))
@@ -22473,7 +22665,7 @@ class App(tk.Tk):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
         def _cap():
             import ctypes
-            time.sleep(0.3)  # 이전 클릭이 떼질 시간
+            nap(0.3)  # 이전 클릭이 떼질 시간
             end = time.time() + 5
             captured = None
             while time.time() < end:
@@ -22485,7 +22677,7 @@ class App(tk.Tk):
                         break
                 if captured is not None:
                     break
-                time.sleep(0.02)
+                nap(0.02)
             if captured is None:
                 self.after(0, lambda: self.status.set("단축키 지정 취소 (시간초과)"))
                 return
@@ -22989,11 +23181,11 @@ class App(tk.Tk):
                 if len(kk) == 1 and kk.isalpha():
                     kk = kk.lower()
                 pyautogui.keyDown(kk)
-                time.sleep(st["hold"] / 1000.0 * random.uniform(*ITEMREG_JITTER))
+                nap(st["hold"] / 1000.0 * random.uniform(*ITEMREG_JITTER))
                 pyautogui.keyUp(kk)
                 done.append(kk)
                 if st["wait"]:
-                    time.sleep(st["wait"] / 1000.0 * random.uniform(*ITEMREG_JITTER))
+                    nap(st["wait"] / 1000.0 * random.uniform(*ITEMREG_JITTER))
             click_log(f"[아이템등록] ✋ 내가 정한 값으로 등록 — 키 {' → '.join(done)}")
             self.after(0, lambda: self.status.set(
                 "✅ 내가 정한 값으로 등록했습니다 (키 " + " → ".join(done) + ")"))
@@ -23139,7 +23331,7 @@ class App(tk.Tk):
                 _h0 = None
             self._itemreg_last_xy = tuple(xy)   # F7 '확인만' 이 쓸 자리
             self._itemreg_hold = False
-            time.sleep(random.uniform(*ITEMREG_WAIT))   # 화면이 뜨기를 기다린다
+            nap(random.uniform(*ITEMREG_WAIT))   # 화면이 뜨기를 기다린다
             done = []
             _trace = []
             _again = 0                 # 🔁 '앞 키 다시 누르기' 를 쓴 횟수
@@ -23241,12 +23433,12 @@ class App(tk.Tk):
                         _ok, _sc = itemreg_img_seen(k, xy)
                         if _ok or time.time() >= _dead:
                             break
-                        time.sleep(random.uniform(*ITEMREG_SEE_GAP))
+                        nap(random.uniform(*ITEMREG_SEE_GAP))
                     _trace.append(f"🖼{k+1}={_sc:.2f}")
                     if _ok:
                         # 창이 '보이는' 것과 '키를 받는' 것은 다르다 — 뜨자마자 누르면
                         # 열리는 중이라 씹힌다 (2026-09-16: "최저가를 안 찍고 눌러버린다").
-                        time.sleep(random.uniform(*ITEMREG_SETTLE))
+                        nap(random.uniform(*ITEMREG_SETTLE))
                     if not _ok and done and _again < ITEMREG_RETRY:
                         # 🔁 **앞 키가 씹힌 것일 수 있다 — 다시 눌러본다** (2026-10-28)
                         #    아이템을 고르기 전에 '4' 가 눌리면 등록 창이 안 뜬다
@@ -23262,7 +23454,7 @@ class App(tk.Tk):
                                   f"눌러본다 ({_again}/{ITEMREG_RETRY})")
                         try:
                             pyautogui.keyDown(_pk)
-                            time.sleep(random.uniform(0.07, 0.10))
+                            nap(random.uniform(0.07, 0.10))
                             pyautogui.keyUp(_pk)
                         except Exception:
                             pass
@@ -23271,12 +23463,12 @@ class App(tk.Tk):
                             _ok, _sc = itemreg_img_seen(k, xy)
                             if _ok or time.time() >= _dead:
                                 break
-                            time.sleep(random.uniform(*ITEMREG_SEE_GAP))
+                            nap(random.uniform(*ITEMREG_SEE_GAP))
                         _trace.append(f"🔁{k+1}={_sc:.2f}")
                         if _ok:
                             click_log(f"[아이템등록] 🔁 다시 누르니 {k+1}번 화면이 떴다 "
                                       f"(일치도 {_sc:.2f}) → 이어서 한다")
-                            time.sleep(random.uniform(*ITEMREG_SETTLE))
+                            nap(random.uniform(*ITEMREG_SETTLE))
                     if not _ok:
                         click_log(f"[아이템등록] {k+1}번({st['key']}) 그림이 안 보여 중단 "
                                   f"(최고 {_sc:.2f}) — 누른 키: "
@@ -23300,14 +23492,14 @@ class App(tk.Tk):
                         _fg = "?"
                     _trace.append(f"{_kk}→[{_fg[:18]}]")
                     pyautogui.keyDown(_kk)
-                    time.sleep(st["hold"] / 1000.0 * random.uniform(*ITEMREG_JITTER))
+                    nap(st["hold"] / 1000.0 * random.uniform(*ITEMREG_JITTER))
                     pyautogui.keyUp(_kk)
                 except Exception as _e:
                     click_log(f"[아이템등록] {k+1}번 키 '{st['key']}' 실패: {_e!r}")
                     return
                 done.append(st["key"])
                 if st["wait"]:
-                    time.sleep(st["wait"] / 1000.0 * random.uniform(*ITEMREG_JITTER))
+                    nap(st["wait"] / 1000.0 * random.uniform(*ITEMREG_JITTER))
             click_log(f"[아이템등록] 클릭 {tuple(xy)} → 창({rc[0]},{rc[1]}) "
                       f"에서 키 {' → '.join(done)} 누름  |  받은 창: "
                       f"{' · '.join(_trace)}")
@@ -23808,7 +24000,7 @@ class App(tk.Tk):
             if pw and pw.winfo_exists():
                 try: pw.withdraw()   # 팝업이 타깃 가리지 않게 잠시 숨김
                 except Exception: pass
-            self.withdraw(); time.sleep(0.2); CoordOverlay(self, mode="doll")
+            self.withdraw(); nap(0.2); CoordOverlay(self, mode="doll")
         self.after(3000, _go)
 
     def on_doll_coord(self, x, y):
@@ -23849,11 +24041,11 @@ class App(tk.Tk):
                     if not c: continue
                     if getattr(self, "_doll_stop", False): break
                     if _clicked == 0:
-                        time.sleep(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))  # 첫 클릭 전 여유
+                        nap(random.uniform(DOLL_LEAD_MIN, DOLL_LEAD_MAX))  # 첫 클릭 전 여유
                     self.status.set(f"[{name}] 좌표{j+1} 실행...")
                     click_at(*c)
                     _clicked += 1
-                    time.sleep(random.uniform(DOLL_MIN, DOLL_MAX))  # 좌표 간 간격
+                    nap(random.uniform(DOLL_MIN, DOLL_MAX))  # 좌표 간 간격
                 self.status.set(f"✔ [{name}] 슬롯 완료!")
             except Exception as e:
                 self.status.set(f"오류: {e}")
@@ -24406,7 +24598,7 @@ class App(tk.Tk):
             return
         self._minimize_claude()
         self._send_to_back()
-        time.sleep(0.25)
+        nap(0.25)
         click_at(int(c[0]), int(c[1]))
         self.status.set(f"▶ 인형탐험 #{idx+1:02d} 좌표{j+1} ({c[0]},{c[1]}) 눌렀습니다")
 
@@ -24498,7 +24690,7 @@ class App(tk.Tk):
         except Exception:
             pass
         def _go():
-            time.sleep(0.8)
+            nap(0.8)
             try:
                 act = self._do_click_or_wheel(fkey, j, c, slot)
             except Exception as e:
@@ -25040,7 +25232,7 @@ class App(tk.Tk):
         end = time.time() + sec
         while time.time() < end:
             if getattr(self, "_doll_stop", False): return False
-            time.sleep(0.05)
+            nap(0.05)
         return True
 
     def _start_doll(self):
@@ -25108,7 +25300,7 @@ class App(tk.Tk):
             got = None
             for _t in range(DOLL_SEE_TRIES):
                 if _t:
-                    time.sleep(random.uniform(*DOLL_SEE_GAP))
+                    nap(random.uniform(*DOLL_SEE_GAP))
                 got = self._doll_flags(reg[0])
                 if got is not None:
                     break
@@ -25186,7 +25378,7 @@ class App(tk.Tk):
             ready = [x for x in alive if state[x]["due"] <= now]
             if not ready:
                 nxt = min(state[x]["due"] for x in alive)
-                time.sleep(max(0.05, min(nxt - now, 1.0)))
+                nap(max(0.05, min(nxt - now, 1.0)))
                 continue
             si = random.choice(ready)
             st = state[si]
@@ -25196,7 +25388,7 @@ class App(tk.Tk):
                 st["due"] = time.time()          # 빈 자리는 기다리지 않고 통과
                 continue
             if si != last_si:
-                time.sleep(random.uniform(0.6, 1.1))   # 다른 창으로 넘어갈 여유
+                nap(random.uniform(0.6, 1.1))   # 다른 창으로 넘어갈 여유
                 last_si = si
             if getattr(self, "_doll_stop", False):
                 break
@@ -25205,7 +25397,7 @@ class App(tk.Tk):
             click_at(*coord)
             done += 1
             st["due"] = time.time() + random.uniform(DOLL_MIN, DOLL_MAX)
-            time.sleep(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
+            nap(random.uniform(0.35, 0.7))      # 클릭끼리 최소 간격
         if getattr(self, "_doll_stop", False):
             self.status.set("인형탐험 멈춤")
         else:
@@ -25626,7 +25818,7 @@ class App(tk.Tk):
     def _reg_coord(self, key):
         self._reg_target = key
         self.status.set(f"3초 후 [{LABELS[key]}] 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="single")])
 
     def on_coord(self, x, y):
@@ -25646,7 +25838,7 @@ class App(tk.Tk):
     def _reg_char_btn(self):
         n = len(self.cfg.get("char_btns", []))
         self.status.set(f"3초 후 캐릭터 #{n+1} 접속 버튼 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="char")])
 
     def on_char_coord(self, x, y):
@@ -25675,7 +25867,7 @@ class App(tk.Tk):
     def _do_slot_step(self):
         step = self._slot_step
         self.status.set(f"3초 후 #{self._slot_target+1}번 클릭{step+1} 위치 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="slot")])
 
     def on_slot_coord(self, x, y):
@@ -25701,7 +25893,7 @@ class App(tk.Tk):
         self._slot_target = idx
         self._slot_step   = step
         self.status.set(f"3초 후 #{idx+1}번 클릭{step+1} 위치 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="slot")])
 
     def _group_copy_slot(self, idx):
@@ -25740,7 +25932,7 @@ class App(tk.Tk):
         self._hunt_reg_step = click_idx
         name = self.cfg["hunt_slots"][slot_idx].get("name", f"#{slot_idx+1}")
         self.status.set(f"3초 후 [{name}] 클릭{click_idx+1} 위치 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="hunt")])
 
     def on_hunt_coord(self, x, y):
@@ -25780,7 +25972,7 @@ class App(tk.Tk):
                     self.status.set(f"[{name}] 클릭{j+1} 테스트...")
                     pyautogui.click(*coord)
                     if j < len(h["coords"]) - 1:
-                        time.sleep(random.uniform(0.1, 0.6))
+                        nap(random.uniform(0.1, 0.6))
                 self.status.set(f"✔ [{name}] 테스트 완료!")
             except Exception as e:
                 self.status.set(f"오류: {e}")
@@ -26092,7 +26284,7 @@ class App(tk.Tk):
                 # 퍼플을 맨 앞 + '최대화' — 아이디 표시 영역/버튼 좌표가 최대화 상태 기준이라
                 # 반드시 최대화해야 OCR 캡처가 올바른 위치에서 찍힌다. (축소/복원 상태면 오인식)
                 win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
-                time.sleep(0.6)
+                nap(0.6)
                 try:
                     ctypes.windll.user32.SetForegroundWindow(hwnd)
                 except Exception:
@@ -26101,13 +26293,13 @@ class App(tk.Tk):
                     win32gui.BringWindowToTop(hwnd)
                 except Exception:
                     pass
-                time.sleep(1.2)
+                nap(1.2)
             self.after(0, lambda: self.status.set("🔍 퍼플 확인 중..."))
 
             # 1단계: 리니지M 좌측버튼(profile_reveal_btn) 클릭 → 아이디 표시 → 확인
             if self.cfg.get("profile_reveal_btn"):
                 pyautogui.click(*self.cfg["profile_reveal_btn"])
-                time.sleep(2)
+                nap(2)
 
             matched, ocr_id, ratio = self._is_target_account(hwnd)
             self._plog(f"1차 확인: OCR='{ocr_id}' 일치율 {int(ratio*100)}% → matched={matched}")
@@ -26123,33 +26315,33 @@ class App(tk.Tk):
                 self.after(0, lambda a=attempt: self.status.set(
                     f"🔍 지정 아이디 아님 → 전환 시도 {a}/{MAX_SWITCH_TRIES}..."))
                 if self.cfg.get("profile_btn"):
-                    pyautogui.click(*self.cfg["profile_btn"]); time.sleep(2)
+                    pyautogui.click(*self.cfg["profile_btn"]); nap(2)
                 # 프로필을 누른 뒤 **먼저 마우스를 올려야** 계정 목록이 뜬다
                 # (2026-08-29 사용자 지시: 순서가 프로필 → 마우스올림 → 구글계정 → 확인)
                 _hv = self.cfg.get("confirm_hover")
                 if _hv:
                     pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
-                    time.sleep(random.uniform(0.5, 0.9))
+                    nap(random.uniform(0.5, 0.9))
                     pyautogui.moveTo(int(_hv[0]), int(_hv[1]))   # 한 번 더 확실히
-                    time.sleep(random.uniform(0.2, 0.4))
+                    nap(random.uniform(0.2, 0.4))
                 if self.cfg.get("google_acc"):
-                    self._lclick("google_acc", hover=True); time.sleep(2)
+                    self._lclick("google_acc", hover=True); nap(2)
                 if self.cfg.get("confirm_btn"):
                     self._lclick("confirm_btn", hover=True)
-                    time.sleep(10)  # 계정 전환 후 로딩(약 8~10초) 대기
+                    nap(10)  # 계정 전환 후 로딩(약 8~10초) 대기
                 # 전환 후 재검증 — 퍼플 hwnd가 새로 생기므로 다시 찾아 앞으로 + 아이디 재표시
                 _re = win32gui.FindWindow(None, "PURPLE")
                 if _re:
                     hwnd = _re
                     try:
-                        win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE); time.sleep(0.5)
+                        win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE); nap(0.5)
                         ctypes.windll.user32.SetForegroundWindow(hwnd)
                         win32gui.BringWindowToTop(hwnd)
                     except Exception:
                         pass
-                    time.sleep(1.0)
+                    nap(1.0)
                 if self.cfg.get("profile_reveal_btn"):
-                    pyautogui.click(*self.cfg["profile_reveal_btn"]); time.sleep(2)
+                    pyautogui.click(*self.cfg["profile_reveal_btn"]); nap(2)
                 matched, ocr_id, ratio = self._is_target_account(hwnd)
                 self._plog(f"전환 {attempt}회 후 확인: OCR='{ocr_id}' 일치율 {int(ratio*100)}% → matched={matched}")
                 self.after(0, lambda o=ocr_id, r=ratio, a=attempt: self.status.set(
@@ -26203,7 +26395,7 @@ class App(tk.Tk):
             # 캡처 전에 퍼플을 '최대화 + 앞으로' — 아이디 표시 영역 좌표가 최대화 기준이라
             # 최대화 상태에서 찍어야 OCR 인식이 맞다.
             win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
-            time.sleep(0.6)
+            nap(0.6)
             try:
                 ctypes.windll.user32.SetForegroundWindow(hwnd)
             except Exception:
@@ -26212,12 +26404,12 @@ class App(tk.Tk):
                 win32gui.BringWindowToTop(hwnd)
             except Exception:
                 pass
-            time.sleep(0.6)
+            nap(0.6)
 
             # 1단계: 리니지M 좌측버튼(profile_reveal_btn) 클릭 → 계정 확인
             if self.cfg.get("profile_reveal_btn"):
                 pyautogui.click(*self.cfg["profile_reveal_btn"])
-                time.sleep(1)
+                nap(1)
 
             matched, ocr_id, ratio = self._is_target_account(hwnd)
             self.status.set(f"{'✔ 아이디 확인됨' if matched else '🔄 아이디 다름 → 퍼플 전환 중...'} ('{ocr_id}' {int(ratio*100)}%)")
@@ -26225,24 +26417,24 @@ class App(tk.Tk):
             if not matched:
                 # 2단계: Purple 포그라운드로 가져와서 프로필 전환 (이미 최대화 상태)
                 win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
-                time.sleep(0.3)
+                nap(0.3)
                 try:
                     ctypes.windll.user32.SetForegroundWindow(hwnd)
                 except Exception:
                     pass
-                time.sleep(1.0)
+                nap(1.0)
                 if self.cfg.get("profile_btn"):
-                    pyautogui.click(*self.cfg["profile_btn"]); time.sleep(2)
+                    pyautogui.click(*self.cfg["profile_btn"]); nap(2)
                 _hv = self.cfg.get("confirm_hover")      # 프로필 다음에 마우스 올림
                 if _hv:
                     pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
-                    time.sleep(random.uniform(0.5, 0.9))
+                    nap(random.uniform(0.5, 0.9))
                     pyautogui.moveTo(int(_hv[0]), int(_hv[1]))
-                    time.sleep(random.uniform(0.2, 0.4))
+                    nap(random.uniform(0.2, 0.4))
                 if self.cfg.get("google_acc"):
-                    self._lclick("google_acc", hover=True); time.sleep(2)
+                    self._lclick("google_acc", hover=True); nap(2)
                 if self.cfg.get("confirm_btn"):
-                    self._lclick("confirm_btn", hover=True); time.sleep(3)
+                    self._lclick("confirm_btn", hover=True); nap(3)
                 self.status.set("✔ 퍼플 지정계정 전환 완료")
 
             # 원래 상태로 복원 후 최소화
@@ -26282,13 +26474,13 @@ class App(tk.Tk):
                     return True
                 if deadline and _dt.datetime.now() >= deadline:
                     return False
-                time.sleep(0.5)
+                nap(0.5)
 
     def _wait_mouse_idle_sched(self, idle_sec=5.0):
         """스케줄 작업용 마우스 idle 대기 — stop flag 없이 단순 대기"""
         import pyautogui as _pg
         prev = _pg.position()
-        time.sleep(0.1)
+        nap(0.1)
         cur = _pg.position()
         if cur == prev:
             return
@@ -26296,7 +26488,7 @@ class App(tk.Tk):
         last_move = time.time()
         prev = cur
         while True:
-            time.sleep(0.1)
+            nap(0.1)
             cur = _pg.position()
             if cur != prev:
                 last_move = time.time()
@@ -26333,7 +26525,7 @@ class App(tk.Tk):
                 waited = 0
                 while waited < wait:
                     if getattr(self, "_sched_any_stop", False): return
-                    time.sleep(0.5); waited += 0.5
+                    nap(0.5); waited += 0.5
             if getattr(self, "_sched_any_stop", False): return
             elapsed = (datetime.datetime.now() - base).total_seconds()
             self._run_past(slot_idx=si)
@@ -26372,7 +26564,7 @@ class App(tk.Tk):
                 waited = 0
                 while waited < wait:
                     if getattr(self, "_sched_any_stop", False): return
-                    time.sleep(0.5); waited += 0.5
+                    nap(0.5); waited += 0.5
             if getattr(self, "_sched_any_stop", False): return
             elapsed = (datetime.datetime.now() - base).total_seconds()
             name = slot.get("name", f"#{si+1}")
@@ -26448,16 +26640,16 @@ class App(tk.Tk):
                             self.status.set(f"🕘 [{name}] 클릭2 연속 {t+1}/7...")
                             pyautogui.click(*coord)
                             if t < 6:
-                                time.sleep(random.uniform(0.12, 0.25))
+                                nap(random.uniform(0.12, 0.25))
                     else:
                         self.status.set(f"🕘 [{name}] 우편함 클릭 {j+1}...")
                         pyautogui.click(*coord)
                     if k < len(valid) - 1:
-                        time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                        nap(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if not self._mail_stop:
                     slot_wait = random.uniform(2.0, 4.0)
                     self.status.set(f"🕘 다음 슬롯 대기 {slot_wait:.1f}초...")
-                    time.sleep(slot_wait)
+                    nap(slot_wait)
             self.status.set("✔ 우편함 클릭 완료!" if not self._mail_stop else "우편함 멈춤")
         except Exception as e:
             self.status.set(f"오류: {e}")
@@ -26466,7 +26658,7 @@ class App(tk.Tk):
         self._reg_mail_slot_idx  = slot_idx
         self._reg_mail_click_idx = click_idx
         self.status.set(f"3초 후 우편함 #{slot_idx+1} 클릭{click_idx+1} 위치 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="mail")])
 
     def on_mail_coord(self, x, y):
@@ -26572,7 +26764,7 @@ class App(tk.Tk):
                     self.status.set(f"🏰 [{name}] 클릭{j+1}...")
                     click_at(*coords[j])
                     if n < len(order) - 1:
-                        time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                        nap(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
             self.status.set("✔ 던전 실행 완료!")
         except Exception as e:
             self.status.set(f"오류: {e}")
@@ -26585,7 +26777,7 @@ class App(tk.Tk):
         self._reg_dungeon_click_idx = click_idx
         label = ["클릭1", "클릭2", "클릭3", "클릭4", "클릭5"][click_idx]
         self.status.set(f"3초 후 던전 #{slot_idx+1} [{label}] 위치 클릭하세요!")
-        self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+        self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                    CoordOverlay(self, mode="dungeon")])
 
     def on_dungeon_coord(self, x, y):
@@ -26665,7 +26857,7 @@ class App(tk.Tk):
         try:
             self.status.set("2초 후 과거의말하는섬 실행...")
             self.after(0, self._send_to_back)
-            time.sleep(2)
+            nap(2)
             slots = self.cfg.get("past_slots", [])
             if slot_idx is not None:
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
@@ -26685,18 +26877,18 @@ class App(tk.Tk):
                 elapsed = 0
                 while elapsed < slot_delay:
                     if self._past_stop: break
-                    time.sleep(0.5); elapsed += 0.5
+                    nap(0.5); elapsed += 0.5
                 if self._past_stop: break
                 # 0: 클릭1(신규) → 1: 마우스이동(hover) → 2: 클릭
                 if coords[0]:
                     self.status.set(f"🏝 [{name}] 클릭1...")
                     pyautogui.click(*coords[0])
-                    time.sleep(random.uniform(3.0, 6.0) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                    nap(random.uniform(3.0, 6.0) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._past_stop: break
                 if coords[1]:
                     self.status.set(f"🏝 [{name}] 마우스 이동...")
                     pyautogui.moveTo(*coords[1])
-                    time.sleep(random.uniform(3.0, 5.0) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                    nap(random.uniform(3.0, 5.0) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._past_stop: break
                 if len(coords) > 2 and coords[2]:
                     self.status.set(f"🏝 [{name}] 클릭2...")
@@ -26706,7 +26898,7 @@ class App(tk.Tk):
                 pause = random.uniform(4.0, 8.0)
                 if random.random() < 0.25:
                     pause += random.uniform(3.0, 7.0)
-                time.sleep(pause)
+                nap(pause)
             self.status.set("✔ 과거의말하는섬 완료!")
         except Exception as e:
             self.status.set(f"오류: {e}")
@@ -26723,7 +26915,7 @@ class App(tk.Tk):
             self._past_hover_countdown(slot_idx, 3)
         else:
             self.status.set(f"3초 후 과거의말하는섬 #{slot_idx+1} [클릭{click_idx+1}] 위치 클릭하세요!")
-            self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+            self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                        CoordOverlay(self, mode="past")])
 
     def _past_hover_countdown(self, slot_idx, remaining):
@@ -26852,7 +27044,7 @@ class App(tk.Tk):
             self._sync_sched_click1()   # 실행 직전 과거섬 클릭1 반영(항상 최신값으로 실행)
             self.status.set("2초 후 매일매일 스케줄 실행...")
             self.after(0, self._send_to_back)
-            time.sleep(2)
+            nap(2)
             slots = self.cfg.get("sched_slots", [])
             if slot_idx is not None:
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []
@@ -26892,13 +27084,13 @@ class App(tk.Tk):
                     self.status.set(f"📅 [{name}] 클릭1...")
                     self._wait_user_free("_sched_stop")
                     click_at(*coords[0])
-                    time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                    nap(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._sched_stop: break
                 if coords[1]:
                     self.status.set(f"📅 [{name}] 마우스 이동...")
                     self._wait_user_free("_sched_stop")
                     move_at(*coords[1])
-                    time.sleep(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
+                    nap(random.uniform(0.1, 0.6) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._sched_stop: break
                 if len(coords) > 2 and coords[2]:
                     self.status.set(f"📅 [{name}] 클릭2...")
@@ -26906,7 +27098,7 @@ class App(tk.Tk):
                     click_at(*coords[2])
                 self._user_focus_back(_snap)      # 이 슬롯 끝 — 사용자 창으로 복귀
                 if self._sched_stop: break
-                time.sleep(random.uniform(1.38, 1.80))   # 슬롯 사이 (2.3~3.0초에서 40% 줄임)
+                nap(random.uniform(1.38, 1.80))   # 슬롯 사이 (2.3~3.0초에서 40% 줄임)
             self.status.set("✔ 매일매일 스케줄 완료!")
         except Exception as e:
             self.status.set(f"오류: {e}")
@@ -26973,7 +27165,7 @@ class App(tk.Tk):
                     for _ in range(BASE_WED_WARN):
                         self.status.set("🧭 %d초 뒤 퍼플 전환 — 마우스를 움직이면 "
                                         "취소됩니다" % BASE_WED_WARN)
-                        time.sleep(1.0)
+                        nap(1.0)
                         if self._system_idle_seconds() < 3:
                             click_log("[기준확장] 🗓 예고 중 사람이 만져 **취소**했다")
                             self.status.set("🧭 퍼플 전환 취소 (사람이 만짐)")
@@ -26982,7 +27174,7 @@ class App(tk.Tk):
                             click_log("[기준확장] 🗓 예고 중 작업이 시작돼 **취소**했다")
                             return
                     ok = self._profile_switch_once("[기준확장 🗓]")
-                    time.sleep(random.uniform(1.5, 2.5))
+                    nap(random.uniform(1.5, 2.5))
                     g2 = self._sidebar_of(BASE_SLOT)
                     W2 = g2[3] if g2 else 0
                     click_log("[기준확장] 🗓 전환 %s → #%02d 지금 %dpx %s"
@@ -27089,7 +27281,7 @@ class App(tk.Tk):
                       f"(기준 {SIDEBAR_WIDE}px) → 퍼플 계정 전환으로 되돌린다")
             self.status.set(f"🧭 #{BASE_SLOT+1:02d} 확장이 풀려 퍼플을 전환합니다...")
             ok = self._profile_switch_once("[기준확장]")
-            time.sleep(random.uniform(1.5, 2.5))
+            nap(random.uniform(1.5, 2.5))
             got2 = self._sidebar_of(BASE_SLOT)
             W2 = got2[3] if got2 else 0
             click_log(f"[기준확장] 전환 {'✔' if ok else '✘'} → "
@@ -27158,7 +27350,7 @@ class App(tk.Tk):
                 _snap = self._user_focus_snap()
                 click_at(X + SIDEBAR_DOTS[0], Y + SIDEBAR_DOTS[1])
                 self._user_focus_back(_snap)
-                time.sleep(random.uniform(*SIDEBAR_WAIT))
+                nap(random.uniform(*SIDEBAR_WAIT))
                 # ⚠ **핸들로 다시 재면 안 된다** — 펼쳐질 때 CEF 창이 다시 만들어져
                 #   옛 핸들은 56px 그대로를 돌려준다 (2026-10-18 에 그렇게 속았다).
                 #   **자리로 다시 찾아** 폭을 본다.
@@ -27252,7 +27444,7 @@ class App(tk.Tk):
             self._sched_wake_cnt(True, _v)
             click_log(f"[스케줄] #{si+1:02d} {name} 절전 상태 ({_v:.2f}) → "
                       + ("깨웠다" if ok else "⚠ 안 깨어남 — 그대로 진행"))
-            time.sleep(random.uniform(0.5, 0.9))   # 화면이 돌아올 틈
+            nap(random.uniform(0.5, 0.9))   # 화면이 돌아올 틈
         except Exception as e:
             try:
                 click_log(f"[스케줄] #{si+1:02d} 깨우기 오류: {e}")
@@ -27305,7 +27497,7 @@ class App(tk.Tk):
                 self.status.set(f"📅 [{name}] #{si+1:02d} 클릭1... (순서대로)")
                 self._wait_user_free("_sched_stop")
                 click_at(*coords[0])
-                time.sleep(random.uniform(0.1, 0.6)
+                nap(random.uniform(0.1, 0.6)
                            + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
             if self._sched_stop:
                 break
@@ -27313,7 +27505,7 @@ class App(tk.Tk):
                 self.status.set(f"📅 [{name}] #{si+1:02d} 마우스 이동...")
                 self._wait_user_free("_sched_stop")
                 move_at(*coords[1])
-                time.sleep(random.uniform(0.1, 0.6)
+                nap(random.uniform(0.1, 0.6)
                            + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
             if self._sched_stop:
                 break
@@ -27324,7 +27516,7 @@ class App(tk.Tk):
             self._user_focus_back(_snap)
             if self._sched_stop:
                 break
-            time.sleep(random.uniform(1.38, 1.80))     # 슬롯 사이
+            nap(random.uniform(1.38, 1.80))     # 슬롯 사이
     def _run_sched_wave(self, targets):
         """스케줄 3슬롯 번갈아 — 한 슬롯이 기다리는 동안 다른 슬롯을 진행한다.
         '마우스 이동 → 클릭2'는 반드시 붙여서 한 묶음으로 처리한다
@@ -27349,7 +27541,7 @@ class App(tk.Tk):
             ready = [si for si in alive if state[si]["due"] <= now]
             if not ready:
                 nxt = min(state[si]["due"] for si in alive)
-                time.sleep(max(0.05, min(nxt - now, 0.5)))
+                nap(max(0.05, min(nxt - now, 0.5)))
                 continue
             # 준비된 것 중 **번호가 앞선 슬롯부터** (섞지 않는다, 2026-08-28)
             si = min(ready)
@@ -27358,7 +27550,7 @@ class App(tk.Tk):
             name = slot.get("name", f"#{si+1}")
             coords = slot.get("coords", [None] * SCHED_CLICKS)
             if si != last:
-                time.sleep(random.uniform(0.4, 0.9))     # 다른 창으로 넘어갈 여유
+                nap(random.uniform(0.4, 0.9))     # 다른 창으로 넘어갈 여유
                 last = si
             if not self._wait_mouse_idle("_sched_stop"):
                 return
@@ -27384,7 +27576,7 @@ class App(tk.Tk):
                     self.status.set(f"📅 [{name}] 마우스 이동...")
                     self._wait_user_free("_sched_stop")
                     move_at(*coords[1])
-                    time.sleep(random.uniform(1.8, 3.0))     # 이동 뒤 여유
+                    nap(random.uniform(1.8, 3.0))     # 이동 뒤 여유
                 if len(coords) > 2 and coords[2]:
                     self.status.set(f"📅 [{name}] 클릭2...  (좌표2와 한 묶음)")
                     self._wait_user_free("_sched_stop")
@@ -27393,7 +27585,7 @@ class App(tk.Tk):
                 self._user_focus_back(_snap)
                 st["due"] = time.time() + random.uniform(1.9, 2.5)   # 슬롯 끝 대기 (40% 단축)
             st["u"] += 1
-            time.sleep(random.uniform(0.25, 0.5))        # 클릭끼리 최소 간격
+            nap(random.uniform(0.25, 0.5))        # 클릭끼리 최소 간격
 
     def _reg_sched_click(self, slot_idx, click_idx):
         self._reg_sched_slot_idx  = slot_idx
@@ -27404,7 +27596,7 @@ class App(tk.Tk):
             self._sched_hover_countdown(slot_idx, 3)
         else:
             self.status.set(f"3초 후 스케줄 #{slot_idx+1} [클릭{click_idx+1}] 위치 클릭하세요!")
-            self.after(3000, lambda: [self.withdraw(), time.sleep(0.2),
+            self.after(3000, lambda: [self.withdraw(), nap(0.2),
                                        CoordOverlay(self, mode="sched")])
 
     def _sched_hover_countdown(self, slot_idx, remaining):
@@ -27519,7 +27711,7 @@ class App(tk.Tk):
 
     def _take_layout_screenshot(self, count):
         import time
-        time.sleep(0.4)
+        nap(0.4)
         try:
             from PIL import ImageGrab, ImageDraw, ImageFont
             shot = ImageGrab.grab(all_screens=True)
@@ -28001,7 +28193,7 @@ class App(tk.Tk):
                 ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
                                                    SWP_NOSIZE | SWP_NOMOVE)
                 ctypes.windll.user32.SetForegroundWindow(hwnd)
-                time.sleep(0.4)
+                nap(0.4)
         threading.Thread(target=_flash, daemon=True).start()
         title = aw.get("title", "")
         self.status.set(f"#{slot_idx+1:02d} 지정 창: [{title[:30]}]  {aw['w']}x{aw['h']}  @{aw['x']},{aw['y']}")
@@ -28071,7 +28263,7 @@ class App(tk.Tk):
             self.after(0, lambda h=hwnd: self.status.set(f"OCR 인식 중..."))
             try:
                 win32gui.SetForegroundWindow(hwnd)
-                time.sleep(0.6)
+                nap(0.6)
                 import ctypes
                 pt = ctypes.wintypes.POINT(0, 0)
                 ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
@@ -28081,7 +28273,7 @@ class App(tk.Tk):
                 results = reader.readtext(img, detail=0)
                 name = " ".join(results).strip()
                 self.after(0, lambda n=name: self.status.set(f"OCR 결과: '{n}'"))
-                time.sleep(1.0)
+                nap(1.0)
                 if not name: continue
 
                 # 가장 가까운 슬롯 찾기 (assigned_window 위치 기준, 없으면 순서대로)
@@ -28205,7 +28397,7 @@ class App(tk.Tk):
         SWP_NOZORDER, SW_RESTORE = 0x0004, 9
         if u.IsIconic(hwnd) or u.IsZoomed(hwnd):
             u.ShowWindow(hwnd, SW_RESTORE)
-            time.sleep(0.25)
+            nap(0.25)
         if not u.SetWindowPos(hwnd, 0, aw["x"], aw["y"], aw["w"], aw["h"], SWP_NOZORDER):
             return False, f"SetWindowPos 실패(오류 {ctypes.windll.kernel32.GetLastError()})"
         r = wintypes.RECT()
@@ -28257,7 +28449,7 @@ class App(tk.Tk):
         for hwnd, wx, wy in wins:
             try:
                 win32gui.SetForegroundWindow(hwnd)
-                time.sleep(0.6)
+                nap(0.6)
                 pt = ctypes.wintypes.POINT(0, 0)
                 ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
                 x, y = pt.x + ox, pt.y + oy
@@ -28282,7 +28474,7 @@ class App(tk.Tk):
                             aw_data["x"], aw_data["y"], aw_data["w"], aw_data["h"], SWP_NOZORDER)
                         self.after(0, lambda n=ocr_name, s=matched_si: self.status.set(f"✔ '{n}' → #{s+1:02d} 복원"))
                         count += 1
-                        time.sleep(0.3)
+                        nap(0.3)
             except Exception as e:
                 self.after(0, lambda e=e: self.status.set(f"오류: {e}"))
 
@@ -28324,7 +28516,7 @@ class App(tk.Tk):
         for hwnd, wx, wy in wins:
             try:
                 win32gui.SetForegroundWindow(hwnd)
-                time.sleep(0.5)
+                nap(0.5)
                 img = ImageGrab.grab(bbox=(ax, ay, ax+aw, ay+ah), all_screens=True)
                 results = reader.readtext(img, detail=0)
                 ocr_name = " ".join(results).strip()
@@ -28493,6 +28685,9 @@ class App(tk.Tk):
         바로 눌리면 어색하고, 창이 아직 정리되기 전에 클릭이 들어갈 수도 있어서.
         + 스케줄·반복으로 저절로 시작될 때 클로드나 런처가 앞에 떠 있으면 클릭을
           가리므로, 무엇이 됐든 먼저 내리고(최소화·맨뒤로) 나서 시작한다."""
+        # ⏹ 새 작업이 시작된다 — 멈춤 깃발을 내려 `nap()` 이 다시 기다리게 한다
+        #    (2026-11-03). ⚠ 안 내리면 **기다림이 0 이 되어** 좌표가 쏟아진다.
+        nap_clear()
         try:
             if fkey in BACK_NOT_MIN:
                 # 🩹 복구 등은 **최소화하지 않고 맨 뒤로만** (2026-08-29 사용자 지시).
@@ -28511,7 +28706,7 @@ class App(tk.Tk):
         while time.time() - _t0 < _d:
             if getattr(self, "_stop_flag", False):
                 return
-            time.sleep(0.01)      # 0.05 면 짧은 뜸을 넘겨버려 실제론 더 오래 쉰다
+            nap(0.01)      # 0.05 면 짧은 뜸을 넘겨버려 실제론 더 오래 쉰다
 
     def _run_task(self, name, fn, *args):
         """작업 스레드 래퍼 — 끝나면 잠금 해제 + **런처를 '맨 뒤'로 되살린다.**
@@ -28524,6 +28719,7 @@ class App(tk.Tk):
         ⚠ 런처마다 챙기지 말 것 — **여기 한 곳**에서 한다. 그래야 새 런처를
           만들어도 자동으로 적용된다 (`_stop()` 을 '아는 런처 전부' 로 바꾼 것과
           같은 이유 — 손으로 나열하면 반드시 빠진다)."""
+        nap_clear()               # 새 작업 — 멈춤 깃발을 내린다 (2026-11-03)
         try:
             fn(*args)
         finally:
@@ -28574,7 +28770,7 @@ class App(tk.Tk):
                           f"→ ({x},{y}) 누름")
                 return (x, y)
             if t < LOGIN_TRIES - 1:
-                time.sleep(random.uniform(*LOGIN_WAIT))
+                nap(random.uniform(*LOGIN_WAIT))
         click_log(f"[접속] ✘ {nm} 그림을 못 찾음 (최고 {best:.2f}, "
                   f"{LOGIN_TRIES}번 봤다) → **아무것도 누르지 않고 중단**")
         self.status.set(f"✘ 접속 중단 — '{nm}' 그림을 못 찾았습니다 "
@@ -28626,7 +28822,7 @@ class App(tk.Tk):
             if woke:
                 click_log(f"[접속] {tag} 🟣 최소화돼 있던 퍼플을 되살렸다 "
                           f"{woke} — 크기는 건드리지 않았다")
-                time.sleep(random.uniform(1.0, 1.6))   # 좌표가 제자리로 돌아올 틈
+                nap(random.uniform(1.0, 1.6))   # 좌표가 제자리로 돌아올 틈
                 try:
                     still = [t for h, t in hits if win32gui.IsIconic(h)]
                 except Exception:
@@ -29439,7 +29635,7 @@ class App(tk.Tk):
         self.update_idletasks()
 
         def _go():
-            time.sleep(0.35)            # 창이 사라질 틈
+            nap(0.35)            # 창이 사라질 틈
             try:
                 if key in LOGIN_IDX:
                     ok = self._lclick(
@@ -29849,6 +30045,15 @@ class App(tk.Tk):
                 pass
 
     def _stop(self):
+        # ⏹ **맨 먼저** 깃발을 세운다 — 기다리던 스레드가 즉시 깨어난다 (2026-11-03)
+        try:
+            _STOP_EVT.set()
+        except Exception:
+            pass
+        try:
+            self.status.set("■ 멈추는 중…")
+        except Exception:
+            pass
         self._stop_flag      = True
         self._past_stop      = True
         self._sched_stop     = True
@@ -30005,11 +30210,11 @@ class App(tk.Tk):
                         self.status.set("사냥 멈춤"); return
                     self.status.set(f"[{name}] 클릭 {j+1}/{HUNT_CLICKS}...")
                     pyautogui.moveTo(*coord)
-                    time.sleep(random.uniform(0.1, 0.3))
+                    nap(random.uniform(0.1, 0.3))
                     pyautogui.mouseDown(*coord)
-                    time.sleep(random.uniform(0.1, 0.25))
+                    nap(random.uniform(0.1, 0.25))
                     pyautogui.mouseUp(*coord)
-                    time.sleep(random.uniform(0.05, 0.15))
+                    nap(random.uniform(0.05, 0.15))
                     if j < HUNT_CLICKS - 1:
                         # 슬롯 안 좌표간 클릭 간격 (랜덤)
                         interval = random.uniform(0.15, 0.5)
@@ -30072,7 +30277,7 @@ class App(tk.Tk):
                 subprocess.Popen(PURPLE_EXE)
                 for _ in range(30):
                     if self._stop_flag: self.status.set("멈춤"); return
-                    time.sleep(1)
+                    nap(1)
                     win = find_purple()
                     if win: break
             if win is None:
@@ -30083,7 +30288,7 @@ class App(tk.Tk):
                 hwnd = win32gui.FindWindow(None, win.title)
                 if hwnd:
                     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                    time.sleep(0.5)
+                    nap(0.5)
                     # 작업 표시줄 제외한 실제 작업 영역으로 크기 설정
                     rc = ctypes.wintypes.RECT()
                     ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rc), 0)
@@ -30091,14 +30296,14 @@ class App(tk.Tk):
                                          rc.left, rc.top,
                                          rc.right - rc.left, rc.bottom - rc.top,
                                          win32con.SWP_SHOWWINDOW)
-                    time.sleep(0.5)
+                    nap(0.5)
                 win32gui.SetForegroundWindow(hwnd)
             except: pass
             if not self._wait(2): self.status.set("멈춤"); return
 
             # 팝업 감지 및 자동 닫기 (3초 대기 후)
             self.status.set("퍼플 팝업 확인 중...")
-            time.sleep(3)
+            nap(3)
             close_purple_popup_if_visible(
                 self.cfg,
                 lambda msg: self.after(0, lambda m=msg: self.status.set(m)))
@@ -30357,7 +30562,7 @@ class App(tk.Tk):
                 for _ in range(10):
                     win = find_purple();
                     if win: break
-                    time.sleep(1)
+                    nap(1)
                 if win is None:
                     self.status.set("오류: 퍼플 창 없음"); return
                 try: win.activate()
@@ -30401,7 +30606,7 @@ class App(tk.Tk):
                 except Exception:
                     pass
                 self.status.set(_msg)
-                time.sleep(1)
+                nap(1)
             # 그룹→사냥 전환 시간 35%로 축소 (5초 → 1.75초)
             self.status.set(f"✔ 클릭 등록 완료! 1.75초 후 사냥 실행 시작...")
             if not self._wait(1.75): self.status.set("멈춤"); return
@@ -31551,7 +31756,7 @@ class _AssignWindowOverlay(tk.Toplevel):
         self.destroy()
         try:
             self.app.update()
-            time.sleep(0.1)
+            nap(0.1)
             # win32gui로 안정적으로 창 감지
             hwnd = win32gui.WindowFromPoint((x, y))
             root = win32gui.GetAncestor(hwnd, win32con.GA_ROOT) if hwnd else hwnd
@@ -31603,7 +31808,7 @@ class CoordOverlay(tk.Toplevel):
             app._minimize_claude()
         except Exception:
             pass
-        time.sleep(0.15)   # 최소화가 화면에 반영될 시간
+        nap(0.15)   # 최소화가 화면에 반영될 시간
 
         from PIL import Image as _Img, ImageTk as _ITk, ImageGrab as _IG
         shot = _IG.grab(all_screens=True).resize((sw, sh))
