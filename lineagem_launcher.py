@@ -2943,6 +2943,59 @@ def fav_write(guid, recs, n_star=None):
         return False, "%s: %s" % (type(e).__name__, e)
 
 
+# 📑 **간단바** — 자주 쓰는 **실행 버튼만** 세로로 꽉 채운 좁은 창 (2026-11-04 사용자 요청:
+#    *"내가 만든 게 너무 복잡하고 지저분한데 … 자주 쓰는 것들은 실행버튼만 저런 식으로
+#      남기고 … 화살표로 펼치기/왼쪽으로 숨기기 … 위아래로 꽉 채워주고 …
+#      최소화·확대·✕ 밑에 **글을 내가 쓸 수 있는 공간**"*).
+#    메인런처는 그대로 두고 **따로 뜨는 창**이다 — 버튼을 눌러 띄운다.
+QUICK_W        = 132       # 펼쳤을 때 창 가로
+#    ⚠ **120px 밑으로는 못 줄인다** — 제목줄(─ □ ✕)이 있는 윈도 창의 한계다(실측).
+#      그래서 접을 때는 **제목줄을 떼고**(`overrideredirect`) 좁힌다.
+#      실측: 제목줄 있으면 34 를 줘도 120 · 떼면 34 가 그대로 먹는다.
+QUICK_MIN      = 34        # 접었을 때 (▶ 하나만 보인다)
+QUICK_PER_PAGE = 10        # 한 쪽에 몇 개 (넘치면 '다음 ▶' 로 넘긴다)
+
+
+def quick_items(app):
+    """고를 수 있는 실행 버튼들 → [(아이디, 글자, 색, 함수)]
+
+    🧭 **여기만 고치면 간단바 목록이 바뀐다.** 아이디는 `coords.json` 에 저장되므로
+       **이미 있는 아이디의 뜻을 바꾸지 말 것** (사용자 설정이 엉뚱해진다)."""
+    D = app._dgn2_info
+    out = [
+        ("seq",    "절전\n해제",  "#2874a6", app._start_seq),
+        ("slp",    "절전\n모드",  "#5d6d7e", app._start_slp),
+        ("sched",  "매일매일\n스케줄", "#16a085", app._start_sched),
+        ("past",   "과거의\n말하는섬", "#c0392b", app._start_past),
+        ("hunt",   "사냥",       "#27ae60", app._start_hunt),
+        ("doll",   "인형\n탐험",  "#8e44ad", app._start_doll),
+        ("item",   "아이템\n정리", "#7d6608", app._start_item),
+        ("pass",   "패스권",     "#6c3483", app._start_pass),
+        ("dungeon", "변신\n확인용", "#d35400", app._start_dungeon),
+        ("mail",   "우편\n지금받기", "#2471a3", app._mail_run_now),
+        ("tj",     "TJ\n성공!!", "#b03a2e", app._start_tj),
+        ("awaken", "각성\n강화",  "#7d3c98",
+         lambda: app._run_awaken(by_user=True, src="간단바")),
+        ("fixall", "전부\n복구",  "#1e8449", app._fix_run_all),
+        ("mondex2", "도감\n보상받기", "#117864", app._mondex_run),
+        ("rec",    "녹화\n교체",  "#16a085", app._rec_swap_open),
+    ]
+    for fk in ("dragon", "jakwi", "fix", "knight", "magic", "omanst", "mondex",
+               "badge", "dollchk", "relic", "coupon", "market", "eventshop",
+               "fish", "incoupon", "inmail", "circus", "circus2", "circus3"):
+        try:
+            _k, t, ic = D(fk)
+        except Exception:
+            continue
+        out.append(("d:" + fk, f"{ic}\n" + t.replace("!", "").strip()[:7],
+                    "#34495e", (lambda f=fk: app._start_dgn2(f))))
+    return out
+
+
+QUICK_DEFAULT = ["d:dragon", "fixall", "d:jakwi", "awaken", "seq",
+                 "sched", "past", "hunt", "mail", "d:badge"]
+
+
 def rec_make_dirs(rows=None):
     """폴더 `1` ~ `6` 과 `_백업` 을 만들어 둔다."""
     try:
@@ -6111,6 +6164,224 @@ class App(tk.Tk):
                       + " ".join(f"#{i+1:02d}{a}" for i, (a, _b) in enumerate(rows)))
         return rows
 
+    # ── 📑 간단바 ───────────────────────────────────────────────────────
+    def _quick_cfg(self):
+        v = self.cfg.get("quick_btns")
+        return list(v) if isinstance(v, list) and v else list(QUICK_DEFAULT)
+
+    def _quick_open(self):
+        w = getattr(self, "_quickwin", None)
+        if w is not None and w.winfo_exists():
+            w.deiconify(); w.lift(); self._quick_fill(); return
+        w = tk.Toplevel(self); self._quickwin = w
+        w.title(str(self.cfg.get("quick_title") or "빠른 실행"))
+        w.attributes("-topmost", True)
+        self._quick_page = 0
+        self._quick_hide = False
+        pos = self.cfg.get("quick_pos") or [0, 60]
+        sh = w.winfo_screenheight() - 80
+        w.geometry("%dx%d+%d+%d" % (QUICK_W, sh, int(pos[0]), int(pos[1])))
+        w.protocol("WM_DELETE_WINDOW", self._quick_close)
+        w.bind("<Configure>", self._quick_moved)
+        # 🖊 **제목줄 바로 밑 — 사용자가 글을 쓰는 칸** (저장된다)
+        self._quick_memo = tk.StringVar(value=str(self.cfg.get("quick_memo") or ""))
+        ent = tk.Entry(w, textvariable=self._quick_memo, font=("맑은 고딕", 9, "bold"),
+                       justify="center", relief="solid", bd=1, width=6)
+        ent.pack(fill="x", padx=2, pady=(2, 1))
+        self._quick_memo_ent = ent
+        ent.bind("<FocusOut>", lambda _e: self._quick_save_memo())
+        ent.bind("<Return>", lambda _e: self._quick_save_memo())
+        self._quick_body = tk.Frame(w); self._quick_body.pack(fill="both", expand=True,
+                                                              padx=2)
+        ft = tk.Frame(w); ft.pack(fill="x", padx=2, pady=(1, 2))
+        self._quick_hide_btn = tk.Button(ft, text="◀", font=("맑은 고딕", 9, "bold"),
+                                         width=2, bg="#566573", fg="white",
+                                         command=self._quick_toggle_hide)
+        self._quick_hide_btn.pack(side="left")
+        self._quick_pg = tk.Label(ft, text="1/1", font=("맑은 고딕", 8), fg="#888")
+        self._quick_pg.pack(side="left", expand=True)
+        tk.Button(ft, text="▶", font=("맑은 고딕", 9, "bold"), width=2,
+                  bg="#2874a6", fg="white",
+                  command=self._quick_next).pack(side="right")
+        self._quick_set_btn = tk.Button(w, text="⚙ 버튼", font=("맑은 고딕", 8),
+                                        bg="#5d6d7e", fg="white", width=6,
+                                        command=self._quick_pick)
+        self._quick_set_btn.pack(fill="x", padx=2, pady=(0, 2))
+        # ⚠ **접을 때 안의 것을 치우지 않으면 창이 안 줄어든다** — Tk 는 자식이
+        #    요구하는 크기보다 작게 못 만든다 (실측: 120px 에서 안 내려갔다).
+        w.minsize(QUICK_MIN, 120)
+        try:
+            apply_dark(w, self.cfg.get("dark_ui", True))
+        except Exception:
+            pass
+        self._quick_fill()
+        if self.cfg.get("quick_hide"):
+            self._quick_hide = False          # 토글이 뒤집으므로 반대로 두고 부른다
+            self.after(120, self._quick_toggle_hide)
+
+    def _quick_save_memo(self):
+        """🖊 쓴 글을 저장하고 **창 제목에도** 올린다 (작업표시줄에서 알아보기 쉽게)."""
+        try:
+            t = self._quick_memo.get()
+            self.cfg["quick_memo"] = t
+            save_cfg(self.cfg)
+            w = getattr(self, "_quickwin", None)
+            if w and w.winfo_exists():
+                w.title(t.strip() or "빠른 실행")
+        except Exception:
+            pass
+
+    def _quick_moved(self, e=None):
+        # ⚠ 자식 위젯의 <Configure> 도 올라온다 — **이 창일 때만** (2026-09-30 교훈)
+        w = getattr(self, "_quickwin", None)
+        if e is not None and getattr(e, "widget", None) is not w:
+            return
+        try:
+            if w and w.winfo_exists() and not self._quick_hide:
+                self.cfg["quick_pos"] = [w.winfo_x(), w.winfo_y()]
+        except Exception:
+            pass
+
+    def _quick_close(self):
+        try:
+            self._quick_save_memo()
+            save_cfg(self.cfg)
+            self._quickwin.destroy()
+        except Exception:
+            pass
+
+    def _quick_toggle_hide(self):
+        """◀ 왼쪽으로 접기 / ▶ 다시 펼치기"""
+        w = getattr(self, "_quickwin", None)
+        if not (w and w.winfo_exists()):
+            return
+        self._quick_hide = not self._quick_hide
+        sh = w.winfo_screenheight() - 80
+        if self._quick_hide:
+            for _w in (self._quick_body, self._quick_memo_ent,
+                       self._quick_set_btn, self._quick_pg):
+                try:
+                    _w.pack_forget()
+                except Exception:
+                    pass
+            self._quick_hide_btn.config(text="▶", bg="#2874a6")
+            try:
+                w.overrideredirect(True)      # 제목줄을 떼야 120 밑으로 줄어든다
+                w.minsize(1, 1)
+            except Exception:
+                pass
+            w.update_idletasks()
+            w.geometry("%dx%d+0+%d" % (QUICK_MIN, sh, w.winfo_y()))
+            try:
+                w.attributes("-topmost", True)
+            except Exception:
+                pass
+            self.cfg["quick_hide"] = True
+        else:
+            try:
+                w.overrideredirect(False)     # 제목줄 되살리기
+                w.minsize(QUICK_MIN, 120)
+                w.attributes("-topmost", True)
+            except Exception:
+                pass
+            self._quick_memo_ent.pack(fill="x", padx=2, pady=(2, 1),
+                                      before=self._quick_hide_btn.master)
+            self._quick_body.pack(fill="both", expand=True, padx=2,
+                                  before=self._quick_hide_btn.master)
+            self._quick_pg.pack(side="left", expand=True)
+            self._quick_set_btn.pack(fill="x", padx=2, pady=(0, 2))
+            self._quick_hide_btn.config(text="◀", bg="#566573")
+            p = self.cfg.get("quick_pos") or [0, 60]
+            w.update_idletasks()
+            w.geometry("%dx%d+%d+%d" % (QUICK_W, sh, int(p[0]), w.winfo_y()))
+            self.cfg["quick_hide"] = False
+            self._quick_fill()
+        try:
+            save_cfg(self.cfg)
+        except Exception:
+            pass
+
+    def _quick_next(self):
+        if self._quick_hide:
+            self._quick_toggle_hide(); return
+        ids = self._quick_cfg()
+        np_ = max(1, (len(ids) + QUICK_PER_PAGE - 1) // QUICK_PER_PAGE)
+        self._quick_page = (self._quick_page + 1) % np_
+        self._quick_fill()
+
+    def _quick_fill(self):
+        bd = getattr(self, "_quick_body", None)
+        if bd is None or not bd.winfo_exists():
+            return
+        for ch in bd.winfo_children():
+            ch.destroy()
+        reg = {a: (b, c, d) for a, b, c, d in quick_items(self)}
+        ids = [x for x in self._quick_cfg() if x in reg]
+        np_ = max(1, (len(ids) + QUICK_PER_PAGE - 1) // QUICK_PER_PAGE)
+        self._quick_page = min(self._quick_page, np_ - 1)
+        cur = ids[self._quick_page * QUICK_PER_PAGE:(self._quick_page + 1) * QUICK_PER_PAGE]
+        # 🧱 남은 높이를 **똑같이 나눠** 위아래로 꽉 채운다
+        for r, i in enumerate(cur):
+            lb, col, fn = reg[i]
+            bd.rowconfigure(r, weight=1, uniform="q")
+            tk.Button(bd, text=lb, font=("맑은 고딕", 9, "bold"), bg=col, fg="white",
+                      relief="raised", bd=2, wraplength=QUICK_W - 20,
+                      command=fn).grid(row=r, column=0, sticky="nsew", pady=1)
+        bd.columnconfigure(0, weight=1)
+        try:
+            self._quick_pg.config(text="%d/%d" % (self._quick_page + 1, np_))
+        except Exception:
+            pass
+
+    def _quick_pick(self):
+        """⚙ 어떤 버튼을 넣을지 고르는 창 (고른 **순서대로** 들어간다)."""
+        w = tk.Toplevel(self); w.title("⚙ 간단바 — 버튼 고르기"); w.geometry("360x620")
+        w.attributes("-topmost", True)
+        tk.Label(w, text="넣을 버튼을 고르세요 (위에서부터 그 차례로 들어갑니다)",
+                 font=("맑은 고딕", 9, "bold")).pack(anchor="w", padx=8, pady=(8, 2))
+        tk.Label(w, text=f"한 쪽에 {QUICK_PER_PAGE}개씩 · 넘치면 ▶ 로 넘깁니다",
+                 font=("맑은 고딕", 8), fg="#888").pack(anchor="w", padx=8)
+        box = tk.Frame(w); box.pack(fill="both", expand=True, padx=8, pady=4)
+        cv = tk.Canvas(box, highlightthickness=0)
+        sb = tk.Scrollbar(box, orient="vertical", command=cv.yview)
+        inner = tk.Frame(cv)
+        inner.bind("<Configure>",
+                   lambda _e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.create_window((0, 0), window=inner, anchor="nw")
+        cv.configure(yscrollcommand=sb.set)
+        cv.pack(side="left", fill="both", expand=True); sb.pack(side="right", fill="y")
+        cur = self._quick_cfg()
+        vs = {}
+        for i, (aid, lb, col, _fn) in enumerate(quick_items(self)):
+            v = tk.BooleanVar(value=(aid in cur))
+            vs[aid] = v
+            r = tk.Frame(inner); r.pack(fill="x", anchor="w")
+            tk.Checkbutton(r, variable=v, font=("맑은 고딕", 9),
+                           text=lb.replace(chr(10), " ")).pack(side="left", anchor="w")
+        def _save():
+            # 고른 것 — **지금 차례를 지키고** 새로 고른 것은 뒤에 붙인다
+            picked = [x for x in cur if vs.get(x) and vs[x].get()]
+            picked += [a for a in vs if vs[a].get() and a not in picked]
+            self.cfg["quick_btns"] = picked
+            save_cfg(self.cfg)
+            self.status.set(f"📑 간단바 버튼 {len(picked)}개 저장")
+            self._quick_fill()
+            w.destroy()
+        bt = tk.Frame(w); bt.pack(fill="x", padx=8, pady=6)
+        tk.Button(bt, text="✔ 저장", font=("맑은 고딕", 9, "bold"), bg="#1e8449",
+                  fg="white", width=10, command=_save).pack(side="left")
+        tk.Button(bt, text="↺ 기본으로", font=("맑은 고딕", 9), bg="#7f8c8d",
+                  fg="white", width=10,
+                  command=lambda: [self.cfg.__setitem__("quick_btns", list(QUICK_DEFAULT)),
+                                   save_cfg(self.cfg), self._quick_fill(),
+                                   w.destroy()]).pack(side="left", padx=(6, 0))
+        tk.Label(bt, text="제목줄 밑 칸에 쓴 글도 저장됩니다",
+                 font=("맑은 고딕", 8), fg="#888").pack(side="left", padx=(8, 0))
+        try:
+            apply_dark(w, self.cfg.get("dark_ui", True))
+        except Exception:
+            pass
+
     def _rec_swap_open(self):
         """[🎹 녹화교체] — 무거운 일은 전부 스레드에서."""
         self.status.set("🎹 퍼플 폴더를 확인하는 중...")
@@ -6913,6 +7184,11 @@ class App(tk.Tk):
                   bg="#16a085", fg="white", activebackground="#0e6655",
                   width=9, height=1, pady=2,
                   command=self._rec_swap_open).pack(side="top", pady=(1, 0))
+        # 📑 간단바 — 자주 쓰는 실행 버튼만 모은 좁은 창
+        tk.Button(sv, text="📑 간단바", font=("맑은 고딕", 8, "bold"),
+                  bg="#6c3483", fg="white", activebackground="#4a235a",
+                  width=9, height=1, pady=2,
+                  command=self._quick_open).pack(side="top", pady=(1, 0))
         self._refresh_coord_save_lbl()
         self.after(1500, self._refresh_lock_btn)
         self.after(300, self._apply_dark_all)     # 저장해둔 화면 밝기 적용
