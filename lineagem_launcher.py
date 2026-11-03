@@ -1667,6 +1667,19 @@ WARN_IDLE_MS = 10000    # 5분이 지난 뒤 **목록에 남은 슬롯만** 다�
 #    올릴 때(WARN_MATCH 0.55)보다 **낮은 기준**으로 보면 애매한 것도 '있다' 가
 #    되어 **안 지운다.** 지우는 것은 0.45 도 못 넘을 때 = 확실히 없을 때뿐이다.
 #    🚫 클로드는 이 값을 WARN_MATCH 와 같게 만들지 말 것 — 그러면 또 지운다.
+# 🖥 **메인런처 고정 위치 — 모든 컴퓨터가 같아야 한다** (2026-11-03 사용자 지시
+#    *"이것도 배포해줘 모든게 다 똑같아야해"*).
+#    그래서 `coords.json`(머신별)이 아니라 **코드에 둔다** — 로컬은 🔄 업데이트만
+#    하면 같은 자리에서 뜬다 (CLAUDE.md 2026-08-15 *"어디서나 같아야 하는 설정은
+#    코드에 넣는다"*). 좌표 배포(`share_coords.json`)를 쓰지 않으므로
+#    **통로를 열어두고 안 닫아서 로컬 좌표가 돌아가는 사고가 원천적으로 없다**
+#    (2026-09-30 · 10-13 · 10-17 에 세 번 당한 그 사고).
+#    🚫 클로드는 이것을 `cfg.get("main_win_fixed")` 로 되돌리지 말 것 —
+#       되돌리면 컴퓨터마다 자리가 달라진다. 옮기려면 **이 숫자만** 고친다.
+#    (화면이 더 좁은 컴퓨터에서 창이 밖으로 나가지 않도록 `_target_geometry` 가
+#     작업영역 안으로 가로·세로를 잘라준다)
+MAIN_WIN_POS = (527, 140)
+
 WARN_GONE_N = 4   # 2026-11-03: 3 → 4 (지울 때는 더 조심한다)
 # 😴 사람이 컴퓨터를 이만큼 안 만지면, 목록에 남은 복구를 스스로 돌린다
 # (2026-09-29 사용자 요청: "5분 동안 아무런 작업이 없을 때 내가 놓친 복구가 있으면 해줘")
@@ -5045,7 +5058,9 @@ class App(tk.Tk):
         self._build_ui()
         # 메인런처 고정 위치 — 드래그해도 자동 저장하지 않음(모든 컴퓨터 동일 위치 유지).
         # 잠깐 옮겨 쓰다가 [📍 제자리] 버튼으로 복귀. 고정값 변경은 클로드에게 요청.
-        _pos = self.cfg.get("main_win_fixed") or self.cfg.get("main_win_pos") or [80, 120]
+        # 자리는 **코드의 `MAIN_WIN_POS`** 다 (머신별 `coords.json` 이 아니다 —
+        # 그래야 21대가 같은 자리에서 뜬다). 🚫 cfg 로 되돌리지 말 것.
+        _pos = list(MAIN_WIN_POS)
         try:
             self.geometry(f"+{int(_pos[0])}+{int(_pos[1])}")
         except Exception:
@@ -19436,8 +19451,7 @@ class App(tk.Tk):
         """콘텐츠에 맞는 목표 창 크기/위치 (폭=섹션행, 높이=콘텐츠+1cm, 작업표시줄 위로)."""
         self.update_idletasks()
         needed = self.winfo_reqheight() + 38   # 슬롯 끝에서 약 1cm 여유
-        pos = self.cfg.get("main_win_fixed") or self.cfg.get("main_win_pos")   # 고정 위치 우선
-        x, y = (int(pos[0]), int(pos[1])) if pos else (76, 75)
+        x, y = int(MAIN_WIN_POS[0]), int(MAIN_WIN_POS[1])   # 코드 고정 — 모든 컴퓨터 동일
         work_bottom = self.winfo_screenheight() - 48   # fallback
         try:
             import ctypes
@@ -19457,6 +19471,16 @@ class App(tk.Tk):
         except Exception:
             w = self.winfo_width() or 1047
         w += 76   # 좌우 약 1cm씩(≈38px) 여유 — 내용이 가운데 정렬이라 양옆에 균등 여백
+        # 🖥 화면이 더 좁은 컴퓨터에서도 창이 밖으로 나가지 않게 가로를 잘라준다
+        #    (자리를 코드에 고정했으므로 — 2026-11-03). 세로는 위에서 이미 잘랐다.
+        try:
+            _sw = self.winfo_screenwidth()
+            if x + w > _sw:
+                x = max(0, _sw - w)
+                if x + w > _sw:
+                    w = _sw - x
+        except Exception:
+            pass
         return w, needed, x, y
 
     def _fit_main_height(self):
@@ -27024,9 +27048,7 @@ class App(tk.Tk):
 
     def _go_home(self):
         """[📍 제자리] — 런처를 고정 위치로 되돌린다."""
-        pos = self.cfg.get("main_win_fixed") or self.cfg.get("main_win_pos")
-        if not pos:
-            self.status.set("고정 위치가 없습니다"); return
+        pos = MAIN_WIN_POS   # 코드 고정 — 모든 컴퓨터 동일
         try:
             self.deiconify()
             self.geometry(f"+{int(pos[0])}+{int(pos[1])}")
