@@ -348,8 +348,20 @@ DUNGEON_INTERVAL = 2.0 # 클릭 사이 간격(초)
 SEQ_SLOTS      = 16    # 연속 클릭 슬롯 수 (고정)
 # 2026-10-05 사용자 지시: "F11 절전해제랑 절전모드는 25% 속도를 앞당겨주라, 좀 느리다"
 #   → 0.37~0.81 에서 **25% 더 짧게** (×0.75). 랜덤 폭은 그대로 둔다 (항상 사람처럼).
-SEQ_MIN        = 0.22  # 절전해제·절전모드 슬롯간 최소 간격(초)
-SEQ_MAX        = 0.49  # 절전해제·절전모드 슬롯간 최대 간격(초)
+SEQ_MIN        = 0.20  # 절전해제·절전모드 슬롯간 최소 간격(초)
+SEQ_MAX        = 0.44  # 절전해제·절전모드 슬롯간 최대 간격(초)
+#    (2026-10-05 25% ↓ 0.37/0.81 → 0.28/0.61 · 2026-11-03 다시 10% ↓ → 0.20/0.44)
+#    ⚠ `coords.json` 의 `seq_min/seq_max/slp_min/slp_max` 가 **코드 기본을 이긴다** —
+#      값을 바꿀 때는 **두 곳을 다** 바꿔야 효과가 있다.
+#    🚫 더 줄이지 말 것 — 절전이 덜 풀린 채 다음으로 넘어가면 팅긴다 (2026-09-19).
+#      대신 아래 `SEQ_VERIFY_*` 가 **안 깨어난 것만 골라 다시 누르므로** 더 안전해졌다.
+# 😴 **깨어났는지 확인하고, 안 깨어났으면 다시 누른다** (2026-11-03 사용자 요청:
+#    *"절전해제 가끔 안 되는 것들이 있어"*). 예전에는 **한 번 누르고 끝**이라
+#    그 클릭이 씹히면 그 클라만 자는 채로 남았고, 뒤에 도는 런처가 Z 로 또 깨웠다.
+#    성공한 클라는 **확인 한 번(약 60ms)** 만 더 드니 전체 시간에 거의 영향이 없다.
+SEQ_VERIFY_GAP   = (0.30, 0.45)  # 누른 뒤 깨어났는지 보기까지
+SEQ_VERIFY_SEE   = 3             # 그 간격으로 몇 번까지 지켜볼지
+SEQ_VERIFY_TRIES = 3             # 안 깨어나면 몇 번까지 다시 누를지 (처음 포함)
 #   2026-10-05 에 0.37~0.81 -> 0.28~0.61 (25% 단축), 2026-11-03 에 사용자 요청으로
 #   거기서 **다시 20% 당겼다** (0.28~0.61 -> 0.22~0.49). 16슬롯 한 바퀴
 #   4.5~9.8초 -> **3.5~7.8초**. 랜덤 폭(비율)은 그대로 둔다.
@@ -3299,6 +3311,10 @@ FLOOR_TRUST_MOVE = ()
 # 🔁 오토를 못 누른 슬롯은 **런처가 끝난 뒤 다시 층을 확인해** 맞으면 눌러준다
 #    (2026-10-06 사용자: "오토를 안 돌렸을 때는 네가 다시 층을 확인해서 돌릴 수 있나?")
 FLOOR_RETRY_WAIT  = (2.5, 4.2)   # 다시 보기 전에 쉬는 시간(초) — 화면이 가라앉을 시간
+#    ⚠ 이건 **처음 한 슬롯 앞에서만** 쉰다 (2026-11-03 사용자 요청: *"실행이 완료가
+#      되면 좀 빠르게 완료해줘"*). 예전엔 **슬롯마다** 쉬어서 10슬롯이면 25~42초를
+#      그냥 버렸다. 화면이 가라앉기를 기다리는 것이므로 **한 번이면 충분하다.**
+FLOOR_RETRY_GAP   = (0.25, 0.55)  # 두 번째 슬롯부터 — 창을 바꾸는 틈만
 FLOOR_RETRY_TRIES = 2            # 슬롯마다 몇 번까지 다시 볼지
 FLOOR_WAIT  = (0.6, 1.0)       # 다시 보기까지 쉬는 시간(초) — 사람처럼 랜덤
 FLOOR_PAD   = 12               # 저장해둔 자리 둘레로 이만큼 더 넓게 훑는다(px)
@@ -14969,11 +14985,12 @@ class App(tk.Tk):
                   f"다시 층을 확인해 눌러본다")
         self.status.set(f"🔁 오토를 못 누른 {len(todo)}슬롯 — 다시 층을 확인합니다…")
         _hit = _no = 0
-        for r in todo:
+        for _k, r in enumerate(todo):
             if getattr(self, stop, False):
                 click_log(f"{fkey} 🔁 멈춤 — 남은 {len(todo)-_hit-_no}슬롯은 그대로")
                 break
-            nap(random.uniform(*FLOOR_RETRY_WAIT))
+            # 화면이 가라앉기를 기다리는 것은 **처음 한 번만** (2026-11-03)
+            nap(random.uniform(*(FLOOR_RETRY_WAIT if _k == 0 else FLOOR_RETRY_GAP)))
             ok, sc, why = False, 0.0, ""
             last = {}
             # 🔢 여기서도 **숫자 읽기를 먼저** (2026-11-03) — 본 경로와 같은 규칙
@@ -21890,6 +21907,7 @@ class App(tk.Tk):
             n = len(coords)
             _hit, _skip, _sc = 0, 0, []
             _moved = []            # 등록 좌표와 다른 자리를 누른 것 (기록용)
+            _again, _fail, _done = [], [], []  # 다시 눌러 깨운 것 · 끝내 안 깨어난 것 · 누른 것
             _cut = False
             for i, (x, y) in enumerate(coords):
                 if self._seq_stop_now():
@@ -21917,6 +21935,7 @@ class App(tk.Tk):
                 _hit += 1
                 self.after(0, lambda a=i: self.status.set(f"🔆 절전해제 {a+1}/{n} (랜덤 순서)..."))
                 pyautogui.click(_cx, _cy)
+                _done.append((i + 1, x, y))      # 끝에 한 바퀴 더 확인한다
                 # 😴 **깨웠다고 적어둔다** — 안 그러면 바로 뒤에 도는 경고확인
                 #    (`_wake_slots`)이 **같은 클라를 Z 로 또 깨운다**
                 #    (2026-10-20 사용자: "절전을 해제하고 또 한 번 더 해제하는 거 같아").
@@ -21926,6 +21945,43 @@ class App(tk.Tk):
                     self._wake_mark((x, y))      # 등록 좌표로도 적어둔다
                 if i < n - 1:
                     nap(random.uniform(mn, mx))   # 슬롯간 간격 (설정값 그대로, 추가 간격 없음)
+            # 😴 **마지막에 한 바퀴 확인한다** (2026-11-03 사용자: *"절전해제 가끔
+            #    안 되는 것들이 있어"*). 예전에는 **한 번 누르고 끝**이라 그 클릭이
+            #    씹힌 클라만 자는 채로 남았고, 뒤에 도는 런처가 Z 로 또 깨웠다.
+            #    🚀 **클릭할 때마다 확인하지 않는다** — 그러면 성공한 클라까지
+            #       기다리느라 F11 이 두 배로 느려진다. 다 누른 뒤 한 바퀴 훑으면
+            #       **16개 확인이 1초**(창 하나 60ms)면 끝나고, 다시 누르는 것은
+            #       **실제로 안 깨어난 것뿐**이다.
+            for _sw in range(SEQ_VERIFY_TRIES - 1):
+                if not (_chk and _done) or self._seq_stop_now():
+                    break
+                nap(random.uniform(*SEQ_VERIFY_GAP))
+                _left = []
+                for _sn, _x, _y in _done:
+                    if self._seq_stop_now():
+                        break
+                    if find_sleep_img("fix", (_x, _y))[0] is None:
+                        continue                 # 깨어났다
+                    _left.append((_sn, _x, _y))
+                if not _left:
+                    break
+                self.after(0, lambda c=len(_left): self.status.set(
+                    f"😴 아직 자는 {c}개를 다시 누릅니다…"))
+                for _sn, _x, _y in _left:
+                    if self._seq_stop_now():
+                        break
+                    _sp2 = sleep_spot_screen("fix", (_x, _y))
+                    _px, _py = (_sp2[0], _sp2[1]) if _sp2 else (_x, _y)
+                    pyautogui.click(_px, _py)
+                    self._wake_mark((_px, _py))
+                    _again.append(f"{_sn}({_sw+2}번째)")
+                    nap(random.uniform(mn, mx))
+                _done = _left
+            if _chk and _done and not self._seq_stop_now():
+                _fail = []
+                for _sn, _x, _y in _done:
+                    if find_sleep_img("fix", (_x, _y))[0] is not None:
+                        _fail.append(_sn)
             # 🗒 **왜 그렇게 했는지 항상 남긴다** (2026-10-20).
             #   예전엔 건너뛴 수가 0 이면 아무 말도 없어서, 멈춤 깃발 때문에
             #   아무것도 안 했을 때도 `0개 깨움` 한 줄뿐이라 원인을 짚을 수 없었다.
@@ -21945,6 +22001,12 @@ class App(tk.Tk):
             if _moved:
                 click_log("[절전해제] 😴 등록 좌표가 글자와 어긋나 **찾은 자리**를 "
                           "눌렀습니다 — " + " ".join(_moved))
+            if _again:
+                click_log("[절전해제] 🔁 한 번에 안 깨어나 다시 눌렀습니다 — "
+                          + " ".join(_again))
+            if _fail:
+                click_log(f"[절전해제] ⚠ {SEQ_VERIFY_TRIES}번 눌러도 안 깨어난 것: "
+                          f"{_fail} — 그 클라는 런처가 슬롯을 시작할 때 다시 깨웁니다")
             self.after(0, lambda m=_msg: self.status.set(m))
         except Exception as e:
             self.after(0, lambda err=e: self.status.set(f"절전해제 오류: {err}"))
