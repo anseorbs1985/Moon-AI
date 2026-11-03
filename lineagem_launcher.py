@@ -4239,6 +4239,36 @@ def floor_num_read(big):
     except Exception as e:
         return None, "오류 %s" % e
 
+def floor_num_try(coord, tries=1):
+    """그 클라의 **층 숫자**를 읽는다 → (층 or None, 설명).
+
+    ⚠ **창 전체(`grab_window`)를 봐야 한다.** `_floor_grab` 은 '층 글씨 자리' 둘레만
+       잘라낸 44x40 조각이라 HUD 던전 이름 줄을 못 찾는다 — 2026-11-03 에
+       `floor_seen` 이 그 조각을 넘기고 있어서 **숫자 읽기가 통째로 죽어 있었다**
+       (cvtColor 가 빈 그림이라 예외 → 조용히 그림 방식으로 내려갔다).
+       🚫 클로드는 여기에 `_floor_grab` 을 다시 넣지 말 것.
+
+    견본이 없는 컴퓨터(창 가로가 다른 로컬 등)는 (None, "견본 없음") 을 돌려주고,
+    부르는 쪽이 **예전 그림 방식으로 내려간다** — 그래서 안 쓰는 컴퓨터는 영향 없다."""
+    why = "견본 없음"
+    for t in range(max(1, int(tries))):
+        try:
+            big = grab_window(coord)
+            if big is None:
+                why = "창 캡처 실패"
+            elif not floor_num_have(big.shape[1]):
+                return None, "창%d 견본 없음" % big.shape[1]
+            else:
+                n, why = floor_num_read(big)
+                if n is not None:
+                    return n, why
+        except Exception as e:
+            why = "오류 %s" % e
+        if t < tries - 1:
+            time.sleep(random.uniform(*FLOOR_WAIT))
+    return None, why
+
+
 def floor_scores2(fkey, coord):
     """위와 같되 **숫자 견본으로 잰 것인지**도 알려준다 → (점수맵, 숫자방식?).
     기준값이 방식마다 다르기 때문에 이 구분이 필요하다."""
@@ -4267,11 +4297,8 @@ def floor_seen(fkey, fl, coord, sc_map=None, dig=None):
     #    견본이 없는 컴퓨터는 예전 그림 방식으로 내려간다 (로컬 호환).
     if FLOOR_NUM_ON and sc_map is None:
         try:
-            _big = _floor_grab(fkey, coord)
-            if _big is not None and floor_num_have(_big.shape[1]):
-                _n, _why = floor_num_read(_big)
-                if _n is None:
-                    return False, 0.0, "숫자를 못 읽음 (%s)" % _why
+            _n, _why = floor_num_try(coord)          # ★ 창 전체로 읽는다
+            if _n is not None:
                 return (_n == fl), 1.0, ("숫자 %s" % _why)
         except Exception:
             pass
@@ -14477,6 +14504,36 @@ class App(tk.Tk):
                                     f"누르지 않았습니다 (🏢 에서 등록해주세요)")
                     return False
                 return True                       # 그 층 그림이 아직 없다
+            # 🔢 **숫자 읽기를 먼저 쓴다** (2026-11-03 — 이 경로가 안 돌고 있었다).
+            #    `floor_seen` 은 `sc_map` 이 None 일 때만 숫자를 읽는데, 부르는 곳
+            #    **셋이 전부 점수맵을 넘겨서** 검증된 숫자 읽기(10-29 13/13 정확)가
+            #    한 번도 안 쓰였다. 그래서 '층' 글자가 같은 그림끼리 붙어
+            #    0.89 vs 0.91 (1.02배 < FLOOR_RATIO 1.06) 로 **맞는 층인데도 막혔다.**
+            #    📏 실측 2026-11-03 (16클라, 화면을 눈으로 읽어 대조):
+            #       숫자 — 13/13 정확 (#08 이 실제 5층인 것까지 맞혔다)
+            #       그림 — #13(진짜 6층) 0.91/0.90 으로 **틀리게 막음** · #06 은
+            #              같은 화면을 0.61 → 0.99 로 재서 **흔들린다**
+            #    🚫 클로드는 여기서 숫자 읽기를 건너뛰게 만들지 말 것.
+            if FLOOR_NUM_ON:
+                _num, _nwhy = floor_num_try(coord, FLOOR_TRIES)
+                if _num == fl:
+                    click_log(f"{fkey} [{nm}] 🏢 {fl}층 확인됨 (숫자 {_nwhy}) "
+                              f"→ 좌표{j+1} 진행")
+                    return True
+                if _num is not None:
+                    # 🚫 **확실히 다른 층** — 절대 누르지 않는다
+                    click_log(f"{fkey} [{nm}] 🏢 숫자로 읽으니 {_num}층 — "
+                              f"지정한 {fl}층이 아니다 ({_nwhy}) "
+                              f"→ 좌표{j+1}(오토)를 누르지 않고 이 슬롯 중단")
+                    self.status.set(f"🏢 [{nm}] {_num}층으로 읽혀 오토를 "
+                                    f"누르지 않았습니다 (지정 {fl}층)")
+                    self._note(fkey, nm,
+                               f"숫자로 {_num}층 — 지정 {fl}층이 아님 → 오토 안 누름")
+                    self._floor_retry_add(fkey, si, nm, coord, fl, j,
+                                          f"숫자로 {_num}층", _nwhy, True)
+                    return False
+                click_log(f"{fkey} [{nm}] 🔢 층 숫자를 못 읽음 ({_nwhy}) "
+                          f"— 그림 방식으로 확인한다")
             best, why, last, _dg = 0.0, "", {}, False
             for t in range(FLOOR_TRIES):
                 last, _dg = floor_scores2(fkey, coord)
@@ -14580,6 +14637,13 @@ class App(tk.Tk):
             time.sleep(random.uniform(*FLOOR_RETRY_WAIT))
             ok, sc, why = False, 0.0, ""
             last = {}
+            # 🔢 여기서도 **숫자 읽기를 먼저** (2026-11-03) — 본 경로와 같은 규칙
+            if FLOOR_NUM_ON:
+                _num, _nwhy = floor_num_try(r["coord"], FLOOR_RETRY_TRIES)
+                if _num is not None:
+                    ok = (_num == r["fl"])
+                    sc, why = 1.0, "숫자 %s" % _nwhy
+                    last = {}
             for t in range(FLOOR_RETRY_TRIES):
                 last, _dg = floor_scores2(fkey, r["coord"])
                 ok, sc, why = floor_seen(fkey, r["fl"], r["coord"], last, _dg)
