@@ -222,8 +222,8 @@ FIX_SLOTS          = 16    # 🩹 복구 — 슬롯 16개
 # 줄였는데, **너무 연속적으로 눌러 복구가 안 되는 경우가 많다**는 신고 (2026-09-29).
 # 창이 뜨는 애니메이션이 끝나기 전에 다음 좌표가 눌려 씹힌다 — 성공률이 우선이라 넓혔다.
 # (랜덤 폭은 그대로 둔다 — 값 하나로 고정하지 말 것)
-FIX_GAP_MIN        = 0.70
-FIX_GAP_MAX        = 1.25
+FIX_GAP_MIN        = 0.80   # 2026-11-03 "또박또박" — 0.70~1.25 에서 14% 늘렸다
+FIX_GAP_MAX        = 1.35   # (창 뜨는 애니메이션이 끝나기 전에 다음 좌표가 눌리던 것)
 # 슬롯의 **첫 좌표를 누르기 전에** 그 창을 앞으로 올리고 이만큼 기다린다.
 # 비활성 창의 첫 클릭은 '창 띄우기'로만 먹히고 사라진다 (2026-08-24 에 이미 겪은 것).
 FIX_FOCUS_WAIT     = (0.45, 0.75)   # 창을 올린 뒤 십자가를 누르기까지
@@ -246,7 +246,7 @@ HERO_CV_H  = HERO_R * 2 + 6
 #   (10-17 실측: 12:30:57 틱에는 없었고 12:32:55 틱에 0.91 로 잡혔다 — 2분 지연).
 #   부하는 16클라 한 바퀴 약 1초 → 1분당 1초. 백그라운드 스레드라 화면은 안 멈춘다.
 # ⚠ 더 줄이기 전에 21대 전체 부하를 생각할 것 (30초로 하면 1분당 2초).
-P0_WATCH_MS   = 60000
+P0_WATCH_MS   = 30000   # 2026-11-03: 60초로는 문구를 자주 놓쳤다 (16클라 1회 1.0초)
 P0_WATCH_COOL = 1200           # 같은 슬롯은 20분에 한 번만 다시 돌린다
 # 🕐 작업 중에 '물약 0개' 를 봤으면 적어뒀다가 작업이 끝난 뒤 돌린다.
 #    이만큼 지나면 버린다 — 그 사이 창고에서 채웠을 수 있다.
@@ -303,7 +303,13 @@ FIX_ESC_TRIES      = 2         # 복구 전 열린 창을 ESC 로 닫아보는 �
 #    (10-10 20:26 에 #11·#12 가 뜬 지 36초 만에 그렇게 지워졌다).
 #    **한 번이라도 보이면 복구를 돌린다.** 세 번 다 안 보여야 '이미 복구됨' 이다.
 #    ⏱ 속도는 그대로다 — 있으면 첫 번에 보이고 끝난다 (한 슬롯 0.07초).
-FIX_SEE_TRIES      = 3
+FIX_SEE_TRIES      = 5   # 2026-11-03: 3 → 5. 십자가 점수는 **있을 때 0.62~0.90 ·
+                         # 없을 때 0.38~0.54** 로 갈리므로(실측) 기준(0.55)은 맞다.
+                         # 못 보는 것은 점수가 아니라 **창이 가려졌거나 절전**이라
+                         # 기준을 낮추면 안 된다 — **횟수로 덮는다.**
+                         # 🚫 기준(WARN_MATCH)을 내려 해결하려 하지 말 것:
+                         #    0.45 면 잡음(0.38~0.54) 한가운데라 **영영 안 지워진다.**
+                         # 있으면 첫 번에 끝나므로 속도는 그대로다.
 FIX_SEE_GAP        = (0.25, 0.45)
 # 📤 떼어낸 슬롯판(오만의탑·악몽의섬 …)의 **앞뒤와 최소화만** 메인런처에 맞춘다.
 # 자리는 건드리지 않는다 — 떼었을 때 그 자리, 사용자가 옮긴 자리가 전부다
@@ -1650,7 +1656,13 @@ WARN_IDLE_MS = 10000    # 5분이 지난 뒤 **목록에 남은 슬롯만** 다�
 # (2026-09-29 사용자 신고: "내가 복구를 안 했는데 십자가가 안 보인다고 없애는 경우가 있더라")
 # 한 번 놓친 것(점수가 잠깐 기준 밑으로 · 창이 가려짐 · 화면 전환 중)과
 # 진짜 복구된 것을 가르는 유일한 방법이다. 실제로 복구를 돌린 슬롯은 예외(한 번에 지움).
-WARN_GONE_N = 3
+# 🩹 **지울 때는 더 민감하게 본다** (2026-11-03 사용자 지시:
+#    *"내가 복구를 하지 않았는데 너가 없애는 경우가 있어"*)
+#    📏 실측 — 십자가가 **있을 때 0.57~0.85 · 없을 때 0.35~0.55** 로 흔들린다.
+#    올릴 때(WARN_MATCH 0.55)보다 **낮은 기준**으로 보면 애매한 것도 '있다' 가
+#    되어 **안 지운다.** 지우는 것은 0.45 도 못 넘을 때 = 확실히 없을 때뿐이다.
+#    🚫 클로드는 이 값을 WARN_MATCH 와 같게 만들지 말 것 — 그러면 또 지운다.
+WARN_GONE_N = 4   # 2026-11-03: 3 → 4 (지울 때는 더 조심한다)
 # 😴 사람이 컴퓨터를 이만큼 안 만지면, 목록에 남은 복구를 스스로 돌린다
 # (2026-09-29 사용자 요청: "5분 동안 아무런 작업이 없을 때 내가 놓친 복구가 있으면 해줘")
 # 다야(재화) 복구는 하지 않는다 — 좌표4 의 👁 '무료' 확인이 그대로 막는다.
@@ -17090,8 +17102,12 @@ class App(tk.Tk):
              · 목록에 없는 슬롯은 아예 손대지 않는다"""
         try:
             _in_list = int(si) in set(self._warn_load())
-            # 목록에 있으면 '지워도 되나' 를 판단해야 하므로 한 번 더 본다
-            _looks = ((FIX_CLICK_DELAY, FIX_CLICK_RETRY, FIX_CLICK_GONE)
+            # 🩹 목록에 있으면 '지워도 되나' 를 판단해야 하므로 **더 많이** 본다
+            #    (2026-11-03 사용자: *"복구를 하지 않았는데 없애는 경우가 있어"*).
+            #    십자가 점수가 0.57~0.85 로 흔들려 3번으로는 놓쳤다 → **5번**.
+            #    🚫 클로드는 이 횟수를 줄이지 말 것.
+            _looks = ((FIX_CLICK_DELAY, FIX_CLICK_RETRY, FIX_CLICK_GONE,
+                       FIX_CLICK_GONE, FIX_CLICK_GONE)
                       if _in_list else (FIX_CLICK_DELAY, FIX_CLICK_RETRY))
             _saw_sleep = False
             for k, _d in enumerate(_looks):
@@ -17130,7 +17146,8 @@ class App(tk.Tk):
             self._warn_save(sorted(cur - {int(si)}))
             self._fix_paid_mark(int(si), False)   # 💎 다야 표시도 해제
             self.after(0, self._warn_refresh)
-            click_log(f"[클릭확인] #{si:02d} 십자가가 {len(_looks)}번 확인에서 "
+            click_log(f"[클릭확인] #{si:02d}{self._warn_score_txt(si)} "
+                      f"십자가가 {len(_looks)}번 확인에서 "
                       f"모두 안 보임 → 손으로 복구한 것으로 보고 목록에서 지웠다")
             self.after(0, lambda s=si, n=len(_looks): self.status.set(
                 f"✅ #{s:02d} 목록에서 지웠습니다 — 십자가가 {n}번 확인에서 "
@@ -17615,6 +17632,23 @@ class App(tk.Tk):
                                           if on else "끔"))
         click_log(f"[클릭확인] 사용자가 {'켬' if on else '끔'}")
 
+    def _warn_score_txt(self, si):
+        """그 슬롯이 마지막으로 본 십자가 점수 (지울 때 기록에 남긴다 — 2026-11-03).
+
+        사용자 신고: *"복구를 하지 않았는데 너가 없애는 경우가 있어."*
+        점수가 **0.40 쯤이면 정말 없는 것**, **0.50~0.54 면 가려졌거나 애매한 것**이다.
+        기록이 없으면 둘을 구분할 수 없어 원인을 영영 못 짚는다.
+        🚫 클로드는 이 기록을 지우지 말 것."""
+        try:
+            for _i, _v in (getattr(self, "_last_scores", None) or []):
+                if int(_i) == int(si):
+                    return (f" · 점수 {_v:.2f}(기준 {WARN_MATCH})"
+                            + ("  ⚠ 기준에 가깝다 — 가려졌을 수 있다"
+                               if _v >= WARN_MATCH - 0.06 else ""))
+        except Exception:
+            pass
+        return ""
+
     def _warn_gone_filter(self, now_hit, before, keep=()):
         """십자가가 안 보인다고 **바로 지우지 않는다** (2026-09-29 사용자 신고).
 
@@ -17637,6 +17671,12 @@ class App(tk.Tk):
                 continue
             miss[si] = miss.get(si, 0) + 1
             if si in ran or miss[si] >= WARN_GONE_N:
+                # 📏 **지울 때 점수를 남긴다** (2026-11-03) — '정말 없는 것(0.40)' 과
+                #    '가려진 것(0.50~0.54)' 을 나중에 구분할 유일한 자료다.
+                click_log(f"[경고확인] #{si:02d} 목록에서 지운다"
+                          f"{self._warn_score_txt(si)} · "
+                          + ("복구를 돌린 뒤 사라짐" if si in ran
+                             else f"{WARN_GONE_N}번 연속 안 보임"))
                 gone.add(si)
                 miss.pop(si, None)
         for si in list(miss):                      # 목록에 없는 기록은 버린다
@@ -17789,7 +17829,8 @@ class App(tk.Tk):
                     self._warn_save(sorted(set(self._warn_load()) - {int(si)}))
                     self._fix_paid_mark(int(si), False)     # 💎 다야 표시도 해제
                     self.after(0, self._warn_refresh)
-                    click_log(f"fix #{si:02d} 십자가가 {FIX_SEE_TRIES}번 다 안 보였다 — "
+                    click_log(f"fix #{si:02d}{self._warn_score_txt(si)} "
+                              f"십자가가 {FIX_SEE_TRIES}번 다 안 보였다 — "
                               f"이미 복구된 것으로 보고 목록에서 지웠다"
                               + (" (절전에서 깨운 뒤 확인)" if _was_sleep else ""))
                     self.status.set(f"✅ #{si:02d} 십자가가 없어 목록에서 지웠습니다 "
@@ -17996,7 +18037,7 @@ class App(tk.Tk):
                 im = _full.crop((x0, y0, x1, y1)).convert("L")
                 _sc = self._img_match(im, ref)
                 _scores.append((i + 1, round(_sc, 2)))
-                if _sc >= WARN_MATCH:      # 기준 그림이 그 안에 있다 = 떠 있다
+                if _sc >= WARN_MATCH:   # 있다 = 떠 있다
                     hit.append(i + 1)
                 # 같은 캡처로 '지금 자고 있나'도 본다 — 자는 동안은 십자가가 가려서
                 # 안 보이므로, 그걸 '복구됨'으로 오해해 지우면 안 된다 (2026-08-29)
@@ -28524,10 +28565,17 @@ class App(tk.Tk):
         try:
             if not _isl.potion0_on():
                 return self._p0_why("[💧 자동 OFF] 로 꺼져 있음")
-            # ✋ 사람이 쓰는 중이면 **보지도 않는다** (2026-10-21 사용자 지시)
-            if self._human_busy():
+            # ✋ 사람이 쓰는 중이어도 **보기는 한다** (2026-11-03 사용자 지시:
+            #    *"인식을 잘 안 하는 것들이 넘쳐난다"*).
+            #    🚨 10-21 에 넣은 `_human_busy` 가 **보는 것까지 막아** 그 틱을
+            #       통째로 건너뛰었다. 문구는 잠깐 떴다 사라지므로 그대로 놓쳤다
+            #       (실측 11-03: 하루에도 여러 번 `✋ … 미룬다` 로 통째 건너뜀).
+            #    → 보는 것(PrintWindow)은 **게임에 입력을 보내지 않는다.**
+            #      사람이 쓰는 중이면 **돌리는 것만** 미룬다 (아래 `_p0_pend`).
+            #    🚫 클로드는 여기에 `return` 을 다시 넣지 말 것.
+            _human = self._human_busy()
+            if _human:
                 self._human_wait_log("물약감시")
-                return
             if not os.path.exists(_isl.potion0_img_path()):
                 return self._p0_why("물약 0개 그림이 없음")
             # 섬 실행기가 이미 돌고 있으면 건드리지 않는다
@@ -28723,14 +28771,15 @@ class App(tk.Tk):
                 return
             # 🕐 **작업이 돌고 있으면 쌓아두고 끝난 뒤에 돌린다.**
             #    여기서 바로 돌리면 돌던 작업과 클릭이 엉킨다.
-            if self._is_busy():
+            if self._is_busy() or _human:
                 _pd = getattr(self, "_p0_pend", None)
                 if _pd is None:
                     _pd = self._p0_pend = {}
+                _why = "사람이 쓰는 중이라" if _human else "다른 작업이 도는 중이라"
                 for si, key, didx, v, pv in hits:
                     if si not in _pd:
                         click_log(f"[물약감시] 🕐 #{si+1:02d} 물약 0개 ({v:.2f}) · "
-                                  f"{key} 안 — 다른 작업이 도는 중이라 "
+                                  f"{key} 안 — {_why} "
                                   f"**적어두고 끝나면 돌린다**")
                     _pd[si] = (key, didx, now)
                 return
