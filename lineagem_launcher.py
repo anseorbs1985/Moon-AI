@@ -1742,6 +1742,7 @@ NIGHT_ALIGN = False
 #    창 오른쪽에 180px 쯤 빈 자리가 남아 그 두 열이 클라 위에 걸렸다.
 #    오른쪽 정렬로 바꾸면 그 두 열이 **클라 오른쪽 빈 자리**까지 나온다.
 #    끄려면 False (예전처럼 왼쪽 정렬).
+SEC_ROW_NO_ISLAND = True   # 🗂 섹션행에 던전 4개를 만들지 않는다 (오른쪽 열에 있다)
 FRONT_ROW_EAST = True
 
 # 💬 실행 멘트(상태줄) 글 너비 — 클라 오른쪽 빈 자리에 맞춘다 (2026-11-03).
@@ -7153,18 +7154,21 @@ class App(tk.Tk):
         upd.create_text(39, 29, text="🔄", font=("맑은 고딕", 13))
         upd.create_text(39, 52, text="업데이트", fill="white", font=("맑은 고딕", 9, "bold"))
         upd.bind("<Button-1>", lambda e: self._run_updater())
+        self._dup_upd = upd        # 🗂 오른쪽 열에 같은 버튼이 있다 → 아래에서 뺀다
 
         # 맨 오른쪽: 좌표 저장/복구 (이 컴퓨터 전용 — 내가 저장한 시점으로 되돌리기)
         sv = tk.Frame(btn_row); sv.pack(side="left", padx=(6, 0))
-        tk.Button(sv, text="💾 좌표\n저장", font=("맑은 고딕", 9, "bold"),
+        self._dup_save = tk.Button(sv, text="💾 좌표\n저장", font=("맑은 고딕", 9, "bold"),
                   bg="#1e8449", fg="white", activebackground="#145a32",
-                  width=7, height=2, command=self._save_coord_snapshot).pack(side="top")
+                  width=7, height=2, command=self._save_coord_snapshot)
+        self._dup_save.pack(side="top")
         self._coord_save_lbl = tk.Label(sv, font=("맑은 고딕", 6), fg="#666")
         self._coord_save_lbl.pack(side="top")
-        tk.Button(sv, text="♻ 좌표복구", font=("맑은 고딕", 8, "bold"),
+        self._dup_rest = tk.Button(sv, text="♻ 좌표복구", font=("맑은 고딕", 8, "bold"),
                   bg="#7d3c98", fg="white", activebackground="#5b2c6f",
                   width=9, height=1, pady=2,
-                  command=self._restore_coord_snapshot).pack(side="top", pady=(1, 0))
+                  command=self._restore_coord_snapshot)
+        self._dup_rest.pack(side="top", pady=(1, 0))
         # 🔒 좌표 잠금 — 잠근 런처는 업데이트가 절대 못 건드린다
         self._lock_btn = tk.Button(sv, text="🔒 좌표잠금", font=("맑은 고딕", 8, "bold"),
                                    bg="#c0392b", fg="white", activebackground="#922b21",
@@ -7268,7 +7272,8 @@ class App(tk.Tk):
         self._front_row = front_row   # 정렬 보정용 (일반던전충전 열 ← TJ 좌측 라인)
 
         # 배열창 재배치 왼쪽: (1행) 일반던전충전+실행  (2행) 인형탐험+실행 — 각 버튼 옆에 실행
-        dc_col = tk.Frame(front_row); dc_col.pack(side="left", padx=(4,8), anchor="n")
+        dc_col = tk.Frame(front_row); dc_col.pack(side="left", padx=(2,2), anchor="n")
+        self._dc_col = dc_col        # 🗂 접어도 **이 열만** 남는다
         # ── 매일 해야 하는 것 (네모 박스) : 용던고고!!! / 스케줄 ──
         daily = tk.LabelFrame(dc_col, text=" 매일 ", font=("맑은 고딕", 8, "bold"),
                               fg="#a04000", bd=2, relief="groove")
@@ -7351,13 +7356,15 @@ class App(tk.Tk):
             dc_col, text="▶ 전부 복구", font=("맑은 고딕", 8, "bold"),
             bg="#8e44ad", fg="white", activebackground="#6c3483", pady=0,
             width=12, height=2, command=self._fix_run_all)
-        self._warn_allbtn.pack(anchor="n", pady=(26, 0))   # ≈1cm 띄운다
+        # 🗂 **여백을 줄였다** (2026-11-04) — 아래에 [던전] 상자와 [▶ 접기] 가
+        #    더해지면서 화면 높이를 넘겨 맨 밑줄이 잘렸다.
+        self._warn_allbtn.pack(anchor="n", pady=(8, 0))
 
         # 작업이 끝나면 여기에 큰 빨간 글씨로 '완료'가 1분간 뜬다
         self._done_var = tk.StringVar(value="")
         self._done_lbl = tk.Label(dc_col, textvariable=self._done_var,
                                   font=("맑은 고딕", 16, "bold"), fg="#c0392b",
-                                  bg=self.cget("bg"), width=11, height=2,
+                                  bg=self.cget("bg"), width=11, height=1,
                                   anchor="center")
         self._done_lbl.pack(anchor="n", pady=(3, 0))
 
@@ -7378,13 +7385,134 @@ class App(tk.Tk):
         #   높이는 **1.5배**로 — [▶ 전부 복구](height=2 ≈ 36px) 보다 조금 작게
         #   (2026-11-03 사용자 요청). ⚠ Tk 의 `height` 는 **글자 줄 수**라 1.5줄을
         #   못 준다. 그래서 `pady` 로 위아래를 늘린다 (20px → 약 30px).
-        tk.Button(self._warn_box, text="📬 우편 지금 받기 (전부)",
+        tk.Button(self._warn_box, text="📬 우편 지금 받기",
                   font=("맑은 고딕", 8, "bold"), pady=5,
                   bg="#2471a3", fg="white", activebackground="#1a5276",
                   command=self._mail_run_now).pack(fill="x", pady=(1, 1))
         self._warn_rows = tk.Frame(self._warn_box)
         self._warn_rows.pack(fill="x")
         self.after(900, self._warn_refresh)
+
+        # ╭─ 🗂 **접어도 남는 열** (2026-11-04 사용자 지시) ───────────────╮
+        # │ *"매일 용던고고 밑으로는 다 살려두고, 위에는 혈레·업데이트·      │
+        # │   좌표저장·좌표복구 살려두고, 오만의탑 실행·악몽의섬 실행 이것도 │
+        # │   전부 용던고고 옆에 실행 이런 식으로. 1열로 하면 총 4줄.        │
+        # │   다야 OCR 실행 이거 가져오고. 화살표는 복구해야함 아래 맨       │
+        # │   밑줄에 붙여서 `< 열기` 이런 식으로."*                          │
+        # │ *"안 쓰는 거 전부 왼쪽으로 보내고 접기 안에 들어가게 해줘."*     │
+        # ╰──────────────────────────────────────────────────────────────╯
+        # 🧭 **왜 dc_col 안에 넣나** — 이 열은 `front_row` 의 **맨 오른쪽**이라,
+        #    왼쪽을 전부 숨기면 그대로 오른쪽 벽에 붙는다. 다른 열에 넣으면
+        #    접었을 때 같이 사라진다.
+        # 🚫 여기에 위젯을 더할 때는 **반드시 dc_col 안**에 넣을 것.
+        self._dc_daily = daily        # 🗂 접기용 — `_keep` 을 이 위에 끼운다
+        _keep = tk.Frame(dc_col)
+        _keep.pack(anchor="n", pady=(0, 4), before=daily)
+        # 📝 **적어둘 칸** — 혈레이드·업데이트 바로 위 (2026-11-04 사용자:
+        #    *"혈레이드 업데이트 위에 글을 쓸 수 있게 공간을 주고 크기는 고를 수 있게"*).
+        #    적는 즉시 `coords.json` 의 `fold_memo` 에 저장된다 (이 컴퓨터 전용).
+        _mt = tk.Frame(_keep); _mt.pack(anchor="n", fill="x")
+        tk.Label(_mt, text="📝", font=("맑은 고딕", 8)).pack(side="left")
+        self._memo_size = tk.StringVar(value=str(int(self.cfg.get("fold_memo_size", 9))))
+        _om = tk.OptionMenu(_mt, self._memo_size, *[str(v) for v in (8, 9, 10, 12, 14, 16)],
+                            command=lambda _v: self._fold_memo_size())
+        _om.config(font=("맑은 고딕", 7), width=2, padx=0, pady=0,
+                   highlightthickness=0, bd=1)
+        try: _om["menu"].config(font=("맑은 고딕", 8))
+        except Exception: pass
+        _om.pack(side="left", padx=(2, 0))
+        self._memo_box = tk.Text(_keep, height=2, width=10, wrap="word", bd=1,
+                                 relief="sunken",
+                                 font=("맑은 고딕", int(self.cfg.get("fold_memo_size", 9))))
+        self._memo_box.pack(anchor="n", fill="x", pady=(1, 3))
+        try:
+            self._memo_box.insert("1.0", str(self.cfg.get("fold_memo", "") or ""))
+        except Exception:
+            pass
+        self._memo_box.bind("<KeyRelease>", lambda e: self._fold_memo_save())
+        self._memo_box.bind("<FocusOut>", lambda e: self._fold_memo_save(now=True))
+        _k1 = tk.Frame(_keep); _k1.pack(anchor="n")
+        tk.Button(_k1, text="🔥 혈\n레이드", font=("맑은 고딕", 8, "bold"),
+                  bg="#c0392b", fg="white", activebackground="#7b241c",
+                  width=6, height=2, command=self._memo_boost).pack(side="left")
+        tk.Button(_k1, text="🔄\n업데이트", font=("맑은 고딕", 8, "bold"),
+                  bg="#c0392b", fg="white", activebackground="#7b241c",
+                  width=6, height=2, command=self._run_updater).pack(side="left", padx=(2, 0))
+        _k2 = tk.Frame(_keep); _k2.pack(anchor="n", pady=(2, 0), fill="x")
+        tk.Button(_k2, text="💾 좌표저장", font=("맑은 고딕", 8, "bold"),
+                  bg="#1e8449", fg="white", activebackground="#145a32",
+                  height=1, pady=2,
+                  command=self._save_coord_snapshot).pack(side="top", fill="x")
+        tk.Button(_k2, text="♻ 좌표복구", font=("맑은 고딕", 8, "bold"),
+                  bg="#7d3c98", fg="white", activebackground="#5b2c6f",
+                  height=1, pady=2,
+                  command=self._restore_coord_snapshot).pack(side="top", fill="x", pady=(2, 0))
+        # 💬 **지금 무슨 일을 하는지** — 좌표저장/복구 바로 아래 (2026-11-04 사용자:
+        #    *"좌표지정이랑 좌표복구 밑에 현재 상황 멘트를 볼 수 있게 해줘"*).
+        #    접으면 위쪽 상태줄이 같이 숨겨지므로 **여기가 유일한 상태 표시**다.
+        self._fold_status = tk.Label(_keep, textvariable=self.status,
+                                     font=("맑은 고딕", 8), fg="#7f8c8d",
+                                     wraplength=140, justify="center")
+        self._fold_status.pack(anchor="n", pady=(3, 0), fill="x")
+
+        # ── 🏝 던전 4개 + 다야OCR — **용던고고와 똑같은 '옆에 ▶실행'** 모양 ──
+        #    낚시녹임 아래 · [▶ 전부 복구] 위.
+        # 💰 다야 OCR — **낚시녹임 바로 아래** (2026-11-04 사용자:
+        #    *"던전에 다야 OCR 은 낚시녹임 밑으로 빼주고"*)
+        _oc = tk.Frame(dc_col); _oc.pack(anchor="n", pady=(5, 0), before=self._warn_allbtn)
+        tk.Button(_oc, text="💰 다야\nOCR", font=("맑은 고딕", 9, "bold"),
+                  bg="#27ae60", fg="white", activebackground="#1e8449",
+                  width=7, height=2, command=self._open_ocr).pack(side="left")
+        tk.Button(_oc, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#1e8449", fg="white", activebackground="#145a32",
+                  width=4, height=2, command=self._open_ocr_scan).pack(side="left", padx=(2, 0))
+
+        _dun = tk.LabelFrame(dc_col, text=" 던전 ", font=("맑은 고딕", 9, "bold"),
+                             fg="#a04000", bd=2, relief="groove")
+        _dun.pack(anchor="n", pady=(6, 0), padx=1, before=self._warn_allbtn)
+        if not hasattr(self, "_dun_imgs"):
+            self._dun_imgs = {}
+        for _i, (_nm, _bg) in enumerate((("오만의탑", "#8e44ad"), ("악몽의섬", "#2471a3"),
+                                         ("잊혀진섬", "#16a085"), ("에카", "#d35400"))):
+            _rw = tk.Frame(_dun); _rw.pack(anchor="n", padx=3, pady=(3, 0))
+            _im = self._dun_imgs.get(_nm)
+            if _im is None:
+                try:
+                    _p = os.path.join(IMG_DIR, f"dun_{_nm}.png")
+                    if os.path.exists(_p):
+                        _im = tk.PhotoImage(file=_p)
+                        self._dun_imgs[_nm] = _im   # ⚠ 참조를 들고 있어야 안 지워진다
+                except Exception:
+                    _im = None
+            _b = tk.Button(_rw, text=_nm, font=("맑은 고딕", 9, "bold"),
+                           bg=_bg, fg="white",
+                           command=lambda x=_i: self._open_past_slot(x))
+            # ⚠ Tk 버튼은 **그림이 있으면 width/height 가 픽셀**이다 (글자 수가 아니다)
+            if _im is not None:
+                _b.config(image=_im, compound="right", width=72, height=34, padx=1)
+            else:
+                _b.config(width=7, height=2)
+            _b.pack(side="left")
+            tk.Button(_rw, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
+                      bg="#27ae60", fg="white", activebackground="#1e8449",
+                      width=4, height=2,
+                      command=lambda x=_i: self._run_island_slot(x)).pack(side="left", padx=(2, 0))
+        tk.Frame(_dun, height=3).pack()
+
+        # 🚫 **키우지 않는다** — 클라 옆 빈 자리가 150px 남짓이라
+        #    (게임창 끝 2352 · 옆 바 끝 2408 · 화면 2560) 키우면 클라를 덮는다
+        #    (2026-11-04 사용자: *"버튼들 사이즈 좀 줄여도 되니까"*).
+        self._warn_allbtn.config(width=11)
+
+        # ── ◀ 열기 / ▶ 접기 — **맨 밑줄** (복구해야함 목록 아래) ──
+        #    접으면 `side="bottom"` 으로 **창 맨 아래**에 붙는다 (2026-11-04 사용자:
+        #    *"열기 이거 버튼 제일 밑에 붙여줘"*). 그 위의 빈 자리는
+        #    **복구해야함 목록이 들어갈 자리**라 일부러 비워둔다.
+        self._fold_btn = tk.Button(dc_col, text="▶ 접기", font=("맑은 고딕", 9, "bold"),
+                                   bg="#5d6d7e", fg="white", activebackground="#34495e",
+                                   width=11, height=1, pady=3, command=self._fold_toggle)
+        self._fold_btn.pack(anchor="n", pady=(6, 2))
+        self._dc_fill(dc_col)          # 🗂 가로 꽉 + 버튼 한 칸 키우기
 
         # 확인용 3종 묶음: 변신확인용 / 인형확인용 / 성물확인용 (세로로 한 곳에)
         chk_col = tk.Frame(front_row); chk_col.pack(side="left", padx=(4,8), anchor="n")
@@ -7529,7 +7657,238 @@ class App(tk.Tk):
         self._pass_coord_sv     = []
         self._pass_detail_frames= []
         self._pass_row_frames   = []
+        # 🗂 접기 — **펼친 상태의 자리를 먼저 찍어두고** 저장된 상태를 적용한다
+        #    (접힌 채로 찍으면 펼칠 때 돌아갈 자리를 모른다)
+        # 🗂 **오른쪽 열에 같은 버튼이 있으므로 위쪽 것은 뺀다**
+        #    (2026-11-04 사용자: *"따로 만들지 말고 지금 있는 버튼들은 없애고"*).
+        for _n in ("_boost_btn", "_dup_upd", "_dup_save", "_dup_rest"):
+            try: getattr(self, _n).pack_forget()
+            except Exception: pass
+        self._fold_snap()
+        self.after(120, lambda: self._fold_apply(bool(self.cfg.get("fold_main"))))
         self._refresh_ui()
+
+    def _dc_fill(self, col):
+        """오른쪽 열을 **가로로 꽉** 채우고 버튼을 한 칸 키운다 (2026-11-04 사용자:
+        *"조금 빈 공간이 있잖아 — 메인런처 좀 더 채워"*).
+
+        🧭 버튼을 하나씩 고치지 않고 **다 만든 뒤에 훑어서** 바꾼다 —
+           줄이 늘어도 저절로 따라온다.
+        """
+        def _walk(p):
+            for ch in p.winfo_children():
+                cls = ch.winfo_class()
+                if cls in ("Frame", "Labelframe"):
+                    try: ch.pack_configure(fill="x")
+                    except Exception: pass
+                    btns = [k for k in ch.winfo_children() if k.winfo_class() == "Button"]
+                    if len(btns) == 2:
+                        try:
+                            _same = str(btns[0].cget("width")) == str(btns[1].cget("width"))
+                        except Exception:
+                            _same = False
+                        for _i, _b in enumerate(btns):
+                            if _same or _i == 0:
+                                try: _b.pack_configure(fill="x", expand=True)
+                                except Exception: pass
+                    _walk(ch)
+                elif cls == "Button":
+                    try:
+                        if ch.cget("image"):
+                            ch.config(height=38)          # 그림 버튼은 픽셀
+                    except Exception:
+                        pass
+        # 🚫 **버튼 높이는 키우지 않는다** — 펼쳤을 때 이 열이 쓸 수 있는 세로는
+        #    약 890px 뿐이라(위에 배너·버튼판·섹션행이 500px 을 먹는다),
+        #    한 칸씩만 키워도 아래가 잘린다. 가로만 꽉 채운다.
+        try: _walk(col)
+        except Exception: pass
+
+    def _fold_strip(self):
+        """리니지M 클라 **오른쪽 끝 ~ 화면 오른쪽 끝** 의 가로 길이 (못 재면 None).
+
+        게임 창(`리니지M l …`)만 본다 — 옆 바(CEFCLIENT)는 가려도 된다.
+        """
+        try:
+            import win32gui
+            edge = [0]
+
+            def _cb(h, _):
+                try:
+                    if not win32gui.IsWindowVisible(h):
+                        return
+                    t = win32gui.GetWindowText(h) or ""
+                    c = win32gui.GetClassName(h) or ""
+                    # 게임창 + **옆 바(확장 패널, CEFCLIENT)** 둘 다 본다.
+                    #    옆 바를 안 보면 런처가 그 위를 덮는다 (2026-11-04 사용자:
+                    #    *"리니지 클라 옆에 확장시키는 거에 걸리잖아"*).
+                    if (t.startswith("리니지M") and "자동 실행" not in t) or c == "CEFCLIENT":
+                        edge[0] = max(edge[0], win32gui.GetWindowRect(h)[2])
+                except Exception:
+                    pass
+            win32gui.EnumWindows(_cb, None)
+            if edge[0] <= 0:
+                return None
+            return max(120, self.winfo_screenwidth() - edge[0])
+        except Exception:
+            return None
+
+    def _fold_memo_size(self):
+        """📝 적어둘 칸의 글자 크기를 바꾼다."""
+        try:
+            v = max(7, min(20, int(self._memo_size.get())))
+            self._memo_box.config(font=("맑은 고딕", v))
+            self.cfg["fold_memo_size"] = v
+            save_cfg(self.cfg)
+        except Exception:
+            pass
+
+    def _fold_memo_save(self, now=False):
+        """적은 것을 저장한다 (타자 중에는 0.8초 쉰 뒤에 한 번만)."""
+        try:
+            if not now:
+                _a = getattr(self, "_memo_after", None)
+                if _a:
+                    try: self.after_cancel(_a)
+                    except Exception: pass
+                self._memo_after = self.after(800, lambda: self._fold_memo_save(now=True))
+                return
+            self._memo_after = None
+            self.cfg["fold_memo"] = self._memo_box.get("1.0", "end-1c")
+            save_cfg(self.cfg)
+        except Exception:
+            pass
+
+    def _font_up(self, w, mul=1.12):
+        """그 위젯과 그 안의 것들을 **글꼴만** 키운다 (버튼은 글자 수 단위라 같이 커진다).
+
+        ⚠ 그림이 붙은 버튼은 `width/height` 가 **픽셀**이라 글꼴로는 안 커진다 —
+           그런 버튼은 만들 때 픽셀값을 직접 준다.
+        """
+        try:
+            f = list(self.tk.splitlist(w.cget("font")))
+            if len(f) >= 2 and str(f[1]).lstrip("-").isdigit():
+                _sz = abs(int(f[1]))
+                if _sz <= 12:                      # 큰 글씨(완료 16pt)는 그대로
+                    f[1] = str(max(_sz + 1, int(round(_sz * mul))))
+                    w.config(font=tuple(f))
+        except Exception:
+            pass
+        try:
+            for c in w.winfo_children():
+                self._font_up(c, mul)
+        except Exception:
+            pass
+
+    # ── 🗂 메인런처 접기 ────────────────────────────────────────────────
+    def _fold_snap(self):
+        """**펼친 상태**의 자리를 통째로 찍어둔다 (한 번만).
+
+        🧭 `pack_forget()` 뒤에 그냥 `pack()` 하면 **맨 뒤에 붙어** 차례가 틀어진다.
+           그래서 전부 떼고 **찍어둔 차례대로 다시** 붙인다.
+        """
+        if getattr(self, "_fold_all", None):
+            return
+        self._fold_all, self._fold_sub = [], []
+        try:
+            for w in self.pack_slaves():
+                self._fold_all.append((w, dict(w.pack_info())))
+        except Exception:
+            pass
+        try:
+            for w in self._front_row.pack_slaves():
+                self._fold_sub.append((w, dict(w.pack_info())))
+        except Exception:
+            pass
+        # 🗂 오른쪽 열 **안의 차례**도 찍어둔다 — [접기] 를 맨 아래에 **먼저**
+        #    붙여 자리를 확보한 뒤 나머지를 순서대로 다시 붙이기 위해서다.
+        #    (pack 은 **먼저 붙인 쪽이 자리를 먼저 가져간다** — 나중에 붙이면
+        #     공간이 모자랄 때 그 위젯이 통째로 안 보인다.)
+        self._fold_dc = []
+        try:
+            for w in self._dc_col.pack_slaves():
+                self._fold_dc.append((w, dict(w.pack_info())))
+        except Exception:
+            pass
+
+    def _fold_apply(self, fold):
+        """fold=True 면 **자주 쓰는 열만** 남기고 나머지를 숨긴다."""
+        self._fold_snap()
+        # 🧭 배너(제목 띠)도 같이 접는다 — 글자가 커서 **창 폭이 630px 아래로
+        #    안 내려간다**. 제목은 창 제목줄에 그대로 남는다.
+        keep = (getattr(self, "_front_row", None),)
+        dc = getattr(self, "_dc_col", None)
+        try:
+            if fold:
+                for w, _i in self._fold_all:
+                    if w not in keep:
+                        try: w.pack_forget()
+                        except Exception: pass
+                for w, _i in self._fold_sub:
+                    if w is not dc:
+                        try: w.pack_forget()
+                        except Exception: pass
+                # 🧭 접으면 이 열이 **창 오른쪽 끝에 붙는다**(anchor="e").
+                #    창 테두리(Win11 약 8px)에 맨 오른쪽 버튼이 잘리므로
+                #    오른쪽 여백을 준다. 펼치면 원래 값으로 되돌아간다.
+                #    **위아래로 늘려** 창을 꽉 채우고(2026-11-04 사용자 지시),
+                #    [◀ 열기] 를 맨 아래에 붙인다. 그 위 빈 자리는 복구 목록 자리.
+            else:
+                for w, _i in self._fold_all:
+                    try: w.pack_forget()
+                    except Exception: pass
+                for w, i in self._fold_all:
+                    try: w.pack(**i)
+                    except Exception: pass
+                for w, _i in self._fold_sub:
+                    try: w.pack_forget()
+                    except Exception: pass
+                for w, i in self._fold_sub:
+                    try: w.pack(**i)
+                    except Exception: pass
+                # 🧭 **접으나 펴나 이 열은 똑같이 보인다** (2026-11-04 사용자:
+                #    *"줄였을 때랑 늘렸을 때 이렇게 보이면 안 돼 — 변화 없이
+                #      펼쳐지게 해줘야 해"*). 그래서 아무것도 빼지 않는다.
+        except Exception:
+            pass
+        # 🧭 **접으나 펴나 똑같이** — 열을 세로로 꽉 채우고 [접기] 를 맨 아래에.
+        #    (2026-11-04 사용자: *"변화 없이 펼쳐지게 해줘야 해"*)
+        #    펼쳤을 때도 이렇게 해야 [▶ 접기] 가 화면 밖으로 밀리지 않는다.
+        try:
+            self._front_row.pack_configure(fill="y", expand=True,
+                                           padx=((0, 2) if fold else (0, 0)))
+            dc.pack_configure(fill="y", expand=True)
+            # [▶ 접기] 를 **맨 먼저** 아래에 붙여 자리를 잡고, 나머지를 순서대로.
+            for _w, _i in getattr(self, "_fold_dc", ()):
+                try: _w.pack_forget()
+                except Exception: pass
+            self._fold_btn.pack(side="bottom", anchor="s", pady=(6, 6))
+            for _w, _i in getattr(self, "_fold_dc", ()):
+                if _w is self._fold_btn:
+                    continue
+                try: _w.pack(**_i)
+                except Exception: pass
+        except Exception:
+            pass
+        self._fold_on = bool(fold)
+        try:
+            self._fold_btn.config(text=("◀ 열기" if fold else "▶ 접기"),
+                                  bg=("#2874a6" if fold else "#5d6d7e"))
+        except Exception:
+            pass
+        # 창을 내용에 맞게 다시 맞춘다 (접으면 좁아지고, 펼치면 넓어진다)
+        for _ms in (60, 400, 1200):
+            self.after(_ms, self._fit_main_height)
+
+    def _fold_toggle(self):
+        self._fold_apply(not getattr(self, "_fold_on", False))
+        try:
+            self.cfg["fold_main"] = bool(self._fold_on)
+            save_cfg(self.cfg)
+        except Exception:
+            pass
+        self.status.set("🗂 " + ("접었습니다 — [◀ 열기] 로 되돌립니다"
+                                 if self._fold_on else "펼쳤습니다"))
 
     # ── 섹션 창 열기 ────────────────────────────────────────────────────
     def _minimize_claude(self):
@@ -21162,16 +21521,50 @@ class App(tk.Tk):
             work_bottom = rect.bottom
         except Exception:
             pass
+        # 🧱 **제목줄·테두리 높이**(Win11 약 39px) — `wm geometry` 는 **안쪽(클라이언트)**
+        #    크기를 정하는데 창은 그보다 크다. 이걸 빼지 않으면 창 아래가
+        #    **작업표시줄(시작 버튼)을 덮는다** (2026-11-04 사용자 지적).
+        _ch = getattr(self, "_win_chrome", None)
+        if _ch is None:
+            try:
+                import ctypes as _ct
+                from ctypes import wintypes as _wt
+                _hw = int(self.wm_frame(), 16)
+                _rr = _wt.RECT()
+                _ct.windll.user32.GetWindowRect(_hw, _ct.byref(_rr))
+                _ch = max(0, (_rr.bottom - _rr.top) - self.winfo_height())
+                if 0 < _ch < 120:
+                    self._win_chrome = _ch
+                else:
+                    _ch = 39
+            except Exception:
+                _ch = 39
+        _wb = max(200, work_bottom - _ch)      # 안쪽 높이로 환산한 바닥
+        # 🗂 접었으면 **위아래로 꽉** (2026-11-04 사용자: "위아래도 꽉차게 해주고")
+        if getattr(self, "_fold_on", False):
+            y = 0
+            needed = max(300, _wb)
         # 창 하단이 작업표시줄 아래로 잘리지 않도록 위로 올리고, 그래도 넘치면 높이 축소
-        if y + needed > work_bottom:
-            y = max(0, work_bottom - needed)
-            if y + needed > work_bottom:
-                needed = work_bottom - y
+        if y + needed > _wb:
+            y = max(0, _wb - needed)
+            if y + needed > _wb:
+                needed = _wb - y
         try:
-            w = max(self._sec_row.winfo_reqwidth() + 20, self.winfo_reqwidth())
+            # 🗂 접었으면 섹션 행은 숨겨져 있다 — 그래도 `winfo_reqwidth()` 는
+            #    **원래 넓이**를 돌려주므로, 그걸 쓰면 창이 안 좁아진다.
+            if getattr(self, "_fold_on", False):
+                # 🧱 접으면 **리니지M 클라 오른쪽 끝 ~ 화면 오른쪽 끝** 그 자리에 딱
+                #    맞춘다 (2026-11-04 사용자: *"우측으로 끝까지 보내라고, 클라 끝이랑
+                #    양옆에 비교해서 센터로"*). 클라를 하나도 안 가린다.
+                w = self._fold_strip() or self.winfo_reqwidth()
+            else:
+                w = max(self._sec_row.winfo_reqwidth() + 20, self.winfo_reqwidth())
         except Exception:
             w = self.winfo_width() or 1047
-        w += 76   # 좌우 약 1cm씩(≈38px) 여유 — 내용이 가운데 정렬이라 양옆에 균등 여백
+        # 🗂 접었을 때는 **빈 공간에 딱 맞게** (2026-11-04 사용자:
+        #    "크기는 빈공간에 딱 맞게 좌우를 맞춰줘"). 펼쳤을 때만 여백을 준다.
+        if not getattr(self, "_fold_on", False):
+            w += 76   # 좌우 약 1cm씩(≈38px) 여유 — 내용이 가운데라 양옆에 균등 여백
         # 🖥 화면이 더 좁은 컴퓨터에서도 창이 밖으로 나가지 않게 가로를 잘라준다
         #    (자리를 코드에 고정했으므로 — 2026-11-03). 세로는 위에서 이미 잘랐다.
         try:
@@ -22140,7 +22533,6 @@ class App(tk.Tk):
             ("🏝 과거섬",    "#c0392b", self._open_past_win,     "#922b21", self._start_past),
             ("주말던전끄기", "#5d6d7e", self._open_wdoff_win,    "#34495e", self._start_wdoff),
             ("🏹 사냥",      "#27ae60", self._open_hunt_win,     "#1e8449", self._start_hunt),
-            ("💰 다야OCR",   "#27ae60", self._open_ocr,          "#1e8449", self._open_ocr_scan),
             ("🔆 절전해제",  "#7d3c98", self._open_seq_win,      "#5b2c6f", self._start_seq),
             ("🌙 절전모드",  "#1f618d", self._open_slp_win,      "#154360", self._start_slp),
             ("🧪 물약색",   "#8e44ad", self._open_potion_win,   "#6c3483", self._potion_check),
@@ -22177,7 +22569,10 @@ class App(tk.Tk):
         #       글자만일 때와 비슷하게 보이도록 픽셀값을 따로 준다.
         if not hasattr(self, "_dun_imgs"):
             self._dun_imgs = {}
-        for i, label in enumerate(_ISLAND_NAMES):
+        # 🗂 **던전 4개는 오른쪽 열(던전 상자)로 옮겼다** (2026-11-04 사용자:
+        #    *"따로 만들지 말고 지금 있는 버튼들은 없애고 전부 좌측으로 밀어줘"*).
+        #    두 군데 있으면 접었을 때와 펼쳤을 때가 달라 보인다.
+        for i, label in ([] if SEC_ROW_NO_ISLAND else list(enumerate(_ISLAND_NAMES))):
             grp = tk.Frame(self._sec_row); grp.pack(side="left", padx=2)
             _im = self._dun_imgs.get(label)
             if _im is None:
@@ -22215,6 +22610,7 @@ class App(tk.Tk):
         DARK, GOLD, GOLD2 = "#141210", "#e6c66a", "#8a6d2f"
         wrap = tk.Frame(self, bg=DARK)
         wrap.pack(fill="x", pady=(0, 3))
+        self._banner = wrap          # 🗂 접어도 남겨둔다
         tk.Frame(wrap, height=2, bg=GOLD).pack(fill="x")          # 위 골드 라인
         body = tk.Frame(wrap, bg=DARK); body.pack(fill="x", pady=3)
         # 좌측 문양
