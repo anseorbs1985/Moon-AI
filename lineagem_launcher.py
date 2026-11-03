@@ -26045,27 +26045,28 @@ class App(tk.Tk):
         save_cfg(self.cfg); self._refresh_ui()
 
     def _test_hunt(self, idx):
+        """▶ 개별 실행 — **전체 실행과 똑같이** 돈다 (2026-11-03).
+
+        🚫 여기에 'pyautogui.click + 짧은 간격' 짜리 빠른 테스트를 다시 만들지 말 것.
+           전체는 누르는 동작을 나눠 하고(이동→누름→뗌) 마우스를 양보하는데
+           개별만 달라서 **2~3배 빨리 끝났다** (사용자: "1초도 안 되서 끝나버린다").
+        """
         h = self.cfg["hunt_slots"][idx]
-        coords = [c for c in h.get("coords", []) if c]
-        if not coords:
+        if not [c for c in h.get("coords", []) if c]:
             messagebox.showwarning("등록 필요", f"#{idx+1} 슬롯에 등록된 좌표가 없습니다."); return
+        if self._is_busy():
+            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 개별 실행 안 함"); return
         name = h.get("name", f"#{idx+1}")
-        self.status.set(f"[{name}] 테스트 실행 중...")
+        self._hunt_stop = False
+        self.status.set(f"[{name}] 개별 실행...")
         self._minimize_all()
+
         def run():
             try:
-                for j, coord in enumerate(h.get("coords", [])):
-                    if not coord: continue
-                    self.status.set(f"[{name}] 클릭{j+1} 테스트...")
-                    pyautogui.click(*coord)
-                    if j < len(h["coords"]) - 1:
-                        nap(random.uniform(0.1, 0.6))
-                self.status.set(f"✔ [{name}] 테스트 완료!")
-            except Exception as e:
-                self.status.set(f"오류: {e}")
+                self._run_hunt(only=idx)
             finally:
-                self.deiconify()
-        threading.Thread(target=run, daemon=True).start()
+                self._hunt_stop = False
+        threading.Thread(target=self._run_task, args=("사냥", run), daemon=True).start()
 
     def _toggle_slot_enable(self, fkey, idx):
         """슬롯 ON/OFF — 꺼둔 슬롯은 실행에서 빠진다."""
@@ -30277,25 +30278,35 @@ class App(tk.Tk):
         self._hunt_stop = False
         self.deiconify()
 
-    def _run_hunt(self, limit=None):
+    def _run_hunt(self, limit=None, only=None):
+        """`only` 에 슬롯번호(0부터)를 주면 **그 슬롯만** 돈다 — 개별 ▶ 가 쓴다.
+
+        🚫 개별 실행용 코드를 따로 만들지 말 것 (2026-11-03 사용자:
+           *"개별실행을 해도 그냥 1초도 안 되서 끝나버린다고, 이게 아니잖아"*).
+           예전 `_test_hunt` 는 `pyautogui.click` + 0.1~0.6초 짜리 **빠른 테스트**라
+           전체 실행(누르는 동작을 나눠 하고 0.15~0.5초 + 마우스 양보)보다
+           2~3배 빨랐다. 길이 둘이면 반드시 어긋난다 — **한 길만 쓴다.**"""
         self._start_pause()
         try:
             all_slots = list(enumerate(self.cfg.get("hunt_slots", [])))
-            if limit is not None:
+            if only is not None:
+                all_slots = [(i, h) for i, h in all_slots if i == only]
+            elif limit is not None:
                 all_slots = all_slots[:limit]
             active = [(i, h) for i, h in all_slots
-                      if h.get("enabled", True) and any(c for c in h.get("coords", []))]
+                      if (only is not None or h.get("enabled", True))
+                      and any(c for c in h.get("coords", []))]
             _hunt_t0 = time.time()   # 사냥 전체 소요시간 측정 (3분=180초 목표)
             # 🗒 **왜 빨랐는지/느렸는지 짚을 수 있게 남긴다** (2026-11-03 사용자 신고:
             #    *"왜 이렇게 엄청나게 빠르게 슬롯을 클릭하는 거야"*). 사냥은 지금까지
             #    click_log 에 한 줄도 안 남겨서 원인을 볼 수가 없었다.
-            click_log(f"[사냥] 시작 — ON 슬롯 {len(active)}개 · 멈춤깃발 "
+            click_log(f"[사냥] 시작 — {'개별 #%02d' % (only + 1) if only is not None else 'ON 슬롯 %d개' % len(active)} · 멈춤깃발 "
                       f"{'세워짐(⚠ 기다림이 0 이 된다)' if _STOP_EVT.is_set() else '내려감'}")
             _hw = []
             for slot_done, (i, h) in enumerate(active):
                 if self._hunt_stop: self.status.set("사냥 멈춤"); return
                 # 슬롯 전 대기 — 전체 3분(180초) 안에 들도록 축소: 2~12 → 1~4
-                slot_delay = random.uniform(1.0, 4.0)
+                slot_delay = random.uniform(0.3, 0.8) if only is not None else random.uniform(1.0, 4.0)
                 name = h.get("name", f"#{i+1}")
                 self.status.set(f"[{name}] {slot_delay:.0f}초 후 실행...")
                 _t_s = time.time()
@@ -30316,8 +30327,10 @@ class App(tk.Tk):
                     if j < HUNT_CLICKS - 1:
                         # 슬롯 안 좌표간 클릭 간격 (랜덤)
                         interval = random.uniform(0.15, 0.5)
+                        _t_c = time.time()
                         if not self._hunt_wait(interval):
                             self.status.set("사냥 멈춤"); return
+                        _hw.append((interval, time.time() - _t_c))
                 # 다음 슬롯 대기
                 if slot_done < len(active) - 1:
                     slot_interval = random.uniform(0.6, 1.6)
@@ -30331,7 +30344,7 @@ class App(tk.Tk):
             if _hw:
                 _want = sum(a for a, _b in _hw); _got = sum(b for _a, b in _hw)
                 click_log(f"[사냥] 끝 — {len(active)}슬롯 {_he:.1f}초 · "
-                          f"슬롯 대기 정한 {_want:.1f}초 / 실제 {_got:.1f}초"
+                          f"기다림 정한 {_want:.1f}초 / 실제 {_got:.1f}초"
                           + ("  🚨 **기다림이 먹히지 않았다**" if _got < _want * 0.5 else ""))
             _hmsg = f"✔ 사냥 완료! ({len(active)}개)  [소요 {_he:.1f}초 {_hmark}]"
             try:
