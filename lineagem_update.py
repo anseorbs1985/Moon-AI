@@ -161,7 +161,11 @@ DATA_DIRS  = ["reroll_templates", "click_templates"]   # 이미지 클릭 그림
 #
 # 🚫 클로드는 이것을 '잠깐만' 풀지 말 것. 정말 배포해야 하면 **사용자에게 먼저 말하고**
 #    코드를 고치고, 받은 뒤 되돌린다. 코드를 고치면 커밋에 남아 잊어버리지 않는다.
-NEVER_ISLAND = True            # island_coords.json 은 어떤 경로로도 받지 않는다
+# 🔓 2026-11-04 — 사용자가 **역산한 좌표를 올리라고** 해서 잠금을 풀었다
+#    (*"역산한 좌표 안 올렸냐 이거 전부 올려줘야지"*).
+#    🚫 **배포가 끝나면 다시 True 로 돌려놓을 것** (2026-10-14 사용자 지시).
+#       물약 칸은 `share_island.json` 의 `keep_cells` 가 로컬 것을 지킨다.
+NEVER_ISLAND = False           # island_coords.json 배포 허용 (배포 끝나면 True)
 NEVER_COORD_KEYS = {
     "doll_slots",              # 🧸 인형탐험 — 컴퓨터마다 다르다 (사용자 지목)
     "char_btns",               # 👤 캐릭터 접속 버튼 — 계정마다 캐릭 수·자리가 다르다
@@ -601,6 +605,12 @@ def sync_island_keys(log):
         only_p = cfgm.get("presets_only") or []      # 이 던전은 '프리셋만' 받는다
         fill_o = cfgm.get("fill_only") or []         # 이 던전은 '빈 칸만' 채운다
         _, lock_i = load_coord_lock()                # 🔒 잠근 던전은 제외
+        # 🔓 **사용자가 콕 집어 '강제로 넣어라' 했을 때만** 잠금을 뚫는다
+        #    (2026-11-04 역산 좌표 배포). 🚫 쓰고 나면 반드시 지울 것.
+        if cfgm.get("ignore_lock") and lock_i:
+            log(f"   🔓 ignore_lock — 🔒 좌표 잠금을 **뚫고** 넣는다 "
+                f"({len(lock_i)}개 던전이 잠겨 있었다)")
+            lock_i = set()
         if lock_i:
             # 🔒 잠금은 **좌표 잠금**이다 — `keys`(좌표·녹화·간격)만 막는다.
             #   `presets_only`(프리셋 '정의')는 좌표가 아니라 막지 않는다.
@@ -650,7 +660,13 @@ def sync_island_keys(log):
         #    "좌표 변경된 것도 같이 바뀔 수 있게 해주고, 내가 슬롯에 물약 주홍이
         #     48%로 되어 있으면 프리셋도 주홍물약 48%로 똑같이 되어 있는 거야").
         #    값은 **0부터** 센 칸 번호 (칸17 → 16).
-        keep_cells = [int(x) for x in (cfgm.get("keep_cells") or [])]
+        # 🧪 던전마다 물약 칸이 다르다 → **dict 로도 받는다** (2026-11-04):
+        #      {"토요일_악몽의섬": [16,17], "화요일_에카": [11,12], …}
+        #    예전처럼 list 를 주면 모든 던전에 똑같이 적용된다.
+        _kc_raw = cfgm.get("keep_cells") or []
+        _kc_map = _kc_raw if isinstance(_kc_raw, dict) else None
+        keep_cells = ([] if _kc_map else
+                      [int(x) for x in _kc_raw])
         got = []
         # 🏝 '빈 칸만 채우기' — 로컬이 찍어둔 좌표는 그대로 두고 **비어 있는 칸만**.
         #    덮어쓰지 않으므로 🔒 좌표 잠금에도 걸리지 않는다 (잠금의 뜻은
@@ -696,7 +712,9 @@ def sync_island_keys(log):
                         if fld in old_s:
                             ns[fld] = old_s[fld]
                     # 🧪 지킬 칸은 **로컬 값으로 되돌린다** (물약 등 슬롯마다 다른 칸)
-                    for _c in keep_cells:
+                    _cells = ([int(x) for x in (_kc_map.get(k) or [])]
+                              if _kc_map else keep_cells)
+                    for _c in _cells:
                         for _f in ("coords", "dirs", "gap_list", "click_names"):
                             _nv = ns.get(_f)
                             _ov = old_s.get(_f)
@@ -717,13 +735,15 @@ def sync_island_keys(log):
                                 _nd.pop(str(_c), None)
                     merged.append(ns)
                 v = merged
+            _klog = ([int(x) for x in (_kc_map.get(k) or [])]
+                     if _kc_map else keep_cells)
             if dst.get(k) == v:
                 continue
             dst[k] = v
             got.append(f"{k}({_count_in(v)}좌표"
                        + (f", {'·'.join(keep)} 는 로컬 것 유지" if keep else "")
-                       + (f", 칸{','.join(str(c+1) for c in keep_cells)}"
-                          f"(물약 등)은 로컬 것 유지" if keep_cells else "") + ")")
+                       + (f", 칸{','.join(str(c+1) for c in _klog)}"
+                          f"(물약 등)은 로컬 것 유지" if _klog else "") + ")")
         sp = (src.get("_presets") or {})
         dp = dst.setdefault("_presets", {})
         for k in (list(keys) if with_presets else []) + list(only_p):

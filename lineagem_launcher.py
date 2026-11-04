@@ -2778,8 +2778,8 @@ def hover_spot(fkey, coord, hwnd=None):
 #      하는 번거로움을 줄여줬으면 … 내가 파일을 올리면 너가 전부 교체 작업을 해줬으면"*).
 #
 #    퍼플은 **클라마다 폴더가 따로** 있다:
-#        %LOCALAPPDATA%\Purple\zone\<GUID>\lm\records\records.json   ← 녹화 (여기)
-#        %LOCALAPPDATA%\Purple\zone\<GUID>\lm\virtualkey\*.cfg        ← 가상 키보드
+#        %LOCALAPPDATA%\Purple\zone / <GUID> / lm\records\records.json   ← 녹화 (여기)
+#        %LOCALAPPDATA%\Purple\zone / <GUID> / lm\virtualkey\*.cfg        ← 가상 키보드
 #
 #    🔑 **슬롯 ↔ 폴더 짝은 `LineageM.exe` 의 명령줄로 맞춘다** —
 #       `-presenceId:"MKR_LINM_PURPLE:<GUID>"` 가 그 클라의 zone 이다.
@@ -2797,8 +2797,8 @@ REC_DROP_DIR = os.path.join(BASE, "키설정교체")     # 파일을 넣는 자�
 REC_SLOTS = 6                                      # 만들어 둘 폴더 개수
 # ⌨ **키보드(단축키) 파일을 넣는 자리** (2026-11-04 사용자 요청 — 퍼플의
 #    [단축키] 칸과 같은 것). 퍼플은 그 cfg 를 두 군데로 나눠 기억한다:
-#      zone\<GUID>\lm\virtualkey\<이름>.cfg          ← 파일 자체
-#      zone\<GUID>\lm\config\purple_zone.config     ← "path": "<이름>.cfg"
+#      zone / <GUID> / lm\virtualkey\<이름>.cfg          ← 파일 자체
+#      zone / <GUID> / lm\config\purple_zone.config     ← "path": "<이름>.cfg"
 #    실측 2026-11-04 — 지금 16클라는 전부 `최종 키보드 복구  (1).cfg` 를 쓴다.
 REC_KEY_DIR = os.path.join(REC_DROP_DIR, "키보드")
 # ⭐ **별표(즐겨찾기)로 고른 칸** — `{"fav": [1,2,3]}` (2026-11-04 사용자 요청).
@@ -2895,6 +2895,37 @@ def slot_zones_live():
         return []
 
 
+def slot_zones_disk():
+    u"""🗂 **폴더를 직접 훑어** zone 을 찾는다 → [(이름, GUID), …]
+
+    🧭 녹화·키보드·★ 는 **16클라에 똑같이** 들어가므로 '어느 슬롯인지' 를
+       몰라도 된다. 그래서 짝을 한 번도 못 본 컴퓨터(= 로컬)에서도 쓸 수 있다.
+    🚨 2026-11-04 사용자 신고 *"로컬에서 안 먹히고 있어"* 의 원인이 이것이었다 —
+       짝은 **클라가 켜져 있을 때만** 알 수 있는데 교체는 **끄고** 해야 해서
+       로컬은 영영 못 썼다 (닭-달걀).
+    조건: `zone / <GUID> / lm` 이 있고 `records` 나 `virtualkey` 가 있는 것.
+    이름은 알 수 없으므로 GUID 앞 8자리를 쓴다 (표시·백업 파일명용).
+    🚫 이 함수를 없애지 말 것."""
+    out = []
+    try:
+        root = purple_zone_root()
+        if not root or not os.path.isdir(root):
+            return []
+        for g in sorted(os.listdir(root)):
+            if len(g) != 36 or g.count("-") != 4:      # GUID 모양만
+                continue
+            lm = os.path.join(root, g, "lm")
+            if not os.path.isdir(lm):
+                continue
+            if not (os.path.isdir(os.path.join(lm, "records"))
+                    or os.path.isdir(os.path.join(lm, "virtualkey"))):
+                continue
+            out.append((g[:8], g.upper()))
+    except Exception:
+        return []
+    return out
+
+
 def slot_zones_save(rows):
     """🔑 짝을 **합쳐서** 기억한다 (덮어쓰지 않는다).
 
@@ -2926,8 +2957,23 @@ def slot_zones_all():
         slot_zones_save(live)
     rows, at = slot_zones_saved()
     if not rows:
-        return live, "지금"
-    return rows, ("지금 켜진 %d개 포함" % len(live)) if live else at
+        rows = list(live)
+        at = "지금"
+    # 🗂 **폴더에 있는데 기억에 없는 zone 을 더한다** (2026-11-04).
+    #    로컬은 짝을 한 번도 못 봤을 수 있고, 메인도 8개만 기억된 사고가 있었다.
+    #    녹화·키보드·★ 는 16클라에 똑같이 들어가므로 더해도 해가 없다.
+    #    🚫 이 더하기를 없애지 말 것 — 없애면 로컬이 다시 못 쓴다.
+    try:
+        seen = {b.upper() for _a, b in rows if b}
+        extra = [(a, b) for a, b in slot_zones_disk() if b.upper() not in seen]
+    except Exception:
+        extra = []
+    if extra:
+        rows = list(rows) + extra
+        at = ((at + " · ") if at else "") + "폴더에서 %d개 더 찾음" % len(extra)
+    if not at:
+        at = "폴더"
+    return rows, (("지금 켜진 %d개 포함" % len(live)) + (" · " + at if extra else ""))         if live else at
 
 
 def slot_zones_saved():
@@ -2969,7 +3015,7 @@ def purple_running():
 
 
 # ⭐ **녹화 패널의 ★ 즐겨찾기** — 녹화 파일이 아니라 **Local Storage(leveldb)** 에 있다.
-#    zone\<GUID>\lm\cache\Local Storage\leveldb\000003.log
+#    zone / <GUID> / lm\cache\Local Storage\leveldb\000003.log
 #      키 `_file://\x00\x01purple_macro_favorites`
 #      값 {"r0":{"name":제목,"macroKey":"r0","createdAtFavorite":밀리초}, …}
 #    🧭 **패널 차례는 `createdAtFavorite` 내림차순** (늦게 누른 별이 위) — 실측으로 확인.
@@ -6683,10 +6729,12 @@ class App(tk.Tk):
                 return
             rows, _at = slot_zones_all()   # 🔑 **아는 짝 전부** (2026-11-04)
             if not rows:
-                _msg("⌨ 키보드",
-                     "퍼플 클라를 아직 한 번도 못 봤습니다." + chr(10)
-                     + "16개 클라를 **켜둔 상태로** 한 번 눌러 짝을 기억시킨 뒤,"
-                     + chr(10) + "클라를 끄고 다시 눌러주세요.")
+                _msg("⌨ 키보드 — 퍼플 폴더를 못 찾았습니다",
+                     "퍼플 설정 폴더가 하나도 없습니다." + chr(10) + chr(10)
+                     + "찾는 곳:" + chr(10) + "  " + purple_zone_root()
+                     + chr(10) + chr(10)
+                     + "퍼플을 설치하고 리니지M 을 **한 번 켰다 끈 뒤**"
+                     + chr(10) + "다시 눌러주세요.")
                 return
             n = lineagem_count()
             click_log(f"[키보드] 눌림 — 켜진 클라 {n}개 · 넣은 파일 "
@@ -6946,7 +6994,7 @@ class App(tk.Tk):
             if getattr(self, "_recwin", None) is None or not self._recwin.winfo_exists():
                 return
             cur = "  ".join("%s (%d개)" % (k, v) for k, v in cnt.most_common()) \
-                if cnt else "(짝을 아직 모릅니다)"
+                if cnt else "(폍플 폴더를 못 찾았습니다)"
             self._kb_now.set("지금 클라들이 쓰는 파일 :  " + cur)
             self._kb_new.set("넣은 파일 :  "
                              + (os.path.basename(src) if src else "(없음 — 📂 폴더에 .cfg 를 넣으세요)"))
@@ -7027,12 +7075,14 @@ class App(tk.Tk):
                 self.after(0, lambda: messagebox.showinfo(t, m))
 
             if not rows:
-                _msg("🎹 녹화교체",
-                     "퍼플 클라를 아직 한 번도 못 봤습니다." + chr(10) + chr(10)
-                     + "16개 클라를 **켜둔 상태로** 이 버튼을 한 번 눌러주세요 —"
-                     + chr(10) + "그때 슬롯↔폴더 짝을 기억해 둡니다."
-                     + chr(10) + "그 뒤에 클라를 끄고 다시 누르면 교체합니다.")
-                self.after(0, lambda: self.status.set("🎹 슬롯↔폴더 짝을 아직 모릅니다"))
+                _msg("🎹 녹화교체 — 퍼플 폴더를 못 찾았습니다",
+                     "퍼플 설정 폴더가 하나도 없습니다." + chr(10) + chr(10)
+                     + "찾는 곳:" + chr(10) + "  " + purple_zone_root()
+                     + chr(10) + chr(10)
+                     + "퍼플을 설치하고 리니지M 을 **한 번 켰다 끈 뒤**"
+                     + chr(10) + "다시 눌러주세요.")
+                self.after(0, lambda: self.status.set(
+                    "🎹 퍼플 폴더를 못 찾았습니다 — " + purple_zone_root()))
                 return
 
             tbl = "  ".join("#%02d %s" % (i + 1, a) for i, (a, _b) in enumerate(rows))
