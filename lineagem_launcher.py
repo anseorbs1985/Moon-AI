@@ -316,32 +316,32 @@ ENTER_TOP_CHAR = (127 / 546.0, 59 / 307.0)   # 맨 위 캐릭 줄 가운데
 ENTER_MATCH    = 0.70        # '입장하기' 글자 일치 기준
 ENTER_PASSES   = 3           # 몇 바퀴 볼까 (하나씩 돌고, 못 한 것만 다시)
 ENTER_PASS_GAP = (2.5, 4.0)  # 바퀴 사이
-ENTER_FOCUS    = (0.90, 1.50)  # 창을 앞으로 올린 뒤 기다림
-ENTER_PICK_GAP = (1.30, 2.10)  # 맨 위 캐릭을 누른 뒤 [입장하기] 까지
+ENTER_FOCUS    = (0.72, 1.20)  # 창을 앞으로 올린 뒤 기다림
+ENTER_PICK_GAP = (1.04, 1.68)  # 맨 위 캐릭을 누른 뒤 [입장하기] 까지
 # 🖱 [입장하기] 는 **커서를 올려야 먹힌다** (실측 2026-11-04 — 캐릭은 선택됐는데
 #    버튼만 안 눌렸다). 계정전환 [확인] 과 같은 종류다.
-ENTER_HOVER       = (0.70, 1.20)  # 커서를 올리고 누르기까지
-ENTER_AFTER       = (3.60, 5.00)  # [입장하기] 누른 뒤 **들어갔는지 확인**까지
+ENTER_HOVER       = (0.56, 0.96)  # 커서를 올리고 누르기까지
+ENTER_AFTER       = (2.88, 4.00)  # [입장하기] 누른 뒤 **들어갔는지 확인**까지
 ENTER_PUSH_TRIES  = 3             # 안 들어갔으면 몇 번까지 다시 누를까
-ENTER_RELOGIN_WAIT = (3.2, 4.4)  # [재접속] 을 누른 뒤 화면이 돌아올 때까지
+ENTER_RELOGIN_WAIT = (2.6, 3.5)  # [재접속] 을 누른 뒤 화면이 돌아올 때까지
 # 🖥 로그인(서버 선택) 화면 — **"화면을 터치해 주세요"** 가 뜨는 그 화면.
 #    🚫 서버 버튼을 누르지 말 것 (2026-11-04 사용자: *"서버를 클릭하는 게 아니라
 #       그냥 **가운데 화면**을 클릭하면 돼. 그러면 캐릭 선택창이 나오니까"* ·
 #       *"서버는 전부 다 맞아"*). 서버 버튼을 누르면 **서버 목록 창**이 떠서
 #       한 단계 더 돌아간다 — 실측으로 확인했다.
-ENTER_LOGIN_WAIT = (3.8, 5.2)   # 가운데를 누른 뒤 캐릭터 선택이 뜰 때까지
+ENTER_LOGIN_WAIT = (3.0, 4.2)   # 가운데를 누른 뒤 캐릭터 선택이 뜰 때까지
 # ⏳ **클라가 전부 뜰 때까지 기다린다** (2026-11-04 사용자: *"캐릭터 16클라가
 #    전부 화면이 켜지면은 다음 걸 진행하면 좋겠어"*). 늦게 뜨는 클라를 안 기다려
 #    **3개를 통째로 놓친 사고**가 있었다 — 이 기다림을 빼지 말 것.
 ENTER_WAIT_N      = 16          # 바라는 클라 수
 ENTER_WAIT_MAX    = 180.0       # 최대 기다림(초) — 못 채워도 여기서 진행
 ENTER_WAIT_TICK   = (2.0, 3.0)  # 몇 초마다 세어보나
-ENTER_WAIT_STABLE = 4           # 개수가 이만큼 연속 그대로면 '다 뜬 것'으로 본다
+ENTER_WAIT_STABLE = 6           # 개수가 이만큼 연속 그대로면 '다 뜬 것'으로 본다
 # 🎮 **한 클라를 끝까지** 처리할 때 (묶음이 아니라 하나씩 — 사용자 지시)
 ENTER_ONE_TRIES   = 8           # 한 클라를 몇 번까지 다시 볼까
-ENTER_LOAD_GAP    = (2.5, 4.0)  # 뭔가 누른 뒤 로딩을 기다릴 때
-ENTER_ONE_GAP     = (1.2, 2.0)  # 다시 보기까지
-ENTER_ONE_DONE    = (1.4, 2.4)  # 한 클라를 끝내고 다음 클라로
+ENTER_LOAD_GAP    = (2.0, 3.2)  # 뭔가 누른 뒤 로딩을 기다릴 때
+ENTER_ONE_GAP     = (1.0, 1.6)  # 다시 보기까지
+ENTER_ONE_DONE    = (1.1, 1.9)  # 한 클라를 끝내고 다음 클라로
 # 🔔 접속 자리를 덮은 알림을 몇 번까지 치워볼까 (알림이 연달아 뜰 수 있다)
 LOGIN_POPUP_TRIES = 3
 # 🟣 접속 자리를 **게임 창이 덮었을 때** 퍼플을 앞으로 올려 다시 보는 횟수
@@ -373,9 +373,14 @@ STATUS_FG = "#ffd43b"
 PROFILE_SWITCH_TRIES = 3
 PROFILE_SWITCH_GAP   = (1.2, 2.0)
 # 🪟 게임 창이 다 뜨는 것을 기다리는 설정 (창 수가 멈출 때까지)
-PURPLE_SETTLE_MAX   = 35.0    # 이보다 오래 기다리지 않는다
+# 🚨 2026-11-04 — **1.6초만 안 변하면 '다 떴다'** 로 봐서, 7개를 눌렀는데
+#    **3개**만 뜬 상태로 계정을 전환해 버렸다 (나머지 4개는 영영 안 뜬다 =
+#    사용자가 말한 격자의 **'빈 공간'**). 게임 창은 하나씩 몇 초 걸려 뜨므로
+#    중간의 멈칫을 끝으로 오판한 것이다.
+#    🚫 `PURPLE_SETTLE_STILL` 을 다시 2 로 내리지 말 것.
+PURPLE_SETTLE_MAX   = 150.0   # 이보다 오래 기다리지 않는다
 PURPLE_SETTLE_TICK  = 0.8     # 몇 초마다 세나
-PURPLE_SETTLE_STILL = 2       # 이만큼 연속으로 안 변하면 다 마쳤다고 본다
+PURPLE_SETTLE_STILL = 8       # 이만큼 연속으로 안 변하면 다 마쳤다고 본다(6.4초)
 FIX_SLOW_MULT      = 2.2       # 2회차 간격·창 올리는 틈 배수
 CHECK_TRIES_SLOW   = 8         # 2회차 👁 '무료' 확인 횟수 (1회차는 CHECK_TRIES=4)
 FIX_ESC_TRIES      = 2         # 복구 전 열린 창을 ESC 로 닫아보는 횟수
@@ -2192,7 +2197,7 @@ CHAR_WAIT_EACH  = 1.1
 # ⏱ 입장 단계에서 **클라를 옮겨 갈 때**만 쉬는 짧은 틈 (2026-11-04 '3분 안에').
 #    🚫 `ENTER_LOGIN_WAIT`(화면이 바뀌기를 기다리는 시간)과 헷갈리지 말 것 —
 #       그건 **전부 누른 뒤 한 번만** 쓴다. 클라마다 쓰면 바퀴당 24초가 날아간다.
-ENTER_CLICK_GAP = (0.90, 1.60)   # 캐릭터 사이 — 급하면 씹힌다(2026-11-04)
+ENTER_CLICK_GAP = (0.72, 1.28)   # 캐릭터 사이 — 급하면 씹힌다(2026-11-04)
 
 # 🎮 멀티플레이 캐릭터 버튼 — **좌표 개수가 아니라 화면에 보이는 만큼** 누른다
 #    (2026-10-28 사용자 지시: *"저게 지금 좌표상으로는 8개 되어있는데 10개도 나타날 수가
@@ -33421,7 +33426,26 @@ class App(tk.Tk):
             click_log(f"[접속] {tag} 🟣 퍼플 올리기 실패 {type(e).__name__}: {e}")
             return False
 
-    def _purple_wait_settle(self, tag="", maxw=PURPLE_SETTLE_MAX):
+    def _game_win_count(self):
+        """🪟 지금 떠 있는 **리니지M 게임 창** 수 (프로세스가 아니라 창)."""
+        n = [0]
+
+        def _cb(h, _):
+            try:
+                if win32gui.IsWindowVisible(h):
+                    t = win32gui.GetWindowText(h) or ""
+                    if t.startswith("리니지M") and "자동 실행" not in t:
+                        n[0] += 1
+            except Exception:
+                pass
+            return True
+        try:
+            win32gui.EnumWindows(_cb, None)
+        except Exception:
+            pass
+        return n[0]
+
+    def _purple_wait_settle(self, tag="", maxw=PURPLE_SETTLE_MAX, want=None):
         """🪟 **게임 창이 다 뜨는 것을 기다린다** (새 창 수가 멈출 때까지).
 
         🚨 **2026-11-04 실측으로 찾은 접속 실패의 진짜 원인**:
@@ -33458,11 +33482,16 @@ class App(tk.Tk):
         t0 = _t.time()
         last = _cnt()
         same = 0
+        hit = False
         while _t.time() - t0 < maxw:
             if getattr(self, "_stop_flag", False):
                 return
             nap(PURPLE_SETTLE_TICK)
             c = _cnt()
+            # 🎯 **누른 만큼 떴으면 즉시** 다음으로 (쓸데없이 안 기다린다)
+            if want and c >= want:
+                last = c; hit = True
+                break
             if c == last:
                 same += 1
                 if same >= PURPLE_SETTLE_STILL:
@@ -33471,8 +33500,13 @@ class App(tk.Tk):
                 same = 0
                 last = c
         click_log(f"[접속] {tag} 🪟 게임 창이 자리잡았다 — "
-                  f"지금 {last}개 · {int(_t.time() - t0)}초 기다렸다 "
-                  f"(새 창이 뜨면 퍼플 메뉴가 닫힌다)")
+                  f"지금 {last}개"
+                  + (f"/{want}개" if want else "")
+                  + f" · {int(_t.time() - t0)}초 기다렸다"
+                  + (" ✔ 다 떴다" if hit else
+                     (f" ⚠ **{want}개를 못 채웠다** — 안 뜬 클라는 영영 안 뜬다"
+                      if want and last < want else ""))
+                  + " (새 창이 뜨면 퍼플 메뉴가 닫힌다)")
 
     def _profile_switch_once(self, tag=""):
         """🔄 계정 전환 — **메뉴가 닫히면 처음부터 다시** (최대 n번).
@@ -33482,7 +33516,8 @@ class App(tk.Tk):
         ⚠ 다시 하기 전에 **ESC 로 반쥐 열린 메뉴를 닫는다** — 안 닫고 프로필을
            다시 누르면 그 클릭이 메뉴를 **닫아버려** 똑같이 실패한다
            (11-04 07:19 에 실제로 그렇게 됐다)."""
-        self._purple_wait_settle(tag)
+        # 🎯 **그 계정에서 누른 캐릭 수만큼** 뜰 때까지 (2026-11-04 사고)
+        self._purple_wait_settle(tag, want=getattr(self, '_want_wins', None))
         # 🟣 **캐릭이 다 들어온 뒤 퍼플을 내렸다 다시 올린다** (2026-11-04 사용자 제안).
         #    게임 창들이 퍼플을 덮고 있으면 프로필·구글·확인을 **게임 창에 누르게 된다**
         #    (14:04 실측 — 확인을 [NCGIF] 에 눌러 **계정 전환이 통째로 빠졌다**).
@@ -34342,6 +34377,15 @@ class App(tk.Tk):
                 _from = "화면" if _rows else "좌표"
                 if not _rows:
                     _rows = [c for c in (self.cfg.get("char_btns") or []) if c]
+                # 🎯 **이 계정에서 몇 개가 더 떠야 하는지** 기억해 둔다.
+                #    전환을 시작하기 전에 그만큼 뜰 때까지 기다린다
+                #    (2026-11-04 — 3개만 뜬 채 전환해 4개가 날아간 사고).
+                try:
+                    self._want_wins = self._game_win_count() + len(_rows)
+                    click_log(f"[접속] 🎯 이 계정에서 {len(_rows)}개를 띄운다 "
+                              f"→ 다 뜨면 창 {self._want_wins}개가 된다")
+                except Exception:
+                    self._want_wins = None
                 for _p in range(CHAR_PASSES):
                     if _p:
                         # 🔁 2바퀴째 — 첫 바퀴에서 씹힌 것을 확인 사살한다
