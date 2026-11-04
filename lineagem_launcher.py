@@ -302,18 +302,40 @@ def key_of_didx(didx):
 #    "2 리니지m 전클릭 이거 두 번째 거 누르고 나서 한 10초 정도 기다려줘.
 #     그 이후에 다음 좌표들 클릭해줘."
 #    ①→② 사이는 예전처럼 짧게(0.7~1.3초) 가고, **② 뒤에만** 길게 쉰다.
-PRE2_WAIT          = 10.0
+PRE2_WAIT          = 3.5   # ⏱ 10.0 → 3.5 (2026-11-04 '3분 안에')
 # 🟣 퍼플을 앞으로 올린 뒤 기다리는 시간 (창이 다 그려질 틈)
 PURPLE_FRONT_WAIT = 0.8
+# ╭─ 🎮 캐릭터 선택 화면 → [입장하기] (2026-11-04 사용자 지시) ──────────╮
+# │ *"접속 화면에서 1번 클라를 봐봐. 제일 위에 불빛이 붉은색으로 들어와  │
+# │   있잖아. 그러면 그냥 아래에 입장하기 버튼을 누르면 돼. **항상 위엣것만**│
+# │   입장하기 버튼을 누르면 되거든. 2번째 3번째는 접속 안 해.          │
+# │   **항상 위에 캐릭만 접속**해줘."*                                   │
+# ╰────────────────────────────────────────────────────────────────────╯
+# 창 가로/세로 대비 **비율** — 창 크기가 달라도 맞는다 (546x307 에서 실측).
+ENTER_TOP_CHAR = (127 / 546.0, 59 / 307.0)   # 맨 위 캐릭 줄 가운데
+ENTER_MATCH    = 0.70        # '입장하기' 글자 일치 기준
+ENTER_PASSES   = 2           # 몇 바퀴 더 볼까 (캐릭 화면이 늦게 뜨는 클라)
+ENTER_PASS_GAP = (2.5, 4.0)  # 바퀴 사이
+ENTER_FOCUS    = (0.30, 0.55)  # 창을 앞으로 올린 뒤 기다림
+ENTER_PICK_GAP = (0.40, 0.75)  # 맨 위 캐릭을 누른 뒤 [입장하기] 까지
+ENTER_RELOGIN_WAIT = (2.0, 3.0)  # [재접속] 을 누른 뒤 화면이 돌아올 때까지
+# 🖥 로그인(서버 선택) 화면 — **"화면을 터치해 주세요"** 가 뜨는 그 화면.
+#    🚫 서버 버튼을 누르지 말 것 (2026-11-04 사용자: *"서버를 클릭하는 게 아니라
+#       그냥 **가운데 화면**을 클릭하면 돼. 그러면 캐릭 선택창이 나오니까"* ·
+#       *"서버는 전부 다 맞아"*). 서버 버튼을 누르면 **서버 목록 창**이 떠서
+#       한 단계 더 돌아간다 — 실측으로 확인했다.
+ENTER_LOGIN_WAIT = (2.5, 3.5)   # 가운데를 누른 뒤 캐릭터 선택이 뜰 때까지
+# 🔔 접속 자리를 덮은 알림을 몇 번까지 치워볼까 (알림이 연달아 뜰 수 있다)
+LOGIN_POPUP_TRIES = 3
 # 📝 적어둘 칸 글씨색 — 굵은 빨강 (2026-11-04 사용자 지시)
 MEMO_FG = "#e03131"
 # 🔄 계정 전환을 **처음부터 다시** 해볼 횟수 (메뉴가 닫히는 경우)
 PROFILE_SWITCH_TRIES = 3
 PROFILE_SWITCH_GAP   = (1.2, 2.0)
 # 🪟 게임 창이 다 뜨는 것을 기다리는 설정 (창 수가 멈출 때까지)
-PURPLE_SETTLE_MAX   = 90.0    # 이보다 오래 기다리지 않는다
-PURPLE_SETTLE_TICK  = 2.0     # 몇 초마다 세나
-PURPLE_SETTLE_STILL = 3       # 이만큼 연속으로 안 변하면 다 마쳤다고 본다
+PURPLE_SETTLE_MAX   = 35.0    # 이보다 오래 기다리지 않는다
+PURPLE_SETTLE_TICK  = 0.8     # 몇 초마다 세나
+PURPLE_SETTLE_STILL = 2       # 이만큼 연속으로 안 변하면 다 마쳤다고 본다
 FIX_SLOW_MULT      = 2.2       # 2회차 간격·창 올리는 틈 배수
 CHECK_TRIES_SLOW   = 8         # 2회차 👁 '무료' 확인 횟수 (1회차는 CHECK_TRIES=4)
 FIX_ESC_TRIES      = 2         # 복구 전 열린 창을 ESC 로 닫아보는 횟수
@@ -2113,7 +2135,11 @@ KEYCFG_CLOSE_WAIT  = (0.7, 1.1)    # Esc 뒤 표시가 꺼지는 시간
 KEYCFG_BIG_W       = 1000          # 이 폭을 넘으면 '최대화됨' 으로 본다
 # 캐릭터 접속 버튼 — 너무 늦게 눌린다는 지적으로 대기를 20% 줄임 (2026-08-29)
 CHAR_WAIT_FIRST = 4.8   # 멀티플레이 클릭 → 첫 캐릭터까지 (전 6초)
-CHAR_WAIT_EACH  = 2.4   # 캐릭터 사이 (전 3초)
+CHAR_WAIT_EACH  = 1.1
+# ⏱ 입장 단계에서 **클라를 옮겨 갈 때**만 쉬는 짧은 틈 (2026-11-04 '3분 안에').
+#    🚫 `ENTER_LOGIN_WAIT`(화면이 바뀌기를 기다리는 시간)과 헷갈리지 말 것 —
+#       그건 **전부 누른 뒤 한 번만** 쓴다. 클라마다 쓰면 바퀴당 24초가 날아간다.
+ENTER_CLICK_GAP = (0.25, 0.50)   # 캐릭터 사이 (전 3초)
 
 # 🎮 멀티플레이 캐릭터 버튼 — **좌표 개수가 아니라 화면에 보이는 만큼** 누른다
 #    (2026-10-28 사용자 지시: *"저게 지금 좌표상으로는 8개 되어있는데 10개도 나타날 수가
@@ -5685,6 +5711,14 @@ def _lum(w, color):
         return None
 
 
+def _parent_bg(w):
+    """그 위젯의 **부모 배경색** — Canvas 를 투명처럼 보이게 하려고."""
+    try:
+        return str(w.master.cget("bg"))
+    except Exception:
+        return "#2b2b2b"
+
+
 def apply_dark(w, on=True):
     """창 하나를 어둡게(또는 원래대로) 바꾼다.
     색을 일부러 지정해둔 버튼(빨강·초록 등)은 건드리지 않고,
@@ -7331,7 +7365,20 @@ class App(tk.Tk):
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
             command=self._start_sched).pack(side="left", padx=(2, 0))
-        # 던전끝! 흑기사!! — [매일] 박스 바로 아래
+        # 🏝 **과거섬 — [던전끝! 흑기사!!] 바로 위** (2026-11-04 사용자:
+        #    *"야 던전끝 흑기사!! 위에 과거섬도 가져와줘"*)
+        #    ⚠ 섹션행(`fixed`)에 있던 같은 버튼은 **지웠다** — 두 군데 있으면
+        #      접었을 때와 펼쳤을 때가 달라 보인다 (2026-11-04 규칙).
+        pr0 = tk.Frame(dc_col); pr0.pack(anchor="n", pady=(0, 5))
+        tk.Button(pr0, text="🏝 과거의\n말하는섬",
+            font=("맑은 고딕", 9, "bold"), bg="#c0392b", fg="white",
+            activebackground="#922b21", width=7, height=2,
+            command=self._open_past_win).pack(side="left")
+        tk.Button(pr0, text="▶\n실행",
+            font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
+            activebackground="#1e8449", width=4, height=2,
+            command=self._start_past).pack(side="left", padx=(2, 0))
+        # 던전끝! 흑기사!! — [과거섬] 바로 아래
         kr = tk.Frame(dc_col); kr.pack(anchor="n", pady=(0, 5))
         tk.Button(kr, text="🖤 던전끝!\n흑기사!!",
             font=("맑은 고딕", 9, "bold"), bg="#212f3d", fg="white",
@@ -7412,7 +7459,10 @@ class App(tk.Tk):
         #   그래서 순서가 **낚시녹임 → (1cm) → ▶전부복구 → 📬우편받기 → 복구해야함 목록**
         #   이 된다. '완료' 큰 글씨(`_done_lbl`)는 그 아래로 내려간다.
         #   ⚠ `before=` 를 빼면 완료 글씨가 목록 위로 끼어든다.
-        self._warn_box.pack(anchor="n", pady=(1, 0), before=self._done_lbl)
+        # ⚠ **`before=self._done_lbl` 을 쓰지 않는다** (2026-11-04) —
+        #    '완료' 글씨는 이제 `_fold_apply` 가 **맨 아래 [◀ 열기] 바로 위**로
+        #    옮기므로 기준으로 삼을 수 없다. 목록은 그냥 차례대로 붙는다.
+        self._warn_box.pack(anchor="n", pady=(1, 0))
         self._warn_hdr = tk.Label(self._warn_box, text="", font=("맑은 고딕", 9, "bold"),
                                   fg="white", bg="#c0392b")
         # 📬 우편 지금 받기 — **여기 하나만 남긴다** (2026-10-20 사용자:
@@ -7474,13 +7524,23 @@ class App(tk.Tk):
         #    (2026-11-04 사용자: *"혈레이드 업데이트 위에 멈춤버튼
         #     배치하고 그 옆에 업데이트버튼"*).
         #    🚫 멈춤은 ⏰ 2시간 반복 예약을 건드리지 않는다 (2026-08-15 지침).
-        _k0 = tk.Frame(_keep); _k0.pack(anchor="n", pady=(0, 2))
-        tk.Button(_k0, text="■\n멈춤", font=("맑은 고딕", 8, "bold"),
-                  bg="#922b21", fg="white", activebackground="#641e16",
-                  width=6, height=2, command=self._stop).pack(side="left")
-        tk.Button(_k0, text="🔄\n업데이트", font=("맑은 고딕", 8, "bold"),
+        _k0 = tk.Frame(_keep); _k0.pack(anchor="n", pady=(0, 2), fill="x")
+        # ■ **멈춤 — 한 줄 · 크게 · 알약 모양** (2026-11-04 사용자 지시:
+        #    *"멈춤버튼 반 줄인데 한 줄로. 그 밑에 업데이트 버튼. 멈춤은 자주
+        #      쓰는 편이니까 약간 크게, 전부복구처럼. 동그라미로, 그것만."*)
+        #    🎨 색: **실행 중이면 빨강 · 멈출 게 없으면 회색** (_refresh_stop_btn).
+        #    ⚠ Tk 버튼은 모서리를 둥글게 못 한다 → Canvas 에 **알약**을 그린다.
+        #       폭은 열 폭에 맞춰야 하므로 <Configure> 에서 다시 그린다.
+        self._fold_stop = tk.Canvas(_k0, height=38, highlightthickness=0,
+                                    bd=0, cursor="hand2")
+        self._fold_stop.pack(side="top", fill="x")
+        self._fold_stop.bind("<Button-1>", lambda e: (self._stop() or "break"))
+        self._fold_stop.bind("<Configure>", lambda e: self._fold_stop_draw())
+        self._fold_stop_draw()
+        tk.Button(_k0, text="🔄 업데이트", font=("맑은 고딕", 8, "bold"),
                   bg="#c0392b", fg="white", activebackground="#7b241c",
-                  width=6, height=2, command=self._run_updater).pack(side="left", padx=(2, 0))
+                  height=1, pady=3,
+                  command=self._run_updater).pack(side="top", fill="x", pady=(3, 0))
         _k1 = tk.Frame(_keep); _k1.pack(anchor="n")
         tk.Button(_k1, text="🔥 혈\n레이드", font=("맑은 고딕", 8, "bold"),
                   bg="#c0392b", fg="white", activebackground="#7b241c",
@@ -7927,8 +7987,16 @@ class App(tk.Tk):
                 try: _w.pack_forget()
                 except Exception: pass
             self._fold_btn.pack(side="bottom", anchor="s", pady=(6, 6))
+            # ✔ **'완료' 큰 글씨는 [◀ 열기] 바로 위** (2026-11-04 사용자:
+            #    *"완료는 열기 바로 위로 배치시켜주고"*).
+            #    ⚠ `side="bottom"` 은 **먼저 붙인 것이 더 아래**다 —
+            #      [열기] 다음에 붙여야 그 '위' 에 온다.
+            _dl = getattr(self, "_done_lbl", None)
+            if _dl is not None:
+                try: _dl.pack(side="bottom", anchor="s", pady=(0, 2))
+                except Exception: _dl = None
             for _w, _i in getattr(self, "_fold_dc", ()):
-                if _w is self._fold_btn:
+                if _w is self._fold_btn or _w is _dl:
                     continue
                 try: _w.pack(**_i)
                 except Exception: pass
@@ -10624,6 +10692,42 @@ class App(tk.Tk):
         self._rep_stop_all()
         self.status.set(f"⏰ 반복 종료 — {n}개 슬롯 전부 꺼짐")
 
+    def _fold_stop_draw(self, busy=None):
+        """■ 멈춤 버튼(알약)을 다시 그린다.
+
+        🎨 **실행 중이면 빨강 · 아니면 회색** — 예전 [■ 전체멈춤] 과 같은 규칙.
+           2026-11-04 사용자: *"멈춤버튼 회색으로. 뭔가 실행 중이면 빨간색,
+           끝나면 다시 회색. 예전엔 그렇게 해주더니 저기로 간 이후에 안 해주네."*
+           → 세로바로 옮기면서 `_refresh_stop_btn` 이 **옛 버튼만** 보고 있었다.
+        ⚠ Canvas 라 폭이 바뀔 때마다 다시 그려야 한다 (<Configure>)."""
+        c = getattr(self, "_fold_stop", None)
+        if c is None or not c.winfo_exists():
+            return
+        if busy is None:
+            try:
+                busy = self._is_busy()
+            except Exception:
+                busy = False
+        w = max(40, c.winfo_width())
+        h = max(20, c.winfo_height())
+        bg = "#c0392b" if busy else "#7f8c8d"      # 빨강 / 회색
+        try:
+            c.delete("all")
+            try:
+                c.configure(bg=_parent_bg(c))
+            except Exception:
+                pass
+            r = h // 2
+            c.create_oval(0, 0, h, h, fill=bg, outline=bg)
+            c.create_oval(w - h, 0, w, h, fill=bg, outline=bg)
+            c.create_rectangle(r, 0, w - r, h, fill=bg, outline=bg)
+            c.create_text(w // 2, h // 2,
+                          text=("■ 멈춤 (실행 중)" if busy else "■ 멈춤"),
+                          fill="white", font=("맑은 고딕", 10, "bold"))
+            self._fold_stop_busy = bool(busy)
+        except Exception:
+            pass
+
     def _refresh_stop_btn(self):
         """실행 중이면 빨강, 멈출 게 없으면 회색 (⏰ 반복 버튼과 같은 규칙)."""
         b = getattr(self, "btn_stop", None)
@@ -10637,6 +10741,9 @@ class App(tk.Tk):
             b.config(bg="#c0392b", activebackground="#922b21")
         else:
             b.config(bg="#7f8c8d", activebackground="#5d6d7e")
+        # 🗂 세로바의 ■ 멈춤(알약)도 같은 규칙으로 — 바뀔 때만 다시 그린다
+        if getattr(self, "_fold_stop_busy", None) != bool(busy):
+            self._fold_stop_draw(busy)
 
     def _refresh_rep_btn(self):
         b = getattr(self, "btn_rep", None)
@@ -22598,7 +22705,8 @@ class App(tk.Tk):
             ("귀환주문서",   "#c0392b", lambda: self._open_past_slot(4),                 "#922b21", lambda: self._run_island_slot(4)),
             ("카매사오기",   "#1a5276", lambda: self._open_past_slot(5),                 "#154360", lambda: self._run_island_slot(5)),
             ("📬 우편함",    "#2471a3", self._open_mail_win,     "#1a5276", self._start_mail),
-            ("🏝 과거섬",    "#c0392b", self._open_past_win,     "#922b21", self._start_past),
+            # 🏝 과거섬은 **세로바(오른쪽 열)로 옮겼다** (2026-11-04) — 두 군데
+            #    있으면 접었을 때와 펼쳤을 때가 달라 보인다.
             ("주말던전끄기", "#5d6d7e", self._open_wdoff_win,    "#34495e", self._start_wdoff),
             ("🏹 사냥",      "#27ae60", self._open_hunt_win,     "#1e8449", self._start_hunt),
             ("🔆 절전해제",  "#7d3c98", self._open_seq_win,      "#5b2c6f", self._start_seq),
@@ -30716,6 +30824,279 @@ class App(tk.Tk):
         except Exception:
             return "[알 수 없음]"
 
+    # ── 🎮 캐릭터 선택 화면 → 맨 위 캐릭으로 입장 ──────────────────────
+    def _enter_tpl(self, name="login_enter"):
+        """`click_templates/<name>.png` 과 그 `_meta.json`(기준 창 가로·기준값).
+
+        ⚠ 기준(`thr`)은 meta 에 둔다 — 그림을 다시 자르면 기준도 같이 바뀐다."""
+        import numpy as _np, cv2 as _cv
+        p = os.path.join(IMG_DIR, name + ".png")
+        if not os.path.exists(p):
+            return None, 546, ENTER_MATCH
+        try:
+            t = _cv.imdecode(_np.fromfile(p, _np.uint8), _cv.IMREAD_COLOR)
+        except Exception:
+            return None, 546, ENTER_MATCH
+        bw, thr = 546, ENTER_MATCH
+        mp = os.path.join(IMG_DIR, name + "_meta.json")
+        try:
+            if os.path.exists(mp):
+                m = json.load(io.open(mp, encoding="utf-8-sig"))
+                bw = int(m.get("w", 546)); thr = float(m.get("thr", ENTER_MATCH))
+        except Exception:
+            pass
+        return t, bw, thr
+
+    def _enter_grab(self, hwnd):
+        """그 클라 창을 **한 번만** 캡처한다 → (화면, rect) / 못 찍으면 (None, None).
+
+        ⚠ 이 단계에서 **가장 비싼 일이 캡처**다 — 게임이 로딩 중인 창은
+          PrintWindow 가 1초 가까이 걸린다(2026-11-04 실측: 바퀴 사이 갭 33초).
+          그래서 **클라당 한 번 찍어** 재접속·로그인·캐릭터 세 그림을
+          그 한 장에 대조한다. 예전에는 단계마다 다시 찍어 **48회**였다.
+        🚫 `ImageGrab`(화면 긁기)로 되돌리지 말 것 — 런처·퍼플이 덮으면 틀린다
+          (2026-08-29 교훈)."""
+        try:
+            r = win32gui.GetWindowRect(hwnd)
+            w, h = r[2] - r[0], r[3] - r[1]
+            if w < 100 or h < 100:
+                return None, None
+            big = grab_window((r[0] + w // 2, r[1] + h // 2))
+            return (big, r) if big is not None else (None, None)
+        except Exception:
+            return None, None
+
+    def _enter_match(self, big, win_w, tpl, base_w, thr):
+        """**찍어둔** 화면에서 그 그림을 찾는다 → (창 안 x, y, 점수).
+
+        ⚠ 그림은 `base_w` 창에서 자른 것이라 **지금 창 가로에 맞춰 늘린다**
+          (창을 491 → 546 으로 키우면 그림이 전부 작아진다 — 2026-11-03 사고)."""
+        import cv2 as _cv
+        if big is None or tpl is None:
+            return None, None, -1.0
+        try:
+            k = win_w / float(base_w or 546)
+            t = tpl if abs(k - 1) < 0.02 else _cv.resize(
+                tpl, (max(4, int(tpl.shape[1] * k)), max(4, int(tpl.shape[0] * k))))
+            if big.shape[0] < t.shape[0] or big.shape[1] < t.shape[1]:
+                return None, None, -1.0
+            res = _cv.matchTemplate(big, t, _cv.TM_CCOEFF_NORMED)
+            _mn, mx, _ml, ml = _cv.minMaxLoc(res)
+            if mx < thr:
+                return None, None, float(mx)
+            return ml[0] + t.shape[1] // 2, ml[1] + t.shape[0] // 2, float(mx)
+        except Exception:
+            return None, None, -1.0
+
+    def _enter_find(self, hwnd, tpl, base_w, thr):
+        """그 창에 그 그림이 보이면 (창 안 x, y, 점수), 아니면 (None, None, 최고점).
+
+        ⚠ 한 창에서 **여러 그림**을 볼 때는 이것을 여러 번 부르지 말 것 —
+          그때마다 다시 캡처한다. `_enter_grab` 한 번 + `_enter_match` 여러 번."""
+        big, r = self._enter_grab(hwnd)
+        if big is None:
+            return None, None, -1.0
+        return self._enter_match(big, r[2] - r[0], tpl, base_w, thr)
+
+    def _enter_click(self, hwnd, x, y):
+        """그 클라 창을 **앞으로 올린 뒤** 그 자리를 누른다 → 눌렀으면 True.
+
+        ⚠ 비활성 창의 첫 클릭은 '창 띄우기' 로만 먹히고 사라진다 (2026-08-24)."""
+        try:
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+            nap(random.uniform(*ENTER_FOCUS))
+            pyautogui.click(int(x), int(y))
+            return True
+        except Exception as e:
+            click_log(f"[입장] \u26a0 누르기 실패 \u2014 {e}")
+            return False
+
+    def _enter_push(self, hit):
+        """캐릭터 선택 화면인 클라들을 **맨 위 캐릭 \u2192 [입장하기]** 로 들여보낸다.
+
+        🚫 **둘째·셋째 캐릭은 절대 고르지 않는다** (사용자 지시 —
+           *"항상 위에 캐릭만 접속해줘"*)."""
+        n = 0
+        for hw, r, ee in hit:
+            if getattr(self, "_stop_flag", False):
+                break
+            try:
+                w, h = r[2] - r[0], r[3] - r[1]
+                nm = win32gui.GetWindowText(hw) or ""
+                try:
+                    win32gui.SetForegroundWindow(hw)
+                except Exception:
+                    pass
+                nap(random.uniform(*ENTER_FOCUS))
+                # ① 맨 위 캐릭 줄을 눌러 **확실히** 고른다
+                tx = r[0] + int(w * ENTER_TOP_CHAR[0])
+                ty = r[1] + int(h * ENTER_TOP_CHAR[1])
+                pyautogui.click(tx, ty)
+                nap(random.uniform(*ENTER_PICK_GAP))
+                # ② [입장하기]
+                pyautogui.click(r[0] + ee[0], r[1] + ee[1])
+                n += 1
+                click_log(f"[입장] \U0001f3ae {nm} \u2014 맨 위 캐릭 ({tx},{ty}) 고르고 "
+                          f"[입장하기] ({r[0] + ee[0]},{r[1] + ee[1]}) 눌렀다 "
+                          f"(일치도 {ee[2]:.2f})")
+            except Exception as e:
+                click_log(f"[입장] \u26a0 누르기 실패 \u2014 {e}")
+            nap(random.uniform(*ENTER_CLICK_GAP))
+        return n
+
+    def _enter_game_all(self, tag=""):
+        """🎮 캐릭터 선택 화면인 클라마다 **맨 위 캐릭 → [입장하기]**.
+
+        ⏱ **묶어서 한다** (2026-11-04 사용자 '3분 안에' 지시):
+           ① 클라당 **한 번만** 캡처해 재접속·로그인·캐릭터 3종을 대조
+              (예전에는 단계마다 다시 찍어 16클라 × 3종 = **48회**)
+           ② 로그인 화면은 **전부 누르고 마지막에 한 번만** 기다린다
+              (예전에는 클라마다 2.5~3.5초 → 바퀴당 24초를 썼다)
+           🚫 **클라마다 `ENTER_LOGIN_WAIT` 를 넣지 말 것** — 그 한 줄이
+              바퀴당 20초를 먹는다. 화면이 바뀌기를 기다리는 것은
+              '묶음이 끝난 뒤 한 번' 이면 충분하다.
+
+        🚫 **둘째·셋째 캐릭은 절대 고르지 않는다** (사용자 지시).
+        🚫 서버 버튼을 누르지 말 것 — 로그인 화면은 **가운데**를 누른다
+           (사용자: *"서버를 클릭하는 게 아니라 그냥 가운데 화면을 클릭하면 돼"*).
+        ⚠ '입장하기' 가 안 보이면 **이미 게임 안**이므로 아무것도 안 한다."""
+        tpl, base_w, thr = self._enter_tpl("login_enter")
+        if tpl is None:
+            click_log("[입장] \u26a0 login_enter.png 가 없다 \u2014 캐릭터 선택 화면을 못 본다")
+            return 0
+        # 🔁 **[재접속] 팝업** — 오래 방치되면 캐릭터 선택 화면 위에 뜬다.
+        #    모달이라 이걸 안 치우면 [입장하기] 클릭이 통째로 먹히지 않는다.
+        #    🚫 같은 자리의 **[종료]** 는 모양이 같아 0.695 가 나온다.
+        #       기준 0.85 로 갈린다 — **내리지 말 것**(종료를 누르면 클라가 꺼진다).
+        rtpl, rbw, rthr = self._enter_tpl("login_relogin")
+        # 🖥 로그인(서버 선택) 화면 — 알아보기만 하고 **가운데를 누른다**
+        stpl, sbw, sthr = self._enter_tpl("login_server")
+        total = 0
+        for _p in range(ENTER_PASSES):
+            if getattr(self, "_stop_flag", False):
+                break
+            # ── 📸 클라당 한 번만 찍고 3종을 전부 대조한다 ──
+            shots, best = [], -1.0
+            for hw, _l, _t, _w, _h in self._get_purple_hwnds():
+                if getattr(self, "_stop_flag", False):
+                    break
+                big, r = self._enter_grab(hw)
+                if big is None:
+                    continue
+                ww = r[2] - r[0]
+                _rr = self._enter_match(big, ww, rtpl, rbw, rthr)
+                _ss = self._enter_match(big, ww, stpl, sbw, sthr)
+                _ee = self._enter_match(big, ww, tpl, base_w, thr)
+                best = max(best, _ee[2])
+                shots.append((hw, r, _rr, _ss, _ee))
+            if not shots:
+                if _p == 0:
+                    click_log(f"[입장] {tag} 리니지M 창을 못 찾았다")
+                break
+            # ── 🔁 ① [재접속] 팝업부터 치운다 ──
+            relo = 0
+            for hw, r, _rr, _ss, _ee in shots:
+                if _rr[0] is None or getattr(self, "_stop_flag", False):
+                    continue
+                nm = win32gui.GetWindowText(hw) or ""
+                if self._enter_click(hw, r[0] + _rr[0], r[1] + _rr[1]):
+                    relo += 1
+                    click_log(f"[입장] \U0001f501 {nm} \u2014 [재접속] 팝업을 눌렀다 "
+                              f"({r[0] + _rr[0]},{r[1] + _rr[1]}) 일치도 {_rr[2]:.2f}")
+                nap(random.uniform(*ENTER_CLICK_GAP))
+            if relo:
+                nap(random.uniform(*ENTER_RELOGIN_WAIT))
+            # ── 🖥 ② 로그인 화면이면 **가운데 화면**을 누른다 (묶어서) ──
+            opened = []
+            for hw, r, _rr, _ss, _ee in shots:
+                if _ss[0] is None or getattr(self, "_stop_flag", False):
+                    continue
+                nm = win32gui.GetWindowText(hw) or ""
+                cx = r[0] + (r[2] - r[0]) // 2
+                cy = r[1] + (r[3] - r[1]) // 2
+                if self._enter_click(hw, cx, cy):
+                    opened.append(hw)
+                    click_log(f"[입장] \U0001f5a5 {nm} \u2014 로그인 화면이라 "
+                              f"**가운데 화면** ({cx},{cy}) 을 눌렀다 "
+                              f"(일치도 {_ss[2]:.2f})")
+                nap(random.uniform(*ENTER_CLICK_GAP))
+            # ── 🎮 ③ 이미 캐릭터 선택인 클라를 들여보낸다 ──
+            hit = [(hw, r, _ee) for hw, r, _rr, _ss, _ee in shots if _ee[0] is not None]
+            if not hit and not opened and not relo and _p == 0:
+                click_log(f"[입장] {tag} 캐릭터 선택 화면인 클라가 없다 "
+                          f"(최고 {best:.2f} \u00b7 기준 {thr:.2f})")
+            total += self._enter_push(hit)
+            # ── 🖥 ④ 방금 가운데를 누른 클라만 **다시 찍어** 들여보낸다 ──
+            #    ⏱ 기다리는 것은 **여기 한 번뿐**이다 (클라마다가 아니다)
+            if opened and not getattr(self, "_stop_flag", False):
+                nap(random.uniform(*ENTER_LOGIN_WAIT))
+                hit2 = []
+                for hw in opened:
+                    if getattr(self, "_stop_flag", False):
+                        break
+                    big, r = self._enter_grab(hw)
+                    if big is None:
+                        continue
+                    _ee = self._enter_match(big, r[2] - r[0], tpl, base_w, thr)
+                    if _ee[0] is not None:
+                        hit2.append((hw, r, _ee))
+                total += self._enter_push(hit2)
+            if _p < ENTER_PASSES - 1:
+                nap(random.uniform(*ENTER_PASS_GAP))
+        if total:
+            click_log(f"[입장] {tag} \u2714 {total}개 클라를 게임에 들여보냈다")
+        return total
+
+
+    def _clear_blocking_popup(self, x, y, tag=""):
+        """🔔 그 자리를 덮은 **윈도 알림(토스트)** 만 치운다 → 치웠으면 True.
+
+        🚨 2026-11-04 실측 — 접속이 끊긴 진짜 원인:
+           `멀티플레이` 버튼이 화면 **오른쪽 아래 구석 (2505,1289)** 이라
+           윈도 알림이 정확히 그 자리에 뜬다. 그러면 그림이 0.21 로 떨어져
+           `✘ 멀티플레이 그림을 못 찾음 … 그 자리 맨 위 창 [새 알림]
+           (ShellExperienceHost.exe)` 로 **접속이 통째로 중단**됐다.
+
+        ⚠ 숨기는 것은 **그 토스트 창 하나뿐**이다 (`SW_HIDE`). 프로세스는
+          건드리지 않고, 다음 알림은 평소대로 다시 뜬다.
+        🚫 퍼플·리니지M·런처 창은 **절대** 숨기지 않는다 — exe 이름으로 막는다."""
+        try:
+            import win32process
+            h = win32gui.WindowFromPoint((int(x), int(y)))
+            root = ctypes.windll.user32.GetAncestor(h, 2) or h
+            cls = win32gui.GetClassName(root) or ""
+            title = win32gui.GetWindowText(root) or ""
+            exe = ""
+            try:
+                _t, _pid = win32process.GetWindowThreadProcessId(root)
+                _k = ctypes.windll.kernel32
+                _hp = _k.OpenProcess(0x1000, False, int(_pid))
+                if _hp:
+                    _b = ctypes.create_unicode_buffer(1024)
+                    _n = ctypes.c_ulong(1024)
+                    if _k.QueryFullProcessImageNameW(_hp, 0, _b, ctypes.byref(_n)):
+                        exe = (_b.value or "").split("\\")[-1].lower()
+                    _k.CloseHandle(_hp)
+            except Exception:
+                pass
+            # 🚫 치워도 되는 것만 — 알림 호스트의 토스트 창
+            if exe not in ("shellexperiencehost.exe", "explorer.exe"):
+                return False
+            if cls not in ("Windows.UI.Core.CoreWindow", "Xaml_WindowedPopupClass",
+                           "ToastChildWindowClass", "tooltips_class32"):
+                return False
+            if "purple" in exe or "lineagem" in exe:
+                return False
+            ctypes.windll.user32.ShowWindow(root, 0)      # SW_HIDE
+            click_log(f"[접속] 🔔 {tag} 자리를 덮은 알림을 치웠다 "
+                      f"— [{title[:20]}] 클래스 {cls} ({exe})")
+            return True
+        except Exception:
+            return False
+
     def _lpoint(self, key):
         """그 단계를 **어디를 눌러야 하나**. 돌려주는 값: (x, y) 또는 None.
 
@@ -30746,7 +31127,12 @@ class App(tk.Tk):
                           f"→ ({x},{y}) 누름")
                 return (x, y)
             if t < LOGIN_TRIES - 1:
-                nap(random.uniform(*LOGIN_WAIT))
+                # 🔔 **윈도 알림이 덮고 있으면 치우고 바로 다시 본다**
+                #    (2026-11-04 — 멀티플레이 버튼이 화면 구석이라 자주 겹친다)
+                if self._clear_blocking_popup(base[0], base[1], nm):
+                    nap(0.35)
+                else:
+                    nap(random.uniform(*LOGIN_WAIT))
         # 🚨 **누가 그 자리를 덮고 있나** — 2026-11-04 에 찾은 진짜 원인이다.
         #    접속 좌표가 **리니지M 클라 격자 안**이라, 캐릭터를 띄우면 게임 창이
         #    앞으로 나와 **퍼플 메뉴를 덮고** 그림이 전부 0.4대로 떨어진다.
@@ -30908,6 +31294,22 @@ class App(tk.Tk):
         #    `move_only`(마우스만 올리는 자리)도 똑같이 막는다 — 엉뚱한 창에
         #    커서를 올리면 그 창이 반응할 수 있다.
         ok, who = self._login_spot_ok(p[0], p[1], key)
+        if not ok:
+            # 🔔 **윈도 알림이 덮은 것이면 치우고 다시 본다** (2026-11-04).
+            #    `게임 실행`(2278,1289)·`멀티플레이`(2505,1289) 가 화면
+            #    **오른쪽 아래 구석**이라 알림 팝업이 정확히 그 자리에 뜬다.
+            #    실측 09:06·09:14 두 번 모두 이것 때문에 접속이 끊겼다.
+            #    ⚠ `_lpoint`(그림 찾기)에만 넣으면 **여기서 막힌다** —
+            #       그림은 찾았는데 관문이 "퍼플이 아니다" 로 중단시킨다.
+            #       🚫 두 곳 모두에 있어야 한다. 한쪽만 고치지 말 것.
+            for _pop in range(LOGIN_POPUP_TRIES):
+                if not self._clear_blocking_popup(p[0], p[1],
+                                                  LOGIN_NAME.get(key, key)):
+                    break
+                nap(0.35)
+                ok, who = self._login_spot_ok(p[0], p[1], key)
+                if ok:
+                    break
         if not ok:
             click_log(f"[접속] 🚫 {LOGIN_NAME.get(key, key)} 자리 "
                       f"({int(p[0])},{int(p[1])}) 에 있는 창이 "
@@ -32701,7 +33103,7 @@ class App(tk.Tk):
                     break
 
                 self.status.set(f"[{acc_idx+1}/{total}] 로딩 대기... (15초)")
-                if not self._wait(15): self.status.set("멈춤"); return
+                if not self._wait(7): self.status.set("멈춤"); return
                 try: win.activate()
                 except: pass
                 if not self._wait(1): self.status.set("멈춤"); return
@@ -32711,7 +33113,7 @@ class App(tk.Tk):
                     self.status.set("멈춤"); return
 
                 self.status.set(f"[{acc_idx+1}/{total}] 새 계정 로딩... (15초)")
-                if not self._wait(15): self.status.set("멈춤"); return
+                if not self._wait(7): self.status.set("멈춤"); return
 
                 for _ in range(10):
                     win = find_purple();
@@ -32727,7 +33129,21 @@ class App(tk.Tk):
 
             # 접속 완료 → 20초 대기 → 클릭 등록(그룹1,2) 실행
             self.status.set("✔ 모든 계정 접속 완료! 20초 후 클릭 등록 실행...")
-            if not self._wait(20): self.status.set("멈춤"); return
+            if not self._wait(3): self.status.set("멈춤"); return
+
+            # ╭─ 🎮 **캐릭터 선택 화면이면 맨 위 캐릭으로 입장** ─────────────╮
+            # │ 2026-11-04 사용자: *"항상 위엣것만 입장하기 버튼을 누르면 돼. │
+            # │   2번째 3번째는 접속 안 해. 항상 위에 캐릭만 접속해줘."*      │
+            # │ *"항상 위에 불빛이 없더라도 항상 위에 거 그냥 접속해주면 돼.  │
+            # │   다른 것보다 글씨랑 다 커져 있잖아."*                        │
+            # ╰──────────────────────────────────────────────────────────────╯
+            # 🚫 불빛(선택 표시)을 보지 않는다 — **맨 위 줄을 그냥 누른다.**
+            # ⚠ '입장하기' 가 안 보이는 클라는 이미 게임 안이라 건드리지 않는다.
+            try:
+                self.status.set("🎮 캐릭터 선택 화면이면 맨 위 캐릭으로 입장...")
+                self._enter_game_all("[접속끝]")
+            except Exception as _e:
+                click_log(f"[입장] ⚠ 오류 — {_e}")
 
             active = [(i, s) for i, s in enumerate(self.cfg.get("click_slots", []))
                       if s[0] and s[1]]
@@ -32736,8 +33152,9 @@ class App(tk.Tk):
                 grp = (i // GROUP_SIZE) + 1
                 self.status.set(f"그룹{grp} #{i+1}번 클릭1...")
                 pyautogui.click(*pair[0])
-                # 두번째 클릭이 좀 빨라서 0.5~0.7초 랜덤 추가로 늦춤
-                if not self._wait(random.uniform(0.6, 1.2) + random.uniform(0.5, 0.7)):
+                # 두번째 클릭이 좀 빨라서 랜덤 추가로 늦춤
+                # ⏱ 2026-11-04 '3분 안에' — 1.1~1.9초 → 0.7~1.3초
+                if not self._wait(random.uniform(0.4, 0.8) + random.uniform(0.3, 0.5)):
                     self.status.set("멈춤"); return
                 self.status.set(f"그룹{grp} #{i+1}번 클릭2...")
                 pyautogui.click(*pair[1])
@@ -32746,7 +33163,10 @@ class App(tk.Tk):
                     self.status.set(f"그룹{grp} #{i+1}번 클릭3...")
                     pyautogui.click(*pair[2])
                 if done < len(active) - 1:
-                    if not self._wait(2.5): self.status.set("멈춤"); return
+                    # ⏱ 2026-11-04 '3분 안에' — 2.5초 고정 → 0.8~1.3초 랜덤
+                    #    🧍 값 하나로 고정하지 말 것 (항상 사람이 하는 것처럼)
+                    if not self._wait(random.uniform(0.8, 1.3)):
+                        self.status.set("멈춤"); return
             # 캐릭터01 접속 → 그룹2 완료까지 실제 소요시간 측정 (4분30초=270초 제한 확인)
             _t0 = getattr(self, "_run_char01_t", None)
             if _t0:
