@@ -32593,10 +32593,15 @@ class App(tk.Tk):
             #    🚫 '누를 때마다 올리기' 로 만들지 말 것 — 2026-10-14 에 그렇게
             #       했다가 접속이 더 망가져 걷어냈다. **막혔을 때만** 올린다.
             for _ft in range(LOGIN_FRONT_TRIES):
-                # 🟣 **내렸다 올리기가 가장 확실하다** — 그것부터 쓴다
-                if not self._purple_bounce(LOGIN_NAME.get(key, key)):
-                    if not self._purple_to_front(LOGIN_NAME.get(key, key)):
-                        break
+                # 🚫 **여기서 `_purple_bounce` 를 쓰지 말 것** — 최소화→복원은
+                #    열린 메뉴·팝업을 닫을 수 있다. 전환을 **시작하기 전**에만 쓴다.
+                # 🟣 **팝업까지** 올린다 — 확인 창은 제목이 없어서
+                #    `_purple_to_front`(제목으로 찾기)만으로는 안 올라온다
+                #    (2026-11-04 사고: 게임 창이 확인 팝업을 덮어 전환이 멈췄다).
+                _f1 = self._purple_to_front(LOGIN_NAME.get(key, key))
+                _f2 = self._purple_popups_front(LOGIN_NAME.get(key, key))
+                if not _f1 and not _f2:
+                    break
                 nap(random.uniform(0.45, 0.75))
                 ok, who = self._login_spot_ok(p[0], p[1], key)
                 if ok:
@@ -33256,6 +33261,50 @@ class App(tk.Tk):
                 click_log(f"[물약감시] 오류: {e}")
             except Exception:
                 pass
+
+    def _purple_popups_front(self, tag=""):
+        """🟣 **퍼플 팝업**(제목 없는 작은 창)을 맨 앞으로 → 올린 개수.
+
+        🚨 2026-11-04 사고 — 구글 계정을 누르면 뜨는 **확인 팝업**이
+           `HwndWrapper[Purple.exe;;…]` 라 **제목이 없다.** 그래서
+           `_purple_to_front`(제목으로 찾기)가 올려주지 않았고,
+           **게임 창이 그 위를 덮어** 관문이 '퍼플이 아니다' 로 막았다.
+        ⚠ 찾는 기준은 **프로세스(Purple.exe)** 다 — 제목·클래스가 아니다.
+        ⚠ 포커스는 빼앗지 않는다(`SWP_NOACTIVATE`) — 열린 메뉴가 닫히지 않게."""
+        hit = []
+        try:
+            import win32con, win32process, win32api
+
+            def _cb(h, _):
+                try:
+                    if not win32gui.IsWindowVisible(h):
+                        return True
+                    r = win32gui.GetWindowRect(h)
+                    w, hh = r[2] - r[0], r[3] - r[1]
+                    if w < 80 or hh < 50 or w > 2000:   # 메인 창은 제외
+                        return True
+                    _t, p = win32process.GetWindowThreadProcessId(h)
+                    ph = win32api.OpenProcess(0x1000, False, p)
+                    exe = (win32process.GetModuleFileNameEx(ph, 0) or "").lower()
+                    if "purple" not in exe:
+                        return True
+                    win32gui.SetWindowPos(
+                        h, win32con.HWND_TOP, 0, 0, 0, 0,
+                        win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+                        | win32con.SWP_NOACTIVATE)
+                    hit.append((h, r))
+                except Exception:
+                    pass
+                return True
+
+            win32gui.EnumWindows(_cb, None)
+        except Exception as e:
+            click_log("[접속] ⚠ 퍼플 팝업을 못 올렸다 — %s" % e)
+            return 0
+        if hit:
+            click_log("[접속] 🟣 %s 퍼플 팝업 %d개를 맨 앞으로 올렸다 %s"
+                      % (tag, len(hit), " ".join(str(r) for _h, r in hit[:3])))
+        return len(hit)
 
     def _purple_bounce(self, tag=""):
         """🟣 퍼플을 **최소화했다가 되살려** 맨 앞으로 — 가장 확실한 방법.
