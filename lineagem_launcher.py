@@ -3421,6 +3421,84 @@ def _rec_newest_json(d):
         return None
 
 
+def _rec_all_json(d):
+    """그 폴더의 **.json 전부** — 이름 순 (사람이 1,2,3 으로 붙이면 그 순서)."""
+    try:
+        fs = [os.path.join(d, f) for f in sorted(os.listdir(d))
+              if f.lower().endswith(".json") and os.path.isfile(os.path.join(d, f))]
+        return fs
+    except Exception:
+        return []
+
+
+def rec_drop_all():
+    """폴더 `1`~`6` 에서 → **{번호: [파일들]}** (한 칸에 여러 개 가능).
+
+    🎲 2026-11-04 사용자 요청 — *"한 군데에 파일을 4개 넣을 거야 …
+       16개 클라니까 **4개씩 분배**를 잘해줬으면"*.
+       스케줄을 0분으로 돌리면 16클라가 한꺼번에 움직여 **팅긴다.**
+       시작 시각이 다른 녹화를 여러 개 넣고 고루 나누면 부하가 흩어진다."""
+    out = {}
+    try:
+        if not os.path.isdir(REC_DROP_DIR):
+            return out
+        for f in os.listdir(REC_DROP_DIR):
+            p = os.path.join(REC_DROP_DIR, f)
+            if not os.path.isdir(p) or f.startswith("_"):
+                continue
+            m = re.match(r"\s*(\d{1,2})\s*$", f)
+            if not m:
+                continue
+            ps = _rec_all_json(p)
+            if ps:
+                out[int(m.group(1))] = ps
+    except Exception:
+        pass
+    return out
+
+
+def rec_spread(multi, n):
+    """🎲 **{칸: [파일]} → 클라마다 {칸: 파일}** 을 골고루 나눈다 → [{…}, …] n개.
+
+    - 파일이 **하나**면 16클라 전부 같은 것 (예전과 똑같다).
+    - 여러 개면 **개수를 똑같이** 나눈다 — 4개면 각 4클라 (16÷4).
+      나누어떨어지지 않으면 앞쪽 파일이 하나씩 더 간다 (예: 3개 → 6·5·5).
+    - **어느 클라가 어느 파일을 받을지는 섞는다** — 늘 #01 이 1번을 받으면
+      그것도 규칙이 된다 ('항상 사람이 하는 것처럼').
+    🚫 '완전 랜덤' 으로 만들지 말 것 — 한 파일이 7클라, 다른 건 1클라가 되어
+       **부하 분산이라는 목적이 깨진다.**"""
+    out = [dict() for _ in range(max(0, n))]
+    for slot in sorted(multi):
+        ps = multi.get(slot) or []
+        if not ps:
+            continue
+        if len(ps) == 1 or n <= 0:
+            for d in out:
+                d[slot] = ps[0]
+            continue
+        idx = [i % len(ps) for i in range(n)]   # 0,1,2,3,0,1,2,3,… → 개수가 같다
+        random.shuffle(idx)                      # 누가 받을지만 섞는다
+        for k in range(n):
+            out[k][slot] = ps[idx[k]]
+    return out
+
+
+def rec_spread_table(plans, multi, names=None):
+    """🎲 분배표를 글로 — *"2번 칸  A.json → #01 #05 #09 #14"*.
+
+    사용자가 **어느 클라가 어느 녹화를 받았는지** 볼 수 있어야 한다."""
+    out = []
+    for slot in sorted(multi):
+        ps = multi.get(slot) or []
+        if len(ps) <= 1:
+            continue
+        for p in ps:
+            who = [f"#{i+1:02d}" for i, d in enumerate(plans) if d.get(slot) == p]
+            out.append(f"{slot}번 칸  {os.path.basename(p)[:26]} → "
+                       f"{len(who)}클라  " + " ".join(who))
+    return out
+
+
 def rec_drop_files():
     """폴더 `1`~`6` 에서 → {번호: 파일경로}. 빈 폴더는 없다.
 
@@ -7194,7 +7272,8 @@ class App(tk.Tk):
             import shutil
             rec_make_dirs()
             rows, at = slot_zones_all()    # 🔑 **아는 짝 전부** (2026-11-04)
-            files = rec_drop_files()      # {번호: 파일}
+            files = rec_drop_files()      # {번호: 파일} — 안내·검증용
+            multi = rec_drop_all()        # {번호: [파일들]} — 🎲 나눠 넣기용
             # ⭐ **별표로 고른 칸** — 창에서 누른 그대로 (2026-11-04 사용자 요청)
             _picks = rec_fav_get()
             running = purple_running()
@@ -7223,6 +7302,10 @@ class App(tk.Tk):
                      + chr(10) + chr(10)
                      + "퍼플 [마우스·키 녹화 설정] 에서 하나씩 **내보내기** 한 것을"
                      + chr(10) + "넣으면 됩니다. 넣은 순서(1→6)대로 채웁니다."
+                     + chr(10) + chr(10)
+                     + "🎲 **한 칸에 여러 개**를 넣으면 16클라에 **개수를 똑같이**"
+                     + chr(10) + "   나눕니다 (4개 → 각 4클라). 시작 시각이 다른 녹화를"
+                     + chr(10) + "   넣으면 한꺼번에 안 몰려 **팅김이 줄어듭니다.**"
                      + chr(10) + chr(10) + "지금 클라:" + chr(10) + tbl)
                 try:
                     os.startfile(REC_DROP_DIR)       # 사용자가 누른 버튼이라 열어도 된다
@@ -7295,15 +7378,30 @@ class App(tk.Tk):
             bk = os.path.join(REC_DROP_DIR, "_백업", time.strftime("%Y%m%d_%H%M%S"))
             os.makedirs(bk, exist_ok=True)
             done, skip = [], []
-            recs, note, bad = rec_build(files)
-            if not recs:
+            # 🎲 한 칸에 파일이 여러 개면 **16클라에 개수를 똑같이** 나눈다
+            #    (2026-11-04 — 스케줄 0분 부하를 흩으려고). 하나면 예전과 똑같다.
+            plans = rec_spread(multi, len(rows))
+            built = [rec_build(pl) for pl in plans]
+            note = built[0][1] if built else []
+            bad = built[0][2] if built else []
+            if not any(r for r, _n, _b in built):
                 _msg("🎹 쓸 수 있는 녹화가 없습니다",
                      (chr(10).join(bad) if bad else "폴더 1~6 이 비어 있습니다"))
                 self.after(0, lambda: self.status.set("🎹 쓸 수 있는 녹화가 없습니다"))
                 return
-            blob = json.dumps({"records": recs}, ensure_ascii=False)
+            spread = rec_spread_table(plans, multi)
+            if spread:
+                click_log("[녹화교체] 🎲 한 칸에 여러 개 — 16클라에 고루 나눴다:")
+                for l in spread:
+                    click_log("[녹화교체]   " + l)
+            recs = built[0][0]        # 메시지에 쓸 대표값
             for i, (nm, g) in enumerate(rows):
                 dst = rec_path(g)
+                _recs = built[i][0] if i < len(built) else recs
+                if not _recs:
+                    skip.append(f"#{i+1:02d} {nm} — 그 클라 몫의 녹화가 비었다")
+                    continue
+                blob = json.dumps({"records": _recs}, ensure_ascii=False)
                 try:
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
                     if os.path.exists(dst):
@@ -7316,7 +7414,7 @@ class App(tk.Tk):
                         _f.write(blob)
                     os.replace(tmp, dst)       # 쓰다가 죽어도 파일이 안 깨진다
                     # ⭐ ★ 즐겨찾기도 같이 맞춘다 (앞 REC_FAV_N 개)
-                    _fok, _fwhy = fav_write(g, recs, picks=_picks)
+                    _fok, _fwhy = fav_write(g, _recs, picks=_picks)
                     if not _fok:
                         skip.append(f"#{i+1:02d} {nm} — ★ 못 맞춤 ({_fwhy})")
                     done.append(f"#{i+1:02d} {nm}")
@@ -7336,6 +7434,9 @@ class App(tk.Tk):
                  + "이전 것은 백업했습니다:" + chr(10) + bk
                  + ((chr(10) + chr(10) + chr(10).join(bad + skip)) if (bad or skip) else "")
                  + chr(10) + chr(10)
+                 + ((chr(10) + "🎲 한 칸에 여러 개 — 고루 나눴습니다:" + chr(10)
+                     + chr(10).join(spread) + chr(10)) if spread else "")
+                 + chr(10)
                  + "※ 켜져 있던 클라는 **녹화 창을 닫았다 다시 열어야** 보입니다."
                  + chr(10) + f"※ ★ 는 {_picks} 번에 켜고 번호 순(1번이 맨 위)으로 올렸습니다.")
             self.after(0, lambda: self.status.set(
