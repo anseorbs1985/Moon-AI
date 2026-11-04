@@ -2025,6 +2025,22 @@ def main():
                                 _km += 1
                             except Exception:
                                 pass
+                    # ⭐ 루트의 `즐겨찾기.json` 도 보낸다 (칸마다 켠 별표)
+                    for _rf in ("즐겨찾기.json",):
+                        _rs2 = os.path.join(_ks, _rf)
+                        if not os.path.isfile(_rs2):
+                            continue
+                        _rd2 = os.path.join(_kd, _rf)
+                        _nd = not os.path.exists(_rd2)
+                        if not _nd:
+                            try:
+                                with open(_rs2, "rb") as _a, open(_rd2, "rb") as _b:
+                                    _nd = _a.read() != _b.read()
+                            except Exception:
+                                _nd = True
+                        if _nd:
+                            os.makedirs(_kd, exist_ok=True)
+                            shutil.copy2(_rs2, _rd2); _kn += 1
                     if _kn or _km:
                         log(f"   🎹 녹화/키보드 설정 {_kn}개 배포"
                             + (f" · 옛 파일 {_km}개는 _받기전 으로" if _km else "")

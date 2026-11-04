@@ -2708,6 +2708,37 @@ REC_SLOTS = 6                                      # 만들어 둘 폴더 개수
 #      zone\<GUID>\lm\config\purple_zone.config     ← "path": "<이름>.cfg"
 #    실측 2026-11-04 — 지금 16클라는 전부 `최종 키보드 복구  (1).cfg` 를 쓴다.
 REC_KEY_DIR = os.path.join(REC_DROP_DIR, "키보드")
+# ⭐ **별표(즐겨찾기)로 고른 칸** — `{"fav": [1,2,3]}` (2026-11-04 사용자 요청).
+#    예전에는 `REC_FAV_N`(앞 5개)으로 자동이었다. 이제 **사용자가 고른다.**
+#    🧭 패널에는 **번호 순(1번이 맨 위)** 으로 올라간다 — 사용자: *"순서대로 할 거라서"*.
+#    📦 이 파일도 로컬에 **배포된다** (업데이트의 녹화/키보드 전용 블록).
+REC_FAV_FILE = os.path.join(REC_DROP_DIR, "즐겨찾기.json")
+
+
+def rec_fav_get():
+    """⭐ 별표를 켜둔 칸 번호 (없으면 예전처럼 앞 `REC_FAV_N` 개)."""
+    try:
+        with open(REC_FAV_FILE, encoding="utf-8-sig") as f:
+            v = json.load(f).get("fav")
+        if isinstance(v, list):
+            return sorted(int(x) for x in v if 1 <= int(x) <= REC_SLOTS)
+    except Exception:
+        pass
+    return list(range(1, REC_FAV_N + 1))
+
+
+def rec_fav_set(fav):
+    """⭐ 고른 칸을 저장한다 (임시파일 → 교체, 쓰다 죽어도 안 깨진다)."""
+    try:
+        os.makedirs(REC_DROP_DIR, exist_ok=True)
+        tmp = REC_FAV_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"fav": sorted(set(int(x) for x in fav))}, f,
+                      ensure_ascii=False, indent=2)
+        os.replace(tmp, REC_FAV_FILE)
+        return True
+    except Exception:
+        return False
 REC_ZONE_MAP = os.path.join(os.environ.get("LOCALAPPDATA", BASE),
                             "MoonAI", "purple_zones.json")   # 기억해둔 짝
 
@@ -2957,10 +2988,17 @@ def ls_log_path(guid):
         return None
 
 
-def fav_make(recs, n_star=None):
+def fav_make(recs, n_star=None, picks=None):
     """합친 녹화에서 **앞 n개**에 ★ 를 켠 값을 만든다 (1번이 맨 위로 오게)."""
-    n_star = REC_FAV_N if n_star is None else n_star
-    ks = list(recs)[:max(0, n_star)]
+    # ⭐ `picks` = 사용자가 **별표로 고른 칸 번호**(1부터). 슬롯 n → 키 r(n-1).
+    #    🧭 **번호 순**으로 넣는다 — 1번이 패널 맨 위 (사용자: *"순서대로"*).
+    _keys = list(recs)
+    if picks:
+        ks = [_keys[i - 1] for i in sorted(set(picks))
+              if 1 <= int(i) <= len(_keys)]
+    else:
+        n_star = REC_FAV_N if n_star is None else n_star
+        ks = _keys[:max(0, n_star)]
     base = int(time.time() * 1000)
     out = {}
     for i, k in enumerate(ks):
@@ -2971,14 +3009,14 @@ def fav_make(recs, n_star=None):
     return out
 
 
-def fav_write(guid, recs, n_star=None):
+def fav_write(guid, recs, n_star=None, picks=None):
     """그 클라의 ★ 를 맞춘다 → (됐나, 설명)"""
     p = ls_log_path(guid)
     if not p:
         return False, "Local Storage 가 없다"
     try:
         st = ls_read(p)
-        fav = fav_make(recs, n_star)
+        fav = fav_make(recs, n_star, picks)
         st[b"_file://\x00\x01purple_macro_favorites"] = (
             b"\x00" + json.dumps(fav, ensure_ascii=False).encode("utf-16-le"))
         ls_write(p, st)
@@ -6611,7 +6649,7 @@ class App(tk.Tk):
                   command=self._kb_apply).pack(side="right")
 
         # ── 🖱 녹화 ──
-        f2 = tk.LabelFrame(w, text=" 🖱 마우스키 녹화 설정 ",
+        f2 = tk.LabelFrame(w, text=" 🖱 마우스키 녹화 설정   (★ 를 누르면 즐겨찾기 · 번호 순으로 올라갑니다) ",
                            font=("맑은 고딕", 10, "bold"), fg="#5dade2")
         f2.pack(fill="both", expand=True, padx=10, pady=(4, 4))
         self._rec_rows = tk.Frame(f2); self._rec_rows.pack(fill="x", padx=8, pady=(6, 0))
@@ -6695,6 +6733,26 @@ class App(tk.Tk):
             click_log(f"[녹화교체] ⚠ 불러오기 실패 — {e}")
             self.status.set(f"📁 불러오기 실패: {e}")
 
+    def _rec_fav_toggle(self, k):
+        """⭐ 그 칸의 별표를 켜고 끈다 — **그 버튼만** 바로 고친다."""
+        f = set(rec_fav_get())
+        if k in f:
+            f.discard(k)
+        else:
+            f.add(k)
+        rec_fav_set(f)
+        on = k in f
+        b = getattr(self, "_rec_fav_btns", {}).get(k)
+        try:
+            if b is not None and b.winfo_exists():
+                b.config(text=("★" if on else "☆"),
+                         fg=("#f1c40f" if on else "#7f8c8d"))
+        except Exception:
+            pass
+        click_log(f"[녹화교체] ⭐ {k}번 칸 즐겨찾기 "
+                  f"{'켬' if on else '끔'} → 지금 {sorted(f)}")
+        self.status.set(f"⭐ 즐겨찾기 {sorted(f)} 번")
+
     def _rec_clear(self, slot):
         """✖ 그 칸을 비운다 — 파일은 `_백업` 으로 옮긴다 (지우지 않는다)."""
         import shutil
@@ -6758,11 +6816,31 @@ class App(tk.Tk):
                              + (os.path.basename(src) if src else "(없음 — 📂 폴더에 .cfg 를 넣으세요)"))
             for ch in self._rec_rows.winfo_children():
                 ch.destroy()
+            fav = set(rec_fav_get())
+            self._rec_fav_btns = {}
             for i in range(1, REC_SLOTS + 1):
                 r = tk.Frame(self._rec_rows); r.pack(fill="x", pady=1)
                 tk.Label(r, text="슬롯 %d :" % i, font=("맑은 고딕", 9, "bold"),
                          width=7, anchor="w").pack(side="left")
                 f = files.get(i)
+                # ⭐ **별표(즐겨찾기)** — 누르면 **황금색** (2026-11-04 사용자:
+                #    *"슬롯 1 2 3 4 이 앞에 즐겨찾기 할 수 있게 별표를 클릭할 수
+                #      있게. 순서대로 할 거라서. 별 클릭하면 황금색으로 변하는 그런 거"*)
+                #    ⚠ 누를 때 **그 버튼만** 바로 고친다 — 창을 통째로 다시 읽으면
+                #      16클라를 훑느라 2초가 걸려 답답하다.
+                _on = (i in fav)
+                _sb = tk.Button(
+                    r, text=("★" if _on else "☆"),
+                    font=("맑은 고딕", 12, "bold"), bd=0, relief="flat",
+                    highlightthickness=0, padx=0, pady=0, cursor="hand2",
+                    fg=("#f1c40f" if _on else "#7f8c8d"),
+                    activeforeground="#f39c12",
+                    command=lambda k=i: self._rec_fav_toggle(k))
+                #    ⚠ **배경을 지정하지 않는다** — `apply_dark` 는 '색을 일부러
+                #      지정해둔 버튼' 을 건드리지 않으므로, bg 를 주면 어두운
+                #      화면에서 회색 박스로 튄다. 맡겨두면 알아서 어두워진다.
+                _sb.pack(side="left", padx=(0, 2))
+                self._rec_fav_btns[i] = _sb
                 # 📁 **줄마다 불러오기** — 퍼플 패널의 [불러오기] 와 같은 자리
                 tk.Button(r, text="✖", font=("맑은 고딕", 8),
                           command=lambda k=i: self._rec_clear(k)).pack(side="right")
@@ -6782,6 +6860,15 @@ class App(tk.Tk):
                 apply_dark(self._recwin, self.cfg.get("dark_ui", True))
             except Exception:
                 pass
+            # ⭐ **별 색은 `apply_dark` 뒤에 다시 입힌다** — 안 그러면 켜진 별이
+            #    흰색으로 덮여 **퍼플 패널과 달라 보인다** (2026-11-04 사용자:
+            #    *"저렇게 해달라는 거야. 그래야 순서가 안 섞인다고"* —
+            #    퍼플은 **켜짐 황금 ★ · 꺼짐 회색 ☆** 로 또렷하게 갈린다).
+            for _k, _b in (getattr(self, "_rec_fav_btns", None) or {}).items():
+                try:
+                    _b.config(fg=("#f1c40f" if _k in fav else "#7f8c8d"))
+                except Exception:
+                    pass
 
         self.after(0, _fill)
 
@@ -6799,6 +6886,8 @@ class App(tk.Tk):
                 slot_zones_save(live)
             rows, at = (live, "지금") if live else slot_zones_saved()
             files = rec_drop_files()      # {번호: 파일}
+            # ⭐ **별표로 고른 칸** — 창에서 누른 그대로 (2026-11-04 사용자 요청)
+            _picks = rec_fav_get()
             running = purple_running()
 
             def _msg(t, m):
@@ -6916,20 +7005,20 @@ class App(tk.Tk):
                         _f.write(blob)
                     os.replace(tmp, dst)       # 쓰다가 죽어도 파일이 안 깨진다
                     # ⭐ ★ 즐겨찾기도 같이 맞춘다 (앞 REC_FAV_N 개)
-                    _fok, _fwhy = fav_write(g, recs)
+                    _fok, _fwhy = fav_write(g, recs, picks=_picks)
                     if not _fok:
                         skip.append(f"#{i+1:02d} {nm} — ★ 못 맞춤 ({_fwhy})")
                     done.append(f"#{i+1:02d} {nm}")
                 except Exception as e:
                     skip.append(f"#{i+1:02d} {nm} — 쓰기 실패 {type(e).__name__}: {e}")
-            click_log(f"[녹화교체] 녹화 {len(recs)}개 + ★ {REC_FAV_N}개로 "
+            click_log(f"[녹화교체] 녹화 {len(recs)}개 + ★ {_picks} 로 "
                       f"{len(done)}개 클라를 채웠다 · 실패 {len(skip)}개 · 백업 {bk}")
             for l in note + bad:
                 click_log("[녹화교체]   " + l)
             for l in done + skip:
                 click_log("[녹화교체]   " + l)
             _msg("🎹 녹화교체 끝",
-                 f"녹화 {len(recs)}개 + ★ 앞 {REC_FAV_N}개로 "
+                 f"녹화 {len(recs)}개 + ★ {_picks} 번으로 "
                  f"**{len(done)}개 클라**를 채웠습니다."
                  + (f"  (실패 {len(skip)}개)" if skip else "") + chr(10) + chr(10)
                  + chr(10).join(note) + chr(10) + chr(10)
@@ -6937,7 +7026,7 @@ class App(tk.Tk):
                  + ((chr(10) + chr(10) + chr(10).join(bad + skip)) if (bad or skip) else "")
                  + chr(10) + chr(10)
                  + "※ 켜져 있던 클라는 **녹화 창을 닫았다 다시 열어야** 보입니다."
-                 + chr(10) + f"※ ★ 는 앞 {REC_FAV_N}개에 켜고 1번이 맨 위로 오게 했습니다.")
+                 + chr(10) + f"※ ★ 는 {_picks} 번에 켜고 번호 순(1번이 맨 위)으로 올렸습니다.")
             self.after(0, lambda: self.status.set(
                 f"🎹 녹화 교체 — 녹화 {len(recs)}개로 {len(done)}개 클라를 채웠습니다 (백업함)"))
         except Exception as e:
@@ -30836,12 +30925,103 @@ class App(tk.Tk):
                   + (f" · 백업 {bk}" if done else ""))
         return done, same
 
+    def _grid_plan(self, rows):
+        """🪟 지금 창들로 **딱 맞는 격자**를 계산한다 → {hwnd: (x, y, w, h)}.
+
+        🧭 2026-11-04 사용자: *"가로 세로 딱딱 맞춰주랬는데 아주 미세하게 다르다"* ·
+           *"7번이랑 11번 사이 보면 미세하게 벌어져 있어"* (실측 1px).
+        ⚠ **창마다 지금 자리를 그대로 쓰면 안 된다** — 손으로 맞춘 것이라
+          1px 씩 어긋난다. 열·줄의 **대표값과 간격을 구해 계산**한다:
+              x = x0 + 가로간격 × 열번호      y = y0 + 세로간격 × 줄번호
+          크기는 **가장 흔한 크기**로 통일한다 (실측 546x307 이 14개, 547x308 이 2개).
+        ⚠ 창이 16개(4x4)가 아니면 **아무것도 하지 않는다** — 격자를 못 세운다.
+        `rows` 는 [(hwnd, rect), ...]."""
+        from collections import Counter
+        if len(rows) < 16:
+            return {}, "창이 %d개라 격자를 못 세운다 (16개 필요)" % len(rows)
+
+        def _group(vals, gap):
+            """가까운 값끼리 묶어 **대표값(최빈 → 중앙값)** 목록을 돌려준다."""
+            out = []
+            for v in sorted(vals):
+                if out and v - out[-1][-1] <= gap:
+                    out[-1].append(v)
+                else:
+                    out.append([v])
+            reps = []
+            for g in out:
+                c = Counter(g).most_common()
+                top = c[0][1]
+                cand = sorted(v for v, n in c if n == top)
+                reps.append(cand[len(cand) // 2])
+            return reps
+
+        xs = _group([r[0] for _h, r in rows], 200)
+        ys = _group([r[1] for _h, r in rows], 150)
+        if len(xs) != 4 or len(ys) != 4:
+            return {}, "열 %d개 · 줄 %d개 — 4x4 가 아니다" % (len(xs), len(ys))
+        # 간격 — 이웃 차이의 중앙값 (하나가 1px 틀어져도 흔들리지 않는다)
+        def _step(v):
+            d = sorted(v[i + 1] - v[i] for i in range(len(v) - 1))
+            return d[len(d) // 2]
+        gx, gy = _step(xs), _step(ys)
+        x0, y0 = xs[0], ys[0]
+        cw = Counter((r[2] - r[0], r[3] - r[1]) for _h, r in rows)
+        (W, H), _n = cw.most_common(1)[0]
+        plan = {}
+        for h, r in rows:
+            ci = min(range(4), key=lambda i: abs(r[0] - (x0 + gx * i)))
+            ri = min(range(4), key=lambda i: abs(r[1] - (y0 + gy * i)))
+            plan[h] = (x0 + gx * ci, y0 + gy * ri, W, H)
+        return plan, "격자 x %d+%d씩 · y %d+%d씩 · 크기 %dx%d" % (x0, gx, y0, gy, W, H)
+
+    def _grid_fix(self):
+        """📏 **지금 창들을 그 격자에 맞춘다** → (고친 개수, 설명).
+
+        ⚠ 저장·복원 **전에** 부른다 — 어긋난 자리를 저장하면 복원해도 어긋난다
+          (사용자: *"내가 저장한 대로 안 돼"*)."""
+        rows = [(h, win32gui.GetWindowRect(h))
+                for h, _l, _t, _w, _hh in self._get_purple_hwnds()]
+        plan, why = self._grid_plan(rows)
+        if not plan:
+            click_log(f"[격자] 맞추지 않음 — {why}")
+            return 0, why
+        u = ctypes.windll.user32
+        fixed, det = 0, []
+        for h, r in rows:
+            x, y, w, hh = plan[h]
+            if (r[0], r[1], r[2] - r[0], r[3] - r[1]) == (x, y, w, hh):
+                continue
+            try:
+                nm = (win32gui.GetWindowText(h) or "").replace("리니지M l ", "")
+                u.SetWindowPos(h, 0, x, y, w, hh, 0x0004 | 0x0010)  # NOZORDER|NOACTIVATE
+                det.append("%s %+d,%+d %+dx%+d" % (
+                    nm[:8], x - r[0], y - r[1],
+                    w - (r[2] - r[0]), hh - (r[3] - r[1])))
+                fixed += 1
+            except Exception as e:
+                click_log(f"[격자] ⚠ 못 옮김 — {e}")
+        click_log(f"[격자] {why} → {fixed}개 고침"
+                  + (" | " + "  ".join(det) if det else " (이미 딱 맞음)"))
+        return fixed, why
+
     def _save_all_window_pos(self):
         """지정된 모든 슬롯의 **지금 창 위치와 크기**를 그대로 저장한다.
 
         🚫 예전에는 크기를 491x276 으로 박아 넣어서, 창을 키워도 저장이 안 되고
            [재배치] 를 누르면 창이 491x276 으로 줄어들었다 (2026-11-03 사용자 신고
            *"해상도가 잘못 저장이 되는 거 같아"*). 고정값을 쓰지 말 것."""
+        # 📏 **저장하기 전에 격자로 딱 맞춘다** (2026-11-04 사용자:
+        #    *"가로 세로 딱딱 맞춰주랬는데 아주 미세하게 다르다"*).
+        #    ⚠ 어긋난 자리를 저장하면 복원해도 어긋난 채로 돌아온다.
+        try:
+            _gf, _gw = self._grid_fix()
+            if _gf:
+                self.status.set(f"📏 격자에 맞춤 {_gf}개 — 저장하는 중...")
+                nap(0.35)        # 창이 실제로 옮겨질 틈
+        except Exception as _e:
+            click_log(f"[격자] ⚠ {_e}")
+            _gf = 0
         slots = self.cfg.get("hunt_slots", [])
         wins = self._get_purple_hwnds()
         if not wins:
@@ -30868,7 +31048,9 @@ class App(tk.Tk):
         save_cfg(self.cfg)
         _kinds = sorted(set(sizes))
         _sz = _kinds[0] if len(_kinds) == 1 else ("크기 " + str(len(_kinds)) + "가지: " + " ".join(_kinds))
-        self.status.set(f"✔ {count}개 창 위치·크기 저장 완료 ({_sz}) · 퍼플 설정에도 쓰는 중...")
+        self.status.set(f"✔ {count}개 창 저장 ({_sz})"
+                        + (f" · 📏 격자 {_gf}개 고침" if _gf else " · 📏 이미 딱 맞음")
+                        + " · 퍼플 설정에도 쓰는 중...")
 
         # 🪟 **퍼플 설정에도 쓴다** — 이걸 안 하면 재부팅 때 옛 자리로 돌아간다
         #    (2026-11-04 실측 — 퍼플은 끌 때 실제 창 위치를 읽지 않는다).
@@ -30877,14 +31059,27 @@ class App(tk.Tk):
             try:
                 d, sm = self._save_purple_zone_cfg()
                 self.after(0, lambda: self.status.set(
-                    f"✔ {count}개 창 저장 ({_sz}) · 🪟 퍼플 설정 {d}개 고침"
+                    f"✔ {count}개 창 저장 ({_sz})"
+                    + (f" · 📏 격자 {_gf}개" if _gf else "")
+                    + f" · 🪟 퍼플 설정 {d}개 고침"
                     f"{'' if d else ' (이미 같음)'} — 재부팅해도 이 자리"))
             except Exception as e:
                 self.after(0, lambda: self.status.set(f"퍼플 설정 저장 오류: {e}"))
         threading.Thread(target=_zw, daemon=True).start()
 
     def _restore_all_windows(self):
+        """📐 저장된 자리로 되돌린 뒤 **격자로 다듬는다**.
+
+        ⚠ 저장값이 1px 어긋나 있어도 여기서 딱 맞춰진다
+          (2026-11-04 사용자: *"7번이랑 11번 사이 미세하게 벌어져 있어"*)."""
         self._restore_by_position()
+        try:
+            nap(0.35)
+            n, why = self._grid_fix()
+            if n:
+                self.status.set(f"📐 복원 뒤 📏 격자 {n}개 더 맞췄습니다 — {why}")
+        except Exception as e:
+            click_log(f"[격자] ⚠ 복원 뒤 다듬기 실패 — {e}")
 
     def _apply_window_pos(self, hwnd, aw):
         """창을 지정 위치/크기로 이동. (성공여부, 실패사유) 반환.
