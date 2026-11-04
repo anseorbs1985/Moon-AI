@@ -6606,6 +6606,33 @@ def close_purple_popup_if_visible(cfg, status_fn=None):
         status_fn("✔ 퍼플 팝업 닫기 완료")
 
 
+# 🔍 **일부러 키운 창은 건드리지 않는다** (2026-11-04 사용자 지시:
+#    *"클라이언트 확대를 시키면 너가 다시 재배치를 시켜버리는 것 같아.
+#    확대시킨 거는 재배치를 하지 않는다로 할까? **어차피 최소화하면 그 자리로
+#    돌아가거든**"*).
+#    사람이 보려고 키운 창을 런처가 도로 줄이면 아무것도 못 본다.
+#    🚫 판정은 **'커졌을 때만'** 이다 — 작아졌거나 자리만 밀린 창은 예전처럼 고친다
+#       (그건 사람이 한 게 아니라 흐트러진 것이다).
+KEEP_BIG      = True     # 끄려면 False
+KEEP_BIG_MARGIN = 40     # 가로·세로가 이보다 많이 커졌으면 '사람이 키운 것'
+
+
+def win_is_enlarged(hwnd, w0, h0, margin=None):
+    """그 창이 기준 크기(w0×h0)보다 **뚜렷하게 커져 있나** → True.
+
+    최대화(`IsZoomed`)도 커진 것으로 본다. 못 재면 False (막지 않는다)."""
+    if not KEEP_BIG:
+        return False
+    m = KEEP_BIG_MARGIN if margin is None else margin
+    try:
+        if ctypes.windll.user32.IsZoomed(hwnd):
+            return True
+        r = win32gui.GetWindowRect(hwnd)
+        return (r[2] - r[0]) > int(w0) + m or (r[3] - r[1]) > int(h0) + m
+    except Exception:
+        return False
+
+
 class WindowSizeLock:
     """폴링으로 창 크기 고정. 최소화만 허용, 최대화/리사이즈 모두 차단."""
     SWP_NOZORDER   = 0x0004
@@ -6655,6 +6682,11 @@ class WindowSizeLock:
                         continue
                     cr = win32gui.GetWindowRect(hwnd)
                     cw, ch = cr[2]-cr[0], cr[3]-cr[1]
+                    # 🔍 **사람이 키운 창은 되돌리지 않는다** (2026-11-04 사용자 지시).
+                    #    0.3초마다 도는 감시라, 키우는 순간 바로 줄여버려서
+                    #    확대 자체가 불가능했다. 최소화했다 꺼내면 어차피 제자리다.
+                    if win_is_enlarged(hwnd, rect[2], rect[3]):
+                        continue
                     if cw != rect[2] or ch != rect[3]:
                         user32.SetWindowPos(hwnd, 0, rect[0], rect[1],
                                             rect[2], rect[3],
@@ -32587,6 +32619,15 @@ class App(tk.Tk):
         from ctypes import wintypes
         u = ctypes.windll.user32
         SWP_NOZORDER, SW_RESTORE = 0x0004, 9
+        # 🔍 **사람이 일부러 키워둔 창은 건드리지 않는다** (2026-11-04 사용자 지시).
+        #    `force=True` 로 부르면(슬롯별 [재배치] 버튼) 그래도 되돌린다.
+        if not aw.get("force") and win_is_enlarged(hwnd, aw.get("w", 0), aw.get("h", 0)):
+            try:
+                _r = win32gui.GetWindowRect(hwnd)
+                _sz = f"{_r[2]-_r[0]}x{_r[3]-_r[1]}"
+            except Exception:
+                _sz = "?"
+            return False, f"🔍 키워둔 창({_sz})이라 건드리지 않음"
         if u.IsIconic(hwnd) or u.IsZoomed(hwnd):
             u.ShowWindow(hwnd, SW_RESTORE)
             nap(0.25)
@@ -32644,6 +32685,7 @@ class App(tk.Tk):
                 continue
             pick[i] = h; used.add(h)
         # ③ 옮긴다
+        big = []          # 🔍 사람이 키워둔 창 — 실패가 아니다
         for i, aw in cand:
             hwnd = pick.get(i)
             if not hwnd:
@@ -32651,10 +32693,25 @@ class App(tk.Tk):
             try:
                 ok, _reason = self._apply_window_pos(hwnd, aw)
             except Exception:
-                ok = False
+                ok, _reason = False, "오류"
             count += 1 if ok else 0
             if not ok:
+                # 🔍 키워둔 창은 **일부러 건너뛴 것** — '안 갔다' 로 세지 않는다
+                if str(_reason).startswith("🔍"):
+                    big.append(i + 1); continue
                 failed += 1; miss.append(i + 1)
+        if big:
+            click_log("[격자] 🔍 키워둔 창 %d개는 건드리지 않았다: %s "
+                      "(되돌리려면 그 슬롯의 [재배치] 를 누르세요)"
+                      % (len(big), " ".join("#%02d" % v for v in big)))
+        if big and not (failed or miss):
+            try:
+                self.status.set("✔ 재배치 %d개 · 🔍 키워둔 창 %d개는 그대로 두었습니다 "
+                                "(%s) — 되돌리려면 그 슬롯의 [재배치]"
+                                % (count, len(big),
+                                   " ".join("#%02d" % v for v in big)))
+            except Exception:
+                pass
         if failed or miss:
             _m = " ".join("#%02d" % v for v in sorted(set(miss))[:8])
             self.status.set(f"창 위치 복원: 성공 {count}개 / 안 된 자리 {_m}")
@@ -32781,7 +32838,8 @@ class App(tk.Tk):
         if not hwnd:
             self.status.set(f"#{slot_idx+1} — 창을 찾을 수 없습니다. '지정' 버튼을 다시 눌러주세요."); return
         try:
-            ok, reason = self._apply_window_pos(hwnd, aw)
+            # 🔍 슬롯별 [재배치] 는 **사람이 콕 집어 누른 것**이라 키워둔 창도 되돌린다
+            ok, reason = self._apply_window_pos(hwnd, dict(aw, force=True))
             if ok:
                 self.status.set(f"✔ #{slot_idx+1:02d} 창 복구 완료  ({aw['w']}x{aw['h']}  @{aw['x']},{aw['y']})")
             else:
