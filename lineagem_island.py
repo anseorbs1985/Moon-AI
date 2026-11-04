@@ -332,6 +332,15 @@ def omanst_pref_name(slot):
 #    게임이 주는 새로고침이 3번(버튼에 (3) 으로 표시)이라 그걸 다 쓴다.
 #    ⚠ 예전엔 3 이라 **새로고침을 두 번밖에 안 썼다.**
 OMANST_TRIES    = 4             # 보는 횟수 (= 새로고침 3번 + 처음 1번)
+# 🏢 **판마다 무엇을 고르나** — 2026-11-04 사용자 지시 (이것이 약속이다):
+#   1판  **무조건 새로고침** (보지도 않고 넘긴다)
+#   2판  **Ⅱ 만** 고른다            (1순위)
+#   3판  **Ⅰ·Ⅱ·Ⅲ** 아무거나        (2순위 Ⅰ · 3순위 Ⅲ — 셋 중 뭐든 받는다)
+#   4판  **뭐가 나오든** 고른다      (Ⅳ·Ⅴ 여도)
+#   무료 새로고침이 **세 번**이라 딱 맞는다.
+#   🚫 **다야로는 절대 새로고침하지 않는다** — 아데나가 아니면 지금 것을 고른다.
+#   🚫 1판에서 고르게 바꾸지 말 것 — 사용자: *"무조건 1번은 하고"*.
+OMANST_PLAN = (None, (2,), (1, 2, 3), "any")
 OMANST_MATCH    = 0.85          # '정화' 글자 일치 기준
 # 🚨 **정화·정복·생존 세 장을 겨룬다** (2026-10-22 사고 — 정복Ⅱ 를 눌렀다)
 #   옛 그림은 **12x12** 로 너무 작아 세 줄에 전부 걸렸다 (실측 #09:
@@ -609,20 +618,28 @@ def omanst_pick(app, anchor, slot, log=None):
                 _ry = int(_c[OMANST_PICK_IDX][1]) - oy
         except Exception:
             _ry = None
-        last = (t == OMANST_TRIES)
+        # 🏢 **그 판의 계획** (OMANST_PLAN). 마지막 판만 '뭐가 나오든'.
+        _plan = OMANST_PLAN[t - 1] if t - 1 < len(OMANST_PLAN) else "any"
+        last = (_plan == "any")
         x, y, n, sc = omanst_read(big, loose=last, row_y=_ry)
         why = ""
         if x is None and last:
             # 🎯 겨루기로 못 가렸다 → **무조건** 그 종류 1등 자리를 고른다
             x, y, n, sc = omanst_read(big, force=True, row_y=_ry)
             why = " · 겨루기로 못 가려 1등 자리"
-        want = (n in pref) if pref else (n > 0)
-        if last:
+        if _plan is None:
+            want = False                 # 1️⃣ 첫 판은 **보지 않고 무조건 새로고침**
+        elif last:
             want = True                  # 🎯 마지막 판은 **뭐가 나오든**
-        _L("[오만의탑] %d/%d판 — %s %s (%.2f)%s · 원하는 것 %s → %s"
+        else:
+            want = (n in _plan)
+        _pn = ("무조건 새로고침" if _plan is None
+               else ("아무거나" if last
+                     else "·".join(NM.get(v, str(v)) for v in _plan)))
+        _L("[오만의탑] %d/%d판 — %s %s (%.2f)%s · 이 판에 받는 것: %s → %s"
            % (t, OMANST_TRIES, kname, NM.get(n, n), sc,
               (" · 세번째줄 창안y %d" % _ry) if _ry is not None else " · ⚠ 줄 고정 안 됨",
-              pref or "아무거나",
+              _pn,
               "고른다" if (want and x is not None)
               else ("새로고침" if not last else "못 찾음")))
         if want and x is not None:
@@ -640,7 +657,7 @@ def omanst_pick(app, anchor, slot, log=None):
                         _L("[오만의탑] 🔁 다시 보니 %s → %s 로 달라졌다 "
                            "— 화면이 바뀌는 중이라 누르지 않는다"
                            % (NM.get(n, n), NM.get(_n3, _n3)))
-                        if _n3 in pref if pref else (_n3 > 0):
+                        if _n3 in (_plan or ()):
                             n, x, y, sc = _n3, _x3, _y3, _sc3
                             return _take(ox, oy, x, y, n, sc, why + " · 다시 확인")
                         time.sleep(random.uniform(0.6, 1.0))
@@ -663,7 +680,9 @@ def omanst_pick(app, anchor, slot, log=None):
         except Exception:
             _rb = 0.0
         if _rb < OMANST_COIN_RB:
-            _L("[오만의탑] ⚠ 새로고침이 아데나가 아니다 (동전 R-B %+.0f) "
+            # 🚫 **다야로는 절대 새로고침하지 않는다** (사용자 지시).
+            #    더 돌릴 수 없으니 **지금 것을 그대로** 고른다 — 1판이어도.
+            _L("[오만의탑] 💰 새로고침이 아데나가 아니다 (동전 R-B %+.0f) "
                "— 누르지 않는다. 지금 것을 그대로 고른다" % _rb)
             if x is None:
                 x, y, n, sc = omanst_read(big, force=True, row_y=_ry)
