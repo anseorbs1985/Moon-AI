@@ -1832,6 +1832,14 @@ MAIN_WIN_RIGHT = True
 #    🧭 이것은 **창을 옮기는 것뿐** — 게임에 클릭을 보내지 않는다. 그래서
 #       '실행은 사용자가 시킬 때만'(2026-08-10) 규칙과 어긋나지 않는다.
 #    ⚠ 사람이 보고 있을 때 창이 갑자기 움직이면 놀라므로 **손을 뗐을 때만** 한다.
+# 🪟 **격자 고정값** — 화면 해상도가 맞으면 이 값으로 맞춘다.
+#    🧭 2026-11-04 사용자: *"해상도 배치 이런 문제 또한 **여기랑 똑같게** 가야 한다."*
+#       코드에 두므로 로컬은 **🔄 업데이트만 하면** 같은 배치가 된다.
+#    한 칸 602x347 = 게임창 546x307 + 상단바 40 + 옆바 56 (실측 2026-11-03).
+#    🚫 숫자를 바꾸면 **모든 컴퓨터의 배치가 바뀐다** — 좌표도 같이 어긋난다.
+GRID_FIXED = {
+    (2560, 1440): {"x0": 0, "y0": 40, "gx": 602, "gy": 347, "w": 546, "h": 307},
+}
 GRID_AUTO_ON   = True        # coords.json 의 `grid_auto` 로 끌 수 있다
 GRID_AUTO_MS   = 180000      # 3분마다 확인 (창 목록만 읽는다 — 가볍다)
 GRID_AUTO_IDLE = 3.0         # 사람이 이만큼 안 만졌을 때만
@@ -1853,6 +1861,10 @@ NIGHT_ALIGN = False
 #    끄려면 False (예전처럼 왼쪽 정렬).
 SEC_ROW_NO_ISLAND = True   # 🗂 섹션행에 던전 4개를 만들지 않는다 (오른쪽 열에 있다)
 FRONT_ROW_EAST = True
+# 🗂 **펼쳤을 때 앞줄을 두 줄로 쌓는다** (2026-11-04 사용자 요청 —
+#    한 줄이면 폭이 2553px 로 화면을 거의 다 덮는다. 세로는 남아돈다).
+#    🚫 False 로 되돌리면 다시 화면을 덮는다.
+FRONT_TWO_ROWS = True
 
 # 💬 실행 멘트(상태줄) 글 너비 — 클라 오른쪽 빈 자리에 맞춘다 (2026-11-03).
 #    넓히면 왼쪽이 클라 뒤로 들어가 안 보이고, 좁히면 줄이 많아져 길어진다.
@@ -8557,8 +8569,114 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _front_two_rows(self, on):
+        """🗂 펼쳤을 때 `front_row` 의 칸을 **두 줄**로 나눈다 (폭 절반).
+
+        🧭 2026-11-04 사용자: *"열기를 하면은 쭉 폭이 늘어나는 현상이 있어서"*
+           실측 2553px → 두 줄로 약 절반.
+        ⚠ 위젯의 **부모는 그대로 `front_row`** 다 — `pack(in_=…)` 로 기하 관리만
+          형제 프레임에 맡긴다. 부모를 바꾸면 잘린다.
+        ⚠ **접기 전에 반드시 `on=False` 로 되돌린다** — 그래야 `_fold_snap()` 이
+          두 줄 상태를 기억하지 않는다."""
+        if not FRONT_TWO_ROWS:
+            return
+        fr = getattr(self, "_front_row", None)
+        if fr is None or not fr.winfo_exists():
+            return
+        try:
+            if not hasattr(self, "_fr_a"):
+                # 🎨 배경을 부모와 같게 — 안 그러면 흰 박스가 튄다
+                try: _bg = fr.cget("bg")
+                except Exception: _bg = None
+                self._fr_a = tk.Frame(fr, **({"bg": _bg} if _bg else {}))
+                self._fr_b = tk.Frame(fr, **({"bg": _bg} if _bg else {}))
+                self._fr_orig = []          # [(위젯, 원래 pack 옵션)] 순서대로
+            # 🧾 **처음 한 번** 원래 차례와 옵션을 적어둔다
+            if not self._fr_orig:
+                for w in fr.pack_slaves():
+                    if w in (self._fr_a, self._fr_b):
+                        continue
+                    try:
+                        self._fr_orig.append((w, dict(w.pack_info())))
+                    except Exception:
+                        pass
+            if not self._fr_orig:
+                return
+            for w, _i in self._fr_orig:
+                try: w.pack_forget()
+                except Exception: pass
+            if not on:
+                # ── 한 줄로 되돌린다 ──
+                try:
+                    self._fr_a.pack_forget(); self._fr_b.pack_forget()
+                except Exception:
+                    pass
+                for w, i in self._fr_orig:
+                    j = dict(i); j["in"] = fr
+                    try: w.pack(**j)
+                    except Exception: pass
+                return
+            # ── 두 줄로 나눈다 — 누적 폭이 절반을 넘으면 둘째 줄 ──
+            self.update_idletasks()
+            tot = 0
+            for w, _i in self._fr_orig:
+                try: tot += max(w.winfo_reqwidth(), w.winfo_width())
+                except Exception: pass
+            half, run, line = tot / 2.0, 0, 0
+            self._fr_a.pack(anchor="e", fill="x")
+            self._fr_b.pack(anchor="e", fill="x", pady=(6, 0))
+            # 🚨 **맨 아래로 내린다.** 이 프레임은 칸들보다 나중에 만들어져
+            #    stacking order 가 위다 → 안 내리면 칸을 **덮어 가린다**
+            #    (실측 2026-11-04 — 로그엔 칸이 들어갔는데 빈 흰 박스만 보였다).
+            #    🚫 이 두 줄을 빼지 말 것.
+            try:
+                self._fr_a.lower(); self._fr_b.lower()
+            except Exception:
+                pass
+            for w, i in self._fr_orig:
+                try: ww = max(w.winfo_reqwidth(), w.winfo_width())
+                except Exception: ww = 0
+                if line == 0 and run > 0 and run + ww > half:
+                    line = 1                 # 절반을 넘으면 둘째 줄로
+                j = dict(i); j["in"] = (self._fr_b if line else self._fr_a)
+                try:
+                    w.pack(**j)
+                except Exception as _pe:
+                    click_log("[화면] ⚠ 칸을 못 옮겼다 — %s · 옵션 %r" % (_pe, j))
+                run += ww
+            try:
+                _na = len(self._fr_a.pack_slaves()); _nb = len(self._fr_b.pack_slaves())
+            except Exception:
+                _na = _nb = -1
+            click_log("[화면] 🗂 앞줄을 두 줄로 쌓았다 (칸 %d개 · 합계 폭 %dpx "
+                      "· 윗줄 %d · 아랫줄 %d)"
+                      % (len(self._fr_orig), int(tot), _na, _nb))
+            # 🔎 **창 폭을 정하는 자식**을 적어둔다 (넓은 것부터 5개)
+            try:
+                self.update_idletasks()
+                ws = []
+                for c in self.winfo_children():
+                    try:
+                        if c.winfo_manager() != "pack":
+                            continue
+                        ws.append((c.winfo_reqwidth(), str(c)[-28:]))
+                    except Exception:
+                        pass
+                ws.sort(reverse=True)
+                click_log("[화면] 📏 창 요구폭 %d · 넓은 칸: %s"
+                          % (self.winfo_reqwidth(),
+                             " · ".join("%s %d" % (b, a) for a, b in ws[:5])))
+            except Exception:
+                pass
+        except Exception as e:
+            click_log("[화면] ⚠ 두 줄 배치 실패 — %s" % e)
+
     def _fold_apply(self, fold):
         """fold=True 면 **자주 쓰는 열만** 남기고 나머지를 숨긴다."""
+        # 🗂 **접기 전에 한 줄로 되돌린다** — 그래야 `_fold_snap()` 이
+        #    두 줄 상태를 기억하지 않는다 (2026-11-04).
+        if fold:
+            self._front_two_rows(False)
         self._fold_snap()
         # 🧭 배너(제목 띠)도 같이 접는다 — 글자가 커서 **창 폭이 630px 아래로
         #    안 내려간다**. 제목은 창 제목줄에 그대로 남는다.
@@ -8632,8 +8750,12 @@ class App(tk.Tk):
                                   bg=("#2874a6" if fold else "#5d6d7e"))
         except Exception:
             pass
+        # 🗂 **펼치면 두 줄로 쌓는다** — 한 줄이면 폭이 2553px 로 화면을 덮는다
+        #    (2026-11-04 사용자 요청). 접을 때는 맨 앞에서 이미 한 줄로 되돌렸다.
+        if not fold:
+            self.after(40, lambda: self._front_two_rows(True))
         # 창을 내용에 맞게 다시 맞춘다 (접으면 좁아지고, 펼치면 넓어진다)
-        for _ms in (60, 400, 1200):
+        for _ms in (120, 500, 1300):
             self.after(_ms, self._fit_main_height)
 
     def _fold_toggle(self):
@@ -31337,12 +31459,28 @@ class App(tk.Tk):
         x0, y0 = xs[0], ys[0]
         cw = Counter((r[2] - r[0], r[3] - r[1]) for _h, r in rows)
         (W, H), _n = cw.most_common(1)[0]
+        # 🪟 **해상도가 맞으면 코드에 적어둔 격자**를 쓴다 (2026-11-04 사용자:
+        #    *"해상도 배치 이런 문제 또한 여기랑 똑같게 가야 한다"*).
+        #    그래야 로컬도 🔄 업데이트만 하면 메인과 **같은 배치**가 된다.
+        #    🚫 지금 창에서 역산만 하면 로컬은 **자기 크기로 통일**될 뿐이다.
+        _fx = None
+        try:
+            _fx = GRID_FIXED.get((self.winfo_screenwidth(),
+                                  self.winfo_screenheight()))
+        except Exception:
+            _fx = None
+        if _fx:
+            x0, y0 = _fx["x0"], _fx["y0"]
+            gx, gy = _fx["gx"], _fx["gy"]
+            W, H = _fx["w"], _fx["h"]
         plan = {}
         for h, r in rows:
             ci = min(range(4), key=lambda i: abs(r[0] - (x0 + gx * i)))
             ri = min(range(4), key=lambda i: abs(r[1] - (y0 + gy * i)))
             plan[h] = (x0 + gx * ci, y0 + gy * ri, W, H)
-        return plan, "격자 x %d+%d씩 · y %d+%d씩 · 크기 %dx%d" % (x0, gx, y0, gy, W, H)
+        return plan, ("격자 x %d+%d씩 · y %d+%d씩 · 크기 %dx%d%s"
+                      % (x0, gx, y0, gy, W, H,
+                         " (코드 고정값 — 모든 컴퓨터 동일)" if _fx else " (지금 창에서 계산)"))
 
     def _grid_auto_start(self):
         """🪟 창 격자 **자동 맞추기**를 시작한다 (런처가 켜질 때 한 번 건다)."""
