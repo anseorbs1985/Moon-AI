@@ -8067,7 +8067,7 @@ class App(tk.Tk):
         #    ⚠ `_fg_keep` 을 달아 `apply_dark` 가 이 색을 덮지 않게 한다.
         self._fold_status = tk.Label(_keep, textvariable=self.status,
                                      font=("맑은 고딕", 8, "bold"), fg=STATUS_FG,
-                                     wraplength=150, justify="center",
+                                     wraplength=140, justify="center",
                                      height=3, anchor="n")
         self._fold_status._keep_fg = True
         self._fold_status.pack(anchor="n", pady=(3, 0), fill="x")
@@ -8355,8 +8355,21 @@ class App(tk.Tk):
                     pass
             win32gui.EnumWindows(_cb, None)
             if edge[0] <= 0:
-                return None
-            return max(120, self.winfo_screenwidth() - edge[0])
+                # 🚨 **클라가 꺼져 있으면 폭을 못 잰다** — 그때 `None` 을 돌려주면
+                #    런처가 **기본 폭(400)으로 벌어진다** (2026-11-04 사용자:
+                #    *"메인런처 폭을 왜 저렇게 하는 거야. 분명히 좁았는데 왜 늘리는
+                #      거야. 리니지M 클라 끝선이랑 맞췄잖아. 다시 폭 줄여"*).
+                #    → **마지막으로 알던 폭**을 그대로 쓴다.
+                w0 = self.cfg.get("fold_strip_w")
+                return int(w0) if w0 else None
+            w = max(120, self.winfo_screenwidth() - edge[0])
+            # 📏 잰 값을 기억해 둔다 — 클라가 꺼져 있을 때 이 값을 쓴다
+            try:
+                if int(self.cfg.get("fold_strip_w") or 0) != int(w):
+                    self.cfg["fold_strip_w"] = int(w); save_cfg(self.cfg)
+            except Exception:
+                pass
+            return w
         except Exception:
             return None
 
