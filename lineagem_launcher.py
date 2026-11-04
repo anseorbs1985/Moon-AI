@@ -2872,7 +2872,13 @@ def fav_hwnd_for(hwnd):
                 l2, t2, r2, b2 = win32gui.GetWindowRect(h)
             except Exception:
                 return
-            if abs(l2 - r) > 12:          # 그 패널 오른쪽에 붙어 있어야 한다
+            # 🚨 **왼쪽에 뜰 수도 있다** (2026-11-04 실측 사고).
+            #    오른쪽 열(#13~16)은 패널이 x2352~2408 이라
+            #    2408 + 240(목록 폭) = 2648 > 화면 2560 → **오른쪽에 못 뜬다.**
+            #    퍼플이 화면 밖으로 안 나가게 **왼쪽**에 띄운다.
+            #    오른쪽만 보다가 #13~16 이 전부 "목록 창이 안 떴다" 로 중단됐다.
+            #    🚫 한쪽만 보도록 되돌리지 말 것.
+            if not (abs(l2 - r) <= 12 or abs(r2 - l) <= 12):
                 return
             if not (t - ROW_FAV_TOP_PAD <= t2 < b):
                 return                    # 🚨 **아래 클라의 목록창** — 그 줄을 누르면 사고다
@@ -2897,7 +2903,25 @@ def row_spot(fkey, coord, hwnd=None):
         return None, None, -1.0, "그 슬롯 창을 못 찾음"
     fav = fav_hwnd_for(h)
     if not fav:
-        return None, None, -1.0, "녹화 목록 창이 안 떴다"
+        # 🗒 **어디를 봤는지** 남긴다 — "안 떴다" 만으로는 원인을 못 짚는다
+        try:
+            import win32gui
+            pn = side_panel_of(h) or h
+            _pr = win32gui.GetWindowRect(pn)
+            _all = []
+
+            def _c2(_h, _):
+                if (win32gui.IsWindowVisible(_h)
+                        and ROW_FAV_TITLE in (win32gui.GetWindowText(_h) or "")):
+                    _all.append(win32gui.GetWindowRect(_h))
+                return True
+            win32gui.EnumWindows(_c2, None)
+            why = (f"녹화 목록 창이 안 떴다 (패널 {_pr} 양옆에 없음"
+                   + (f" · 화면에 뜬 목록창 {_all}" if _all else " · 목록창 0개")
+                   + ")")
+        except Exception:
+            why = "녹화 목록 창이 안 떴다"
+        return None, None, -1.0, why
     try:
         import cv2, numpy as np
         big, (ox, oy) = grab_hwnd(fav)
