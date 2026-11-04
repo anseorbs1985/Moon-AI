@@ -149,16 +149,20 @@ if not zs:
 pm = jload(os.path.join(LA, "purple_zones.json")) or {}
 print("   기억해둔 슬롯↔폴더 짝: %d개 (%s)"
       % (len(pm.get("slots") or []), pm.get("at", "-")))
+# 🚫 **런처를 import 하지 않는다** — 런처가 켜져 있으면 뮤텍스에 막혀
+#    **출력 한 줄 없이 그대로 멈춘다** (2026-11-04 메인에서 실제로 여기서 죽었다).
+#    소스에서 이름만 찾으면 된다.
 try:
-    sys.path.insert(0, DESK)
-    import lineagem_launcher as LL
+    _src = io.open(os.path.join(DESK, "lineagem_launcher.py"),
+                   encoding="utf-8", errors="replace").read()
     print("   런처에 slot_zones_disk 가 있는가: %s"
-          % ("✔ 있다" if hasattr(LL, "slot_zones_disk") else
+          % ("✔ 있다" if "def slot_zones_disk" in _src else
              "✘ 없다 — 런처 코드가 옛 판이다 (🔄 한 번 더)"))
-    if hasattr(LL, "slot_zones_disk"):
-        print("   slot_zones_disk() → %d개" % len(LL.slot_zones_disk()))
+    for _nm in ("def rec_drop_all", "def rec_spread", "def fav_write"):
+        print("   %-22s %s" % (_nm[4:], "✔" if _nm in _src else "✘ 옛 판"))
 except Exception as e:
-    print("   ⚠ 런처를 못 읽었다 (런처가 켜져 있으면 정상): %s" % str(e)[:60])
+    print("   ⚠ 런처 소스를 못 읽었다: %s" % str(e)[:60])
+
 kd = os.path.join(DESK, "키설정교체")
 print("   폴더: %s" % kd)
 for sub in ("1", "2", "3", "4", "5", "6", "키보드"):
@@ -167,6 +171,97 @@ for sub in ("1", "2", "3", "4", "5", "6", "키보드"):
           if os.path.isfile(os.path.join(d, f))]
     print("     %-6s %s" % (sub, (" · ".join("%s (%d B)" % (f, sz(os.path.join(d, f)))
                                              for f in fs) if fs else "(빈 칸)")))
+
+
+# ── ⑥-2 **교체가 실제로 됐나** — 이게 핵심이다 (2026-11-04) ─────────
+#    폴더에 파일이 와 있어도 **[🎹 녹화교체] 를 눌러야** 16클라에 들어간다.
+#    그리고 **클라가 켜져 있으면 런처가 거부한다** (켜진 채 바꾸면 끌 때 도로 덮어쓴다).
+def _titles(recs):
+    out = []
+    for _k, v in (recs or {}).items():
+        if isinstance(v, dict) and v.get("events"):
+            out.append(str(v.get("title"))[:20])
+    return out
+
+
+want = []
+for sub in ("1", "2", "3", "4", "5", "6"):
+    d = os.path.join(kd, sub)
+    fs = sorted(f for f in (os.listdir(d) if os.path.isdir(d) else [])
+                if f.lower().endswith(".json"))
+    for f in fs[:1]:                      # 칸마다 첫 파일 기준
+        want += _titles((jload(os.path.join(d, f)) or {}).get("records"))
+print("")
+print("   폴더에 넣은 녹화 %d개: %s" % (len(want), " · ".join(want) or "(없음)"))
+
+try:
+    import ctypes
+    from ctypes import wintypes
+    u32 = ctypes.windll.user32
+    _n = [0]
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def _cb(h, _):
+        if u32.IsWindowVisible(h):
+            ln = u32.GetWindowTextLengthW(h)
+            b = ctypes.create_unicode_buffer(ln + 1)
+            u32.GetWindowTextW(h, b, ln + 1)
+            t = b.value or ""
+            if t.startswith("리니지M") and not t.startswith("리니지M 자동 실행"):
+                _n[0] += 1
+        return True
+    u32.EnumWindows(_cb, 0)
+    print("   켜진 리니지M 창: %d개  %s" % (
+        _n[0], "✔ 0개 — 지금 교체할 수 있다" if _n[0] == 0 else
+        "⛔ 켜져 있으면 런처가 교체를 **거부한다** (전부 끄고 누를 것)"))
+except Exception as e:
+    print("   켜진 클라를 못 셌다: %s" % str(e)[:50])
+
+# ⚠ zone 폴더에는 **지금 안 쓰는 옛 것**이 섞여 있다 (메인 실측: 25개 중 16개만 사용).
+#     에 기억해둔 **지금 쓰는 16개**만 본다.
+# ⚠ slots 는 {"name": .., "zone": GUID} **dict 리스트**다 (옛 튜플 아님)
+_use = []
+for r in (pm.get("slots") or []):
+    if isinstance(r, dict):
+        _use.append(str(r.get("zone") or "").upper())
+    elif isinstance(r, (list, tuple)) and len(r) > 1:
+        _use.append(str(r[1]).upper())
+_zs = [g for g in zs if g.upper() in _use] or zs
+if len(_zs) != len(zs):
+    print("   (지금 쓰는 %d개만 본다 — 나머지 %d개는 옛 폴더)" % (len(_zs), len(zs) - len(_zs)))
+same = diff = none = 0
+rows = []
+for g in _zs:
+    rp = os.path.join(zr, g, "lm", "records", "records.json")
+    if not os.path.exists(rp):
+        none += 1
+        rows.append((g[:8], "records.json 없음", "-"))
+        continue
+    got = _titles((jload(rp) or {}).get("records"))
+    ok = bool(want) and got == want
+    same += ok
+    diff += (not ok)
+    rows.append((g[:8], when(rp),
+                 "✔ 같다" if ok else "✘ 다르다 → " + (" · ".join(got[:3]) or "빈 것")))
+print("   퍼플 zone 의 녹화가 폴더 것과 같은가:")
+for a, b, c in rows[:18]:
+    print("     %-10s %-18s %s" % (a, b, c[:56]))
+print("   → 같음 %d · 다름 %d · 파일없음 %d" % (same, diff, none))
+if want and diff:
+    print("   ⚠ **교체가 안 됐다** — 클라를 전부 끄고 [🎹 녹화교체] 를 눌러주세요")
+elif want and same and not diff:
+    print("   ✔ zone 전부 폴더의 녹화로 교체돼 있다")
+
+# ⭐ 즐겨찾기(leveldb) — 바뀐 시각만
+fv = []
+for g in (_zs[:4] if _zs else zs[:4]):
+    ld = os.path.join(zr, g, "lm", "cache", "Local Storage", "leveldb")
+    if os.path.isdir(ld):
+        for f in os.listdir(ld):
+            if f.endswith(".log"):
+                fv.append("%s %s" % (g[:8], when(os.path.join(ld, f))))
+                break
+print("   ⭐ 즐겨찾기 로그가 바뀐 때: %s" % (" | ".join(fv) or "(못 찾음)"))
 
 # ── ⑦ 업데이트 기록 ────────────────────────────────────────────────
 ul = os.path.join(LA, "update_log.txt")
