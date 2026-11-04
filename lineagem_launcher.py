@@ -329,6 +329,21 @@ ENTER_LOGIN_WAIT = (2.5, 3.5)   # 가운데를 누른 뒤 캐릭터 선택이 �
 LOGIN_POPUP_TRIES = 3
 # 🟣 접속 자리를 **게임 창이 덮었을 때** 퍼플을 앞으로 올려 다시 보는 횟수
 LOGIN_FRONT_TRIES = 2
+# 🟣 퍼플을 **내렸다 올릴 때** 쉬는 시간 (최소화 뒤 · 복원 뒤)
+PURPLE_BOUNCE_DOWN = (0.45, 0.70)
+PURPLE_BOUNCE_UP   = (0.70, 1.10)
+# 🟣 퍼플을 앞으로 올릴 때 **클릭할 빈 자리** (퍼플 창 왼쪽위 기준).
+#    2026-11-04 사용자 제안: *"게임창이 안 뜨는 퍼플에 **빈 공간을 클릭**하면
+#    퍼플이 앞으로 나오잖아. 그러고 전환을 하는 건 어때"* — 맞는 말이다.
+#    `SetForegroundWindow` 는 윈도가 거부할 때가 있지만 **실제 클릭은 확실하다.**
+#    📏 실측 — 퍼플 상단 띠(y<40)의 **가운데는 완전히 비어 있다**:
+#       왼쪽 PURPLE 로고 x~140 · 오른쪽 아이콘 x2140~ · 그 사이가 빈 자리.
+#       **게임 창은 y≥40 부터**라 이 자리를 절대 덮지 않는다.
+#    🚫 더블클릭하지 말 것 — 제목줄 더블클릭은 **최대화/복원**이 된다.
+#    🚫 드래그하지 말 것 — 창이 움직인다.
+#    ⚠ 한 자리만 두면 **다른 창(클로드 등)이 그 자리를 덮었을 때** 못 누른다
+#       (실측 — 클로드 창이 (1200,20) 을 덮고 있었다). **여러 곳을 차례로** 본다.
+PURPLE_BLANKS = ((1200, 20), (300, 20), (2100, 20), (700, 20), (1700, 20))
 # 📝 적어둘 칸 글씨색 — 굵은 빨강 (2026-11-04 사용자 지시)
 # 🟡 **적어둘 칸 글씨 — 찐 노랑** (2026-11-04 사용자: *"그 아래 메모 글씨를
 #    말하는 거야. 리니지 no.7 이렇게 글씨를 적은 거"*).
@@ -32144,14 +32159,60 @@ class App(tk.Tk):
             h = hit[0]
             if win32gui.IsIconic(h):
                 win32gui.ShowWindow(h, win32con.SW_RESTORE)
+                nap(0.4)
+            # 🖱 **빈 자리를 실제로 클릭해 앞으로 끌어올린다** (사용자 제안).
+            #    `SetForegroundWindow` 만으로는 윈도가 거부할 때가 있다.
+            r = win32gui.GetWindowRect(h)
+            clicked = False
+            bx = by = 0
+            for _cx, _cy in PURPLE_BLANKS:
+                bx, by = r[0] + _cx, r[1] + _cy
+                try:
+                    # 그 자리가 **정말 퍼플인지** 보고 누른다 (엉뚱한 창 금지)
+                    _ok2, _who2 = self._login_spot_ok(bx, by, "퍼플 빈 자리")
+                except Exception:
+                    _ok2 = False
+                if _ok2:
+                    try:
+                        pyautogui.click(int(bx), int(by))
+                        clicked = True
+                        nap(random.uniform(0.3, 0.5))
+                    except Exception:
+                        pass
+                    break
+            # 🔗 **입력 스레드를 붙여** 올린다 — 윈도는 다른 앱이 포그라운드를
+            #    가져가는 것을 거부할 때가 있는데, 지금 앞에 있는 창의 입력
+            #    스레드에 붙으면 허용된다. **클릭이 필요 없어 가장 안전하다.**
+            #    🧭 2026-11-04 사용자 제안(*"퍼플 빈 공간을 클릭"*)은 실측 결과
+            #       **빈 자리가 없어서** 못 쓴다: 게임창 끝 2352 → 옆바 2408 →
+            #       메인런처 2408 로 **딱 붙어 있고**, 상단(y<40)은 `ngptop`
+            #       (LineageM.exe)이라 관문이 막는다.
             try:
-                win32gui.SetForegroundWindow(h)
+                u = ctypes.windll.user32
+                k = ctypes.windll.kernel32
+                fg = u.GetForegroundWindow()
+                t1 = u.GetWindowThreadProcessId(fg, None)
+                t2 = u.GetWindowThreadProcessId(h, None)
+                if t1 and t2 and t1 != t2:
+                    u.AttachThreadInput(t1, t2, True)
+                    try:
+                        u.BringWindowToTop(h)
+                        u.SetForegroundWindow(h)
+                    finally:
+                        u.AttachThreadInput(t1, t2, False)
+                else:
+                    u.SetForegroundWindow(h)
             except Exception:
                 try:
-                    ctypes.windll.user32.SwitchToThisWindow(h, True)
+                    win32gui.SetForegroundWindow(h)
                 except Exception:
-                    pass
-            click_log(f"[접속] 🟣 퍼플을 앞으로 올렸다 ({tag})")
+                    try:
+                        ctypes.windll.user32.SwitchToThisWindow(h, True)
+                    except Exception:
+                        pass
+            click_log(f"[접속] 🟣 퍼플을 앞으로 올렸다 ({tag})"
+                      + (f" · 빈 자리 ({int(bx)},{int(by)}) 클릭" if clicked
+                         else " · 빈 자리를 못 눌러 창 올리기만"))
             return True
         except Exception as e:
             click_log(f"[접속] ⚠ 퍼플을 못 올렸다 — {e}")
@@ -32272,8 +32333,10 @@ class App(tk.Tk):
             #    🚫 '누를 때마다 올리기' 로 만들지 말 것 — 2026-10-14 에 그렇게
             #       했다가 접속이 더 망가져 걷어냈다. **막혔을 때만** 올린다.
             for _ft in range(LOGIN_FRONT_TRIES):
-                if not self._purple_to_front(LOGIN_NAME.get(key, key)):
-                    break
+                # 🟣 **내렸다 올리기가 가장 확실하다** — 그것부터 쓴다
+                if not self._purple_bounce(LOGIN_NAME.get(key, key)):
+                    if not self._purple_to_front(LOGIN_NAME.get(key, key)):
+                        break
                 nap(random.uniform(0.45, 0.75))
                 ok, who = self._login_spot_ok(p[0], p[1], key)
                 if ok:
@@ -32934,6 +32997,63 @@ class App(tk.Tk):
             except Exception:
                 pass
 
+    def _purple_bounce(self, tag=""):
+        """🟣 퍼플을 **최소화했다가 되살려** 맨 앞으로 — 가장 확실한 방법.
+
+        🧭 2026-11-04 사용자 제안: *"작업표시줄에 퍼플을 최소화했다가 다시
+           키우고 난 이후에 작업을 계속하면 좋겠는데. **그게 제일 안전할 거 같은데**"*
+           → 맞다. **최소화 → 복원은 윈도가 거부하지 않는다.**
+           `SetForegroundWindow` 는 무시될 때가 있고, '빈 자리 클릭' 은
+           **빈 자리가 없어서** 못 쓴다 (게임창 끝 2352 → 옆바 2408 → 런처 2408
+           로 딱 붙어 있고, 상단 y<40 은 `ngptop` = LineageM 이라 관문이 막는다).
+
+        🚫 **`SW_MAXIMIZE` 를 쓰지 말 것** — 사용자가 말한 '최대화' 는 *되살린다*
+           는 뜻이다. 크기를 바꾸면 **접속 좌표가 전부 어긋난다.**
+        🚫 **메뉴가 열린 채로 부르지 말 것** — 최소화하면 그 메뉴가 닫힌다.
+           전환을 **시작하기 전에** 부른다."""
+        try:
+            import win32con
+            h = self._purple_hwnd()
+            if not h:
+                click_log(f"[접속] 🟣 퍼플 창을 못 찾았다 ({tag})")
+                return False
+            win32gui.ShowWindow(h, win32con.SW_MINIMIZE)
+            nap(random.uniform(*PURPLE_BOUNCE_DOWN))
+            win32gui.ShowWindow(h, win32con.SW_RESTORE)
+            nap(random.uniform(*PURPLE_BOUNCE_UP))
+            try:
+                fg = win32gui.GetForegroundWindow()
+                ok = (fg == h)
+            except Exception:
+                ok = True
+            click_log(f"[접속] 🟣 {tag} 퍼플을 **내렸다 다시 올렸다** "
+                      + ("— 맨 앞 ✔" if ok else "— 아직 뒤에 있다 ⚠"))
+            return True
+        except Exception as e:
+            click_log(f"[접속] ⚠ 퍼플 내렸다 올리기 실패 — {e}")
+            return False
+
+    def _purple_hwnd(self):
+        """🟣 **큰 퍼플 창**의 손잡이 (없으면 None)."""
+        hit = []
+
+        def _cb(h, _):
+            try:
+                if not win32gui.IsWindowVisible(h):
+                    return
+                t = (win32gui.GetWindowText(h) or "")
+                if "purple" in t.lower() or "퍼플" in t:
+                    r = win32gui.GetWindowRect(h)
+                    if (r[2] - r[0]) > 400 and (r[3] - r[1]) > 300:
+                        hit.append(h)
+            except Exception:
+                pass
+        try:
+            win32gui.EnumWindows(_cb, None)
+        except Exception:
+            pass
+        return hit[0] if hit else None
+
     def _purple_front_once(self, tag=""):
         """🟣 퍼플을 **앞으로** 한 번 올린다 (최소화면 되살린다).
 
@@ -33054,6 +33174,11 @@ class App(tk.Tk):
            다시 누르면 그 클릭이 메뉴를 **닫아버려** 똑같이 실패한다
            (11-04 07:19 에 실제로 그렇게 됐다)."""
         self._purple_wait_settle(tag)
+        # 🟣 **캐릭이 다 들어온 뒤 퍼플을 내렸다 다시 올린다** (2026-11-04 사용자 제안).
+        #    게임 창들이 퍼플을 덮고 있으면 프로필·구글·확인을 **게임 창에 누르게 된다**
+        #    (14:04 실측 — 확인을 [NCGIF] 에 눌러 **계정 전환이 통째로 빠졌다**).
+        #    ⚠ 메뉴를 **열기 전**이라 닫힐 것이 없다.
+        self._purple_bounce(tag)
         for _t2 in range(PROFILE_SWITCH_TRIES):
             if getattr(self, "_stop_flag", False):
                 return False
