@@ -1970,6 +1970,67 @@ def main():
                         pass
             except Exception as e:
                 log(f"   ⚠ 십자가 기준 그림 동기화 실패: {e}")
+            # 🎹 **마우스/키 녹화 + ⌨ 키보드 설정** — 하위 폴더째 배포
+            #    (2026-11-04 사용자: *"내가 이걸 배포하면 저 파일까지
+            #      전부 배포가 될 수 있도록 해줘"*)
+            #    저장소 `키설정교체\{키보드,1..6}\` → 로컬 런처 폴더의 같은 자리.
+            #    ⚠ `_` 로 시작하는 폴더(`_백업`)는 **머신별**이라 보내지 않는다
+            #      (메인 백업만 23MB 다).
+            #    ⚠ 한 칸에는 **파일 하나**다 → 메인에 없는 파일은 로컬에서도
+            #      치운다(`_받기전` 으로 옮긴다. 지우지 않는다). 안 그러면
+            #      옛 파일이 남아 어느 것이 쓰이는지 헷갈린다.
+            try:
+                _ks = os.path.join(REPO, "키설정교체")
+                _kd = os.path.join(DESK, "키설정교체")
+                if os.path.isdir(_ks):
+                    _kn = _km = 0
+                    for _sub in sorted(os.listdir(_ks)):
+                        if _sub.startswith("_"):
+                            continue
+                        _ss = os.path.join(_ks, _sub)
+                        if not os.path.isdir(_ss):
+                            continue
+                        _sd = os.path.join(_kd, _sub)
+                        os.makedirs(_sd, exist_ok=True)
+                        _want = set()
+                        for _fn in os.listdir(_ss):
+                            _sp = os.path.join(_ss, _fn)
+                            if not os.path.isfile(_sp):
+                                continue
+                            _want.add(_fn)
+                            _dp = os.path.join(_sd, _fn)
+                            _nd = not os.path.exists(_dp)
+                            if not _nd:
+                                try:
+                                    if os.path.getsize(_sp) != os.path.getsize(_dp):
+                                        _nd = True
+                                    else:
+                                        with open(_sp, "rb") as _a, open(_dp, "rb") as _b:
+                                            _nd = _a.read() != _b.read()
+                                except Exception:
+                                    _nd = True
+                            if _nd:
+                                shutil.copy2(_sp, _dp); _kn += 1
+                        # 메인에 없는 것은 치운다 (지우지 않고 옮긴다)
+                        for _fn in os.listdir(_sd):
+                            if _fn in _want:
+                                continue
+                            _op = os.path.join(_sd, _fn)
+                            if not os.path.isfile(_op):
+                                continue
+                            _bk = os.path.join(_kd, "_받기전")
+                            os.makedirs(_bk, exist_ok=True)
+                            try:
+                                shutil.move(_op, os.path.join(_bk, _sub + "_" + _fn))
+                                _km += 1
+                            except Exception:
+                                pass
+                    if _kn or _km:
+                        log(f"   🎹 녹화/키보드 설정 {_kn}개 배포"
+                            + (f" · 옛 파일 {_km}개는 _받기전 으로" if _km else "")
+                            + " ✔")
+            except Exception as e:
+                log(f"   ⚠ 녹화/키보드 설정 배포 실패: {e}")
             for d in DATA_DIRS:
                 sdir, ddir = os.path.join(REPO, d), os.path.join(DESK, d)
                 if not os.path.isdir(sdir):

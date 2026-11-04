@@ -29,7 +29,7 @@ except Exception:
     except Exception: pass
 
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 import subprocess, time, threading, json, random, re
 import io                      # 🎬 녹화 배포 — 한글 경로도 안전하게 읽고 쓰려고
 import pyautogui
@@ -6585,7 +6585,7 @@ class App(tk.Tk):
         rec_make_dirs()
         w = tk.Toplevel(self); self._recwin = w
         w.title("🎹 마우스/키 녹화하기")
-        w.geometry("560x430")
+        w.geometry("640x450")
         w.attributes("-topmost", True)
 
         # ── ⌨ 키보드 ──
@@ -6599,8 +6599,13 @@ class App(tk.Tk):
         tk.Label(f1, textvariable=self._kb_new, font=("맑은 고딕", 9, "bold"),
                  anchor="w", justify="left").pack(fill="x", padx=8, pady=(2, 4))
         b1 = tk.Frame(f1); b1.pack(fill="x", padx=8, pady=(0, 8))
-        tk.Button(b1, text="📂 폴더 열기", font=("맑은 고딕", 9),
-                  command=lambda: self._rec_open_dir(REC_KEY_DIR)).pack(side="left")
+        tk.Button(b1, text="📁 불러오기", font=("맑은 고딕", 9, "bold"),
+                  bg="#5d6d7e", fg="white", activebackground="#34495e",
+                  command=lambda: self._rec_load("kb")).pack(side="left")
+        tk.Button(b1, text="✖", font=("맑은 고딕", 9),
+                  command=lambda: self._rec_clear("kb")).pack(side="left", padx=(3, 0))
+        tk.Button(b1, text="📂 폴더", font=("맑은 고딕", 9),
+                  command=lambda: self._rec_open_dir(REC_KEY_DIR)).pack(side="left", padx=(3, 0))
         tk.Button(b1, text="▶ 16클라에 적용", font=("맑은 고딕", 9, "bold"),
                   bg="#f1c40f", fg="#1a1a1a", activebackground="#d4ac0d",
                   command=self._kb_apply).pack(side="right")
@@ -6611,12 +6616,14 @@ class App(tk.Tk):
         f2.pack(fill="both", expand=True, padx=10, pady=(4, 4))
         self._rec_rows = tk.Frame(f2); self._rec_rows.pack(fill="x", padx=8, pady=(6, 0))
         b2 = tk.Frame(f2); b2.pack(fill="x", padx=8, pady=(6, 8), side="bottom")
-        tk.Button(b2, text="📂 폴더 열기", font=("맑은 고딕", 9),
+        tk.Button(b2, text="📂 폴더", font=("맑은 고딕", 9),
                   command=lambda: self._rec_open_dir(REC_DROP_DIR)).pack(side="left")
         tk.Button(b2, text="▶ 16클라에 적용", font=("맑은 고딕", 9, "bold"),
                   bg="#2471a3", fg="white", activebackground="#1a5276",
                   command=self._rec_swap_open).pack(side="right")
 
+        tk.Label(w, text="📦 여기 넣은 파일은 [🔄 업데이트] 로 **다른 컴퓨터에도** 배포됩니다",
+                 font=("맑은 고딕", 8), fg="#5dade2").pack(fill="x", padx=12, pady=(2, 0))
         self._rec_note = tk.StringVar(value="")
         tk.Label(w, textvariable=self._rec_note, font=("맑은 고딕", 9, "bold"),
                  fg="#e74c3c", wraplength=520, justify="left").pack(
@@ -6630,6 +6637,86 @@ class App(tk.Tk):
             apply_dark(w, self.cfg.get("dark_ui", True))
         except Exception:
             pass
+        self._rec_win_refresh()
+
+    def _rec_load(self, slot):
+        """📁 **불러오기** — 파일을 직접 골라 그 칸에 넣는다.
+
+        🧭 퍼플 [단축키]/[매크로] 패널의 [불러오기] 와 같은 것
+           (2026-11-04 사용자: *"불러오기 기능을 안에 만들어달라는 거야"*).
+        `slot` 은 "kb"(⌨ 키보드) 또는 1~6(🖱 녹화 칸).
+        ⚠ 한 칸에는 **파일 하나**다 — 넣기 전에 그 칸의 옛 파일을
+          `_백업` 으로 옮긴다 (지우지 않는다)."""
+        import shutil
+        kb = (slot == "kb")
+        d = REC_KEY_DIR if kb else os.path.join(REC_DROP_DIR, str(slot))
+        try:
+            os.makedirs(d, exist_ok=True)
+            f = filedialog.askopenfilename(
+                parent=getattr(self, "_recwin", self),
+                title=("⌨ 키보드 설정 파일 고르기 (.cfg)" if kb
+                       else f"🖱 {slot}번 칸에 넣을 녹화 고르기 (.json)"),
+                filetypes=([("퍼플 단축키", "*.cfg"), ("모든 파일", "*.*")] if kb
+                           else [("퍼플 녹화", "*.json"), ("모든 파일", "*.*")]))
+            if not f:
+                return
+            ext = os.path.splitext(f)[1].lower()
+            want = ".cfg" if kb else ".json"
+            if ext != want:
+                messagebox.showwarning(
+                    "📁 불러오기",
+                    f"{want} 파일이어야 합니다." + chr(10) + f"고른 것: {os.path.basename(f)}",
+                    parent=getattr(self, "_recwin", self))
+                return
+            # 📦 그 칸의 옛 파일은 _백업 으로 옮긴다 (지우지 않는다)
+            bk = os.path.join(REC_DROP_DIR, "_백업",
+                              time.strftime("%Y%m%d_%H%M%S") + "_바꿈")
+            moved = 0
+            for old in os.listdir(d):
+                op = os.path.join(d, old)
+                if not os.path.isfile(op):
+                    continue
+                os.makedirs(bk, exist_ok=True)
+                try:
+                    shutil.move(op, os.path.join(
+                        bk, ("키보드_" if kb else "%s_" % slot) + old))
+                    moved += 1
+                except Exception:
+                    pass
+            shutil.copy2(f, os.path.join(d, os.path.basename(f)))
+            click_log(f"[녹화교체] 📁 {'키보드' if kb else str(slot) + '번 칸'} "
+                      f"← {os.path.basename(f)}"
+                      + (f" (옛 파일 {moved}개는 _백업 으로)" if moved else ""))
+            self.status.set(f"📁 {'키보드' if kb else str(slot) + '번'} "
+                            f"— {os.path.basename(f)} 넣었습니다")
+            self._rec_win_refresh()
+        except Exception as e:
+            click_log(f"[녹화교체] ⚠ 불러오기 실패 — {e}")
+            self.status.set(f"📁 불러오기 실패: {e}")
+
+    def _rec_clear(self, slot):
+        """✖ 그 칸을 비운다 — 파일은 `_백업` 으로 옮긴다 (지우지 않는다)."""
+        import shutil
+        kb = (slot == "kb")
+        d = REC_KEY_DIR if kb else os.path.join(REC_DROP_DIR, str(slot))
+        bk = os.path.join(REC_DROP_DIR, "_백업",
+                          time.strftime("%Y%m%d_%H%M%S") + "_비움")
+        n = 0
+        try:
+            for old in os.listdir(d):
+                op = os.path.join(d, old)
+                if not os.path.isfile(op):
+                    continue
+                os.makedirs(bk, exist_ok=True)
+                shutil.move(op, os.path.join(
+                    bk, ("키보드_" if kb else "%s_" % slot) + old))
+                n += 1
+        except Exception as e:
+            self.status.set(f"✖ 비우기 실패: {e}")
+            return
+        click_log(f"[녹화교체] ✖ {'키보드' if kb else str(slot) + '번 칸'} 비움 "
+                  f"— {n}개를 _백업 으로 옮겼다")
+        self.status.set(f"✖ {'키보드' if kb else str(slot) + '번'} 비웠습니다 ({n}개)")
         self._rec_win_refresh()
 
     def _rec_open_dir(self, d):
@@ -6675,6 +6762,13 @@ class App(tk.Tk):
                 tk.Label(r, text="슬롯 %d :" % i, font=("맑은 고딕", 9, "bold"),
                          width=7, anchor="w").pack(side="left")
                 f = files.get(i)
+                # 📁 **줄마다 불러오기** — 퍼플 패널의 [불러오기] 와 같은 자리
+                tk.Button(r, text="✖", font=("맑은 고딕", 8),
+                          command=lambda k=i: self._rec_clear(k)).pack(side="right")
+                tk.Button(r, text="📁 불러오기", font=("맑은 고딕", 8, "bold"),
+                          bg="#5d6d7e", fg="white", activebackground="#34495e",
+                          command=lambda k=i: self._rec_load(k)).pack(
+                              side="right", padx=(0, 3))
                 tk.Label(r, text=(os.path.basename(f) if f else "(비었음)"),
                          font=("맑은 고딕", 9),
                          fg=("#2ecc71" if f else "#95a5a6"),
@@ -7834,6 +7928,14 @@ class App(tk.Tk):
                   bg="#16a085", fg="white", activebackground="#0e6655",
                   height=1, pady=2,
                   command=self._rec_win).pack(side="top", fill="x", pady=(3, 0))
+        # 🪟 **재배치 — 옆으로 펼치는 판** (2026-11-04 사용자 지시).
+        #    [📍 위치 전체저장]·[📐 창 전체복원]·[🔢 번호 재지정]·슬롯 16칸이
+        #    그 판 **안에** 들어 있다 (`_build_winmgmt` 그대로).
+        self._wm_btn = tk.Button(_k2, text="🪟 재배치  ◀",
+                  font=("맑은 고딕", 8, "bold"),
+                  bg="#1a5276", fg="white", activebackground="#154360",
+                  height=1, pady=2, command=self._winmgmt_win)
+        self._wm_btn.pack(side="top", fill="x", pady=(3, 0))
         # 💬 **지금 무슨 일을 하는지** — 좌표저장/복구 바로 아래 (2026-11-04 사용자:
         #    *"좌표지정이랑 좌표복구 밑에 현재 상황 멘트를 볼 수 있게 해줘"*).
         #    접으면 위쪽 상태줄이 같이 숨겨지므로 **여기가 유일한 상태 표시**다.
@@ -11614,6 +11716,49 @@ class App(tk.Tk):
                             self.status.set("클릭 멈추는 중..."),
             state="disabled")
         self.btn_click_stop.pack(side="left")
+
+    def _winmgmt_win(self):
+        """🪟 **재배치 판을 세로바 왼쪽 옆에 편다** (다시 누르면 접는다).
+
+        🧭 2026-11-04 사용자: *"클릭을 하면 열기처럼 ◀ 이렇게 열기로 될 수
+           있게. 그 옆에 배치하면 되겠지. 저장이나 등등은 그 안에."*
+        ⚠ 판은 `_build_winmgmt(parent)` 를 **그대로** 부른다 — [📍 위치 전체저장]
+          [📐 창 전체복원] [🔢 번호 재지정] 과 슬롯 16칸이 그 안에 다 들어 있다.
+          버튼을 따로 만들면 한쪽만 고치는 사고가 난다."""
+        w = getattr(self, "_wmwin", None)
+        if w is not None and w.winfo_exists():
+            try: w.destroy()
+            except Exception: pass
+            self._wmwin = None
+            try: self._wm_btn.config(text="🪟 재배치  ◀")
+            except Exception: pass
+            return
+        w = tk.Toplevel(self); self._wmwin = w
+        w.title("🪟 배열창 재배치")
+        w.attributes("-topmost", True)
+        body = tk.Frame(w); body.pack(padx=8, pady=8)
+        try:
+            self._build_winmgmt(body)
+        except Exception as e:
+            tk.Label(body, text=f"판을 못 만들었다: {e}",
+                     fg="#e74c3c").pack(padx=10, pady=10)
+        # 🧭 **세로바 바로 왼쪽**에 붙인다 (사용자: *"그 옆에 배치"*)
+        try:
+            w.update_idletasks()
+            ww, hh = w.winfo_reqwidth(), w.winfo_reqheight()
+            r = win32gui.GetWindowRect(int(self.wm_frame(), 16))
+            x = max(0, r[0] - ww - 6)
+            y = max(0, min(r[1] + 60, self.winfo_screenheight() - hh - 60))
+            w.geometry("+%d+%d" % (x, y))
+        except Exception:
+            pass
+        w.protocol("WM_DELETE_WINDOW", self._winmgmt_win)
+        try:
+            apply_dark(w, self.cfg.get("dark_ui", True))
+        except Exception:
+            pass
+        try: self._wm_btn.config(text="🪟 재배치  ▶")
+        except Exception: pass
 
     def _build_winmgmt(self, parent):
         """배열창 재배치 — 좌측 전체 관리 버튼 열 + 슬롯별(01~16) 개별 재배치 그리드.

@@ -19,3 +19,8 @@ ocr_debug.png
 !share_skip.json
 !check_ref.png
 !restore_order.json
+
+# 🎹 녹화/키보드 설정은 배포한다 (_백업·_받기전 은 머신별이라 제외)
+!키설정교체/**/*.json
+키설정교체/_백업/
+키설정교체/_받기전/
