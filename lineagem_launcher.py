@@ -2387,6 +2387,30 @@ CHAR_PASS_GAP   = (2.5, 4.0)   # 바퀴와 바퀴 사이
 #      생각하면 다시 누르던지 알아서 해").
 CHAR_RING_WAIT  = 400          # 이보다 크면 **아직 대기** = 안 눌렸다 → 누른다
 
+# 🎮 **플레이 버튼으로 줄 찾기** (2026-11-04 — 아이콘이 구글·페북·전번·NC 로 제각각이라
+#    아이콘 색으로는 무채색 계정의 줄을 통째로 놓쳤다)
+CHAR_BTN_HALF   = 22           # 버튼 x 둘레 이만큼만 훑는다 (링 지름보다 조금 크게)
+CHAR_BTN_INK    = 3            # 그 가로줄에 링 픽셀이 이만큼 있으면 버튼이 있는 줄
+CHAR_BTN_H_MIN  = 8            # 세로로 이만큼은 이어져야 버튼으로 본다
+
+# 🔁 **활성(대기)인 버튼이 남아 있으면 계속 누른다** (2026-11-04 사용자 지시:
+#    *"활성화가 되어 있는 버튼이 있으면 그건 다 눌러줘. 계속 누르면 다시 취소되고
+#    활성화가 될 수 있거든. 한 번 눌러도 **다시 활성화가 떠 있으면 눌러줘**"*)
+#    기본 2바퀴를 돈 뒤에도 링이 큰(=대기) 줄이 남아 있으면 그 줄만 다시 누른다.
+#    🚫 무한 반복은 안 된다 — CHAR_MAX_PASSES 에서 멈추고 기록을 남긴다.
+CHAR_MAX_PASSES = 6            # 아무리 많아도 이 바퀴까지만
+
+# 🚫 **캐릭 접속과 사냥 사이의 '클릭 등록'(click_slots)을 하지 않는다**
+#    (2026-11-04 사용자 지시: *"케릭 접속하면은 **사냥을 바로 실행**해줘.
+#    그 전에 좌표 누르는 건 없애줘. 하지 마. **이상한 거 누르면 다른 게 전혀
+#    안 되니까**"* · *"**케릭 접속 + 사냥**이야. 그 사이에 좌표 클릭하지 마. 클라마다 전부"*)
+#    클라마다 좌표 2~3개를 누르던 구간이다. 캐릭이 막 들어온 직후라 화면이
+#    아직 안 그려져 있으면 **엉뚱한 곳이 눌리고, 그러면 사냥이 통째로 틀어진다.**
+#    ⚠ 끄는 것은 **전체 자동실행 안의 것뿐**이다 — 사용자가 직접 누르는
+#       [클릭 등록] 버튼(`_run_click`)은 그대로 동작한다.
+#    🚫 클로드는 사용자가 다시 요청하기 전까지 True 로 되돌리지 말 것.
+CLICK_SLOTS_ON = False
+
 
 def char_ring_px(cx, cy):
     """플레이 버튼의 **보라 링 픽셀 수** (버튼 둘레 32x32 칸).
@@ -2406,6 +2430,76 @@ def char_ring_px(cx, cy):
 
 
 
+def char_rows_by_btn(cfg, log=None):
+    """🎮 **플레이 버튼(보라 링)으로** 줄을 찾는다 → [(x, y), …] 또는 None.
+
+    🚨 **왜 필요한가** (2026-11-04 사용자 신고로 찾은 진짜 원인):
+       `char_rows_find` 는 줄 왼쪽의 **구글 G 로고가 컬러(채도)** 인 것을 기준으로
+       줄을 찾는다. 그런데 계정 아이콘이 **구글 · 페이스북 · 전화번호 · NC** 로
+       제각각이고, **무채색 아이콘(전화번호·NC)은 채도 조건을 못 넘어 그 줄이
+       통째로 안 잡혔다** → 그 계정은 **영영 접속을 안 했다.**
+       (사용자: *"페이스북이나 전번 이걸 전혀 인식을 못하고 접속을 안 하는 문제"*)
+
+    플레이 버튼의 **보라 링**은 계정 종류와 무관하게 **모든 줄에 똑같이** 있다.
+    그래서 등록 좌표의 x 에서 아래로 훑으며 링이 있는 자리를 찾으면
+    아이콘이 무엇이든 **전부** 잡힌다.
+    🚫 이것을 아이콘 색 판정으로 되돌리지 말 것."""
+    btns = [c for c in (cfg.get("char_btns") or []) if c]
+    if len(btns) < 2:
+        return None
+    try:
+        import numpy as _np
+        from PIL import ImageGrab as _IG
+        cx = int(sum(c[0] for c in btns) / len(btns))
+        sw, sh = pyautogui.size()
+        y0 = CHAR_PANEL_T; y1 = max(y0 + 60, sh - CHAR_PANEL_B)
+        bx0 = max(0, cx - CHAR_BTN_HALF); bx1 = min(sw, cx + CHAR_BTN_HALF)
+        a = _np.array(_IG.grab(bbox=(bx0, y0, bx1, y1)))[:, :, :3].astype(int)
+        g, b = a[:, :, 1], a[:, :, 2]          # ImageGrab 은 RGB
+        m = (b > 150) & (b - g > 80)           # char_ring_px 와 **같은 기준**
+        rows = m.sum(axis=1)
+        out = []; run = None
+        for i, v in enumerate(list(rows) + [0]):
+            if v >= CHAR_BTN_INK and run is None:
+                run = i
+            elif v < CHAR_BTN_INK and run is not None:
+                h = i - run
+                if h >= CHAR_BTN_H_MIN:
+                    out.append(y0 + run + h // 2)
+                run = None
+        if not out:
+            return None
+        # 간격이 **등록 좌표의 간격**과 맞는 가장 긴 묶음만 (배경 차단)
+        bys = sorted(c[1] for c in btns)
+        _bg = [bys[i + 1] - bys[i] for i in range(len(bys) - 1)]
+        gm = sorted(_bg)[len(_bg) // 2] if _bg else 0
+        if gm and len(out) >= 3:
+            gaps = [out[i + 1] - out[i] for i in range(len(out) - 1)]
+            cur = [0]; best = [0]
+            for i, gp in enumerate(gaps):
+                if abs(gp - gm) <= gm * CHAR_ROW_GAP_TOL:
+                    cur.append(i + 1)
+                else:
+                    if len(cur) > len(best):
+                        best = cur
+                    cur = [i + 1]
+            if len(cur) > len(best):
+                best = cur
+            out = [out[i] for i in best]
+        if not (CHAR_ROW_MIN <= len(out) <= CHAR_ROW_MAX):
+            return None
+        if log:
+            log(f"[접속] 🎮 멀티 줄 {len(out)}개 — **플레이 버튼으로** 찾음 "
+                f"(아이콘 종류와 무관) y " + " ".join(str(y) for y in out)
+                + f" (등록 좌표는 {len(btns)}개)")
+        return [(cx, y) for y in out]
+    except Exception as e:
+        if log:
+            log(f"[접속] 🎮 플레이 버튼으로 줄을 못 셌다 "
+                f"({type(e).__name__}: {e}) — 아이콘 색으로 다시 해본다")
+        return None
+
+
 def char_rows_find(cfg, log=None):
     """멀티 플레이 패널에서 **지금 보이는 줄**의 클릭 자리를 위→아래 순서로 돌려준다.
 
@@ -2417,6 +2511,11 @@ def char_rows_find(cfg, log=None):
     btns = [c for c in (cfg.get("char_btns") or []) if c]
     if not btns:
         return None
+    # 🎮 **플레이 버튼으로 먼저** 찾는다 — 계정 아이콘(구글·페북·전번·NC)과 무관하다.
+    #    이것이 실패할 때만 예전 '아이콘 색' 방식으로 내려간다.
+    _bt = char_rows_by_btn(cfg, log)
+    if _bt:
+        return _bt
     try:
         import numpy as _np
         from PIL import ImageGrab as _IG
@@ -5935,6 +6034,80 @@ def client_rect_at(x, y):
         r = ctypes.wintypes.RECT()
         ctypes.windll.user32.GetWindowRect(h, ctypes.byref(r))
         return (r.left, r.top, r.right, r.bottom)
+    except Exception:
+        return None
+
+
+# 🟣 **계정 목록 같은 '퍼플 팝업 창' 안에서 찾는다** (2026-11-04 로컬 사고)
+#    `login_08_area.json` 은 `(1790,520) 320x170` 짜리 **고정 범위**인데,
+#    하위 메뉴(계정 목록)는 **계정 수에 따라 높이·자리가 달라진다.**
+#    메인은 계정이 하나라 그 범위에 들어왔지만, 계정이 더 있는 로컬에서는
+#    G 로고가 **범위 밖**이라 영영 못 찾았다
+#    (사용자: *"로컬에서 거기를 클릭을 못하고 있어"*).
+#    → 팝업 **창 자체**를 찾아 그 안을 훑으면 계정 수·해상도와 무관하다.
+#    🚫 이 길을 지우고 고정 범위로 되돌리지 말 것.
+# 🚫 **그림으로 찾지 않고 등록한 좌표를 무조건 누르는 단계** (2026-11-04 사용자 지시)
+#    사용자: *"저게 구글로도 있지만 **전화번호나 NC로 마크가 되어 있는 것들도 있어.
+#    그게 문제였어**"* · *"그냥 구글로만 보지 말고 **그 위치를 무조건 로그인을 할 수
+#    있도록** 해줘"* · *"**구글 매칭을 없애고 무조건 접속**한다고 바꿔줘"*
+#
+#    계정 줄의 아이콘이 **구글(G) · 전화번호 · NC** 로 제각각이라, G 로고 한 장으로는
+#    구글 계정이 아닌 로컬에서 **영영 못 찾아 전환이 통째로 멈췄다.**
+#    → 그 단계는 **등록한 좌표를 그대로** 누른다.
+#    🛡 안전은 `_login_spot_ok` 가 지킨다 — 그 자리에 **퍼플 창이 없으면
+#       아무것도 누르지 않는다** (게임 클라·클로드 창을 누르는 일은 여전히 없다).
+#    🚫 여기에 아이콘 그림 매칭을 다시 넣지 말 것 — 계정 종류마다 아이콘이 다르다.
+LOGIN_NO_IMG = ("google_acc",)
+
+LOGIN_POPUP_KEYS = ("google_acc",)   # 팝업 창 안에서 찾을 단계
+LOGIN_POPUP_PAD  = 6                 # 팝업 테두리 여유(px)
+LOGIN_POPUP_MIN  = (80, 40)          # 이보다 작으면 팝업이 아니다
+LOGIN_POPUP_MAX  = (1100, 1100)      # 이보다 크면 본 창이다
+
+
+def purple_popup_box(near=None):
+    """🟣 퍼플의 **작은 팝업 창**(계정 목록 등) 범위 → (x0,y0,x1,y1) 또는 None.
+
+    본 창(2560x1392)은 빼고, 보이는 Purple.exe 창 중 알맞은 크기만 고른다.
+    여럿이면 `near`(기준 좌표)에 **가장 가까운** 것.
+    ⚠ 제목이 **없는** 창이다 (WPF 팝업) — 제목으로 거르면 통째로 놓친다
+      (2026-10-28 에 같은 함정을 밟았다)."""
+    try:
+        import win32gui, win32process, ctypes
+        got = []
+
+        def _cb(h, _):
+            try:
+                if not win32gui.IsWindowVisible(h) or win32gui.IsIconic(h):
+                    return
+                r = win32gui.GetWindowRect(h)
+                w, hh = r[2] - r[0], r[3] - r[1]
+                if not (LOGIN_POPUP_MIN[0] <= w <= LOGIN_POPUP_MAX[0]
+                        and LOGIN_POPUP_MIN[1] <= hh <= LOGIN_POPUP_MAX[1]):
+                    return
+                if r[0] < -10000 or r[1] < -10000:      # 최소화된 것
+                    return
+                _a, pid = win32process.GetWindowThreadProcessId(h)
+                hp = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+                if not hp:
+                    return
+                b = ctypes.create_unicode_buffer(520); n = ctypes.c_ulong(520)
+                ctypes.windll.kernel32.QueryFullProcessImageNameW(
+                    hp, 0, b, ctypes.byref(n))
+                ctypes.windll.kernel32.CloseHandle(hp)
+                if "purple" in b.value.split("\\")[-1].lower():
+                    got.append(r)
+            except Exception:
+                pass
+        win32gui.EnumWindows(_cb, None)
+        if not got:
+            return None
+        if near:
+            got.sort(key=lambda r: ((r[0] + r[2]) / 2 - near[0]) ** 2
+                                   + ((r[1] + r[3]) / 2 - near[1]) ** 2)
+        r = got[0]
+        p = LOGIN_POPUP_PAD
+        return (r[0] - p, r[1] - p, r[2] + p, r[3] + p)
     except Exception:
         return None
 
@@ -33313,6 +33486,20 @@ class App(tk.Tk):
         nm = LOGIN_NAME.get(key, key)
         c  = self.cfg.get(key)
         j  = LOGIN_IDX.get(key)
+        # 🚫 **그림을 안 보고 좌표를 그대로 누르는 단계** (계정 아이콘이 구글·전화번호·NC
+        #    로 제각각이라 그림으로는 못 찾는다 — 2026-11-04 사용자 지시)
+        if key in LOGIN_NO_IMG:
+            if not c:
+                click_log(f"[접속] ✘ {nm} — 좌표가 등록돼 있지 않다 "
+                          f"(그림을 안 보는 단계라 좌표가 꼭 있어야 한다)")
+                self.status.set(f"✘ '{nm}' 좌표를 등록해주세요")
+                return None
+            _pp = purple_popup_box(tuple(c))
+            click_log(f"[접속] {nm} 🚫 그림을 안 본다 — 등록 좌표 ({c[0]},{c[1]}) 를 "
+                      f"그대로 누른다 (계정이 구글·전화번호·NC 로 제각각)"
+                      + (f" · 팝업 창 ({_pp[0]},{_pp[1]})~({_pp[2]},{_pp[3]})"
+                         if _pp else " · ⚠ 그 둘레에 퍼플 팝업 창이 안 보인다"))
+            return tuple(c)
         if j is None or not has_img(LOGIN_FKEY, j):
             return tuple(c) if c else None          # 그림 없음 → 좌표 그대로
         # 훑을 자리의 기준 — 등록된 좌표 둘레를 본다 (퍼플 창은 리니지M 창이
@@ -33324,7 +33511,24 @@ class App(tk.Tk):
         for t in range(LOGIN_TRIES):
             if getattr(self, "_stop_flag", False):
                 return None
-            x, y, v = find_image(LOGIN_FKEY, j, base)
+            # 🟣 계정 목록처럼 **팝업 창 안**에 있는 단계는 그 창을 훑는다
+            #    (고정 범위는 계정 수가 달라지면 빗나간다 — 로컬 사고)
+            _pop = purple_popup_box(base) if key in LOGIN_POPUP_KEYS else None
+            if _pop:
+                x, y, v = _find_in_boxes(LOGIN_FKEY, j, base,
+                                         img_list(LOGIN_FKEY, j), [_pop])
+                if t == 0:
+                    click_log(f"[접속] {nm} 🟣 팝업 창 안에서 찾는다 "
+                              f"({_pop[0]},{_pop[1]})~({_pop[2]},{_pop[3]}) "
+                              f"{_pop[2]-_pop[0]}x{_pop[3]-_pop[1]}")
+                if x is None:      # 팝업 안에 없으면 평소 범위로도 한 번
+                    x2, y2, v2 = find_image(LOGIN_FKEY, j, base)
+                    if x2 is not None:
+                        x, y, v = x2, y2, v2
+                    else:
+                        v = max(v, v2)
+            else:
+                x, y, v = find_image(LOGIN_FKEY, j, base)
             best = max(best, v)
             if x is not None:
                 click_log(f"[접속] {nm} 그림으로 찾음 (일치도 {v:.2f}) "
@@ -33342,12 +33546,48 @@ class App(tk.Tk):
         #    앞으로 나와 **퍼플 메뉴를 덮고** 그림이 전부 0.4대로 떨어진다.
         #    그 창 이름을 남겨야 원격에서 짚을 수 있다.
         _cv = self._cover_who(base[0], base[1])
+        _shot = self._login_shot(key, j, base)      # 📸 로컬 진단용
         click_log(f"[접속] ✘ {nm} 그림을 못 찾음 (최고 {best:.2f}, "
                   f"{LOGIN_TRIES}번 봤다) → **아무것도 누르지 않고 중단** "
-                  f"· 그 자리 맨 위 창 {_cv}")
+                  f"· 그 자리 맨 위 창 {_cv}"
+                  + (f" · 화면 {_shot}" if _shot else ""))
         self.status.set(f"✘ 접속 중단 — '{nm}' 그림을 못 찾았습니다 "
                         f"(최고 {best:.2f}) · 엉뚱한 곳을 누르지 않았습니다")
         return None
+
+    def _login_shot(self, key, j, base):
+        """📸 접속 단계가 **실패한 그 화면**을 남긴다 → 저장한 경로.
+
+        🚫 지우지 말 것 — 로컬에서 '왜 못 찾았나' 를 짚는 **유일한 통로**다.
+           그림이 안 맞는 건지, 범위가 빗나간 건지, 메뉴가 아예 안 열린 건지는
+           숫자만으로는 못 가른다 (2026-11-04 에 그래서 하루를 썼다)."""
+        try:
+            import datetime, cv2, numpy as np
+            from PIL import ImageGrab
+            d = os.path.join(TPL_DIR, "_login")
+            os.makedirs(d, exist_ok=True)
+            sc = np.array(ImageGrab.grab().convert("RGB"))[:, :, ::-1].copy()
+            # 훑은 범위를 노란 상자로 그린다
+            for _b, _col in ((search_box(LOGIN_FKEY, j, base), (0, 220, 255)),
+                             (purple_popup_box(base), (0, 160, 255))):
+                if _b:
+                    cv2.rectangle(sc, (int(_b[0]), int(_b[1])),
+                                  (int(_b[2]), int(_b[3])), _col, 2)
+            cv2.circle(sc, (int(base[0]), int(base[1])), 9, (0, 0, 255), 2)
+            p = os.path.join(d, "%s_%02d_%s.png" % (
+                datetime.datetime.now().strftime("%m%d_%H%M%S"), j + 1, key))
+            cv2.imencode(".png", sc)[1].tofile(p)
+            # 오래된 것 정리 (최근 40장만)
+            try:
+                fs = sorted(os.path.join(d, f) for f in os.listdir(d)
+                            if f.lower().endswith(".png"))
+                for f in fs[:-40]:
+                    os.remove(f)
+            except Exception:
+                pass
+            return p
+        except Exception:
+            return None
 
     def _purple_unmin(self, tag=""):
         """🟣 **최소화된 퍼플만 풀어준다** → 되살렸으면 True (2026-10-27).
@@ -35562,7 +35802,8 @@ class App(tk.Tk):
                     _cbase = 0
                 # 🎲 첫 묶음 크기 (4~6 랜덤) — 묶음마다 다시 뽑는다
                 _cnext = random.randint(*CHAR_BATCH_RANGE)
-                for _p in range(CHAR_PASSES):
+                _p = 0
+                while _p < CHAR_MAX_PASSES:
                     if _p:
                         # 🔁 2바퀴째 — 첫 바퀴에서 씹힌 것을 확인 사살한다
                         _g = random.uniform(*CHAR_PASS_GAP)
@@ -35601,6 +35842,27 @@ class App(tk.Tk):
                         _w = random.uniform(*(CHAR_GAP_EACH if _p == 0
                                               else CHAR_PASS2_GAP))
                         if not self._wait(_w): self.status.set("멈춤"); return
+                    _p += 1
+                    # 🔁 **아직 활성(대기)인 버튼이 남아 있으면 더 돈다** (사용자 지시)
+                    #    "한 번 눌러도 다시 활성화가 떠 있으면 눌러줘"
+                    if _p >= CHAR_PASSES:
+                        try:
+                            _r3 = char_rows_find(self.cfg, None) or _rows
+                        except Exception:
+                            _r3 = _rows
+                        _act = [k + 1 for k, (ax, ay) in enumerate(_r3)
+                                if char_ring_px(ax, ay) >= CHAR_RING_WAIT]
+                        if not _act:
+                            click_log(f"[접속] 🎮 {_p}바퀴 끝 — **활성(대기)인 버튼이 "
+                                      f"없다** (줄 {len(_r3)}개) → 그만 누른다")
+                            break
+                        if _p >= CHAR_MAX_PASSES:
+                            click_log(f"[접속] 🎮 ⚠ {_p}바퀴를 돌았는데도 활성인 버튼이 "
+                                      f"{len(_act)}개 남았다 {_act} — 그만 누른다")
+                            break
+                        _rows = _r3
+                        click_log(f"[접속] 🔁 아직 활성인 버튼 {len(_act)}개 {_act} "
+                                  f"→ 다시 누른다 ({_p + 1}바퀴)")
 
                 # 캐릭터 버튼 완료 후 항상 위 해제
                 try:
@@ -35780,6 +36042,13 @@ class App(tk.Tk):
 
             active = [(i, s) for i, s in enumerate(self.cfg.get("click_slots", []))
                       if s[0] and s[1]]
+            # 🚫 **캐릭 접속 → 바로 사냥** (2026-11-04 사용자 지시) —
+            #    그 사이에 클라마다 좌표를 누르지 않는다.
+            if not CLICK_SLOTS_ON:
+                click_log(f"[사냥] 🚫 접속과 사냥 사이의 '클릭 등록' 을 **하지 않는다** "
+                          f"(등록된 슬롯 {len(active)}개 · 사용자 지시) → 바로 사냥")
+                self.status.set("🚫 클릭 등록은 건너뜁니다 — 바로 사냥을 시작합니다")
+                active = []
             # 🚫 **아직 게임에 안 들어간 클라에는 사냥을 보내지 않는다**
             #    (2026-11-04 사고 — 입장이 4개 남았는데 사냥을 시작해서
             #     캐릭 선택 화면의 엉뚱한 버튼을 눌렀다. 사용자가 본

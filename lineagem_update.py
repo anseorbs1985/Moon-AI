@@ -165,14 +165,11 @@ DATA_DIRS  = ["reroll_templates", "click_templates"]   # 이미지 클릭 그림
 #    (*"역산한 좌표 안 올렸냐 이거 전부 올려줘야지"*).
 #    🚫 **배포가 끝나면 다시 True 로 돌려놓을 것** (2026-10-14 사용자 지시).
 #       물약 칸은 `share_island.json` 의 `keep_cells` 가 로컬 것을 지킨다.
-NEVER_ISLAND = False           # island_coords.json 배포 허용 (배포 끝나면 True)
-NEVER_COORD_KEYS = {
-    "doll_slots",              # 🧸 인형탐험 — 컴퓨터마다 다르다 (사용자 지목)
-    # 🔓 2026-11-04 — 사용자가 **접속을 100% 똑같이** 올리라고 해서
-    #    "char_btns" 를 **임시로** 뺐다 (*"해상도도 다 같단 말이야"*).
-    #    🚫 로컬이 받으면 **반드시 되돌릴 것** — 이 줄의 주석을 풀면 된다.
-    # "char_btns",             # 👤 캐릭터 접속 버튼 — 계정마다 캐릭 수·자리가 다르다
-}
+NEVER_ISLAND = True            # 🔒 island_coords.json 은 어떤 경로로도 받지 않는다
+# 🔒 섬/던전 좌표와 인형탐험·캐릭터 버튼은 **코드가 막는다** (사람이 json 을
+#    비우는 것만으로는 네 번이나 샜다 — 2026-09-30·10-13·10-17·11-03).
+#    🚫 정말 배포해야 하면 사용자에게 먼저 말하고, 받은 뒤 **반드시 되돌린다.**
+NEVER_COORD_KEYS = {"doll_slots", "char_btns"}
 
 
 def load_coord_lock():
