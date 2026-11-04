@@ -1869,6 +1869,10 @@ FRONT_ROW_EAST = True
 # 🗂 **펼쳤을 때 앞줄을 두 줄로 쌓는다** (2026-11-04 사용자 요청 —
 #    한 줄이면 폭이 2553px 로 화면을 거의 다 덮는다. 세로는 남아돈다).
 #    🚫 False 로 되돌리면 다시 화면을 덮는다.
+# 🗂 **펼칠 때 몇 줄로 쌓을까** — 실측(2026-11-04)으로 정한 값.
+#    버튼 줄은 21칸 1524px 라 한 줄로 두면 창이 2020px 까지 벌어진다.
+#    🚫 1 로 되돌리지 말 것 — 사용자가 *"폭을 늘리지 말라"* 고 한 그 증상이 돌아온다.
+WRAP_LINES = {"front": 2, "btn": 2}
 FRONT_TWO_ROWS = True
 
 # 💬 실행 멘트(상태줄) 글 너비 — 클라 오른쪽 빈 자리에 맞춘다 (2026-11-03).
@@ -7652,6 +7656,9 @@ class App(tk.Tk):
         # 실행 / 멈춤
         # 가운데정렬이면 창을 넓힐 때마다 버튼이 오른쪽으로 밀린다 → 왼쪽 고정
         btn_row = tk.Frame(_topwrap); btn_row.pack(pady=6, anchor="w", padx=(38, 0))
+        # 🗂 **펼칠 때 두 줄로 쌓을 수 있게 들고 있는다** (2026-11-04) —
+        #    이 줄이 21칸으로 **1524px** 라 창 폭을 혼자 정하고 있었다.
+        self._btn_row = btn_row
         # TJ성공!! (동그라미 버튼) + 실행 — 계정관리 왼쪽
         tjcol = tk.Frame(btn_row); tjcol.pack(side="left", padx=(0, 6), anchor="n")
         self._tjcol = tjcol
@@ -8172,10 +8179,16 @@ class App(tk.Tk):
         tk.Button(_k1, text="🔥 혈\n레이드", font=("맑은 고딕", 8, "bold"),
                   bg="#c0392b", fg="white", activebackground="#7b241c",
                   width=6, height=2, command=self._memo_boost).pack(side="left")
-        # 📍 제자리 — 혈레이드 옆 (사용자 지시). 창을 제자리로 돌린다.
-        tk.Button(_k1, text="📍\n제자리", font=("맑은 고딕", 8, "bold"),
-                  bg="#5d6d7e", fg="white", activebackground="#34495e",
-                  width=6, height=2, command=self._go_home).pack(side="left", padx=(2, 0))
+        # 🔄 **런처 재시작** — 혈레이드 옆 (2026-11-04 사용자:
+        #    *"제자리를 빼고 그 자리에 재시작을 넣어줘"*).
+        #    👉 접어두면 버튼 줄이 숨어 **재시작을 누를 수 없었다.** 세로바에 둔다.
+        #    🚫 [📍 제자리] 로 되돌리지 말 것 — 창 자리는 코드(`MAIN_WIN_POS`)로
+        #       고정돼 누를 일이 거의 없다 (위쪽 버튼 줄에는 그대로 남아 있다).
+        tk.Button(_k1, text="🔄" + chr(10) + "재시작",
+                  font=("맑은 고딕", 8, "bold"),
+                  bg="#1f618d", fg="white", activebackground="#154360",
+                  width=6, height=2,
+                  command=self._restart_launcher).pack(side="left", padx=(2, 0))
         _k2 = tk.Frame(_keep); _k2.pack(anchor="n", pady=(2, 0), fill="x")
         tk.Button(_k2, text="💾 좌표저장", font=("맑은 고딕", 8, "bold"),
                   bg="#1e8449", fg="white", activebackground="#145a32",
@@ -8625,7 +8638,19 @@ class App(tk.Tk):
             pass
 
     def _front_two_rows(self, on):
-        """🗂 펼쳤을 때 `front_row` 의 칸을 **두 줄**로 나눈다 (폭 절반).
+        """🗂 펼쳤을 때 **넓은 줄들을 두 줄씩** 쌓는다 (폭 절반).
+
+        🧭 2026-11-04 — 앞줄만 쌓고 **버튼 줄(1524px)은 한 줄로 뒀더니** 창 폭이
+           그대로 2020px 이었다. 이제 둘 다 쌓는다.
+        🚫 여기에 줄을 더할 때는 `WRAP_LINES` 에 태그를 적고 **접을 때
+           `on=False` 로 되돌아가는지** 확인할 것."""
+        if not FRONT_TWO_ROWS:
+            return
+        self._wrap_row(getattr(self, "_front_row", None), "front", on)
+        self._wrap_row(getattr(self, "_btn_row", None), "btn", on)
+
+    def _wrap_row(self, fr, tag, on):
+        """🗂 한 줄짜리 프레임을 `WRAP_LINES[tag]` 줄로 쌓는다 (범용).
 
         🧭 2026-11-04 사용자: *"열기를 하면은 쭉 폭이 늘어나는 현상이 있어서"*
            실측 2553px → 두 줄로 약 절반.
@@ -8633,40 +8658,43 @@ class App(tk.Tk):
           형제 프레임에 맡긴다. 부모를 바꾸면 잘린다.
         ⚠ **접기 전에 반드시 `on=False` 로 되돌린다** — 그래야 `_fold_snap()` 이
           두 줄 상태를 기억하지 않는다."""
-        if not FRONT_TWO_ROWS:
-            return
-        fr = getattr(self, "_front_row", None)
         if fr is None or not fr.winfo_exists():
             return
+        if not hasattr(self, "_wrap"):
+            self._wrap = {}
         try:
-            if not hasattr(self, "_fr_a"):
+            if tag not in self._wrap:
                 # 🎨 배경을 부모와 같게 — 안 그러면 흰 박스가 튄다
                 try: _bg = fr.cget("bg")
                 except Exception: _bg = None
-                self._fr_a = tk.Frame(fr, **({"bg": _bg} if _bg else {}))
-                self._fr_b = tk.Frame(fr, **({"bg": _bg} if _bg else {}))
-                self._fr_orig = []          # [(위젯, 원래 pack 옵션)] 순서대로
+                _n = max(2, int(WRAP_LINES.get(tag, 2)))
+                self._wrap[tag] = {
+                    "rows": [tk.Frame(fr, **({"bg": _bg} if _bg else {}))
+                             for _ in range(_n)],
+                    "orig": [],             # [(위젯, 원래 pack 옵션)] 순서대로
+                }
+            _st = self._wrap[tag]
+            _rows, _orig = _st["rows"], _st["orig"]
             # 🧾 **처음 한 번** 원래 차례와 옵션을 적어둔다
-            if not self._fr_orig:
+            if not _orig:
                 for w in fr.pack_slaves():
-                    if w in (self._fr_a, self._fr_b):
+                    if w in _rows:
                         continue
                     try:
-                        self._fr_orig.append((w, dict(w.pack_info())))
+                        _orig.append((w, dict(w.pack_info())))
                     except Exception:
                         pass
-            if not self._fr_orig:
+            if not _orig:
                 return
-            for w, _i in self._fr_orig:
+            for w, _i in _orig:
                 try: w.pack_forget()
                 except Exception: pass
             if not on:
                 # ── 한 줄로 되돌린다 ──
-                try:
-                    self._fr_a.pack_forget(); self._fr_b.pack_forget()
-                except Exception:
-                    pass
-                for w, i in self._fr_orig:
+                for _r in _rows:
+                    try: _r.pack_forget()
+                    except Exception: pass
+                for w, i in _orig:
                     j = dict(i); j["in"] = fr
                     try: w.pack(**j)
                     except Exception: pass
@@ -8674,38 +8702,42 @@ class App(tk.Tk):
             # ── 두 줄로 나눈다 — 누적 폭이 절반을 넘으면 둘째 줄 ──
             self.update_idletasks()
             tot = 0
-            for w, _i in self._fr_orig:
+            for w, _i in _orig:
                 try: tot += max(w.winfo_reqwidth(), w.winfo_width())
                 except Exception: pass
-            half, run, line = tot / 2.0, 0, 0
-            self._fr_a.pack(anchor="e", fill="x")
-            self._fr_b.pack(anchor="e", fill="x", pady=(6, 0))
+            # 📏 줄마다 **같은 폭**을 목표로 나눈다 (줄 수는 `WRAP_LINES`)
+            _per = tot / float(len(_rows)) if _rows else tot
+            run, line = 0, 0
+            _anc = (_orig[0][1].get("anchor") or "w") if _orig else "w"
+            for _k, _r in enumerate(_rows):
+                _r.pack(anchor=_anc, fill="x", pady=((1, 0) if _k else (0, 0)))
             # 🚨 **맨 아래로 내린다.** 이 프레임은 칸들보다 나중에 만들어져
             #    stacking order 가 위다 → 안 내리면 칸을 **덮어 가린다**
             #    (실측 2026-11-04 — 로그엔 칸이 들어갔는데 빈 흰 박스만 보였다).
             #    🚫 이 두 줄을 빼지 말 것.
-            try:
-                self._fr_a.lower(); self._fr_b.lower()
-            except Exception:
-                pass
-            for w, i in self._fr_orig:
+            for _r in _rows:
+                try: _r.lower()
+                except Exception: pass
+            for w, i in _orig:
                 try: ww = max(w.winfo_reqwidth(), w.winfo_width())
                 except Exception: ww = 0
-                if line == 0 and run > 0 and run + ww > half:
-                    line = 1                 # 절반을 넘으면 둘째 줄로
-                j = dict(i); j["in"] = (self._fr_b if line else self._fr_a)
+                if line < len(_rows) - 1 and run > 0 and run + ww > _per:
+                    line += 1                # 한 줄 몫을 넘으면 다음 줄로
+                    run = 0
+                j = dict(i); j["in"] = _rows[line]
                 try:
                     w.pack(**j)
                 except Exception as _pe:
                     click_log("[화면] ⚠ 칸을 못 옮겼다 — %s · 옵션 %r" % (_pe, j))
                 run += ww
             try:
-                _na = len(self._fr_a.pack_slaves()); _nb = len(self._fr_b.pack_slaves())
+                _cnt = [len(_r.pack_slaves()) for _r in _rows]
             except Exception:
-                _na = _nb = -1
-            click_log("[화면] 🗂 앞줄을 두 줄로 쌓았다 (칸 %d개 · 합계 폭 %dpx "
-                      "· 윗줄 %d · 아랫줄 %d)"
-                      % (len(self._fr_orig), int(tot), _na, _nb))
+                _cnt = []
+            click_log("[화면] 🗂 '%s' 줄을 %d줄로 쌓았다 (칸 %d개 · 합계 폭 %dpx "
+                      "· 줄마다 %s)"
+                      % (tag, len(_rows), len(_orig), int(tot),
+                         "/".join(str(c) for c in _cnt)))
             # 🔎 **창 폭을 정하는 자식**을 적어둔다 (넓은 것부터 5개)
             try:
                 self.update_idletasks()
@@ -8724,7 +8756,7 @@ class App(tk.Tk):
             except Exception:
                 pass
         except Exception as e:
-            click_log("[화면] ⚠ 두 줄 배치 실패 — %s" % e)
+            click_log("[화면] ⚠ '%s' 두 줄 배치 실패 — %s" % (tag, e))
 
     def _fold_apply(self, fold):
         """fold=True 면 **자주 쓰는 열만** 남기고 나머지를 숨긴다."""
@@ -8736,6 +8768,11 @@ class App(tk.Tk):
         # 🧭 배너(제목 띠)도 같이 접는다 — 글자가 커서 **창 폭이 630px 아래로
         #    안 내려간다**. 제목은 창 제목줄에 그대로 남는다.
         keep = (getattr(self, "_dc_host", None),)
+        # 🧱 **배너(제목 띠 48px)는 펼칠 때도 접어둔다** (2026-11-04) —
+        #    두 줄 쌓기로 세로가 늘어 창(작업영역)을 넘기기 때문이다.
+        #    제목은 **창 제목줄에 그대로** 있으므로 잃는 것이 없다.
+        #    🚫 펼칠 때 되살리지 말 것 — 그만큼 아래가 잘린다.
+        _bn = getattr(self, "_banner", None)
         dc = getattr(self, "_dc_col", None)      # 🗂 이 열은 `_dc_host` 에 있다
         try:
             if fold:
@@ -8757,6 +8794,8 @@ class App(tk.Tk):
                     try: w.pack_forget()
                     except Exception: pass
                 for w, i in self._fold_all:
+                    if w is _bn:          # 🧱 배너는 펼칠 때도 접어둔다
+                        continue
                     try: w.pack(**i)
                     except Exception: pass
                 for w, _i in self._fold_sub:
