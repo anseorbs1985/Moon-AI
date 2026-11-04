@@ -2777,6 +2777,130 @@ def hover_spot(fkey, coord, hwnd=None):
         return None, None, -1.0
 
 
+# 🎬 **녹화 줄을 '제목 그림' 으로 찾아 누른다** (2026-11-04 사용자 요청:
+#    *"플레이 버튼은 이미지로 인식을 하는데 **위치가 다르다 보니깐 다른걸 누르는
+#      문제**가 있더라고. 과거섬은 aa말하는섬+시련, 스케줄은 HHH 서비스타임 이거든"*).
+#
+#    칸2 에 마우스를 올리면 **즐겨찾기 녹화 목록**(`ngp_macro_favorite.html`)이 펼쳐지고,
+#    칸3 은 **그 목록의 한 줄**을 누른다. 그런데 **목록 순서는 바뀐다** —
+#    좌표로 누르면 엉뚱한 녹화가 돌아간다.
+#    → 제목 글자를 그림으로 찾아 **그 줄**을 누른다. 몇 번째에 있든 맞는다.
+#
+#    🚫 **못 찾으면 아무것도 누르지 않고 그 슬롯을 끝낸다** — 엉뚱한 녹화를 돌리는 것보다
+#       안 돌리는 것이 낫다 (용던고고의 '창을 못 보면 중단' 과 같은 규칙).
+#    🚫 **그림이 없으면 예전처럼 좌표를 누른다** — 안 넣은 컴퓨터가 멈추면 안 된다.
+#    🚫 **과거섬과 스케줄은 서로 그림을 빌려 쓰지 않는다** (`HOVER_SHARE` 와 다르다) —
+#       둘은 **다른 줄**이라 빌려 쓰면 반드시 엉뚱한 녹화를 돌린다.
+ROW_IMG_FKEYS = ("past", "sched")     # 이 런처의 칸3(녹화 줄)에 쓴다
+ROW_MATCH     = 0.70                  # 실측: 자기 줄 1.000 · 다른 줄 최고 0.34
+ROW_IMG_MAX   = 4                     # 이 컴퓨터 전용 그림 장수
+ROW_SPAN      = (1.00, 0.95, 1.05)    # 글자라 크기 보정 폭은 좁게
+ROW_TRIES     = 3                     # 목록이 뜨는 중일 수 있어 몇 번 본다
+ROW_GAP       = (0.25, 0.45)          # 다시 보기 전 쉼
+ROW_FAV_TITLE = "macro_favorite"      # 즐겨찾기 목록 창 (ngp_macro_favorite.html)
+# 🚨 목록 창은 **아래 클라의 패널과도 세로가 겹친다** (2026-11-04 실측 사고):
+#    #01 의 목록창(y140~444)이 #02 패널(y347~694)과 97px 겹쳐,
+#    #02 가 **#01 의 녹화 줄**을 누를 뻔했다 — 막으려던 바로 그 사고다.
+#    → 목록 창의 **위쪽(top)이 그 패널 안**이어야 한다. ★ 를 누른 자리 근처에 뜨므로
+#      자기 패널 안에서 시작한다. 🚫 이 조건을 빼지 말 것.
+ROW_FAV_TOP_PAD = 24                  # 패널보다 이만큼 위에서 시작해도 봐준다
+
+
+def row_img_path(fkey):
+    """공용 그림 (저장소 click_templates — 업데이트로 로컬에도 간다)"""
+    return os.path.join(IMG_DIR, f"row_{fkey}.png")
+
+
+def row_img_list(fkey):
+    """공용 1장 + **이 컴퓨터 전용** 몇 장 (글꼴이 조금씩 다를 수 있다)"""
+    out = []
+    p = row_img_path(fkey)
+    if os.path.exists(p):
+        out.append(p)
+    for k in range(1, ROW_IMG_MAX + 1):
+        q = os.path.join(IMG_DIR_MINE, f"row_{fkey}_mine{k}.png")
+        if os.path.exists(q):
+            out.append(q)
+    return out
+
+
+def fav_hwnd_for(hwnd):
+    """그 클라의 **즐겨찾기 녹화 목록 창**을 찾는다.
+
+    옆 패널(56px) **오른쪽에 딱 붙어** 뜬다 (실측 #01: 패널 right 602 · 목록 left 601).
+    ⚠ 목록 창(304px)은 그 클라 패널(347px)보다 아래로 넘칠 수 있어
+      **세로가 가장 많이 겹치는 것**을 고른다 — 아래 클라의 패널과도 겹치기 때문이다."""
+    try:
+        import win32gui
+        panel = side_panel_of(hwnd) or hwnd
+        l, t, r, b = win32gui.GetWindowRect(panel)
+        best = [0, None]
+
+        def _cb(h, _):
+            if not win32gui.IsWindowVisible(h):
+                return
+            if (win32gui.GetClassName(h) or "") != "CEFCLIENT":
+                return
+            if ROW_FAV_TITLE not in (win32gui.GetWindowText(h) or ""):
+                return
+            try:
+                l2, t2, r2, b2 = win32gui.GetWindowRect(h)
+            except Exception:
+                return
+            if abs(l2 - r) > 12:          # 그 패널 오른쪽에 붙어 있어야 한다
+                return
+            if not (t - ROW_FAV_TOP_PAD <= t2 < b):
+                return                    # 🚨 **아래 클라의 목록창** — 그 줄을 누르면 사고다
+            ov = min(b, b2) - max(t, t2)  # 세로 겹침
+            if ov > best[0]:
+                best[0], best[1] = ov, h
+        win32gui.EnumWindows(_cb, None)
+        return best[1]
+    except Exception:
+        return None
+
+
+def row_spot(fkey, coord, hwnd=None):
+    """🎬 제목 그림을 찾아 **누를 자리**를 돌려준다 → (화면x, 화면y, 일치도, 까닭).
+
+    🚫 못 찾으면 `(None, None, 점수, 까닭)` — 부르는 쪽이 **누르지 않고 끝낸다.**"""
+    ps = row_img_list(fkey)
+    if not (ps and coord):
+        return None, None, -1.0, "그림 없음"
+    h = hwnd or panel_hwnd_at(int(coord[0]), int(coord[1]))
+    if not h:
+        return None, None, -1.0, "그 슬롯 창을 못 찾음"
+    fav = fav_hwnd_for(h)
+    if not fav:
+        return None, None, -1.0, "녹화 목록 창이 안 떴다"
+    try:
+        import cv2, numpy as np
+        big, (ox, oy) = grab_hwnd(fav)
+        if big is None:
+            return None, None, -1.0, "목록 창을 못 찍음"
+        best = (-1.0, 0, 0, 0, 0)
+        for p in ps:
+            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            if t is None:
+                continue
+            for sc in ROW_SPAN:
+                tt = (t if abs(sc - 1.0) < 0.02 else
+                      cv2.resize(t, (max(3, int(round(t.shape[1] * sc))),
+                                     max(3, int(round(t.shape[0] * sc))))))
+                if big.shape[0] < tt.shape[0] or big.shape[1] < tt.shape[1]:
+                    continue
+                _n, mx, _l, ml = cv2.minMaxLoc(
+                    cv2.matchTemplate(big, tt, cv2.TM_CCOEFF_NORMED))
+                if mx > best[0]:
+                    best = (float(mx), ml[0], ml[1], tt.shape[1], tt.shape[0])
+        if best[0] < ROW_MATCH:
+            return None, None, float(best[0]), "그 줄이 목록에 없다"
+        return (int(ox + best[1] + best[3] // 2),
+                int(oy + best[2] + best[4] // 2), float(best[0]), "찾음")
+    except Exception as e:
+        return None, None, -1.0, f"{type(e).__name__}: {e}"
+
+
 # 🎹 **퍼플 마우스·키 녹화(records.json) 를 16클라에 한 번에 교체** (2026-11-03 사용자 요청:
 #    *"플레이 버튼을 누르면 마우스키녹화 설정을 할 수 있는 게 있어 … 이걸 다 수동으로 해야
 #      하는 번거로움을 줄여줬으면 … 내가 파일을 올리면 너가 전부 교체 작업을 해줬으면"*).
@@ -16238,6 +16362,133 @@ class App(tk.Tk):
                 pass
             return coord
 
+    def _grab_row_image(self, fkey, btn=None):
+        """🎬 **녹화 줄의 제목 글자**를 드래그해 등록한다.
+
+        ⚠ 먼저 그 클라에서 **칸2 자리에 마우스를 올려 목록을 펼쳐**둬야 한다.
+        ⚠ **숫자·시간은 빼고** 자른다 (`HHH 서비스타임!! 00000` 의 `00000` 처럼
+           바뀌는 값이 들어가면 다음에 안 맞는다)."""
+        self._row_target = (fkey, btn)
+        self.status.set("🎬 녹화 목록에서 **그 줄의 제목 글자**를 드래그하세요 "
+                        "(숫자·시간은 빼고 · ESC 취소)")
+        for w in self._section_wins():
+            try:
+                w.withdraw()
+            except Exception:
+                pass
+        self.withdraw()
+        self.after(250, lambda: _PotionAreaOverlay(self, self._on_row_image))
+
+    def _on_row_image(self, x, y, w, h):
+        self.deiconify()
+        for wn in self._section_wins():
+            try:
+                wn.deiconify()
+            except Exception:
+                pass
+        tgt = getattr(self, "_row_target", None)
+        if not tgt:
+            return
+        fkey, btn = tgt
+        if w < 5 or h < 5:
+            self.status.set("🎬 너무 작습니다 — 제목 글자를 다시 드래그해주세요")
+            return
+        try:
+            from PIL import ImageGrab
+            import numpy as np, cv2
+            im = ImageGrab.grab(bbox=(x, y, x + w, y + h),
+                                all_screens=True).convert("RGB")
+            g = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2GRAY)
+            if float(g.std()) < 3.0:
+                self.status.set("🎬 무늬가 없는 자리입니다 — 제목 **글자**를 "
+                                "잘라주세요 (저장 안 함)")
+                return
+            p = row_img_path(fkey)
+            if not os.path.exists(p):
+                os.makedirs(IMG_DIR, exist_ok=True)
+                im.save(p)
+                where = "공용"
+            else:
+                os.makedirs(IMG_DIR_MINE, exist_ok=True)
+                where = None
+                for k in range(1, ROW_IMG_MAX + 1):
+                    q = os.path.join(IMG_DIR_MINE, f"row_{fkey}_mine{k}.png")
+                    if not os.path.exists(q):
+                        im.save(q)
+                        where = f"이 컴퓨터 전용 {k}장째"
+                        break
+                if where is None:
+                    self.status.set(f"🎬 전용 그림이 이미 {ROW_IMG_MAX}장입니다 "
+                                    f"(오른쪽 클릭으로 지운 뒤 다시)")
+                    return
+            self._row_btn_sync(fkey, btn)
+            self.status.set(f"🎬 녹화 줄 그림 저장 ({w}×{h} · {where}) — "
+                            f"이제 목록 순서가 바뀌어도 그 줄을 누릅니다")
+        except Exception as e:
+            self.status.set(f"🎬 저장 실패: {e}")
+
+    def _del_row_image(self, fkey, btn=None):
+        """오른쪽 클릭 — 전용이 있으면 **전용만** 전부, 없으면 공용을 지운다."""
+        try:
+            mine = [os.path.join(IMG_DIR_MINE, f"row_{fkey}_mine{k}.png")
+                    for k in range(1, ROW_IMG_MAX + 1)]
+            mine = [q for q in mine if os.path.exists(q)]
+            if mine:
+                for q in mine:
+                    os.remove(q)
+                self.status.set(f"🎬 이 컴퓨터 전용 {len(mine)}장을 지웠습니다 "
+                                f"(공용은 남음)")
+            elif os.path.exists(row_img_path(fkey)):
+                os.remove(row_img_path(fkey))
+                self.status.set("🎬 공용 그림을 지웠습니다 — 이제 등록 좌표를 누릅니다")
+            else:
+                self.status.set("🎬 지울 그림이 없습니다")
+            self._row_btn_sync(fkey, btn)
+        except Exception as e:
+            self.status.set(f"🎬 지우기 실패: {e}")
+
+    def _row_btn_sync(self, fkey, btn):
+        try:
+            n = len(row_img_list(fkey))
+            if btn and btn.winfo_exists():
+                btn.config(text=("🎬 줄그림" if not n else
+                                 ("🎬있음" if n == 1 else f"🎬{n}장")),
+                           bg=("#5d6d7e" if not n else "#1e8449"))
+        except Exception:
+            pass
+
+    def _row_probe(self, fkey):
+        """🔍 16슬롯에서 지금 그 줄이 어디에 잡히는지 — **아무것도 누르지 않는다.**
+
+        ⚠ 녹화 목록은 **칸2 에 마우스를 올려야 펼쳐진다.** 안 펼쳐진 슬롯이
+           '목록 창이 안 떴다' 로 나오는 것은 **정상**이다."""
+        if not row_img_list(fkey):
+            self.status.set("🎬 먼저 [🎬 줄그림] 으로 제목 글자를 잘라 등록해주세요")
+            return
+        key = self._grid_spec(fkey)["key"]
+        rows = []
+        for si, sl in enumerate(self.cfg.get(key, []) or []):
+            cs = (sl or {}).get("coords") or []
+            c = cs[2] if len(cs) > 2 else None
+            if not c:
+                rows.append(f"#{si+1:02d} 칸3 없음")
+                continue
+            x, y, v, why = row_spot(fkey, c, self._hover_slot_hwnd(si))
+            if x is None:
+                rows.append(f"#{si+1:02d} ✘ {why} (최고 {v:.2f})")
+            else:
+                rows.append(f"#{si+1:02d} ✔ {v:.2f}  ({c[0]},{c[1]}) → ({x},{y})"
+                            + ("   ← 줄이 달랐다"
+                               if abs(x - c[0]) > 3 or abs(y - c[1]) > 3 else ""))
+        txt = NL.join(rows)
+        click_log(f"[{fkey}] 🎬 녹화 줄 확인 — " + " | ".join(rows))
+        messagebox.showinfo(
+            f"🎬 녹화 줄 — {fkey}",
+            f"기준 {ROW_MATCH} · 그림 {len(row_img_list(fkey))}장"
+            + NL + "⚠ 목록은 칸2 에 마우스를 올려야 펼쳐집니다 — "
+                   "안 펼친 슬롯이 '안 떴다' 로 나오는 것은 정상입니다."
+            + NL + NL + txt)
+
     def _grab_hover_image(self, fkey, btn=None):
         """🖱 '마우스를 올릴 것'(옆 패널의 플레이 버튼 등)을 드래그해 등록한다."""
         self._hover_target = (fkey, btn)
@@ -16334,6 +16585,41 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _row_click(self, fkey, coord, name="", si=None, click_fn=None):
+        """🎬 **녹화 줄을 제목 그림으로 찾아** 누른다 → 눌렀으면 True.
+
+        목록 순서가 바뀌어도 맞는 줄을 누른다 (2026-11-04 사용자 요청).
+        🚫 **못 찾으면 아무것도 누르지 않는다** — 엉뚱한 녹화를 돌리는 것보다 낫다.
+           칸3 은 그 슬롯의 마지막 칸이라 안 누르면 그대로 다음 슬롯으로 간다.
+        🚫 **그림이 없으면 예전처럼 등록 좌표** 를 누른다."""
+        _f = click_fn or click_at
+        try:
+            if not row_img_list(fkey):
+                _f(*coord)
+                return True
+            hw = self._hover_slot_hwnd(si) if si is not None else None
+            v, why = -1.0, ""
+            for k in range(ROW_TRIES):
+                x, y, v, why = row_spot(fkey, coord, hw)
+                if x is not None:
+                    if abs(x - coord[0]) > 3 or abs(y - coord[1]) > 3:
+                        click_log(f"[{fkey}] 🎬 [{name}] 녹화 줄을 그림으로 찾음 "
+                                  f"(일치도 {v:.2f}) {tuple(coord)} → ({x},{y})"
+                                  f"   ← 목록 순서가 달랐다")
+                    _f(x, y)
+                    return True
+                if k < ROW_TRIES - 1:
+                    nap(random.uniform(*ROW_GAP))
+            click_log(f"[{fkey}] 🎬 [{name}] 녹화 줄을 못 찾았다 — {why} "
+                      f"(최고 {v:.2f} · 기준 {ROW_MATCH}) "
+                      f"→ **아무것도 누르지 않고 이 슬롯을 끝낸다**")
+            self.status.set(f"🎬 [{name}] 녹화 줄을 못 찾아 건너뜁니다 ({why})")
+            return False
+        except Exception as e:
+            click_log(f"[{fkey}] 🎬 [{name}] 줄 찾기 오류 {type(e).__name__}: {e} "
+                      f"→ 누르지 않는다")
+            return False
+
     def _hover_probe(self, fkey):
         """🔍 16슬롯에서 지금 그림이 어디에 잡히는지 — **아무것도 누르지 않는다.**"""
         if not hover_img_list(fkey):
@@ -16377,6 +16663,23 @@ class App(tk.Tk):
                   bg="#2874a6", fg="white", width=13,
                   command=lambda f=fkey: self._hover_probe(f)).pack(side="left")
         tk.Label(hr, text="(그림이 있으면 그걸 찾아 올립니다)",
+                 font=("맑은 고딕", 7), fg="#888").pack(side="left", padx=(4, 0))
+
+        # 🎬 **녹화 줄(칸3)** — 목록 순서가 바뀌어도 맞는 줄을 누른다 (2026-11-04)
+        rr = tk.Frame(parent)
+        rr.pack(pady=(0, 2))
+        tk.Label(rr, text="누를 녹화 줄(좌표3):", font=("맑은 고딕", 8),
+                 fg="#555").pack(side="left")
+        rb = tk.Button(rr, text="🎬 줄그림", font=("맑은 고딕", 8, "bold"),
+                       fg="white", width=10)
+        rb.config(command=lambda f=fkey, bb=rb: self._grab_row_image(f, bb))
+        rb.pack(side="left", padx=(4, 2))
+        rb.bind("<Button-3>", lambda _e, f=fkey, bb=rb: self._del_row_image(f, bb))
+        self._row_btn_sync(fkey, rb)
+        tk.Button(rr, text="🔍 16클라 확인", font=("맑은 고딕", 8),
+                  bg="#2874a6", fg="white", width=13,
+                  command=lambda f=fkey: self._row_probe(f)).pack(side="left")
+        tk.Label(rr, text="(못 찾으면 **누르지 않고** 그 슬롯을 끝냅니다)",
                  font=("맑은 고딕", 7), fg="#888").pack(side="left", padx=(4, 0))
 
     def _grab_sleep_image(self, fkey, btn=None):
@@ -29919,7 +30222,8 @@ class App(tk.Tk):
                 if self._past_stop: break
                 if len(coords) > 2 and coords[2]:
                     self.status.set(f"🏝 [{name}] 클릭2...")
-                    pyautogui.click(*coords[2])
+                    self._row_click("past", coords[2], name, si=si,
+                                    click_fn=lambda x, y: pyautogui.click(x, y))
                 if self._past_stop: break
                 # 슬롯 간 대기 (가끔 긴 휴식)
                 pause = random.uniform(4.0, 8.0)
@@ -30122,7 +30426,7 @@ class App(tk.Tk):
                 if len(coords) > 2 and coords[2]:
                     self.status.set(f"📅 [{name}] 클릭2...")
                     self._wait_user_free("_sched_stop")
-                    click_at(*coords[2])
+                    self._row_click("sched", coords[2], name, si=si)
                 self._user_focus_back(_snap)      # 이 슬롯 끝 — 사용자 창으로 복귀
                 if self._sched_stop: break
                 nap(random.uniform(1.38, 1.80))   # 슬롯 사이 (2.3~3.0초에서 40% 줄임)
@@ -30539,7 +30843,7 @@ class App(tk.Tk):
             if len(coords) > 2 and coords[2]:
                 self.status.set(f"📅 [{name}] #{si+1:02d} 클릭2...")
                 self._wait_user_free("_sched_stop")
-                click_at(*coords[2])
+                self._row_click("sched", coords[2], name, si=si)
             self._user_focus_back(_snap)
             if self._sched_stop:
                 break
@@ -30607,7 +30911,7 @@ class App(tk.Tk):
                 if len(coords) > 2 and coords[2]:
                     self.status.set(f"📅 [{name}] 클릭2...  (좌표2와 한 묶음)")
                     self._wait_user_free("_sched_stop")
-                    click_at(*coords[2])
+                    self._row_click("sched", coords[2], name, si=si)
                     done += 1
                 self._user_focus_back(_snap)
                 st["due"] = time.time() + random.uniform(1.9, 2.5)   # 슬롯 끝 대기 (40% 단축)

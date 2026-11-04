@@ -39,6 +39,21 @@ def load(name):
         return {"_읽기실패": str(e)}
 
 
+def _kc_txt(kc):
+    """keep_cells 를 글로 — **list 와 던전별 dict 둘 다** 받는다 (2026-11-04).
+
+    `lineagem_update.py` 가 dict 를 받게 바뀌었는데 여기만 list 로 알고 있어
+    `int('토요일_악몽의섬')` 으로 터졌다. 한쪽만 고치면 안 된다."""
+    try:
+        if isinstance(kc, dict):
+            return " · ".join(
+                "%s %s" % (k, ",".join(str(int(c) + 1) for c in (v or [])))
+                for k, v in kc.items())
+        return ",".join(str(int(c) + 1) for c in (kc or []))
+    except Exception:
+        return str(kc)
+
+
 def main():
     sc = load("share_coords.json") or {}
     si = load("share_island.json") or {}
@@ -54,8 +69,7 @@ def main():
         ("share_coords.json  force", len(sc.get("force") or []),
          "★ 로컬이 찍어둔 좌표까지 **덮어쓴다**", True),
         ("share_island.json  keys", len(si.get("keys") or []),
-         ("그 던전을 덮어쓴다 (칸"
-          + ",".join(str(int(c) + 1) for c in (si.get("keep_cells") or []))
+         ("그 던전을 덮어쓴다 (칸 " + _kc_txt(si.get("keep_cells"))
           + " 은 로컬 유지)") if si.get("keep_cells")
          else "그 던전을 통째로 덮어쓴다", True),
         # 2026-10-04 — keys 로 덮어쓸 때 '이 칸만 로컬 것을 지킨다' (물약 등)
