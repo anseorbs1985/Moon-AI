@@ -1852,6 +1852,10 @@ MAIN_WIN_POS = (527, 140)
 #    (y 는 그대로). 창 가로가 컴퓨터마다 달라도 늘 오른쪽에 딱 붙는다.
 #    끄려면 False — 그러면 예전처럼 `MAIN_WIN_POS` 자리로 간다.
 MAIN_WIN_RIGHT = True
+
+# 📏 접힌 런처 폭을 **기억할 조건** — 게임창이 이만큼 켜져 있을 때 잰 값만 믿는다
+#    (2026-11-04: 2열까지만 켜진 순간의 1356 이 저장돼 클라가 꺼지면 벌어졌다)
+FOLD_MIN_WINS = 12
 # 🪟 **창이 틀어지면 스스로 맞춘다** (2026-11-04 사용자: *"재부팅하거나 화면이
 #    틀어지거나 하면 너가 복원을 시켜줄 수 있어? 재배치를 너가 눌러줘"*).
 #    🧭 이것은 **창을 옮기는 것뿐** — 게임에 클릭을 보내지 않는다. 그래서
@@ -2293,7 +2297,12 @@ CHAR_GAP_EACH   = (1.0, 2.0)   # 1바퀴째 — 버튼 하나 누르고 다음�
 #            *"한 번에 접속하니까 계속 **서버와 접속이 끊어진다고 재접속이 뜬단말이야**"*
 #    (화면으로 확인함 — #01 에 `서버와 접속이 끊어졌습니다 / [재접속]` 이 떠 있었다)
 CHAR_BATCH_ON   = True         # 묶어서 기다릴지
-CHAR_BATCH      = 4            # 한 묶음에 몇 개를 누르나 (CHAR_BATCH_ON 일 때만)
+# 🎲 **묶음마다 크기가 다르다** (2026-11-04 사용자: *"4~6개 랜덤"*).
+#    한 묶음을 누를 때마다 다음 묶음 크기를 새로 뽑는다 — 늘 같은 수로 끊으면
+#    그것도 규칙이 된다 ('항상 사람이 하는 것처럼', 2026-09-07 상시 규칙).
+#    예: 5 → 4 → 6 → 4 …  (클라 **개수**다)
+CHAR_BATCH_RANGE = (4, 6)      # 한 묶음 클라 수 — 이 범위에서 매번 뽑는다
+CHAR_BATCH      = 4            # (옛 고정값 — 호환용으로 남겨둔다)
 CHAR_BATCH_MAX  = 120          # 그 묶음이 **실제로 접속될 때까지** 최대 기다림(초)
 CHAR_BATCH_GAP  = (3.0, 5.0)   # 다 뜬 뒤 다음 묶음까지 여유 (사용자: "5초 정도")
 CHAR_WAIT_EACH  = 1.1          # (옛 고정값 — 호환용으로 남겨둔다)
@@ -8838,6 +8847,7 @@ class App(tk.Tk):
         try:
             import win32gui
             edge = [0]
+            nwin = [0]          # 📏 게임창 수 — **다 켜져 있을 때만** 기억하려고
 
             def _cb(h, _):
                 try:
@@ -8845,6 +8855,8 @@ class App(tk.Tk):
                         return
                     t = win32gui.GetWindowText(h) or ""
                     c = win32gui.GetClassName(h) or ""
+                    if t.startswith("리니지M l "):
+                        nwin[0] += 1
                     # 게임창 + **옆 바(확장 패널, CEFCLIENT)** 둘 다 본다.
                     #    옆 바를 안 보면 런처가 그 위를 덮는다 (2026-11-04 사용자:
                     #    *"리니지 클라 옆에 확장시키는 거에 걸리잖아"*).
@@ -8862,10 +8874,25 @@ class App(tk.Tk):
                 w0 = self.cfg.get("fold_strip_w")
                 return int(w0) if w0 else None
             w = max(120, self.winfo_screenwidth() - edge[0])
-            # 📏 잰 값을 기억해 둔다 — 클라가 꺼져 있을 때 이 값을 쓴다
+            # 📏 **클라가 다 켜져 있을 때 잰 값만** 기억한다 (2026-11-04 실측 사고).
+            #    예전엔 몇 개가 켜져 있든 저장해서, 2열까지만 켜진 순간의
+            #    1356 이 들어갔고 클라가 꺼지면 런처가 **그 폭으로 벌어졌다**
+            #    (사용자: *"리니지 런처 꺼져도 켜진 것처럼 크기 고정해달라니까"*).
+            #    🚫 '아무 때나 저장' 으로 되돌리지 말 것.
             try:
-                if int(self.cfg.get("fold_strip_w") or 0) != int(w):
-                    self.cfg["fold_strip_w"] = int(w); save_cfg(self.cfg)
+                if nwin[0] >= FOLD_MIN_WINS:
+                    if int(self.cfg.get("fold_strip_w") or 0) != int(w):
+                        self.cfg["fold_strip_w"] = int(w)
+                        save_cfg(self.cfg, ["fold_strip_w"])
+                        click_log(f"[격자] 📏 접힌 런처 폭 {w}px 기억 "
+                                  f"(게임창 {nwin[0]}개일 때 잰 값)")
+            except Exception:
+                pass
+            # 📏 지금 클라가 적어서 폭이 터무니없이 넓게 나오면 **기억해둔 값**을 쓴다
+            try:
+                w0 = int(self.cfg.get("fold_strip_w") or 0)
+                if nwin[0] < FOLD_MIN_WINS and 0 < w0 < w:
+                    return w0
             except Exception:
                 pass
             return w
@@ -35431,6 +35458,8 @@ class App(tk.Tk):
                     _cbase = self._game_win_ready()
                 except Exception:
                     _cbase = 0
+                # 🎲 첫 묶음 크기 (4~6 랜덤) — 묶음마다 다시 뽑는다
+                _cnext = random.randint(*CHAR_BATCH_RANGE)
                 for _p in range(CHAR_PASSES):
                     if _p:
                         # 🔁 2바퀴째 — 첫 바퀴에서 씹힌 것을 확인 사살한다
@@ -35445,12 +35474,12 @@ class App(tk.Tk):
                         if self._stop_flag: self.status.set("멈춤"); return
                         # 🪟 **4개 누를 때마다** 그만큼 뜬 것을 확인하고 간다
                         #    (한 번에 다 누르면 재접속이 뜨며 팅긴다 — 사용자 지시)
-                        if (CHAR_BATCH_ON and _p == 0 and i
-                                and i % CHAR_BATCH == 0):
-                            if not self._char_batch_wait(
-                                    _cbase, i, f"{i//CHAR_BATCH}묶음"):
+                        if CHAR_BATCH_ON and _p == 0 and i and i >= _cnext:
+                            if not self._char_batch_wait(_cbase, i, "묶음"):
                                 self.status.set("멈춤")
                                 return
+                            # 🎲 다음 묶음 크기를 새로 뽑는다 (4~6)
+                            _cnext = i + random.randint(*CHAR_BATCH_RANGE)
                         if acc_idx == 0 and i == 0 and _p == 0:
                             self._run_char01_t = time.time()   # 캐릭터01 접속 시각 (4분30초 제한 측정)
                         _ring = char_ring_px(cx, cy)
