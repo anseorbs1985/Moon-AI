@@ -33228,6 +33228,31 @@ class App(tk.Tk):
                         woke.append(t or "제목없음")
                 except Exception:
                     pass
+            # 🟣 **최소화가 아니어도 맨 앞으로** (2026-11-04 실측 사고).
+            #    퍼플이 **뒤에 있으면** 접속 좌표 자리에 게임 클라가 드러나
+            #    그걸 누른다 (사용자: *"11번이랑 14번이랑 어디를 누르는데"*).
+            #    `WindowFromPoint` 는 **맨 위 창**을 보므로 앞에 있어야 맞다.
+            #    ⚠ **접속 시작에 한 번뿐**이다 — 2026-10-14 에 '누를 때마다'
+            #      올렸다가 접속을 망쳤다. 그 방식으로 되돌리지 말 것.
+            #    ⚠ 크기·위치는 건드리지 않는다 (좌표가 지금 크기 기준이다).
+            fronted = []
+            for h, t in hits:
+                try:
+                    if win32gui.IsIconic(h):
+                        continue
+                    ctypes.windll.user32.SetWindowPos(
+                        h, 0, 0, 0, 0, 0, 0x0001 | 0x0002)   # HWND_TOP·NOSIZE·NOMOVE
+                    try:
+                        win32gui.SetForegroundWindow(h)
+                    except Exception:
+                        pass
+                    fronted.append(t or "제목없음")
+                except Exception:
+                    pass
+            if fronted:
+                click_log(f"[접속] {tag} 🟣 퍼플을 맨 앞으로 올렸다 {fronted} "
+                          f"— 뒤에 있으면 게임 클라를 누르게 된다")
+                nap(random.uniform(0.4, 0.7))
             if woke:
                 click_log(f"[접속] {tag} 🟣 최소화돼 있던 퍼플을 되살렸다 "
                           f"{woke} — 크기는 건드리지 않았다")
@@ -33393,6 +33418,22 @@ class App(tk.Tk):
         #   (실측 2026-10-21 — 처음에 거꾸로 봐서 프로필 자리를 막았다).
         #   옆 패널은 제목 `index.html?type=live` · 클래스 `CEFCLIENT`.
         clow = cls.lower()
+        # 🚨 **리니지M 게임 클라는 막는다** (2026-11-04 실측 사고).
+        #    `exe` 쪽에서는 이미 뺐는데 **아래 제목 검사**가 새고 있었다 —
+        #    `title.startswith("리니지")` 가 `리니지M l 불화설` 을 통과시켰다.
+        #    퍼플이 내려가 있으면 접속 좌표 자리에 **게임 클라가 드러나** 그걸 눌렀다.
+        #    실측 로그: `(2295,512) → [리니지M l dklove]` · `(1350,746) → [리니지M l 망자로]`
+        #    (사용자: *"11번이랑 14번이랑 어디를 누르는데 … 도통 모르겠다"*)
+        #    접속 9단계는 **전부 퍼플 창**이다 — 게임 클라를 누를 자리가 하나도 없다.
+        #    🚫 이 차단을 풀지 말 것.
+        #    같은 이유로 **게임 쪽 오버레이**(옆 패널 `index.html?type=live` ·
+        #    상단바)도 막는다 — `NCOverlayCefweb32.exe` 는 클라에 붙는 창이라
+        #    접속에서 누를 자리가 없다. 퍼플 자신의 CEF 창은 `Purple.exe` 라
+        #    위 `exe` 검사로 그대로 통과한다.
+        if (exe in ("lineagem.exe", "ncoverlaycefweb32.exe")
+                or title.startswith("리니지M l ")):
+            return False, (f"[{title or cls}] **게임 쪽 창**({exe or cls}) — "
+                           f"퍼플이 내려가 그 자리에 드러난 것")
         # 🟣 **프로그램이 퍼플·리니지M 이면 통과** — 가장 확실하다.
         #    제목이 비어도, 클래스가 처음 보는 것이어도 그 프로그램의 창이면 맞다.
         #    🚫 그래도 느슨해지지 않는다 — Claude(chrome.exe)·바탕화면(explorer.exe)
@@ -33406,8 +33447,10 @@ class App(tk.Tk):
         #    🚫 `"lineagem" in exe` 를 다시 넣지 말 것.
         if exe and ("purple" in exe or "ngp" in exe):
             return True, f"[{title or cls}] ({exe})"
+        # 🚫 `title.startswith("리니지")` 는 **뺐다** (2026-11-04) —
+        #    퍼플 창은 위 `exe` 검사(purple/ngp)가 이미 통과시키고,
+        #    이 줄은 **게임 클라만** 통과시키고 있었다.
         if ("purple" in low or "퍼플" in title
-                or title.startswith("리니지")
                 or "ngptop" in low or "index.html" in low
                 or "purple" in clow                      # HwndWrapper[Purple.exe;;…]
                 or cls in ("ngptop", "CEFCLIENT")):
