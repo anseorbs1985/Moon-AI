@@ -372,6 +372,36 @@ OMANST_KIND   = "jh"
 OMANST_NAMES  = {"jh": "정화", "jb": "정복", "sj": "생존"}
 OMANST_LOOSE  = 0.70            # **마지막 판** 기준 (겨루기 배수는 1.0 로 푼다)
 OMANST_NUM_SPAN  = 40         # 숫자 띠 밝기 폭이 이보다 좁으면 안 읽는다
+# 🚨 **어두운 줄에서는 숫자를 믿지 않는다** (2026-11-04 사고 — Ⅴ 를 Ⅱ 로 읽어
+#    새로고침이 남았는데 골랐다). 실측: 아무것도 안 고른 **밝은 줄 0.98~1.00** ·
+#    이미 한 줄이 선택된 **어두운 줄 0.69~0.79**.
+#    🚨 **이 관문은 뺐다** (2026-11-04 실측) — 사용자가 띄워준 **정상 화면**
+#       (아무것도 선택 안 된 1층 퀘스트 창)이 **0.688** 이었다. 0.85 로 막으면
+#       정상 화면까지 '못 읽음' 이 되어 Ⅱ·Ⅲ 우선이 통째로 무효가 된다.
+#       CLAUDE.md 의 "평소 1.00" 은 그림을 자른 그 화면에서만 나오는 값이었다.
+#       → Ⅴ 오독은 **다른 방법**으로 막는다 (아래 새로고침 대기 + 숫자 판정).
+OMANST_NUM_MIN_SC = 0.85      # (쓰지 않는다 — 아래 실측 참조)
+# 🔄 새로고침을 누른 뒤 **화면이 실제로 바뀔 때까지** 기다린다 (고정 대기 ✘ —
+#    2초만 쉬고 넘어가 **같은 화면을 다시 읽는** 사고가 났다).
+OMANST_WAIT_MAX  = 9.0        # 최대 이만큼 기다린다 (실측 7초 넘게 걸릴 때가 있다)
+OMANST_WAIT_TICK = 0.30       # 이 간격으로 다시 본다
+# 🔄 **화면이 바뀌었나**는 새로고침 버튼 둘레 픽셀로 본다 — 누르면 남은 횟수
+#    `(5)→(4)` 와 값 `100,000→200,000` 이 바뀐다.
+#    🚫 '정화 점수가 밝아졌나' 로 보지 말 것 — 아무것도 선택 안 된 **정상 화면이
+#       0.688** 이라(2026-11-04 실측) 영영 안 밝아진다.
+#    📏 실측 2026-11-04 — 같은 화면 12회: **평균차이 0.000 · 큰변화 픽셀 0**
+#       (잡음이 아예 없다). 숫자 한 덩어리가 바뀌면 평균 8.5 · 픽셀 396.
+#       → 아주 민감하게 둬도 **오판이 없다.** 둘 중 하나만 넘으면 바뀐 것으로 본다.
+OMANST_REF_DIFF  = 0.5        # 평균 픽셀 차이
+OMANST_REF_PIX   = 30         # 또는 '30 이상 바뀐 픽셀' 개수
+
+
+def _ref_band(big):
+    """🔄 새로고침 버튼 둘레(횟수·값 글자가 있는 자리)를 떠낸다."""
+    h, w = big.shape[0], big.shape[1]
+    cx = int(w * OMANST_REFRESH[0])
+    cy = int(h * OMANST_REFRESH[1])
+    return big[max(0, cy - 12):cy + 12, max(0, cx - 65):cx + 65].astype(float)
 OMANST_NUM_CUT   = 0.45       # 어두운 줄에서 쓰는 적응형 기준 (min + 폭×이값)
 OMANST_ROW_BAND  = 13 / 276   # 📏 **세 번째 줄 띠** 반폭 (창 높이 비율)
 OMANST_ROW_OFF   = 6          # _take 가 글자 좌상단 +6 을 누른다 (그만큼 되돌린다)
@@ -517,6 +547,12 @@ def omanst_read(big, kind=None, loose=False, force=False, row_y=None):
                 _mn = _mx = 0
             if _mx - _mn >= OMANST_NUM_SPAN:
                 runs = _runs(_mn + (_mx - _mn) * OMANST_NUM_CUT)
+        # 🚨 **어두운 줄에서는 숫자를 믿지 않는다** (2026-11-04 사고).
+        #    이미 한 줄이 선택돼 있으면 글자가 어두워 `Ⅴ` 의 기울어진 두 획이
+        #    끊겨 **`Ⅱ` 와 똑같이 좁은 막대 둘**로 보인다 (2026-10-29 실측).
+        #    → 0 으로 돌려주면 `want` 가 False 가 되어 **새로고침으로 넘어가고**,
+        #      새로고침하면 밝아져서 다음 판에 제대로 읽는다.
+        #    🚫 이 관문을 없애지 말 것 — 없애면 고르면 안 되는 Ⅴ·Ⅳ 를 고른다.
         if not runs:
             return jx, jy, 0, sc
         if any((r[1] - r[0]) >= OMANST_WIDE for r in runs):
@@ -590,6 +626,25 @@ def omanst_pick(app, anchor, slot, log=None):
               "고른다" if (want and x is not None)
               else ("새로고침" if not last else "못 찾음")))
         if want and x is not None:
+            # 🔁 **누르기 직전에 한 번 더 읽어 같은지 확인한다** (2026-11-04 사고).
+            #    새로고침 직후에는 화면이 **바뀌는 중**이라 글자가 겹쳐
+            #    **Ⅴ 를 Ⅱ 로** 읽을 수 있다. 같은 숫자가 두 번 나와야 누른다.
+            #    (마지막 판은 '뭐가 나오든' 이므로 확인하지 않는다.)
+            #    🚫 이 확인을 빼지 말 것 — 고르면 안 되는 것을 고른다.
+            if not last:
+                time.sleep(random.uniform(0.25, 0.45))
+                _g3 = grab_window(anchor)
+                if _g3:
+                    _x3, _y3, _n3, _sc3 = omanst_read(_g3[0], row_y=_ry)
+                    if _n3 != n:
+                        _L("[오만의탑] 🔁 다시 보니 %s → %s 로 달라졌다 "
+                           "— 화면이 바뀌는 중이라 누르지 않는다"
+                           % (NM.get(n, n), NM.get(_n3, _n3)))
+                        if _n3 in pref if pref else (_n3 > 0):
+                            n, x, y, sc = _n3, _x3, _y3, _sc3
+                            return _take(ox, oy, x, y, n, sc, why + " · 다시 확인")
+                        time.sleep(random.uniform(0.6, 1.0))
+                        continue
             return _take(ox, oy, x, y, n, sc, why)
         if last:
             # 여기는 그 글자를 **화면에서 아예 못 본 것** (퀘스트 창이 안 떴거나 가려짐).
@@ -620,8 +675,33 @@ def omanst_pick(app, anchor, slot, log=None):
         # 🔄 새로고침 (아데나). 누르면 고른 줄이 풀리므로 다시 읽고 고른다.
         rx = ox + int(big.shape[1] * OMANST_REFRESH[0])
         ry = oy + int(big.shape[0] * OMANST_REFRESH[1])
+        _b0 = _ref_band(big)        # 🔄 누르기 **전** 새로고침 둘레를 떠둔다
         _click(rx, ry)
-        time.sleep(random.uniform(1.8, 2.6))
+        # ⏳ **화면이 바뀔 때까지** 기다린다 — 새로고침을 누르면 고른 줄이 풀려
+        #    **밝아진다.** 밝아져야 숫자를 제대로 읽는다.
+        #    🚫 고정 대기(2초)로 되돌리지 말 것 — 화면이 안 바뀐 채 같은 줄을
+        #       다시 읽어 **Ⅴ 를 Ⅱ 로 보고 골랐다** (2026-11-04 사고).
+        time.sleep(random.uniform(0.5, 0.8))
+        _t0 = time.time()
+        _ok = False
+        while time.time() - _t0 < OMANST_WAIT_MAX:
+            _g2 = grab_window(anchor)
+            if _g2 is not None:
+                try:
+                    import numpy as _np
+                    _dd = _np.abs(_ref_band(_g2[0]) - _b0)
+                    _d = float(_dd.mean())
+                    _np_ = int((_dd.max(axis=2) > 30).sum())
+                except Exception:
+                    _d, _np_ = 999.0, 999
+                if _d >= OMANST_REF_DIFF or _np_ >= OMANST_REF_PIX:
+                    _ok = True
+                    break
+            time.sleep(OMANST_WAIT_TICK)
+        if not _ok:
+            _L("[오만의탑] ⏳ 새로고침을 눌렀는데 %.1f초 동안 화면이 그대로다 "
+               "— 다음 판에서 다시 본다 (남은 횟수가 없거나 클릭이 씹혔을 수 있다)"
+               % (time.time() - _t0))
     return False
 
 
