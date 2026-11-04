@@ -7961,13 +7961,24 @@ class App(tk.Tk):
         #    *"혈레이드 업데이트 위에 글을 쓸 수 있게 공간을 주고 크기는 고를 수 있게"*).
         #    적는 즉시 `coords.json` 의 `fold_memo` 에 저장된다 (이 컴퓨터 전용).
         _mt = tk.Frame(_keep); _mt.pack(anchor="n", fill="x")
-        tk.Label(_mt, text="📝", font=("맑은 고딕", 8)).pack(side="left")
+        _ml = tk.Label(_mt, text="📝 크기", font=("맑은 고딕", 8, "bold"),
+                       fg=STATUS_FG)
+        _ml._keep_fg = True
+        _ml.pack(side="left")
         self._memo_size = tk.StringVar(value=str(int(self.cfg.get("fold_memo_size", 9))))
         _om = tk.OptionMenu(_mt, self._memo_size, *[str(v) for v in (8, 9, 10, 12, 14, 16, 18, 20)],
                             command=lambda _v: self._fold_memo_size())
-        _om.config(font=("맑은 고딕", 7), width=2, padx=0, pady=0,
-                   highlightthickness=0, bd=1)
-        try: _om["menu"].config(font=("맑은 고딕", 8))
+        # 🟡 **찐 노란색** (2026-11-04 사용자: *"글씨 크기 지정하는 거,
+        #    그것도 색상을 찐 노란색으로 바꿔줘"*). 바탕은 어둡게 두고 글씨만.
+        #    ⚠ `_keep_fg` 로 `apply_dark` 가 덮지 않게 한다.
+        _om.config(font=("맑은 고딕", 8, "bold"), width=2, padx=0, pady=0,
+                   highlightthickness=0, bd=1,
+                   fg=STATUS_FG, activeforeground=STATUS_FG)
+        _om._keep_fg = True
+        try:
+            _om["menu"].config(font=("맑은 고딕", 9, "bold"), fg=STATUS_FG,
+                               activeforeground=STATUS_FG)
+            _om["menu"]._keep_fg = True
         except Exception: pass
         _om.pack(side="left", padx=(2, 0))
         # 📝 **굵은 빨강** (2026-11-04 사용자 지시) · 최대 20pt.
