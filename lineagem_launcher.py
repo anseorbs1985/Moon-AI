@@ -11742,13 +11742,27 @@ class App(tk.Tk):
         except Exception as e:
             tk.Label(body, text=f"판을 못 만들었다: {e}",
                      fg="#e74c3c").pack(padx=10, pady=10)
-        # 🧭 **세로바 바로 왼쪽**에 붙인다 (사용자: *"그 옆에 배치"*)
+        # 🧭 **그 버튼 바로 옆**에 붙인다 (2026-11-04 사용자:
+        #    *"재배치 바로 옆으로 켜줘야지 왜 위로 올리냐"*)
+        #    ⚠ 크기는 **`GetWindowRect`(테두리 포함)** 로 잰다 —
+        #      `winfo_reqwidth()` 는 **안쪽** 폭이라 그만큼 오른쪽으로 밀려
+        #      세로바와 겹친다 (실측 2419 > 2409).
+        #    ⚠ 높이는 **버튼의 `winfo_rooty()`** — '창 위 + 60' 으로 두면
+        #      버튼과 무관한 맨 위에 뜬다 (실측 y=60 인데 버튼은 y≈356).
         try:
             w.update_idletasks()
-            ww, hh = w.winfo_reqwidth(), w.winfo_reqheight()
+            try:
+                _fr = win32gui.GetWindowRect(int(w.wm_frame(), 16))
+                ww, hh = _fr[2] - _fr[0], _fr[3] - _fr[1]
+            except Exception:
+                ww, hh = w.winfo_reqwidth(), w.winfo_reqheight()
             r = win32gui.GetWindowRect(int(self.wm_frame(), 16))
-            x = max(0, r[0] - ww - 6)
-            y = max(0, min(r[1] + 60, self.winfo_screenheight() - hh - 60))
+            x = max(0, r[0] - ww - 4)
+            try:
+                y = self._wm_btn.winfo_rooty() - 8
+            except Exception:
+                y = r[1] + 60
+            y = max(0, min(y, self.winfo_screenheight() - hh - 40))
             w.geometry("+%d+%d" % (x, y))
         except Exception:
             pass
