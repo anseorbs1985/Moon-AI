@@ -198,6 +198,14 @@ def sync_times(log):
         with open(man, encoding="utf-8") as f:
             keys = (json.load(f) or {}).get("keys") or []
             _, lock_i = load_coord_lock()
+            # 🔓 ignore_lock 이면 잠금을 뚫는다 (2026-11-04) — 간격만 바꾸므로
+            #    좌표와 무관하지만, 잠긴 던전은 간격도 안 받고 있었다.
+            try:
+                with open(man, encoding="utf-8") as f:
+                    if (json.load(f) or {}).get("ignore_lock"):
+                        lock_i = set()
+            except Exception:
+                pass
             keys = [k for k in keys if k not in lock_i]   # 🔒 잠근 던전은 제외
         if not keys:
             return
@@ -819,6 +827,20 @@ def sync_coord_keys(log):
         except Exception:
             force = set()
         lock_k, _ = load_coord_lock()
+        # 🔓 **사용자가 콕 집어 '강제로 뚫어라' 했을 때만** 잠금을 무시한다
+        #    (2026-11-04: *"잠금을 강제로 뚫어서 하게 좀 해주라"*).
+        #    🚫 쓰고 나면 share_coords.json 의 ignore_lock 을 **반드시 지울 것.**
+        try:
+            with open(man, encoding="utf-8") as f:
+                _ig = bool((json.load(f) or {}).get("ignore_lock"))
+        except Exception:
+            _ig = False
+        if _ig and lock_k:
+            _hit = sorted(set(k for k in keys if k in lock_k))
+            if _hit:
+                log("   🔓 ignore_lock — 🔒 좌표 잠금을 **뚫고** 넣는다: "
+                    + ", ".join(_hit))
+            lock_k = set()
         got, locked, kept = [], [], []
         for k in keys:
             if k in lock_k:                 # 🔒 잠근 항목은 건너뛴다
