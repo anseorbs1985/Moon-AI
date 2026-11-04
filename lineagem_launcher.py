@@ -8092,6 +8092,16 @@ class App(tk.Tk):
                       bg="#27ae60", fg="white", activebackground="#1e8449",
                       width=4, height=2,
                       command=lambda x=_i: self._run_island_slot(x)).pack(side="left", padx=(2, 0))
+        # 🏝 **섬/던전 미니! — 던전 상자 안, 에카 바로 아래** (2026-11-04 사용자:
+        #    *"던전 안 에카 밑에 넣어줘야 해. 버튼 크기는 전부복구와 같은 사이즈로"*)
+        #    누르면 **세로바 옆에 펼쳐진다** (다시 누르거나 ✕ 로 닫으면 되돌아간다).
+        #    ⚠ 판은 **이미 있는 `_night_detach`**(wm manage) 를 그대로 쓴다 —
+        #       새로 만들면 `self._night_*` 위젯이 두 벌이 되어 엉킨다.
+        self._night_wbtn = tk.Button(
+            _dun, text="🏝 섬/던전 미니!  ◀", font=("맑은 고딕", 8, "bold"),
+            bg="#117864", fg="white", activebackground="#0e6251", pady=0,
+            width=11, height=2, command=self._night_win_toggle)
+        self._night_wbtn.pack(anchor="n", pady=(4, 0))
         tk.Frame(_dun, height=3).pack()
 
         # 🚫 **키우지 않는다** — 클라 옆 빈 자리가 150px 남짓이라
@@ -8511,6 +8521,20 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _work_bottom(self):
+        """🖥 **작업표시줄을 뺀** 화면 아래 끝 — 창이 그 밑으로 내려가지 않게.
+
+        ⚠ `winfo_screenheight()`(1440)를 쓰면 작업표시줄(1392)을 덮는다."""
+        try:
+            from ctypes import wintypes
+            r = wintypes.RECT()
+            ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(r), 0)
+            if int(r.bottom) > 200:
+                return int(r.bottom)
+        except Exception:
+            pass
+        return self.winfo_screenheight() - 48
+
     def _place_beside(self, win, btn=None):
         """🧭 그 창을 **세로바 바로 왼쪽**에 붙인다 — 멀리 뜨지 않게.
 
@@ -8562,7 +8586,7 @@ class App(tk.Tk):
                 except Exception:
                     y = 60
             y0 = y
-            y = max(0, min(int(y), self.winfo_screenheight() - hh - 40))
+            y = max(0, min(int(y), self._work_bottom() - hh - 8))
             win.geometry("+%d+%d" % (x, y))
             # 🧭 **실제로 얼마나 어긋났는지 재서 되돌린다** — `wm geometry` 가
             #    준 값과 `GetWindowRect` 가 보는 자리가 Win11 의 보이지 않는
@@ -12735,6 +12759,87 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _night_win_toggle(self):
+        """🏝 슬롯판을 **세로바 옆에 펼친다** (다시 누르면 접는다).
+
+        🧭 2026-11-04 사용자: *"클릭하면 옆으로 열리도록 해줘."*
+        ⚠ 떼는 일 자체는 `_night_detach`(`wm manage`) 가 한다 — 그걸 그대로 쓰고
+          **자리만** 세로바 옆으로 옮긴다."""
+        try:
+            if self._night_detached():
+                self._night_attach()
+            else:
+                self._night_detach()
+                self.after(80, self._night_place_beside)
+                self.after(200, lambda: self.status.set(
+                    "🏝 섬/던전 미니 판을 옆에 열었습니다 "
+                    "(다시 누르거나 ✕ 로 닫으면 메인런처로 돌아갑니다)"))
+        except Exception as e:
+            self.status.set(f"🏝 슬롯판 열기 실패: {e}")
+        self.after(140, self._night_wbtn_sync)
+
+    def _night_wbtn_sync(self):
+        """🏝 버튼 글자를 지금 상태에 맞춘다 (◀ 닫힘 · ▶ 열림)."""
+        b = getattr(self, "_night_wbtn", None)
+        if b is None or not b.winfo_exists():
+            return
+        try:
+            b.config(text=("🏝 섬/던전 미니!  ▶" if self._night_detached()
+                           else "🏝 섬/던전 미니!  ◀"))
+        except Exception:
+            pass
+
+    def _night_place_beside(self):
+        """🏝 뗀 판을 **세로바 바로 왼쪽**, 그 버튼 높이에 둔다.
+
+        ⚠ 판은 `wm manage` 된 **Frame** 이라 Toplevel 메서드가 없다 →
+          `tk.call("wm", ...)` 로 다룬다. 크기는 `wm frame` 이 주는 창 손잡이로
+          **테두리까지 포함해** 잰다 (`winfo_reqwidth` 는 안쪽이라 겹친다)."""
+        p = getattr(self, "_night_panel", None)
+        if p is None or not p.winfo_exists() or not self._night_detached():
+            return
+        try:
+            p.update_idletasks()
+            try:
+                hw = int(self.tk.call("wm", "frame", p._w), 16)
+                fr = win32gui.GetWindowRect(hw)
+                ww, hh = fr[2] - fr[0], fr[3] - fr[1]
+            except Exception:
+                ww, hh = p.winfo_reqwidth(), p.winfo_reqheight()
+            left = None
+            try:
+                _h = getattr(self, "_dc_host", None)
+                if _h is not None and _h.winfo_exists():
+                    left = _h.winfo_rootx()
+            except Exception:
+                left = None
+            if not left:
+                left = self.winfo_screenwidth()
+            x = max(0, left - ww - 12)
+            try:
+                y = self._night_wbtn.winfo_rooty() - 8
+            except Exception:
+                y = 60
+            y = max(0, min(int(y), self._work_bottom() - hh - 8))
+            self.tk.call("wm", "geometry", p._w, "+%d+%d" % (x, y))
+            # 테두리 때문에 어긋난 만큼 되돌린다 (2026-09-30 과 같은 방법)
+            try:
+                p.update_idletasks()
+                hw = int(self.tk.call("wm", "frame", p._w), 16)
+                f2 = win32gui.GetWindowRect(hw)
+                dx, dy = f2[0] - x, f2[1] - y
+                if dx or dy:
+                    self.tk.call("wm", "geometry", p._w,
+                                 "+%d+%d" % (max(0, x - dx), max(0, y - dy)))
+            except Exception:
+                pass
+            d = dict(self.cfg.get("night_detach") or {})
+            d.update({"on": True, "x": int(x), "y": int(y)})
+            self.cfg["night_detach"] = d; save_cfg(self.cfg)
+            click_log(f"[슬롯판] 🏝 세로바 옆에 펼쳤다 ({x},{y}) 크기 {ww}x{hh}")
+        except Exception as e:
+            click_log(f"[슬롯판] ⚠ 자리잡기 실패 — {e}")
+
     def _night_detach(self, x=None, y=None, front_only=False):
         """판을 독립 창으로 뗀다 — **보이던 그 자리에 그대로** 뜬다.
 
@@ -12782,6 +12887,7 @@ class App(tk.Tk):
             if getattr(self, "_night_dbtn", None) is not None:
                 self._night_dbtn.config(text="📥", bg="#117864")
             self._night_backbtn_sync()
+            self._night_wbtn_sync()
             self.status.set("📤 슬롯판을 따로 뗐습니다 — 메인런처 바로 아래에 붙어 "
                             "함께 움직입니다 (✕ 나 [📥 슬롯판 붙이기] 로 되돌림)")
             self.after(120, self._night_dock_now)     # 앞뒤를 바로 맞춘다 (자리는 그대로)
