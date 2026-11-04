@@ -404,6 +404,11 @@ FIX_ESC_TRIES      = 2         # 복구 전 열린 창을 ESC 로 닫아보는 �
 #    (10-10 20:26 에 #11·#12 가 뜬 지 36초 만에 그렇게 지워졌다).
 #    **한 번이라도 보이면 복구를 돌린다.** 세 번 다 안 보여야 '이미 복구됨' 이다.
 #    ⏱ 속도는 그대로다 — 있으면 첫 번에 보이고 끝난다 (한 슬롯 0.07초).
+# 🩹 목록에 **올릴 때** 연속 몇 번 보여야 하나 (2026-11-04 사용자:
+#    *"복구가 안 떠 있는데 왜 복구하라고 나오는 거냐"*). 한 번만 보고 올렸더니
+#    접속 직후 로딩 화면의 오탐이 올라왔다 — 실측 1번째만 0.55+, 그 뒤 5번 0.45.
+#    🚫 1 로 되돌리지 말 것. 지우는 쪽(FIX_SEE_TRIES)은 그대로 5번이다.
+FIX_SEE_ADD        = 2
 FIX_SEE_TRIES      = 5   # 2026-11-03: 3 → 5. 십자가 점수는 **있을 때 0.62~0.90 ·
                          # 없을 때 0.38~0.54** 로 갈리므로(실측) 기준(0.55)은 맞다.
                          # 못 보는 것은 점수가 아니라 **창이 가려졌거나 절전**이라
@@ -20264,11 +20269,25 @@ class App(tk.Tk):
                     cur = set(self._warn_load())
                     if si in cur:
                         return                    # 이미 목록에 있다
+                    # 🚫 **연속 2번** 보여야 올린다 (2026-11-04 사용자:
+                    #    *"복구가 안 떠 있는데 왜 복구하라고 나오는 거냐"*).
+                    #    실측 16:02 — 1번째만 0.55+ 였고 그 뒤 5번 전부 0.45 였다
+                    #    (접속 직후 로딩 화면의 오탐). 한 번만 보고 올리면
+                    #    사용자를 계속 괴롭힌다. 놓쳐도 다음 클릭·F11 때 잡힌다.
+                    #    ⚠ 지우는 쪽(5번 연속)은 그대로다 — 줄이지 말 것.
+                    _seen = getattr(self, "_fix_seen2", {})
+                    _seen[si] = _seen.get(si, 0) + 1
+                    self._fix_seen2 = _seen
+                    if _seen[si] < FIX_SEE_ADD:
+                        click_log(f"[클릭확인] #{si:02d} 십자가 보임 "
+                                  f"({_seen[si]}/{FIX_SEE_ADD}번째) — 한 번 더 봐야 올린다")
+                        continue
+                    _seen.pop(si, None)
                     cur.add(si)
                     self._warn_save(sorted(cur))
                     self.after(0, self._warn_refresh)
                     click_log(f"[클릭확인] #{si:02d} 십자가 보임 → 목록에 올림 "
-                              f"({k+1}번째 확인)")
+                              f"({k+1}번째 확인 · 연속 {FIX_SEE_ADD}번)")
                     self.after(0, lambda s=si: self.status.set(
                         f"🩹 #{s:02d} 복구해야함 — 클릭한 클라에서 십자가를 봤습니다 "
                         f"(누르거나, {FIX_IDLE_SEC//60}분 쉬면 자동 복구)"))
@@ -34665,26 +34684,59 @@ class App(tk.Tk):
 
             active = [(i, s) for i, s in enumerate(self.cfg.get("click_slots", []))
                       if s[0] and s[1]]
+            # 🚫 **아직 게임에 안 들어간 클라에는 사냥을 보내지 않는다**
+            #    (2026-11-04 사고 — 입장이 4개 남았는데 사냥을 시작해서
+            #     캐릭 선택 화면의 엉뚱한 버튼을 눌렀다. 사용자가 본
+            #     '2·3번 클라가 엉뚱한 곳 클릭'·'13번 창 확대' 가 이것이다).
+            #    🚫 이 확인을 없애지 말 것.
+            _bad = []
+            try:
+                _T = (self._enter_tpl("login_enter"),
+                      self._enter_tpl("login_relogin"),
+                      self._enter_tpl("login_server"))
+                _re, _ch, _lo, _nn = self._enter_scan(_T)
+                _bad = [r for _i, _nm, _h, r, _x in (_re + _ch + _lo)]
+                if _bad:
+                    click_log(f"[사냥] 🚫 아직 게임 안이 아닌 클라 {len(_bad)}개 "
+                              f"— 그 슬롯은 사냥을 보내지 않는다")
+            except Exception as _e:
+                click_log(f"[사냥] ⚠ 게임 안인지 못 봤다 — {_e}")
+
+            def _not_in_game(p):
+                try:
+                    return any(r[0] <= p[0] < r[2] and r[1] <= p[1] < r[3]
+                               for r in _bad)
+                except Exception:
+                    return False
+
+            _sent = 0
             for done, (i, pair) in enumerate(active):
                 if self._stop_flag: self.status.set("멈춤"); return
+                if _not_in_game(pair[0]):
+                    click_log(f"[사냥] ⏸ #{i+1:02d} 아직 게임 안이 아니다 "
+                              f"— 건너뛴다 (엉뚱한 곳을 누르지 않게)")
+                    continue
                 grp = (i // GROUP_SIZE) + 1
                 self.status.set(f"그룹{grp} #{i+1}번 클릭1...")
                 pyautogui.click(*pair[0])
-                # 두번째 클릭이 좀 빨라서 랜덤 추가로 늦춤
-                # ⏱ 2026-11-04 '3분 안에' — 1.1~1.9초 → 0.7~1.3초
-                if not self._wait(random.uniform(0.4, 0.8) + random.uniform(0.3, 0.5)):
+                _sent += 1
+                # 🧍 **너무 빠르지 않게** (2026-11-04 사용자: *"하나씩 보내줘도
+                #    되는데 **랜덤으로 너무 빠르지 않고**"*). 값 하나로 고정하지 말 것.
+                if not self._wait(random.uniform(0.6, 1.1) + random.uniform(0.4, 0.8)):
                     self.status.set("멈춤"); return
                 self.status.set(f"그룹{grp} #{i+1}번 클릭2...")
                 pyautogui.click(*pair[1])
                 if i == 4 and len(pair) > 2 and pair[2]:
-                    if not self._wait(random.uniform(0.6, 1.2)): self.status.set("멈춤"); return
+                    if not self._wait(random.uniform(0.8, 1.5)): self.status.set("멈춤"); return
                     self.status.set(f"그룹{grp} #{i+1}번 클릭3...")
                     pyautogui.click(*pair[2])
                 if done < len(active) - 1:
-                    # ⏱ 2026-11-04 '3분 안에' — 2.5초 고정 → 0.8~1.3초 랜덤
-                    #    🧍 값 하나로 고정하지 말 것 (항상 사람이 하는 것처럼)
-                    if not self._wait(random.uniform(0.8, 1.3)):
+                    # 🧍 슬롯 사이 — 한 번에 몰리지 않게 (부하도 낮아진다)
+                    if not self._wait(random.uniform(1.6, 3.0)):
                         self.status.set("멈춤"); return
+            click_log(f"[사냥] ✔ {_sent}개 슬롯을 사냥터로 보냈다"
+                      + (f" · ⏸ {len(active) - _sent}개는 아직 게임 안이 아니라 건너뜀"
+                         if _sent < len(active) else ""))
             # 캐릭터01 접속 → 그룹2 완료까지 실제 소요시간 측정 (4분30초=270초 제한 확인)
             _t0 = getattr(self, "_run_char01_t", None)
             if _t0:
