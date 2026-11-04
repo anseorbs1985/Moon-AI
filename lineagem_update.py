@@ -1535,6 +1535,24 @@ def coords_guard_restore(log):
             g = json.load(f) or {}
         snap = g.get("snap") or {}
         allow = set(g.get("allow") or []) | set(_GUARD_ALWAYS_OK)
+        # 🔓 **지금(pull 뒤) 저장소의 허락 목록도 합친다** (2026-11-04).
+        #    snapshot 은 업데이트 **시작 전**에 찍히므로 그때 저장소는 옛 판이다 →
+        #    이번에 새로 허락된 항목이 목록에 없어 **받자마자 되돌려졌다.**
+        #    🚫 이 합치기를 없애지 말 것 — 없애면 좌표 배포가 영원히 한 판 늦는다.
+        try:
+            _m = os.path.join(REPO, "share_coords.json")
+            if os.path.exists(_m):
+                with open(_m, encoding="utf-8") as _f:
+                    _d = json.load(_f) or {}
+                _now_ok = set(str(k) for k in (_d.get("keys") or []))
+                _now_ok |= set(str(k) for k in (_d.get("force") or []))
+                _add = _now_ok - allow
+                if _add:
+                    log("   🔓 이번에 새로 허락된 항목도 지킨다: "
+                        + ", ".join(sorted(_add)))
+                allow |= _now_ok
+        except Exception:
+            pass
         if not snap:
             return
         dst = os.path.join(DESK, "coords.json")

@@ -8062,17 +8062,17 @@ class App(tk.Tk):
             activebackground="#1e8449", width=4, height=2,
             command=lambda: self._start_dgn2("fish")).pack(side="left", padx=(2,0))
 
-        # ▶ 전부 복구 — **낚시녹임 1cm 아래로 올렸다** (2026-10-20 사용자:
-        #   "전부복구 이거는 좀 위로 올려주라, 낚시녹임 1CM 밑으로 올려주고").
-        #   ⚠ 예전에는 `_warn_box` 안(경고 목록 바로 위)에 있어서, 목록이 길어지면
-        #     버튼이 아래로 밀려 손이 가는 자리가 매번 달라졌다.
-        self._warn_allbtn = tk.Button(
-            dc_col, text="▶ 전부 복구", font=("맑은 고딕", 8, "bold"),
-            bg="#8e44ad", fg="white", activebackground="#6c3483", pady=0,
-            width=12, height=2, command=self._fix_run_all)
+        # 📬 **우편 지금 받기 — 낚시녹임 1cm 아래 고정 자리** (2026-11-04 사용자:
+        #   *"우편지금받기랑 전부복구 위치 위아래 바꿔줘"*).
+        #   ⚠ 이 자리는 **목록 길이와 무관하게 고정**이다 — `before=` 의 기준으로도
+        #     쓰이므로(던전 상자·오만 줄) 변수는 `_warn_topbtn` 으로 둔다.
+        self._warn_topbtn = tk.Button(
+            dc_col, text="📬 우편 지금 받기", font=("맑은 고딕", 8, "bold"),
+            bg="#2471a3", fg="white", activebackground="#1a5276", pady=0,
+            width=12, height=2, command=self._mail_run_now)
         # 🗂 **여백을 줄였다** (2026-11-04) — 아래에 [던전] 상자와 [▶ 접기] 가
         #    더해지면서 화면 높이를 넘겨 맨 밑줄이 잘렸다.
-        self._warn_allbtn.pack(anchor="n", pady=(8, 0))
+        self._warn_topbtn.pack(anchor="n", pady=(8, 0))
 
         # 작업이 끝나면 여기에 큰 빨간 글씨로 '완료'가 1분간 뜬다
         self._done_var = tk.StringVar(value="")
@@ -8097,15 +8097,16 @@ class App(tk.Tk):
         self._warn_box.pack(anchor="n", pady=(1, 0))
         self._warn_hdr = tk.Label(self._warn_box, text="", font=("맑은 고딕", 9, "bold"),
                                   fg="white", bg="#c0392b")
-        # 📬 우편 지금 받기 — **여기 하나만 남긴다** (2026-10-20 사용자:
-        #   "우편받기 버튼만 냅두고"). 나머지 토글·도감받기는 🟣 영웅 판 아래로 옮겼다.
-        #   높이는 **1.5배**로 — [▶ 전부 복구](height=2 ≈ 36px) 보다 조금 작게
-        #   (2026-11-03 사용자 요청). ⚠ Tk 의 `height` 는 **글자 줄 수**라 1.5줄을
-        #   못 준다. 그래서 `pady` 로 위아래를 늘린다 (20px → 약 30px).
-        tk.Button(self._warn_box, text="📬 우편 지금 받기",
+        # ▶ **전부 복구 — 복구해야함 목록 바로 위** (2026-11-04 사용자:
+        #   *"우편지금받기랑 전부복구 위치 위아래 바꿔줘"*).
+        #   목록에 뜬 것을 번호 순서대로 하나씩 복구한다 — 바로 아래가 그 목록이라
+        #   손이 가는 자리가 자연스럽다.
+        #   ⚠ `height` 는 **글자 줄 수**라 1.5줄을 못 준다 → `pady` 로 늘린다.
+        #   🚫 이 위에 버튼을 더 쌓지 말 것 — 목록이 밀려난다 (2026-10-20 사고).
+        tk.Button(self._warn_box, text="▶ 전부 복구",
                   font=("맑은 고딕", 8, "bold"), pady=5,
-                  bg="#2471a3", fg="white", activebackground="#1a5276",
-                  command=self._mail_run_now).pack(fill="x", pady=(1, 1))
+                  bg="#8e44ad", fg="white", activebackground="#6c3483",
+                  command=self._fix_run_all).pack(fill="x", pady=(1, 1))
         self._warn_rows = tk.Frame(self._warn_box)
         self._warn_rows.pack(fill="x")
         self.after(900, self._warn_refresh)
@@ -8259,7 +8260,7 @@ class App(tk.Tk):
         #    낚시녹임 아래 · [▶ 전부 복구] 위.
         # 💰 다야 OCR — **낚시녹임 바로 아래** (2026-11-04 사용자:
         #    *"던전에 다야 OCR 은 낚시녹임 밑으로 빼주고"*)
-        _oc = tk.Frame(dc_col); _oc.pack(anchor="n", pady=(5, 0), before=self._warn_allbtn)
+        _oc = tk.Frame(dc_col); _oc.pack(anchor="n", pady=(5, 0), before=self._warn_topbtn)
         tk.Button(_oc, text="💰 다야\nOCR", font=("맑은 고딕", 9, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
                   width=7, height=2, command=self._open_ocr).pack(side="left")
@@ -8269,7 +8270,7 @@ class App(tk.Tk):
 
         _dun = tk.LabelFrame(dc_col, text=" 던전 ", font=("맑은 고딕", 9, "bold"),
                              fg="#a04000", bd=2, relief="groove")
-        _dun.pack(anchor="n", pady=(6, 0), padx=1, before=self._warn_allbtn)
+        _dun.pack(anchor="n", pady=(6, 0), padx=1, before=self._warn_topbtn)
         if not hasattr(self, "_dun_imgs"):
             self._dun_imgs = {}
         for _i, (_nm, _bg) in enumerate((("오만의탑", "#8e44ad"), ("악몽의섬", "#2471a3"),
@@ -8312,7 +8313,7 @@ class App(tk.Tk):
         # 🚫 **키우지 않는다** — 클라 옆 빈 자리가 150px 남짓이라
         #    (게임창 끝 2352 · 옆 바 끝 2408 · 화면 2560) 키우면 클라를 덮는다
         #    (2026-11-04 사용자: *"버튼들 사이즈 좀 줄여도 되니까"*).
-        self._warn_allbtn.config(width=11)
+        self._warn_topbtn.config(width=11)
 
         # ── ◀ 열기 / ▶ 접기 — **맨 밑줄** (복구해야함 목록 아래) ──
         #    접으면 `side="bottom"` 으로 **창 맨 아래**에 붙는다 (2026-11-04 사용자:
