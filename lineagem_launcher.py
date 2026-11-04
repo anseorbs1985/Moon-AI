@@ -17843,6 +17843,10 @@ class App(tk.Tk):
         return True
 
     def _start_dgn2(self, fkey, sel_list=None):
+        # ⏱ **버튼을 누른 시각** — 첫 클릭까지 얼마나 걸렸는지 기록한다
+        #    (2026-11-04 사용자: *"실행을 누르면 왜 한참 생각하고 실행하느냐.
+        #    1~2초 뒤에 바로 해줘"*). 어디서 시간을 쓰는지 숫자로 보여야 고친다.
+        self._btn_t0 = time.time()
         key, title, _ = self._dgn2_info(fkey)
         # 👑 작위는 [🔁 연속] 이 따로 돈다. 그게 도는 중에 여기로 또 시작하면
         #    아래 `_jakwi_stop = False` 가 **멈춤을 취소해버려** 계속 돌았다 (2026-09-19).
@@ -17858,13 +17862,15 @@ class App(tk.Tk):
         setattr(self, f"_{fkey}_stop", False)
         self._set_btn(f"btn_{fkey}_run", state="disabled")
         self._set_btn(f"btn_{fkey}_stop", state="normal")
-        if fkey in BACK_NOT_MIN:
-            # 🩹 복구는 **최소화하지 않고 맨 뒤로만** 보낸다 (2026-08-29 사용자 지시).
-            # 최소화하면 다시 꺼내는 데 시간이 걸려 버퍼링처럼 느껴진다.
-            self._send_behind_only()
-        else:
-            self._minimize_all()
-        self.after(60, lambda: threading.Thread(
+        # ⚡ **창 내리기를 기다리지 않고 바로 시작한다** (2026-11-04).
+        #    예전엔 여기서 `_minimize_all()` 을 **화면 그리는 스레드에서 끝까지**
+        #    돌린 뒤에야 작업 스레드를 띄웠다. 창이 여럿이면 그만큼 통째로 멈췄고,
+        #    그것이 사용자가 말한 *"한참 생각하고 실행한다"* 의 정체다.
+        #    🚫 빼먹은 게 아니다 — 작업 스레드의 `_start_pause(fkey)` 가
+        #       **같은 일을 `after(0)` 으로** 한다 (중복 호출이었다).
+        self.after(0, (self._send_behind_only if fkey in BACK_NOT_MIN
+                       else self._minimize_all))
+        self.after(0, lambda: threading.Thread(
             target=self._run_task,
             args=(title, lambda: self._run_dgn2(fkey, sel_list=sel_list)), daemon=True).start())
 
@@ -32918,6 +32924,15 @@ class App(tk.Tk):
         # ⏹ 새 작업이 시작된다 — 멈춤 깃발을 내려 `nap()` 이 다시 기다리게 한다
         #    (2026-11-03). ⚠ 안 내리면 **기다림이 0 이 되어** 좌표가 쏟아진다.
         nap_clear()
+        # ⏱ 버튼 → 작업 스레드 시작까지 (2026-11-04)
+        try:
+            _bt = getattr(self, "_btn_t0", 0)
+            if _bt and time.time() - _bt < 60:
+                click_log("[%s] ⏱ 버튼 → 실행 시작 %.2f초"
+                          % (fkey or "실행", time.time() - _bt))
+                self._btn_t0 = 0
+        except Exception:
+            pass
         try:
             if fkey in BACK_NOT_MIN:
                 # 🩹 복구 등은 **최소화하지 않고 맨 뒤로만** (2026-08-29 사용자 지시).
