@@ -6082,8 +6082,26 @@ class WindowSizeLock:
 
 
 class App(tk.Tk):
+    def _tk_err(self, exc, val, tb):
+        """🐞 **버튼을 눌러 난 예외**를 기록에 남긴다 (2026-11-04).
+
+        🚨 이게 없으면 Tk 가 조용히 삼켜 **아무 일도 안 난 것처럼** 보인다.
+           지우지 말 것 — 로컬 문제를 짚는 유일한 통로다."""
+        try:
+            import traceback
+            msg = "".join(traceback.format_exception(exc, val, tb))
+            click_log("[오류] 🐞 " + msg.strip().replace(chr(10), " | ")[:800])
+        except Exception:
+            pass
+        try:
+            self.status.set("🐞 오류 — %s: %s" % (getattr(exc, "__name__", exc), val))
+        except Exception:
+            pass
+
     def __init__(self):
         super().__init__()
+        # 🐞 **예외를 보이게** — 가장 먼저 건다 (2026-11-04)
+        self.report_callback_exception = self._tk_err
         self.title("리니지M 자동 실행")
         try:
             # Moon-AI 공통 아이콘 (default= → 모든 서브창에도 적용)
@@ -8078,10 +8096,13 @@ class App(tk.Tk):
         #    길이 둘이면 반드시 어긋난다 (이 살장소의 반복된 사고).
         # 🟡 **노란 버튼** (2026-11-04 사용자 지시). 노랑 바탕에는
         #    흰 글씨가 안 보이므로 글씨는 검정으로 둔다.
-        tk.Button(_k2, text="▶ 전체 자동실행", font=("맑은 고딕", 8, "bold"),
-                  bg="#f1c40f", fg="#1a1a1a", activebackground="#d4ac0d",
-                  height=1, pady=4,
-                  command=self._start).pack(side="top", fill="x", pady=(3, 0))
+        # 💊 **알약(타원) 모양 · 1.3배** (2026-11-04 사용자: *"멈춤 버튼처럼
+        #    타원형으로 … 지금 크기의 1.3배로 다른 거랑 약간 차별화되게"*).
+        #    🚫 `tk.Button` 으로 되돌리지 말 것 — Tk 버튼은 사각형만 된다.
+        self._auto_pill = self._pill_btn(
+            _k2, "▶ 전체 자동실행", "#f1c40f", "#1a1a1a", self._start,
+            h=33, act="#d4ac0d")
+        self._auto_pill.pack(side="top", fill="x", pady=(3, 0))
         # 🎹 **마우스/키 녹화하기** — 좌표복구 밑 (2026-11-04 사용자 지시:
         #    *"좌표복구 밑에 [마우스/키 녹화하기] 에 이렇게 넣어줄 수 있냐.
         #      위에 건 키보드고 아래는 마우스키 녹화설정이야"*).
@@ -8099,6 +8120,15 @@ class App(tk.Tk):
                   bg="#1a5276", fg="white", activebackground="#154360",
                   height=1, pady=2, command=self._winmgmt_win)
         self._wm_btn.pack(side="top", fill="x", pady=(3, 0))
+        # 🟣 **영웅템 체크 — 옆으로 펼치는 판** (2026-11-04 사용자 지시:
+        #    *"재배치 밑에 영웅템 체크 … 재배치처럼 옆으로 확장될 수 있게"*)
+        #    ⚠ 판은 `_build_hero_grid` 를 그대로 쓴다 — 점을 새로 만들면
+        #       `self._hero_cv` 가 두 벌이 되어 한쪽만 칠해진다.
+        self._hero_btn = tk.Button(_k2, text="🟣 영웅템 체크!!  ◀",
+                  font=("맑은 고딕", 8, "bold"),
+                  bg="#6c3483", fg="white", activebackground="#512e5f",
+                  height=1, pady=2, command=self._hero_win)
+        self._hero_btn.pack(side="top", fill="x", pady=(3, 0))
         # 💬 **지금 무슨 일을 하는지** — 좌표저장/복구 바로 아래 (2026-11-04 사용자:
         #    *"좌표지정이랑 좌표복구 밑에 현재 상황 멘트를 볼 수 있게 해줘"*).
         #    접으면 위쪽 상태줄이 같이 숨겨지므로 **여기가 유일한 상태 표시**다.
@@ -8224,7 +8254,9 @@ class App(tk.Tk):
         #     거야, 재배치 하는 런처 밑으로"). 그래서 재배치 쪽 코드는 손대지 않았다.
         _wtop = tk.Frame(winmgmt); _wtop.pack(anchor="w")
         self._build_winmgmt(_wtop)
-        self._build_hero_grid(winmgmt)
+        # 🟣 영웅 판은 **[🟣 영웅템 체크!!] 로 옆에 펼친다** (2026-11-04 사용자 지시).
+        #    🚫 여기서 또 만들지 말 것 — `self._hero_cv` 가 두 벌이 되어
+        #       아이템등록이 켠 점이 한쪽에만 보인다.
         self._build_fix_toggles(winmgmt)
 
         tk.Frame(front_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(4,8))
@@ -11384,6 +11416,61 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _pill_btn(self, parent, text, bg, fg, cmd, h=33,
+                  font=("맑은 고딕", 9, "bold"), act=None):
+        """💊 **알약(타원) 모양 버튼** — 접은 [■ 멈춤] 과 같은 모양.
+
+        🧭 2026-11-04 사용자: *"멈춤 버튼처럼 타원형으로 해줘."*
+        ⚠ Tk 버튼은 **사각형만** 된다 → Canvas 에 양 끝 원 + 가운데 사각형.
+        ⚠ 폭은 열을 따라가므로 `<Configure>` 에서 다시 그린다.
+          자식 위젯에서도 올라오는 이벤트라 `e.widget is c` 를 본다."""
+        act = act or bg
+        c = tk.Canvas(parent, height=h, highlightthickness=0, bd=0,
+                      cursor="hand2")
+        st = {"bg": bg}
+
+        def _draw(_e=None):
+            if _e is not None and getattr(_e, "widget", None) is not c:
+                return
+            try:
+                w = max(40, c.winfo_width())
+                hh = max(16, c.winfo_height())
+                c.delete("all")
+                try:
+                    c.configure(bg=_parent_bg(c))
+                except Exception:
+                    pass
+                col = st["bg"]
+                r = hh // 2
+                c.create_oval(0, 0, hh, hh, fill=col, outline=col)
+                c.create_oval(w - hh, 0, w, hh, fill=col, outline=col)
+                c.create_rectangle(r, 0, w - r, hh, fill=col, outline=col)
+                c.create_text(w // 2, hh // 2, text=text, fill=fg, font=font)
+            except Exception:
+                pass
+
+        def _down(_e):
+            st["bg"] = act; _draw()
+
+        def _up(_e):
+            st["bg"] = bg; _draw()
+            try:
+                if (0 <= _e.x <= c.winfo_width()
+                        and 0 <= _e.y <= c.winfo_height()):
+                    cmd()
+            except Exception as _x:
+                click_log("[버튼] ⚠ %s — %s" % (text, _x))
+
+        c.bind("<Configure>", _draw)
+        c.bind("<Button-1>", _down)
+        c.bind("<ButtonRelease-1>", _up)
+        c._pill_draw = _draw          # 🎨 어두운 화면을 입힌 뒤 다시 칠할 때
+        try:
+            self.after(140, _draw)    # apply_dark 가 bg 를 바꿔도 되살린다
+        except Exception:
+            pass
+        return c
+
     def _refresh_stop_btn(self):
         """실행 중이면 빨강, 멈출 게 없으면 회색 (⏰ 반복 버튼과 같은 규칙)."""
         b = getattr(self, "btn_stop", None)
@@ -12038,6 +12125,45 @@ class App(tk.Tk):
         except Exception:
             pass
         try: self._wm_btn.config(text="🪟 재배치  ▶")
+        except Exception: pass
+
+    def _hero_win(self):
+        """🟣 **영웅템 체크 판을 그 버튼 옆에 편다** (다시 누르면 접는다).
+
+        🧭 2026-11-04 사용자: *"재배치 밑에 영웅템 체크 … **재배치처럼** 옆으로
+           확장될 수 있게 해주라."*
+        ⚠ 판은 `_build_hero_grid(parent)` 를 **그대로** 부른다 — 점 48개와
+          누르기·칠하기가 전부 그 안에 있다. 따로 만들면 한쪽만 고치는 사고가 난다."""
+        w = getattr(self, "_herowin", None)
+        if w is not None and w.winfo_exists():
+            try: w.destroy()
+            except Exception: pass
+            self._herowin = None
+            self._hero_cv = {}          # 🧹 닫으면 위젯 참조도 비운다
+            try: self._hero_btn.config(text="🟣 영웅템 체크!!  ◀")
+            except Exception: pass
+            return
+        w = tk.Toplevel(self); self._herowin = w
+        w.title("🟣 영웅템 체크")
+        w.attributes("-topmost", True)
+        body = tk.Frame(w); body.pack(padx=8, pady=8)
+        tk.Label(body, text="먹으면 점을 켜고, 팔리면 끈다 "
+                            "(아이템등록이 보라를 만나면 저절로 켜진다)",
+                 font=("맑은 고딕", 8), fg="#8e44ad").pack(anchor="w", pady=(0, 2))
+        try:
+            self._build_hero_grid(body)
+        except Exception as e:
+            tk.Label(body, text=f"판을 못 만들었다: {e}",
+                     fg="#e74c3c").pack(padx=10, pady=10)
+        # 🧭 **그 버튼 바로 옆**에 붙인다 — 다른 창과 **같은 도우미**를 쓴다
+        self._place_beside(w, getattr(self, "_hero_btn", None))
+        w.protocol("WM_DELETE_WINDOW", self._hero_win)
+        try:
+            apply_dark(w, self.cfg.get("dark_ui", True))
+        except Exception:
+            pass
+        self._hero_paint()              # 🎨 어두운 화면을 입힌 뒤 다시 칠한다
+        try: self._hero_btn.config(text="🟣 영웅템 체크!!  ▶")
         except Exception: pass
 
     def _build_winmgmt(self, parent):
