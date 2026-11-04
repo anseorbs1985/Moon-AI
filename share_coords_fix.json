@@ -1,0 +1,30 @@
+{
+ "keys": [
+  "badge_slots",
+  "circus_slots",
+  "circus2_slots",
+  "circus3_slots",
+  "coupon_slots",
+  "dc_slots",
+  "doll_slots",
+  "dollchk_slots",
+  "dungeon_slots",
+  "eventshop_slots",
+  "fish_slots",
+  "fix_slots",
+  "hunt_slots",
+  "item_slots",
+  "knight_slots",
+  "magic_slots",
+  "market_slots",
+  "mondex_slots",
+  "omanst_slots",
+  "pass_slots",
+  "relic_slots",
+  "seq_slots",
+  "seq2_slots",
+  "slp_slots",
+  "tj_slots"
+ ],
+ "_메모": "📏 **좌표(coords)만** 로컬에 옮긴다 — ON/OFF(enabled)·이름·물약·층 등 슬롯의 다른 설정은 **전혀 건드리지 않는다.** 2026-11-03 에 클라 창을 491x276 → 546x307 로 키우면서 역산한 좌표를 로컬에도 그대로 맞추려고 만든 통로 (사용자 지시). 🚫 dragon_slots(로컬마다 직접 맞춤)·char_btns(계정마다 다름)는 넣지 않는다. 🔒 좌표잠금(coord_lock.json)은 여전히 최우선이다."
+}

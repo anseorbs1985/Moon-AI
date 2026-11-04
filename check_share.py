@@ -61,6 +61,7 @@ def main():
     sr = load("share_recs.json") or {}
     ro = load("restore_order.json") or {}
     sk = load("share_skip.json") or {}
+    sf = load("share_coords_fix.json") or {}
 
     # (이름, 값, 설명, 0이어야 안전한가)
     rows = [
@@ -91,6 +92,11 @@ def main():
          "★ 좌표를 옛 백업으로 되돌린다", True),
         ("restore_order.json keys", len(ro.get("keys") or []),
          "되돌릴 던전", True),
+        # 📏 2026-11-04 — **좌표(coords)만** 옮기는 통로. ON/OFF·이름·물약·층은
+        #    건드리지 않으므로 `force` 처럼 위험하지는 않다. 다만 '로컬이 찍어둔
+        #    좌표를 바꾼다' 는 것은 같으므로 **쓰고 나면 비우는 것이 원칙**이다.
+        ("share_coords_fix.json keys", len(sf.get("keys") or []),
+         "📏 **좌표만** 갈아끼운다 (ON/OFF·설정은 그대로)", True),
         ("share_skip.json    files", len(sk.get("files") or []),
          "복사 제외 목록 (많을수록 안전)", False),
     ]

@@ -770,6 +770,97 @@ def sync_island_keys(log):
         log(f"   ⚠ 던전 동기화 실패: {e}")
 
 
+def sync_coord_fix(log):
+    """📏 **역산된 좌표만** 로컬에 옮긴다 — ON/OFF·이름·물약·층은 건드리지 않는다.
+
+    사용자(2026-11-04): *"온오프 건들지 말고 **역산된 좌표만** 이동할 수 있게 해줘.
+    강제로 좌표 변동이 아니잖아. **물약·층 이런 거 건드는 거 아니고** 역산된 좌표만
+    건드는 거니까 수정될 수 있게 해줘."*
+
+    ■ `sync_coord_keys` 와 무엇이 다른가
+      - 저쪽은 그 항목을 **통째로** 바꾼다 → 슬롯 dict 의 `enabled`(ON/OFF)·`name`·
+        물약·층 같은 **설정까지 덮어쓴다.**
+      - 여기는 **각 슬롯의 `coords` 만** 갈아끼운다. 나머지 키는 **손도 안 댄다.**
+      - 그래서 `NEVER_COORD_KEYS`(인형탐험 등)도 **이 통로로는 통과시킨다** —
+        막아둔 이유가 'ON/OFF·설정이 컴퓨터마다 다르다' 였고, 그건 그대로 지켜진다.
+      - 이미 찍어둔 좌표가 있어도 **바꾼다** (그게 '역산해서 고쳐준다' 는 뜻이다).
+
+    🔒 **좌표 잠금(`coord_lock.json`)은 그대로 최우선** — 잠근 항목은 건너뛴다.
+    🚫 클로드는 여기서 `coords` 말고 다른 키를 쓰지 말 것."""
+    try:
+        man = os.path.join(REPO, "share_coords_fix.json")
+        if not os.path.exists(man):
+            return
+        with open(man, encoding="utf-8") as f:
+            keys = (json.load(f) or {}).get("keys") or []
+        if not keys:
+            return
+        dat_p = os.path.join(REPO, "share_coords_data.json")
+        dst_p = os.path.join(DESK, "coords.json")
+        if not (os.path.exists(dat_p) and os.path.exists(dst_p)):
+            return
+        with open(dat_p, encoding="utf-8") as f:
+            src = json.load(f) or {}
+        with open(dst_p, encoding="utf-8") as f:
+            dst = json.load(f) or {}
+        lock_k, _ = load_coord_lock()
+        got, locked, skip = [], [], []
+
+        def _only_coords(now, want):
+            """want 의 좌표만 now 에 얹는다 → (새 값, 바뀐 슬롯 수) 또는 None"""
+            if not isinstance(want, list):
+                return None, 0
+            if now is None:
+                now = []          # 로컬에 그 항목이 아직 없으면 빈 것에서 시작한다
+            if not isinstance(now, list):
+                return None, 0
+            # ① 슬롯 dict 목록 — coords 만 바꾼다
+            if want and isinstance(want[0], dict):
+                out, n = [], 0
+                for i, w in enumerate(want):
+                    cur = now[i] if i < len(now) and isinstance(now[i], dict) else {}
+                    new = dict(cur)                       # 🛡 로컬 설정을 통째로 보존
+                    if isinstance(w, dict) and "coords" in w:
+                        if new.get("coords") != w["coords"]:
+                            n += 1
+                        new["coords"] = w["coords"]       # 🚫 여기 말고 아무것도 안 쓴다
+                    out.append(new)
+                # 로컬에 슬롯이 더 많으면 남은 것은 그대로 둔다
+                out.extend(now[len(want):])
+                return out, n
+            # ② 그냥 좌표 목록 — 바꿀 설정이 없으니 통째로
+            return list(want), (0 if now == want else len(want))
+
+        for k in keys:
+            if k in lock_k:
+                locked.append(k); continue
+            w = src.get(k)
+            if w is None:
+                skip.append(f"{k}(보낼 값 없음)"); continue
+            new, n = _only_coords(dst.get(k), w)
+            if new is None:
+                skip.append(f"{k}(모양이 다름)"); continue
+            if n == 0:
+                continue
+            dst[k] = new
+            got.append(f"{k}({n}슬롯)")
+        if locked:
+            log(f"   🔒 잠금 — 건드리지 않음: {', '.join(locked)}")
+        if skip:
+            log(f"   ⚠ 건너뜀: {', '.join(skip)}")
+        if not got:
+            log("   📏 역산 좌표: 바꿀 것이 없습니다 (이미 같습니다)")
+            return
+        tmp = dst_p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(dst, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, dst_p)
+        log("   📏 역산 좌표만 받음: " + ", ".join(got)
+            + "  (ON/OFF·이름·물약·층은 그대로)")
+    except Exception as e:
+        log(f"   ⚠ 역산 좌표 동기화 실패: {e}")
+
+
 def sync_coord_keys(log):
     """coords.json 중 '지정한 항목만' 메인 것으로 받는다 (share_coords.json 의 keys).
     나머지 좌표는 로컬 것을 그대로 지킨다 — 컴퓨터마다 위치가 다르기 때문."""
@@ -1516,6 +1607,17 @@ def coords_guard_snapshot(log):
                     allow = [str(k) for k in ((json.load(f) or {}).get("keys") or [])]
         except Exception:
             allow = []
+        # 📏 역산 좌표 통로도 허락 목록에 넣는다 — 안 넣으면 `coords_guard_restore`
+        #    가 업데이트 끝에 **방금 고친 좌표를 도로 되돌린다** (2026-09-09 잠금).
+        try:
+            m2 = os.path.join(REPO, "share_coords_fix.json")
+            if os.path.exists(m2):
+                with open(m2, encoding="utf-8") as f:
+                    for k in ((json.load(f) or {}).get("keys") or []):
+                        if str(k) not in allow:
+                            allow.append(str(k))
+        except Exception:
+            pass
         with open(_coords_guard_path(), "w", encoding="utf-8") as f:
             json.dump({"snap": cur, "allow": allow}, f, ensure_ascii=False)
         log(f"   🔐 좌표 잠금: 이번에 받을 항목만 허용 — "
@@ -1888,6 +1990,7 @@ def main():
                 restore_local_coords_once(log)
                 sync_times(log)          # 좌표는 그대로, 시간만 메인과 맞춤
                 sync_coord_keys(log)     # 지정한 항목(낚시녹임 등)만 좌표도 받음
+                sync_coord_fix(log)      # 📏 역산된 **좌표만** (ON/OFF·설정은 그대로)
                 sync_island_keys(log)    # 지정한 던전은 통째로 받음
                 sync_recs(log)           # 지정한 녹화(⏺)만 받음 — 좌표는 그대로
                 apply_restore_order(log)  # 되돌리기 지시가 있으면 한 번만 수행
