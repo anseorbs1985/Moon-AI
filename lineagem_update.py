@@ -1252,7 +1252,20 @@ def log_trouble(reason):
 #      (CLAUDE.md 절대 규칙). 그 확인은 창 목록이라 즉시 끝난다.
 #    ⚠ **새 코드는 런처를 다시 켜야 적용된다.** 업데이트 창이 그렇게 알려준다.
 #    🚫 클로드는 사용자가 다시 요청하기 전까지 True 로 되돌리지 말 것.
-UPDATE_RESTART = False
+UPDATE_RESTART = True       # 업데이트 끝에 런처를 다시 띄운다 (사용자 지시로 유지)
+
+# ⚡ **빠른 재시작** (2026-11-05 사용자: *"5초에 다시 업데이트하고 재시작해주잖아,
+#    그건 해줘야지"* — 재시작은 **그대로 두고** 느린 확인만 뺀다).
+#    뺀 것 두 가지 (correctness 와 무관한 '겹겹이 확인'):
+#      · 종료 확인 10회 폴링 — `_any_py_running()` 한 번이 **1.68초**였다 (최악 26.8초)
+#      · 지문 확인 20초 대기 — 새 런처가 기록을 남길 때까지 기다렸다
+#    남긴 것 (이게 '두 번 재시작해야 먹힌다' 를 막는 핵심):
+#      · **무조건 종료** → **무조건 새로 띄운다** (`ensure_launcher` 처럼
+#        '떠 있으면 그대로' 가 아니다)
+#      · `__pycache__` 삭제 (옛 .pyc 가 살아남는 것 방지)
+#    🚫 클로드는 느린 폴링을 다시 넣지 말 것 — 그게 100초를 만들었다.
+RESTART_FAST   = True
+RESTART_WAIT   = 1.6        # 종료 뒤 이만큼만 쉰다 (초)
 
 
 def _any_py_running():
@@ -1377,6 +1390,13 @@ def kill_launchers(log=None):
            "Name='python.exe'\" | Where-Object { $_.CommandLine -match "
            "'lineagem_launcher|lineagem_island|lineagem_ocr|lineagem_dungeon' } | "
            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }")
+    # ⚡ 빠른 길 — **한 번 보내고 잠깐만 쉰다.** 확인하지 않는다.
+    #    `_any_py_running()` 은 한 번에 1.68초라 10번 돌면 그것만 26.8초다.
+    #    Stop-Process 는 바로 먹으므로 확인은 값에 비해 너무 비쌌다.
+    if RESTART_FAST:
+        sh(["powershell", "-NoProfile", "-Command", _ps])
+        time.sleep(RESTART_WAIT)
+        return True
     for _try in range(2):
         sh(["powershell", "-NoProfile", "-Command", _ps])
         for _ in range(10):
@@ -1413,6 +1433,20 @@ def force_restart_launcher(log=None):
        곳에서 쓰므로 그대로 남겨둔다.)"""
     p = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI",
                      "click_log.txt")
+    # ⚡ 빠른 길 — 끄고 · 캐시 지우고 · 띄운다. 지문 확인은 **안 기다린다.**
+    #    ('무조건 끄고 무조건 띄운다' 는 그대로라 "두 번 재시작" 은 안 돌아온다)
+    if RESTART_FAST:
+        if log:
+            log("   옛 런처를 내리고 새로 띄웁니다 (빠른 재시작)")
+        kill_launchers(log)
+        _clear_pycache(log)
+        ok = _spawn_launcher(log)
+        if log:
+            if ok:
+                log("   ✔ 런처를 띄웠습니다 (새 코드 지문 %s)" % (_code_md5() or "?"))
+            else:
+                log("   ⚠ 런처가 안 떴습니다")
+        return ok
     for _try in (1, 2):
         if log:
             log("   옛 런처를 종료합니다 (%d/2 — 전부 내려갈 때까지 확인)" % _try)
@@ -2402,7 +2436,7 @@ def main():
         if not UPDATE_RESTART:
             # 🚫 끄지도 띄우지도 않는다 — 꺼져 있을 때만 살려둔다 (즉시 끝난다)
             if _launcher_running():
-                log("5) 런처는 그대로 둡니다 (사용자 지시 — 재시작 안 함)")
+                log("5) 런처는 그대로 둡니다 (재시작 안 함)")
                 log("   ⚠ **새 코드는 런처를 다시 켜야 적용됩니다** — "
                     "메인런처의 [🔄 런처 재시작] 을 눌러주세요")
                 ok = True
@@ -2410,8 +2444,9 @@ def main():
                 log("5) 런처가 꺼져 있어 띄웁니다")
                 ok = ensure_launcher()
         else:
-            log("5) 런처 재시작 (옛 런처를 확실히 내리고 새로 띄웁니다)...")
+            log("5) 런처 재시작...")
             ok = force_restart_launcher(log)
+        # UPDATE_RESTART 가 꺼져 있을 때만 '직접 재시작하세요' 안내를 붙인다
         _tail = "" if UPDATE_RESTART else " — [🔄 런처 재시작] 을 눌러야 적용됩니다"
         if ok and copy_err is None and git_ok:
             finish("✔ 업데이트 완료!" + _tail)
