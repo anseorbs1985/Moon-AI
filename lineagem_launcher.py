@@ -6613,6 +6613,13 @@ def close_purple_popup_if_visible(cfg, status_fn=None):
 #    사람이 보려고 키운 창을 런처가 도로 줄이면 아무것도 못 본다.
 #    🚫 판정은 **'커졌을 때만'** 이다 — 작아졌거나 자리만 밀린 창은 예전처럼 고친다
 #       (그건 사람이 한 게 아니라 흐트러진 것이다).
+# 🚫 **자동 배치는 하지 않는다** (2026-11-05 사용자 지시:
+#    *"자동배치하는 거는 내가 수동으로 할게. **자동배치는 필요할 때 요청을 다시 할게**"*).
+#    끄는 것은 **0.3초마다 창 크기를 되돌리던 감시**(WindowSizeLock) 하나다.
+#    수동 버튼([📐 창 전체복원] · 슬롯별 [재배치])은 **그대로 동작한다.**
+#    🚫 클로드는 사용자가 다시 요청하기 전까지 True 로 되돌리지 말 것.
+WIN_AUTO_ARRANGE = False
+
 KEEP_BIG      = True     # 끄려면 False
 KEEP_BIG_MARGIN = 40     # 가로·세로가 이보다 많이 커졌으면 '사람이 키운 것'
 
@@ -6651,6 +6658,15 @@ class WindowSizeLock:
                 self._locks[hwnd] = (r[0], r[1], r[2]-r[0], r[3]-r[1])
             except Exception:
                 pass
+        # 🚫 자동 배치 꺼짐 — 감시 스레드를 **아예 띄우지 않는다** (2026-11-05).
+        #    창 목록만 기억해 두므로, 다시 켜고 싶을 때 WIN_AUTO_ARRANGE 만 True 로.
+        if self._locks and not WIN_AUTO_ARRANGE:
+            try:
+                click_log("[창] 🚫 리사이즈 차단을 켜려 했지만 **자동 배치가 꺼져 있다** "
+                          "(WIN_AUTO_ARRANGE=False · 사용자 지시) — 감시하지 않는다")
+            except Exception:
+                pass
+            return self._locks
         if self._locks:
             self._running = True
             self._thread = threading.Thread(target=self._watch, daemon=True)
@@ -14671,7 +14687,9 @@ class App(tk.Tk):
             if not sel: return
             chosen = [wins[i][0] for i in sel]
             self._win_lock.lock_all(chosen)
-            self._lock_status_var.set(f"리사이즈 차단 ON — {len(chosen)}개 창")
+            self._lock_status_var.set(
+                (f"리사이즈 차단 ON — {len(chosen)}개 창") if WIN_AUTO_ARRANGE
+                else "🚫 자동 배치 꺼짐 — 감시하지 않습니다 (수동 버튼만 동작)")
             self._btn_lock.config(bg="#27ae60")
             dlg.destroy()
 
@@ -32691,7 +32709,10 @@ class App(tk.Tk):
             if not hwnd:
                 miss.append(i + 1); continue
             try:
-                ok, _reason = self._apply_window_pos(hwnd, aw)
+                # 🖐 **수동으로 누른 버튼이므로 전부 옮긴다** (2026-11-05 사용자:
+                #    *"자동배치는 내가 수동으로 할게"* — 자동은 안 건드리고,
+                #    사람이 누른 것은 시킨 대로 한다). 키워둔 창도 제자리로.
+                ok, _reason = self._apply_window_pos(hwnd, dict(aw, force=True))
             except Exception:
                 ok, _reason = False, "오류"
             count += 1 if ok else 0
