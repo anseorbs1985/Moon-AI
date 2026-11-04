@@ -2839,13 +2839,38 @@ def slot_zones_live():
 
 
 def slot_zones_save(rows):
+    """🔑 짝을 **합쳐서** 기억한다 (덮어쓰지 않는다).
+
+    🚨 2026-11-04 사고: 예전에는 받은 목록으로 **통째로 덮어썼다.** 클라가
+       8개만 켜진 채 눌렀더니 기억이 8개로 줄었고, 그 뒤 녹화·★ 교체가
+       **그 8개에만** 들어가 나머지 8개는 옛 ★(r6~r9)가 그대로 남았다.
+       → **zone GUID 로 합친다.** 한 번이라도 본 클라는 안 사라진다.
+    🚫 '덮어쓰기' 로 되돌리지 말 것."""
     try:
+        old, _at = slot_zones_saved()
+        seen = {b.upper() for _a, b in rows if b}
+        merged = list(rows) + [(a, b) for a, b in old
+                               if b and b.upper() not in seen]
         os.makedirs(os.path.dirname(REC_ZONE_MAP), exist_ok=True)
         json.dump({"at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                   "slots": [{"name": a, "zone": b} for a, b in rows]},
+                   "slots": [{"name": a, "zone": b} for a, b in merged]},
                   open(REC_ZONE_MAP, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+
+def slot_zones_all():
+    """🔑 지금 켜진 것을 기억에 더한 뒤 **아는 짝 전부**를 돌려준다 → (목록, 설명)
+
+    🧭 녹화·키보드·★ 는 **16클라에 똑같이** 들어가므로 '지금 켜진 것' 이 아니라
+       **아는 것 전부**가 대상이다. (2026-11-04 — 8개만 들어간 사고)"""
+    live = slot_zones_live()
+    if live:
+        slot_zones_save(live)
+    rows, at = slot_zones_saved()
+    if not rows:
+        return live, "지금"
+    return rows, ("지금 켜진 %d개 포함" % len(live)) if live else at
 
 
 def slot_zones_saved():
@@ -6581,10 +6606,7 @@ class App(tk.Tk):
                 except Exception:
                     pass
                 return
-            live = slot_zones_live()
-            if live:
-                slot_zones_save(live)
-            rows, _at = (live, "지금") if live else slot_zones_saved()
+            rows, _at = slot_zones_all()   # 🔑 **아는 짝 전부** (2026-11-04)
             if not rows:
                 _msg("⌨ 키보드",
                      "퍼플 클라를 아직 한 번도 못 봤습니다." + chr(10)
@@ -6836,10 +6858,7 @@ class App(tk.Tk):
 
     def _rec_win_scan(self):
         try:
-            live = slot_zones_live()
-            if live:
-                slot_zones_save(live)
-            rows, at = (live, "지금 켜진 클라") if live else slot_zones_saved()
+            rows, at = slot_zones_all()    # 🔑 **아는 짝 전부** (2026-11-04)
             cnt = kb_now(rows)
             src = rec_key_file()
             files = rec_drop_files()
@@ -6923,10 +6942,7 @@ class App(tk.Tk):
         try:
             import shutil
             rec_make_dirs()
-            live = slot_zones_live()
-            if live:
-                slot_zones_save(live)
-            rows, at = (live, "지금") if live else slot_zones_saved()
+            rows, at = slot_zones_all()    # 🔑 **아는 짝 전부** (2026-11-04)
             files = rec_drop_files()      # {번호: 파일}
             # ⭐ **별표로 고른 칸** — 창에서 누른 그대로 (2026-11-04 사용자 요청)
             _picks = rec_fav_get()
