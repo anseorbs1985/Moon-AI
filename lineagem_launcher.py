@@ -1764,6 +1764,19 @@ MAIN_WIN_POS = (527, 140)
 #    (y 는 그대로). 창 가로가 컴퓨터마다 달라도 늘 오른쪽에 딱 붙는다.
 #    끄려면 False — 그러면 예전처럼 `MAIN_WIN_POS` 자리로 간다.
 MAIN_WIN_RIGHT = True
+# 🪟 **창이 틀어지면 스스로 맞춘다** (2026-11-04 사용자: *"재부팅하거나 화면이
+#    틀어지거나 하면 너가 복원을 시켜줄 수 있어? 재배치를 너가 눌러줘"*).
+#    🧭 이것은 **창을 옮기는 것뿐** — 게임에 클릭을 보내지 않는다. 그래서
+#       '실행은 사용자가 시킬 때만'(2026-08-10) 규칙과 어긋나지 않는다.
+#    ⚠ 사람이 보고 있을 때 창이 갑자기 움직이면 놀라므로 **손을 뗐을 때만** 한다.
+GRID_AUTO_ON   = True        # coords.json 의 `grid_auto` 로 끌 수 있다
+GRID_AUTO_MS   = 180000      # 3분마다 확인 (창 목록만 읽는다 — 가볍다)
+GRID_AUTO_IDLE = 3.0         # 사람이 이만큼 안 만졌을 때만
+#    📏 20초로 뒀더니 **사용자가 컴퓨터를 쓰는 동안 영영 안 맞춰졌다**
+#       (기록: "사람이 만진 지 1초"). 퍼플 클라 창은 테두리가 없어
+#       **드래그로 옮길 수 없으므로** 사람과 부딪힐 일이 없다 —
+#       클릭하는 그 순간만 피하면 된다.
+GRID_AUTO_FIRST_MS = 12000   # 런처가 켜진 뒤 첫 확인까지 (클라가 다 뜰 틈)
 
 # 🚫 악몽의섬 슬롯판 왼쪽을 [🎟 쿠폰등록] 에 맞추던 기능 (2026-09-20) — 껐다.
 #    2026-11-03 에 용던고고·인사이드 열을 슬롯판 오른쪽으로 옮기면서,
@@ -6131,6 +6144,8 @@ class App(tk.Tk):
         # 💧 물약 0개 상시 감시 — 사냥 도중에 떨어지는 것을 잡는다 (2026-10-13)
         self.after(20000, self._p0_watch_tick)
         self.after(40000, self._mail_tick)          # 📬 우편 자동받기
+        # 🪟 창이 틀어지면 스스로 맞춘다 (재부팅 대응 — 2026-11-04 사용자 요청)
+        self._grid_auto_start()
         # 🗓 매주 수요일 10시 — 사람이 완전히 손을 뗐을 때만 퍼플 전환
         self.after(45000, self._base_wed_tick)
         self.after(4000, self._bot_start_watcher)
@@ -30974,6 +30989,80 @@ class App(tk.Tk):
             ri = min(range(4), key=lambda i: abs(r[1] - (y0 + gy * i)))
             plan[h] = (x0 + gx * ci, y0 + gy * ri, W, H)
         return plan, "격자 x %d+%d씩 · y %d+%d씩 · 크기 %dx%d" % (x0, gx, y0, gy, W, H)
+
+    def _grid_auto_start(self):
+        """🪟 창 격자 **자동 맞추기**를 시작한다 (런처가 켜질 때 한 번 건다)."""
+        try:
+            self.after(GRID_AUTO_FIRST_MS, self._grid_auto_tick)
+        except Exception:
+            pass
+
+    def _grid_auto_tick(self):
+        """🪟 3분마다 — **틀어져 있으면 스스로 맞춘다.**
+
+        🧭 2026-11-04 사용자 요청. 재부팅하면 퍼플이 `purple_zone.config` 로
+           창을 띄우지만 1px 씩 어긋날 때가 있다.
+        ⚠ 무거운 일(창 목록 읽기·옮기기)은 **백그라운드 스레드**에서 한다 —
+          `after` 틱에서 하면 그 시간만큼 화면이 멈춘다 (2026-09-16 교훈).
+        🚫 **사람이 만지는 중이면 건드리지 않는다** — 창이 갑자기 움직이면 놀란다.
+        🚫 **작업이 돌고 있으면 건드리지 않는다** — 클릭 중에 창을 옮기면 엉킨다."""
+        try:
+            self.after(GRID_AUTO_MS, self._grid_auto_tick)      # 다음 확인 예약
+        except Exception:
+            pass
+        try:
+            if not self.cfg.get("grid_auto", GRID_AUTO_ON):
+                self._grid_auto_why("꺼져 있다 (coords.json 의 grid_auto)")
+                return
+            if self._is_busy():
+                self._grid_auto_why("다른 작업이 도는 중")
+                return
+            try:
+                import precise_click as _pc
+                _idle = _pc.human_idle_seconds()
+            except Exception:
+                _idle = 999.0
+            if _idle < GRID_AUTO_IDLE:
+                self._grid_auto_why("사람이 만진 지 %.0f초 (기준 %.0f초)"
+                                    % (_idle, GRID_AUTO_IDLE))
+                return
+            threading.Thread(target=self._grid_auto_work, daemon=True).start()
+        except Exception as e:
+            self._grid_auto_why("오류 %s" % e)
+
+    def _grid_auto_why(self, why):
+        """🪟 자동 맞추기를 **왜 안 했는지** 남긴다 — 같은 이유는 5분에 한 번.
+
+        🚫 조용히 빠지는 길을 만들지 말 것 — 이 저장소에서 여러 번 당했다."""
+        try:
+            t = time.time()
+            last = getattr(self, "_grid_why", ("", 0.0))
+            if last[0] == why and t - last[1] < 300:
+                return
+            self._grid_why = (why, t)
+            click_log("[격자] 🪟 자동 맞추기 건너뜀 — " + why)
+        except Exception:
+            pass
+
+    def _grid_auto_work(self):
+        """🪟 실제로 재어 보고 틀어졌으면 맞춘다 (스레드)."""
+        try:
+            rows = [(h, win32gui.GetWindowRect(h))
+                    for h, _l, _t, _w, _hh in self._get_purple_hwnds()]
+            plan, why = self._grid_plan(rows)
+            if not plan:
+                return                      # 16개가 아니면 조용히 넘어간다
+            bad = [h for h, r in rows
+                   if plan[h] != (r[0], r[1], r[2] - r[0], r[3] - r[1])]
+            if not bad:
+                return                      # 이미 딱 맞는다 — 아무것도 안 한다
+            n, why2 = self._grid_fix()
+            if n:
+                click_log(f"[격자] 🪟 **스스로 맞췄다** {n}개 — {why2}")
+                self.after(0, lambda: self.status.set(
+                    f"🪟 창이 틀어져 있어 {n}개를 자동으로 맞췄습니다"))
+        except Exception as e:
+            click_log(f"[격자] ⚠ 자동 맞추기 실패 — {e}")
 
     def _grid_fix(self):
         """📏 **지금 창들을 그 격자에 맞춘다** → (고친 개수, 설명).
