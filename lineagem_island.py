@@ -625,6 +625,95 @@ def omanst_read(big, kind=None, loose=False, force=False, row_y=None):
         return None, None, 0, 0.0
 
 
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║ 🏢 오만의탑 **갈 층** — 칸23('퀘스트')이 누르는 층 목록 (2026-11-05)      ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+# 사용자 2026-11-05: *"왜 전부 5층만 선택을 하는거야? 층이 다 달라."*
+#
+# 🔎 원인 — **칸23 이 층을 고르는 자리**다 (슬롯 이름표도 '퀘스트').
+#    프리셋은 멀쩡했다 — 층마다 **칸23 좌표만** 다르다. 그런데 16슬롯 중
+#    **15개가 '5층' 프리셋**이라 전부 5층 줄을 눌렀다 (실측 11-05 08:07
+#    `#10 (1383,569)` · `#12 (1384,1265)` → 둘 다 창안 (180,184) = 5층).
+#
+# 📏 층 목록은 **줄 간격이 일정한 고정 목록**이다 (프리셋 15개 실측 · 창 546x307):
+#      3층 y229 · 5층 y184.0 · 6층 y162.0 · 7층 y138.7 · 8층 y116.3  (x≈184)
+#    한 층 = **22.54px**, 직선에서 벗어난 값이 **0.6px 뿐** → 층 번호로 계산 가능.
+#
+# 그래서 슬롯마다 **드롭다운으로 층을 고르면** 칸23 을 그 줄로 누른다.
+# 🚫 '안함' 이면 예전처럼 **등록된 칸23 좌표**를 누른다 — 안 쓰는 컴퓨터는 영향 0.
+# 🚫 계산보다 **사용자가 프리셋에 직접 찍어둔 값이 먼저다** (`omanst_floor_rel`).
+OMANST_FLOOR_IDX = 22          # 칸23 (0부터) — 층 목록을 누르는 자리
+OMANST_FLOOR_W   = 546.0       # 재던 창 크기 (이 비율로 환산한다)
+OMANST_FLOOR_H   = 307.0
+OMANST_FLOOR_X   = 184.0       # 층 줄 가운데 x (창안)
+OMANST_FLOOR_Y3  = 229.0       # 3층 y (창안)
+OMANST_FLOOR_DY  = 22.54       # 한 층 올라갈 때마다 위로
+OMANST_FLOOR_LIST = (0, 3, 4, 5, 6, 7, 8)   # 0 = 안함(등록된 좌표를 그대로)
+
+
+def omanst_floor_of(slot):
+    """그 슬롯이 갈 층 (0 = 안함)."""
+    try:
+        v = int((slot or {}).get("omanst_floor") or 0)
+    except Exception:
+        return 0
+    return v if v in OMANST_FLOOR_LIST else 0
+
+
+def omanst_floor_name(n):
+    """드롭다운에 보일 글자. ⚠ 숫자+'층' 모양을 지킬 것 — 저장할 때 숫자만 뽑는다."""
+    return u"🏢 안함" if not n else u"🏢 %d층" % n
+
+
+def omanst_floor_rel(floor, presets=None):
+    """그 층 줄의 **창안 좌표** (x, y, 출처). 창 546x307 기준.
+
+    되도록 **사용자가 프리셋에 직접 찍어둔 값**을 쓴다 (`_presets` 칸23 의 `rel`).
+    같은 층 프리셋이 여럿이면 평균. 없는 층(4층)만 직선식으로 계산한다.
+    🚫 '계산' 이 '사용자가 찍은 값' 을 이기게 바꾸지 말 것."""
+    xs, ys = [], []
+    for p in (presets or []):
+        try:
+            if str((p or {}).get("floor") or "") != u"%d층" % int(floor):
+                continue
+            rel = (((p.get("items") or {}).get(str(OMANST_FLOOR_IDX)) or {}).get("rel"))
+            if rel and len(rel) >= 2:
+                xs.append(float(rel[0]))
+                ys.append(float(rel[1]))
+        except Exception:
+            pass
+    if xs:
+        return sum(xs) / len(xs), sum(ys) / len(ys), u"프리셋 실측 %d개" % len(xs)
+    return (OMANST_FLOOR_X,
+            OMANST_FLOOR_Y3 - (int(floor) - 3) * OMANST_FLOOR_DY,
+            u"직선 계산")
+
+
+def omanst_floor_point(anchor, floor, presets=None):
+    """그 클라 창에서 **그 층 줄**의 화면 좌표 (x, y, 설명). 못 구하면 (None, None, 이유).
+
+    창 크기 비율로 환산하므로 창이 커지거나 작아져도 맞는다."""
+    try:
+        import ctypes, ctypes.wintypes
+        from precise_click import game_window_at
+        h = game_window_at(int(anchor[0]), int(anchor[1]))
+        if not h:
+            return None, None, u"리니지M 창을 못 찾았다"
+        r = ctypes.wintypes.RECT()
+        ctypes.windll.user32.GetWindowRect(h, ctypes.byref(r))
+        w, ht = r.right - r.left, r.bottom - r.top
+        if w <= 0 or ht <= 0:
+            return None, None, u"창 크기를 못 쟀다"
+        rx, ry, how = omanst_floor_rel(floor, presets)
+        x = r.left + rx * (w / OMANST_FLOOR_W)
+        y = r.top + ry * (ht / OMANST_FLOOR_H)
+        if not (r.left <= x <= r.right and r.top <= y <= r.bottom):
+            return None, None, u"계산한 자리가 창 밖이다"
+        return int(round(x)), int(round(y)), u"창안 (%d,%d) · %s" % (rx, ry, how)
+    except Exception as e:
+        return None, None, u"오류 %s" % e
+
+
 def omanst_pick(app, anchor, slot, log=None):
     """🏢 **원하는 종류 줄을 골라 누른다** — 세 번까지 새로고침하며.
 
@@ -2028,6 +2117,7 @@ class IslandApp(tk.Tk):
         self._repn_vars = {d["key"]: [] for d in DUNGEONS}   # 반복 '횟수' 드롭다운 변수
         # 🏢 오만의탑 — 슬롯마다 고른 정화 우선순위 드롭다운 변수 (2026-10-15)
         self._omanst_vars = {}
+        self._omanst_fvars = {}      # 🏢 슬롯마다 '갈 층' 드롭다운
         self._numsel    = {}                                 # 번호 지정 일괄 입력칸
         self._repeat_left = {}                               # (key,idx) → 남은 반복 횟수
         self._paste_marks = {}                               # 붙여넣기 표시(⭕) 라벨
@@ -2693,6 +2783,19 @@ class IslandApp(tk.Tk):
                            activebackground="#512e5f")
                 oom.pack(side="left")
                 self._omanst_vars.setdefault(key, {})[i] = ov
+                # 🏢 **이 슬롯이 갈 층** (2026-11-05 사용자 지시) — 칸23 을
+                #    그 층 줄로 누른다. '안함' 이면 등록된 좌표를 그대로 쓴다.
+                r7 = tk.Frame(cell); r7.pack(pady=(1, 0))
+                fv = tk.StringVar(value=omanst_floor_name(omanst_floor_of(_sl0)))
+                fom = tk.OptionMenu(r7, fv,
+                                    *[omanst_floor_name(n) for n in OMANST_FLOOR_LIST],
+                                    command=lambda val, k=key, x=i:
+                                    self._set_omanst_floor(k, x, val))
+                fom.config(font=("맑은 고딕", 6), width=10, pady=0,
+                           highlightthickness=0, bg="#1f618d", fg="white",
+                           activebackground="#154360")
+                fom.pack(side="left")
+                self._omanst_fvars.setdefault(key, {})[i] = fv
 
         self._refresh(key)
 
@@ -2714,6 +2817,46 @@ class IslandApp(tk.Tk):
             self._rlog(f"[오만의탑] #{idx+1:02d} 우선순위 {val} {pref}")
         except Exception as e:
             self._status.set(f"⚠ 우선순위 저장 실패: {e}")
+
+    def _set_omanst_floor(self, key, idx, val):
+        """🏢 그 슬롯이 **갈 층** 을 정한다 (2026-11-05 사용자 지시).
+
+        `island_coords.json` 의 그 슬롯에 `omanst_floor` 로 저장한다 —
+        그 파일은 코드가 배포를 막고 있어 **컴퓨터마다 따로** 간다
+        (캐릭터가 컴퓨터마다 다르므로 그게 맞다).
+        ⚠ 이름에서 **숫자만** 뽑는다 — `endswith("층")` 로 읽으면 기호를 붙인
+          이름이 0 으로 저장된다 (2026-09-16 에 실제로 그랬다)."""
+        try:
+            import re as _re
+            m = _re.search(r"(\d+)\s*층", str(val))
+            fl = int(m.group(1)) if m else 0
+            if fl not in OMANST_FLOOR_LIST:
+                fl = 0
+            slots = self.cfg.setdefault(key, [{} for _ in range(SLOTS)])
+            while len(slots) <= idx:
+                slots.append({})
+            slots[idx]["omanst_floor"] = fl
+            save_cfg(self.cfg)
+            if not fl:
+                self._status.set(f"🏢 #{idx+1:02d} 갈 층 → 안함 "
+                                 f"(등록된 칸23 좌표를 그대로 누릅니다)")
+                self._rlog(f"[오만의탑] #{idx+1:02d} 갈 층 안함 — 칸23 좌표 그대로")
+                return
+            anc = self._slot_anchor(slots[idx])
+            pres = (self.cfg.get("_presets") or {}).get(key) or []
+            if anc:
+                x, y, how = omanst_floor_point(anc, fl, pres)
+            else:
+                x, y, how = None, None, "등록된 좌표가 없어 어느 클라인지 모른다"
+            if x is None:
+                self._status.set(f"⚠ #{idx+1:02d} {fl}층 으로 저장했지만 "
+                                 f"지금 자리를 못 쟀습니다 — {how}")
+            else:
+                self._status.set(f"🏢 #{idx+1:02d} 갈 층 → {fl}층  "
+                                 f"(칸23 을 그 줄로 누릅니다 · {how})")
+            self._rlog(f"[오만의탑] #{idx+1:02d} 갈 층 {fl}층 · {how}")
+        except Exception as e:
+            self._status.set(f"⚠ 갈 층 저장 실패: {e}")
 
     def _open_slot_pop(self, key, idx):
         """슬롯 좌표 등록 팝업 — 이름 + 클릭1~6 버튼 + 그룹복사."""
@@ -6506,6 +6649,63 @@ class IslandApp(tk.Tk):
                 pass
             return True
 
+    def _omanst_floor_click(self, key, si, slot, j):
+        """🏢 오만의탑 칸23 — 슬롯이 고른 **갈 층** 줄을 눌렀으면 True.
+
+        드롭다운이 '안함' 이면 False → 예전처럼 등록된 좌표를 누른다.
+        ⚠ **웨이브(`_do_one_click`)와 순차(`_run`) 양쪽에서 부른다** —
+          한쪽만 걸면 '개별은 되는데 전체실행은 안 된다' 가 또 생긴다
+          (2026-10-05·10-10·10-15 에 같은 종류로 세 번 당했다)."""
+        try:
+            if key != OMANST_KEY or j != OMANST_FLOOR_IDX:
+                return False
+            fl = omanst_floor_of(slot)
+            if not fl:
+                return False
+            anc = self._slot_anchor(slot)
+            if not anc:
+                self._rlog(u"[오만의탑] ⚠ #%02d 등록된 좌표가 하나도 없어 "
+                           u"어느 클라인지 모른다 — %d층 을 누르지 못했다"
+                           % (si + 1, fl))
+                return False
+            pres = (self.cfg.get("_presets") or {}).get(key) or []
+            x, y, how = omanst_floor_point(anc, fl, pres)
+            # 🎯 **x 는 등록된 칸23 것을 그대로 쓴다 — y(층)만 바꾼다.**
+            #    층 목록에서 x 는 '어느 칸' 이 아니라 그냥 줄 안의 가로 위치라
+            #    사용자가 찍어둔 x 가 가장 안전하다 (실측: 계산 x 가 등록값과
+            #    최대 6px 차이 — 줄 간격 22.5px 에는 영향 없지만 굳이 바꿀 이유가 없다).
+            try:
+                _c0 = slot.get("coords") or []
+                if len(_c0) > j and _c0[j] and x is not None:
+                    x = int(_c0[j][0])
+                    how += u" · x 는 등록 좌표 그대로"
+            except Exception:
+                pass
+            if x is None:
+                self._rlog(u"[오만의탑] ⚠ #%02d %d층 자리를 계산하지 못했다 (%s) "
+                           u"— 등록된 좌표를 그대로 누른다" % (si + 1, fl, how))
+                return False
+            try:
+                self._focus_client(si, anc)
+                time.sleep(random.uniform(0.25, 0.45))
+                self._last_focus = si
+            except Exception:
+                pass
+            click_at(x, y)
+            _c = slot.get("coords") or []
+            _old = _c[j] if j < len(_c) else None
+            self._rlog(u"[오만의탑] 🏢 #%02d **%d층** 줄을 눌렀다 (%d,%d) · %s%s"
+                       % (si + 1, fl, x, y, how,
+                          (u" · 등록 좌표 (%d,%d) 는 쓰지 않았다" % (_old[0], _old[1]))
+                          if _old else u""))
+            return True
+        except Exception as e:
+            try:
+                self._rlog(u"[오만의탑] 층 고르기 오류 — %s · 등록된 좌표를 누른다" % e)
+            except Exception:
+                pass
+            return False
+
     def _wake_skip1(self, si, slot, name=""):
         """좌표1 을 **건너뛸까** → 깨어 있으면 True.
 
@@ -6555,6 +6755,10 @@ class IslandApp(tk.Tk):
         #    고르기가 통째로 건너뛰어진다 (그러면 좌표로 3번째 줄 = 정복을 누른다).
         if self._omanst_try(key, si, slot, j):
             self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) 정화 고름")
+            return True
+        # 🏢 **칸23 — 슬롯이 고른 '갈 층' 줄을 누른다** (2026-11-05).
+        #    ⚠ 순차(`_run`)의 같은 분기와 **한 쌍이다.**
+        if self._omanst_floor_click(key, si, slot, j):
             return True
         _rm = ((slot.get("rasta") or {}).get(str(j)) or {}).get("mode")
         if _rm in RASTA_FIRST:
@@ -7344,6 +7548,11 @@ class IslandApp(tk.Tk):
                         #     알려주는 용도다). 녹화(⏺)는 아래에서 그대로 재생된다 —
                         #    '그림 누른 뒤 녹화 재생' 은 쓸모가 있어 막지 않았다.
                         d_ = None
+                    elif self._omanst_floor_click(key, si, slot, j):
+                        # 🏢 오만의탑 칸23 — 슬롯이 고른 **갈 층** 줄을 눌렀다.
+                        #    ⚠ 웨이브(`_do_one_click`)와 **한 쌍**. 좌표가 등록돼
+                        #      있지 않아도 되도록 `coords[j]` 검사 **앞**에 둔다.
+                        did = True
                     elif d_ and d_[0] == "⇩":
                         # 등록한 좌표를 짧게 누르고 아래로 살짝 끌어내리기 (스크롤)
                         if coords[j]:
