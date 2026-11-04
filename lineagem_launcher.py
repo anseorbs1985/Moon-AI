@@ -1837,6 +1837,11 @@ MAIN_WIN_RIGHT = True
 #       코드에 두므로 로컬은 **🔄 업데이트만 하면** 같은 배치가 된다.
 #    한 칸 602x347 = 게임창 546x307 + 상단바 40 + 옆바 56 (실측 2026-11-03).
 #    🚫 숫자를 바꾸면 **모든 컴퓨터의 배치가 바뀐다** — 좌표도 같이 어긋난다.
+# 🪟 재배치는 **옮긴 뒤 확인하고 다시 시도**한다 (2026-11-04 — 한 번 부르고
+#    결과를 안 봐서 '어떤 건 가고 어떤 건 안 가는' 증상이 났다).
+GRID_TRIES = 3          # 한 창을 몇 번까지 다시 옮겨볼까
+GRID_SETTLE = 0.12      # 옮기고 다시 재기까지 (초)
+GRID_SLACK = 2          # 이 픽셀 안이면 맞은 것으로 본다
 GRID_FIXED = {
     (2560, 1440): {"x0": 0, "y0": 40, "gx": 602, "gy": 347, "w": 546, "h": 307},
 }
@@ -31568,22 +31573,54 @@ class App(tk.Tk):
             click_log(f"[격자] 맞추지 않음 — {why}")
             return 0, why
         u = ctypes.windll.user32
-        fixed, det = 0, []
+        fixed, det, bad = 0, [], []
         for h, r in rows:
             x, y, w, hh = plan[h]
-            if (r[0], r[1], r[2] - r[0], r[3] - r[1]) == (x, y, w, hh):
+            nm = (win32gui.GetWindowText(h) or "").replace("리니지M l ", "")[:8]
+
+            def _ok(rr):
+                return (abs(rr[0] - x) <= GRID_SLACK and abs(rr[1] - y) <= GRID_SLACK
+                        and abs((rr[2] - rr[0]) - w) <= GRID_SLACK
+                        and abs((rr[3] - rr[1]) - hh) <= GRID_SLACK)
+
+            if _ok(r):
                 continue
-            try:
-                nm = (win32gui.GetWindowText(h) or "").replace("리니지M l ", "")
-                u.SetWindowPos(h, 0, x, y, w, hh, 0x0004 | 0x0010)  # NOZORDER|NOACTIVATE
-                det.append("%s %+d,%+d %+dx%+d" % (
-                    nm[:8], x - r[0], y - r[1],
-                    w - (r[2] - r[0]), hh - (r[3] - r[1])))
-                fixed += 1
-            except Exception as e:
-                click_log(f"[격자] ⚠ 못 옮김 — {e}")
+            # 🔁 **옮기고 → 다시 재서 확인 → 어긋나면 다시** (2026-11-04).
+            #    한 번만 부르면 게임 창이 안 따라올 때가 있다 (크기 제약·퍼플 되돌림).
+            #    🚫 결과를 안 보고 '고침' 으로 세지 말 것.
+            now = r
+            for _t in range(GRID_TRIES):
+                try:
+                    u.SetWindowPos(h, 0, x, y, w, hh, 0x0004 | 0x0010)  # NOZORDER|NOACTIVATE
+                except Exception as e:
+                    click_log(f"[격자] ⚠ {nm} 못 옮김 — {e}")
+                    break
+                nap(GRID_SETTLE)
+                try:
+                    now = win32gui.GetWindowRect(h)
+                except Exception:
+                    break
+                if _ok(now):
+                    det.append("%s %+d,%+d %+dx%+d%s" % (
+                        nm, x - r[0], y - r[1],
+                        w - (r[2] - r[0]), hh - (r[3] - r[1]),
+                        "" if _t == 0 else "(%d번째)" % (_t + 1)))
+                    fixed += 1
+                    break
+            else:
+                bad.append("%s 바란 %d,%d %dx%d / 실제 %d,%d %dx%d"
+                           % (nm, x, y, w, hh, now[0], now[1],
+                              now[2] - now[0], now[3] - now[1]))
         click_log(f"[격자] {why} → {fixed}개 고침"
-                  + (" | " + "  ".join(det) if det else " (이미 딱 맞음)"))
+                  + (" | " + "  ".join(det) if det else
+                     ("" if bad else " (이미 딱 맞음)"))
+                  + (f" | ⚠ {len(bad)}개 안 맞음: " + " · ".join(bad) if bad else ""))
+        if bad:
+            try:
+                self.status.set("⚠ 재배치 — %d개가 제자리로 안 갔습니다 "
+                                "(클릭기록에 어느 창인지 남았습니다)" % len(bad))
+            except Exception:
+                pass
         return fixed, why
 
     def _save_all_window_pos(self):
