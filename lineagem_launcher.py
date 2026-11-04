@@ -2274,6 +2274,16 @@ CHAR_WAIT_FIRST = 4.8   # 멀티플레이 클릭 → 첫 캐릭터까지 (전 6�
 #    🚫 `game_start`→`multiplay`(6초)·`CHAR_WAIT_FIRST`(4.8초)는 건드리지 말 것 —
 #       화면이 뜨기를 기다리는 시간이라 줄이면 더 씹힌다.
 CHAR_GAP_EACH   = (1.0, 2.0)   # 1바퀴째 — 버튼 하나 누르고 다음까지
+
+# 🪟 **4개씩 묶어 띄운다** (2026-11-04 사용자 지시:
+#    *"한 번에 접속을 하니까 팅겨. 4개나 5개 접속이 완료가 되면 다른 거 눌러주고.
+#      한 번에 열몇 개를 동시에 접속하면 **무조건 재접속 뜨면서 팅기더라**"*).
+#    창이 하나 뜰 때마다 부하가 걸린다 — 묶음이 **실제로 다 뜬 것을 확인**하고 다음으로.
+#    ⚠ 창 수만 센다(`_game_win_count`) — 화면을 긁지 않으므로 부하가 없다.
+#    🚫 이 묶음 대기를 없애지 말 것. 없애면 전부 동시에 접속해 팅긴다.
+CHAR_BATCH      = 4            # 한 묶음에 몇 개를 누르나
+CHAR_BATCH_MAX  = 75           # 그 묶음이 다 뜰 때까지 최대 기다림(초)
+CHAR_BATCH_GAP  = (3.0, 5.0)   # 다 뜬 뒤 다음 묶음까지 여유 (사용자: "5초 정도")
 CHAR_WAIT_EACH  = 1.1          # (옛 고정값 — 호환용으로 남겨둔다)
 # ⏱ 입장 단계에서 **클라를 옮겨 갈 때**만 쉬는 짧은 틈 (2026-11-04 '3분 안에').
 #    🚫 `ENTER_LOGIN_WAIT`(화면이 바뀌기를 기다리는 시간)과 헷갈리지 말 것 —
@@ -34380,6 +34390,39 @@ class App(tk.Tk):
             pass
         return n[0]
 
+    def _char_batch_wait(self, base, pressed, tag=""):
+        """🪟 **누른 만큼 창이 뜰 때까지** 기다린다 (2026-11-04 사용자 지시).
+
+        한 번에 열몇 개를 띄우면 **재접속이 뜨면서 팅긴다** — 그래서
+        `CHAR_BATCH` 개씩 누르고 그만큼 실제로 뜬 뒤 다음 묶음으로 간다.
+        ⚠ 창 수만 센다 — 화면을 긁지 않으므로 부하가 없다.
+        ⚠ 끝내 안 뜨면 **기록을 남기고 그냥 간다** (여기서 멈추면 더 나쁘다)."""
+        import time as _t
+        want = base + pressed
+        t0 = _t.time()
+        got = self._game_win_count()
+        if got >= want:
+            click_log(f"[접속] 🪟 {tag} {pressed}개 다 떴다 (창 {got}/{want})")
+        else:
+            click_log(f"[접속] 🪟 {tag} {pressed}개가 다 뜰 때까지 기다린다 "
+                      f"(지금 창 {got} → {want})")
+            while _t.time() - t0 < CHAR_BATCH_MAX:
+                if self._stop_flag:
+                    return False
+                got = self._game_win_count()
+                if got >= want:
+                    click_log(f"[접속] 🪟 {tag} 다 떴다 — 창 {got}/{want} "
+                              f"({_t.time()-t0:.0f}초 걸렸다)")
+                    break
+                self.status.set(f"🪟 접속 기다리는 중 — 창 {got}/{want} "
+                                f"({_t.time()-t0:.0f}초)")
+                if not self._wait(1.0):
+                    return False
+            else:
+                click_log(f"[접속] 🪟 ⚠ {tag} {CHAR_BATCH_MAX}초를 기다려도 "
+                          f"창 {got}/{want} — 그냥 다음으로 간다")
+        return self._wait(random.uniform(*CHAR_BATCH_GAP))
+
     def _purple_wait_settle(self, tag="", maxw=PURPLE_SETTLE_MAX, want=None):
         """🪟 **게임 창이 다 뜨는 것을 기다린다** (새 창 수가 멈출 때까지).
 
@@ -35341,6 +35384,11 @@ class App(tk.Tk):
                               f"→ 다 뜨면 창 {self._want_wins}개가 된다")
                 except Exception:
                     self._want_wins = None
+                # 🪟 묶음 대기의 기준 — 누르기 전 창 수
+                try:
+                    _cbase = self._game_win_count()
+                except Exception:
+                    _cbase = 0
                 for _p in range(CHAR_PASSES):
                     if _p:
                         # 🔁 2바퀴째 — 첫 바퀴에서 씹힌 것을 확인 사살한다
@@ -35353,6 +35401,13 @@ class App(tk.Tk):
                             _rows = _r2
                     for i, (cx, cy) in enumerate(_rows):
                         if self._stop_flag: self.status.set("멈춤"); return
+                        # 🪟 **4개 누를 때마다** 그만큼 뜬 것을 확인하고 간다
+                        #    (한 번에 다 누르면 재접속이 뜨며 팅긴다 — 사용자 지시)
+                        if _p == 0 and i and i % CHAR_BATCH == 0:
+                            if not self._char_batch_wait(
+                                    _cbase, i, f"{i//CHAR_BATCH}묶음"):
+                                self.status.set("멈춤")
+                                return
                         if acc_idx == 0 and i == 0 and _p == 0:
                             self._run_char01_t = time.time()   # 캐릭터01 접속 시각 (4분30초 제한 측정)
                         _ring = char_ring_px(cx, cy)
