@@ -316,15 +316,20 @@ ENTER_TOP_CHAR = (127 / 546.0, 59 / 307.0)   # 맨 위 캐릭 줄 가운데
 ENTER_MATCH    = 0.70        # '입장하기' 글자 일치 기준
 ENTER_PASSES   = 3           # 몇 바퀴 볼까 (하나씩 돌고, 못 한 것만 다시)
 ENTER_PASS_GAP = (2.5, 4.0)  # 바퀴 사이
-ENTER_FOCUS    = (0.30, 0.55)  # 창을 앞으로 올린 뒤 기다림
-ENTER_PICK_GAP = (0.40, 0.75)  # 맨 위 캐릭을 누른 뒤 [입장하기] 까지
-ENTER_RELOGIN_WAIT = (2.0, 3.0)  # [재접속] 을 누른 뒤 화면이 돌아올 때까지
+ENTER_FOCUS    = (0.90, 1.50)  # 창을 앞으로 올린 뒤 기다림
+ENTER_PICK_GAP = (1.30, 2.10)  # 맨 위 캐릭을 누른 뒤 [입장하기] 까지
+# 🖱 [입장하기] 는 **커서를 올려야 먹힌다** (실측 2026-11-04 — 캐릭은 선택됐는데
+#    버튼만 안 눌렸다). 계정전환 [확인] 과 같은 종류다.
+ENTER_HOVER       = (0.70, 1.20)  # 커서를 올리고 누르기까지
+ENTER_AFTER       = (3.60, 5.00)  # [입장하기] 누른 뒤 **들어갔는지 확인**까지
+ENTER_PUSH_TRIES  = 3             # 안 들어갔으면 몇 번까지 다시 누를까
+ENTER_RELOGIN_WAIT = (3.2, 4.4)  # [재접속] 을 누른 뒤 화면이 돌아올 때까지
 # 🖥 로그인(서버 선택) 화면 — **"화면을 터치해 주세요"** 가 뜨는 그 화면.
 #    🚫 서버 버튼을 누르지 말 것 (2026-11-04 사용자: *"서버를 클릭하는 게 아니라
 #       그냥 **가운데 화면**을 클릭하면 돼. 그러면 캐릭 선택창이 나오니까"* ·
 #       *"서버는 전부 다 맞아"*). 서버 버튼을 누르면 **서버 목록 창**이 떠서
 #       한 단계 더 돌아간다 — 실측으로 확인했다.
-ENTER_LOGIN_WAIT = (2.5, 3.5)   # 가운데를 누른 뒤 캐릭터 선택이 뜰 때까지
+ENTER_LOGIN_WAIT = (3.8, 5.2)   # 가운데를 누른 뒤 캐릭터 선택이 뜰 때까지
 # ⏳ **클라가 전부 뜰 때까지 기다린다** (2026-11-04 사용자: *"캐릭터 16클라가
 #    전부 화면이 켜지면은 다음 걸 진행하면 좋겠어"*). 늦게 뜨는 클라를 안 기다려
 #    **3개를 통째로 놓친 사고**가 있었다 — 이 기다림을 빼지 말 것.
@@ -336,7 +341,7 @@ ENTER_WAIT_STABLE = 4           # 개수가 이만큼 연속 그대로면 '다 �
 ENTER_ONE_TRIES   = 8           # 한 클라를 몇 번까지 다시 볼까
 ENTER_LOAD_GAP    = (2.5, 4.0)  # 뭔가 누른 뒤 로딩을 기다릴 때
 ENTER_ONE_GAP     = (1.2, 2.0)  # 다시 보기까지
-ENTER_ONE_DONE    = (0.8, 1.4)  # 한 클라를 끝내고 다음 클라로
+ENTER_ONE_DONE    = (1.4, 2.4)  # 한 클라를 끝내고 다음 클라로
 # 🔔 접속 자리를 덮은 알림을 몇 번까지 치워볼까 (알림이 연달아 뜰 수 있다)
 LOGIN_POPUP_TRIES = 3
 # 🟣 접속 자리를 **게임 창이 덮었을 때** 퍼플을 앞으로 올려 다시 보는 횟수
@@ -2187,7 +2192,7 @@ CHAR_WAIT_EACH  = 1.1
 # ⏱ 입장 단계에서 **클라를 옮겨 갈 때**만 쉬는 짧은 틈 (2026-11-04 '3분 안에').
 #    🚫 `ENTER_LOGIN_WAIT`(화면이 바뀌기를 기다리는 시간)과 헷갈리지 말 것 —
 #       그건 **전부 누른 뒤 한 번만** 쓴다. 클라마다 쓰면 바퀴당 24초가 날아간다.
-ENTER_CLICK_GAP = (0.25, 0.50)   # 캐릭터 사이 (전 3초)
+ENTER_CLICK_GAP = (0.90, 1.60)   # 캐릭터 사이 — 급하면 씹힌다(2026-11-04)
 
 # 🎮 멀티플레이 캐릭터 버튼 — **좌표 개수가 아니라 화면에 보이는 만큼** 누른다
 #    (2026-10-28 사용자 지시: *"저게 지금 좌표상으로는 8개 되어있는데 10개도 나타날 수가
@@ -32005,7 +32010,14 @@ class App(tk.Tk):
         while time.time() - t0 < ENTER_WAIT_MAX:
             if getattr(self, "_stop_flag", False):
                 break
-            n = lineagem_count()
+            # 🚨 **창 수를 센다** — `lineagem_count()`(프로세스 수)를 쓰면
+            #    프로세스만 16개이고 **게임 창은 9개**인 순간에 지나가 버린다
+            #    (2026-11-04 실측 — 그래서 7개가 손도 못 대고 빠졌다).
+            #    🚫 `lineagem_count()` 로 되돌리지 말 것.
+            try:
+                n = len(self._get_purple_hwnds())
+            except Exception:
+                n = lineagem_count()
             if n >= ENTER_WAIT_N:
                 click_log("[입장] ⏳ %s 클라 %d개가 전부 떴다 (%.0f초 기다렸다) "
                           "— 다음으로 간다" % (tag, n, time.time() - t0))
@@ -32121,12 +32133,36 @@ class App(tk.Tk):
                 ty = r[1] + int(h * ENTER_TOP_CHAR[1])
                 pyautogui.click(tx, ty)
                 nap(random.uniform(*ENTER_PICK_GAP))
-                # ② [입장하기]
-                pyautogui.click(r[0] + ee[0], r[1] + ee[1])
-                n += 1
-                click_log(f"[입장] \U0001f3ae {nm} \u2014 맨 위 캐릭 ({tx},{ty}) 고르고 "
-                          f"[입장하기] ({r[0] + ee[0]},{r[1] + ee[1]}) 눌렀다 "
-                          f"(일치도 {ee[2]:.2f})")
+                # ② [입장하기] — 🖱 **커서를 올린 뒤** 누른다. 그냥 누르면 씹힌다
+                #    (2026-11-04 실측: 캐릭은 선택됐는데 버튼만 안 먹었다).
+                #    🚫 `pyautogui.click` 으로 되돌리지 말 것.
+                ex, ey = r[0] + ee[0], r[1] + ee[1]
+                _tp = self._enter_tpl("login_enter")
+                _ok = False
+                for _pt in range(ENTER_PUSH_TRIES):
+                    hover_click(ex, ey, ENTER_HOVER)
+                    # ③ **들어갔는지 확인한다** — 예전에는 누르고 끝이었다
+                    nap(random.uniform(*ENTER_AFTER))
+                    _b2, _r2 = self._enter_grab(hw)
+                    if _b2 is None:
+                        _ok = True
+                        break
+                    _e2 = self._enter_match(_b2, _r2[2] - _r2[0], *_tp)
+                    if _e2[0] is None:
+                        _ok = True
+                        click_log(f"[입장] 🎮 {nm} — 맨 위 캐릭 ({tx},{ty}) 고르고 "
+                                  f"[입장하기] ({ex},{ey}) 눌렀다 "
+                                  f"→ ✔ 들어갔다 ({_pt + 1}번째)")
+                        break
+                    click_log(f"[입장] ⚠ {nm} — [입장하기] 를 눌렀는데 아직 "
+                              f"캐릭터 선택이다 (일치도 {_e2[2]:.2f}) → 다시 누른다 "
+                              f"({_pt + 1}/{ENTER_PUSH_TRIES})")
+                    ex, ey = _r2[0] + _e2[0], _r2[1] + _e2[1]
+                if _ok:
+                    n += 1
+                else:
+                    click_log(f"[입장] ✘ {nm} — {ENTER_PUSH_TRIES}번 눌러도 "
+                              f"안 들어갔다")
             except Exception as e:
                 click_log(f"[입장] \u26a0 누르기 실패 \u2014 {e}")
             nap(random.uniform(*ENTER_CLICK_GAP))
