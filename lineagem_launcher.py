@@ -314,7 +314,7 @@ PURPLE_FRONT_WAIT = 0.8
 # 창 가로/세로 대비 **비율** — 창 크기가 달라도 맞는다 (546x307 에서 실측).
 ENTER_TOP_CHAR = (127 / 546.0, 59 / 307.0)   # 맨 위 캐릭 줄 가운데
 ENTER_MATCH    = 0.70        # '입장하기' 글자 일치 기준
-ENTER_PASSES   = 2           # 몇 바퀴 더 볼까 (캐릭 화면이 늦게 뜨는 클라)
+ENTER_PASSES   = 3           # 몇 바퀴 볼까 (하나씩 돌고, 못 한 것만 다시)
 ENTER_PASS_GAP = (2.5, 4.0)  # 바퀴 사이
 ENTER_FOCUS    = (0.30, 0.55)  # 창을 앞으로 올린 뒤 기다림
 ENTER_PICK_GAP = (0.40, 0.75)  # 맨 위 캐릭을 누른 뒤 [입장하기] 까지
@@ -325,6 +325,18 @@ ENTER_RELOGIN_WAIT = (2.0, 3.0)  # [재접속] 을 누른 뒤 화면이 돌아�
 #       *"서버는 전부 다 맞아"*). 서버 버튼을 누르면 **서버 목록 창**이 떠서
 #       한 단계 더 돌아간다 — 실측으로 확인했다.
 ENTER_LOGIN_WAIT = (2.5, 3.5)   # 가운데를 누른 뒤 캐릭터 선택이 뜰 때까지
+# ⏳ **클라가 전부 뜰 때까지 기다린다** (2026-11-04 사용자: *"캐릭터 16클라가
+#    전부 화면이 켜지면은 다음 걸 진행하면 좋겠어"*). 늦게 뜨는 클라를 안 기다려
+#    **3개를 통째로 놓친 사고**가 있었다 — 이 기다림을 빼지 말 것.
+ENTER_WAIT_N      = 16          # 바라는 클라 수
+ENTER_WAIT_MAX    = 180.0       # 최대 기다림(초) — 못 채워도 여기서 진행
+ENTER_WAIT_TICK   = (2.0, 3.0)  # 몇 초마다 세어보나
+ENTER_WAIT_STABLE = 4           # 개수가 이만큼 연속 그대로면 '다 뜬 것'으로 본다
+# 🎮 **한 클라를 끝까지** 처리할 때 (묶음이 아니라 하나씩 — 사용자 지시)
+ENTER_ONE_TRIES   = 8           # 한 클라를 몇 번까지 다시 볼까
+ENTER_LOAD_GAP    = (2.5, 4.0)  # 뭔가 누른 뒤 로딩을 기다릴 때
+ENTER_ONE_GAP     = (1.2, 2.0)  # 다시 보기까지
+ENTER_ONE_DONE    = (0.8, 1.4)  # 한 클라를 끝내고 다음 클라로
 # 🔔 접속 자리를 덮은 알림을 몇 번까지 치워볼까 (알림이 연달아 뜰 수 있다)
 LOGIN_POPUP_TRIES = 3
 # 🟣 접속 자리를 **게임 창이 덮었을 때** 퍼플을 앞으로 올려 다시 보는 횟수
@@ -31855,6 +31867,112 @@ class App(tk.Tk):
             click_log(f"[입장] \u26a0 누르기 실패 \u2014 {e}")
             return False
 
+    def _enter_wait_clients(self, tag=""):
+        """⏳ 리니지M 창이 **전부 뜰 때까지** 기다린다 → 뜬 개수.
+
+        🧭 2026-11-04 사용자: *"캐릭터 16클라가 전부 화면이 켜지면은 다음 걸
+           진행하면 좋겠어."* 늦게 뜨는 클라를 안 기다려 **3개를 놓친 사고**가 있었다.
+        ⚠ `ENTER_WAIT_N` 을 채우거나, 개수가 `ENTER_WAIT_STABLE` 번 연속
+          그대로면(= 더 안 늘면) 진행한다. 최대 `ENTER_WAIT_MAX` 초."""
+        t0 = time.time()
+        last, same, n = -1, 0, 0
+        while time.time() - t0 < ENTER_WAIT_MAX:
+            if getattr(self, "_stop_flag", False):
+                break
+            n = lineagem_count()
+            if n >= ENTER_WAIT_N:
+                click_log("[입장] ⏳ %s 클라 %d개가 전부 떴다 (%.0f초 기다렸다) "
+                          "— 다음으로 간다" % (tag, n, time.time() - t0))
+                return n
+            same = same + 1 if n == last else 0
+            last = n
+            if n > 0 and same >= ENTER_WAIT_STABLE:
+                click_log("[입장] ⏳ %s 클라 %d개에서 더 안 늘어난다 (%.0f초) "
+                          "— 그대로 진행한다 (바라던 %d개)"
+                          % (tag, n, time.time() - t0, ENTER_WAIT_N))
+                return n
+            self.after(0, lambda _n=n: self.status.set(
+                "⏳ 클라가 뜨기를 기다리는 중... %d/%d" % (_n, ENTER_WAIT_N)))
+            nap(random.uniform(*ENTER_WAIT_TICK))
+        click_log("[입장] ⏳ %s %.0f초를 기다렸지만 클라가 %d개뿐이다 "
+                  "— 그대로 진행한다" % (tag, ENTER_WAIT_MAX, n))
+        return n
+
+    def _purple_min(self, tag=""):
+        """🟣 퍼플을 **내린다**(최소화) — 캐릭터 입장 전에 클라를 안 가리게.
+
+        🧭 2026-11-04 사용자: *"리니지M 이게 가운데 사라지면은 **퍼플을 내리고**
+           캐릭터를 하나씩 접속해주면 되잖아."*
+        ⚠ 크기·위치는 건드리지 않는다 — 접속 좌표가 지금 창 크기 기준이다."""
+        try:
+            import win32con
+            h = self._purple_hwnd()
+            if not h:
+                return False
+            win32gui.ShowWindow(h, win32con.SW_MINIMIZE)
+            click_log("[입장] 🟣 %s 퍼플을 내렸다 (클라를 가리지 않게)" % tag)
+            return True
+        except Exception as e:
+            click_log("[입장] ⚠ 퍼플을 못 내렸다 — %s" % e)
+            return False
+
+    def _enter_one(self, hw, T):
+        """🎮 **그 클라 하나**를 끝까지 들여보낸다 → (들여보냈나, 설명).
+
+        🚫 **묶음으로 만들지 말 것** (2026-11-04 사용자 지시 — 묶었더니 클릭이
+           씹히고 늦게 뜬 클라를 놓쳤다). 한 클라가 **끝나야** 다음으로 간다.
+        순서: [재접속] 팝업 → 로그인 화면(가운데) → 맨 위 캐릭 → [입장하기]"""
+        (tpl, base_w, thr), (rtpl, rbw, rthr), (stpl, sbw, sthr) = T
+        nm = win32gui.GetWindowText(hw) or ""
+        # 🧭 `acted` = 이 클라에 **뭔가 눌렀다**. 누른 뒤에는 로딩 화면이라
+        #    셋 다 안 보이는 게 정상이므로 **끈기 있게 다시 본다.**
+        #    🚫 이 구분을 없애지 말 것 — 없애면 재접속을 누르고도 '이미 게임 안'
+        #       으로 단정해 그 클라가 통째로 빠진다.
+        blank, best, acted = 0, -1.0, False
+        for _t in range(ENTER_ONE_TRIES):
+            if getattr(self, "_stop_flag", False):
+                return False, "멈춤"
+            big, r = self._enter_grab(hw)
+            if big is None:
+                nap(random.uniform(*ENTER_ONE_GAP))
+                continue
+            ww = r[2] - r[0]
+            _rr = self._enter_match(big, ww, rtpl, rbw, rthr)
+            _ss = self._enter_match(big, ww, stpl, sbw, sthr)
+            _ee = self._enter_match(big, ww, tpl, base_w, thr)
+            best = max(best, _ee[2])
+            # ── 🔁 [재접속] 팝업부터 치운다 (모달이라 안 치우면 다 먹힌다) ──
+            if _rr[0] is not None:
+                self._enter_click(hw, r[0] + _rr[0], r[1] + _rr[1])
+                click_log("[입장] 🔁 %s — [재접속] 팝업을 눌렀다 (일치도 %.2f)"
+                          % (nm, _rr[2]))
+                nap(random.uniform(*ENTER_RELOGIN_WAIT))
+                blank, acted = 0, True
+                continue
+            # ── 🎮 캐릭터 선택 화면이면 바로 들여보낸다 ──
+            if _ee[0] is not None:
+                n = self._enter_push([(hw, r, _ee)])
+                return bool(n), ("들여보냈다" if n else "누르기 실패")
+            # ── 🖥 로그인 화면이면 **가운데**를 누르고 기다린다 ──
+            if _ss[0] is not None:
+                cx = r[0] + (r[2] - r[0]) // 2
+                cy = r[1] + (r[3] - r[1]) // 2
+                self._enter_click(hw, cx, cy)
+                click_log("[입장] 🖥 %s — 로그인 화면이라 **가운데 화면** "
+                          "(%d,%d) 을 눌렀다 (일치도 %.2f)" % (nm, cx, cy, _ss[2]))
+                nap(random.uniform(*ENTER_LOGIN_WAIT))
+                blank, acted = 0, True
+                continue
+            # ── 셋 다 아니다 → 이미 게임 안이거나 아직 로딩 중 ──
+            blank += 1
+            if not acted and blank >= 2:
+                # 아무것도 안 눌렀는데 셋 다 안 보인다 = **이미 게임 안**
+                return False, "이미 게임 안인 듯 (입장하기 최고 %.2f)" % best
+            # 누른 적이 있으면 **로딩 중**이므로 넉넉히 기다렸다 다시 본다
+            nap(random.uniform(*(ENTER_LOAD_GAP if acted else ENTER_ONE_GAP)))
+        return False, "%d번 봐도 못 들여보냈다 (입장하기 최고 %.2f)" % (
+            ENTER_ONE_TRIES, best)
+
     def _enter_push(self, hit):
         """캐릭터 선택 화면인 클라들을 **맨 위 캐릭 \u2192 [입장하기]** 로 들여보낸다.
 
@@ -31888,107 +32006,71 @@ class App(tk.Tk):
             nap(random.uniform(*ENTER_CLICK_GAP))
         return n
 
-    def _enter_game_all(self, tag=""):
-        """🎮 캐릭터 선택 화면인 클라마다 **맨 위 캐릭 → [입장하기]**.
+    def _enter_game_all(self, tag="", wait=True):
+        """🎮 **클라를 하나씩** 캐릭터 선택에서 들여보낸다.
 
-        ⏱ **묶어서 한다** (2026-11-04 사용자 '3분 안에' 지시):
-           ① 클라당 **한 번만** 캡처해 재접속·로그인·캐릭터 3종을 대조
-              (예전에는 단계마다 다시 찍어 16클라 × 3종 = **48회**)
-           ② 로그인 화면은 **전부 누르고 마지막에 한 번만** 기다린다
-              (예전에는 클라마다 2.5~3.5초 → 바퀴당 24초를 썼다)
-           🚫 **클라마다 `ENTER_LOGIN_WAIT` 를 넣지 말 것** — 그 한 줄이
-              바퀴당 20초를 먹는다. 화면이 바뀌기를 기다리는 것은
-              '묶음이 끝난 뒤 한 번' 이면 충분하다.
+        🧭 2026-11-04 사용자 지시 — *"그냥 접속을 하나씩 하면 되지 …
+           퍼플 접속이 다 된 거 확인하고 **퍼플을 내리고 캐릭터를 하나씩** 접속"* /
+           *"**캐릭터 16클라가 전부 화면이 켜지면은 다음 걸 진행**"* /
+           *"이렇게 빨리 접속하면 **클릭이 미스가 난다** … **4분대에 해도 된다**"*
 
+        순서
+          ① 리니지M 창이 **전부 뜰 때까지 기다린다**
+          ② **퍼플을 내린다**
+          ③ 클라를 **하나씩** 끝까지 (`_enter_one`)
+          ④ 못 들여보낸 것만 **한 바퀴 더**
+
+        🚫 **묶음(batch)으로 되돌리지 말 것** — 늦게 뜬 클라 3개를 통째로 놓쳤다.
         🚫 **둘째·셋째 캐릭은 절대 고르지 않는다** (사용자 지시).
-        🚫 서버 버튼을 누르지 말 것 — 로그인 화면은 **가운데**를 누른다
-           (사용자: *"서버를 클릭하는 게 아니라 그냥 가운데 화면을 클릭하면 돼"*).
-        ⚠ '입장하기' 가 안 보이면 **이미 게임 안**이므로 아무것도 안 한다."""
+        🚫 서버 버튼을 누르지 말 것 — 로그인 화면은 **가운데**를 누른다."""
         tpl, base_w, thr = self._enter_tpl("login_enter")
         if tpl is None:
-            click_log("[입장] \u26a0 login_enter.png 가 없다 \u2014 캐릭터 선택 화면을 못 본다")
+            click_log("[입장] ⚠ login_enter.png 가 없다 — 캐릭터 선택 화면을 못 본다")
             return 0
-        # 🔁 **[재접속] 팝업** — 오래 방치되면 캐릭터 선택 화면 위에 뜬다.
-        #    모달이라 이걸 안 치우면 [입장하기] 클릭이 통째로 먹히지 않는다.
-        #    🚫 같은 자리의 **[종료]** 는 모양이 같아 0.695 가 나온다.
-        #       기준 0.85 로 갈린다 — **내리지 말 것**(종료를 누르면 클라가 꺼진다).
-        rtpl, rbw, rthr = self._enter_tpl("login_relogin")
-        # 🖥 로그인(서버 선택) 화면 — 알아보기만 하고 **가운데를 누른다**
-        stpl, sbw, sthr = self._enter_tpl("login_server")
-        total = 0
+        # 🔁 **[재접속] 팝업** — 방치되면 캐릭터 선택 화면 위에 뜬다. 모달이라
+        #    안 치우면 [입장하기] 가 통째로 먹히지 않는다.
+        #    🚫 같은 자리의 **[종료]** 가 0.695 로 나온다 — 기준 0.85 를 내리지 말 것.
+        T = (self._enter_tpl("login_enter"),
+             self._enter_tpl("login_relogin"),
+             self._enter_tpl("login_server"))   # 🖥 로그인(서버) 화면
+        # ── ① 클라가 전부 뜰 때까지 ──
+        if wait:
+            self._enter_wait_clients(tag)
+        # ── ② 퍼플을 내린다 ──
+        self._purple_min(tag)
+        nap(random.uniform(0.6, 1.1))
+        total, left = 0, []
         for _p in range(ENTER_PASSES):
             if getattr(self, "_stop_flag", False):
                 break
-            # ── 📸 클라당 한 번만 찍고 3종을 전부 대조한다 ──
-            shots, best = [], -1.0
-            for hw, _l, _t, _w, _h in self._get_purple_hwnds():
+            hws = [x[0] for x in self._get_purple_hwnds()]
+            if _p and left:
+                hws = [h for h in hws if h in left]
+            if not hws:
+                break
+            left = []
+            for i, hw in enumerate(hws):
                 if getattr(self, "_stop_flag", False):
                     break
-                big, r = self._enter_grab(hw)
-                if big is None:
-                    continue
-                ww = r[2] - r[0]
-                _rr = self._enter_match(big, ww, rtpl, rbw, rthr)
-                _ss = self._enter_match(big, ww, stpl, sbw, sthr)
-                _ee = self._enter_match(big, ww, tpl, base_w, thr)
-                best = max(best, _ee[2])
-                shots.append((hw, r, _rr, _ss, _ee))
-            if not shots:
-                if _p == 0:
-                    click_log(f"[입장] {tag} 리니지M 창을 못 찾았다")
+                nm = (win32gui.GetWindowText(hw) or "").replace("리니지M l ", "")
+                self.after(0, lambda _n=nm, _i=i, _c=len(hws): self.status.set(
+                    "🎮 캐릭터 입장 %d/%d — %s" % (_i + 1, _c, _n)))
+                ok, why = self._enter_one(hw, T)
+                if ok:
+                    total += 1
+                else:
+                    left.append(hw)
+                    click_log("[입장] — %s %s" % (nm, why))
+                nap(random.uniform(*ENTER_ONE_DONE))
+            if not left:
                 break
-            # ── 🔁 ① [재접속] 팝업부터 치운다 ──
-            relo = 0
-            for hw, r, _rr, _ss, _ee in shots:
-                if _rr[0] is None or getattr(self, "_stop_flag", False):
-                    continue
-                nm = win32gui.GetWindowText(hw) or ""
-                if self._enter_click(hw, r[0] + _rr[0], r[1] + _rr[1]):
-                    relo += 1
-                    click_log(f"[입장] \U0001f501 {nm} \u2014 [재접속] 팝업을 눌렀다 "
-                              f"({r[0] + _rr[0]},{r[1] + _rr[1]}) 일치도 {_rr[2]:.2f}")
-                nap(random.uniform(*ENTER_CLICK_GAP))
-            if relo:
-                nap(random.uniform(*ENTER_RELOGIN_WAIT))
-            # ── 🖥 ② 로그인 화면이면 **가운데 화면**을 누른다 (묶어서) ──
-            opened = []
-            for hw, r, _rr, _ss, _ee in shots:
-                if _ss[0] is None or getattr(self, "_stop_flag", False):
-                    continue
-                nm = win32gui.GetWindowText(hw) or ""
-                cx = r[0] + (r[2] - r[0]) // 2
-                cy = r[1] + (r[3] - r[1]) // 2
-                if self._enter_click(hw, cx, cy):
-                    opened.append(hw)
-                    click_log(f"[입장] \U0001f5a5 {nm} \u2014 로그인 화면이라 "
-                              f"**가운데 화면** ({cx},{cy}) 을 눌렀다 "
-                              f"(일치도 {_ss[2]:.2f})")
-                nap(random.uniform(*ENTER_CLICK_GAP))
-            # ── 🎮 ③ 이미 캐릭터 선택인 클라를 들여보낸다 ──
-            hit = [(hw, r, _ee) for hw, r, _rr, _ss, _ee in shots if _ee[0] is not None]
-            if not hit and not opened and not relo and _p == 0:
-                click_log(f"[입장] {tag} 캐릭터 선택 화면인 클라가 없다 "
-                          f"(최고 {best:.2f} \u00b7 기준 {thr:.2f})")
-            total += self._enter_push(hit)
-            # ── 🖥 ④ 방금 가운데를 누른 클라만 **다시 찍어** 들여보낸다 ──
-            #    ⏱ 기다리는 것은 **여기 한 번뿐**이다 (클라마다가 아니다)
-            if opened and not getattr(self, "_stop_flag", False):
-                nap(random.uniform(*ENTER_LOGIN_WAIT))
-                hit2 = []
-                for hw in opened:
-                    if getattr(self, "_stop_flag", False):
-                        break
-                    big, r = self._enter_grab(hw)
-                    if big is None:
-                        continue
-                    _ee = self._enter_match(big, r[2] - r[0], tpl, base_w, thr)
-                    if _ee[0] is not None:
-                        hit2.append((hw, r, _ee))
-                total += self._enter_push(hit2)
             if _p < ENTER_PASSES - 1:
+                click_log("[입장] 🔁 %s 아직 %d개가 남았다 — 한 바퀴 더 본다"
+                          % (tag, len(left)))
                 nap(random.uniform(*ENTER_PASS_GAP))
-        if total:
-            click_log(f"[입장] {tag} \u2714 {total}개 클라를 게임에 들여보냈다")
+        click_log("[입장] %s ✔ %d개 클라를 게임에 들여보냈다%s"
+                  % (tag, total,
+                     (" · ⚠ %d개는 못 했다" % len(left)) if left else ""))
         return total
 
 
