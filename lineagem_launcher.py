@@ -29807,21 +29807,48 @@ class App(tk.Tk):
 
     # ── 창 배치 ───────────────────────────────────────────────────────
     def _get_purple_hwnds(self):
-        """Purple/리니지 창의 (hwnd, left, top, width, height) 목록 반환"""
+        """**게임 창만**의 (hwnd, left, top, width, height) 목록.
+
+        🚨 예전에는 제목에 `Purple`·`리니지` 가 들어간 **모든 창**을 모았다.
+           그러면 **퍼플 런처 창(2560x1392)·메인런처·상단바(ngptop)** 까지
+           섞여서, 재배치가 그것들을 클라 자리로 **546x307 로 줄여 옮길 수**
+           있었다 (실측 2026-11-04 — 게임 16개인데 `창 17개` 로 잡혔다).
+           퍼플 창이 격자에 끼면 접속이 통째로 망가진다.
+        ⚠ 거르는 조건 — 클로드는 느슨하게 만들지 말 것:
+           · 클래스 `GLFW30` (게임 창)
+           · 제목이 `리니지` 로 시작 · `자동 실행`(메인런처) 아님 · `ngptop` 아님
+           · 주인창(owner)이 없는 진짜 최상위 창
+           · 300x200 보다 큼 (작은 보조 창 제외)"""
         import ctypes
         result = []
+
         def cb(hwnd, _):
-            buf = ctypes.create_unicode_buffer(256)
-            ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)
-            title = buf.value
-            if ("Purple" in title or "리니지" in title) and ctypes.windll.user32.IsWindowVisible(hwnd):
+            try:
+                if not ctypes.windll.user32.IsWindowVisible(hwnd):
+                    return True
+                buf = ctypes.create_unicode_buffer(256)
+                ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)
+                title = buf.value or ""
+                cbuf = ctypes.create_unicode_buffer(256)
+                ctypes.windll.user32.GetClassNameW(hwnd, cbuf, 256)
+                cls = cbuf.value or ""
+                if cls != "GLFW30":
+                    return True
+                if not title.startswith("리니지"):
+                    return True
+                if "자동 실행" in title or title == "ngptop":
+                    return True
+                if ctypes.windll.user32.GetWindow(hwnd, 4):      # GW_OWNER
+                    return True
                 r = ctypes.wintypes.RECT()
                 ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(r))
-                w = r.right - r.left
-                h = r.bottom - r.top
-                if w > 100 and h > 100:
+                w, h = r.right - r.left, r.bottom - r.top
+                if w > 300 and h > 200:
                     result.append((hwnd, r.left, r.top, w, h))
+            except Exception:
+                pass
             return True
+
         WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
         ctypes.windll.user32.EnumWindows(WNDENUMPROC(cb), 0)
         return result
@@ -29967,11 +29994,17 @@ class App(tk.Tk):
     _FIXED_W = 546
     _FIXED_H = 307
 
-    def _find_hwnd_for_slot(self, aw, wins):
-        """1) HWND  2) 창 제목 번호  3) 가장 가까운 위치 순으로 찾기"""
+    def _find_hwnd_for_slot(self, aw, wins, used=None):
+        """1) HWND  2) 창 제목  3) 가장 가까운 위치 순으로 찾기.
+
+        ⚠ `used` 에 들어 있는 창은 **제외**한다 — 한 창은 한 슬롯에만.
+           안 빼면 가까운 창 하나를 여러 슬롯이 골라 **멀리 있는 창은
+           영영 안 옮겨진다** (2026-11-04 사용자 *"자꾸 재배치를 다시
+           누르게 된다"* 의 진짜 원인). 클로드는 이 제외를 빼지 말 것."""
+        _u = used or set()
         # 1) HWND
         saved_hwnd = aw.get("hwnd")
-        if saved_hwnd and win32gui.IsWindow(saved_hwnd):
+        if saved_hwnd and saved_hwnd not in _u and win32gui.IsWindow(saved_hwnd):
             for e in wins:
                 if e[0] == saved_hwnd:
                     return saved_hwnd
@@ -29979,13 +30012,16 @@ class App(tk.Tk):
         title = aw.get("title", "")
         if title:
             for e in wins:
+                if e[0] in _u:
+                    continue
                 if win32gui.GetWindowText(e[0]) == title:
                     return e[0]
-        # 3) 저장된 x,y 기준 가장 가까운 창
+        # 3) 저장된 x,y 기준 가장 가까운 창 (이미 쓴 것은 뺀다)
         sx, sy = aw.get("x"), aw.get("y")
         if sx is not None and sy is not None:
-            best = min(wins, key=lambda e: (e[1]-sx)**2+(e[2]-sy)**2)
-            return best[0]
+            _left = [e for e in wins if e[0] not in _u]
+            if _left:
+                return min(_left, key=lambda e: (e[1]-sx)**2+(e[2]-sy)**2)[0]
         return None
 
     def _reg_name_area(self):
@@ -30112,6 +30148,103 @@ class App(tk.Tk):
         except Exception as e:
             self.status.set(f"#{slot_idx+1} 저장 오류: {e}")
 
+    # ── 🪟 퍼플 설정에도 창 자리를 쓴다 (재부팅해도 유지) ──────────────
+    def _purple_zone_paths(self):
+        """지금 켜진 게임 창마다 (hwnd, purple_zone.config 경로) 를 돌려준다.
+
+        짝은 `LineageM.exe` 의 명령줄 `-presenceId:"MKR_LINM_PURPLE:<GUID>"` 로
+        맞춘다. 🚫 `purple_zone.config` 의 창 위치로 맞추면 안 된다 — 그 값은
+        **켤 때 읽는 값**이라 지금 창과 다를 수 있다 (그게 이 기능의 이유다)."""
+        import re, subprocess, win32process
+        out = {}
+        try:
+            ps = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_Process -Filter \"Name='LineageM.exe'\" | "
+                 "ForEach-Object { $_.ProcessId.ToString() + '|' + $_.CommandLine }"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                creationflags=0x08000000, timeout=25)
+        except Exception as e:
+            click_log(f"[창자리] ⚠ 프로세스 목록을 못 읽었다 — {e}")
+            return out
+        pid2guid = {}
+        for ln in (ps.stdout or "").splitlines():
+            if "|" not in ln:
+                continue
+            _p, _c = ln.split("|", 1)
+            m = re.search(r"MKR_LINM_PURPLE:([0-9A-Fa-f\-]{36})", _c)
+            if m:
+                try: pid2guid[int(_p)] = m.group(1).upper()
+                except Exception: pass
+        base = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Purple", "zone")
+        for hwnd, _l, _t, _w, _h in self._get_purple_hwnds():
+            try:
+                _tid, pid = win32process.GetWindowThreadProcessId(hwnd)
+            except Exception:
+                continue
+            g = pid2guid.get(pid)
+            if not g:
+                continue
+            p = os.path.join(base, g, "lm", "config", "purple_zone.config")
+            if os.path.exists(p):
+                out[hwnd] = p
+        return out
+
+    def _save_purple_zone_cfg(self):
+        """지금 창 자리를 **퍼플 설정에도** 쓴다 → 재부팅해도 그 자리에 뜬다.
+
+        🚨 2026-11-04 실측으로 찾은 것 — 사용자 신고
+           *"재부팅하면 예전으로 돌아간다"* 의 진짜 원인:
+           퍼플은 클라를 **켤 때** `purple_zone.config` 의 `game_*`/`real_*` 로
+           창을 띄우는데, **끌 때 실제 창 위치를 읽지 않는다.**
+           창을 (602,40) 에 두고 WM_CLOSE 로 정상 종료해도 config 는
+           (693,58) 그대로였다. 그래서 [창 전체복원] 으로 아무리 옮겨도
+           재부팅하면 옛 자리로 돌아갔다. 창에 `WS_THICKFRAME` 이 없어
+           모서리를 끌어 바꿀 수도 없다 → **파일을 직접 쓰는 것이 유일한 길.**
+           ⚠ 고치기 전에 `%LOCALAPPDATA%/MoonAI/backups/<시각>_zone` 에 백업한다.
+        ⚠ 무거운 일(프로세스 목록 읽기 ~2초)이라 **백그라운드 스레드**에서 부른다."""
+        import shutil
+        try:
+            paths = self._purple_zone_paths()
+        except Exception as e:
+            click_log(f"[창자리] ⚠ 퍼플 설정 경로를 못 찾았다 — {e}")
+            return 0, 0
+        if not paths:
+            click_log("[창자리] ⚠ 퍼플 설정을 못 찾았다 — 퍼플로 띄운 클라가 아닌 듯")
+            return 0, 0
+        bk = os.path.join(LOCAL_DATA, "backups",
+                          time.strftime("%Y%m%d_%H%M%S") + "_zone")
+        done = same = 0
+        for hwnd, p in paths.items():
+            try:
+                r = win32gui.GetWindowRect(hwnd)
+                x, y = r[0], r[1]
+                w, h = r[2] - r[0], r[3] - r[1]
+                if w < 100 or h < 100:
+                    continue
+                cur = json.load(io.open(p, encoding="utf-8-sig"))
+                want = {"game_left": str(x), "game_top": str(y),
+                        "game_width": str(w), "game_height": str(h),
+                        "real_left": str(x), "real_top": str(y),
+                        "real_width": str(w), "real_height": str(h)}
+                if all(str(cur.get(k)) == v for k, v in want.items()):
+                    same += 1
+                    continue
+                os.makedirs(bk, exist_ok=True)
+                shutil.copy2(p, os.path.join(bk, os.path.basename(
+                    os.path.dirname(os.path.dirname(p))) + ".config"))
+                cur.update(want)
+                tmp = p + ".tmp"
+                io.open(tmp, "w", encoding="utf-8").write(
+                    json.dumps(cur, ensure_ascii=False, indent=4))
+                os.replace(tmp, p)
+                done += 1
+            except Exception as e:
+                click_log(f"[창자리] ⚠ {os.path.basename(p)} 쓰기 실패 — {e}")
+        click_log(f"[창자리] 🪟 퍼플 설정에 저장 — 고침 {done}개 · 이미 같음 {same}개"
+                  + (f" · 백업 {bk}" if done else ""))
+        return done, same
+
     def _save_all_window_pos(self):
         """지정된 모든 슬롯의 **지금 창 위치와 크기**를 그대로 저장한다.
 
@@ -30144,7 +30277,20 @@ class App(tk.Tk):
         save_cfg(self.cfg)
         _kinds = sorted(set(sizes))
         _sz = _kinds[0] if len(_kinds) == 1 else ("크기 " + str(len(_kinds)) + "가지: " + " ".join(_kinds))
-        self.status.set(f"✔ {count}개 창 위치·크기 저장 완료 ({_sz})")
+        self.status.set(f"✔ {count}개 창 위치·크기 저장 완료 ({_sz}) · 퍼플 설정에도 쓰는 중...")
+
+        # 🪟 **퍼플 설정에도 쓴다** — 이걸 안 하면 재부팅 때 옛 자리로 돌아간다
+        #    (2026-11-04 실측 — 퍼플은 끌 때 실제 창 위치를 읽지 않는다).
+        #    프로세스 목록을 읽어야 해서 ~2초 걸린다 → 백그라운드 스레드.
+        def _zw():
+            try:
+                d, sm = self._save_purple_zone_cfg()
+                self.after(0, lambda: self.status.set(
+                    f"✔ {count}개 창 저장 ({_sz}) · 🪟 퍼플 설정 {d}개 고침"
+                    f"{'' if d else ' (이미 같음)'} — 재부팅해도 이 자리"))
+            except Exception as e:
+                self.after(0, lambda: self.status.set(f"퍼플 설정 저장 오류: {e}"))
+        threading.Thread(target=_zw, daemon=True).start()
 
     def _restore_all_windows(self):
         self._restore_by_position()
@@ -30172,22 +30318,66 @@ class App(tk.Tk):
         wins = self._get_purple_hwnds()
         if not wins:
             self.status.set("리니지M 창을 찾을 수 없습니다."); return
-        count, failed = 0, 0
+        # 🪟 **한 창은 한 슬롯에만** — 먼저 HWND·제목으로 확실한 것을 잡고,
+        #    남은 것만 **거리가 가까운 순서대로** 짝짓는다.
+        #    🚫 예전처럼 슬롯마다 따로 "가장 가까운 창" 을 고르면 **같은 창이
+        #       여러 슬롯에 중복으로 뽑혀** 멀리 있는 창은 안 옮겨진다.
+        #       그래서 재배치를 여러 번 눌러야 했다 (2026-11-04 실측).
+        count, failed, miss = 0, 0, []
+        cand = []          # (슬롯번호, aw)
         for i, slot in enumerate(slots):
             aw = slot.get("assigned_window")
             if not aw or not all(k in aw for k in ("x","y","w","h")): continue
-            hwnd = self._find_hwnd_for_slot(aw, wins)
-            if not hwnd: continue
+            cand.append((i, aw))
+        used, pick = set(), {}
+        # ① HWND·제목으로 확실히 잡히는 것부터
+        for i, aw in cand:
+            h = None
+            sh = aw.get("hwnd")
+            if sh and sh not in used and win32gui.IsWindow(sh):
+                for e in wins:
+                    if e[0] == sh:
+                        h = sh; break
+            if h is None and aw.get("title"):
+                for e in wins:
+                    if e[0] in used:
+                        continue
+                    try:
+                        if win32gui.GetWindowText(e[0]) == aw["title"]:
+                            h = e[0]; break
+                    except Exception:
+                        pass
+            if h is not None:
+                pick[i] = h; used.add(h)
+        # ② 남은 슬롯 × 남은 창 — 거리가 가까운 순서대로
+        rest_s = [(i, aw) for i, aw in cand if i not in pick]
+        rest_w = [e for e in wins if e[0] not in used]
+        prs = sorted((abs(e[1] - aw["x"]) + abs(e[2] - aw["y"]), i, e[0])
+                     for i, aw in rest_s for e in rest_w)
+        for _d, i, h in prs:
+            if i in pick or h in used:
+                continue
+            pick[i] = h; used.add(h)
+        # ③ 옮긴다
+        for i, aw in cand:
+            hwnd = pick.get(i)
+            if not hwnd:
+                miss.append(i + 1); continue
             try:
                 ok, _reason = self._apply_window_pos(hwnd, aw)
             except Exception:
                 ok = False
-            count  += 1 if ok else 0
-            failed += 0 if ok else 1
-        if failed:
-            self.status.set(f"창 위치 복원: 성공 {count}개 / 실패 {failed}개")
+            count += 1 if ok else 0
+            if not ok:
+                failed += 1; miss.append(i + 1)
+        if failed or miss:
+            _m = " ".join("#%02d" % v for v in sorted(set(miss))[:8])
+            self.status.set(f"창 위치 복원: 성공 {count}개 / 안 된 자리 {_m}")
+            click_log(f"[재배치] 성공 {count}개 · 안 된 자리 {_m} "
+                      f"(창 {len(wins)}개 · 슬롯 {len(cand)}개)")
         else:
             self.status.set(f"✔ {count}개 창 위치 복원 완료")
+            click_log(f"[재배치] ✔ {count}개 전부 제자리 (창 {len(wins)}개)")
 
     def _restore_by_ocr(self):
         """OCR로 각 창의 캐릭터명을 읽어 슬롯 이름과 매칭 후 복원"""
