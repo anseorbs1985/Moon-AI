@@ -2288,9 +2288,13 @@ CHAR_GAP_EACH   = (1.0, 2.0)   # 1바퀴째 — 버튼 하나 누르고 다음�
 #        · 묶음 **안**  : CHAR_GAP_EACH(1~2초) 간격으로 **연속으로** 누른다
 #        · 묶음 **사이**: 그 4~5개가 **실제로 접속될 때까지** 기다린다
 #    한 번에 열몇 개를 띄우면 재접속이 뜨며 팅긴다.
+# ✅ 켬 — 다만 **'창이 떴나' 가 아니라 '실제로 들어갔나'** 로 기다린다 (2026-11-04).
+#    사용자: *"4~5개를 입장하기를 하고 **그게 완료가 되면** 다음 거 들어가고"* ·
+#            *"한 번에 접속하니까 계속 **서버와 접속이 끊어진다고 재접속이 뜬단말이야**"*
+#    (화면으로 확인함 — #01 에 `서버와 접속이 끊어졌습니다 / [재접속]` 이 떠 있었다)
 CHAR_BATCH_ON   = True         # 묶어서 기다릴지
 CHAR_BATCH      = 4            # 한 묶음에 몇 개를 누르나 (CHAR_BATCH_ON 일 때만)
-CHAR_BATCH_MAX  = 75           # 그 묶음이 다 뜰 때까지 최대 기다림(초)
+CHAR_BATCH_MAX  = 120          # 그 묶음이 **실제로 접속될 때까지** 최대 기다림(초)
 CHAR_BATCH_GAP  = (3.0, 5.0)   # 다 뜬 뒤 다음 묶음까지 여유 (사용자: "5초 정도")
 CHAR_WAIT_EACH  = 1.1          # (옛 고정값 — 호환용으로 남겨둔다)
 # ⏱ 입장 단계에서 **클라를 옮겨 갈 때**만 쉬는 짧은 틈 (2026-11-04 '3분 안에').
@@ -34398,6 +34402,36 @@ class App(tk.Tk):
             pass
         return n[0]
 
+    def _game_win_ready(self):
+        """🎮 **실제로 게임에 들어간** 창 수 — 제목에 캐릭 이름이 붙은 것만.
+
+        🚨 `_game_win_count` 와 다르다 (2026-11-04 사용자 지시로 갈라냈다):
+           창은 **누르자마자 뜨고** 그 안에서 로딩 → 캐릭터 선택 → 입장 까지
+           시간이 걸린다. 창 수로 세면 **아직 안 들어갔는데** 다음 묶음을 눌러
+           결국 동시에 접속하고 **서버와 접속이 끊어진다(재접속)**.
+        ```
+        창이 뜸      제목 "리니지M"          ← 로딩 중
+        접속 완료    제목 "리니지M l 불화설"   ← 캐릭 이름이 붙는다
+        ```
+        (2026-08-29 에 확인된 성질 — *"캐릭터가 안 뜬 클라는 제목이 그냥 리니지M"*)
+        🚫 이것을 `_game_win_count` 로 되돌리지 말 것."""
+        n = [0]
+
+        def _cb(h, _):
+            try:
+                if win32gui.IsWindowVisible(h):
+                    t = win32gui.GetWindowText(h) or ""
+                    if t.startswith("리니지M l ") and "자동 실행" not in t:
+                        n[0] += 1
+            except Exception:
+                pass
+            return True
+        try:
+            win32gui.EnumWindows(_cb, None)
+        except Exception:
+            return 0
+        return n[0]
+
     def _char_batch_wait(self, base, pressed, tag=""):
         """🪟 **누른 만큼 창이 뜰 때까지** 기다린다 (2026-11-04 사용자 지시).
 
@@ -34408,27 +34442,27 @@ class App(tk.Tk):
         import time as _t
         want = base + pressed
         t0 = _t.time()
-        got = self._game_win_count()
+        got = self._game_win_ready()      # 🎮 **실제로 들어간** 창만 센다
         if got >= want:
-            click_log(f"[접속] 🪟 {tag} {pressed}개 다 떴다 (창 {got}/{want})")
+            click_log(f"[접속] 🎮 {tag} {pressed}개 접속 완료 ({got}/{want})")
         else:
-            click_log(f"[접속] 🪟 {tag} {pressed}개가 다 뜰 때까지 기다린다 "
-                      f"(지금 창 {got} → {want})")
+            click_log(f"[접속] 🎮 {tag} {pressed}개가 **실제로 접속될 때까지** "
+                      f"기다린다 (지금 {got} → {want})")
             while _t.time() - t0 < CHAR_BATCH_MAX:
                 if self._stop_flag:
                     return False
-                got = self._game_win_count()
+                got = self._game_win_ready()
                 if got >= want:
-                    click_log(f"[접속] 🪟 {tag} 다 떴다 — 창 {got}/{want} "
+                    click_log(f"[접속] 🎮 {tag} 접속 완료 — {got}/{want} "
                               f"({_t.time()-t0:.0f}초 걸렸다)")
                     break
-                self.status.set(f"🪟 접속 기다리는 중 — 창 {got}/{want} "
+                self.status.set(f"🎮 접속 기다리는 중 — {got}/{want} "
                                 f"({_t.time()-t0:.0f}초)")
                 if not self._wait(1.0):
                     return False
             else:
-                click_log(f"[접속] 🪟 ⚠ {tag} {CHAR_BATCH_MAX}초를 기다려도 "
-                          f"창 {got}/{want} — 그냥 다음으로 간다")
+                click_log(f"[접속] 🎮 ⚠ {tag} {CHAR_BATCH_MAX}초를 기다려도 "
+                          f"{got}/{want} — 그냥 다음으로 간다")
         return self._wait(random.uniform(*CHAR_BATCH_GAP))
 
     def _purple_wait_settle(self, tag="", maxw=PURPLE_SETTLE_MAX, want=None):
@@ -35392,9 +35426,9 @@ class App(tk.Tk):
                               f"→ 다 뜨면 창 {self._want_wins}개가 된다")
                 except Exception:
                     self._want_wins = None
-                # 🪟 묶음 대기의 기준 — 누르기 전 창 수
+                # 🎮 묶음 대기의 기준 — 누르기 전 **실제로 들어가 있는** 창 수
                 try:
-                    _cbase = self._game_win_count()
+                    _cbase = self._game_win_ready()
                 except Exception:
                     _cbase = 0
                 for _p in range(CHAR_PASSES):
