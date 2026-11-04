@@ -2702,6 +2702,12 @@ REC_DROP_DIR = os.path.join(BASE, "키설정교체")     # 파일을 넣는 자�
 #       둘 다 만들었다가 *"너무 어렵게 해놨어"* · *"이게 맞는지 전혀 모르겠어"* 를 들었다.
 #       폴더 번호 = 런처 슬롯 번호. 그게 전부다.
 REC_SLOTS = 6                                      # 만들어 둘 폴더 개수
+# ⌨ **키보드(단축키) 파일을 넣는 자리** (2026-11-04 사용자 요청 — 퍼플의
+#    [단축키] 칸과 같은 것). 퍼플은 그 cfg 를 두 군데로 나눠 기억한다:
+#      zone\<GUID>\lm\virtualkey\<이름>.cfg          ← 파일 자체
+#      zone\<GUID>\lm\config\purple_zone.config     ← "path": "<이름>.cfg"
+#    실측 2026-11-04 — 지금 16클라는 전부 `최종 키보드 복구  (1).cfg` 를 쓴다.
+REC_KEY_DIR = os.path.join(REC_DROP_DIR, "키보드")
 REC_ZONE_MAP = os.path.join(os.environ.get("LOCALAPPDATA", BASE),
                             "MoonAI", "purple_zones.json")   # 기억해둔 짝
 
@@ -3016,7 +3022,7 @@ def quick_items(app):
          lambda: app._run_awaken(by_user=True, src="간단바")),
         ("fixall", "전부\n복구",  "#1e8449", app._fix_run_all),
         ("mondex2", "도감\n보상받기", "#117864", app._mondex_run),
-        ("rec",    "녹화\n교체",  "#16a085", app._rec_swap_open),
+        ("rec",    "녹화\n교체",  "#16a085", app._rec_win),
     ]
     for fk in ("dragon", "jakwi", "fix", "knight", "magic", "omanst", "mondex",
                "badge", "dollchk", "relic", "coupon", "market", "eventshop",
@@ -3041,8 +3047,38 @@ def rec_make_dirs(rows=None):
         for i in range(1, REC_SLOTS + 1):
             os.makedirs(os.path.join(REC_DROP_DIR, str(i)), exist_ok=True)
         os.makedirs(os.path.join(REC_DROP_DIR, "_백업"), exist_ok=True)
+        os.makedirs(REC_KEY_DIR, exist_ok=True)      # ⌨ 키보드 cfg 자리
     except Exception:
         pass
+
+
+def rec_key_file():
+    """⌨ `키설정교체\\키보드` 에 넣은 **가장 최근 .cfg** 하나 (없으면 None)."""
+    try:
+        fs = [os.path.join(REC_KEY_DIR, f) for f in os.listdir(REC_KEY_DIR)
+              if f.lower().endswith(".cfg")
+              and os.path.isfile(os.path.join(REC_KEY_DIR, f))]
+        return max(fs, key=os.path.getmtime) if fs else None
+    except Exception:
+        return None
+
+
+def kb_now(rows):
+    """그 zone 들이 **지금 쓰는 키보드 cfg 이름** → {이름: 개수}.
+
+    ⚠ `purple_zone.config` 의 `path` 가 그 값이다. 창 자리(`game_*`)와
+      **같은 파일**에 들어 있으니 고칠 때 그 키들을 건드리지 말 것."""
+    from collections import Counter
+    c = Counter()
+    for _nm, z in (rows or []):
+        f = os.path.join(purple_zone_root(), z, "lm", "config",
+                         "purple_zone.config")
+        try:
+            with open(f, encoding="utf-8-sig") as fp:
+                c[json.load(fp).get("path") or "(없음)"] += 1
+        except Exception:
+            c["(못 읽음)"] += 1
+    return c
 
 
 def _rec_newest_json(d):
@@ -6435,6 +6471,225 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _kb_apply(self):
+        """⌨ 넣어둔 키보드 cfg 를 **16클라 전부**에 적용한다 (스레드)."""
+        threading.Thread(target=self._kb_apply_work, daemon=True).start()
+
+    def _kb_apply_work(self):
+        """⌨ 키보드(단축키) cfg 를 16 zone 에 넣고 `path` 를 그것으로 바꾼다.
+
+        🚨 **클라가 켜져 있으면 하지 않는다** — 퍼플이 켤 때 읽어 메모리에 들고
+           있다가 **끌 때 옛것으로 도로 덮어쓴다** (2026-11-03 녹화에서 실측).
+        ⚠ `purple_zone.config` 는 **읽어서 `path` 만 고쳐 쓴다** —
+          같은 파일에 **창 자리(`game_*`·`real_*`)** 가 들어 있다. 통째로
+          덮어쓰면 재부팅 때 창이 엉뚱한 자리에 뜬다."""
+        import shutil
+        try:
+            rec_make_dirs()
+            src = rec_key_file()
+
+            def _msg(t, m):
+                self.after(0, lambda: messagebox.showinfo(t, m))
+
+            if not src:
+                _msg("⌨ 키보드 — 폴더에 파일을 넣어주세요",
+                     "퍼플 [단축키] 에서 **다운로드** 한 .cfg 를"
+                     + chr(10) + "이 폴더에 넣고 다시 눌러주세요." + chr(10) + chr(10)
+                     + REC_KEY_DIR)
+                try:
+                    os.startfile(REC_KEY_DIR)   # 사용자가 누른 버튼이라 열어도 된다
+                except Exception:
+                    pass
+                return
+            live = slot_zones_live()
+            if live:
+                slot_zones_save(live)
+            rows, _at = (live, "지금") if live else slot_zones_saved()
+            if not rows:
+                _msg("⌨ 키보드",
+                     "퍼플 클라를 아직 한 번도 못 봤습니다." + chr(10)
+                     + "16개 클라를 **켜둔 상태로** 한 번 눌러 짝을 기억시킨 뒤,"
+                     + chr(10) + "클라를 끄고 다시 눌러주세요.")
+                return
+            n = lineagem_count()
+            click_log(f"[키보드] 눌림 — 켜진 클라 {n}개 · 넣은 파일 "
+                      f"{os.path.basename(src)} · 기억해둔 짝 {len(rows)}개")
+            if n > 0:
+                click_log(f"[키보드] ⛔ 클라가 {n}개 켜져 있어 **아무것도 하지 않았다**")
+                _msg("⌨ 먼저 클라를 전부 꺼주세요",
+                     f"지금 리니지M 클라가 **{n}개** 켜져 있습니다." + chr(10) + chr(10)
+                     + "퍼플은 키보드 설정을 **켤 때 읽어** 들고 있다가"
+                     + chr(10) + "**끌 때 옛것으로 도로 덮어씁니다.**" + chr(10) + chr(10)
+                     + "  1. 퍼플·16클라를 전부 끈다" + chr(10)
+                     + "  2. [▶ 16클라에 적용] 을 누른다" + chr(10)
+                     + "  3. 클라를 켠다")
+                return
+            name = os.path.basename(src)
+            bk = os.path.join(REC_DROP_DIR, "_백업",
+                              time.strftime("%Y%m%d_%H%M%S") + "_키보드")
+            os.makedirs(bk, exist_ok=True)
+            done = fail = 0
+            for i, (nm, z) in enumerate(rows):
+                try:
+                    root = os.path.join(purple_zone_root(), z, "lm")
+                    vk = os.path.join(root, "virtualkey")
+                    cf = os.path.join(root, "config", "purple_zone.config")
+                    os.makedirs(vk, exist_ok=True)
+                    # 📦 지금 쓰던 cfg 를 먼저 백업
+                    try:
+                        with open(cf, encoding="utf-8-sig") as fp:
+                            d = json.load(fp)
+                    except Exception:
+                        d = {}
+                    old = d.get("path") or ""
+                    if old:
+                        op = os.path.join(vk, old)
+                        if os.path.isfile(op):
+                            shutil.copy2(op, os.path.join(
+                                bk, "%02d_%s" % (i + 1, old)))
+                    # 📄 새 cfg 를 넣고 **path 만** 바꾼다
+                    shutil.copy2(src, os.path.join(vk, name))
+                    d["path"] = name
+                    tmp = cf + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as fp:
+                        json.dump(d, fp, ensure_ascii=False, indent=4)
+                    os.replace(tmp, cf)
+                    done += 1
+                except Exception as e:
+                    fail += 1
+                    click_log(f"[키보드] ⚠ #{i+1} {nm} 실패 — {e}")
+            click_log(f"[키보드] ✔ {done}개 적용 · 실패 {fail}개 — '{name}' "
+                      f"(백업 {bk})")
+            _msg("⌨ 키보드 적용 끝",
+                 f"**{done}개** 클라에 넣었습니다." + chr(10)
+                 + f"파일 : {name}" + chr(10) + chr(10)
+                 + ("" if not fail else f"⚠ 실패 {fail}개 — 기록을 봐주세요" + chr(10))
+                 + "이제 클라를 켜면 그 설정으로 뜹니다." + chr(10) + chr(10)
+                 + "되돌리려면 아래 백업에서 꺼내 쓰세요:" + chr(10) + bk)
+            self.after(0, lambda: self.status.set(f"⌨ 키보드 {done}개 적용 완료"))
+            self.after(0, self._rec_win_refresh)
+        except Exception as e:
+            click_log(f"[키보드] 오류 {type(e).__name__}: {e}")
+            self.after(0, lambda: self.status.set(f"⌨ 키보드 오류: {e}"))
+
+    def _rec_win(self):
+        """🎹 **마우스/키 녹화하기** — 위는 ⌨ 키보드, 아래는 🖱 녹화.
+
+        🧭 퍼플의 [단축키]+[매크로] 패널과 **같은 모양**으로 만들었다
+           (2026-11-04 사용자가 그 화면을 보여주며 요청).
+        🚫 적용은 **클라를 전부 끈 상태**에서만 먹는다 — 창 아래에 그 사실과
+           지금 켜진 개수를 늘 보여준다."""
+        w = getattr(self, "_recwin", None)
+        if w is not None and w.winfo_exists():
+            w.deiconify(); w.lift(); self._rec_win_refresh(); return
+        rec_make_dirs()
+        w = tk.Toplevel(self); self._recwin = w
+        w.title("🎹 마우스/키 녹화하기")
+        w.geometry("560x430")
+        w.attributes("-topmost", True)
+
+        # ── ⌨ 키보드 ──
+        f1 = tk.LabelFrame(w, text=" ⌨ 키보드 (단축키) ",
+                           font=("맑은 고딕", 10, "bold"), fg="#f1c40f")
+        f1.pack(fill="x", padx=10, pady=(10, 4))
+        self._kb_now = tk.StringVar(value="")
+        self._kb_new = tk.StringVar(value="")
+        tk.Label(f1, textvariable=self._kb_now, font=("맑은 고딕", 9),
+                 anchor="w", justify="left").pack(fill="x", padx=8, pady=(6, 0))
+        tk.Label(f1, textvariable=self._kb_new, font=("맑은 고딕", 9, "bold"),
+                 anchor="w", justify="left").pack(fill="x", padx=8, pady=(2, 4))
+        b1 = tk.Frame(f1); b1.pack(fill="x", padx=8, pady=(0, 8))
+        tk.Button(b1, text="📂 폴더 열기", font=("맑은 고딕", 9),
+                  command=lambda: self._rec_open_dir(REC_KEY_DIR)).pack(side="left")
+        tk.Button(b1, text="▶ 16클라에 적용", font=("맑은 고딕", 9, "bold"),
+                  bg="#f1c40f", fg="#1a1a1a", activebackground="#d4ac0d",
+                  command=self._kb_apply).pack(side="right")
+
+        # ── 🖱 녹화 ──
+        f2 = tk.LabelFrame(w, text=" 🖱 마우스키 녹화 설정 ",
+                           font=("맑은 고딕", 10, "bold"), fg="#5dade2")
+        f2.pack(fill="both", expand=True, padx=10, pady=(4, 4))
+        self._rec_rows = tk.Frame(f2); self._rec_rows.pack(fill="x", padx=8, pady=(6, 0))
+        b2 = tk.Frame(f2); b2.pack(fill="x", padx=8, pady=(6, 8), side="bottom")
+        tk.Button(b2, text="📂 폴더 열기", font=("맑은 고딕", 9),
+                  command=lambda: self._rec_open_dir(REC_DROP_DIR)).pack(side="left")
+        tk.Button(b2, text="▶ 16클라에 적용", font=("맑은 고딕", 9, "bold"),
+                  bg="#2471a3", fg="white", activebackground="#1a5276",
+                  command=self._rec_swap_open).pack(side="right")
+
+        self._rec_note = tk.StringVar(value="")
+        tk.Label(w, textvariable=self._rec_note, font=("맑은 고딕", 9, "bold"),
+                 fg="#e74c3c", wraplength=520, justify="left").pack(
+                     fill="x", padx=12, pady=(0, 2))
+        b3 = tk.Frame(w); b3.pack(fill="x", padx=10, pady=(0, 8))
+        tk.Button(b3, text="🔄 다시 읽기", font=("맑은 고딕", 9),
+                  command=self._rec_win_refresh).pack(side="left")
+        tk.Button(b3, text="닫기", font=("맑은 고딕", 9),
+                  command=w.destroy).pack(side="right")
+        try:
+            apply_dark(w, self.cfg.get("dark_ui", True))
+        except Exception:
+            pass
+        self._rec_win_refresh()
+
+    def _rec_open_dir(self, d):
+        """📂 그 폴더를 연다 — **사용자가 누른 버튼에서만** 부른다."""
+        try:
+            os.makedirs(d, exist_ok=True)
+            os.startfile(d)
+        except Exception as e:
+            self.status.set(f"폴더를 못 열었다: {e}")
+
+    def _rec_win_refresh(self):
+        """🎹 창 내용을 다시 읽는다 (무거운 일은 스레드에서)."""
+        if getattr(self, "_recwin", None) is None or not self._recwin.winfo_exists():
+            return
+        threading.Thread(target=self._rec_win_scan, daemon=True).start()
+
+    def _rec_win_scan(self):
+        try:
+            live = slot_zones_live()
+            if live:
+                slot_zones_save(live)
+            rows, at = (live, "지금 켜진 클라") if live else slot_zones_saved()
+            cnt = kb_now(rows)
+            src = rec_key_file()
+            files = rec_drop_files()
+            n = lineagem_count()
+        except Exception as e:
+            self.after(0, lambda: self.status.set(f"🎹 다시 읽기 오류: {e}"))
+            return
+
+        def _fill():
+            if getattr(self, "_recwin", None) is None or not self._recwin.winfo_exists():
+                return
+            cur = "  ".join("%s (%d개)" % (k, v) for k, v in cnt.most_common()) \
+                if cnt else "(짝을 아직 모릅니다)"
+            self._kb_now.set("지금 클라들이 쓰는 파일 :  " + cur)
+            self._kb_new.set("넣은 파일 :  "
+                             + (os.path.basename(src) if src else "(없음 — 📂 폴더에 .cfg 를 넣으세요)"))
+            for ch in self._rec_rows.winfo_children():
+                ch.destroy()
+            for i in range(1, REC_SLOTS + 1):
+                r = tk.Frame(self._rec_rows); r.pack(fill="x", pady=1)
+                tk.Label(r, text="슬롯 %d :" % i, font=("맑은 고딕", 9, "bold"),
+                         width=7, anchor="w").pack(side="left")
+                f = files.get(i)
+                tk.Label(r, text=(os.path.basename(f) if f else "(비었음)"),
+                         font=("맑은 고딕", 9),
+                         fg=("#2ecc71" if f else "#95a5a6"),
+                         anchor="w").pack(side="left", fill="x", expand=True)
+            self._rec_note.set(
+                ("⚠ 지금 리니지M 클라가 %d개 켜져 있습니다 — "
+                 "전부 꺼야 적용됩니다." % n) if n > 0
+                else "✔ 클라가 전부 꺼져 있습니다 — 지금 적용할 수 있습니다.")
+            try:
+                apply_dark(self._recwin, self.cfg.get("dark_ui", True))
+            except Exception:
+                pass
+
+        self.after(0, _fill)
+
     def _rec_swap_open(self):
         """[🎹 녹화교체] — 무거운 일은 전부 스레드에서."""
         self.status.set("🎹 퍼플 폴더를 확인하는 중...")
@@ -7248,10 +7503,13 @@ class App(tk.Tk):
                                    command=self._toggle_dark)
         self._dark_btn.pack(side="top", pady=(1, 0))
         # 🎹 퍼플 마우스·키 녹화를 16클라에 한 번에 교체
-        tk.Button(sv, text="🎹 녹화교체", font=("맑은 고딕", 8, "bold"),
+        # 🎹 예전 [녹화교체] 버튼 — **세로바의 [마우스/키 녹화하기] 로 옮겼다**
+        #    (2026-11-04). 두 군데 있으면 접었을 때와 펼쳤을 때가 달라 보인다.
+        _old_rec_btn = tk.Button(sv, text="🎹 녹화교체", font=("맑은 고딕", 8, "bold"),
                   bg="#16a085", fg="white", activebackground="#0e6655",
                   width=9, height=1, pady=2,
-                  command=self._rec_swap_open).pack(side="top", pady=(1, 0))
+                  command=self._rec_win)
+        _old_rec_btn.pack_forget()      # 🚫 세로바로 옮겼으므로 보이지 않는다
         # 📑 간단바 — 자주 쓰는 실행 버튼만 모은 좁은 창
         tk.Button(sv, text="📑 간단바", font=("맑은 고딕", 8, "bold"),
                   bg="#6c3483", fg="white", activebackground="#4a235a",
@@ -7568,6 +7826,14 @@ class App(tk.Tk):
                   bg="#f1c40f", fg="#1a1a1a", activebackground="#d4ac0d",
                   height=1, pady=4,
                   command=self._start).pack(side="top", fill="x", pady=(3, 0))
+        # 🎹 **마우스/키 녹화하기** — 좌표복구 밑 (2026-11-04 사용자 지시:
+        #    *"좌표복구 밑에 [마우스/키 녹화하기] 에 이렇게 넣어줄 수 있냐.
+        #      위에 건 키보드고 아래는 마우스키 녹화설정이야"*).
+        #    ⚠ 예전 [🎹 녹화교체] 버튼은 **지웠다** — 두 군데 있으면 헷갈린다.
+        tk.Button(_k2, text="🎹 마우스/키 녹화하기", font=("맑은 고딕", 8, "bold"),
+                  bg="#16a085", fg="white", activebackground="#0e6655",
+                  height=1, pady=2,
+                  command=self._rec_win).pack(side="top", fill="x", pady=(3, 0))
         # 💬 **지금 무슨 일을 하는지** — 좌표저장/복구 바로 아래 (2026-11-04 사용자:
         #    *"좌표지정이랑 좌표복구 밑에 현재 상황 멘트를 볼 수 있게 해줘"*).
         #    접으면 위쪽 상태줄이 같이 숨겨지므로 **여기가 유일한 상태 표시**다.
