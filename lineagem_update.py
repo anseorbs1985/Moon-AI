@@ -168,7 +168,10 @@ DATA_DIRS  = ["reroll_templates", "click_templates"]   # 이미지 클릭 그림
 NEVER_ISLAND = False           # island_coords.json 배포 허용 (배포 끝나면 True)
 NEVER_COORD_KEYS = {
     "doll_slots",              # 🧸 인형탐험 — 컴퓨터마다 다르다 (사용자 지목)
-    "char_btns",               # 👤 캐릭터 접속 버튼 — 계정마다 캐릭 수·자리가 다르다
+    # 🔓 2026-11-04 — 사용자가 **접속을 100% 똑같이** 올리라고 해서
+    #    "char_btns" 를 **임시로** 뺐다 (*"해상도도 다 같단 말이야"*).
+    #    🚫 로컬이 받으면 **반드시 되돌릴 것** — 이 줄의 주석을 풀면 된다.
+    # "char_btns",             # 👤 캐릭터 접속 버튼 — 계정마다 캐릭 수·자리가 다르다
 }
 
 

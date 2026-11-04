@@ -2,6 +2,7 @@
  "keys": [
   "badge_slots",
   "cardfix_rels",
+  "char_btns",
   "char_enter",
   "circus2_slots",
   "circus3_slots",
@@ -52,6 +53,7 @@
  "force": [
   "badge_slots",
   "cardfix_rels",
+  "char_btns",
   "char_enter",
   "circus2_slots",
   "circus3_slots",
@@ -99,6 +101,6 @@
   "tj_slots",
   "wdoff_slots"
  ],
- "_메모": "2026-11-04 역산 좌표 배포 — 사용자 지시로 **잠금을 뚫는다**. 배포가 끝나면 keys·force 를 **반드시 비울 것** (09-30·10-13·10-17 사고).",
+ "_메모": "2026-11-04 접속 관련 100% 배포 (사용자가 콕 집어 요청 — 해상도가 같다). 🚫 로컬이 받으면 keys·force 를 **반드시 비우고** lineagem_update.py 의 NEVER_COORD_KEYS 에 char_btns 를 되돌린 뒤 py check_share.py 로 확인할 것.",
  "ignore_lock": true
 }
