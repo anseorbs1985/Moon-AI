@@ -328,7 +328,10 @@ ENTER_LOGIN_WAIT = (2.5, 3.5)   # 가운데를 누른 뒤 캐릭터 선택이 �
 # 🔔 접속 자리를 덮은 알림을 몇 번까지 치워볼까 (알림이 연달아 뜰 수 있다)
 LOGIN_POPUP_TRIES = 3
 # 📝 적어둘 칸 글씨색 — 굵은 빨강 (2026-11-04 사용자 지시)
-MEMO_FG = "#e03131"
+# 🟡 **적어둘 칸 글씨 — 찐 노랑** (2026-11-04 사용자: *"그 아래 메모 글씨를
+#    말하는 거야. 리니지 no.7 이렇게 글씨를 적은 거"*).
+#    🚫 예전 빨강(#e03131)으로 되돌리지 말 것.
+MEMO_FG = "#ffd43b"
 # 🟡 상태줄(지금 무슨 일을 하는지) 글씨 — **찐 노란색** (2026-11-04 사용자:
 #    *"메인런처 글씨 찐 노란색으로 바꿔줘, 잘 안 보인다"*)
 STATUS_FG = "#ffd43b"
@@ -7961,24 +7964,15 @@ class App(tk.Tk):
         #    *"혈레이드 업데이트 위에 글을 쓸 수 있게 공간을 주고 크기는 고를 수 있게"*).
         #    적는 즉시 `coords.json` 의 `fold_memo` 에 저장된다 (이 컴퓨터 전용).
         _mt = tk.Frame(_keep); _mt.pack(anchor="n", fill="x")
-        _ml = tk.Label(_mt, text="📝 크기", font=("맑은 고딕", 8, "bold"),
-                       fg=STATUS_FG)
-        _ml._keep_fg = True
-        _ml.pack(side="left")
+        tk.Label(_mt, text="📝", font=("맑은 고딕", 8)).pack(side="left")
         self._memo_size = tk.StringVar(value=str(int(self.cfg.get("fold_memo_size", 9))))
         _om = tk.OptionMenu(_mt, self._memo_size, *[str(v) for v in (8, 9, 10, 12, 14, 16, 18, 20)],
                             command=lambda _v: self._fold_memo_size())
-        # 🟡 **찐 노란색** (2026-11-04 사용자: *"글씨 크기 지정하는 거,
-        #    그것도 색상을 찐 노란색으로 바꿔줘"*). 바탕은 어둡게 두고 글씨만.
-        #    ⚠ `_keep_fg` 로 `apply_dark` 가 덮지 않게 한다.
-        _om.config(font=("맑은 고딕", 8, "bold"), width=2, padx=0, pady=0,
-                   highlightthickness=0, bd=1,
-                   fg=STATUS_FG, activeforeground=STATUS_FG)
-        _om._keep_fg = True
-        try:
-            _om["menu"].config(font=("맑은 고딕", 9, "bold"), fg=STATUS_FG,
-                               activeforeground=STATUS_FG)
-            _om["menu"]._keep_fg = True
+        # ⚪ 크기 고르기는 **기본 색 그대로** (2026-11-04 사용자: *"위에는 다시
+        #    돌려줘"* — 노랗게 할 것은 **메모 글씨**였다).
+        _om.config(font=("맑은 고딕", 7), width=2, padx=0, pady=0,
+                   highlightthickness=0, bd=1)
+        try: _om["menu"].config(font=("맑은 고딕", 8))
         except Exception: pass
         _om.pack(side="left", padx=(2, 0))
         # 📝 **굵은 빨강** (2026-11-04 사용자 지시) · 최대 20pt.
