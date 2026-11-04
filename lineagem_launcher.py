@@ -1758,6 +1758,31 @@ RECLICK_HOLD = [(0.18, 0.30), (0.35, 0.50), (0.50, 0.70), (0.70, 0.95)]  # 갈�
 # 매일매일 스케줄 — 이 번호까지만 웨이브로 겹쳐 돌리고, 뒤는 한 슬롯씩 순서대로
 # (2026-08-29 사용자 지시: 겹치니 다른 창에 가려 실행이 안 되는 일이 있었다)
 SCHED_WAVE_TO = 12
+
+# 🕐 **스케줄을 4개씩 묶어 시간차로 돌린다** (2026-11-04 사용자 제안:
+#    *"슬롯마다 바로 클릭을 네 개 해주고 2분 뒤에 네 개, 3분 뒤에 4개, 5분 뒤에 네 개"* ·
+#    *"스케줄을 0분으로 하니까 **부하가 엄청나게 걸려서 팅길 위험**이 엄청나거든"*).
+#
+#    🎉 이걸로 **녹화 파일을 여러 개 만들 필요가 없다** — 딜레이가 코드에 있으니
+#       로컬도 🔄 업데이트만 하면 똑같이 돈다 (사용자: *"파일을 여러 개 안 넣어도 되긴 하거든"*).
+#
+#    `SCHED_BATCH_AT` 은 **전체 시작 기준 '시작 시각'**(분)이다 — 묶음 사이 간격이 아니다.
+#    0·2·3·5 → 묶음 사이가 2분 · 1분 · 2분, 전체 약 5분에 끝난다.
+#    ⚠ 앞 묶음이 길어져 그 시각이 이미 지났으면 **기다리지 않고 바로** 간다.
+SCHED_BATCH    = 4                # 한 묶음 슬롯 수
+SCHED_BATCH_AT = (0, 2, 3, 5)     # 분 — **시작 시각** (사용자 확정, 번호 순으로 배정)
+SCHED_BATCH_ON = True             # 끄려면 coords.json 의 `sched_batch_on: false`
+
+
+def sched_batch_min(k):
+    """k번째(0부터) 묶음이 시작할 **분**. 표가 모자라면 마지막 간격을 이어 쓴다."""
+    at = SCHED_BATCH_AT
+    if not at:
+        return 0
+    if k < len(at):
+        return at[k]
+    step = (at[-1] - at[-2]) if len(at) >= 2 else 2
+    return at[-1] + step * (k - len(at) + 1)
 # 이 런처들은 슬롯을 시작하기 전에 '절전모드 화면'을 확인하고, 절전이면 키를 눌러 깨운다
 # (2026-08-29 사용자 지시 — 늦게 하면 절전으로 들어가 Z 를 따로 눌러야 한다)
 # 복구를 누른 뒤 그 슬롯을 몇 번 더 지켜볼지 (3초 간격 → 30번 ≈ 90초)
@@ -16783,6 +16808,38 @@ class App(tk.Tk):
         tk.Label(rr, text="(못 찾으면 **누르지 않고** 그 슬롯을 끝냅니다)",
                  font=("맑은 고딕", 7), fg="#888").pack(side="left", padx=(4, 0))
 
+    def _sched_batch_row(self, parent):
+        """🕐 **4개씩 묶어 시간차로 돌리기** 켬/끔 (2026-11-04 사용자 제안).
+
+        켜져 있는지 **눈에 보여야 한다** — 안 보이면 돌려보기 전엔 알 수 없다
+        (이 저장소의 반복된 교훈)."""
+        fr = tk.Frame(parent)
+        fr.pack(pady=(0, 2))
+        _plan = " · ".join("%d분 %d개" % (sched_batch_min(k), SCHED_BATCH)
+                            for k in range(4))
+        b = tk.Button(fr, font=("맑은 고딕", 8, "bold"), fg="white", width=22)
+
+        def _sync():
+            on = bool(self.cfg.get("sched_batch_on", SCHED_BATCH_ON))
+            b.config(text=("🕐 4개씩 나눠 돌림 (켬)" if on else "🕐 한꺼번에 (끔)"),
+                     bg=("#1e8449" if on else "#5d6d7e"))
+
+        def _tog():
+            on = not bool(self.cfg.get("sched_batch_on", SCHED_BATCH_ON))
+            self.cfg["sched_batch_on"] = on
+            save_cfg(self.cfg, ["sched_batch_on"])
+            _sync()
+            self.status.set("🕐 스케줄 — " + ("%s 로 나눠 돌립니다" % _plan) if on
+                            else "🕐 스케줄 — 예전처럼 한꺼번에 돌립니다")
+            click_log("[스케줄] 🕐 4개씩 나눠 돌리기 "
+                      + ("켬 — " + _plan if on else "끔 (한꺼번에)") + " (사용자)")
+
+        b.config(command=_tog)
+        b.pack(side="left", padx=(4, 4))
+        _sync()
+        tk.Label(fr, text=_plan + "  (번호 순 · 전체 약 %d분)" % sched_batch_min(3),
+                 font=("맑은 고딕", 8), fg="#555").pack(side="left")
+
     def _grab_sleep_image(self, fkey, btn=None):
         """😴 절전모드 화면을 드래그해 등록한다.
         슬롯을 시작하기 전에 이게 보이면 Z 를 한 번 눌러 깨우고 진행한다."""
@@ -23842,6 +23899,7 @@ class App(tk.Tk):
             font=("맑은 고딕", 8), bg="#95a5a6", fg="white", width=14,
             state="disabled").pack(side="left", padx=(4,0))
         self._hover_row(parent, "sched")
+        self._sched_batch_row(parent)      # 🕐 4개씩 나눠 돌리기 (2026-11-04)
 
         tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
         self._build_slot_grid(parent, "sched")   # 4×4 그리드 (화면 배치와 동일)
@@ -30485,19 +30543,62 @@ class App(tk.Tk):
                            if any(s.get("coords", []))]
                 # 1번부터 번호 순서대로 — 섞지 않는다 (2026-08-28 사용자 지시)
             if slot_idx is None and len(targets) > 1:
-                # 앞쪽(1~SCHED_WAVE_TO 번)만 웨이브로 겹쳐 돌리고,
-                # 뒤쪽은 **한 슬롯씩 순서대로** 돈다 (2026-08-29 사용자 지시 —
-                # 웨이브로 겹치니 다른 창에 가려 실행이 안 되는 일이 있었다).
-                _wave = [(i, sl) for i, sl in targets if i + 1 <= SCHED_WAVE_TO]
-                _tail = [(i, sl) for i, sl in targets if i + 1 > SCHED_WAVE_TO]
-                if len(_wave) > 1:
-                    self._base_expand_ok("📅 스케줄")
-                    self._run_sched_wave(_wave)
-                elif _wave:
-                    _tail = _wave + _tail
-                if _tail and not self._sched_stop:
-                    self.status.set(f"📅 스케줄 — 나머지 {len(_tail)}슬롯은 순서대로")
-                    self._run_sched_seq(_tail)
+                # 🕐 **4개씩 묶어 시간차로** (2026-11-04 사용자 제안 — 0분에 다 돌리면
+                #    부하가 몰려 팅긴다). 묶음 **안**은 예전 규칙 그대로다.
+                _bon = bool(self.cfg.get("sched_batch_on", SCHED_BATCH_ON))
+                if _bon and len(targets) > SCHED_BATCH:
+                    _bats = [targets[i:i + SCHED_BATCH]
+                             for i in range(0, len(targets), SCHED_BATCH)]
+                else:
+                    _bats = [targets]
+                if len(_bats) > 1:
+                    _plan = " · ".join(
+                        "%d분 #%02d~%02d" % (sched_batch_min(k), b[0][0] + 1,
+                                             b[-1][0] + 1)
+                        for k, b in enumerate(_bats))
+                    click_log(f"[스케줄] 🕐 {SCHED_BATCH}개씩 나눠 돌린다 — {_plan}")
+                    self.status.set(f"📅 스케줄 — {SCHED_BATCH}개씩 나눠서: {_plan}")
+                _t0 = time.time()
+                self._base_expand_ok("📅 스케줄")
+                for _bi, _bt in enumerate(_bats):
+                    if self._sched_stop:
+                        break
+                    if _bi:            # 첫 묶음은 바로 — 그 다음부터 시각을 맞춘다
+                        _due = _t0 + sched_batch_min(_bi) * 60.0
+                        _left = _due - time.time()
+                        if _left > 0.5:
+                            click_log(f"[스케줄] 🕐 {_bi+1}묶음 "
+                                      f"(#{_bt[0][0]+1:02d}~{_bt[-1][0]+1:02d}) — "
+                                      f"시작까지 {_left:.0f}초 기다린다")
+                        else:
+                            click_log(f"[스케줄] 🕐 {_bi+1}묶음 — 앞 묶음이 길어져 "
+                                      f"{sched_batch_min(_bi)}분이 이미 지났다, 바로 간다")
+                        while not self._sched_stop:
+                            _left = _due - time.time()
+                            if _left <= 0:
+                                break
+                            self.status.set(
+                                f"📅 {_bi+1}묶음 (#{_bt[0][0]+1:02d}~"
+                                f"{_bt[-1][0]+1:02d}) — {_left:.0f}초 뒤 시작")
+                            nap(min(1.0, _left))     # [■ 멈춤] 에 바로 반응한다
+                        if self._sched_stop:
+                            break
+                    # ── 묶음 안은 예전 규칙 그대로 ──
+                    # 앞쪽(1~SCHED_WAVE_TO 번)만 웨이브로 겹쳐 돌리고,
+                    # 뒤쪽은 **한 슬롯씩 순서대로** 돈다 (2026-08-29 사용자 지시 —
+                    # 웨이브로 겹치니 다른 창에 가려 실행이 안 되는 일이 있었다).
+                    _wave = [(i, sl) for i, sl in _bt if i + 1 <= SCHED_WAVE_TO]
+                    _tail = [(i, sl) for i, sl in _bt if i + 1 > SCHED_WAVE_TO]
+                    if len(_wave) > 1:
+                        self._run_sched_wave(_wave)
+                    elif _wave:
+                        _tail = _wave + _tail
+                    if _tail and not self._sched_stop:
+                        self.status.set(f"📅 스케줄 — 나머지 {len(_tail)}슬롯은 순서대로")
+                        self._run_sched_seq(_tail)
+                if len(_bats) > 1:
+                    click_log(f"[스케줄] 🕐 끝 — {len(_bats)}묶음 · "
+                              f"전체 {time.time()-_t0:.0f}초")
                 self.status.set("✔ 매일매일 스케줄 완료!")
                 # 😴 깨우기 결과를 **한 줄로** 남긴다 — 조용히 넘어가면
                 #    "왜 안 깨웠지" 를 로컬에서 짚을 수 없다 (반복된 교훈).
