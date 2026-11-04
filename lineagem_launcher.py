@@ -6637,6 +6637,7 @@ class App(tk.Tk):
             apply_dark(w, self.cfg.get("dark_ui", True))
         except Exception:
             pass
+        self._place_beside(w, getattr(self, "_rec_btn", None))
         self._rec_win_refresh()
 
     def _rec_load(self, slot):
@@ -7924,10 +7925,11 @@ class App(tk.Tk):
         #    *"좌표복구 밑에 [마우스/키 녹화하기] 에 이렇게 넣어줄 수 있냐.
         #      위에 건 키보드고 아래는 마우스키 녹화설정이야"*).
         #    ⚠ 예전 [🎹 녹화교체] 버튼은 **지웠다** — 두 군데 있으면 헷갈린다.
-        tk.Button(_k2, text="🎹 마우스/키 녹화하기", font=("맑은 고딕", 8, "bold"),
+        self._rec_btn = tk.Button(_k2, text="🎹 마우스/키 녹화하기",
+                  font=("맑은 고딕", 8, "bold"),
                   bg="#16a085", fg="white", activebackground="#0e6655",
-                  height=1, pady=2,
-                  command=self._rec_win).pack(side="top", fill="x", pady=(3, 0))
+                  height=1, pady=2, command=self._rec_win)
+        self._rec_btn.pack(side="top", fill="x", pady=(3, 0))
         # 🪟 **재배치 — 옆으로 펼치는 판** (2026-11-04 사용자 지시).
         #    [📍 위치 전체저장]·[📐 창 전체복원]·[🔢 번호 재지정]·슬롯 16칸이
         #    그 판 **안에** 들어 있다 (`_build_winmgmt` 그대로).
@@ -8405,6 +8407,77 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _place_beside(self, win, btn=None):
+        """🧭 그 창을 **세로바 바로 왼쪽**에 붙인다 — 멀리 뜨지 않게.
+
+        🧭 2026-11-04 사용자: *"용던고고 스케줄 과거의말하는섬 등등 그걸
+           클릭하면 재배치처럼 **옆으로** 뜨게 해줘. **저기 멀리 뜨게 하지 말고.**"*
+
+        ⚠ **폭·높이는 `GetWindowRect`(테두리 포함)** 로 잰다 —
+          `winfo_reqwidth()` 는 **안쪽** 폭이라 그만큼 오른쪽으로 밀려 겹친다
+          (2026-11-04 재배치 판에서 실측 2419 > 2409).
+        ⚠ **가로 기준은 세로바(`_dc_host`)** 다. 메인런처 창 전체로 잡으면
+          펼친 상태에서 왼쪽 끝이 화면 가까이라 창이 화면 밖으로 밀린다.
+        ⚠ **세로 기준은 눌린 버튼** — 모르면 **마우스 커서 높이**를 쓴다
+          (방금 그 버튼을 눌렀으니 커서가 거기 있다). 고정값을 쓰면
+          *"왜 위로 올리냐"* 가 된다."""
+        try:
+            win.update_idletasks()
+            try:
+                fr = win32gui.GetWindowRect(int(win.wm_frame(), 16))
+                ww, hh = fr[2] - fr[0], fr[3] - fr[1]
+            except Exception:
+                ww, hh = win.winfo_reqwidth(), win.winfo_reqheight()
+            # 가로 — 세로바 왼쪽
+            left = None
+            try:
+                _h = getattr(self, "_dc_host", None)
+                if _h is not None and _h.winfo_exists():
+                    left = _h.winfo_rootx()
+            except Exception:
+                left = None
+            if not left:
+                try:
+                    left = win32gui.GetWindowRect(int(self.wm_frame(), 16))[0]
+                except Exception:
+                    left = self.winfo_screenwidth()
+            # ⚠ 간격 **12px** — `winfo_rootx()` 는 테두리 **안쪽** 기준이라
+            #    창 왼쪽 끝보다 8px 오른쪽이다. 4px 만 띄우면 세로바와 겹친다
+            #    (실측: 창 끝 2412 > 세로바 2408).
+            x = max(0, left - ww - 12)
+            # 세로 — 그 버튼, 없으면 마우스 커서
+            y = None
+            try:
+                if btn is not None and btn.winfo_exists():
+                    y = btn.winfo_rooty() - 8
+            except Exception:
+                y = None
+            if y is None:
+                try:
+                    y = win32gui.GetCursorPos()[1] - 40
+                except Exception:
+                    y = 60
+            y0 = y
+            y = max(0, min(int(y), self.winfo_screenheight() - hh - 40))
+            win.geometry("+%d+%d" % (x, y))
+            # 🧭 **실제로 얼마나 어긋났는지 재서 되돌린다** — `wm geometry` 가
+            #    준 값과 `GetWindowRect` 가 보는 자리가 Win11 의 보이지 않는
+            #    테두리만큼 다르다 (실측 +8px → 세로바와 겹쳤다).
+            #    2026-09-30 슬롯판에서 쓴 방법 그대로.
+            try:
+                win.update_idletasks()
+                f2 = win32gui.GetWindowRect(int(win.wm_frame(), 16))
+                dx, dy = f2[0] - x, f2[1] - y
+                if dx or dy:
+                    win.geometry("+%d+%d" % (x - dx, y - dy))
+            except Exception:
+                dx = dy = 0
+            click_log(f"[창자리] {win.title()} → ({x},{y}) 크기 {ww}x{hh} "
+                      f"· 세로바 {left} · 바라던 y {y0} · 어긋남 {dx},{dy}")
+        except Exception as _e:
+            try: click_log(f"[창자리] ⚠ {_e}")
+            except Exception: pass
+
     def _open_section_win(self, attr, title, build_fn, w=420, h=700, pinnable=False, fit=True):
         win = getattr(self, attr, None)
         if win and win.winfo_exists():
@@ -8445,7 +8518,14 @@ class App(tk.Tk):
                 nw = win.winfo_reqwidth() + 10
                 nh = win.winfo_reqheight() + 6
                 win.geometry(f"{nw}x{nh}")
+                # 🧭 크기를 잡은 **뒤** 세로바 옆으로 붙인다 (멀리 뜨지 않게).
+                #    ⚠ 사용자가 옮겨 **저장해둔 자리**(`_win_pos_*`)가 있으면
+                #      그것을 존중한다 — 건드리지 않는다.
+                if not saved:
+                    self._place_beside(win)
             win.after(80, _fit)
+        elif not saved:
+            win.after(80, lambda: self._place_beside(win))
         try:                    # 새 창도 지금 화면 밝기에 맞춘다
             if self._dark_on():
                 apply_dark(win, True)
@@ -11742,30 +11822,8 @@ class App(tk.Tk):
         except Exception as e:
             tk.Label(body, text=f"판을 못 만들었다: {e}",
                      fg="#e74c3c").pack(padx=10, pady=10)
-        # 🧭 **그 버튼 바로 옆**에 붙인다 (2026-11-04 사용자:
-        #    *"재배치 바로 옆으로 켜줘야지 왜 위로 올리냐"*)
-        #    ⚠ 크기는 **`GetWindowRect`(테두리 포함)** 로 잰다 —
-        #      `winfo_reqwidth()` 는 **안쪽** 폭이라 그만큼 오른쪽으로 밀려
-        #      세로바와 겹친다 (실측 2419 > 2409).
-        #    ⚠ 높이는 **버튼의 `winfo_rooty()`** — '창 위 + 60' 으로 두면
-        #      버튼과 무관한 맨 위에 뜬다 (실측 y=60 인데 버튼은 y≈356).
-        try:
-            w.update_idletasks()
-            try:
-                _fr = win32gui.GetWindowRect(int(w.wm_frame(), 16))
-                ww, hh = _fr[2] - _fr[0], _fr[3] - _fr[1]
-            except Exception:
-                ww, hh = w.winfo_reqwidth(), w.winfo_reqheight()
-            r = win32gui.GetWindowRect(int(self.wm_frame(), 16))
-            x = max(0, r[0] - ww - 4)
-            try:
-                y = self._wm_btn.winfo_rooty() - 8
-            except Exception:
-                y = r[1] + 60
-            y = max(0, min(y, self.winfo_screenheight() - hh - 40))
-            w.geometry("+%d+%d" % (x, y))
-        except Exception:
-            pass
+        # 🧭 **그 버튼 바로 옆**에 붙인다 — 다른 창과 **같은 도우미**를 쓴다
+        self._place_beside(w, getattr(self, "_wm_btn", None))
         w.protocol("WM_DELETE_WINDOW", self._winmgmt_win)
         try:
             apply_dark(w, self.cfg.get("dark_ui", True))
