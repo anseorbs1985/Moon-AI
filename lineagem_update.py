@@ -792,9 +792,22 @@ def sync_coord_fix(log):
         if not os.path.exists(man):
             return
         with open(man, encoding="utf-8") as f:
-            keys = (json.load(f) or {}).get("keys") or []
+            _mf = json.load(f) or {}
+        keys = _mf.get("keys") or []
         if not keys:
             return
+        # 🔓 **잠금을 뚫을 항목** (2026-11-05 사용자: *"로컬에서 여전히 마법인형이
+        #    안 맞는데 잠금 뚫어줘야겠는데"*).
+        #    `true` 면 전부, 목록이면 **적힌 항목만** 뚫는다.
+        #    🚫 쓰고 나면 **반드시 비울 것** — 남겨두면 로컬이 잠가둔 좌표가
+        #       업데이트마다 계속 갈아끼워진다 (2026-08-28 restore_order 사고와 같은 뿌리).
+        _ig = _mf.get("ignore_lock")
+        if _ig is True:
+            ig_set = set(keys)
+        elif isinstance(_ig, (list, tuple)):
+            ig_set = set(str(k) for k in _ig)
+        else:
+            ig_set = set()
         dat_p = os.path.join(REPO, "share_coords_data.json")
         dst_p = os.path.join(DESK, "coords.json")
         if not (os.path.exists(dat_p) and os.path.exists(dst_p)):
@@ -831,8 +844,12 @@ def sync_coord_fix(log):
             # ② 그냥 좌표 목록 — 바꿀 설정이 없으니 통째로
             return list(want), (0 if now == want else len(want))
 
+        _broke = sorted(k for k in keys if k in lock_k and k in ig_set)
+        if _broke:
+            log("   🔓 ignore_lock — 🔒 좌표 잠금을 **뚫고** 좌표만 넣는다: "
+                + ", ".join(_broke) + "  (ON/OFF·설정은 그대로)")
         for k in keys:
-            if k in lock_k:
+            if k in lock_k and k not in ig_set:
                 locked.append(k); continue
             w = src.get(k)
             if w is None:
