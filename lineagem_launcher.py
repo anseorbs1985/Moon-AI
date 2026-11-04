@@ -329,6 +329,9 @@ ENTER_LOGIN_WAIT = (2.5, 3.5)   # 가운데를 누른 뒤 캐릭터 선택이 �
 LOGIN_POPUP_TRIES = 3
 # 📝 적어둘 칸 글씨색 — 굵은 빨강 (2026-11-04 사용자 지시)
 MEMO_FG = "#e03131"
+# 🟡 상태줄(지금 무슨 일을 하는지) 글씨 — **찐 노란색** (2026-11-04 사용자:
+#    *"메인런처 글씨 찐 노란색으로 바꿔줘, 잘 안 보인다"*)
+STATUS_FG = "#ffd43b"
 # 🔄 계정 전환을 **처음부터 다시** 해볼 횟수 (메뉴가 닫히는 경우)
 PROFILE_SWITCH_TRIES = 3
 PROFILE_SWITCH_GAP   = (1.2, 2.0)
@@ -5852,7 +5855,11 @@ def apply_dark(w, on=True):
             if on:
                 if lb is None or lb > 0.55:
                     w.configure(bg=DARK_BG)
-                    if lf is not None and lf < 0.45:      # 어두운 글씨 → 밝게
+                    # 📝 `_keep_fg` 를 달아둔 글씨는 **색을 지킨다**
+                    #    (상태줄은 찐 노랑이어야 한다 — 2026-11-04 사용자 지시).
+                    #    🚫 이 확인을 빼면 어두운 화면이 흰 글씨로 덮어쓴다.
+                    if (lf is not None and lf < 0.45
+                            and not getattr(w, "_keep_fg", False)):
                         w.configure(fg=DARK_DIM if lf > 0.25 else DARK_FG)
                 if cls in ("Checkbutton", "Radiobutton"):
                     try: w.configure(selectcolor=DARK_BG2, activebackground=DARK_BG,
@@ -8045,9 +8052,19 @@ class App(tk.Tk):
         # 💬 **지금 무슨 일을 하는지** — 좌표저장/복구 바로 아래 (2026-11-04 사용자:
         #    *"좌표지정이랑 좌표복구 밑에 현재 상황 멘트를 볼 수 있게 해줘"*).
         #    접으면 위쪽 상태줄이 같이 숨겨지므로 **여기가 유일한 상태 표시**다.
+        # 🟡 **찐 노란색** (2026-11-04 사용자: *"글씨 찐 노란색으로 바꿔줘,
+        #    잘 안 보인다"*) — 어두운 배경에 회색은 묻힌다.
+        # 📏 **높이를 3줄로 고정한다** (사용자: *"2줄 3줄에 따라서 런처가 움직인다.
+        #    공간을 좀 더 줘, 글씨가 3줄이 될 수 있게. 아니면 글씨를 잘라줘.
+        #    런처 움직이지 말아줘"*).
+        #    ⚠ Tk Label 의 `height` 는 **글자 줄 수**다 — 3 이면 늘 3줄 높이를
+        #      차지하므로 **글이 길어져도 아래 버튼들이 밀리지 않는다.**
+        #    ⚠ `_fg_keep` 을 달아 `apply_dark` 가 이 색을 덮지 않게 한다.
         self._fold_status = tk.Label(_keep, textvariable=self.status,
-                                     font=("맑은 고딕", 8), fg="#7f8c8d",
-                                     wraplength=140, justify="center")
+                                     font=("맑은 고딕", 8, "bold"), fg=STATUS_FG,
+                                     wraplength=150, justify="center",
+                                     height=3, anchor="n")
+        self._fold_status._keep_fg = True
         self._fold_status.pack(anchor="n", pady=(3, 0), fill="x")
 
         # ── 🏝 던전 4개 + 다야OCR — **용던고고와 똑같은 '옆에 ▶실행'** 모양 ──
