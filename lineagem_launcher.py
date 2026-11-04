@@ -327,6 +327,8 @@ ENTER_RELOGIN_WAIT = (2.0, 3.0)  # [재접속] 을 누른 뒤 화면이 돌아�
 ENTER_LOGIN_WAIT = (2.5, 3.5)   # 가운데를 누른 뒤 캐릭터 선택이 뜰 때까지
 # 🔔 접속 자리를 덮은 알림을 몇 번까지 치워볼까 (알림이 연달아 뜰 수 있다)
 LOGIN_POPUP_TRIES = 3
+# 🟣 접속 자리를 **게임 창이 덮었을 때** 퍼플을 앞으로 올려 다시 보는 횟수
+LOGIN_FRONT_TRIES = 2
 # 📝 적어둘 칸 글씨색 — 굵은 빨강 (2026-11-04 사용자 지시)
 # 🟡 **적어둘 칸 글씨 — 찐 노랑** (2026-11-04 사용자: *"그 아래 메모 글씨를
 #    말하는 거야. 리니지 no.7 이렇게 글씨를 적은 거"*).
@@ -32114,6 +32116,47 @@ class App(tk.Tk):
             click_log(f"[접속] ⚠ 퍼플 최소화 확인 실패 {e!r}")
         return False
 
+    def _purple_to_front(self, tag=""):
+        """🟣 **퍼플 창을 앞으로** 올린다 → 올렸으면 True.
+
+        🧭 접속 자리를 **게임 창이 덮었을 때만** 부른다 (2026-11-04 사고).
+        ⚠ **크기·위치는 건드리지 않는다** — 접속 좌표가 지금 창 크기 기준이라
+          `maximize()` 하면 전부 어긋난다.
+        🚫 '누를 때마다' 부르지 말 것 (2026-10-14 에 그래서 접속이 망가졌다)."""
+        try:
+            import win32con
+            hit = []
+
+            def _cb(h, _):
+                try:
+                    if not win32gui.IsWindowVisible(h):
+                        return
+                    t = (win32gui.GetWindowText(h) or "")
+                    if "purple" in t.lower() or "퍼플" in t:
+                        r = win32gui.GetWindowRect(h)
+                        if (r[2] - r[0]) > 400 and (r[3] - r[1]) > 300:
+                            hit.append(h)
+                except Exception:
+                    pass
+            win32gui.EnumWindows(_cb, None)
+            if not hit:
+                return False
+            h = hit[0]
+            if win32gui.IsIconic(h):
+                win32gui.ShowWindow(h, win32con.SW_RESTORE)
+            try:
+                win32gui.SetForegroundWindow(h)
+            except Exception:
+                try:
+                    ctypes.windll.user32.SwitchToThisWindow(h, True)
+                except Exception:
+                    pass
+            click_log(f"[접속] 🟣 퍼플을 앞으로 올렸다 ({tag})")
+            return True
+        except Exception as e:
+            click_log(f"[접속] ⚠ 퍼플을 못 올렸다 — {e}")
+            return False
+
     def _login_spot_ok(self, x, y, what=""):
         """🚫🚫 **그 자리가 퍼플·리니지M 이 아니면 누르지 않는다** → (허용?, 무엇)
 
@@ -32179,7 +32222,12 @@ class App(tk.Tk):
         #       은 그대로 막힌다. 2026-10-28 사용자 신고의 직접 원인이 이것이었다:
         #       구글 계정 목록 = [제목없음] HwndWrapper[Purple.exe;;…] 를 막아
         #       **접속이 거기서 매번 끊겼다.**
-        if exe and ("purple" in exe or "lineagem" in exe or "ngp" in exe):
+        # 🚨 **`lineagem` 은 허용하지 않는다** (2026-11-04 사고).
+        #    접속 9단계는 **전부 퍼플 창**이다. 게임 창을 허용했더니
+        #    첫 계정 캐릭이 들어오며 **확인 버튼 자리를 덮었고**, 그 게임 창을
+        #    눌러 **계정 전환이 통째로 빠졌다**(16개 → 8개만 접속).
+        #    🚫 `"lineagem" in exe` 를 다시 넣지 말 것.
+        if exe and ("purple" in exe or "ngp" in exe):
             return True, f"[{title or cls}] ({exe})"
         if ("purple" in low or "퍼플" in title
                 or title.startswith("리니지")
@@ -32217,6 +32265,20 @@ class App(tk.Tk):
                 nap(0.35)
                 ok, who = self._login_spot_ok(p[0], p[1], key)
                 if ok:
+                    break
+        if not ok:
+            # 🟣 **퍼플이 뒤에 있어 막힌 것이면 앞으로 올리고 다시 본다**
+            #    (2026-11-04 — 게임 창이 확인 버튼을 덮어 계정 전환이 빠진 사고).
+            #    🚫 '누를 때마다 올리기' 로 만들지 말 것 — 2026-10-14 에 그렇게
+            #       했다가 접속이 더 망가져 걷어냈다. **막혔을 때만** 올린다.
+            for _ft in range(LOGIN_FRONT_TRIES):
+                if not self._purple_to_front(LOGIN_NAME.get(key, key)):
+                    break
+                nap(random.uniform(0.45, 0.75))
+                ok, who = self._login_spot_ok(p[0], p[1], key)
+                if ok:
+                    click_log(f"[접속] 🟣 {LOGIN_NAME.get(key, key)} — 퍼플을 앞으로 "
+                              f"올리니 자리가 돌아왔다 ({_ft + 1}번째)")
                     break
         if not ok:
             click_log(f"[접속] 🚫 {LOGIN_NAME.get(key, key)} 자리 "
