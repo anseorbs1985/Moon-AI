@@ -364,6 +364,48 @@ OMANST_COIN    = (277 / 491, 178 / 276, 14 / 491, 12 / 276)
 OMANST_COIN_RB = 10            # R-B 가 이보다 작으면 아데나가 아니다 → 안 누른다
 # 💎 칸 안에 **파란 픽셀(B>R)** 이 이만큼 있으면 다야다 (실측 다야 39 · 아데나 0)
 OMANST_COIN_BLUE = 10
+# 🔢 **숫자 견본** — `click_templates/omanst_dig1.png` … `dig5.png` (22x14).
+#    🚫 막대 개수로는 못 가린다 (2026-11-04 실측): Ⅲ 는 막대가 **붙고**,
+#       Ⅴ 는 두 획이 **갈라져** 막대 2개로 보인다. 폭도 둘 다 13px 로 같다.
+#    → 견본과 겨뤄 **1등이 2등보다 뚜렷할 때만** 인정한다.
+OMANST_DIG_MATCH = 0.55       # 1등이 이보다 높아야
+OMANST_DIG_RATIO = 1.06       # 그리고 2등의 이 배수 이상이어야
+
+
+def omanst_dig_path(n):
+    """숫자 견본 파일 경로."""
+    return os.path.join(BASE, "click_templates", "omanst_dig%d.png" % n)
+
+
+def omanst_dig_read(band):
+    """🔢 숫자 띠를 **견본과 겨뤄** 읽는다 → (숫자, 점수, 배수).
+
+    견본이 두 장 미만이면 `(0, 0, 0)` — 부르는 쪽이 옛 방식으로 내려간다.
+    못 가리면 `0` (= 못 읽음) → 새로고침으로 넘어간다."""
+    import cv2 as _cv
+    import numpy as _np
+    got = []
+    for v in (1, 2, 3, 4, 5):
+        p = omanst_dig_path(v)
+        if not os.path.exists(p):
+            continue
+        try:
+            t = _cv.imdecode(_np.fromfile(p, _np.uint8), _cv.IMREAD_GRAYSCALE)
+            if t is None or band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
+                continue
+            r = _cv.matchTemplate(band, t, _cv.TM_CCOEFF_NORMED)
+            got.append((float(r.max()), v))
+        except Exception:
+            pass
+    if len(got) < 2:
+        return 0, 0.0, 0.0
+    got.sort(reverse=True)
+    sc1, v1 = got[0]
+    sc2 = got[1][0]
+    ratio = sc1 / max(1e-6, abs(sc2)) if sc2 > 0 else 9.9
+    if sc1 < OMANST_DIG_MATCH or ratio < OMANST_DIG_RATIO:
+        return 0, sc1, ratio
+    return v1, sc1, ratio
 # ⚠ 30 이었는데 **실측 아데나가 +21~+25** 라 새로고침이 거의 항상 막혔다
 #   (기록 10-15: `⚠ 새로고침이 아데나가 아니다 (동전 R-B +21/+24/+25)`).
 #   다야는 파란 동전이라 R-B 가 **음수**다 → 10 이면 아데나는 통과하고 다야는 막힌다.
@@ -394,8 +436,11 @@ OMANST_NUM_SPAN  = 40         # 숫자 띠 밝기 폭이 이보다 좁으면 안
 OMANST_NUM_MIN_SC = 0.85      # (쓰지 않는다 — 아래 실측 참조)
 # 🔄 새로고침을 누른 뒤 **화면이 실제로 바뀔 때까지** 기다린다 (고정 대기 ✘ —
 #    2초만 쉬고 넘어가 **같은 화면을 다시 읽는** 사고가 났다).
-OMANST_WAIT_MAX  = 9.0        # 최대 이만큼 기다린다 (실측 7초 넘게 걸릴 때가 있다)
-OMANST_WAIT_TICK = 0.30       # 이 간격으로 다시 본다
+OMANST_WAIT_MAX  = 3.0        # 최대 이만큼 기다린다
+#    ⏱ 2026-11-04 사용자: *"시간을 좀 빠르게 당겨줘"* — 9초는 슬롯당 20초를
+#       버린다(16슬롯이면 5분). 변화를 **못 봐도 3초 뒤 넘어간다** —
+#       '누르기 직전에 한 번 더 읽어 같은지 확인' 이 안전망이라 괜찮다.
+OMANST_WAIT_TICK = 0.22       # 이 간격으로 다시 본다
 # 🔄 **화면이 바뀌었나**는 새로고침 버튼 둘레 픽셀로 본다 — 누르면 남은 횟수
 #    `(5)→(4)` 와 값 `100,000→200,000` 이 바뀐다.
 #    🚫 '정화 점수가 밝아졌나' 로 보지 말 것 — 아무것도 선택 안 된 **정상 화면이
@@ -550,6 +595,10 @@ def omanst_read(big, kind=None, loose=False, force=False, row_y=None):
                 out.append((st2, len(c2)))
             return out
 
+        # 🔢 **견본 겨루기를 먼저** (막대 세기는 견본이 없을 때만)
+        _dv, _ds, _dr = omanst_dig_read(band)
+        if _ds > 0:                       # 견본이 두 장 이상 있다
+            return jx, jy, _dv, sc
         runs = _runs(120)
         if not runs:
             # 🔢 **선택 안 된 줄은 글자가 어두워 120 을 못 넘는다** (2026-10-29).
@@ -596,7 +645,7 @@ def omanst_pick(app, anchor, slot, log=None):
     pref = omanst_pref_of(slot)
     _L = log or (lambda m: None)
     kname = OMANST_NAMES.get(OMANST_KIND, OMANST_KIND)
-    NM = {0: "못읽음", 1: "Ⅰ", 2: "Ⅱ", 3: "Ⅲ", 9: "Ⅳ·Ⅴ"}
+    NM = {0: "못읽음", 1: "Ⅰ", 2: "Ⅱ", 3: "Ⅲ", 4: "Ⅳ", 5: "Ⅴ", 9: "Ⅳ·Ⅴ"}
 
     def _take(ox, oy, x, y, n, sc, why):
         try:
@@ -709,7 +758,7 @@ def omanst_pick(app, anchor, slot, log=None):
         #    **밝아진다.** 밝아져야 숫자를 제대로 읽는다.
         #    🚫 고정 대기(2초)로 되돌리지 말 것 — 화면이 안 바뀐 채 같은 줄을
         #       다시 읽어 **Ⅴ 를 Ⅱ 로 보고 골랐다** (2026-11-04 사고).
-        time.sleep(random.uniform(0.5, 0.8))
+        time.sleep(random.uniform(0.35, 0.55))
         _t0 = time.time()
         _ok = False
         while time.time() - _t0 < OMANST_WAIT_MAX:
