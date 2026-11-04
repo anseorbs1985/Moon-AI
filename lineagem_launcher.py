@@ -348,6 +348,17 @@ ENTER_FAST_GAP    = (0.22, 0.40)  # 클라 사이 (단계 안)
 ENTER_FAST_HOVER  = (0.26, 0.42)  # 커서를 올리고 누르기까지
 ENTER_FAST_PICK   = (0.30, 0.50)  # 맨 위 캐릭 → [입장하기]
 ENTER_FAST_STEP   = (2.6, 3.4)    # 바퀴 사이 (화면이 바뀔 틈)
+
+# 🎮 **[입장하기] 는 4~6개씩 나눠 누른다** (2026-11-04 사용자 지시:
+#    *"캐릭터 선택해서 접속할 때 **4~6개 접속이 완료되면 다른 거** 해달라고 했잖아"* ·
+#    *"한 번에 접속하니까 계속 **서버와 접속이 끊어진다고 재접속이 뜬단말이야**"*).
+#    ⚠ 같은 날 오전의 *"전부 클릭 얼른"* 에서 **바뀐 지시**다 — 한꺼번에 하니 팅겼다.
+#    🚫 '캐릭선택을 전부 한꺼번에' 로 되돌리지 말 것.
+#    나누는 것은 **캐릭선택 묶음 하나뿐** — 재접속·로그인 단계는 그대로 전부 한다.
+ENTER_BATCH       = (4, 6)        # 한 묶음에 몇 개 (묶음마다 다시 뽑는다)
+ENTER_BATCH_MAX   = 120.0         # 그 묶음이 **게임에 들어갈 때까지** 최대 기다림(초)
+ENTER_BATCH_GAP   = (3.0, 5.0)    # 다 들어간 뒤 다음 묶음까지 여유
+ENTER_BATCH_TICK  = (1.6, 2.4)    # 들어갔는지 몇 초마다 확인하나
 ENTER_ONE_GAP     = (1.0, 1.6)  # 다시 보기까지
 ENTER_ONE_DONE    = (1.1, 1.9)  # 한 클라를 끝내고 다음 클라로
 # 🔔 접속 자리를 덮은 알림을 몇 번까지 치워볼까 (알림이 연달아 뜰 수 있다)
@@ -33071,6 +33082,38 @@ class App(tk.Tk):
             nap(random.uniform(*ENTER_CLICK_GAP))
         return n
 
+    def _enter_batch_wait(self, T, want, tag=""):
+        """🎮 **누른 만큼 게임에 들어갈 때까지** 기다린다 (2026-11-04 사용자 지시).
+
+        한 번에 다 누르면 **서버와 접속이 끊어지며 재접속이 뜬다.**
+        '들어갔나' 는 `_enter_scan` 으로 본다 — 재접속·캐릭선택·로그인 **어느 것도
+        아닌 것**이 게임 안이다.
+        ⚠ 창 제목으로 세면 안 된다 — **캐릭터 선택 화면에서도 제목에 캐릭 이름이 있다**
+          (실측 2026-11-04: `리니지M l 불화설` 이 캐릭터 선택 화면이었다).
+        ⚠ 끝내 안 들어가면 **기록을 남기고 그냥 간다** (여기서 멈추면 더 나쁘다)."""
+        t0 = time.time()
+        inside = -1
+        while time.time() - t0 < ENTER_BATCH_MAX:
+            if getattr(self, "_stop_flag", False):
+                return False
+            try:
+                relo, chrs, logi, ntot = self._enter_scan(T)
+                inside = ntot - len(relo) - len(chrs) - len(logi)
+            except Exception:
+                break
+            if inside >= want:
+                click_log("[입장] 🎮 %s 묶음 접속 완료 — 게임 안 %d/%d (%.0f초)"
+                          % (tag, inside, want, time.time() - t0))
+                break
+            self.status.set("🎮 접속 기다리는 중 — 게임 안 %d/%d (%.0f초)"
+                            % (inside, want, time.time() - t0))
+            nap(random.uniform(*ENTER_BATCH_TICK))
+        else:
+            click_log("[입장] 🎮 ⚠ %s %.0f초를 기다려도 게임 안 %d/%d "
+                      "— 그냥 다음으로 간다" % (tag, ENTER_BATCH_MAX, inside, want))
+        nap(random.uniform(*ENTER_BATCH_GAP))
+        return True
+
     def _enter_scan(self, T):
         """🔍 모든 클라를 **한 번씩 찍어** 상태를 나눈다 →
         (재접속, 캐릭선택, 로그인화면, 전체수).  각 항목 = (번호, 이름, hwnd, rect, 찾은자리)"""
@@ -33147,8 +33190,22 @@ class App(tk.Tk):
                 hover_click(r[0] + rr[0], r[1] + rr[1], ENTER_FAST_HOVER)
                 click_log("[입장] 🔁 #%02d %s — [재접속] (%.2f)" % (i, nm, rr[2]))
                 nap(random.uniform(*ENTER_FAST_GAP))
-            # ── 🎮 캐릭 선택인 것을 **전부** (가장 급하다) ──
-            for i, nm, hw, r, ee in chrs:
+            # ── 🎮 캐릭 선택인 것을 **4~6개씩 나눠** (2026-11-04 사용자 지시) ──
+            #    한 번에 다 누르면 서버와 접속이 끊어지며 **재접속이 뜬다.**
+            #    묶음 안은 연속으로 누르고, 묶음이 **게임에 들어가면** 다음으로.
+            _bn = random.randint(*ENTER_BATCH)      # 이번 묶음 크기 (4~6)
+            _bc = 0                                  # 이번 묶음에서 누른 수
+            _bt = 0                                  # 이 바퀴에서 누른 **누적** 수
+            _bi = 0                                  # 몇 번째 묶음인가
+            # 🎮 기준 — **누르기 전에 이미 게임 안에 있던** 수.
+            #    위 `_enter_scan` 결과를 그대로 쓴다 (다시 찍지 않는다).
+            #    ⚠ 누른 **뒤에** 재서 거기에 더하면 **이중으로 세어** 목표가
+            #      부풀고 영영 못 채운다 (만들다 한 번 밟았다).
+            _ibase = ntot - len(relo) - len(chrs) - len(logi)
+            if chrs:
+                click_log("[입장] 🎮 캐릭선택 %d개를 **%d개씩 나눠** 들여보낸다"
+                          % (len(chrs), _bn))
+            for _k, (i, nm, hw, r, ee) in enumerate(chrs):
                 if getattr(self, "_stop_flag", False):
                     break
                 self._enter_front(hw)
@@ -33160,9 +33217,20 @@ class App(tk.Tk):
                 # ② [입장하기] — 🖱 커서를 올린 뒤 (그냥 누르면 씹힌다)
                 hover_click(r[0] + ee[0], r[1] + ee[1], ENTER_FAST_HOVER)
                 done += 1
+                _bc += 1
                 click_log("[입장] 🎮 #%02d %s — 맨 위 캐릭 → [입장하기] (%.2f)"
                           % (i, nm, ee[2]))
-                nap(random.uniform(*ENTER_FAST_GAP))
+                # 🎮 묶음이 찼고 **남은 것이 있으면** 들어갈 때까지 기다린다
+                _bt += 1
+                if _bc >= _bn and _k + 1 < len(chrs):
+                    _bi += 1
+                    if not self._enter_batch_wait(
+                            T, _ibase + _bt, "%d묶음(%d개)" % (_bi, _bc)):
+                        break
+                    _bn = random.randint(*ENTER_BATCH)   # 다음 묶음 크기 새로 뽑기
+                    _bc = 0
+                else:
+                    nap(random.uniform(*ENTER_FAST_GAP))
             # ── 🖥 로그인 화면인 것을 **전부** ──
             for i, nm, hw, r, ss in logi:
                 if getattr(self, "_stop_flag", False):
@@ -34377,6 +34445,7 @@ class App(tk.Tk):
         try:
             import win32gui, win32con, win32process, ctypes
             tgt = []
+            mini = []       # 🟣 최소화된 퍼플 후보 (크기 조건을 못 넘는다)
 
             def _cb(h, _):
                 try:
@@ -34394,11 +34463,39 @@ class App(tk.Tk):
                         r = win32gui.GetWindowRect(h)
                         if (r[2] - r[0]) > 600 and (r[3] - r[1]) > 400:
                             tgt.append(h)
+                        elif win32gui.IsIconic(h):
+                            # 🚨 **최소화된 퍼플은 크기로 걸러진다** (2026-11-04 실측).
+                            #    최소화되면 창이 (-32000,-32000) 160x28 이라
+                            #    '폭 600·높이 400' 조건을 못 넘는다. 그래서
+                            #    `_purple_front_once` 가 False → `_profile_switch_once`
+                            #    가 **계정 전환을 통째로 건너뛰었다**
+                            #    (사용자: *"로컬은 여전히 퍼플 전환도 안 하고"*).
+                            #    🚫 이 가지를 빼지 말 것 — 빼면 최소화된 퍼플에서
+                            #       전환이 영영 안 된다.
+                            mini.append(h)
                 except Exception:
                     pass
             win32gui.EnumWindows(_cb, None)
+            # 🟣 큰 창이 없고 **최소화된 퍼플만** 있으면 되살려서 쓴다
+            if not tgt and mini:
+                for h0 in mini:
+                    try:
+                        win32gui.ShowWindow(h0, win32con.SW_RESTORE)
+                    except Exception:
+                        continue
+                    nap(0.5)
+                    try:
+                        r0 = win32gui.GetWindowRect(h0)
+                    except Exception:
+                        continue
+                    if (r0[2] - r0[0]) > 600 and (r0[3] - r0[1]) > 400:
+                        tgt.append(h0)
+                        click_log(f"[접속] {tag} 🟣 **최소화돼 있던 퍼플을 되살렸다** "
+                                  f"({r0[2]-r0[0]}x{r0[3]-r0[1]}) — 크기는 안 건드렸다")
+                        break
             if not tgt:
-                click_log(f"[접속] {tag} 🟣 퍼플 창을 못 찾았다 — 그대로 진행한다")
+                click_log(f"[접속] {tag} 🟣 퍼플 창을 못 찾았다 "
+                          f"(최소화 후보 {len(mini)}개도 못 살렸다) — 그대로 진행한다")
                 return False
             h = tgt[0]
             if win32gui.IsIconic(h):
