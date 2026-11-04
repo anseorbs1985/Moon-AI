@@ -381,6 +381,11 @@ PROFILE_SWITCH_GAP   = (1.2, 2.0)
 PURPLE_SETTLE_MAX   = 150.0   # 이보다 오래 기다리지 않는다
 PURPLE_SETTLE_TICK  = 0.8     # 몇 초마다 세나
 PURPLE_SETTLE_STILL = 8       # 이만큼 연속으로 안 변하면 다 마쳤다고 본다(6.4초)
+# ⏳ **누를 개수를 아는 경우**(`want`)는 채울 때까지 기다린다. 다만 이만큼
+#    **하나도 안 늘면** 포기한다 (영영 안 뜨는 클라가 있을 수 있다).
+#    🚫 `want` 가 있을 때 `STILL` 로 끝내도록 되돌리지 말 것 — 캐릭을 누른
+#       직후의 멈칫(6.4초)을 끝으로 보고 **창 1개에서 전환해 버렸다**.
+PURPLE_WANT_DEAD    = 30.0    # want 를 못 채운 채 이만큼 안 늘면 포기(초)
 FIX_SLOW_MULT      = 2.2       # 2회차 간격·창 올리는 틈 배수
 CHECK_TRIES_SLOW   = 8         # 2회차 👁 '무료' 확인 횟수 (1회차는 CHECK_TRIES=4)
 FIX_ESC_TRIES      = 2         # 복구 전 열린 창을 ESC 로 닫아보는 횟수
@@ -33483,6 +33488,7 @@ class App(tk.Tk):
         last = _cnt()
         same = 0
         hit = False
+        grew = _t.time()          # 마지막으로 창이 **늘어난** 시각
         while _t.time() - t0 < maxw:
             if getattr(self, "_stop_flag", False):
                 return
@@ -33492,13 +33498,21 @@ class App(tk.Tk):
             if want and c >= want:
                 last = c; hit = True
                 break
-            if c == last:
-                same += 1
-                if same >= PURPLE_SETTLE_STILL:
-                    break
-            else:
+            if c != last:
+                if c > last:
+                    grew = _t.time()
                 same = 0
                 last = c
+                continue
+            same += 1
+            if want:
+                # ⏳ **채울 때까지 기다린다.** 캐릭을 누른 직후에는 창이 바로
+                #    안 뜨므로 멈칫을 끝으로 보면 안 된다 (2026-11-04 사고).
+                #    단 `PURPLE_WANT_DEAD` 동안 **하나도 안 늘면** 포기한다.
+                if _t.time() - grew >= PURPLE_WANT_DEAD:
+                    break
+            elif same >= PURPLE_SETTLE_STILL:
+                break
         click_log(f"[접속] {tag} 🪟 게임 창이 자리잡았다 — "
                   f"지금 {last}개"
                   + (f"/{want}개" if want else "")
