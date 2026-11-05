@@ -12545,11 +12545,35 @@ class App(tk.Tk):
             self._send_to_back()
         self._minimize_claude()
 
+    def _night_panel_topmost(self, on):
+        """📌 떼어낸 슬롯판을 **항상 위**로 두거나 푼다 (2026-11-05).
+
+        ⚠ 판은 `wm manage` 된 **Frame** 이라 Toplevel 의 `attributes` 가 없다 →
+          창 손잡이를 `wm frame` 으로 얻어 `SetWindowPos` 로 직접 건다.
+        ⚠ `_night_user_front` 를 함께 켠다 — 안 켜면 `_night_dock_now` 가
+          1초마다 '메인런처 바로 앞'(= 클라보다 뒤)으로 도로 끌어내린다."""
+        p = getattr(self, "_night_panel", None)
+        try:
+            if not (p and p.winfo_exists() and p.winfo_manager() == "wm"):
+                return
+            hw = int(self.tk.call("wm", "frame", p._w), 16)
+            win32gui.SetWindowPos(
+                hw, win32con.HWND_TOPMOST if on else win32con.HWND_NOTOPMOST,
+                0, 0, 0, 0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+                | win32con.SWP_NOACTIVATE)
+            self._night_user_front = bool(on)
+        except Exception:
+            pass
+
     def _night_panel_iconify(self):
-        """떼어낸 슬롯판이 있으면 최소화한다 (붙어 있으면 아무 일도 안 한다)."""
+        """떼어낸 슬롯판이 있으면 최소화한다 (붙어 있으면 아무 일도 안 한다).
+
+        📌 **항상 위를 먼저 푼다** — 안 풀면 최소화에서 꺼낼 때 다시 클라를 덮는다."""
         p = getattr(self, "_night_panel", None)
         try:
             if p and p.winfo_exists() and p.winfo_manager() == "wm":
+                self._night_panel_topmost(False)
                 self.tk.call("wm", "iconify", p._w)
         except Exception:
             pass
@@ -13894,10 +13918,15 @@ class App(tk.Tk):
                                  "+%d+%d" % (max(0, x - dx), max(0, y - dy)))
             except Exception:
                 pass
+            # 📌 **실행 전에는 항상 위** (2026-11-05 사용자 지시) —
+            #    예전에는 '메인런처 바로 앞'(= 클라보다 뒤)이라 눌러도 안 보였다.
+            #    `_night_user_front` 를 켜 두면 `_night_dock_now` 가 앞뒤를
+            #    건드리지 않는다. 실행이 시작되면 `_night_panel_iconify` 가 푼다.
+            self._night_panel_topmost(True)
             d = dict(self.cfg.get("night_detach") or {})
             d.update({"on": True, "x": int(x), "y": int(y)})
             self.cfg["night_detach"] = d; save_cfg(self.cfg)
-            click_log(f"[슬롯판] 🏝 세로바 옆에 펼쳤다 ({x},{y}) 크기 {ww}x{hh}")
+            click_log(f"[슬롯판] 🏝 세로바 옆에 펼쳤다 ({x},{y}) 크기 {ww}x{hh} · 항상 위")
         except Exception as e:
             click_log(f"[슬롯판] ⚠ 자리잡기 실패 — {e}")
 
