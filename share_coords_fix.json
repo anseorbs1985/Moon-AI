@@ -1,33 +1,5 @@
 {
- "keys": [
-  "badge_slots",
-  "circus_slots",
-  "circus2_slots",
-  "circus3_slots",
-  "coupon_slots",
-  "dc_slots",
-  "doll_slots",
-  "dollchk_slots",
-  "dungeon_slots",
-  "eventshop_slots",
-  "fish_slots",
-  "fix_slots",
-  "hunt_slots",
-  "item_slots",
-  "knight_slots",
-  "magic_slots",
-  "market_slots",
-  "mondex_slots",
-  "omanst_slots",
-  "pass_slots",
-  "relic_slots",
-  "seq_slots",
-  "seq2_slots",
-  "slp_slots",
-  "tj_slots"
- ],
- "_메모": "📏 **좌표(coords)만** 로컬에 옮긴다 — ON/OFF(enabled)·이름·물약·층 등 슬롯의 다른 설정은 **전혀 건드리지 않는다.** 2026-11-03 에 클라 창을 491x276 → 546x307 로 키우면서 역산한 좌표를 로컬에도 그대로 맞추려고 만든 통로 (사용자 지시). 🚫 dragon_slots(로컬마다 직접 맞춤)·char_btns(계정마다 다름)는 넣지 않는다. 🔒 좌표잠금(coord_lock.json)은 여전히 최우선이다.  🔓 2026-11-05: doll_slots 만 🔒 좌표잠금을 뚫는다 (사용자 요청 — 로컬 마법인형 좌표가 계속 안 맞아서). **로컬이 받으면 ignore_lock 을 반드시 비울 것.**",
- "ignore_lock": [
-  "doll_slots"
- ]
+  "keys": [],
+  "_메모": "🔒 닫힘 (2026-11-05 — 로컬이 받은 것을 사용자가 확인). 좌표(coords)는 지금 하나도 배포하지 않는다. 🚫 keys·ignore_lock 을 열었으면 **그 대화 안에서 비우고** py check_share.py 로 전부 ✔ 를 확인한 뒤 끝낸다 — 열어두면 업데이트마다 로컬 좌표를 계속 덮어쓴다 (2026-09-30 · 10-13 · 10-17 · 11-03 에 네 번 사고).",
+  "ignore_lock": []
 }
