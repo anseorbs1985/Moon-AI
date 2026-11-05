@@ -1811,6 +1811,12 @@ SCHED_WAVE_TO = 12
 SCHED_BATCH    = 4                # 한 묶음 슬롯 수
 SCHED_BATCH_AT = (0, 2, 3, 5)     # 분 — **시작 시각** (사용자 확정, 번호 순으로 배정)
 SCHED_BATCH_ON = True             # 끄려면 coords.json 의 `sched_batch_on: false`
+# 😴 묶음 시작 **N초 전에 그 묶음을 미리 깨운다** (2026-11-05 사용자 신고).
+#    리니지M 절전은 **약 5분 무입력**이라(실측) 마지막 5분 묶음이 꼭 잠들어 있었다.
+#    기다리는 중에는 **돌고 있는 작업이 없어** 창을 앞으로 올려도 엉키지 않고,
+#    깨운 뒤 시작까지 여유가 있어 **첫 클릭이 씹히지 않는다.**
+#    4개 깨우는 데 실측 23초 → 35초면 넉넉하다. 🚫 10초 밑으로 줄이지 말 것.
+SCHED_PREWAKE  = 35.0             # 초. 0 이면 미리 깨우지 않는다
 
 
 def sched_batch_min(k):
@@ -30970,10 +30976,33 @@ class App(tk.Tk):
                         else:
                             click_log(f"[스케줄] 🕐 {_bi+1}묶음 — 앞 묶음이 길어져 "
                                       f"{sched_batch_min(_bi)}분이 이미 지났다, 바로 간다")
+                        _pre = False
                         while not self._sched_stop:
                             _left = _due - time.time()
                             if _left <= 0:
                                 break
+                            # 😴 **시작 전에 미리 깨워둔다** — 기다리는 사이 잠들기
+                            #    때문이다(절전 약 5분). 지금은 돌고 있는 작업이
+                            #    없어 창을 앞으로 올려도 엉키지 않고, 시작까지
+                            #    여유가 있어 첫 클릭이 씹히지 않는다.
+                            if (not _pre and SCHED_PREWAKE > 0
+                                    and _left <= SCHED_PREWAKE):
+                                _pre = True
+                                self.status.set(
+                                    f"😴 {_bi+1}묶음 (#{_bt[0][0]+1:02d}~"
+                                    f"{_bt[-1][0]+1:02d}) — 미리 깨웁니다")
+                                click_log(
+                                    f"[스케줄] 😴 {_bi+1}묶음 "
+                                    f"(#{_bt[0][0]+1:02d}~{_bt[-1][0]+1:02d}) — "
+                                    f"시작 {_left:.0f}초 전에 **미리 깨운다**")
+                                for _psi, _psl in _bt:
+                                    if self._sched_stop:
+                                        break
+                                    self._sched_wake(
+                                        _psi,
+                                        (_psl.get("coords") or [None])[0],
+                                        _psl.get("name", f"#{_psi+1}"))
+                                continue
                             self.status.set(
                                 f"📅 {_bi+1}묶음 (#{_bt[0][0]+1:02d}~"
                                 f"{_bt[-1][0]+1:02d}) — {_left:.0f}초 뒤 시작")
