@@ -8265,6 +8265,17 @@ class IslandApp(tk.Tk):
                 time.sleep(2)
             self._status.set("✔ 실행 완료!")
         except Exception as e:
+            # 🚫 **조용히 실패하지 않는다** (2026-11-05).
+            #    `--run` 모드는 창을 숨기므로 상태줄은 아무도 못 본다 —
+            #    예외가 나면 슬롯이 그냥 멈춘 것처럼 보였다. 기록에 남긴다.
+            try:
+                import traceback
+                _tb = traceback.format_exc().strip().split(chr(10))
+                self._rlog("[오류] %s 실행 중 예외 — %s" % (key, e))
+                for _l in _tb[-4:]:
+                    self._rlog("[오류]   " + _l.strip()[:150])
+            except Exception:
+                pass
             self._status.set(f"오류: {e}")
         finally:
             self._slot_running = False
