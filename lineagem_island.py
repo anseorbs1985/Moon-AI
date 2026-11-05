@@ -8138,13 +8138,33 @@ class IslandApp(tk.Tk):
                         d_ = None
                     rec = recs.get(str(j))
                     did = False
+                    # 🔄 **슬롯을 시작할 때 지금 화면에 맞는 칸부터** (2026-11-05).
+                    #    ⚠ **칸 루프 맨 앞**이어야 한다 — 아래 `elif coords[j]`
+                    #      분기 안에 두면 **카드·그림 칸(RASTA_FIRST)에는 적용되지
+                    #      않는다** (한 번 그렇게 넣었다가 칸6 이 그대로 돌았다).
+                    #    ⚠ 웨이브(`_do_one_click`)의 같은 처리와 **한 쌍이다.**
+                    if j == 0:
+                        if not hasattr(self, "_resync"):
+                            self._resync = {}
+                        _sk = self._slot_resync(key, si, slot, coords, name)
+                        if _sk < 0:               # 이미 던전 안 → 이 슬롯 끝
+                            break
+                        self._resync[si] = _sk
+                    if j < getattr(self, "_resync", {}).get(si, 0):
+                        continue                  # 이미 지난 자리 — 건너뛴다
                     # 🗡 라스타바드 — 이 칸이 '그림' 자리면 그림으로 처리한다.
                     #    설정은 **그 슬롯**에 있다 (라스타바드 프리셋을 적용하면 적힌다).
                     #    악몽의섬 프리셋을 적용하면 지워지므로 이 블록을 안 탄다.
                     _rm = cell_mode(key, slot, j)
                     if _rm in RASTA_FIRST:
                         if not self._rasta_do(key, j, si, slot, coords, name, lbl):
-                            break              # 🚫 그림을 못 봤다 → **이 슬롯만 중단**
+                            # 🚫 그림을 못 봤다 → **이 슬롯만 중단**
+                            #    ⚠ 왜 멈췄는지 **반드시 남긴다** — 기록이 없으면
+                            #      원격에서 아무것도 못 짚는다 (반복된 교훈).
+                            self._rlog(u"[중단] %s #%02d %d번(%s) — %s 자리에서 "
+                                       u"멈췄다 (그림/카드를 못 봤다)"
+                                       % (key, si + 1, j + 1, lbl, _rm))
+                            break
                         did = True
                         # ⚠ 그림으로 처리한 칸은 **좌표·방향을 건너뛴다.**
                         #    안 그러면 아래 `elif coords[j]` 가 또 눌러서 **두 번 눌린다**
@@ -8183,17 +8203,6 @@ class IslandApp(tk.Tk):
                         #    못 고르면 `_omanst_try` 가 **스스로 True 를 돌려** 좌표를
                         #    안 누르게 한다 — 정복을 누르느니 아무것도 안 누른다.
                         #    ⚠ `continue` 로 빠져나가지 말 것 (뒤 간격·횟수가 건너뛰어진다).
-                        # 🔄 **슬롯을 시작할 때 지금 화면에 맞는 칸부터** (2026-11-05).
-                        #    ⚠ 웨이브(`_do_one_click`)의 같은 처리와 **한 쌍이다.**
-                        if j == 0:
-                            if not hasattr(self, "_resync"):
-                                self._resync = {}
-                            _sk = self._slot_resync(key, si, slot, coords, name)
-                            if _sk < 0:               # 이미 던전 안 → 이 슬롯 끝
-                                break
-                            self._resync[si] = _sk
-                        if j < getattr(self, "_resync", {}).get(si, 0):
-                            continue                  # 이미 지난 자리 — 건너뛴다
                         if j == 0 and self._wake_skip1(si, slot, name):
                             pass                      # 깨어 있다 — 좌표1 은 안 누른다
                         elif self._omanst_try(key, si, slot, j):
