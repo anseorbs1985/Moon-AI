@@ -1017,6 +1017,7 @@ DEFAULT_CFG = {
                       for _ in range(FIX_SLOTS)],   # 🩹 복구 (그림 확인 필수)
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표4 (인형탐험식 실행)
     "tj_front_added": False,            # 좌표를 맨 앞에 한 번 밀었나 (2026-10-07)
+    "seq_speed_20261105": False,        # 🔆 절전해제 간격을 코드 기본으로 한 번 당겼나
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
     "seq_slots":    [None]*SEQ_SLOTS,   # 연속 클릭 좌표 (각 [x,y] 또는 None)
     "seq_hotkey":   None,               # 연속 클릭 실행 단축키 (가상키 코드)
@@ -1348,6 +1349,33 @@ def load_cfg():
                     if len(_c) < TJ_CLICKS:          # 아직 안 민 자료만
                         _s["coords"] = [None] + _c
             cfg["tj_front_added"] = True
+        # 🔆 **절전해제·절전모드 간격을 코드 기본으로 한 번만 당긴다** (2026-11-05).
+        #    사용자: *"절전해제 내가 시간 많이 단축해놨는데 **로컬에서는 여전히 느린데?**"*
+        #    🔎 원인 — `coords.json` 의 `seq_min/seq_max/slp_min/slp_max` 가
+        #       **코드 기본(SEQ_MIN/SEQ_MAX)을 이긴다.** 메인에서 코드와 설정을 같이
+        #       고쳐도, 로컬은 **자기 컴퓨터에 저장된 옛 값**을 그대로 쓴다.
+        #       (CLAUDE.md 2026-10-05 에 적어둔 함정이 실제로 터진 것)
+        #    → 컴퓨터마다 **한 번만**, **느린 쪽일 때만** 코드 기본으로 당긴다.
+        #    🚫 더 빠르게 맞춰둔 컴퓨터는 건드리지 않는다 (느려지지 않는다).
+        #    🚫 이 표시를 지우지 말 것 — 지우면 사용자가 일부러 늦춰둔 값을 또 당긴다.
+        if not cfg.get("seq_speed_20261105"):
+            _moved = []
+            for _k4, _v4 in (("seq_min", SEQ_MIN), ("seq_max", SEQ_MAX),
+                             ("slp_min", SEQ_MIN), ("slp_max", SEQ_MAX)):
+                try:
+                    _cur = cfg.get(_k4)
+                    if _cur is None or float(_cur) > _v4:
+                        _moved.append("%s %s→%s" % (_k4, _cur, _v4))
+                        cfg[_k4] = _v4
+                except Exception:
+                    pass
+            cfg["seq_speed_20261105"] = True
+            if _moved:
+                try:
+                    click_log("[절전해제] 🔆 간격을 코드 기본으로 당겼습니다 (한 번만): "
+                              + " · ".join(_moved))
+                except Exception:
+                    pass
         # tj_slots (TJ성공!!) — 16슬롯 × 좌표 4 (맨 앞이 새 칸)
         nt = []
         for s in (cfg.get("tj_slots") or []):
