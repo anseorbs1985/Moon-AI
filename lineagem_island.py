@@ -276,6 +276,17 @@ CARD_CELL = {"토요일_악몽의섬": 6, "수금_오만의탑": 6,
 CARD_DEFAULT = {"수금_오만의탑": "오만과신념의탑",
                 "월요일_잊혀진섬": "잊혀진섬",
                 "화요일_에카": "에스카로스"}
+# 🗡 **프리셋이 카드를 정한다** (2026-11-05 사용자 지시).
+#    사용자: *"라스타바드랑 악몽의섬이랑 **같은 조건**이야 — 주말에 열리는데
+#    이 둘 중에 어떤 건 라스타바드를 가야 하고 어떤 건 악몽의섬을 가야 한다."*
+#    둘 다 같이 열리므로 '열린 것 고르기' 로는 못 가린다. 그런데 그 슬롯이
+#    어느 쪽인지는 **프리셋이 이미 정하고 있다**(`_slot_ver` — 칸26~35 의 `rasta`).
+#    🚫 라스타바드 슬롯이 다른 카드로 들어가면 칸26~35 가 통째로 어긋난다 —
+#       그래서 이것은 슬롯 지정([🃏])보다 **먼저**다.
+CARD_BY_VER = {"토요일_악몽의섬": {"라스타바드": "라스타바드"}}
+# 🃏 **우선순위** — 슬롯에 따로 안 적었을 때, 이 순서로 보고 **안 잠긴 첫 카드**.
+CARD_ORDER = {"토요일_악몽의섬": ["테베라스사막", "아틀란티스", "티칼사원",
+                                  "악몽의섬", "해적섬"]}
 
 
 def cell_mode(key, slot, j):
@@ -1605,6 +1616,108 @@ def card_find(name, anchor):
         return (ox + ml[0] + tw // 2, oy + ml[1] + th // 2, float(mx))
     except Exception:
         return None, None, 0.0
+
+
+def card_lock_meta():
+    """🔒 자물쇠를 찾을 자리와 기준 — `card_meta.json` 의 `lock`."""
+    try:
+        with open(os.path.join(IMG_DIR, "card_meta.json"), encoding="utf-8") as f:
+            d = json.load(f) or {}
+        a = d.get("lock") or {}
+        return (int(a.get("dy") or 100), int(a.get("h") or 60),
+                int(a.get("halfw") or 40), float(a.get("thr") or 0.60),
+                (float(d.get("w") or 0), float(d.get("h") or 0)))
+    except Exception:
+        return 100, 60, 40, 0.60, (0.0, 0.0)
+
+
+def card_is_locked(big, cx):
+    """🔒 그 카드가 **잠겨 있나** (카드 가운데 x 를 받는다) → (잠김, 점수).
+
+    📏 실측 2026-11-05 — 잠김 **0.812~1.000**(29건) · 열림 **0.180~0.345**(5건).
+       기준 0.60 이면 여유 0.47. 🚫 색(빨강 픽셀)으로 재지 말 것 —
+       불타는 카드 그림(오만과신념의탑)이 잠긴 카드보다 빨간 픽셀이 더 많았다.
+    판단이 불가능하면 **(False, -1)** — 막지 않는다 (안전한 쪽)."""
+    try:
+        import cv2, numpy as np
+        q = os.path.join(IMG_DIR, "card_lock.png")
+        if not os.path.exists(q):
+            return False, -1.0
+        dy, hh, hw, thr, base = card_lock_meta()
+        H, W = big.shape[:2]
+        ky = (H / base[1]) if (base and base[1] > 0) else 1.0
+        kx = (W / base[0]) if (base and base[0] > 0) else 1.0
+        y0, y1 = int(dy * ky), int((dy + hh) * ky)
+        x0, x1 = int(cx - hw * kx), int(cx + hw * kx)
+        band = big[max(0, y0):min(H, y1), max(0, x0):min(W, x1)]
+        t0 = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+        if t0 is None or band.size == 0:
+            return False, -1.0
+        best = -1.0
+        for k in (ky, ky * 0.97, ky * 1.03, 1.0):
+            th, tw = int(round(t0.shape[0] * k)), int(round(t0.shape[1] * k))
+            if th < 6 or tw < 6 or th > band.shape[0] or tw > band.shape[1]:
+                continue
+            t2 = t0 if abs(k - 1.0) < 1e-6 else cv2.resize(t0, (tw, th))
+            best = max(best, float(cv2.matchTemplate(
+                band, t2, cv2.TM_CCOEFF_NORMED).max()))
+        return (best >= thr), best
+    except Exception:
+        return False, -1.0
+
+
+def card_pick_open(names, anchor):
+    """🃏 우선순위대로 보고 **잠기지 않은 첫 카드** → (이름, 설명).
+
+    창을 **한 번만** 찍어 전부 본다 (카드마다 다시 찍으면 느리다).
+    전부 잠겼으면 (None, 이유) — 부르는 쪽이 그 슬롯을 중단한다."""
+    try:
+        import cv2, numpy as np
+        got = grab_window(anchor)
+        if not got:
+            return None, u"창을 못 찍었다"
+        big, (ox, oy) = got
+        H, W = big.shape[:2]
+        area, thr, _c, base = card_meta()
+        kx = (W / base[0]) if (base and base[0] > 0) else 1.0
+        ky = (H / base[1]) if (base and base[1] > 0) else 1.0
+        bx0 = by0 = 0
+        band = big
+        if area:
+            dx, dy, w, h = area
+            bx0, by0 = max(0, int(dx * kx)), max(0, int(dy * ky))
+            bx1, by1 = min(W, int((dx + w) * kx)), min(H, int((dy + h) * ky))
+            if bx1 - bx0 > 8 and by1 - by0 > 8:
+                band = big[by0:by1, bx0:bx1]
+        seen = []
+        for nm in names:
+            best = (-1.0, None, None)
+            for _p in card_img_all(nm):
+                t0 = cv2.imdecode(np.fromfile(_p, np.uint8), cv2.IMREAD_COLOR)
+                if t0 is None:
+                    continue
+                for k in (ky, ky * 0.97, ky * 1.03, 1.0):
+                    th, tw = int(round(t0.shape[0] * k)), int(round(t0.shape[1] * k))
+                    if th < 4 or tw < 4 or th > band.shape[0] or tw > band.shape[1]:
+                        continue
+                    t2 = t0 if abs(k - 1.0) < 1e-6 else cv2.resize(t0, (tw, th))
+                    _mn, mx, _ml, ml = cv2.minMaxLoc(
+                        cv2.matchTemplate(band, t2, cv2.TM_CCOEFF_NORMED))
+                    if mx > best[0]:
+                        best = (float(mx), ml, (tw, th))
+            if best[1] is None or best[0] < thr:
+                seen.append(u"%s 없음(%.2f)" % (nm, max(best[0], 0)))
+                continue
+            cx = bx0 + best[1][0] + best[2][0] // 2
+            lk, lv = card_is_locked(big, cx)
+            if lk:
+                seen.append(u"%s 🔒(%.2f)" % (nm, lv))
+                continue
+            return nm, u"우선순위 — %s 열림(%.2f·자물쇠 %.2f)%s" % (
+                nm, best[0], lv, (u" · 앞의 것: " + u" ".join(seen)) if seen else u"")
+        return None, u"쓸 수 있는 카드가 없다 — " + u" ".join(seen)
+    except Exception as e:
+        return None, u"오류 %s" % e
 
 
 def rasta_area_path(j):
@@ -6537,14 +6650,41 @@ class IslandApp(tk.Tk):
         🚫 이름이 비어 있으면 **좌표로** 누른다 (예전 그대로) — 설정 안 한 슬롯이
            갑자기 멈추면 안 된다.
         🚫 카드를 못 찾으면 **이 슬롯 중단** — 엉뚱한 던전에 들어가는 것보다 낫다."""
-        cname = (slot.get("card") or "").strip()
-        _why_c = u"슬롯 지정"
+        anchor0 = coords[j] if (j < len(coords) and coords[j]) else None
+        if not anchor0:
+            anchor0 = next((c for c in coords if c), None)
+        # 🃏 **카드를 정하는 순서** (2026-11-05) — ①프리셋 ②슬롯지정 ③던전기본 ④우선순위
+        cname = ""
+        _why_c = u""
+        _ver = self._slot_ver(key, slot)
+        _byver = (CARD_BY_VER.get(key) or {}).get(_ver) or ""
+        if _byver:
+            # ① 🗡 라스타바드 프리셋이면 **무조건** 라스타바드 —
+            #    칸26~35 가 라스타바드 전용이라 다른 카드로 들어가면 그 뒤가 어긋난다.
+            cname, _why_c = _byver, u"프리셋 %s" % _ver
+            _pick = (slot.get("card") or "").strip()
+            if _pick and _pick != cname:
+                self._rlog(u"[카드] %s #%02d 슬롯에 '%s' 가 적혀 있지만 "
+                           u"**라스타바드 프리셋**이라 '%s' 로 간다"
+                           % (key, si + 1, _pick, cname))
         if not cname:
-            cname = (CARD_DEFAULT.get(key) or "").strip()
-            _why_c = u"던전 기본"      # 갈 곳이 하나뿐인 던전 — 따로 안 적어도 된다
-        anchor = coords[j] if (j < len(coords) and coords[j]) else None
-        if not anchor:
-            anchor = next((c for c in coords if c), None)
+            cname = (slot.get("card") or "").strip()          # ② [🃏] 로 콕 집은 것
+            if cname:
+                _why_c = u"슬롯 지정"
+        if not cname:
+            cname = (CARD_DEFAULT.get(key) or "").strip()      # ③ 갈 곳이 하나뿐인 던전
+            if cname:
+                _why_c = u"던전 기본"
+        if not cname and (CARD_ORDER.get(key) and anchor0):
+            # ④ 🃏 우선순위 — 잠기지 않은 첫 카드
+            cname, _w4 = card_pick_open(CARD_ORDER[key], anchor0)
+            _why_c = _w4
+            if not cname:
+                self._status.set(f"🃏 [{name}] {lbl} — 갈 수 있는 카드가 없습니다")
+                self._rlog(f"[카드] {key} #{si+1:02d} {_w4} → 중단")
+                return False
+            self._rlog(u"[카드] %s #%02d %s" % (key, si + 1, _w4))
+        anchor = anchor0
         if not cname:
             if anchor and j < len(coords) and coords[j]:
                 self._status.set(f"🃏 [{name}] {lbl} — 갈 카드가 안 정해져 "
