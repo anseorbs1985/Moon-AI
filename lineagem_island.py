@@ -270,6 +270,10 @@ CARD_KEYS = ("토요일_악몽의섬", "수금_오만의탑", "월요일_잊혀�
 #    🚫 **슬롯에 적지 않고 코드에 둔다** — 프리셋을 적용하면 `rasta` 가 지워져서
 #       슬롯에 적어두면 카드 설정이 조용히 날아간다. 코드에 두면 로컬도 그대로다.
 # 🧭 장소 겨루기에 쓸 던전 네 개 (place_scores 용)
+# 🚪 **던전 입구** 장소 이름 그림의 키 (던전 목록에는 넣지 않는다).
+#    입구는 던전 안도 마을도 아니다 — 여기 서 있으면 입장만 하면 된다.
+ENTRANCE_KEY = "_입구"
+
 DUN_KEYS = ["수금_오만의탑", "토요일_악몽의섬",
             "월요일_잊혀진섬", "화요일_에카"]
 
@@ -7282,6 +7286,25 @@ class IslandApp(tk.Tk):
                         return -1
             except Exception:
                 pass
+            # 🚪 **던전 입구에 서 있나** → 칸1~6 은 이미 지난 자리, **입장(칸7)부터**.
+            #    실측 2026-11-05 정상 흐름(#01): 칸1~5 월드던전 화면 · 칸6 카드 ·
+            #    **칸7 입장**(누르고 53초 로딩) · 칸8~ 던전 안.
+            #    입구에서 칸1부터 누르면 월드던전이 안 열려 **엉뚱한 곳을 눌러
+            #    더 깊이 들어간다** (11-05 에 실제로 그렇게 됐다).
+            if cell and cell < len(coords):
+                try:
+                    if place_list(ENTRANCE_KEY):
+                        _ev = place_in_dungeon(ENTRANCE_KEY, anc)[1]
+                        if _ev >= self.RESYNC_IN_MATCH:
+                            self._rlog(u"[시작맞춤] %s #%02d **던전 입구**에 있다 "
+                                       u"(%.2f) → 앞 %d칸을 건너뛰고 %d번 칸"
+                                       u"(입장)부터 간다"
+                                       % (key, si + 1, _ev, cell, cell + 1))
+                            self._status.set(u"🚪 [%s] 입구에 있어 %d번 칸(입장)"
+                                             u"부터 갑니다" % (name, cell + 1))
+                            return cell
+                except Exception:
+                    pass
             # ① 갈 카드가 이미 화면에 보이나 → 그 칸부터 시작
             if cell and 1 < cell <= len(coords):
                 cname = self._slot_card_name(key, slot)
