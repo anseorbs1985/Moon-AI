@@ -855,11 +855,15 @@ SUHO_BIG_Y       = 0.4956
 SUHO_DRAG_BOT    = 20                # 창 바닥에서 이만큼 위까지 끈다
 #    사용자: *"한번에 쫙 … 팍 내리라고"* — 빠르게. 다만 끌림이 먹히려면
 #    중간 이동이 몇 번은 있어야 한다 (실측: 1칸 이동이면 안 잡힌다).
-SUHO_DRAG_N      = 6                 # 끄는 중간 이동 횟수 — **팍 내린다** (2026-11-06 사용자)
+SUHO_DRAG_N      = 24                # 끄는 중간 이동 횟수
+#    🚫 **적게 만들지 말 것** — 6단계로 줄였더니 **21번 끌어도 카드가 안 내려갔다**
+#       (2026-11-06 실측). 게임이 드래그를 따라오려면 중간 이동이 촘촘해야 한다.
+#       24 × 0.008초 = **0.19초** 라 눈에는 여전히 '확' 내려간다.
 #    🚫 1로 만들지 말 것 — 순간이동하면 카드가 **안 잡힌다** (2026-11-05 실측).
 #       6단계 × 0.010초 = **0.06초** 면 눈에는 '팍' 내려가는 것으로 보인다.
-SUHO_DRAG_STEP   = 0.010             # 한 단계 사이 (전 0.022 — 두 배 빠르다)
-SUHO_DRAG_HOLD   = (0.15, 0.22)      # 누르고/놓기 전 잡는 시간
+SUHO_DRAG_STEP   = 0.008             # 한 단계 사이 (초)
+SUHO_DRAG_FAIL   = 3                 # 끌었는데 선이 그대로인 것이 이만큼이면 끝낸다
+SUHO_DRAG_HOLD   = (0.18, 0.26)      # 누르고/놓기 전 잡는 시간
 #    ⚠ 이건 **줄이지 말 것** — 너무 짧으면 게임이 '잡았다'를 인식 못 한다
 #      (클릭 80ms 교훈과 같다). 빠르게 할 것은 **이동**이지 잡는 시간이 아니다.
 #    노란 '여기까지' 선 — 끌기 단계인지 가리는 데만 쓴다
@@ -11004,8 +11008,16 @@ class App(tk.Tk):
             nap(random.uniform(0.10, 0.16))   # 카드에 손 올리는 뜸 — 짧게
             pyautogui.mouseDown(x, y0)
             nap(random.uniform(*SUHO_DRAG_HOLD))
+            # 🖐 **먼저 살짝 움직여 '잡았다'를 알린다** (2026-11-06 — 21번 끌어도
+            #    카드가 안 내려간 뒤 넣었다). 누르자마자 멀리 뛰면 게임이
+            #    '드래그 시작' 으로 못 받고 그냥 클릭으로 흘린다.
+            for d in (2, 5, 9):
+                pyautogui.moveTo(x, y0 + d)
+                nap(0.012)
+            # 🏃 그 다음 **촘촘하게 쭉** — 단계가 적으면 게임이 못 따라온다.
+            #    24단계 × 0.008초 = 0.19초 — 눈에는 '확' 내려가는 것으로 보인다.
             for st in range(1, SUHO_DRAG_N + 1):
-                pyautogui.moveTo(x, y0 + int((y1 - y0) * st / SUHO_DRAG_N))
+                pyautogui.moveTo(x, y0 + 9 + int((y1 - y0 - 9) * st / SUHO_DRAG_N))
                 nap(SUHO_DRAG_STEP)
             nap(random.uniform(*SUHO_DRAG_HOLD))
             pyautogui.mouseUp(x, y1)
@@ -11176,6 +11188,21 @@ class App(tk.Tk):
                         okd, x, y0, dy = self._suho_drag_big(rect)
                         if not okd:
                             break
+                        # 🚨 **끌었는데 선이 그대로면 못 잡은 것** — 헛돌지 않게 센다
+                        #    (2026-11-06 실측: 같은 자리를 21번 끌었다)
+                        self._suho_nap(*SUHO_CLICK_WAIT)
+                        _im2 = self._suho_grab(rect)
+                        if _im2 is not None and self._suho_line(_im2) is not None:
+                            _bad = getattr(self, "_suho_dragfail", 0) + 1
+                            self._suho_dragfail = _bad
+                            click_log(f"[수호성] ⚠ 끌었는데 선이 그대로다 "
+                                      f"— 카드를 못 잡은 듯 ({_bad}/{SUHO_DRAG_FAIL})")
+                            if _bad >= SUHO_DRAG_FAIL:
+                                click_log(f"[수호성] ⚠ {SUHO_DRAG_FAIL}번 끌어도 "
+                                          f"안 내려간다 → 끝낸다 (헛돌지 않게)")
+                                break
+                        else:
+                            self._suho_dragfail = 0
                         done = n
                         click_log(f"[수호성] {n}/{times}회 ③ 카드를 ({x},{y0}) 에서 "
                                   f"**{dy}px 쭉 아래로** 끌었다 (선 창안y {line})")
