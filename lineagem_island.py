@@ -6738,6 +6738,12 @@ class IslandApp(tk.Tk):
         🚫 이름이 비어 있으면 **좌표로** 누른다 (예전 그대로) — 설정 안 한 슬롯이
            갑자기 멈추면 안 된다.
         🚫 카드를 못 찾으면 **이 슬롯 중단** — 엉뚱한 던전에 들어가는 것보다 낫다."""
+        # 🚨 **`st` 를 반드시 먼저 정의한다** (2026-11-05 버그).
+        #    아래에서 `st.get("off")` 를 쓰는데 정의가 없어 **카드를 찾고도**
+        #    `NameError` 로 죽었다 — 그 예외가 `_run` 의 except 에 묻혀
+        #    슬롯이 **조용히 멈춘 것처럼** 보였다 (사용자: "왜 저 상태에서
+        #    계속 멈추냐"). `_rasta_do` 에는 있고 여기만 빠져 있었다.
+        st = ((slot.get("rasta") or {}).get(str(j)) or {})
         anchor0 = coords[j] if (j < len(coords) and coords[j]) else None
         if not anchor0:
             anchor0 = next((c for c in coords if c), None)
