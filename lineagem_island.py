@@ -649,6 +649,12 @@ OMANST_FLOOR_X   = 184.0       # 층 줄 가운데 x (창안)
 OMANST_FLOOR_Y3  = 229.0       # 3층 y (창안)
 OMANST_FLOOR_DY  = 22.54       # 한 층 올라갈 때마다 위로
 OMANST_FLOOR_LIST = (0, 3, 4, 5, 6, 7, 8)   # 0 = 안함(등록된 좌표를 그대로)
+# 🚨 **라벨과 어긋난 프리셋 값은 버린다** (2026-11-05 — 로컬 '7층 골라도 5층' 의 원인).
+#    `_presets()` 가 저장된 프리셋을 **번호로만** 라벨에 맞추기 때문에, 개수가
+#    달라진 적이 있으면 `7층` 라벨에 **5·6층 좌표**가 붙어 있을 수 있다.
+#    줄 간격이 22.54px 이므로 **반 줄(11px)** 보다 더 어긋나면 그 값은 믿지 않고
+#    직선식으로 계산한다. 메인은 전부 0.62px 안이라 그대로 쓰인다 (실측 15/15).
+OMANST_FLOOR_TOL = 11.0
 
 
 def omanst_floor_of(slot):
@@ -671,22 +677,28 @@ def omanst_floor_rel(floor, presets=None):
     되도록 **사용자가 프리셋에 직접 찍어둔 값**을 쓴다 (`_presets` 칸23 의 `rel`).
     같은 층 프리셋이 여럿이면 평균. 없는 층(4층)만 직선식으로 계산한다.
     🚫 '계산' 이 '사용자가 찍은 값' 을 이기게 바꾸지 말 것."""
-    xs, ys = [], []
+    calc = OMANST_FLOOR_Y3 - (int(floor) - 3) * OMANST_FLOOR_DY
+    xs, ys, drop = [], [], 0
     for p in (presets or []):
         try:
             if str((p or {}).get("floor") or "") != u"%d층" % int(floor):
                 continue
             rel = (((p.get("items") or {}).get(str(OMANST_FLOOR_IDX)) or {}).get("rel"))
-            if rel and len(rel) >= 2:
-                xs.append(float(rel[0]))
-                ys.append(float(rel[1]))
+            if not (rel and len(rel) >= 2):
+                continue
+            if abs(float(rel[1]) - calc) > OMANST_FLOOR_TOL:
+                drop += 1             # 🚨 라벨과 어긋난다 — 번호가 밀린 프리셋
+                continue
+            xs.append(float(rel[0]))
+            ys.append(float(rel[1]))
         except Exception:
             pass
     if xs:
-        return sum(xs) / len(xs), sum(ys) / len(ys), u"프리셋 실측 %d개" % len(xs)
-    return (OMANST_FLOOR_X,
-            OMANST_FLOOR_Y3 - (int(floor) - 3) * OMANST_FLOOR_DY,
-            u"직선 계산")
+        return (sum(xs) / len(xs), sum(ys) / len(ys),
+                u"프리셋 실측 %d개%s" % (len(xs),
+                                        u" (어긋난 %d개 버림)" % drop if drop else u""))
+    return (OMANST_FLOOR_X, calc,
+            u"직선 계산" + (u" (프리셋 %d개가 라벨과 어긋나 버렸다)" % drop if drop else u""))
 
 
 def omanst_floor_point(anchor, floor, presets=None):
@@ -4184,6 +4196,39 @@ class IslandApp(tk.Tk):
             if base in ("", "미등록"):
                 base = ""
             nm = (base + " " + (pr.get("name") or "").strip()).strip()
+        # 🏢 **오만의탑 — 프리셋의 '층' 라벨이 진짜다** (2026-11-05 사용자 신고:
+        #    "로컬에서 7층을 골라도 5층을 눌러버린다").
+        #    `_presets()` 는 저장된 프리셋을 **번호로만** 라벨에 맞추기 때문에,
+        #    개수가 달라진 적이 있으면 `7층` 라벨에 **5·6층 좌표**가 붙어 있다.
+        #    라벨은 코드(`PRESET_LAYOUT`)에서 오므로 **어느 컴퓨터든 같다** →
+        #    층 번호를 슬롯에 적어두고 실행할 때 그 줄을 누른다 (좌표가 밀려도 안전).
+        #    🚫 이 기록을 빼지 말 것 — 빼면 밀린 좌표를 그대로 누른다.
+        if key == OMANST_KEY:
+            try:
+                import re as _re2
+                _m2 = _re2.match(r"\s*(\d+)\s*층", str(pr.get("floor") or ""))
+                _fl2 = int(_m2.group(1)) if _m2 else 0
+                if _fl2 in OMANST_FLOOR_LIST and _fl2:
+                    slot["omanst_floor"] = _fl2
+                    try:
+                        self._omanst_fvars[key][idx].set(omanst_floor_name(_fl2))
+                    except Exception:
+                        pass
+                    _rel2 = ((items.get(str(OMANST_FLOOR_IDX)) or {}).get("rel"))
+                    _calc2 = (OMANST_FLOOR_Y3
+                              - (_fl2 - 3) * OMANST_FLOOR_DY)
+                    if (_rel2 and len(_rel2) >= 2
+                            and abs(float(_rel2[1]) - _calc2) > OMANST_FLOOR_TOL):
+                        self._rlog(u"[오만의탑] 🚨 #%02d 프리셋 '%s' 의 칸23 이 "
+                                   u"라벨과 어긋난다 (저장 y%.0f · %d층 자리는 y%.0f) "
+                                   u"— **프리셋 번호가 밀린 것**이다. "
+                                   u"라벨(%d층)대로 누른다."
+                                   % (idx + 1, nm, float(_rel2[1]), _fl2, _calc2, _fl2))
+                    else:
+                        self._rlog(u"[오만의탑] 🏢 #%02d 프리셋 '%s' → 갈 층 %d층"
+                                   % (idx + 1, nm, _fl2))
+            except Exception:
+                pass
         self._paste_ts = time.time()      # 늦게 오는 이름칸 저장이 덮어쓰지 않게
         slot["name"] = nm
         try:
