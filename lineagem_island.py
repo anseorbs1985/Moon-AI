@@ -262,7 +262,32 @@ CARD_MODE = "card"     # 🃏 슬롯이 '내 카드' 를 찾아 누르는 칸 (�
 #     잊혀진섬만. 에카는 에스카로스만. 그냥 **악몽의섬만** 고르는 거고.")
 #    나머지 셋은 갈 던전이 하나뿐이라 고를 일이 없다 — 좌표로 그냥 간다.
 #    ⚠ 여기에 다른 던전을 함부로 넣지 말 것 (한 번 넣었다가 되돌렸다).
-CARD_KEYS = ("토요일_악몽의섬",)
+# 🃏 [🃏] 버튼을 둘 던전 — **네 던전 전부** (2026-11-05 사용자 지시).
+#    (2026-10-04 의 '악몽의섬만' 은 폐지 — 카드 순서가 바뀌어 잊혀진섬·에카가
+#     엉뚱한 카드를 누르고 있던 것이 실측으로 확인됐다.)
+CARD_KEYS = ("토요일_악몽의섬", "수금_오만의탑", "월요일_잊혀진섬", "화요일_에카")
+# 🃏 **그 던전의 '카드 자리' (1부터)** — 여기서는 좌표 대신 카드를 찾아 누른다.
+#    🚫 **슬롯에 적지 않고 코드에 둔다** — 프리셋을 적용하면 `rasta` 가 지워져서
+#       슬롯에 적어두면 카드 설정이 조용히 날아간다. 코드에 두면 로컬도 그대로다.
+CARD_CELL = {"토요일_악몽의섬": 6, "수금_오만의탑": 6,
+             "월요일_잊혀진섬": 6, "화요일_에카": 6}
+# 🃏 **갈 카드가 하나뿐인 던전의 기본값** — 슬롯에 따로 안 적어도 된다.
+#    악몽의섬은 갈 곳이 여럿이라 기본값이 없다 (슬롯마다 [🃏] 로 고른다).
+CARD_DEFAULT = {"수금_오만의탑": "오만과신념의탑",
+                "월요일_잊혀진섬": "잊혀진섬",
+                "화요일_에카": "에스카로스"}
+
+
+def cell_mode(key, slot, j):
+    """그 칸을 어떻게 처리하나 (🖼/👁/🃏). 슬롯 설정이 먼저, 없으면 던전 기본.
+
+    🃏 카드 자리는 **코드(`CARD_CELL`)** 가 정한다 — 프리셋을 적용해도 안 날아간다."""
+    m = (((slot or {}).get("rasta") or {}).get(str(j)) or {}).get("mode")
+    if m:
+        return m
+    if CARD_CELL.get(key) == j + 1:
+        return CARD_MODE
+    return m
 RASTA_MODES = (RASTA_CLICK, RASTA_SEE, CARD_MODE)
 # 좌표 **대신 먼저** 처리하는 모드 (지금은 그림 자리가 전부 여기에 든다)
 RASTA_FIRST = RASTA_MODES      # 전부 좌표 **대신** 처리한다
@@ -1492,9 +1517,10 @@ def card_meta():
             d = json.load(f) or {}
         a = d.get("area") or {}
         return ((int(a["dx"]), int(a["dy"]), int(a["w"]), int(a["h"])),
-                float(d.get("thr") or 0.80), list(d.get("cards") or []))
+                float(d.get("thr") or 0.80), list(d.get("cards") or []),
+                (float(d.get("w") or 0), float(d.get("h") or 0)))
     except Exception:
-        return None, 0.80, []
+        return None, 0.80, [], (0.0, 0.0)
 
 
 def card_img_path(name):
@@ -1528,24 +1554,40 @@ def card_find(name, anchor):
         if not got:
             return None, None, 0.0
         big, (ox, oy) = got
-        area, thr, _ = card_meta()
+        H, W = big.shape[:2]
+        area, thr, _c, base = card_meta()
+        # 📏 **창 크기가 달라도 맞게** — 그림·범위를 그 비율로 늘린다 (2026-11-05).
+        #    옛 메타는 491x276 기준이었는데 창이 546x307 로 커져 **범위 왼쪽이 잘려**
+        #    `오만과 신념의 탑` 이 0.619 로 안 잡혔다. 로컬 창 크기가 달라도 같은 문제다.
+        kx = ky = 1.0
+        if base and base[0] > 0 and base[1] > 0:
+            kx, ky = W / base[0], H / base[1]
         if area:
             dx, dy, w, h = area
-            H, W = big.shape[:2]
-            x0, y0 = max(0, dx), max(0, dy)
-            x1, y1 = min(W, dx + w), min(H, dy + h)
+            x0, y0 = max(0, int(dx * kx)), max(0, int(dy * ky))
+            x1 = min(W, int((dx + w) * kx)); y1 = min(H, int((dy + h) * ky))
             if x1 - x0 > 8 and y1 - y0 > 8:
                 big = big[y0:y1, x0:x1]
                 ox += x0; oy += y0
-        tpl = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
-        if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
+        tpl0 = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+        if tpl0 is None:
             return None, None, 0.0
-        res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
-        _mn, mx, _ml, ml = cv2.minMaxLoc(res)
+        best = (-1.0, None, None)
+        for k in (ky, ky * 0.97, ky * 1.03, 1.0):      # 창 비율 둘레로 조금 훑는다
+            th, tw = int(round(tpl0.shape[0] * k)), int(round(tpl0.shape[1] * k))
+            if th < 4 or tw < 4 or th > big.shape[0] or tw > big.shape[1]:
+                continue
+            tpl = tpl0 if abs(k - 1.0) < 1e-6 else cv2.resize(tpl0, (tw, th))
+            res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
+            _mn, mx, _ml, ml = cv2.minMaxLoc(res)
+            if mx > best[0]:
+                best = (float(mx), ml, (tw, th))
+        if best[1] is None:
+            return None, None, 0.0
+        mx, ml, (tw, th) = best
         if mx < thr:
             return None, None, float(mx)
-        return (ox + ml[0] + tpl.shape[1] // 2,
-                oy + ml[1] + tpl.shape[0] // 2, float(mx))
+        return (ox + ml[0] + tw // 2, oy + ml[1] + th // 2, float(mx))
     except Exception:
         return None, None, 0.0
 
@@ -5034,7 +5076,7 @@ class IslandApp(tk.Tk):
                 # 🗡 그림 자리(라스타바드)면 **그림으로** 처리한다 — 실행 때와 같은 길.
                 #    (2026-10-04) 예전엔 이걸 안 봐서, 그림 자리를 ▶ 로 눌러도
                 #    좌표가 없으면 **아무 일도 안 났다**. 테스트가 불가능했다.
-                _rm = ((slot.get("rasta") or {}).get(str(ci)) or {}).get("mode")
+                _rm = cell_mode(key, slot, ci)
                 if _rm in RASTA_FIRST:
                     _okr = self._rasta_do(key, ci, idx, slot, coords, name, lbl)
                     if not _okr:
@@ -6407,7 +6449,7 @@ class IslandApp(tk.Tk):
         어느 클라인지는 **그 슬롯에 등록된 첫 좌표**로 안다 (용던고고의 `slot_anchor` 와
         같은 방식) — 그림 자리에는 좌표를 등록하지 않아도 된다."""
         st = ((slot.get("rasta") or {}).get(str(j)) or {})
-        mode = st.get("mode") or ""
+        mode = cell_mode(key, slot, j) or ""
         pick = st.get("pick") or "top"
         if mode == CARD_MODE:
             return self._card_do(key, j, si, slot, coords, name, lbl)
@@ -6481,6 +6523,10 @@ class IslandApp(tk.Tk):
            갑자기 멈추면 안 된다.
         🚫 카드를 못 찾으면 **이 슬롯 중단** — 엉뚱한 던전에 들어가는 것보다 낫다."""
         cname = (slot.get("card") or "").strip()
+        _why_c = u"슬롯 지정"
+        if not cname:
+            cname = (CARD_DEFAULT.get(key) or "").strip()
+            _why_c = u"던전 기본"      # 갈 곳이 하나뿐인 던전 — 따로 안 적어도 된다
         anchor = coords[j] if (j < len(coords) and coords[j]) else None
         if not anchor:
             anchor = next((c for c in coords if c), None)
@@ -6534,7 +6580,7 @@ class IslandApp(tk.Tk):
                 self._status.set(f"🃏 [{name}] {lbl} '{cname}' 찾는 중… "
                                  f"({t+1}/{RASTA_TRIES} · 최고 {best:.2f})")
                 time.sleep(random.uniform(*RASTA_GAP))
-        _a, _thr, _ = card_meta()
+        _a, _thr, _, _b = card_meta()
         self._status.set(f"🚫 [{name}] {lbl} '{cname}' 카드가 목록에 없습니다 "
                          f"(최고 {best:.2f} · 기준 {_thr:.2f}) — 이 슬롯 중단")
         self._rlog(f"[카드] {key} #{si+1:02d} '{cname}' 못 찾음 "
@@ -6879,7 +6925,7 @@ class IslandApp(tk.Tk):
         #    ⚠ 순차(`_run`)의 같은 분기와 **한 쌍이다.**
         if self._omanst_floor_click(key, si, slot, j):
             return True
-        _rm = ((slot.get("rasta") or {}).get(str(j)) or {}).get("mode")
+        _rm = cell_mode(key, slot, j)
         if _rm in RASTA_FIRST:
             if not self._rasta_do(key, j, si, slot, coords, name, lbl):
                 return None            # ← 이 슬롯 중단 (웨이브는 다른 슬롯 계속)
@@ -7656,7 +7702,7 @@ class IslandApp(tk.Tk):
                     # 🗡 라스타바드 — 이 칸이 '그림' 자리면 그림으로 처리한다.
                     #    설정은 **그 슬롯**에 있다 (라스타바드 프리셋을 적용하면 적힌다).
                     #    악몽의섬 프리셋을 적용하면 지워지므로 이 블록을 안 탄다.
-                    _rm = ((slot.get("rasta") or {}).get(str(j)) or {}).get("mode")
+                    _rm = cell_mode(key, slot, j)
                     if _rm in RASTA_FIRST:
                         if not self._rasta_do(key, j, si, slot, coords, name, lbl):
                             break              # 🚫 그림을 못 봤다 → **이 슬롯만 중단**
