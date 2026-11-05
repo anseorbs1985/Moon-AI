@@ -815,6 +815,13 @@ SUHO_DONE        = "suho_ok"         # 성공 표시 — **'성공!' 글자만**
 #    🚫 `suho_done_*.png`(통째) 로 되돌리지 말 것.
 #    아무 단계도 아닌데 수호성 화면이면 **결과 화면으로 보고 닫는다** —
 #    결과 화면 종류가 더 있을 수 있다. 다만 연속 이만큼까지만 (막힘 방지).
+SUHO_WIN_WAIT    = (0.6, 1.0)        # 🎉 성공 화면이 다 그려지기를 기다린다
+#    🚫 줄이지 말 것 — 뜨자마자 [나가기] 를 누르면 **안 먹는다** (2026-11-06 실측).
+SUHO_EXIT_TRIES  = 3                 # [나가기] 를 눌러보는 횟수 (닫히면 바로 멈춘다)
+SUHO_EXIT_WAIT   = (0.7, 1.0)        # 누르고 닫혔는지 보기까지
+SUHO_AFTER_DRAG  = (0.5, 0.8)        # ③ 끈 뒤 결과가 뜨기를 기다린다
+#    🚫 이것도 줄이지 말 것 — 끌자마자 카드를 찾으면 **넘어가는 중인 화면에
+#       엉뚱한 클릭**이 들어간다 (2026-11-06 07:26:04 실측).
 SUHO_BLIND_MAX   = 3
 #    👀 **클릭을 기다리지 않고 스스로 지켜본다** (2026-11-05 사용자:
 #       *"수호성 찾기를 보면 **바로 실행**을 해줘야지 한참을 있어야 해"*).
@@ -11204,7 +11211,9 @@ class App(tk.Tk):
                             break
                         # 🚨 **끌었는데 선이 그대로면 못 잡은 것** — 헛돌지 않게 센다
                         #    (2026-11-06 실측: 같은 자리를 21번 끌었다)
-                        self._suho_nap(*SUHO_CLICK_WAIT)
+                        #    ⏳ 결과(성공/실패)가 뜨기를 기다린 뒤 본다 — 바로 보면
+                        #       넘어가는 중인 화면에서 카드를 눌러버린다.
+                        self._suho_nap(*SUHO_AFTER_DRAG)
                         _im2 = self._suho_grab(rect)
                         if _im2 is not None and self._suho_line(_im2) is not None:
                             _bad = getattr(self, "_suho_dragfail", 0) + 1
@@ -11242,9 +11251,28 @@ class App(tk.Tk):
                         eb = self._suho_exit_btn(img)
                         if eb:
                             exy = (L + eb[0], T + eb[1])
-                            pyautogui.click(*exy)
-                            click_log(f"[수호성] 🎉 **성공!** — [나가기] 눌렀다 {exy} "
-                                      f"({done}회 뽑고 끝낸다)")
+                            # 🚨 **눌러놓고 끝내면 안 된다** (2026-11-06 실측).
+                            #    07:26:06 에 `[나가기] 눌렀다` 가 찍혔는데 **화면은
+                            #    그대로 남아 있었다.** 성공 화면이 뜬 지 2초밖에 안 돼
+                            #    버튼이 아직 안 먹은 것이다 (같은 자리를 나중에 손으로
+                            #    누르니 한 번에 닫혔다 — 자리·방식은 맞다).
+                            #    👉 **닫혔는지 보고, 안 닫혔으면 다시 누른다.**
+                            self._suho_nap(*SUHO_WIN_WAIT)
+                            _gone = False
+                            for _t in range(1, SUHO_EXIT_TRIES + 1):
+                                pyautogui.click(*exy)
+                                self._suho_nap(*SUHO_EXIT_WAIT)
+                                _im3 = self._suho_grab(rect)
+                                if _im3 is None or not self._suho_done_seen(_im3):
+                                    _gone = True
+                                    click_log(f"[수호성] 🎉 **성공!** — [나가기] 눌러 "
+                                              f"닫았다 {exy} ({_t}번째 · {done}회 뽑았다)")
+                                    break
+                                click_log(f"[수호성] 🎉 [나가기] 를 눌렀는데 안 닫힌다 "
+                                          f"— 다시 누른다 ({_t}/{SUHO_EXIT_TRIES})")
+                            if not _gone:
+                                click_log(f"[수호성] ⚠ {SUHO_EXIT_TRIES}번 눌러도 "
+                                          f"성공 화면이 안 닫힌다 → 끝낸다")
                             self.after(0, lambda: self.status.set("🌙 수호성 🎉 성공!"))
                             break
                         # 🚦 아직 [나가기] 가 안 그려졌을 수 있다 — **끝내지 말고 다시 본다**
