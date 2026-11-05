@@ -269,6 +269,10 @@ CARD_KEYS = ("토요일_악몽의섬", "수금_오만의탑", "월요일_잊혀�
 # 🃏 **그 던전의 '카드 자리' (1부터)** — 여기서는 좌표 대신 카드를 찾아 누른다.
 #    🚫 **슬롯에 적지 않고 코드에 둔다** — 프리셋을 적용하면 `rasta` 가 지워져서
 #       슬롯에 적어두면 카드 설정이 조용히 날아간다. 코드에 두면 로컬도 그대로다.
+# 🧭 장소 겨루기에 쓸 던전 네 개 (place_scores 용)
+DUN_KEYS = ["수금_오만의탑", "토요일_악몽의섬",
+            "월요일_잊혀진섬", "화요일_에카"]
+
 CARD_CELL = {"토요일_악몽의섬": 6, "수금_오만의탑": 6,
              "월요일_잊혀진섬": 6, "화요일_에카": 6}
 # 🃏 **갈 카드가 하나뿐인 던전의 기본값** — 슬롯에 따로 안 적어도 된다.
@@ -7222,6 +7226,79 @@ class IslandApp(tk.Tk):
                 pass
             return False
 
+    # 🔄 '이미 던전 안' 으로 보고 **그 슬롯을 통째로 건너뛸 때** 쓰는 기준.
+    #    평소 장소 판정(PLACE_MATCH 0.75)보다 훨씬 엄격해야 한다 — 실측 2026-11-05:
+    #      진짜 던전 안 0.98~1.00  ·  HUD 가 펼쳐져 이름이 안 보일 때 0.75~0.78
+    RESYNC_IN_MATCH = 0.90
+    RESYNC_IN_RATIO = 1.25
+
+    def _slot_card_name(self, key, slot):
+        """그 슬롯이 갈 카드 이름 (없으면 \"\") — `_card_do` 와 같은 순서."""
+        try:
+            _ver = self._slot_ver(key, slot)
+            byv = (CARD_BY_VER.get(key) or {}).get(_ver) or ""
+            if byv:
+                return byv
+            nm = (slot.get("card") or "").strip()
+            return nm or (CARD_DEFAULT.get(key) or "").strip()
+        except Exception:
+            return ""
+
+    def _slot_resync(self, key, si, slot, coords, name=""):
+        """🔄 **지금 화면을 보고 시작할 칸을 정한다** → 건너뛸 칸 수.
+
+        돌려주는 값:
+            0    평소대로 칸1부터 (기본 · 애매하면 언제나 이것)
+            n>0  앞 n칸을 건너뛰고 n+1번 칸부터
+            -1   **이미 그 던전 안** — 이 슬롯은 아무것도 하지 않는다
+
+        🚫 **확실할 때만** 건너뛴다. 그림이 없거나 점수가 낮으면 0 을 돌려준다."""
+        try:
+            cell = CARD_CELL.get(key)          # 카드를 누르는 칸 (1부터)
+            anc = self._slot_anchor(slot)
+            if not anc:
+                return 0
+            # ② 이미 그 던전 안인가 — **아주 엄격하게**.
+            #    🚨 건너뛰기는 **그 슬롯을 통째로 안 돌리는** 위험한 결정이라
+            #       평소 기준(PLACE_MATCH 0.75)으로는 절대 안 된다.
+            #       실측 2026-11-05: 진짜 던전 안 **0.98~1.00**,
+            #       HUD 가 펼쳐져 장소 이름이 안 보일 때 잡음 **0.75~0.78**
+            #       → 0.75 로 보면 15슬롯이 전부 '던전 안' 으로 오판했다.
+            #    그래서 ① 점수 ≥ RESYNC_IN_MATCH ② 2등의 RESYNC_IN_RATIO 배 이상
+            #    ③ 1등이 그 던전 — 셋을 다 넘어야 인정한다.
+            try:
+                if place_list(key):
+                    sc = place_scores(DUN_KEYS, anc) or {}
+                    v = sc.get(key, -1.0)
+                    others = sorted((x for k2, x in sc.items() if k2 != key),
+                                    reverse=True)
+                    second = others[0] if others else 0.0
+                    ratio = (v / second) if second > 0 else 9.9
+                    if (v >= self.RESYNC_IN_MATCH and ratio >= self.RESYNC_IN_RATIO
+                            and v >= max(sc.values())):
+                        self._rlog(u"[시작맞춤] %s #%02d **이미 던전 안**이다 "
+                                   u"(%.2f · 2등 %.2f · %.2f배) → 이 슬롯은 건너뛴다"
+                                   % (key, si + 1, v, second, ratio))
+                        return -1
+            except Exception:
+                pass
+            # ① 갈 카드가 이미 화면에 보이나 → 그 칸부터 시작
+            if cell and 1 < cell <= len(coords):
+                cname = self._slot_card_name(key, slot)
+                if cname and os.path.exists(card_img_path(cname)):
+                    x, y, v = card_find(cname, anc)
+                    if x is not None:
+                        self._rlog(u"[시작맞춤] %s #%02d '%s' 카드가 **이미 보인다** "
+                                   u"(%.2f) → 앞 %d칸을 건너뛰고 %d번 칸부터 간다"
+                                   % (key, si + 1, cname, v, cell - 1, cell))
+                        self._status.set(u"🔄 [%s] '%s' 가 이미 떠 있어 "
+                                         u"%d번 칸부터 갑니다" % (name, cname, cell))
+                        return cell - 1
+        except Exception as e:
+            self._rlog(u"[시작맞춤] %s #%02d 확인 중 오류 %s — 평소대로 칸1부터"
+                       % (key, si + 1, e))
+        return 0
+
     def _wake_skip1(self, si, slot, name=""):
         """좌표1 을 **건너뛸까** → 깨어 있으면 True.
 
@@ -7256,6 +7333,17 @@ class IslandApp(tk.Tk):
         # 😴 **좌표1 은 '절전모드 해제' 버튼** — 깨어 있으면 누르지 않는다.
         #    ⚠ 순차(`_run`)의 같은 자리와 **한 쌍이다** — 한쪽만 고치면
         #      '개별은 되는데 전체실행은 안 된다' 가 또 생긴다.
+        # 🔄 **슬롯을 시작할 때 지금 화면에 맞는 칸부터** (2026-11-05).
+        #    ⚠ 순차(`_run`)의 같은 처리와 **한 쌍이다.**
+        if j == 0:
+            if not hasattr(self, "_resync"):
+                self._resync = {}
+            _sk = self._slot_resync(key, si, slot, coords, name)
+            if _sk < 0:                       # 이미 던전 안 → 이 슬롯 끝
+                return None
+            self._resync[si] = _sk
+        if j < getattr(self, "_resync", {}).get(si, 0):
+            return True                       # 그 칸은 이미 지난 자리 — 건너뛴다
         if j == 0 and self._wake_skip1(si, slot, name):
             try:
                 self._esc_close(si, self._slot_anchor(slot), name)
@@ -8095,6 +8183,17 @@ class IslandApp(tk.Tk):
                         #    못 고르면 `_omanst_try` 가 **스스로 True 를 돌려** 좌표를
                         #    안 누르게 한다 — 정복을 누르느니 아무것도 안 누른다.
                         #    ⚠ `continue` 로 빠져나가지 말 것 (뒤 간격·횟수가 건너뛰어진다).
+                        # 🔄 **슬롯을 시작할 때 지금 화면에 맞는 칸부터** (2026-11-05).
+                        #    ⚠ 웨이브(`_do_one_click`)의 같은 처리와 **한 쌍이다.**
+                        if j == 0:
+                            if not hasattr(self, "_resync"):
+                                self._resync = {}
+                            _sk = self._slot_resync(key, si, slot, coords, name)
+                            if _sk < 0:               # 이미 던전 안 → 이 슬롯 끝
+                                break
+                            self._resync[si] = _sk
+                        if j < getattr(self, "_resync", {}).get(si, 0):
+                            continue                  # 이미 지난 자리 — 건너뛴다
                         if j == 0 and self._wake_skip1(si, slot, name):
                             pass                      # 깨어 있다 — 좌표1 은 안 누른다
                         elif self._omanst_try(key, si, slot, j):
