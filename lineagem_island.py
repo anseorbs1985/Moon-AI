@@ -658,12 +658,35 @@ OMANST_FLOOR_TOL = 11.0
 
 
 def omanst_floor_of(slot):
-    """그 슬롯이 갈 층 (0 = 안함)."""
+    """그 슬롯이 갈 층 (0 = 안함). 값, 어디서 읽었는지는 `omanst_floor_why`."""
+    return omanst_floor_src(slot)[0]
+
+
+def omanst_floor_src(slot):
+    """(층, 어디서 읽었나). **이름에서도 읽는다** — 2026-11-05.
+
+    🔎 로컬은 프리셋을 **예전에** 적용해둬서 `omanst_floor` 가 없다. 그런데
+       `_apply_preset` 이 슬롯 **이름**에 `7층 주홍이 48%` 처럼 층을 적어둔다.
+       그 이름은 **코드(`PRESET_LAYOUT`)의 라벨**에서 온 것이라 어느 컴퓨터든 같다.
+       → 이름에서 읽으면 **로컬이 아무것도 안 눌러도** 바로 맞는 층을 누른다.
+       (프리셋 번호가 밀려 저장된 좌표가 5층을 가리켜도 상관없다.)
+    ⚠ 드롭다운으로 직접 고른 값(`omanst_floor`)이 **이름보다 먼저**다."""
     try:
         v = int((slot or {}).get("omanst_floor") or 0)
+        if v in OMANST_FLOOR_LIST and v:
+            return v, u"설정"
     except Exception:
-        return 0
-    return v if v in OMANST_FLOOR_LIST else 0
+        pass
+    try:
+        import re as _re
+        m = _re.match(r"\s*(\d+)\s*층", str((slot or {}).get("name") or ""))
+        if m:
+            v = int(m.group(1))
+            if v in OMANST_FLOOR_LIST and v:
+                return v, u"슬롯 이름"
+    except Exception:
+        pass
+    return 0, u""
 
 
 def omanst_floor_name(n):
@@ -6739,7 +6762,7 @@ class IslandApp(tk.Tk):
         try:
             if key != OMANST_KEY or j != OMANST_FLOOR_IDX:
                 return False
-            fl = omanst_floor_of(slot)
+            fl, _why = omanst_floor_src(slot)
             if not fl:
                 return False
             anc = self._slot_anchor(slot)
@@ -6774,10 +6797,26 @@ class IslandApp(tk.Tk):
             click_at(x, y)
             _c = slot.get("coords") or []
             _old = _c[j] if j < len(_c) else None
-            self._rlog(u"[오만의탑] 🏢 #%02d **%d층** 줄을 눌렀다 (%d,%d) · %s%s"
-                       % (si + 1, fl, x, y, how,
-                          (u" · 등록 좌표 (%d,%d) 는 쓰지 않았다" % (_old[0], _old[1]))
-                          if _old else u""))
+            # 🗒 등록된 칸23 이 **몇 층 자리였는지** 같이 남긴다 — 이름과 어긋나면
+            #    그게 '프리셋 번호가 밀린' 증거다 (2026-11-05 로컬 사고).
+            _was = u""
+            if _old:
+                try:
+                    import ctypes, ctypes.wintypes
+                    from precise_click import game_window_at
+                    _h2 = game_window_at(int(anc[0]), int(anc[1]))
+                    _r2 = ctypes.wintypes.RECT()
+                    ctypes.windll.user32.GetWindowRect(_h2, ctypes.byref(_r2))
+                    _ky = (_r2.bottom - _r2.top) / OMANST_FLOOR_H
+                    _yin = (_old[1] - _r2.top) / _ky
+                    _fwas = 3 + (OMANST_FLOOR_Y3 - _yin) / OMANST_FLOOR_DY
+                    _was = (u" · 등록 좌표 (%d,%d) 는 **%.1f층 자리**였다%s"
+                            % (_old[0], _old[1], _fwas,
+                               u" 🚨 어긋남" if abs(_fwas - fl) > 0.5 else u""))
+                except Exception:
+                    _was = u" · 등록 좌표 (%d,%d) 는 쓰지 않았다" % (_old[0], _old[1])
+            self._rlog(u"[오만의탑] 🏢 #%02d **%d층** 줄을 눌렀다 (%d,%d) · %s에서 읽음 · %s%s"
+                       % (si + 1, fl, x, y, _why, how, _was))
             return True
         except Exception as e:
             try:
