@@ -855,11 +855,17 @@ SUHO_BIG_Y       = 0.4956
 SUHO_DRAG_BOT    = 20                # 창 바닥에서 이만큼 위까지 끈다
 #    사용자: *"한번에 쫙 … 팍 내리라고"* — 빠르게. 다만 끌림이 먹히려면
 #    중간 이동이 몇 번은 있어야 한다 (실측: 1칸 이동이면 안 잡힌다).
-SUHO_DRAG_N      = 12                # 몇 칸에 나눠 미나
-SUHO_DRAG_STEP   = 0.022             # 한 칸마다 (초)
-SUHO_DRAG_HOLD   = (0.22, 0.34)      # 누르고 나서 · 끝에서 머무는 시간
+SUHO_DRAG_N      = 6                 # 끄는 중간 이동 횟수 — **팍 내린다** (2026-11-06 사용자)
+#    🚫 1로 만들지 말 것 — 순간이동하면 카드가 **안 잡힌다** (2026-11-05 실측).
+#       6단계 × 0.010초 = **0.06초** 면 눈에는 '팍' 내려가는 것으로 보인다.
+SUHO_DRAG_STEP   = 0.010             # 한 단계 사이 (전 0.022 — 두 배 빠르다)
+SUHO_DRAG_HOLD   = (0.15, 0.22)      # 누르고/놓기 전 잡는 시간
+#    ⚠ 이건 **줄이지 말 것** — 너무 짧으면 게임이 '잡았다'를 인식 못 한다
+#      (클릭 80ms 교훈과 같다). 빠르게 할 것은 **이동**이지 잡는 시간이 아니다.
 #    노란 '여기까지' 선 — 끌기 단계인지 가리는 데만 쓴다
 SUHO_LINE_BAND   = (0.70, 0.98)
+SUHO_LINE_FRAC   = 0.14              # 노란 선 — **창 폭의 이만큼이 이어져야** 선이다
+#    실측 2026-11-06: 끌기 18.9% · 확인창 10.2~10.5% · 546 잡음 3.8%
 SUHO_LINE_MIN    = 120               # 한 줄에 이만큼 노란 픽셀이 있어야
 SUHO_SEE         = 6                 # 화면이 (다시) 뜰 때까지 몇 번 보나.
 #    🚫 길게 기다리지 않는다 — 화면이 아니면 **빨리 끝내는 것**이 맞다 (사용자 지시).
@@ -10565,6 +10571,12 @@ class App(tk.Tk):
         lock = _mk(getattr(self, "_suho_lock", None))
         if lock:
             return lock
+        # 🔁 앞 판이 끝나며 찍어둔 **다음 창** 이 있으면 거기부터
+        nxt = _mk(getattr(self, "_suho_next", None))
+        if nxt:
+            self._suho_next = None
+            self._suho_hwnd = nxt[0]
+            return nxt
         try:
             fg = _mk(win32gui.GetForegroundWindow())
         except Exception:
@@ -10693,7 +10705,23 @@ class App(tk.Tk):
             return None
 
     def _suho_line(self, img):
-        """③ '카드를 여기까지' **노란 선** 이 보이나 → 창 안 y. 없으면 None."""
+        """③ '카드를 여기까지' **노란 선** 이 보이나 → 창 안 y. 없으면 None.
+
+        🚨 **'노란 픽셀 몇 개' 로 세면 안 된다** (2026-11-06 실측).
+           기준 `SUHO_LINE_MIN`(120) 이 2504 창에서 정해져 있어서
+           **546 작은 창에서는 선이 절대 120을 못 넘었다** — 그래서
+           ③ 끌기가 **아예 시작되지 않았다** (사용자: *"카드를 드래그해서
+           밑으로 내려야 하잖아 왜 안 그러는 거야"*).
+           게다가 2504 에서도 **확인창 255 · 활성화창 263** 이 120을 넘어
+           선이 아닌데 선으로 봤다.
+
+        👉 **창 폭 대비 '이어진 길이'** 로 본다 — 크기와 무관하다. 실측:
+             끌기 화면(진짜)   18.9%
+             확인창·활성화창    10.2 ~ 10.5%   (버튼 테두리가 이어진 것)
+             546 잡음 천장      3.8%
+           → `SUHO_LINE_FRAC`(0.14) 면 양쪽 다 안전하다
+             (위 여유 4.9%p · 아래 여유 3.5%p).
+        🚫 다시 '픽셀 개수' 로 되돌리지 말 것."""
         try:
             import numpy as np
             H, W = img.shape[0], img.shape[1]
@@ -10703,9 +10731,19 @@ class App(tk.Tk):
             g = sub[:, :, 1].astype(int)
             r = sub[:, :, 2].astype(int)
             m = (r > 140) & (g > 110) & (b < 120) & (r - b > 60)
+            need = max(30, int(W * SUHO_LINE_FRAC))
             rows = m.sum(axis=1)
-            k = int(rows.argmax())
-            return (y0 + k) if rows[k] >= SUHO_LINE_MIN else None
+            # ⚡ 줄 전체 개수가 기준에 못 미치면 이어진 길이는 볼 것도 없다
+            for k in np.where(rows >= need)[0]:
+                row = m[k]
+                run = mx = 0
+                for v in row:
+                    run = run + 1 if v else 0
+                    if run > mx:
+                        mx = run
+                if mx >= need:
+                    return y0 + int(k)
+            return None
         except Exception:
             return None
 
@@ -10958,9 +10996,12 @@ class App(tk.Tk):
             L, T, W, H = rect[1], rect[2], rect[3], rect[4]
             x = int(L + SUHO_BIG_X * W)
             y0 = int(T + SUHO_BIG_Y * H)
-            y1 = int(T + H - SUHO_DRAG_BOT)
+            # 🚨 바닥까지 남기는 여백도 **창 크기에 맞춘다** — 2504 기준 20px 를
+            #    546 창에 그대로 쓰면 선(창 높이의 91%)을 7px 밖에 못 지나
+            #    되돌아갈 수 있다. 비율로 줄이되 최소 8px 은 남긴다.
+            y1 = int(T + H - max(8, int(SUHO_DRAG_BOT * H / 1352.0)))
             pyautogui.moveTo(x, y0)
-            nap(random.uniform(0.20, 0.32))
+            nap(random.uniform(0.10, 0.16))   # 카드에 손 올리는 뜸 — 짧게
             pyautogui.mouseDown(x, y0)
             nap(random.uniform(*SUHO_DRAG_HOLD))
             for st in range(1, SUHO_DRAG_N + 1):
@@ -11236,6 +11277,28 @@ class App(tk.Tk):
                 except Exception:
                     pass
             finally:
+                # 🔁 **다음 창으로 넘어간다** — 여러 개 띄워뒀으면 순서대로 (사용자 지시)
+                try:
+                    if not getattr(self, "_suho_stop", False):
+                        _skip = set(getattr(self, "_suho_swept", ()) or ())
+                        if self._suho_lock:
+                            _skip.add(self._suho_lock)
+                        _nx = self._suho_find_work(skip=_skip)
+                        if _nx:
+                            self._suho_swept = _skip
+                            self._suho_next = _nx[0]
+                            click_log(f"[수호성] 🔁 **다음 창으로** — {_nx[5]} "
+                                      f"(남은 창을 순서대로 돈다)")
+                        else:
+                            self._suho_swept = set()
+                            self._suho_next = None
+                            click_log("[수호성] 🔁 할 일이 있는 창이 더 없다 — 끝")
+                    else:
+                        self._suho_swept = set()
+                        self._suho_next = None
+                except Exception:
+                    self._suho_swept = set()
+                    self._suho_next = None
                 self._suho_busy = False
                 self._suho_lock = None
                 self._suho_latch = None      # 화면이 다시 뜨면 또 돈다
@@ -11251,6 +11314,52 @@ class App(tk.Tk):
                     pass
 
         threading.Thread(target=_go, daemon=True).start()
+
+    def _suho_wins(self):
+        """지금 떠 있는 리니지M 창 전부 → [(hwnd, x, y, w, h, 이름), …] 왼쪽 위부터."""
+        out = []
+        def _cb(h, _):
+            try:
+                if not win32gui.IsWindowVisible(h) or win32gui.IsIconic(h):
+                    return True
+                t = win32gui.GetWindowText(h) or ""
+                if not t.startswith("리니지M") or t.startswith("리니지M 자동 실행"):
+                    return True
+                l, tp, r, b = win32gui.GetWindowRect(h)
+                if (r - l) < 200:
+                    return True
+                nm = t.split("l")[-1].strip() if " l " in t else t
+                out.append((h, l, tp, r - l, b - tp, nm))
+            except Exception:
+                pass
+            return True
+        try:
+            win32gui.EnumWindows(_cb, None)
+        except Exception:
+            pass
+        return sorted(out, key=lambda q: (q[1] // 200, q[2]))
+
+    def _suho_find_work(self, skip=()):
+        """🔎 **할 일이 있는 다음 창**을 찾는다 → rect 또는 None (2026-11-06 사용자:
+        *"내가 창을 만약 여러 개 띄워놓으면 어떻게 할래"*).
+
+        여러 개를 **동시에는 못 한다** — 클릭은 맨 앞 창에만 들어가므로
+        **한 창씩 순서대로** 돈다. 한 판이 끝날 때만 부르므로 평소 부하는 0이다.
+        ⚠ 창 하나 캡처가 ~60ms 라 16개면 ~1초다. **폴링에서 부르지 말 것.**"""
+        try:
+            for w in self._suho_wins():
+                if w[0] in skip:
+                    continue
+                img = self._suho_grab(w)
+                if img is None:
+                    continue
+                if self._suho_tpl_seen(img, suho_info_list()):
+                    return w
+                if self._suho_tpl_seen(img, suho_screen_list()) and self._suho_cards(w):
+                    return w
+        except Exception as e:
+            click_log(f"[수호성] ⚠ 다음 창 찾기 오류 {e}")
+        return None
 
     def _suho_wait_human(self):
         """✋ 사람이 마우스를 만지는 중이면 **양보한다** → 이어서 해도 되나.
@@ -11375,7 +11484,10 @@ class App(tk.Tk):
                 return
             if getattr(self, "_suho_busy", False) or self._is_busy():
                 return
-            if time.time() - getattr(self, "_suho_done_at", 0.0) < SUHO_RERUN_COOL:
+            # 🔁 다음 창이 정해져 있으면 **바로** 간다 (쿨다운은 같은 창 재시작용)
+            if (not getattr(self, "_suho_next", None)
+                    and time.time() - getattr(self, "_suho_done_at", 0.0)
+                    < SUHO_RERUN_COOL):
                 return
             if not (suho_screen_list() or suho_info_list()):
                 return
