@@ -174,7 +174,12 @@ def main():
         return 0
 
     # ── 받는다 — 막히는 슬롯 먼저, 그 다음 골고루 ───────────────────
-    pick = list(dict.fromkeys((bad0 or []) + [1, 6, 11, 16]))[:TAKE]
+    # 🚨 **'막히는 슬롯' 을 먼저 받지 않는다** (2026-11-05 사고).
+    #    막히는 이유가 '그림이 안 맞아서' 가 아니라 **그 클라가 다른 곳에 있어서**
+    #    일 수 있다 — 실제로 입구에 있던 #13 에서 먼저 받아 오염시켰다.
+    #    잘 잡히는 슬롯에서 골고루 받는다.
+    _ok = [i + 1 for i in range(16) if (i + 1) not in (bad0 or [])]
+    pick = (_ok or list(range(1, 17)))[::max(1, len(_ok) // TAKE or 1)][:TAKE]
     print(u"\n=== 지금 창에서 받을 슬롯: %s ===" % pick)
     added = []
     for sn in pick:
@@ -184,6 +189,16 @@ def main():
             continue
         if float(cut.std()) < 3.0:
             print(u"  #%02d 글자가 없다 (무늬 %.1f) — 건너뜀" % (sn, cut.std()))
+            continue
+        # 🚨 **칸 전체 크기면 저장하지 않는다** (2026-11-05 사고).
+        #    `place_trim` 은 글자를 못 찾으면 칸 전체(75x12)를 그대로 돌려준다.
+        #    그걸 저장하면 **아무 데나 맞는 그림**이 되어 판정이 망가진다.
+        #    실제로 입구 화면(#13)을 오만의탑 그림으로 저장해 오염시켰다.
+        if (cut.shape[1] >= g["PLACE_CW"] - 1
+                and cut.shape[0] >= g["PLACE_CH"] - 1):
+            print(u"  #%02d ⚠ 글자를 못 찾아 **칸 전체**(%dx%d)가 잘렸다 — 저장 안 함"
+                  % (sn, cut.shape[1], cut.shape[0]))
+            print(u"       (그 클라가 던전 밖이거나 HUD 가 펼쳐져 있을 수 있다)")
             continue
         n = len(g["place_list"](want))
         if n >= g["PLACE_MAX"]:
