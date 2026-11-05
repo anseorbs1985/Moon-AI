@@ -754,10 +754,36 @@ def sync_island_keys(log):
                           f"(물약 등)은 로컬 것 유지" if _klog else "") + ")")
         sp = (src.get("_presets") or {})
         dp = dst.setdefault("_presets", {})
+        kpc = cfgm.get("keep_preset_cells") or {}
         for k in (list(keys) if with_presets else []) + list(only_p):
             if k in sp and dp.get(k) != sp[k]:
-                dp[k] = sp[k]
-                got.append(f"{k} 프리셋")
+                # 🔒 **프리셋도 '지킬 칸'을 지킨다** (2026-11-05 사고).
+                #    물약·층처럼 컴퓨터마다 다른 칸은 메인 것으로 바꾸면 안 된다.
+                #    예전에는 dp[k] = sp[k] 로 프리셋 그룹을 통째로 갈아끼워서
+                #    로컬 오만의탑 층 선택이 전부 메인 것(= 5층)으로 바뀌었다.
+                _keep = kpc.get(k) or []
+                if not _keep:
+                    dp[k] = sp[k]
+                    got.append(f"{k} 프리셋")
+                    continue
+                _new, _old = sp[k], (dp.get(k) or [])
+                try:
+                    _out = json.loads(json.dumps(_new))
+                    for _pi in range(len(_out)):
+                        if _pi >= len(_old) or not isinstance(_out[_pi], dict):
+                            continue
+                        _oit = (_old[_pi] or {}).get("items") or {}
+                        _nit = _out[_pi].setdefault("items", {})
+                        for _c in _keep:
+                            _nit.pop(str(_c), None)
+                            if str(_c) in _oit:
+                                _nit[str(_c)] = _oit[str(_c)]
+                    dp[k] = _out
+                    got.append(f"{k} 프리셋(칸"
+                               + ",".join(str(c + 1) for c in _keep)
+                               + "은 로컬 것 유지)")
+                except Exception:
+                    log(f"   ⚠ {k} 프리셋 — 지킬 칸 처리 실패, 건너뜁니다")
         if not got:
             log("   던전 동기화: 이미 메인과 같습니다")
             return

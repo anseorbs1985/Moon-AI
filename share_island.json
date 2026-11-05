@@ -5,12 +5,14 @@
   "enabled",
   "repeat_h",
   "repeat_n",
-  "omanst_pref"
+  "omanst_pref",
+  "omanst_floor"
  ],
  "keep_cells": {
   "수금_오만의탑": [
    11,
-   12
+   12,
+   22
   ],
   "토요일_악몽의섬": [
    16,
@@ -26,6 +28,13 @@
   ]
  },
  "fill_only": [],
- "_메모": "2026-11-04 역산 좌표 배포 — 사용자 지시로 **잠금을 뚫고** 넣는다 (*\"강제로 넣어줘, 역산한 게 중요해\"*). 물약 칸(keep_cells)·이름·ON/OFF·반복·오만 층은 그대로 지킨다. 배포가 끝나면 keys 를 비우고 NEVER_ISLAND 를 True 로 되돌릴 것.",
- "ignore_lock": true
+ "_메모": "🔒 닫힘. keys 를 열 때는 keep_cells 에 **층 칸(오만 22)** 이 들어 있는지 반드시 확인할 것 — 2026-11-05 에 그걸 빼먹어 로컬 15슬롯이 5층으로 갈렸다. 배포가 끝나면 keys·presets 를 비우고 py check_share.py 로 확인한다.",
+ "ignore_lock": true,
+ "keep_preset_cells": {
+  "수금_오만의탑": [
+   11,
+   12,
+   22
+  ]
+ }
 }
