@@ -6633,6 +6633,11 @@ class IslandApp(tk.Tk):
                 self._last_focus = si
             except Exception:
                 pass
+            # 📷 **층을 고른 직후의 화면을 남긴다** (2026-11-05).
+            #    왼쪽 '층 목록' 과 오른쪽 '퀘스트 세 줄' 이 같이 찍힌다 —
+            #    "왜 5층만 고르냐" 를 눈으로 짚는 유일한 통로다.
+            #    `%LOCALAPPDATA%\MoonAI\click_templates\_omanst\`
+            self._omanst_shot(si, anc, slot)
             ok = bool(omanst_pick(self, anc, slot, log=self._rlog))
             if not ok:
                 # 🚫 **그 자리에서는 좌표를 절대 누르지 않는다.**
@@ -6648,6 +6653,36 @@ class IslandApp(tk.Tk):
             except Exception:
                 pass
             return True
+
+    def _omanst_shot(self, si, anc, slot, keep=24):
+        """📷 지배석 창을 통째로 저장한다 (칸24 직전 = 층을 고른 직후).
+
+        **아무것도 클릭하지 않는다.** PrintWindow 라 가려져 있어도 정확하다.
+        최근 `keep` 장만 남긴다."""
+        try:
+            import os, time as _t, cv2, numpy as _np
+            got = grab_window(anc)
+            if not got:
+                return
+            big = got[0]
+            d = os.path.join(os.environ.get("LOCALAPPDATA", BASE),
+                             "MoonAI", "click_templates", "_omanst")
+            os.makedirs(d, exist_ok=True)
+            nm = "%s_%02d_%s.png" % (_t.strftime("%m%d_%H%M%S"), si + 1,
+                                     (slot.get("name") or "").replace(" ", "")[:12])
+            p = os.path.join(d, nm)
+            ok, buf = cv2.imencode(".png", big)      # 한글 경로 대비
+            if ok:
+                buf.tofile(p)
+            old = sorted(os.path.join(d, f) for f in os.listdir(d)
+                         if f.endswith(".png"))
+            for q in old[:-keep]:
+                try:
+                    os.remove(q)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _omanst_floor_click(self, key, si, slot, j):
         """🏢 오만의탑 칸23 — 슬롯이 고른 **갈 층** 줄을 눌렀으면 True.
