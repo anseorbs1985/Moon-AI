@@ -1666,6 +1666,54 @@ def card_is_locked(big, cx):
         return False, -1.0
 
 
+def card_open_one(name, anchor):
+    """🔒 그 카드가 **지금 들어갈 수 있나** → (열림, 설명).
+
+    돌려주는 값: `True` 열림 · `False` 잠김 · `None` **판단 못 함**(화면에 없음 등).
+    🚫 `None` 일 때는 막지 않는다 — 모를 때는 예전처럼 간다 (안전한 쪽)."""
+    try:
+        import cv2, numpy as np
+        got = grab_window(anchor)
+        if not got:
+            return None, u"창을 못 찍었다"
+        big, (ox, oy) = got
+        H, W = big.shape[:2]
+        area, thr, _c, base = card_meta()
+        kx = (W / base[0]) if (base and base[0] > 0) else 1.0
+        ky = (H / base[1]) if (base and base[1] > 0) else 1.0
+        bx0 = 0
+        band = big
+        if area:
+            dx, dy, w, h = area
+            bx0, by0 = max(0, int(dx * kx)), max(0, int(dy * ky))
+            bx1, by1 = min(W, int((dx + w) * kx)), min(H, int((dy + h) * ky))
+            if bx1 - bx0 > 8 and by1 - by0 > 8:
+                band = big[by0:by1, bx0:bx1]
+        best = (-1.0, None, None)
+        for _p in card_img_all(name):
+            t0 = cv2.imdecode(np.fromfile(_p, np.uint8), cv2.IMREAD_COLOR)
+            if t0 is None:
+                continue
+            for k in (ky, ky * 0.97, ky * 1.03, 1.0):
+                th, tw = int(round(t0.shape[0] * k)), int(round(t0.shape[1] * k))
+                if th < 4 or tw < 4 or th > band.shape[0] or tw > band.shape[1]:
+                    continue
+                t2 = t0 if abs(k - 1.0) < 1e-6 else cv2.resize(t0, (tw, th))
+                _mn, mx, _ml, ml = cv2.minMaxLoc(
+                    cv2.matchTemplate(band, t2, cv2.TM_CCOEFF_NORMED))
+                if mx > best[0]:
+                    best = (float(mx), ml, (tw, th))
+        if best[1] is None or best[0] < thr:
+            return None, u"화면에서 못 찾음 (최고 %.2f)" % max(best[0], 0)
+        cx = bx0 + best[1][0] + best[2][0] // 2
+        lk, lv = card_is_locked(big, cx)
+        if lv < 0:
+            return None, u"자물쇠를 못 쟀다"
+        return (not lk), u"자물쇠 %.2f" % lv
+    except Exception as e:
+        return None, u"오류 %s" % e
+
+
 def card_pick_open(names, anchor):
     """🃏 우선순위대로 보고 **잠기지 않은 첫 카드** → (이름, 설명).
 
@@ -5664,7 +5712,18 @@ class IslandApp(tk.Tk):
         악몽의섬이 아닌 던전은 빈 값 → 기본 여유를 쓴다."""
         if key != RASTA_KEY:
             return ""
-        return "라스타바드" if ((slot or {}).get("rasta")) else "악몽의섬"
+        # 🚨 **`rasta` 에 들어 있다고 다 라스타바드가 아니다** (2026-11-05 버그).
+        #    칸6 의 🃏 카드 설정도 같은 `rasta` 에 적힌다 — 그걸 세는 바람에
+        #    카드만 골라둔 악몽의섬 슬롯이 **라스타바드로 잡혀** ⏰ 간격까지
+        #    4시간1회로 걸렸다. **26~35 칸만** 센다.
+        _a, _b = RASTA_RANGE
+        for k3 in ((slot or {}).get("rasta") or {}):
+            try:
+                if _a <= int(k3) + 1 <= _b:
+                    return "라스타바드"
+            except Exception:
+                pass
+        return "악몽의섬"
 
     def _rep_extra_sec(self, key, slot):
         """반복 간격에 더 주는 여유(초). 랜덤 폭은 없애지 않는다 — 사람처럼."""
@@ -6658,8 +6717,11 @@ class IslandApp(tk.Tk):
         _why_c = u""
         _ver = self._slot_ver(key, slot)
         _byver = (CARD_BY_VER.get(key) or {}).get(_ver) or ""
+        if not hasattr(self, "_card_norasta"):
+            self._card_norasta = set()
+        self._card_norasta.discard(si)       # 이번 판은 일단 프리셋대로
         if _byver:
-            # ① 🗡 라스타바드 프리셋이면 **무조건** 라스타바드 —
+            # ① 🗡 라스타바드 프리셋이면 라스타바드 —
             #    칸26~35 가 라스타바드 전용이라 다른 카드로 들어가면 그 뒤가 어긋난다.
             cname, _why_c = _byver, u"프리셋 %s" % _ver
             _pick = (slot.get("card") or "").strip()
@@ -6667,6 +6729,30 @@ class IslandApp(tk.Tk):
                 self._rlog(u"[카드] %s #%02d 슬롯에 '%s' 가 적혀 있지만 "
                            u"**라스타바드 프리셋**이라 '%s' 로 간다"
                            % (key, si + 1, _pick, cname))
+            # 🔒 **라스타바드가 잠겼으면 (= 그 시간을 다 썼으면)** 그 판만 악몽의섬으로.
+            #    사용자 2026-11-05: *"그 시간을 다 쓰면 자동으로 해적섬 프리셋으로
+            #    바꿔서 해주면 제일 좋은데."* — 프리셋을 **바꿔 끼우지 않고**
+            #    26~35 만 건너뛰면 된다 (1~25 는 공용 · 악몽의섬 = 26~35 를 비운 것).
+            #    🚫 슬롯 자료는 하나도 건드리지 않는다 — 다음에 열리면 저절로 돌아온다.
+            if anchor0 and CARD_ORDER.get(key):
+                _ok2, _why2 = card_open_one(cname, anchor0)
+                if _ok2 is False:
+                    _alt, _wa = card_pick_open(CARD_ORDER[key], anchor0)
+                    if _alt:
+                        self._rlog(u"[카드] %s #%02d 🔒 '%s' 가 잠겼다 (%s) → "
+                                   u"**이번 판만 '%s' 로 간다 · 칸%d~%d 는 건너뛴다** "
+                                   u"(슬롯 설정은 그대로)"
+                                   % (key, si + 1, cname, _why2, _alt,
+                                      RASTA_RANGE[0], RASTA_RANGE[1]))
+                        cname, _why_c = _alt, u"라스타바드 잠김 → " + _wa
+                        self._card_norasta.add(si)
+                    else:
+                        self._rlog(u"[카드] %s #%02d 🔒 '%s' 가 잠겼는데 "
+                                   u"대신 갈 카드도 없다 (%s) → 이 슬롯 중단"
+                                   % (key, si + 1, cname, _wa))
+                        self._status.set(f"🃏 [{name}] {lbl} — "
+                                         f"'{cname}' 가 잠겼고 대신 갈 카드도 없습니다")
+                        return False
         if not cname:
             cname = (slot.get("card") or "").strip()          # ② [🃏] 로 콕 집은 것
             if cname:
@@ -6953,6 +7039,25 @@ class IslandApp(tk.Tk):
         except Exception:
             pass
 
+    def _skip_rasta_cell(self, key, si, j):
+        """🗡 이번 판은 **악몽의섬으로 도는데** 이 칸이 라스타바드 칸(26~35)인가.
+
+        라스타바드 카드가 🔒 잠겼을 때 `_card_do` 가 `_card_norasta` 에 적어둔다.
+        **슬롯 자료는 그대로** — 다음에 열리면 저절로 라스타바드로 돌아온다."""
+        try:
+            if key != RASTA_KEY:
+                return False
+            if si not in getattr(self, "_card_norasta", ()):
+                return False
+            a, b = RASTA_RANGE
+            if not (a <= j + 1 <= b):
+                return False
+            self._rlog(u"[카드] %s #%02d 칸%d 건너뜀 — 이번 판은 악몽의섬으로 돈다"
+                       % (key, si + 1, j + 1))
+            return True
+        except Exception:
+            return False
+
     def _omanst_floor_click(self, key, si, slot, j):
         """🏢 오만의탑 칸23 — 슬롯이 고른 **갈 층** 줄을 눌렀으면 True.
 
@@ -7079,6 +7184,10 @@ class IslandApp(tk.Tk):
         # 🏢 **칸23 — 슬롯이 고른 '갈 층' 줄을 누른다** (2026-11-05).
         #    ⚠ 순차(`_run`)의 같은 분기와 **한 쌍이다.**
         if self._omanst_floor_click(key, si, slot, j):
+            return True
+        # 🗡 라스타바드가 잠겨 악몽의섬으로 도는 판이면 **26~35 는 건너뛴다**
+        #    (⚠ 순차 `_run` 의 같은 확인과 **한 쌍**)
+        if self._skip_rasta_cell(key, si, j):
             return True
         _rm = cell_mode(key, slot, j)
         if _rm in RASTA_FIRST:
@@ -7854,6 +7963,10 @@ class IslandApp(tk.Tk):
                         d_ = None
                     rec = recs.get(str(j))
                     did = False
+                    # 🗡 라스타바드가 잠겨 악몽의섬으로 도는 판이면 26~35 건너뛰기
+                    #    (⚠ 웨이브 `_do_one_click` 과 **한 쌍**)
+                    if self._skip_rasta_cell(key, si, j):
+                        continue
                     # 🗡 라스타바드 — 이 칸이 '그림' 자리면 그림으로 처리한다.
                     #    설정은 **그 슬롯**에 있다 (라스타바드 프리셋을 적용하면 적힌다).
                     #    악몽의섬 프리셋을 적용하면 지워지므로 이 블록을 안 탄다.
