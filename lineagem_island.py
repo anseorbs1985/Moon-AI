@@ -1533,9 +1533,23 @@ def card_list():
     out = []
     for p in glob.glob(os.path.join(IMG_DIR, "card_*.png")):
         n = os.path.basename(p)[5:-4]
-        if n:
+        # 🃏 `card_<이름>_2.png` 같은 **덧판**은 같은 카드의 다른 판이라 따로 세지 않는다
+        if n and not (len(n) > 2 and n[-2] == "_" and n[-1].isdigit()):
             out.append(n)
     return sorted(out)
+
+
+def card_img_all(name):
+    """🃏 그 카드의 그림 **전부** — 기본 + 덧판(`card_<이름>_2.png` …).
+
+    📏 **클라마다 카드 글자가 조금씩 다르게 그려진다** (2026-11-05 실측:
+       #01 에서 자른 그림이 다른 클라에서 **0.84** 까지 떨어졌다).
+       여러 클라에서 한 장씩 잘라두면 **하나라도 맞으면 찾은 것**이라 여유가 커진다.
+       (용던고고가 그림을 여러 장 두는 것과 같은 방식)"""
+    import glob
+    ps = [card_img_path(name)]
+    ps += sorted(glob.glob(os.path.join(IMG_DIR, "card_%s_[0-9].png" % name)))
+    return [p for p in ps if os.path.exists(p)]
 
 
 def card_find(name, anchor):
@@ -1569,19 +1583,20 @@ def card_find(name, anchor):
             if x1 - x0 > 8 and y1 - y0 > 8:
                 big = big[y0:y1, x0:x1]
                 ox += x0; oy += y0
-        tpl0 = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
-        if tpl0 is None:
-            return None, None, 0.0
         best = (-1.0, None, None)
-        for k in (ky, ky * 0.97, ky * 1.03, 1.0):      # 창 비율 둘레로 조금 훑는다
-            th, tw = int(round(tpl0.shape[0] * k)), int(round(tpl0.shape[1] * k))
-            if th < 4 or tw < 4 or th > big.shape[0] or tw > big.shape[1]:
+        for _p in card_img_all(name):          # 기본 + 덧판 — 하나라도 맞으면 된다
+            tpl0 = cv2.imdecode(np.fromfile(_p, np.uint8), cv2.IMREAD_COLOR)
+            if tpl0 is None:
                 continue
-            tpl = tpl0 if abs(k - 1.0) < 1e-6 else cv2.resize(tpl0, (tw, th))
-            res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
-            _mn, mx, _ml, ml = cv2.minMaxLoc(res)
-            if mx > best[0]:
-                best = (float(mx), ml, (tw, th))
+            for k in (ky, ky * 0.97, ky * 1.03, 1.0):  # 창 비율 둘레로 조금 훑는다
+                th, tw = int(round(tpl0.shape[0] * k)), int(round(tpl0.shape[1] * k))
+                if th < 4 or tw < 4 or th > big.shape[0] or tw > big.shape[1]:
+                    continue
+                tpl = tpl0 if abs(k - 1.0) < 1e-6 else cv2.resize(tpl0, (tw, th))
+                res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
+                _mn, mx, _ml, ml = cv2.minMaxLoc(res)
+                if mx > best[0]:
+                    best = (float(mx), ml, (tw, th))
         if best[1] is None:
             return None, None, 0.0
         mx, ml, (tw, th) = best
