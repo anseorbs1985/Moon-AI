@@ -783,7 +783,17 @@ SUHO_CLICK_WAIT  = (0.15, 0.26)      # 클릭하고 카드가 **골라지기까�
 #       그래서 **누르기 직전마다** 화면을 다시 보고, 아니면 **그 자리에서 끝낸다.**
 #       ①클릭 앞 · ②끌기 앞 **두 번** 본다. 한 번 확인하고 두 동작을 하지 말 것 —
 #       클릭 때문에 화면이 바뀌었을 수 있다.
-SUHO_RERUN_COOL  = 1.0               # 한 판 끝난 뒤 다시 걸리기까지
+SUHO_BACK_SEC    = 25.0              # 도는 동안 런처를 뒤로 미는 시간(초)
+# ── ✋ 사람이 마우스를 만지면 **양보한다** (2026-11-06 사용자:
+#    *"내가 마우스를 움직일 때는 너가 멈춰야지 않겠냐"*) ────────────────
+#    ⚠ 판정은 **`precise_click.human_idle_seconds()`** 뿐이다 (2026-10-20 결론).
+#       `_system_idle_seconds()` 는 **우리 클릭도 세어** 영영 멈추고,
+#       `precise_click.idle_seconds()` 는 **원격에서 사람 입력까지 걸러** 안 멈춘다.
+SUHO_QUIET       = 1.2               # 사람이 만진 뒤 이만큼 조용해지면 이어서 한다
+SUHO_QUIET_MAX   = 6.0               # 계속 만지면 **그 판을 끝낸다** (컴퓨터를 돌려준다)
+SUHO_RERUN_COOL  = 15.0              # 한 판 끝난 뒤 다시 걸리기까지(초)
+#    🚫 **1초로 되돌리지 말 것** — 2026-11-06 실측, 끝나자마자 또 시작해
+#       1초마다 무한 반복하며 사용자 화면을 눌러댔다. 사용자가 손댈 틈이 없었다.
 # ── 네 단계 (2026-11-05 사용자와 화면을 보며 알아냈다) ────────────────
 #    ① 카드 랜덤 클릭 → ② [확인] 버튼 → ③ 카드를 **쭉** 아래로 끌기
 #    → ④ 결과 화면을 아무 곳이나 클릭해 닫기 → ①로
@@ -11039,7 +11049,9 @@ class App(tk.Tk):
                 nap_clear()
                 self._minimize_claude()
                 self._send_to_back()
-                self._stay_back(60 + times * 6)
+                #    🚫 **길게 잡지 말 것** — `60 + 60*6 = 420초`(7분)였다.
+                #       그동안 런처가 계속 뒤로 밀려 사용자가 아무것도 못 했다.
+                self._stay_back(SUHO_BACK_SEC)
                 # 🙈 내 창을 **숨긴다** — 수호성 창은 topmost 라 확대한 클라 위에
                 #    남아 카드 5·6번 자리를 덮는다. 맨 뒤로는 안 되고 숨겨야 한다.
                 try:
@@ -11051,6 +11063,9 @@ class App(tk.Tk):
                 for n in range(1, times + 1):
                     if self._suho_stop:
                         click_log(f"[수호성] ■ 멈춤 — {done}회 했다")
+                        break
+                    # ✋ **사람이 마우스를 만지면 양보한다** (누르기 전마다)
+                    if not self._suho_wait_human():
                         break
                     # ── ⚡ 한 회차에 **한 번만 찍는다** (전에는 두 번 찍어 느렸다) ──
                     rect = self._suho_rect()
@@ -11162,26 +11177,23 @@ class App(tk.Tk):
                         continue
                     cards = self._suho_cards(rect)      # 🃏 지금 몇 장인가
                     if not cards:
-                        # 수호성 화면인데 ①②③④ 어디도 아니다 — 결과 화면이
-                        # 더 있을 수 있으니 **닫아 본다** (연속 SUHO_BLIND_MAX 번까지).
-                        # 🚦 여기서만 '수호성 화면이 맞나' 를 확인한다
-                        if not self._suho_tpl_seen(
-                                img, suho_screen_list() + suho_close_list()
-                                + suho_done_list() + suho_info_list()):
-                            click_log(f"[수호성] {n}회째 — **수호성 화면이 아니다** → "
-                                      f"아무것도 누르지 않고 끝낸다")
-                            break
-                        blind += 1
-                        if blind > SUHO_BLIND_MAX:
-                            click_log(f"[수호성] {n}회째 — 카드도 버튼도 안 보이고 "
-                                      f"{SUHO_BLIND_MAX}번 닫아봐도 그대로 → 끝낸다")
-                            break
-                        cxy = (L + int(rect[3] * 0.15), T + int(rect[4] * 0.25))
-                        pyautogui.click(*cxy)
-                        click_log(f"[수호성] {n}/{times}회 ④ 결과로 보고 닫았다 "
-                                  f"{cxy} ({blind}/{SUHO_BLIND_MAX})")
-                        self._suho_nap(*SUHO_CLICK_WAIT)
-                        continue
+                        # 🚫 **카드도 버튼도 없으면 아무것도 누르지 않고 끝낸다**
+                        #    (2026-11-06 사용자: *"수호성이 될 때 내가 아무것도
+                        #    못하겠어"* · *"창을 열어주면 … 내가 할 수 있는 게 없어"*)
+                        #
+                        #    🚨 예전에는 '결과 화면이 더 있을 수 있으니' **화면을
+                        #       아무 데나 3번 눌러봤다**(blind click). 그런데 수호성
+                        #       **트리 판**에도 제목이 있어 그 판에서 시작해버리고,
+                        #       카드가 없으니 사용자 화면을 세 번 누른 뒤 끝내고
+                        #       **1초 뒤 또 시작** — 끝없이 반복했다 (실측 06:45:31~48).
+                        #       이 저장소 절대 규칙(「그림을 못 보면 누르지 않는다」)
+                        #       정면 위반이었다. 🚫 블라인드 클릭을 다시 넣지 말 것.
+                        #
+                        #    결과 화면은 `suho_close`(실패)·`suho_ok`(성공) 그림을
+                        #    **실제로 봤을 때만** 닫는다 — 그 길은 위에 따로 있다.
+                        click_log(f"[수호성] {n}회째 — 카드도 버튼도 결과창도 없다 → "
+                                  f"**아무것도 누르지 않고 끝낸다** ({done}회 뽑았다)")
+                        break
                     blind = 0
                     i = random.randrange(len(cards))    # 전부 랜덤 (사용자 지시)
                     okc, x, y = self._suho_pick(cards[i])
@@ -11239,6 +11251,41 @@ class App(tk.Tk):
                     pass
 
         threading.Thread(target=_go, daemon=True).start()
+
+    def _suho_wait_human(self):
+        """✋ 사람이 마우스를 만지는 중이면 **양보한다** → 이어서 해도 되나.
+
+        손을 떼면 `SUHO_QUIET` 뒤 **즉시** 이어서 하므로 평소엔 안 느려진다.
+        `SUHO_QUIET_MAX` 넘게 계속 만지면 **False** — 그 판을 끝내고 컴퓨터를 돌려준다.
+        🚫 `_system_idle_seconds()`·`precise_click.idle_seconds()` 를 쓰지 말 것."""
+        try:
+            import precise_click as _pc
+            t0 = time.time()
+            said = False
+            while True:
+                if getattr(self, "_suho_stop", False):
+                    return False
+                idle = _pc.human_idle_seconds()
+                if idle >= SUHO_QUIET:
+                    if said:
+                        click_log("[수호성] ✋ 손을 떼서 이어서 한다")
+                    return True
+                if time.time() - t0 >= SUHO_QUIET_MAX:
+                    click_log(f"[수호성] ✋ **사람이 계속 쓰는 중** "
+                              f"({SUHO_QUIET_MAX:.0f}초) → 이 판을 끝낸다")
+                    return False
+                if not said:
+                    said = True
+                    click_log("[수호성] ✋ 사람이 마우스를 만져 **멈춘다** "
+                              "— 손을 떼면 바로 이어서 한다")
+                    try:
+                        self.after(0, lambda: self.status.set(
+                            "🌙 수호성 ✋ 멈춤 — 손 떼면 이어서"))
+                    except Exception:
+                        pass
+                nap(0.12)
+        except Exception:
+            return True          # 감시를 못 켜는 환경이면 막지 않는다
 
     def _suho_stop_now(self):
         self._suho_stop = True
@@ -11332,14 +11379,35 @@ class App(tk.Tk):
                 return
             if not (suho_screen_list() or suho_info_list()):
                 return
-            # ⚡ 진입창(수호성 정보)과 제목만 본다 — 결과 그림까지 보면 느리다
+            # ✋ 사람이 마우스를 만지는 중이면 **아예 시작하지 않는다**
+            #    (시작했다가 바로 양보하면 화면만 한 번 찍고 끝나 낭비다)
+            try:
+                import precise_click as _pc
+                if _pc.human_idle_seconds() < SUHO_QUIET:
+                    return
+            except Exception:
+                pass
+            # ⚡ 진입창(수호성 정보)을 먼저 본다 — 결과 그림까지 보면 느리다
             rect = self._suho_rect()
             if not rect:
                 self._suho_latch = None
                 return
             img = self._suho_grab(rect)
-            ok = (img is not None and self._suho_tpl_seen(
-                img, suho_info_list() + suho_screen_list()))
+            if img is None:
+                self._suho_latch = None
+                return
+            # 🚫 **제목(수호성)만 보고 시작하지 않는다** (2026-11-06 사용자 신고).
+            #    수호성 **트리 판**에도 제목이 있어서, 사용자가 그 판을 보고만
+            #    있어도 시작해버렸다. 카드가 없으니 바로 끝나고 **1초 뒤 또 시작** —
+            #    끝없이 반복하며 화면을 눌러댔다 (실측 06:45:31~48, 4초마다 한 판).
+            #    👉 **할 일이 실제로 있을 때만** 시작한다:
+            #       ⓪ 진입창(수호성 정보 + [활성화])  또는  ① 카드가 깔려 있을 때.
+            ok = self._suho_tpl_seen(img, suho_info_list())
+            why = "진입창"
+            if not ok and self._suho_tpl_seen(img, suho_screen_list()):
+                # 제목은 보인다 — 카드가 실제로 깔렸는지만 확인한다
+                if self._suho_cards(rect):
+                    ok, why = True, "카드"
             v = 1.0 if ok else 0.0
             if not ok or not rect:
                 self._suho_latch = None
@@ -11348,7 +11416,8 @@ class App(tk.Tk):
             if getattr(self, "_suho_latch", None) == key:
                 return
             self._suho_latch = key
-            click_log(f"[수호성] 👀 수호성 화면을 봤다 (일치도 {v:.2f}) → **바로 돌린다**")
+            click_log(f"[수호성] 👀 {why} 을(를) 봤다 → **바로 돌린다** "
+                      f"(수호성 판만 떠 있을 때는 시작하지 않는다)")
             self._run_suho(src="화면 보고 자동")
         except Exception:
             pass
@@ -36852,6 +36921,8 @@ class App(tk.Tk):
         self._coupon_stop    = True
         self._market_stop    = True
         self._dragon_stop    = True
+        self._suho_stop      = True   # 🌙 수호성 — [■ 멈춤] 으로 즉시 멈춘다
+        self._suho_latch     = None   #    멈춘 뒤 그 화면에서 또 안 걸리게
         self._knight_stop    = True
         self._eventshop_stop = True
         self._fish_stop      = True
