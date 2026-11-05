@@ -815,6 +815,23 @@ SUHO_DONE        = "suho_ok"         # 성공 표시 — **'성공!' 글자만**
 #    🚫 `suho_done_*.png`(통째) 로 되돌리지 말 것.
 #    아무 단계도 아닌데 수호성 화면이면 **결과 화면으로 보고 닫는다** —
 #    결과 화면 종류가 더 있을 수 있다. 다만 연속 이만큼까지만 (막힘 방지).
+# ── 💎 수호석이 모자라면 **ESC 로 나간다** (2026-11-06 사용자:
+#    *"그냥 esc 를 누르고 나가면 된다, 저 상태에서 esc 세 번 눌러봐"*) ──────
+#    🚫 그냥 멈추기만 하면 **수호성 화면이 열린 채로 남는다.**
+#    ⚠ ESC 는 **그 창을 앞으로 올린 뒤** 보내야 한다 — 안 그러면 엉뚱한 창이 받는다
+#      (실측 2026-11-06: `SetForegroundWindow` 가 막혀 맨앞창=False 인 채로
+#       ESC 를 보냈더니 그 창이 아니라 다른 창으로 갔다).
+# ── 🖱 **커서를 사용자 자리로 돌려놓는다** (2026-11-06 사용자:
+#    *"마우스 움직이는 거랑 좌표 클릭 … 분리 좀 해달라니까, 내가 마우스
+#      움직일 때 자꾸 따라온다"*) ────────────────────────────────────────
+#    ⚠ **완전한 분리는 불가능하다.** 카드를 끄는 것은 진짜 커서가 있어야 하고,
+#      창에 메시지만 보내는 '가상 클릭'은 2026-08-21 에 **씹혀서 삭제**했다.
+#    👉 할 수 있는 최선 두 가지:
+#       ① ✋ 사람이 만지면 **양보**한다 (`_suho_wait_human`)
+#       ② 한 판이 끝나면 **커서를 원래 자리로 되돌린다** (아래)
+SUHO_CURSOR_BACK = True              # 끝나면 커서를 제자리로
+SUHO_ESC_TIMES   = 3                 # 수호성 화면을 빠져나오는 ESC 횟수
+SUHO_ESC_GAP     = (0.18, 0.32)      # ESC 사이 간격
 SUHO_WIN_WAIT    = (0.6, 1.0)        # 🎉 성공 화면이 다 그려지기를 기다린다
 #    🚫 줄이지 말 것 — 뜨자마자 [나가기] 를 누르면 **안 먹는다** (2026-11-06 실측).
 SUHO_EXIT_TRIES  = 3                 # [나가기] 를 눌러보는 횟수 (닫히면 바로 멈춘다)
@@ -11111,6 +11128,11 @@ class App(tk.Tk):
         def _go():
             self._suho_busy = True
             self._suho_stop = False
+            # 🖱 시작할 때 커서 자리를 기억해 **끝나면 제자리로** 돌려놓는다
+            try:
+                _cur0 = pyautogui.position()
+            except Exception:
+                _cur0 = None
             # 🔒 **한 판 도는 동안 창을 고정한다** (2026-11-05 사고).
             #    실측 22:59 — `시작 — 주이` 로 시작했는데 2회째 [활성화] 를
             #    **(1511,1331) = 한 줄 아래 '도로' 클라**에 눌렀다. 작은 창 16개가
@@ -11181,9 +11203,11 @@ class App(tk.Tk):
                         _sh, _np_ = self._suho_short(img)
                         if _sh:
                             click_log(f"[수호성] 💎 **수호석이 모자랍니다** "
-                                      f"(빨간 숫자 {_np_}픽셀) → 누르지 않고 멈춘다")
+                                      f"(빨간 숫자 {_np_}픽셀) → 누르지 않고 "
+                                      f"ESC 로 나간다")
+                            self._suho_esc_out(rect, "수호석 부족")
                             self.after(0, lambda: self.status.set(
-                                "🌙 수호성 💎 수호석 부족 — 멈춤"))
+                                "🌙 수호성 💎 수호석 부족 — ESC 로 나감"))
                             break
                         bx, by = L + btn[0], T + btn[1]
                         pyautogui.click(bx, by)
@@ -11321,9 +11345,11 @@ class App(tk.Tk):
                             _sh, _np_ = self._suho_short(_im2)
                             if _sh:
                                 click_log(f"[수호성] 💎 **수호석이 모자랍니다** "
-                                          f"(빨간 숫자 {_np_}픽셀) → 누르지 않고 멈춘다")
+                                          f"(빨간 숫자 {_np_}픽셀) → 누르지 않고 "
+                                          f"ESC 로 나간다")
+                                self._suho_esc_out(rect, "수호석 부족")
                                 self.after(0, lambda: self.status.set(
-                                    "🌙 수호성 💎 수호석 부족 — 멈춤"))
+                                    "🌙 수호성 💎 수호석 부족 — ESC 로 나감"))
                                 break
                         pyautogui.click(L + bt[0], T + bt[1])
                         click_log(f"[수호성] {n}/{times}회 ② **[확인]** 눌렀다 "
@@ -11346,6 +11372,7 @@ class App(tk.Tk):
                 except Exception:
                     pass
             finally:
+                self._suho_cursor_back(_cur0)   # 🖱 커서를 사용자 자리로
                 # 🔁 **다음 창으로 넘어간다** — 여러 개 띄워뒀으면 순서대로 (사용자 지시)
                 try:
                     if not getattr(self, "_suho_stop", False):
@@ -11429,6 +11456,47 @@ class App(tk.Tk):
         except Exception as e:
             click_log(f"[수호성] ⚠ 다음 창 찾기 오류 {e}")
         return None
+
+    def _suho_cursor_back(self, pos):
+        """🖱 커서를 **사용자가 두었던 자리**로 되돌린다 (움직였을 때만)."""
+        if not SUHO_CURSOR_BACK or not pos:
+            return
+        try:
+            now = pyautogui.position()
+            if abs(now[0] - pos[0]) < 3 and abs(now[1] - pos[1]) < 3:
+                return                      # 안 움직였으면 건드리지 않는다
+            pyautogui.moveTo(pos[0], pos[1])
+        except Exception:
+            pass
+
+    def _suho_esc_out(self, rect, why=""):
+        """⎋ **ESC 를 눌러 수호성 화면에서 나간다** (수호석이 모자랄 때).
+
+        ⚠ 반드시 **그 창을 앞으로 올린 뒤** 보낸다 — 키는 맨 앞 창이 받는다."""
+        try:
+            ok = self._suho_focus(rect)
+            if not ok:
+                click_log(f"[수호성] ⚠ 창을 앞으로 못 올려 ESC 를 보내지 않았다 ({why})")
+                return False
+            # 🚦 **닫히면 바로 멈춘다** — 다 닫힌 뒤 ESC 를 더 누르면
+            #    게임 **메뉴판이 열린다** (2026-11-06 실측: 1번 확인창 ·
+            #    2번 수호성 화면 · 3번째는 메뉴만 열렸다).
+            gone = False
+            used = 0
+            for i in range(SUHO_ESC_TIMES):
+                pyautogui.press("esc")
+                used = i + 1
+                self._suho_nap(*SUHO_ESC_GAP)
+                img = self._suho_grab(rect)
+                if img is None or not self._suho_here(img):
+                    gone = True
+                    break
+            click_log(f"[수호성] ⎋ ESC {used}번 눌러 나왔다 ({why}) — "
+                      f"{'수호성 화면이 닫혔다 ✔' if gone else '⚠ 아직 화면이 남아 있다'}")
+            return gone
+        except Exception as e:
+            click_log(f"[수호성] ⚠ ESC 오류 {e}")
+            return False
 
     def _suho_wait_human(self):
         """✋ 사람이 마우스를 만지는 중이면 **양보한다** → 이어서 해도 되나.
