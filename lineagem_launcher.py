@@ -739,6 +739,39 @@ AWAKEN_SEE_WAIT  = (0.7, 1.1, 1.6)   # 클릭 뒤 이 시각들(초)에 한 번�
 #    ⚠ `AWAKEN_MATCH` 는 건드리지 말 것 — 그건 **버튼을 누를 때** 쓰는 기준이고,
 #      글자가 반쯤 켜진 상태도 잡아야 해서 낮게 두는 것이 맞다.
 AWAKEN_SEEN_MATCH = 0.90
+# ── 🌙 수호성 찾기 (2026-11-05 사용자 요청) ─────────────────────────────
+#    사용자: *"이 화면이 뜨면은 너가 **무조건 해줘**. **각성이랑 달라** —
+#            각성은 시작을 해야 하고 **이건 아니야**"* ·
+#            *"**랜덤으로 클릭해서 내려주면** 된다. **전부 랜덤**이야"*
+#    동작: 제일 큰 리니지M 창이 '수호성 찾기' 화면이면 →
+#          카드 6장 중 **무작위로 하나**를 누른 채 **아래로 끌어내린다** → 반복.
+#    ⚠ 이것은 '실행은 사용자가 시킬 때만'(2026-08-10)의
+#      **사용자가 직접 요청한 예외**다 (물약감시·마을감시·유휴복구와 같은 성격).
+#      🚫 클로드는 다른 작업에 같은 자동 실행을 붙이지 말 것.
+SUHO_SCREEN      = "suho_screen"     # '수호성 찾기' 글자 그림
+SUHO_BASE_W      = 546               # 그림·좌표를 뜬 창 크기
+SUHO_BASE_H      = 307
+#    📏 실측 2026-11-05 (16클라) — 진짜 수호성 화면 **1.000** · 잡음 **0.289~0.320**
+#       → 여유 0.68. 0.85 면 양쪽으로 넉넉하다.
+#       🚫 0.50 밑으로 내리지 말 것 (잡음이 0.32 다). 자동 실행이라 더 조심한다.
+SUHO_SEEN_MATCH  = 0.85
+#    카드 6장 가운데 — **창 크기 대비 비율**이라 창을 키워도 그대로 맞는다
+#    (실측 546x307: x 88·160·233·307·377·450 · y 150)
+SUHO_CARDS       = (0.1612, 0.2930, 0.4267, 0.5623, 0.6905, 0.8242)
+SUHO_CARD_Y      = 0.4886
+SUHO_DRAG_DY     = 0.28              # 아래로 끄는 거리 (창 높이 대비) — 창에서 바꿀 수 있다
+SUHO_DRAG_STEPS  = 8                 # 사람처럼 조금씩 민다
+SUHO_TITLE_BOX   = (0.4267, 0.0261, 0.5604, 0.0847)   # 제목 글자 자리(비율) — 다시 등록용
+SUHO_N           = 30                # 기본 횟수 — 화면이 사라지면 그 전에 알아서 끝난다
+SUHO_SEE         = 25                # 화면이 (다시) 뜰 때까지 몇 번 보나
+SUHO_SEE_GAP     = (0.18, 0.32)      # 그 사이 간격
+SUHO_GAP         = (0.45, 0.85)      # 끌고 난 뒤
+SUHO_ROUND       = (0.6, 1.2)        # 회차 사이
+SUHO_JITTER      = (0.85, 1.15)      # 간격을 매번 ±15% 흔든다 (사람처럼)
+SUHO_PAUSE_P     = 0.12              # 이 확률로
+SUHO_PAUSE       = (0.15, 0.45)      #   한 박자 더 쉰다
+SUHO_SEE_COOL    = 2.0               # '수호성 화면인가' 를 다시 보기까지
+SUHO_SEE_WAIT    = (0.7, 1.1, 1.6)   # 클릭 뒤 이 시각들에 한 번씩 본다
 # 🚨 **머무는 동안은 기준이 따로다** (2026-10-21 사고 — 각성 도중에 창이 사라졌다)
 #   사용자: *"왜 여기에서 사라지냐고. 각성하는 도중이잖아!!"*
 #   실측: **각성 연출 중에 탭줄 점수가 0.82~0.86 으로 떨어진다** (평소 0.999).
@@ -806,6 +839,11 @@ def awaken_screen_img_path():
 
 def awaken_screen_area_path():
     return os.path.join(IMG_DIR, f"{AWAKEN_SCREEN}_area.json")
+
+
+def suho_screen_img_path():
+    """🌙 '수호성 찾기' 글자 그림 — 공용(저장소) 것 하나만 쓴다."""
+    return os.path.join(IMG_DIR, f"{SUHO_SCREEN}.png")
 
 
 def awaken_screen_area():
@@ -1919,7 +1957,15 @@ GRID_SLACK = 2          # 이 픽셀 안이면 맞은 것으로 본다
 GRID_FIXED = {
     (2560, 1440): {"x0": 0, "y0": 40, "gx": 602, "gy": 347, "w": 546, "h": 307},
 }
-GRID_AUTO_ON   = True        # coords.json 의 `grid_auto` 로 끌 수 있다
+# 🚫 **자동 맞추기는 껐다** (2026-11-05 사용자 신고:
+#    *"재배치 아직 안 꺼진 거 같은데 **스스로 돌아버리는데**? 확대시켰는데 다시 축소시킴"*)
+#    실측 — 11-05 20:18:43 에 수호성을 하려고 키워둔 `dook` 을
+#    2504x1352 → 546x307 로 되돌렸다 (`-1958x-1045`).
+#    창을 크게 띄워 쓰는 작업(각성·수호성·카드교체)과 **정면으로 부딪힌다.**
+#    🚫 클로드는 이것을 사용자 요청 없이 True 로 되돌리지 말 것.
+#       창이 틀어졌으면 **[🪟 재배치] → [📐 창 전체복원]** 을 사용자가 누른다.
+#       (그 버튼과 [📍 위치 전체저장]·`_grid_fix` 는 그대로 살아 있다)
+GRID_AUTO_ON   = False       # coords.json 의 `grid_auto: true` 로 켤 수 있다
 GRID_AUTO_MS   = 180000      # 3분마다 확인 (창 목록만 읽는다 — 가볍다)
 GRID_AUTO_IDLE = 3.0         # 사람이 이만큼 안 만졌을 때만
 #    📏 20초로 뒀더니 **사용자가 컴퓨터를 쓰는 동안 영영 안 맞춰졌다**
@@ -8313,6 +8359,12 @@ class App(tk.Tk):
                   bg="#6c3483", fg="white", activebackground="#512e5f",
                   width=2, height=2,
                   command=lambda: self._run_awaken(by_user=True, src="메인런처 ▶")).pack(side="left", padx=(2, 0))
+        # 🌙 수호성 — **각성 옆에** (2026-11-05 사용자 지시: "각성 옆에 배치해놔").
+        #    설정·진단 창일 뿐이다 — 실행은 화면이 뜨면 **자동으로** 돈다.
+        tk.Button(_aw, text="🌙 수호" + chr(10) + "성", font=("맑은 고딕", 8, "bold"),
+                  bg="#5b2c6f", fg="white", activebackground="#4a235a",
+                  width=4, height=2,
+                  command=self._open_suho_win).pack(side="left", padx=(4, 0))
         tk.Button(btn_row, text="🔑 계정\n관리",
             font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
             activebackground="#0e6655", width=7, height=2,
@@ -10289,6 +10341,367 @@ class App(tk.Tk):
         self.status.set(f"🎬 녹화 배포 — 클라 {len(slots)}개 확인됨")
 
     # ── ✨ 각성강화!! — 크게 띄운 창 하나에만 돌린다 ──────────────────────
+    # ── 🌙 수호성 찾기 — 화면이 뜨면 **무조건 바로** 돈다 ────────────────
+    def _suho_rect(self):
+        """지금 화면에서 **제일 큰 리니지M 창** — 각성과 같은 길을 쓴다.
+        (사용자: *"내가 띄운 그 클라 하나만"*)"""
+        return self._awaken_win_rect()
+
+    def _suho_seen(self, rect=None, thr=None):
+        """그 창이 **수호성 찾기 화면인가** → (맞나, 점수, rect).
+
+        창을 **직접 캡처**(PrintWindow)하므로 런처가 앞에 있어도 정확하다.
+        그림은 546 창에서 떴으므로 **지금 창 가로 비율로 늘려** 본다.
+        ⚠ 키우는 쪽(k>1)은 흐려져 **놓치는** 쪽이라 안전하다 — 오탐은 안 난다."""
+        try:
+            import cv2, numpy as np
+            if rect is None:
+                rect = self._suho_rect()
+            if not rect:
+                return False, 0.0, None
+            p = suho_screen_img_path()
+            if not os.path.exists(p):
+                return False, -1.0, rect
+            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            big = grab_window((rect[1] + 40, rect[2] + 40))
+            if t is None or big is None:
+                return False, 0.0, rect
+            k = big.shape[1] / float(SUHO_BASE_W)
+            if abs(k - 1.0) > 0.02:
+                t = cv2.resize(t, None, fx=k, fy=k,
+                               interpolation=cv2.INTER_AREA if k < 1 else cv2.INTER_CUBIC)
+            if t.shape[0] > big.shape[0] or t.shape[1] > big.shape[1]:
+                return False, 0.0, rect
+            v = float(cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED).max())
+            return v >= (SUHO_SEEN_MATCH if thr is None else thr), v, rect
+        except Exception:
+            return False, 0.0, None
+
+    def _suho_card_xy(self, rect, i):
+        """카드 i(0~5) 의 **화면 좌표** — 창 크기 대비 비율로 계산한다."""
+        L, T, W, H = rect[1], rect[2], rect[3], rect[4]
+        return (int(L + SUHO_CARDS[i] * W), int(T + SUHO_CARD_Y * H))
+
+    def _suho_dy(self):
+        """아래로 끄는 거리 (창 높이 대비 비율) — 창에서 바꾼 값이 있으면 그것."""
+        try:
+            return max(0.05, min(0.45, float(self.cfg.get("suho_dy", SUHO_DRAG_DY))))
+        except Exception:
+            return SUHO_DRAG_DY
+
+    def _suho_nap(self, lo, hi):
+        """사람처럼 — 매번 ±15% 흔들고, 가끔 한 박자 더 쉰다."""
+        nap(random.uniform(lo, hi) * random.uniform(*SUHO_JITTER))
+        if random.random() < SUHO_PAUSE_P:
+            nap(random.uniform(*SUHO_PAUSE))
+
+    def _suho_drag(self, rect, i):
+        """🖐 카드 i 를 **누른 채 아래로 끌어내린다** (사용자가 알려준 동작).
+
+        `_mondex_drag` 와 같은 틀이다 — 검증된 것을 그대로 쓴다.
+        🚫 그냥 클릭으로 바꾸지 말 것 — 카드는 **끌어야** 뽑힌다."""
+        try:
+            x, y0 = self._suho_card_xy(rect, i)
+            dy = int(self._suho_dy() * rect[4])
+            pyautogui.moveTo(x, y0)
+            nap(random.uniform(0.15, 0.30))
+            pyautogui.mouseDown(x, y0)
+            nap(random.uniform(0.08, 0.16))
+            for st in range(1, SUHO_DRAG_STEPS + 1):
+                pyautogui.moveTo(x, y0 + int(dy * st / SUHO_DRAG_STEPS))
+                nap(random.uniform(0.025, 0.05))
+            pyautogui.mouseUp(x, y0 + dy)
+            return True, x, y0, dy
+        except Exception as e:
+            click_log(f"[수호성] ⚠ 끌기 오류 {e}")
+            return False, 0, 0, 0
+
+    def _suho_wait_screen(self, tries=None):
+        """수호성 화면이 **뜰 때까지** 본다 → (떴나, 점수, rect).
+
+        ⚠ 회차마다 `rect` 를 **다시 구한다** — 사용자가 다른 창을 크게 띄우면
+          옛 좌표로 계속 누르게 된다 (2026-10-23 각성에서 겪은 사고)."""
+        n = SUHO_SEE if tries is None else tries
+        best, rect = 0.0, None
+        for _ in range(max(1, n)):
+            if getattr(self, "_suho_stop", False):
+                break
+            ok, v, r = self._suho_seen()
+            if r:
+                rect = r
+            best = max(best, v)
+            if ok:
+                return True, v, r
+            nap(random.uniform(*SUHO_SEE_GAP))
+        return False, best, rect
+
+    def _run_suho(self, times=None, src=""):
+        """🌙 수호성 — 화면이 보이는 동안 **카드를 무작위로 골라 끌어내린다**.
+
+        화면이 안 보이면 **아무것도 누르지 않고** 끝낸다."""
+        if getattr(self, "_suho_busy", False):
+            return
+        if not os.path.exists(suho_screen_img_path()):
+            click_log("[수호성] ⚠ 그림이 없다 (suho_screen.png) — "
+                      "창의 [🖼 이 화면 다시 등록] 을 눌러주세요")
+            try:
+                self.status.set("🌙 '수호성 찾기' 그림이 없습니다 — 다시 등록해주세요")
+            except Exception:
+                pass
+            return
+        if times is None:
+            try:
+                times = int(self.cfg.get("suho_times", SUHO_N))
+            except Exception:
+                times = SUHO_N
+        times = max(1, min(999, int(times)))
+
+        def _go():
+            self._suho_busy = True
+            self._suho_stop = False
+            done = 0
+            try:
+                nap_clear()
+                self._minimize_claude()
+                self._send_to_back()
+                self._stay_back(60 + times * 6)
+                for n in range(1, times + 1):
+                    if self._suho_stop:
+                        click_log(f"[수호성] ■ 멈춤 — {done}회 했다")
+                        break
+                    ok, v, rect = self._suho_wait_screen()
+                    if not ok or not rect:
+                        click_log(f"[수호성] {'시작 못 함' if n == 1 else str(n)+'회째'} — "
+                                  f"수호성 화면이 안 보인다 "
+                                  f"(최고 {v:.2f} · 기준 {SUHO_SEEN_MATCH:.2f}) → "
+                                  f"아무것도 누르지 않고 끝낸다")
+                        break
+                    if n == 1:
+                        click_log(f"[수호성] 시작 — {rect[5]} ({rect[3]}x{rect[4]}) · "
+                                  f"최대 {times}회 · 끌기 {self._suho_dy()*100:.0f}% · {src}")
+                    i = random.randrange(len(SUHO_CARDS))   # 전부 랜덤 (사용자 지시)
+                    okd, x, y0, dy = self._suho_drag(rect, i)
+                    if not okd:
+                        break
+                    done = n
+                    click_log(f"[수호성] {n}/{times}회 — {i+1}번 카드를 "
+                              f"({x},{y0}) 에서 {dy}px 아래로 끌었다 (화면 {v:.2f})")
+                    self.after(0, lambda n=n, i=i: self.status.set(
+                        f"🌙 수호성 {n}회 — {i+1}번 카드"))
+                    self._suho_nap(*SUHO_GAP)
+                    self._suho_nap(*SUHO_ROUND)
+                if done:
+                    click_log(f"[수호성] 끝 — {done}회 뽑았다")
+                    self.after(0, lambda: self.status.set(f"🌙 수호성 끝 — {done}회"))
+            except Exception as e:
+                click_log(f"[수호성] ⚠ 오류 {e}")
+                try:
+                    self.after(0, lambda e=e: self.status.set(f"🌙 오류: {e}"))
+                except Exception:
+                    pass
+            finally:
+                self._suho_busy = False
+                self._suho_latch = None      # 화면이 다시 뜨면 또 돈다
+                try:
+                    self._stay_back_off()
+                except Exception:
+                    pass
+
+        threading.Thread(target=_go, daemon=True).start()
+
+    def _suho_stop_now(self):
+        self._suho_stop = True
+        try:
+            self.status.set("🌙 멈추는 중...")
+        except Exception:
+            pass
+
+    def _suho_regrab(self):
+        """🖼 지금 창에서 '수호성 찾기' 글자를 **자동으로 다시 잘라** 등록한다.
+
+        드래그가 필요 없다 — 제목은 늘 같은 비율 자리에 있다.
+        ⚠ 무늬 없는(단색) 자리는 **저장을 거부한다** — 단색은 어디서나 1.00 이
+          나와 판정을 통째로 망가뜨린다 (2026-09-16 층그림 사고)."""
+        try:
+            import cv2, numpy as np
+            rect = self._suho_rect()
+            if not rect:
+                self.status.set("🌙 리니지M 창을 못 찾았습니다")
+                return
+            big = grab_window((rect[1] + 40, rect[2] + 40))
+            if big is None:
+                self.status.set("🌙 창을 못 찍었습니다")
+                return
+            H, W = big.shape[0], big.shape[1]
+            a = SUHO_TITLE_BOX
+            cut = big[int(a[1]*H):int(a[3]*H), int(a[0]*W):int(a[2]*W)]
+            if cut.size == 0:
+                self.status.set("🌙 자를 자리가 비었습니다")
+                return
+            sd = float(cut.std())
+            if sd < 3.0:
+                self.status.set(f"🌙 ⚠ 무늬가 없는 자리입니다 (무늬 {sd:.1f}) — "
+                                f"수호성 화면을 띄운 채 눌러주세요 (저장 안 함)")
+                click_log(f"[수호성] ⚠ 다시 등록 거부 — 무늬 {sd:.1f} (단색)")
+                return
+            k = SUHO_BASE_W / float(W)       # 546 기준으로 줄여 저장한다
+            if abs(k - 1.0) > 0.02:
+                cut = cv2.resize(cut, None, fx=k, fy=k,
+                                 interpolation=cv2.INTER_AREA if k < 1 else cv2.INTER_CUBIC)
+            os.makedirs(IMG_DIR, exist_ok=True)
+            cv2.imencode(".png", cut)[1].tofile(suho_screen_img_path())
+            self.status.set(f"🌙 다시 등록했습니다 — {cut.shape[1]}x{cut.shape[0]} "
+                            f"· 무늬 {sd:.1f} (창 {W}x{H})")
+            click_log(f"[수호성] 🖼 그림 다시 등록 — {cut.shape[1]}x{cut.shape[0]} "
+                      f"· 무늬 {sd:.1f} · 창 {W}x{H}")
+        except Exception as e:
+            self.status.set(f"🌙 다시 등록 오류: {e}")
+
+    def _suho_probe(self):
+        """🔍 **지금 수호성 화면인가** — 아무것도 누르지 않고 글로 보여준다."""
+        def _w():
+            try:
+                rect = self._suho_rect()
+                if not rect:
+                    msg = "리니지M 창을 못 찾았습니다"
+                else:
+                    ok, v, _ = self._suho_seen(rect)
+                    have = os.path.exists(suho_screen_img_path())
+                    cx = [self._suho_card_xy(rect, i) for i in range(len(SUHO_CARDS))]
+                    msg = (f"창 {rect[5]} {rect[3]}x{rect[4]} · "
+                           f"그림 {'있음' if have else '없음'} · "
+                           f"일치도 {v:.3f} (기준 {SUHO_SEEN_MATCH:.2f}) → "
+                           f"{'✅ 수호성 화면' if ok else '❌ 아니다'} · "
+                           f"카드1 {cx[0]} ~ 카드6 {cx[-1]} · "
+                           f"끌기 {int(self._suho_dy()*rect[4])}px")
+                click_log(f"[수호성진단] {msg}")
+                self.after(0, lambda: self.status.set("🌙 " + msg))
+            except Exception as e:
+                self.after(0, lambda e=e: self.status.set(f"🌙 진단 오류: {e}"))
+        threading.Thread(target=_w, daemon=True).start()
+
+    def _suho_auto(self, xy):
+        """사람이 클라를 클릭했을 때 — **수호성 화면이면 바로 돌린다.**
+
+        ⚠ 각성과 **다르다**: 각성은 창만 띄우고 사용자가 ▶ 를 누르지만,
+          수호성은 사용자 지시로 **무조건 바로 실행**한다
+          (*"이 화면이 뜨면은 너가 무조건 해줘. 각성이랑 달라"*).
+        걸쇠(`_suho_latch`)로 **같은 화면에서 두 번 걸리지 않게** 한다 —
+        한 번 돌면 끝날 때 풀리고, 화면이 다시 뜨면 또 돈다."""
+        try:
+            if not self.cfg.get("suho_auto_on", True):
+                return
+            if getattr(self, "_suho_busy", False) or self._is_busy():
+                return
+            if time.time() - getattr(self, "_suho_see_at", 0.0) < SUHO_SEE_COOL:
+                return
+            self._suho_see_at = time.time()
+            if not os.path.exists(suho_screen_img_path()):
+                return
+            ok, v, rect = False, 0.0, None
+            prev = 0.0
+            for w in SUHO_SEE_WAIT:      # 클릭 직후엔 화면이 덜 그려져 있다
+                nap(max(0.05, w - prev)); prev = w
+                ok, v, rect = self._suho_seen()
+                if ok:
+                    break
+            if not ok or not rect:
+                self._suho_latch = None   # 나갔다 → 다음에 뜨면 다시 돈다
+                return
+            key = (rect[0], rect[3], rect[4])
+            if getattr(self, "_suho_latch", None) == key:
+                return
+            self._suho_latch = key
+            click_log(f"[수호성] 수호성 화면 확인 (일치도 {v:.2f}) → **바로 돌린다** "
+                      f"(사용자 지시 — 각성과 달리 ▶ 를 안 눌러도 된다)")
+            self._run_suho(src="화면 보고 자동")
+        except Exception:
+            pass
+
+    def _open_suho_win(self, reuse=False):
+        """🌙 수호성 설정 창 — 횟수·끌기 거리·진단. **평소엔 안 띄운다.**
+        `reuse=True` 면 다시 만들지 않고 꺼내기만 한다."""
+        w = getattr(self, "_suho_win", None)
+        if reuse and w is not None:
+            try:
+                if w.winfo_exists():
+                    w.deiconify(); w.lift(); return
+            except Exception:
+                pass
+        try:
+            if w is not None and w.winfo_exists():
+                w.destroy()
+        except Exception:
+            pass
+        win = tk.Toplevel(self); self._suho_win = win
+        win.title("🌙 수호성 찾기"); win.geometry("470x250")
+        win.attributes("-topmost", True)
+
+        top = tk.Frame(win); top.pack(pady=(10, 4))
+        tk.Label(top, text="최대 횟수", font=("맑은 고딕", 9, "bold")).pack(side="left")
+        v_n = tk.StringVar(value=str(self.cfg.get("suho_times", SUHO_N)))
+        tk.Entry(top, textvariable=v_n, width=5,
+                 font=("맑은 고딕", 10)).pack(side="left", padx=(4, 12))
+        tk.Label(top, text="아래로 끄는 거리 (창 높이 %)",
+                 font=("맑은 고딕", 9)).pack(side="left")
+        v_d = tk.StringVar(value="%d" % int(self._suho_dy() * 100))
+        tk.Entry(top, textvariable=v_d, width=4,
+                 font=("맑은 고딕", 10)).pack(side="left", padx=(4, 0))
+
+        def _save():
+            try:
+                self.cfg["suho_times"] = max(1, min(999, int(v_n.get())))
+            except Exception:
+                pass
+            try:
+                self.cfg["suho_dy"] = max(0.05, min(0.45, int(v_d.get()) / 100.0))
+            except Exception:
+                pass
+            save_cfg(self.cfg)
+
+        row = tk.Frame(win); row.pack(pady=(8, 4))
+        tk.Button(row, text="▶ 지금 돌리기", font=("맑은 고딕", 11, "bold"),
+                  bg="#5b2c6f", fg="white", activebackground="#4a235a",
+                  width=12, height=2,
+                  command=lambda: (_save(), self._run_suho(src="수호성 창 ▶"))
+                  ).pack(side="left", padx=(0, 6))
+        tk.Button(row, text="■ 멈춤", font=("맑은 고딕", 11, "bold"),
+                  bg="#c0392b", fg="white", activebackground="#922b21",
+                  width=8, height=2,
+                  command=self._suho_stop_now).pack(side="left")
+
+        row2 = tk.Frame(win); row2.pack(pady=(6, 4))
+        tk.Button(row2, text="🔍 지금 수호성 화면인가",
+                  font=("맑은 고딕", 9), width=22,
+                  command=self._suho_probe).pack(side="left", padx=(0, 4))
+        tk.Button(row2, text="🖼 이 화면 다시 등록",
+                  font=("맑은 고딕", 9), width=18,
+                  command=self._suho_regrab).pack(side="left")
+
+        v_on = tk.StringVar()
+
+        def _sync():
+            v_on.set("🌙 수호성 화면이 뜨면 **바로 돌리기** "
+                     + ("(켬)" if self.cfg.get("suho_auto_on", True) else "(끔)"))
+
+        def _tog():
+            self.cfg["suho_auto_on"] = not self.cfg.get("suho_auto_on", True)
+            save_cfg(self.cfg); _sync()
+        _sync()
+        tk.Button(win, textvariable=v_on, font=("맑은 고딕", 9),
+                  command=_tog).pack(pady=(6, 2))
+        tk.Label(win, font=("맑은 고딕", 8),
+                 text="카드 6장 중 무작위로 하나를 눌러 아래로 끌어내립니다 "
+                      "(사용자 지시 — 전부 랜덤)").pack()
+        try:
+            apply_dark(win, self.cfg.get("dark_ui", True))
+        except Exception:
+            pass
+        try:
+            self._place_beside(win, "🌙 수호성 찾기")
+        except Exception:
+            pass
+
     def _awaken_win_rect(self):
         """지금 화면에서 **제일 큰 리니지M 창** → (hwnd, x, y, w, h, 이름).
         16슬롯을 쓰지 않는 이유: 사용자가 '확장해놨을 때만' 쓰겠다고 했다."""
@@ -21301,6 +21714,10 @@ class App(tk.Tk):
                 # 🃏 카드교체 화면이면 변신확정 창을 띄운다 (2026-10-19)
                 threading.Thread(target=self._cardfix_click_check,
                                  args=(xy,), daemon=True).start()
+                # 🌙 수호성 찾기 화면이면 **바로 돌린다** (2026-11-05 사용자 지시 —
+                #    각성과 달리 창을 띄우지 않고 무조건 실행한다)
+                threading.Thread(target=self._suho_auto, args=(xy,),
+                                 daemon=True).start()
                 if not self.cfg.get("check_area_rel"):
                     continue                      # 경고영역이 없으면 볼 수가 없다
                 si = self._slot_of_anchor(xy)
