@@ -287,6 +287,17 @@ CARD_BY_VER = {"토요일_악몽의섬": {"라스타바드": "라스타바드"}}
 # 🃏 **우선순위** — 슬롯에 따로 안 적었을 때, 이 순서로 보고 **안 잠긴 첫 카드**.
 CARD_ORDER = {"토요일_악몽의섬": ["테베라스사막", "아틀란티스", "티칼사원",
                                   "악몽의섬", "해적섬"]}
+# 🔁 **라스타바드가 잠겼을 때 바꿔 탈 짝** (2026-11-05 사용자 요청).
+#    `{던전: {라스타바드 프리셋 이름: 악몽의섬 프리셋 이름}}` — 슬롯 이름으로 찾는다.
+#    🚫 이름을 짐작하지 않는다. 여기 없는 이름이면 바꾸지 않고 그 슬롯만 중단한다.
+CARD_SWAP = {"토요일_악몽의섬": {
+    "라스타바드 기본!!":     "악몽의섬 주홍이 기본!",
+    "라스타바드 주홍이 48%": "악몽의섬 주홍이 48%",
+    "라스타바드 주홍이 82%": "악몽의섬 주홍이 82%",
+}}
+# 🔁 바꿔 끼울 칸 — 두 프리셋이 **갈리는 구간**만 (앞은 공용이라 안 건드린다).
+#    📏 실측 2026-11-05: 악몽의섬은 27·28 좌표 · 라스타바드는 27~34.
+CARD_SWAP_CELLS = (27, 34)
 
 
 def cell_mode(key, slot, j):
@@ -4420,9 +4431,19 @@ class IslandApp(tk.Tk):
                     cs[j] = [rel[0] + rects[idx][0], rel[1] + rects[idx][1]]
                 else:
                     cs[j] = [rel[0], rel[1]]
-                _b = (slot.get("recs_off") or {}).pop(str(j), None)
-                if _b and not rc.get(str(j)):
-                    rc[str(j)] = _b            # 숨겨둔 녹화 복원
+                # ⏺ **이 칸을 '좌표 클릭'으로 쓰겠다는 프리셋**이다.
+                #    지금 **켜져 있는 녹화**가 있으면 다른 프리셋이 넣어둔 것이므로
+                #    `recs_off` 로 **숨겨둔다** (2026-11-05).
+                #    🔎 라스타바드는 칸27 이 ⏺녹화, 악몽의섬은 ↗좌표다. 안 숨기면
+                #       악몽의섬으로 바꿔도 **좌표를 누른 뒤 라스타바드 녹화가 재생**된다.
+                #    🚫 지우지 않는다 — 2026-08-10 '프리셋은 녹화를 지우지 않는다' 그대로.
+                #       숨긴 것은 그 칸을 ⏺ 로 쓰는 프리셋이 다시 넣어준다.
+                if rc.get(str(j)):
+                    slot.setdefault("recs_off", {})[str(j)] = rc.pop(str(j))
+                else:
+                    _b = (slot.get("recs_off") or {}).pop(str(j), None)
+                    if _b:
+                        rc[str(j)] = _b        # 숨겨둔 녹화 복원 (예전 그대로)
                 movs.append(j + 1)
         # 어떤 프리셋을 적용했는지 슬롯 이름에 남긴다 (미등록 → 프리셋 이름)
         nm = self._preset_full(key, pi)
@@ -6712,6 +6733,21 @@ class IslandApp(tk.Tk):
         anchor0 = coords[j] if (j < len(coords) and coords[j]) else None
         if not anchor0:
             anchor0 = next((c for c in coords if c), None)
+        # 🔁 **자동으로 바뀌어 있던 슬롯은, 원래 카드가 열렸으면 되돌린다** (2026-11-05).
+        _home = (slot.get("auto_home") or "").strip()
+        if _home and anchor0:
+            _hc = (CARD_BY_VER.get(key) or {}).get(
+                "라스타바드" if _home.startswith("라스타바드") else "") or ""
+            if _hc:
+                _ho, _hw = card_open_one(_hc, anchor0)
+                if _ho is True:
+                    _lo, _hi = CARD_SWAP_CELLS
+                    if self._swap_cells(key, si, slot, _home, _lo, _hi):
+                        slot.pop("auto_home", None)
+                        save_cfg(self.cfg)
+                        self._rlog(u"[전환] 🔁 %s #%02d '%s' 가 다시 열려 "
+                                   u"**'%s' 로 되돌렸다** (%s)"
+                                   % (key, si + 1, _hc, _home, _hw))
         # 🃏 **카드를 정하는 순서** (2026-11-05) — ①프리셋 ②슬롯지정 ③던전기본 ④우선순위
         cname = ""
         _why_c = u""
@@ -6731,24 +6767,30 @@ class IslandApp(tk.Tk):
             #    바꿔서 해주면 제일 좋은데."* — 프리셋을 **바꿔 끼우지 않고**
             #    26~35 만 건너뛰면 된다 (1~25 는 공용 · 악몽의섬 = 26~35 를 비운 것).
             #    🚫 슬롯 자료는 하나도 건드리지 않는다 — 다음에 열리면 저절로 돌아온다.
-            # 🔒 잠겼으면 **그 슬롯만 중단**한다.
-            #    🚫 다른 카드로 바꿔 가게 만들지 말 것 (2026-11-05 — 한 번 그렇게
-            #       만들었다가 되돌렸다). 실제 자료를 보니 **칸27·28 을 두 버전이
-            #       같이 쓴다** — 악몽의섬은 좌표 클릭, 라스타바드는 녹화·그림.
-            #       그래서 라스타바드 슬롯으로 악몽의섬 카드에 들어가면
-            #       칸27·28 이 엉뚱하게 눌린다. 바꿔 가려면 **프리셋을 실제로
-            #       적용**해야 하고, 그러려면 악몽의섬 프리셋이 칸27·28 좌표를
-            #       되살릴 수 있어야 한다 (지금 프리셋에는 그 정보가 없다).
+            # 🔁 **잠겼으면 악몽의섬 프리셋으로 바꿔 끼운다** (2026-11-05 사용자 요청).
+            #    칸27~34 만 바꾼다 — 앞 칸·이름·⏰·ON/OFF 는 그대로.
+            #    원래 프리셋 이름을 `auto_home` 에 적어두고, 다시 열리면 되돌린다.
             if anchor0:
                 _ok2, _why2 = card_open_one(cname, anchor0)
                 if _ok2 is False:
-                    self._rlog(u"[카드] %s #%02d 🔒 '%s' 가 잠겼다 (%s) "
-                               u"→ 이 슬롯만 중단 (다른 카드로 바꿔 가지 않는다 — "
-                               u"칸27·28 이 악몽의섬과 달라서)"
-                               % (key, si + 1, cname, _why2))
-                    self._status.set(f"🃏 [{name}] {lbl} — '{cname}' 가 잠겨 "
-                                     f"이 슬롯은 건너뜁니다")
-                    return False
+                    _pair = (CARD_SWAP.get(key) or {}).get(
+                        (slot.get("name") or "").strip())
+                    _lo, _hi = CARD_SWAP_CELLS
+                    if _pair and self._swap_cells(key, si, slot, _pair, _lo, _hi):
+                        slot["auto_home"] = (slot.get("name") or "").strip()
+                        save_cfg(self.cfg)
+                        self._rlog(u"[전환] 🔁 %s #%02d '%s' 가 잠겨 **'%s' 로 바꿔 돈다** "
+                                   u"(%s · 칸%d~%d 만 바뀜 · 다시 열리면 되돌아온다)"
+                                   % (key, si + 1, cname, _pair, _why2, _lo, _hi))
+                        cname, _why_c = "", u""      # 카드는 아래에서 다시 고른다
+                    else:
+                        self._rlog(u"[카드] %s #%02d 🔒 '%s' 가 잠겼다 (%s) → 이 슬롯만 중단 "
+                                   u"(바꿔 탈 짝이 없다: 슬롯 이름 '%s')"
+                                   % (key, si + 1, cname, _why2,
+                                      (slot.get("name") or "").strip()))
+                        self._status.set(f"🃏 [{name}] {lbl} — '{cname}' 가 잠겨 "
+                                         f"이 슬롯은 건너뜁니다")
+                        return False
         if not cname:
             cname = (slot.get("card") or "").strip()          # ② [🃏] 로 콕 집은 것
             if cname:
@@ -7034,6 +7076,78 @@ class IslandApp(tk.Tk):
                     pass
         except Exception:
             pass
+
+    def _preset_by_name(self, key, pname):
+        """프리셋 전체 이름('악몽의섬 주홍이 48%')으로 찾기 → (번호, 프리셋)."""
+        for pi in range(len(self._presets(key))):
+            if self._preset_full(key, pi) == pname:
+                return pi, self._presets(key)[pi]
+        return None, None
+
+    def _swap_cells(self, key, si, slot, pname, lo, hi):
+        """🔁 그 프리셋의 **칸 lo~hi 설정만** 이 슬롯에 적용한다 → 됐으면 True.
+
+        **이름·다른 칸·⏰·ON/OFF 는 건드리지 않는다.**
+        🚫 Tk 를 부르지 않는다 — 실행은 다른 스레드라 위젯을 만지면 멈춘다.
+        🚫 녹화는 지우지 않고 `recs_off` 로 숨긴다 (2026-08-10 절대 규칙)."""
+        pi, pr = self._preset_by_name(key, pname)
+        if pr is None:
+            self._rlog(u"[전환] %s #%02d 프리셋 '%s' 를 못 찾았다" % (key, si + 1, pname))
+            return False
+        items = pr.get("items") or {}
+        rects = self._client_rects_by_slot()
+        if not rects and not pr.get("abs"):
+            self._rlog(u"[전환] %s #%02d 리니지M 창을 못 찾아 좌표를 못 맞춘다" % (key, si + 1))
+            return False
+        nclk = clicks_for(key)
+        cs = slot.setdefault("coords", [])
+        while len(cs) < nclk:
+            cs.append(None)
+        ds = slot.setdefault("dirs", [])
+        while len(ds) < nclk:
+            ds.append(None)
+        rc = slot.setdefault("recs", {})
+        ra = slot.setdefault("rasta", {})
+        done = []
+        for j in range(lo - 1, hi):
+            it = items.get(str(j))
+            if not it:
+                continue                      # 그 프리셋이 안 건드리는 칸 — 그대로 둔다
+            act = it.get("act")
+            if act in RASTA_MODES:            # 🖼 그림 · 👁 확인 · 🃏 카드
+                _r1 = {"mode": act, "pick": it.get("pick") or "top"}
+                if it.get("off"):
+                    _r1["off"] = list(it["off"])
+                ra[str(j)] = _r1
+                done.append(u"%d%s" % (j + 1, u"🖼"))
+                continue
+            ra.pop(str(j), None)              # 좌표/녹화 칸이면 그림 설정은 지운다
+            if act == "rec":
+                cs[j] = None
+                ds[j] = None
+                rc[str(j)] = list(it.get("ev") or [])
+                (slot.get("recs_off") or {}).pop(str(j), None)
+                done.append(u"%d⏺%d" % (j + 1, len(rc[str(j)])))
+            elif act == "del":
+                cs[j] = None
+                ds[j] = None
+                if rc.get(str(j)):
+                    slot.setdefault("recs_off", {})[str(j)] = rc.pop(str(j))
+                done.append(u"%d✖" % (j + 1))
+            else:                             # mov — 좌표 클릭
+                rel = it.get("rel") or [0, 0]
+                cs[j] = ([rel[0] + rects[si][0], rel[1] + rects[si][1]]
+                         if (rects and not pr.get("abs")) else [rel[0], rel[1]])
+                ds[j] = None
+                if rc.get(str(j)):            # 다른 프리셋이 넣어둔 녹화는 숨긴다
+                    slot.setdefault("recs_off", {})[str(j)] = rc.pop(str(j))
+                done.append(u"%d↗" % (j + 1))
+        if not ra:
+            slot.pop("rasta", None)
+        save_cfg(self.cfg)
+        self._rlog(u"[전환] %s #%02d → '%s' 의 칸%d~%d 적용: %s"
+                   % (key, si + 1, pname, lo, hi, u" ".join(done) or u"바뀐 칸 없음"))
+        return True
 
     def _omanst_floor_click(self, key, si, slot, j):
         """🏢 오만의탑 칸23 — 슬롯이 고른 **갈 층** 줄을 눌렀으면 True.
