@@ -1830,6 +1830,149 @@ def _coords_guard_resnap(new_cfg):
 COORDS_ROLLBACK_ID = ""
 
 
+# 🏢 **오만의탑 '층'(칸23) 자동 되살리기** — 컴퓨터당 한 번만 (2026-11-05).
+#   사고: 11-04 17:15 `68a6522` 가 share_island.json 에
+#     keys=[수금_오만의탑, …] · presets=true 로 배포했는데,
+#     keep_cells 에 **물약 칸(12·13)만** 적고 **층 칸(23)을 빼먹었다.**
+#     → 로컬 16슬롯의 칸23 좌표와 프리셋이 메인 것으로 통째로 갈렸고,
+#       실측하니 **15개가 5층** 이라 6·7·8층 프리셋을 골라도 5층이 눌렸다.
+#   🚫 **지금 값이 배포된 값과 같을 때만** 되살린다 = 갈아끼워진 증거가 있을 때만.
+#      사용자가 이미 고쳤으면 값이 달라서 건너뛴다 → 또 돌아도 무해하다.
+#   🚫 칸24(정화 고르는 자리)·물약·이름·ON/OFF·반복은 **건드리지 않는다.**
+#      칸24 는 16슬롯 전부 창안 (328~332,157~159) = 3번째 줄 고정이라 층과 무관하다.
+FLOOR_FIX_ID = "20261105_omanst_floor"
+FLOOR_FIX_KEY = "수금_오만의탑"
+FLOOR_FIX_IDX = 22                      # 칸23 (0부터)
+
+
+def fix_omanst_floor_once(log):
+    """🏢 갈아끼워진 오만의탑 칸23(층)·프리셋을 **자기 백업**으로 되살린다 — 한 번만."""
+    if not FLOOR_FIX_ID:
+        return
+    ldir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
+    done_p = os.path.join(ldir, "restore_done.json")
+    try:
+        done = json.load(open(done_p, encoding="utf-8")) if os.path.exists(done_p) else {}
+    except Exception:
+        done = {}
+    if done.get(FLOOR_FIX_ID):
+        return                                   # 이 컴퓨터에서 이미 했다
+
+    def _mark():
+        try:
+            os.makedirs(ldir, exist_ok=True)
+            done[FLOOR_FIX_ID] = time.strftime("%Y-%m-%d %H:%M:%S")
+            with open(done_p, "w", encoding="utf-8") as f:
+                json.dump(done, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    K, FI = FLOOR_FIX_KEY, FLOOR_FIX_IDX
+    try:
+        dst_p = os.path.join(DESK, "island_coords.json")
+        if not os.path.exists(dst_p) or os.path.getsize(dst_p) < 2000:
+            return                               # 좌표가 없으면 유실복구 쪽 일이다
+        with open(dst_p, encoding="utf-8-sig") as f:
+            dst = json.load(f)
+        sent_p = os.path.join(REPO, "share_island_data.json")
+        if not os.path.exists(sent_p):
+            return
+        with open(sent_p, encoding="utf-8-sig") as f:
+            sent = json.load(f) or {}
+        cur_sl = dst.get(K) or []
+        sent_sl = sent.get(K) or []
+        if not cur_sl or not sent_sl:
+            return
+
+        def _c23(sl, i):
+            cs = ((sl[i] if i < len(sl) else None) or {}).get("coords") or []
+            return cs[FI] if len(cs) > FI else None
+
+        # ① 갈아끼워진 슬롯 = 지금 값이 배포된 값과 **똑같은** 것
+        same = [i for i in range(min(16, len(cur_sl)))
+                if _c23(cur_sl, i) and _c23(sent_sl, i)
+                and list(_c23(cur_sl, i)) == list(_c23(sent_sl, i))]
+        sp_now = (dst.get("_presets") or {}).get(K) or []
+        sp_sent = (sent.get("_presets") or {}).get(K) or []
+        pres_same = bool(sp_now and sp_sent and json.dumps(
+            sp_now, sort_keys=True) == json.dumps(sp_sent, sort_keys=True))
+        if not same and not pres_same:
+            log("   🏢 오만의탑 층 — 이미 이 컴퓨터 것입니다 (되살릴 것 없음)")
+            _mark()
+            return
+
+        # ② 백업에서 '배포 값과 다른' 칸23 을 찾는다 (최신부터)
+        bk = os.path.join(ldir, "backups")
+        cands = []
+        if os.path.isdir(bk):
+            for nm in sorted(os.listdir(bk), reverse=True):
+                if "island_coords" in nm and nm.endswith(".json"):
+                    cands.append(os.path.join(bk, nm))
+        found, pres = {}, None
+        for p in cands:
+            try:
+                with open(p, encoding="utf-8-sig") as f:
+                    b = json.load(f)
+            except Exception:
+                continue
+            if not isinstance(b, dict):
+                continue
+            bsl = b.get(K) or []
+            for i in same:
+                if i in found:
+                    continue
+                bc = _c23(bsl, i)
+                sc = _c23(sent_sl, i)
+                if bc and (not sc or list(bc) != list(sc)):
+                    found[i] = list(bc)
+            if pres is None and pres_same:
+                bp = (b.get("_presets") or {}).get(K) or []
+                if bp and json.dumps(bp, sort_keys=True) != json.dumps(
+                        sp_sent, sort_keys=True):
+                    pres = bp
+            if len(found) >= len(same) and (pres is not None or not pres_same):
+                break
+
+        if not found and pres is None:
+            _what = []
+            if same:
+                _what.append("칸23 %d슬롯" % len(same))
+            if pres_same:
+                _what.append("프리셋")
+            log("   🏢 오만의탑 층 — %s 가 메인 것으로 갈려 있는데 "
+                "**이 컴퓨터 백업에 옛 값이 없습니다**" % (" · ".join(_what) or "설정"))
+            log("      → 오만의탑 창에서 슬롯 칸의 [🏢 ▾] 로 갈 층을 골라주세요. "
+                "그러면 칸23 좌표와 무관하게 그 층 줄을 누릅니다 (정화 인식은 그대로)")
+            return                               # 표시하지 않는다 — 다음에 다시 시도
+        # ③ 되살린다 (직전 상태 백업)
+        try:
+            os.makedirs(bk, exist_ok=True)
+            with open(os.path.join(bk, time.strftime("%Y%m%d_%H%M%S")
+                                   + "_before_floorfix_island_coords.json"),
+                      "w", encoding="utf-8") as f:
+                json.dump(dst, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        for i in sorted(found):
+            cs = (dst[K][i] or {}).setdefault("coords", [])
+            while len(cs) <= FI:
+                cs.append(None)
+            cs[FI] = found[i]
+        if pres is not None:
+            dst.setdefault("_presets", {})[K] = pres
+        tmp = dst_p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(dst, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, dst_p)
+        log("   🏢 오만의탑 층 되살림 ✔ 칸23 %d개%s — "
+            "슬롯 %s (칸24 정화·물약·이름·ON/OFF 는 그대로)"
+            % (len(found), " + 프리셋" if pres is not None else "",
+               [i + 1 for i in sorted(found)]))
+        _mark()
+    except Exception as e:
+        log("   ⚠ 오만의탑 층 되살리기 실패: %s" % e)
+
+
 def restore_local_coords_once(log):
     """🔁 이 컴퓨터가 **자기 백업**으로 좌표를 통째로 되돌린다 — 한 번만.
 
@@ -2087,6 +2230,9 @@ def main():
                 sync_coord_fix(log)      # 📏 역산된 **좌표만** (ON/OFF·설정은 그대로)
                 sync_island_keys(log)    # 지정한 던전은 통째로 받음
                 sync_recs(log)           # 지정한 녹화(⏺)만 받음 — 좌표는 그대로
+                # 🏢 동기화가 **얹힌 뒤에** 오만의탑 층을 되살린다 (한 번만).
+                #    순서가 중요하다 — 앞에 두면 sync_island_keys 가 또 덮는다.
+                fix_omanst_floor_once(log)
                 apply_restore_order(log)  # 되돌리기 지시가 있으면 한 번만 수행
             # 섬/던전 창 위치(island_win_pos.json)도 메인 것을 받는다
             try:
