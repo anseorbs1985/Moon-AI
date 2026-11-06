@@ -4253,6 +4253,22 @@ FIX_COIN_BOX  = (0, -19, 12, -9)     # '모두 복구' 좌상단 기준 **합계
 FIX_COIN_FROM = {"tab_exp":  (77, 202, 89, 212),
                  "tab_item": (16, 203, 28, 213)}
 FIX_COIN_BLUE = 10                   # 파란 픽셀이 이보다 많으면 **다야** → 멈춘다
+# 🆓 **경험치 복구 탭은 화면이 아예 다르다** (2026-11-06 — #04·#06 을 띄워 확인).
+#    ```
+#    |경험치 복구(2)|  |아이템 복구|      [✕]      ← 아이템은 (n) 이 없다 = 할 게 없다
+#    [EXP] 75,754,880,140(5.0%)   💎 185          ← 비용이 **다야**다
+#    [화폐 변경]              2/5    💎   0
+#    [5 일일무료복구(3)]                           ← **[모두 복구] 가 없다!**
+#    ```
+#    🚫 **다야는 절대 쓰지 않는다** (2026-11-06 사용자: *"일일무료복구만 쓰고
+#       그 다음에 다야는 절대 사용하면 안 된다"*).
+#    ✅ 경험치는 **[일일무료복구] 만** 누른다. 그 버튼이 없거나 횟수를 다 쓰면 건너뛴다.
+FIX_FREE_TRIES = 3                   # 경험치 탭에서 [일일무료복구] 를 누를 최대 횟수
+# 🔢 **탭에 숫자가 없으면 할 게 없다** (사용자: *"아무것도 안 떠 있으면 취소를 누르고"*)
+#    탭 그림 **오른쪽 +1~+13px** 에 잉크가 있나로 본다.
+#    📏 실측 — 숫자 있음 15~21픽셀 · 없음 **0픽셀**. 아주 깨끗하게 갈린다.
+FIX_NUM_PAD   = (1, 14)              # 탭 그림 오른쪽 이 범위를 본다
+FIX_NUM_INK   = 4                    # 잉크가 이보다 많으면 '숫자 있음'
 #    📏 실측 2026-11-06 (#06) — 아데나 동전 **R-B +116 · B>R 픽셀 0**.
 #       다야는 파란 동전이라 B>R 가 많다 (오만의탑 `OMANST_COIN_BLUE` 와 같은 방식).
 #    🚫 평균 R-B 하나로 판정하지 말 것 — 갈색 배경이 평균을 지배한다 (2026-11-04 교훈).
@@ -4266,7 +4282,7 @@ def fix_tab_ready():
     """🗂 탭 흐름에 필요한 그림 셋이 다 있나 (없으면 예전 흐름으로)."""
     try:
         return all(os.path.exists(fix_tab_img(n))
-                   for n in ("tab_exp", "tab_item", "all"))
+                   for n in ("tab_exp", "tab_item", "all", "free"))
     except Exception:
         return False
 
@@ -4333,6 +4349,29 @@ def fix_coin_is_daya(big, box, off=None):
         return (blue >= FIX_COIN_BLUE), blue
     except Exception:
         return False, -1
+
+
+def fix_tab_has_num(big, tb):
+    """🔢 그 탭에 **숫자(n)가 붙어 있나** → (있나?, 잉크 픽셀 수).
+
+    `아이템 복구(1)` 처럼 숫자가 있으면 복구할 것이 있다는 뜻.
+    `아이템 복구` 만 있으면 **할 게 없다** → 건너뛴다 (2026-11-06 사용자 지시).
+    📏 실측 — 있음 15~21픽셀 · 없음 **0픽셀**."""
+    try:
+        import cv2, numpy as np
+        k = big.shape[1] / float(fix_tab_base() or IMG_BASE_W)
+        x = tb[0] + tb[2] + int(round(FIX_NUM_PAD[0] * k))
+        x2 = tb[0] + tb[2] + int(round(FIX_NUM_PAD[1] * k))
+        y, y2 = tb[1], tb[1] + tb[3]
+        x, y = max(0, x), max(0, y)
+        x2, y2 = min(big.shape[1], x2), min(big.shape[0], y2)
+        if x2 - x < 2 or y2 - y < 2:
+            return False, -1
+        g = cv2.cvtColor(big[y:y2, x:x2], cv2.COLOR_BGR2GRAY)
+        ink = int((g > 70).sum())
+        return (ink >= FIX_NUM_INK), ink
+    except Exception:
+        return True, -1          # 못 재면 막지 않는다
 
 
 def fix_quit_meta():
@@ -24318,27 +24357,67 @@ class App(tk.Tk):
                 if not tb:
                     click_log(f"fix #{si:02d} 🗂 [{_ko}] 탭을 못 찾았다 — 건너뛴다")
                     continue
+                # 🔢 **숫자가 없으면 할 게 없다** — 누르지 않는다 (2026-11-06 사용자)
+                _has, _ink = fix_tab_has_num(big, tb)
+                if not _has:
+                    click_log(f"fix #{si:02d} 🗂 [{_ko}] 숫자가 없다 (잉크 {_ink}) "
+                              f"— 복구할 것이 없어 건너뛴다")
+                    continue
                 # ② 그 탭으로 바꾼다 (이미 그 탭이어도 무해하다)
                 tx, ty = L + tb[0] + tb[2] // 2, T + tb[1] + tb[3] // 2
                 click_at(tx, ty)
-                click_log(f"fix #{si:02d} 🗂 [{_ko}] 탭 ({tb[4]:.2f}) → ({tx},{ty}) 눌렀다")
+                click_log(f"fix #{si:02d} 🗂 [{_ko}] 탭 ({tb[4]:.2f} · 숫자 잉크 {_ink}) "
+                          f"→ ({tx},{ty}) 눌렀다")
                 nap(random.uniform(*FIX_TAB_GAP))
-                # ③ 💰 **동전 색을 먼저 본다** — 기준점은 **탭 그림**이다.
-                #    🎯 [모두 복구] 가 없는 탭이 있어서(경험치) 탭을 기준으로 삼는다.
+
+                if _nm == "tab_exp":
+                    # 🆓 **경험치는 [일일무료복구] 만 쓴다** — 🚫 다야는 절대 안 쓴다
+                    #    (2026-11-06 사용자: *"일일무료복구만 쓰고 그 다음에
+                    #     다야는 절대 사용하면 안 된다"*)
+                    for _f in range(FIX_FREE_TRIES):
+                        big = grab_window(c1)
+                        fb = fix_tab_find(big, "free") if big is not None else None
+                        if not fb:
+                            _paid = True
+                            click_log(f"fix #{si:02d} 🆓 [{_ko}] **[일일무료복구] 가 "
+                                      f"없다** ({_f}번 했다) → 🚫 다야는 쓰지 않는다 "
+                                      f"· 💎 다야!! 로 표시한다")
+                            self._fix_tab_shot(si, big, "free_none")
+                            break
+                        fx, fy = L + fb[0] + fb[2] // 2, T + fb[1] + fb[3] // 2
+                        click_at(fx, fy)
+                        _did = True
+                        click_log(f"fix #{si:02d} ✅ [{_ko}] **[일일무료복구]** "
+                                  f"({fb[4]:.2f}) → ({fx},{fy}) 눌렀다 ({_f+1}번째)")
+                        self.status.set(f"🆓 복구 #{si:02d} — 경험치 일일무료복구")
+                        nap(random.uniform(*FIX_ALL_WAIT))
+                        if c5:
+                            click_at(*c5)
+                            nap(random.uniform(*FIX_ALL_WAIT))
+                        self._fix_quit_clear(si, anc, f"{_ko} {_f+1}번째 뒤")
+                        # 아직 남았나 — 탭 숫자로 본다
+                        big = grab_window(c1)
+                        tb3 = fix_tab_find(big, _nm) if big is not None else None
+                        if not tb3 or not fix_tab_has_num(big, tb3)[0]:
+                            click_log(f"fix #{si:02d} 🆓 [{_ko}] 다 했다 "
+                                      f"({_f+1}번) — 숫자가 사라졌다")
+                            break
+                    continue
+
+                # 📦 아이템 — 💰 동전을 먼저 보고 [모두 복구]
                 big = grab_window(c1)
                 tb2 = fix_tab_find(big, _nm) if big is not None else None
+                _blue = -1
                 if tb2:
                     _daya, _blue = fix_coin_is_daya(big, tb2, FIX_COIN_FROM.get(_nm))
                     if _daya:
                         _paid = True
                         click_log(f"fix #{si:02d} 💎 [{_ko}] **다야**가 든다 "
                                   f"(파란 픽셀 {_blue} ≥ {FIX_COIN_BLUE}) → 누르지 않는다")
+                        self._fix_tab_shot(si, big, _nm + "_daya")
                         self.status.set(f"💎 복구 #{si:02d} [{_ko}] — 다야가 들어 "
                                         f"누르지 않았습니다")
                         continue
-                else:
-                    _blue = -1
-                # ④ [모두 복구] 를 **보일 때까지 다시 본다** (탭을 바꾸면 다시 그려진다)
                 ab, _sc = None, 0.0
                 for _t in range(FIX_TAB_TRIES):
                     if big is not None:
@@ -24348,39 +24427,17 @@ class App(tk.Tk):
                     if _t < FIX_TAB_TRIES - 1:
                         nap(random.uniform(*FIX_TAB_RETRY))
                         big = grab_window(c1)
-                if ab:
-                    mx, my = L + ab[0] + ab[2] // 2, T + ab[1] + ab[3] // 2
-                    click_at(mx, my)
-                    _did = True
-                    click_log(f"fix #{si:02d} ✅ [{_ko}] **[모두 복구]** ({ab[4]:.2f}) → "
-                              f"({mx},{my}) 눌렀다 · 동전 파란픽셀 {_blue}(아데나)")
-                    self.status.set(f"🩹 복구 #{si:02d} — [{_ko}] 모두 복구")
-                else:
-                    # 🚫 **못 찾으면 아무것도 누르지 않는다** (2026-11-06 사용자:
-                    #    *"아니야 **모두 복구는 항상 있어**"*). 항상 있는데 못 봤다면
-                    #    화면이 아직 안 그려졌거나 다른 창이 덮은 것이다 —
-                    #    추측해서 다른 자리를 누르면 엉뚱한 것이 눌린다.
-                    #    🗒 그 화면을 저장해 원격에서 원인을 짚게 한다.
-                    try:
-                        if big is not None:
-                            _p2 = fix_tab_img("all")
-                            import cv2 as _cv, numpy as _np
-                            _tt = _cv.imdecode(_np.fromfile(_p2, dtype=_np.uint8),
-                                               _cv.IMREAD_COLOR)
-                            _k2 = big.shape[1] / float(fix_tab_base() or IMG_BASE_W)
-                            _t2 = _cv.resize(_tt,
-                                             (max(3, int(round(_tt.shape[1] * _k2))),
-                                              max(3, int(round(_tt.shape[0] * _k2)))))
-                            _sc = float(_cv.matchTemplate(
-                                big, _t2, _cv.TM_CCOEFF_NORMED).max())
-                    except Exception:
-                        pass
+                if not ab:
                     click_log(f"fix #{si:02d} 🚫 [{_ko}] **[모두 복구] 를 못 찾았다** "
-                              f"(최고 {_sc:.2f} · 기준 {FIX_TAB_MATCH} · "
-                              f"{FIX_TAB_TRIES}번 봤다) — 항상 있어야 하는 버튼이라 "
-                              f"**아무것도 누르지 않는다**")
+                              f"({FIX_TAB_TRIES}번 봤다) — 아무것도 누르지 않는다")
                     self._fix_tab_shot(si, big, _nm)
                     continue
+                mx, my = L + ab[0] + ab[2] // 2, T + ab[1] + ab[3] // 2
+                click_at(mx, my)
+                _did = True
+                click_log(f"fix #{si:02d} ✅ [{_ko}] **[모두 복구]** ({ab[4]:.2f}) → "
+                          f"({mx},{my}) 눌렀다 · 동전 파란픽셀 {_blue}(아데나)")
+                self.status.set(f"🩹 복구 #{si:02d} — [{_ko}] 모두 복구")
                 nap(random.uniform(*FIX_ALL_WAIT))
                 if c5:
                     click_at(*c5)
