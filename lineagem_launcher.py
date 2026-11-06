@@ -9058,14 +9058,35 @@ class App(tk.Tk):
         #    실행기 같은 별도 프로세스까지 **전부** 끈다. `_STOP_EVT` 를 세우므로
         #    기다리던 스레드가 **즉시** 깨어난다 (예전엔 간격이 끝나야 멈췄다).
         #    ⚠ ⏰ 2시간 반복 예약은 여기서 끄지 않는다 — 그건 [⏰] 버튼 (2026-08-15 규칙).
-        self._stop_wide = tk.Canvas(back_row, width=72, height=34, highlightthickness=0,
+        #   ⏰ **그 옆 절반에 [⏰ 반복]** (2026-11-07 사용자 지시:
+        #      *"멈춤 버튼 옆에 악몽의섬이나 섬/던전 실행기 그거 관련해서 반복을
+        #        옮겨줘. 멈춤버튼 절반 반복 절반"*)
+        #      → 72px 자리를 **35 + 35** 로 나눠 쓴다.
+        #      🚫 섹션행의 [⏰ 반복] 은 **지웠다** — 상태(켜진 개수·색)를 두 군데
+        #         두면 한쪽만 갱신돼 어긋난다 (2026-11-04 규칙). 다시 만들지 말 것.
+        _HW = 35
+        self._stop_wide = tk.Canvas(back_row, width=_HW, height=34, highlightthickness=0,
                                     bg=self.cget("bg"), cursor="hand2")
         self._stop_wide.pack(side="left", padx=(LEFT, 0), pady=(3, 0))
-        self._stop_wide.create_rectangle(2, 2, 70, 32, fill="#c0392b",
+        self._stop_wide.create_rectangle(2, 2, _HW - 1, 32, fill="#c0392b",
                                          outline="#7b241c", width=2)
-        self._stop_wide.create_text(36, 17, text="■ 멈춤", fill="white",
-                                    font=("맑은 고딕", 9, "bold"))
+        self._stop_wide.create_text(_HW // 2, 17, text="■" + chr(10) + "멈춤",
+                                    fill="white", justify="center",
+                                    font=("맑은 고딕", 7, "bold"))
         self._stop_wide.bind("<Button-1>", lambda e: (self._stop() or "break"))
+        #   ⏰ 반복 — **묻지 않고 즉시** 2시간 N회 예약을 전부 끈다 (2026-08-09 규칙).
+        #      ⚠ [■ 멈춤] 과 **따로다** — 멈춤은 돌고 있는 작업만, 이건 예약만.
+        #      색·숫자는 `_refresh_rep_btn` 이 1.5초마다 갱신한다 (`_queue_tick`).
+        self._rep_wide = tk.Canvas(back_row, width=_HW, height=34, highlightthickness=0,
+                                   bg=self.cget("bg"), cursor="hand2")
+        self._rep_wide.pack(side="left", padx=(2, 0), pady=(3, 0))
+        self._rep_wide_box = self._rep_wide.create_rectangle(
+            2, 2, _HW - 1, 32, fill="#7f8c8d", outline="#4d5656", width=2)
+        self._rep_wide_txt = self._rep_wide.create_text(
+            _HW // 2, 17, text="⏰" + chr(10) + "없음", fill="white",
+            justify="center", font=("맑은 고딕", 7, "bold"))
+        self._rep_wide.bind("<Button-1>",
+                            lambda e: (self._rep_stop_click() or "break"))
         self._back_circle = tk.Canvas(back_row, width=WIDE, height=34, highlightthickness=0,
                                       bg=self.cget("bg"), cursor="hand2")
         self._back_circle.pack(side="left", padx=(GAP, 0), pady=(3, 0))
@@ -15218,10 +15239,25 @@ class App(tk.Tk):
             self._fold_stop_draw(busy)
 
     def _refresh_rep_btn(self):
+        n = self._rep_count()
+        #   ⏰ **[■ 멈춤] 옆의 작은 반복 버튼** (2026-11-07 — 섹션행에서 옮겨왔다).
+        #      켜진 예약이 있으면 빨강 + 개수, 없으면 회색 + '없음'.
+        #      ⚠ `itemconfig` 로 색만 바꾼다 — 다시 그리면 어두운 화면이 bg 를
+        #         바꿔도 사각형이 덮고 있어 영향이 없다.
+        c = getattr(self, "_rep_wide", None)
+        if c is not None:
+            try:
+                if c.winfo_exists():
+                    c.itemconfig(self._rep_wide_box,
+                                 fill="#c0392b" if n else "#7f8c8d",
+                                 outline="#7b241c" if n else "#4d5656")
+                    c.itemconfig(self._rep_wide_txt,
+                                 text="⏰" + chr(10) + (f"{n}개" if n else "없음"))
+            except Exception:
+                pass
         b = getattr(self, "btn_rep", None)
         if not b or not b.winfo_exists():
             return
-        n = self._rep_count()
         if n:
             b.config(text="⏰ 반복" + chr(10) + f"종료 {n}",
                      bg="#c0392b", activebackground="#922b21")
@@ -28286,11 +28322,12 @@ class App(tk.Tk):
             font=("맑은 고딕", 9, "bold"), bg="#7f8c8d", fg="white",
             activebackground="#5d6d7e", width=6, height=2, command=self._stop)
         self.btn_stop.pack(side="left")
-        self.btn_rep = tk.Button(self._stop_col, text="⏰ 반복" + chr(10) + "ON",
-            font=("맑은 고딕", 9, "bold"), bg="#27ae60", fg="white",
-            activebackground="#1e8449", width=6, height=2,
-            command=self._rep_stop_click)
-        self.btn_rep.pack(side="left", padx=(3, 0))
+        #   ⏰ **[⏰ 반복] 은 '맨뒤로' 왼쪽([■ 멈춤] 옆)으로 옮겼다**
+        #      (2026-11-07 사용자 지시). 🚫 여기 다시 만들지 말 것 — 상태를
+        #      두 군데 두면 한쪽만 갱신돼 어긋난다 (2026-11-04 규칙).
+        #   ⚠ `_stop_col` 자체는 **그대로 둔다** — '★ 과거섬 패스' 줄 맞춤이
+        #      이것을 기준으로 쓴다 (2026-11-03 규칙).
+        self.btn_rep = None
         self.after(300, self._refresh_rep_btn)
 
         # ★ 과거섬 하루 패스 버튼 — 누르면 다음 새벽 실행 건너뜀, 다시 누르면 취소, 다음날 자동 재개
