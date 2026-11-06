@@ -1040,6 +1040,26 @@ SUHO_TITLE_BAND  = (0.0, 0.16, 0.30, 0.70)
 #      (창은 안 띄운다). 그래야 여러 클라를 한 번의 ▶ 로 돌 수 있다.
 #    🚫 `False` 로 되돌리지 말 것 — 수호성에 들어가기만 해도 창이 뜬다.
 SUHO_SHOW_INFO_ONLY = True           # 진입창([활성화])일 때만 창을 띄울까
+# 🔎 **싸게 엿본다 — [활성화] 가 뜨면 창이 바로 뜨게** (2026-11-06 사용자:
+#    *"야 **활성화 띄워놨는데 수호성 찾기가 너무 늦게 뜬다**니까"*).
+#    🚨 폴링(`SUHO_POLL_ON`)이 **렉 때문에 꺼져 있어** 창을 띄우는 길이
+#       **사람이 클라를 클릭할 때(`_suho_auto`)뿐**이었다 → [활성화] 를 띄워놓고
+#       가만히 있으면 **영영 안 떴다.**
+#    💡 **실측으로 길이 열렸다** (2504x1352 창):
+#         PrintWindow 창 전체                **102 ms**  ← 예전 폴링이 이것을 썼다
+#         화면에서 **제목 띠만** BitBlt         **17 ms**  (1/6)
+#         두 방식의 진입창 점수   0.437 vs 0.437 — **같다** (실측)
+#    👉 **싼 엿보기(BitBlt+줄인 대조) → 걸리면 정식 확인(PrintWindow)** 두 단계.
+#       엿보기가 틀려도 정식 확인이 막으므로 **오탐이 창을 띄우지 못한다.**
+#    🚫 엿보기만으로 창을 띄우지 말 것 — 화면 BitBlt 는 **다른 창이 그 자리를
+#       덮으면 엉뚱한 픽셀**을 읽는다.
+SUHO_PEEK_ON     = True              # 🔎 싸게 엿보기를 쓸까
+SUHO_PEEK_MS     = 400               # 엿보는 주기(ms)
+SUHO_PEEK_DOWN   = 0.5               # 띠를 이만큼 줄여 대조한다 (4배 싸다)
+SUHO_PEEK_MATCH  = 0.70              # 엿보기 기준 — **느슨하게** (정식은 0.85)
+#    ⚠ 느슨해도 안전하다 — 걸리면 **PrintWindow 로 정식 확인**을 거친다.
+#    📏 비용: BitBlt 17 + 줄인 대조 ~10 = **~27 ms** → 0.4초 주기면 한 코어의 7%.
+#       그것도 **1200px 넘는 창이 있을 때만**이다 (없으면 창 목록 1ms 뿐).
 SUHO_WATCH_MS    = 250               # 창 크기를 보는 주기(ms) — 캡처 없음, 부하 0
 SUHO_WATCH_SEE   = 0.8               # 🖼 화면까지 보는 주기(초)
 #    ⚡ 2026-11-06 사용자: *"반응을 좀 더 빨리 해줬으면 좋겠어. **확 뜨고 확 꺼지고**"*.
@@ -7721,6 +7741,8 @@ class App(tk.Tk):
         self.after(AWAKEN_WATCH_MS, self._awaken_watch_tick)
         # 👁 수호성 창이 떠 있는 동안만 그 클라를 지켜본다 (축소하면 바로 닫는다)
         self.after(SUHO_WATCH_MS + 150, self._suho_watch_tick)
+        # 🔎 [활성화] 가 뜨면 창이 바로 뜨게 — 싸게 엿본다 (큰 창이 없으면 ~1ms)
+        self.after(SUHO_PEEK_MS + 250, self._suho_peek_tick)
         self.after(1800, self._itemreg_refresh)
         # 🚫🚫 **런처가 클로드를 자동으로 켜지 않는다** (2026-10-21 사용자 지시 — 절대 규칙)
         #   사용자: *"너 왜 재시작 하거나 중간에 수시로 문서를 여는 거야?
@@ -12703,6 +12725,140 @@ class App(tk.Tk):
             self.after(0, lambda: self._open_suho_win(reuse=True))
         except Exception:
             pass
+
+    def _suho_screen_rect(self, x, y, w, h):
+        """🔎 **화면에서 그 사각형만** 복사한다 (BitBlt) — 아주 싸다 (실측 17ms).
+
+        ⚠ **그 자리를 다른 창이 덮으면 그 창의 픽셀**이 온다. 그래서 이것은
+          **싼 엿보기 전용**이고, 실제 판정은 `grab_window`(PrintWindow)로 한다.
+        🚫 이것만으로 무언가를 누르거나 창을 띄우지 말 것."""
+        try:
+            import numpy as np, win32ui, win32con
+            if w < 24 or h < 24:
+                return None
+            sdc = win32gui.GetDC(0)
+            try:
+                dc = win32ui.CreateDCFromHandle(sdc)
+                mdc = dc.CreateCompatibleDC()
+                bmp = win32ui.CreateBitmap()
+                bmp.CreateCompatibleBitmap(dc, w, h)
+                mdc.SelectObject(bmp)
+                mdc.BitBlt((0, 0), (w, h), dc, (x, y), win32con.SRCCOPY)
+                a = np.frombuffer(bmp.GetBitmapBits(True),
+                                  np.uint8).reshape(h, w, 4)[:, :, :3].copy()
+                win32gui.DeleteObject(bmp.GetHandle())
+                mdc.DeleteDC(); dc.DeleteDC()
+                return a
+            finally:
+                win32gui.ReleaseDC(0, sdc)
+        except Exception:
+            return None
+
+    def _suho_big_win(self):
+        """🔎 `SUHO_MIN_W` 넘는 리니지M 창 중 **가장 큰 것** → (h,l,t,w,ht,이름).
+
+        창 목록만 보므로 **~1ms** 다 (캡처 없음). 없으면 None."""
+        try:
+            best = None
+            def _cb(h, _):
+                try:
+                    if not win32gui.IsWindowVisible(h) or win32gui.IsIconic(h):
+                        return True
+                    t = win32gui.GetWindowText(h) or ""
+                    if not t.startswith("리니지M") or t.startswith("리니지M 자동 실행"):
+                        return True
+                    l, tp, r, b = win32gui.GetWindowRect(h)
+                    if (r - l) < SUHO_MIN_W:
+                        return True
+                    nonlocal best
+                    if best is None or (r - l) * (b - tp) > best[3] * best[4]:
+                        nm = t.split("l")[-1].strip() if " l " in t else t
+                        best = (h, l, tp, r - l, b - tp, nm)
+                except Exception:
+                    pass
+                return True
+            win32gui.EnumWindows(_cb, None)
+            return best
+        except Exception:
+            return None
+
+    def _suho_peek_tick(self):
+        """🔎 **[활성화] 가 뜨면 창이 바로 뜨게** — 싸게 엿본다 (2026-11-06).
+
+        사용자: *"활성화 띄워놨는데 수호성 찾기가 너무 늦게 뜬다니까"*.
+        폴링이 렉 때문에 꺼져 있어 **사람이 클릭할 때만** 창이 떴다.
+
+        **두 단계로 싸게 한다:**
+          ① 창 목록으로 **1200px 넘는 창**을 찾는다 (~1ms · 없으면 여기서 끝)
+          ② 그 창의 **제목 띠만 화면에서 BitBlt**(17ms) → 줄여서 대조(~10ms)
+          ③ 걸리면 **`_suho_poll`**(PrintWindow 정식 확인)로 넘긴다
+        🚫 ②만으로 창을 띄우지 않는다 — 화면 BitBlt 는 덮이면 틀린 픽셀을 읽는다.
+        🚫 수호성 창이 **이미 보이면** 아무것도 안 한다 (`_suho_watch_tick` 이 맡는다).
+        🚫 돌고 있으면 안 한다."""
+        try:
+            self.after(SUHO_PEEK_MS, self._suho_peek_tick)
+        except Exception:
+            pass
+        if not SUHO_PEEK_ON:
+            return
+        try:
+            if not self.cfg.get("suho_auto_on", True):
+                return
+            if getattr(self, "_suho_busy", False) or getattr(self, "_suho_peeking", False):
+                return
+            w = getattr(self, "_suho_win", None)
+            try:
+                if w is not None and w.winfo_exists() and w.winfo_viewable():
+                    return                  # 이미 떠 있다
+            except Exception:
+                pass
+            if self._is_busy():
+                return
+            big = self._suho_big_win()      # ~1ms
+            if not big:
+                return
+            self._suho_peeking = True
+            threading.Thread(target=self._suho_peek, args=(big,),
+                             daemon=True).start()
+        except Exception:
+            self._suho_peeking = False
+
+    def _suho_peek(self, big):
+        """🔎 제목 띠만 싸게 보고, 걸리면 **정식 확인**으로 넘긴다 (백그라운드)."""
+        try:
+            import cv2
+            h, L, T, W, H = big[0], big[1], big[2], big[3], big[4]
+            b = SUHO_TITLE_BAND
+            y0, y1 = int(H * b[0]), int(H * b[1])
+            x0, x1 = (int(W * b[2]), int(W * b[3])) if len(b) >= 4 else (0, W)
+            sub = self._suho_screen_rect(L + x0, T + y0, x1 - x0, y1 - y0)
+            if sub is None:
+                return
+            d = SUHO_PEEK_DOWN
+            if d and 0.2 < d < 1.0 and min(sub.shape[:2]) * d > 40:
+                sub = cv2.resize(sub, None, fx=d, fy=d,
+                                 interpolation=cv2.INTER_AREA)
+            else:
+                d = 1.0
+            hit = False
+            for p, bw in suho_info_list():
+                got = self._suho_tpl(p, bw, W, d)
+                if not got:
+                    continue
+                t, k = got
+                if t.shape[0] > sub.shape[0] or t.shape[1] > sub.shape[1]:
+                    continue
+                if float(cv2.matchTemplate(sub, t,
+                                           cv2.TM_CCOEFF_NORMED).max()) >= SUHO_PEEK_MATCH:
+                    hit = True
+                    break
+            if hit:
+                #   🚦 **정식 확인** — PrintWindow + 정식 기준(0.85) 을 거쳐야 뜬다
+                self._suho_poll()
+        except Exception:
+            pass
+        finally:
+            self._suho_peeking = False
 
     def _suho_watch_tick(self):
         """👁 **수호성 창이 떠 있는 동안만** 그 클라를 지켜본다 → 아니면 창을 치운다.
