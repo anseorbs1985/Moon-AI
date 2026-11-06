@@ -2151,6 +2151,16 @@ WARN_HIGH   = 0.72      # 🛟 **이만큼 높으면 배수를 안 보고 바로
 #    🚫 이 값을 0.6 아래로 내리지 말 것 — 그러면 겨루기가 무력해진다.
 WARN_MARGIN = 60        # 경고영역 주변 이만큼 더 넓게 훑는다 (전 20)
 WARN_TICK_MS = 5000     # F11 뒤 지켜보는 간격(ms) — 전 15초
+# 🔆 **F11 뒤 첫 스캔까지(ms)** — 2026-11-06 사용자 신고:
+#    *"f11 누르면 절전이 뜨는데.. 감지 좀 제대로 좀 해죠"*
+#    🚨 예전엔 **1200ms** 였다. 실측 11-05 22:56:11 깨움 → 22:56:13 스캔 →
+#       십자가 점수가 **16개 전부 0.39~0.51** 로 `뜬 곳 []` 이었다.
+#       절전 화면이 사라지고 게임 화면이 그려지기 **전**에 본 것이다.
+#    🚨 게다가 `_esc_close_all`(인벤토리·상점 닫기)이 **2000ms** 라 순서가
+#       **거꾸로**였다 — 창이 십자가를 가린 채로 스캔했다.
+#    👉 ESC 닫기(2000) **뒤에** 보고, 뒤늦게 그려지는 클라를 위해 **한 번 더** 본다.
+WARN_AFTER_WAKE = 4500  # 첫 스캔 (ESC 닫기 뒤)
+WARN_WAKE_AGAIN = 9500  # 한 번 더 (뒤늦게 그려지는 클라)
 WARN_IDLE_MS = 10000    # 5분이 지난 뒤 **목록에 남은 슬롯만** 다시 보는 간격(ms)
 # 🚨 2026-10-23 사용자: *"내가 F11이든 절전해제든 해서 복구를 하면 너가 복구 표기에서
 #   다시 지워줘야 하는데 지워지지 않고 **그 클라를 클릭해야만** 지워진다."*
@@ -2280,6 +2290,20 @@ FIX_IDLE_TICK_MS = 20000    # 20초마다 '마지막 입력 이후 몇 초' 만 
 FIX_CLICK_DELAY  = (1.4, 2.0)   # 클릭 뒤 화면이 돌아오기를 기다리는 시간(초)
 FIX_CLICK_RETRY  = (1.3, 1.9)   # 못 봤으면 한 번 더 (절전 해제가 느릴 때)
 FIX_CLICK_COOL   = 6.0          # 같은 슬롯은 이 시간 안에 다시 보지 않는다
+# 😴 **절전 화면이 사라질 때까지 기다린 뒤에 본다** (2026-11-06 사용자 신고:
+#    *"내가 마우스로 절전해제하면은 십자가 인식을 못해 복구가 안 뜨는데"*).
+#    🚨 **절전 중에는 십자가를 볼 수가 없다** — 절전 화면이 가린다.
+#       실측 2026-11-06: 16클라가 전부 자는 상태에서 십자가 점수가
+#       **16개 모두 똑같이 0.439** 였다 (= 같은 절전 화면만 보고 있었다).
+#    예전엔 1.4~2.0초 뒤 한 번 + 못 보면 1.3~1.9초 뒤 한 번, **총 3.5초**가
+#    전부였다. 절전 해제는 화면이 그려지는 데 더 걸려서 그 안에 못 봤고,
+#    `FIX_CLICK_COOL`(6초) 때문에 다시 보지도 않았다.
+FIX_CLICK_WAKE_MAX = 12.0       # 절전 화면이 사라지기를 최대 이만큼 기다린다
+FIX_CLICK_WAKE_GAP = (0.4, 0.8) # 그 사이 다시 보는 간격
+FIX_CLICK_LOOKS    = 4          # 목록에 **없는** 슬롯을 볼 횟수
+#    🚫 **2 로 되돌리지 말 것** — `FIX_SEE_ADD`(연속 2번)를 **한 번의 클릭 안에서**
+#       달성할 수 있어야 한다. 2번뿐이면 2번째에 한 번 놓치는 순간
+#       `1/2번째` 로 영영 굳는다 (실측 11-06 06:40·06:42·06:58 세 건 전부).
 # 🩹 손으로 복구했는지 볼 때 — 목록에 있는 슬롯은 **이만큼 더** 본 뒤에야 지운다.
 #    (2026-10-03 사용자: "내가 복구하면 없애주라. 십자가 없으면 확인하고 없애줘")
 #    여러 번 보는 이유: 점수가 흔들려(실측 0.37~0.91) 한 번씩 놓치는데,
@@ -23030,8 +23054,35 @@ class App(tk.Tk):
             #    🚫 클로드는 이 횟수를 줄이지 말 것.
             _looks = ((FIX_CLICK_DELAY, FIX_CLICK_RETRY, FIX_CLICK_GONE,
                        FIX_CLICK_GONE, FIX_CLICK_GONE)
-                      if _in_list else (FIX_CLICK_DELAY, FIX_CLICK_RETRY))
+                      if _in_list
+                      else ((FIX_CLICK_DELAY, FIX_CLICK_RETRY)
+                            + (FIX_CLICK_GONE,) * max(0, FIX_CLICK_LOOKS - 2)))
             _saw_sleep = False
+            # 😴 **절전 화면이 사라지기를 먼저 기다린다** (2026-11-06).
+            #    자는 동안은 십자가가 가려 **아무리 봐도 안 보인다** —
+            #    실측 16클라가 전부 자는 상태에서 점수가 똑같이 0.439 였다.
+            #    🚫 이 기다림을 없애지 말 것. 깨어나면 **즉시** 넘어가므로
+            #       평소(이미 깨어 있을 때)에는 한 번 확인(0.07초)뿐이다.
+            _t0 = time.time()
+            _slept_wait = 0
+            while time.time() - _t0 < FIX_CLICK_WAKE_MAX:
+                if self._is_busy():
+                    return
+                _h0 = self._check_hits(only={si})
+                if _h0 is None:
+                    return
+                if si in set(_h0):
+                    break            # 벌써 보인다 — 아래 루프가 이어서 센다
+                if int(si) not in getattr(self, "_last_sleep", set()):
+                    break            # 안 자고 있다 — 기다릴 이유가 없다
+                _slept_wait += 1
+                nap(random.uniform(*FIX_CLICK_WAKE_GAP))
+            if _slept_wait:
+                _awake = int(si) not in getattr(self, "_last_sleep", set())
+                click_log(f"[클릭확인] #{si:02d} 😴 절전 화면이 사라지기를 "
+                          f"{time.time() - _t0:.1f}초 기다렸다 — "
+                          + ("깨어났다 ✔" if _awake
+                             else f"⚠ 아직 자고 있다 ({FIX_CLICK_WAKE_MAX:.0f}초 한도)"))
             for k, _d in enumerate(_looks):
                 nap(random.uniform(*_d))
                 if self._is_busy():
@@ -23053,6 +23104,8 @@ class App(tk.Tk):
                     _seen[si] = _seen.get(si, 0) + 1
                     self._fix_seen2 = _seen
                     if _seen[si] < FIX_SEE_ADD:
+                        # 🚦 다음 확인에서 못 보면 **0 으로 되돌린다** (아래) —
+                        #    그래야 주석대로 진짜 '연속' 이 된다.
                         click_log(f"[클릭확인] #{si:02d} 십자가 보임 "
                                   f"({_seen[si]}/{FIX_SEE_ADD}번째) — 한 번 더 봐야 올린다")
                         continue
@@ -23066,10 +23119,27 @@ class App(tk.Tk):
                         f"🩹 #{s:02d} 복구해야함 — 클릭한 클라에서 십자가를 봤습니다 "
                         f"(누르거나, {FIX_IDLE_SEC//60}분 쉬면 자동 복구)"))
                     return
+                else:
+                    # 🚦 **못 봤으면 센 것을 되돌린다** — 누적이 아니라 **연속**이다.
+                    #    (예전엔 누적이라 '1/2' 가 영영 남아 있었다)
+                    _z = getattr(self, "_fix_seen2", {})
+                    if _z.pop(si, None):
+                        self._fix_seen2 = _z
                 if int(si) in getattr(self, "_last_sleep", set()):
                     _saw_sleep = True
             # ── 여기까지 왔다 = 본 횟수만큼 전부 안 보였다 ──
             if not _in_list:
+                # 🗒 **왜 못 봤는지 남긴다** — 조용히 빠지면 원인을 짚을 수 없다.
+                #    (2026-11-06 사용자: "마우스로 절전해제하면 십자가 인식을 못해")
+                try:
+                    _sv = dict(getattr(self, "_last_scores", None) or [])
+                    click_log(f"[클릭확인] #{si:02d} 십자가 안 보임 — 점수 "
+                              f"{_sv.get(int(si), 0):.2f}(기준 "
+                              f"{getattr(self, '_warn_need', WARN_MATCH):.2f}) · "
+                              f"{len(_looks)}번 봤다"
+                              + (" · 절전 중이었다" if _saw_sleep else ""))
+                except Exception:
+                    pass
                 return                            # 목록에 없으면 할 일이 없다
             if _saw_sleep:
                 # 자고 있었다 — 십자가가 가려진 것뿐이다. **지우지 않는다.**
@@ -27540,8 +27610,12 @@ class App(tk.Tk):
             self._clear_busy("절전해제")
             self.after(0, self._restore_back_quiet)   # 앞으로 띄우지 않고 바로 맨 뒤로
         # (2026-08-10) F11(절전해제) 끝나면 경고영역을 확인한다
+        # 🔆 **ESC 닫기(2000ms) 뒤에 본다** (2026-11-06). 그 전에는 절전 화면이
+        #    아직 남아 있거나 인벤토리가 십자가를 가려서 전부 0.4대로 나왔다.
+        #    🚫 1200ms 로 되돌리지 말 것.
         try:
-            self.after(1200, lambda: self._check_scan(quiet=True))
+            self.after(WARN_AFTER_WAKE, lambda: self._check_scan(quiet=True))
+            self.after(WARN_WAKE_AGAIN, lambda: self._check_scan(quiet=True))
         except Exception:
             pass
         # 🚪 (2026-10-17) 절전이 풀렸을 때 **인벤토리·상점이 열려 있으면 닫는다.**
