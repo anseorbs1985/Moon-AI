@@ -4527,8 +4527,12 @@ def fix_tab_base():
         return IMG_BASE_W
 
 
-def fix_tab_find(big, nm):
-    """🗂 그 그림을 창 안에서 찾는다 → (좌상단x, 좌상단y, 폭, 높이, 점수) 또는 None."""
+def fix_tab_find(big, nm, lo=False):
+    """🗂 그 그림을 창 안에서 찾는다 → (좌상단x, 좌상단y, 폭, 높이, 점수) 또는 None.
+
+    `lo=True` 면 **기준에 못 미쳐도** 가장 닮은 자리를 돌려준다 — 못 찾았을 때
+    **최고 점수를 기록으로 남기려고** 쓴다.
+    🚫 `lo=True` 로 받은 자리를 **누르지 말 것** (기준을 안 넘은 자리다)."""
     try:
         import cv2, numpy as np
         p = fix_tab_img(nm)
@@ -4549,7 +4553,7 @@ def fix_tab_find(big, nm):
             _, mx, _, loc = cv2.minMaxLoc(r)
             if best is None or mx > best[4]:
                 best = (loc[0], loc[1], t2.shape[1], t2.shape[0], float(mx))
-        if best and best[4] >= FIX_TAB_MATCH:
+        if best and (lo or best[4] >= FIX_TAB_MATCH):
             return best
         return None
     except Exception:
@@ -25261,6 +25265,37 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _fix_tab_look(self, c1, nm, ko, si):
+        """🗂 그 탭을 **보일 때까지 다시 본다** → (big, tb) · 못 찾으면 (big, None).
+
+        🚨 **한 번만 보고 넘어가면 안 된다** (2026-11-06 사용자 신고:
+           *"경험치 복구만 하고 **장비 복구가 안 돼** … 전혀 안 하고 꺼버린다"*).
+           탭을 바꾸거나 복구를 한 직후에는 **목록이 다시 그려지는 중**이라
+           그 순간 찍으면 탭 글자가 안 나온다. `[모두 복구]` 는 `FIX_TAB_TRIES` 번
+           보면서 **탭 자체는 한 번뿐**이었던 것이 구멍이었다.
+        🗒 못 찾으면 **최고 점수와 화면을 남긴다** — 로컬에서 원인을 짚는
+           유일한 통로다. 🚫 지우지 말 것."""
+        big, tb, best = None, None, 0.0
+        for _t in range(FIX_TAB_TRIES):
+            big = grab_window(c1)
+            if big is not None:
+                tb = fix_tab_find(big, nm)
+                if tb:
+                    return big, tb
+                try:
+                    _b = fix_tab_find(big, nm, lo=True)
+                    if _b:
+                        best = max(best, float(_b[4]))
+                except Exception:
+                    pass
+            if _t < FIX_TAB_TRIES - 1:
+                self._fix_nap(*FIX_TAB_RETRY)
+        click_log(f"fix #{si:02d} 🗂 [{ko}] ⚠ **탭을 못 찾았다** "
+                  f"(최고 {best:.2f} · 기준 {FIX_TAB_MATCH} · "
+                  f"{FIX_TAB_TRIES}번 봤다)")
+        self._fix_tab_shot(si, big, nm + "_notab")
+        return big, None
+
     def _fix_tabs_work(self, si, idx):
         """🗂 **탭 두 개를 돌며 [모두 복구]** — 복구의 새 흐름 (2026-11-06).
 
@@ -25271,7 +25306,7 @@ class App(tk.Tk):
 
         🚫 **다야(파란 동전)면 그 탭을 건너뛰고 💎 표시**한다 (사용자 지시).
         🚫 그림(`fix_tab_exp/tab_item/all`)이 없으면 이 길로 오지 않는다."""
-        _did, _paid = False, False
+        _did, _paid, _notab = False, False, False
         try:
             slots = self.cfg.get("fix_slots") or []
             slot = slots[idx] if idx < len(slots) else {}
@@ -25296,12 +25331,13 @@ class App(tk.Tk):
                 return
             L, T = rect[0], rect[1]
             for _nm, _ko in (("tab_exp", "경험치 복구"), ("tab_item", "아이템 복구")):
-                big = grab_window(c1)
+                #   🔁 **보일 때까지 다시 본다** — 한 번만 보면 화면이 덜 그려진
+                #      순간에 그대로 건너뛴다 (장비 복구가 통째로 빠지던 원인).
+                big, tb = self._fix_tab_look(c1, _nm, _ko, si)
                 if big is None:
                     click_log(f"fix #{si:02d} 🗂 ⚠ 창을 못 찍었다"); break
-                tb = fix_tab_find(big, _nm)
                 if not tb:
-                    click_log(f"fix #{si:02d} 🗂 [{_ko}] 탭을 못 찾았다 — 건너뛴다")
+                    _notab = True
                     continue
                 # ② **먼저 그 탭으로 바꾼다** — 그래야 숫자를 제대로 읽는다.
                 #    🚨 **선택 안 된 탭은 글자가 어두워서** 숫자가 있어도 잉크가
@@ -25455,6 +25491,15 @@ class App(tk.Tk):
             try:
                 big = grab_window(c1)
                 tb = fix_tab_find(big, "tab_item") if big is not None else None
+                if not tb and _notab:
+                    #   🚪 탭을 못 찾았으면 ✕ 자리도 모른다 → **ESC 로 닫는다.**
+                    #      안 닫으면 복구 창이 열린 채 남아 다음 복구가 통째로 막힌다.
+                    #      🚫 창이 다 닫힌 뒤 더 누르면 "게임을 종료 하시겠습니까?"
+                    #         가 뜨므로 **한 번만** 누르고 바로 치운다.
+                    press_esc(1)
+                    click_log(f"fix #{si:02d} 🚪 탭을 못 찾아 **ESC 로 닫았다**")
+                    self._fix_nap(0.3, 0.5)
+                    self._fix_quit_clear(si, anc, "ESC 로 닫은 뒤")
                 if tb:
                     k = big.shape[1] / float(fix_tab_base() or IMG_BASE_W)
                     cx = L + tb[0] + int(FIX_TAB_CLOSE[0] * k)
