@@ -849,6 +849,16 @@ SUHO_BLIND_MAX   = 3
 #       비용: 창 한 번 찍기(130ms) + 제목 대조(60ms) ≈ 0.2초 → 1.2초마다면 **16%**.
 #       백그라운드 스레드라 화면은 안 멈춘다. `suho_auto_on` 을 끄면 **비용 0**.
 SUHO_POLL_MS     = 400
+#    🔁 **스윕** — 맨 앞 창에 없으면 **다른 창도 돌아본다** (2026-11-06 사용자 신고
+#       *"활성화를 해도 인식을 안 해"*). `_suho_rect` 가 ① 맨 앞 창 … ⑤ 제일 큰 창
+#       순으로 고르는데, **546 창 16개는 크기가 같아** ⑤ 에서 아무 창이나 골랐다.
+#       그래서 수호성을 띄워놓고 **딴 창을 클릭하면 영영 못 찾았다**
+#       (그때 실측 — 띄워둔 #15 의 진입창 점수는 **1.000**. 인식이 아니라
+#        **엉뚱한 창을 보고 있었던 것**이다).
+#    ⚠ 16개를 한꺼번에 훑으면 **498ms** (창 하나 31ms · 2026-11-06 실측)라
+#       폴링(0.4초)을 감당할 수 없다. 그래서 **한 틱에 몇 개씩**만 본다.
+SUHO_SWEEP_N     = 2                 # 한 틱에 돌아볼 창 수 (16개 한 바퀴 ≈ 3초)
+SUHO_SWEEP_IDLE  = 3.0               # 한 바퀴 돌아 아무것도 없으면 쉬는 초
 #    ⓪ **진입부터** 한다 (2026-11-05 사용자: *"진입할 때부터 하자. 내가 수호성만
 #       클릭하면 너가 **활성화 클릭하고 들어가서** 카드 까주라"*).
 #       수호성 트리에서 칸을 누르면 뜨는 **'수호성 정보'** 창의 [활성화] 를 누른다.
@@ -8596,10 +8606,16 @@ class App(tk.Tk):
                   command=lambda: self._run_awaken(by_user=True, src="메인런처 ▶")).pack(side="left", padx=(2, 0))
         # 🌙 수호성 — **각성 옆에** (2026-11-05 사용자 지시: "각성 옆에 배치해놔").
         #    설정·진단 창일 뿐이다 — 실행은 화면이 뜨면 **자동으로** 돈다.
-        tk.Button(_aw, text="🌙 수호" + chr(10) + "성", font=("맑은 고딕", 8, "bold"),
+        _sb = tk.Button(_aw, text="🌙수호성" + chr(10) + "켬",
+                  font=("맑은 고딕", 8, "bold"),
                   bg="#5b2c6f", fg="white", activebackground="#4a235a",
-                  width=4, height=2,
-                  command=self._open_suho_win).pack(side="left", padx=(4, 0))
+                  width=5, height=2,
+                  command=self._open_suho_win)
+        _sb.pack(side="left", padx=(4, 0))
+        self._suho_onoff_btn = _sb   # 🚫 _suho_btn 은 **색 덩어리 찾는 메서드** 다
+        #   🖱 **오른쪽 클릭 = 켬/끔** (왼쪽 클릭은 그대로 설정·진단 창)
+        _sb.bind("<Button-3>", lambda e: self._suho_set_auto(None))
+        self._suho_btn_sync()
         tk.Button(btn_row, text="🔑 계정\n관리",
             font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
             activebackground="#0e6655", width=7, height=2,
@@ -11438,6 +11454,47 @@ class App(tk.Tk):
             pass
         return sorted(out, key=lambda q: (q[1] // 200, q[2]))
 
+    def _suho_sweep(self, skip=()):
+        """🔁 **한 틱에 창 몇 개씩** 돌며 수호성 화면을 찾는다 → (rect, 이유).
+
+        맨 앞 창(① )에 없을 때의 **보험**이다. 사용자가 그 클라를 클릭해 띄운
+        경우는 ① 로 0.4초 안에 잡히므로 스윕까지 올 일이 없다.
+        ⚠ `SUHO_SWEEP_N` 개만 보고 돌아간다 — 16개를 한꺼번에 훑으면 498ms 라
+          폴링을 감당할 수 없다. 한 바퀴 다 돌아 **아무것도 없으면
+          `SUHO_SWEEP_IDLE` 초 쉰다** (수호성 창이 없는 평소 비용을 낮춘다).
+        찾으면 그 창을 `_suho_hwnd` 에 기억해 **다음부터는 ④ 로 바로** 잡는다.
+        🚫 이 스윕을 없애지 말 것 — 없애면 '딴 창을 보고 있으면 못 찾는' 상태로 돌아간다."""
+        try:
+            if time.time() - getattr(self, "_suho_sweep_rest", 0.0) < SUHO_SWEEP_IDLE:
+                return None, ""
+            ws = [w for w in self._suho_wins() if w[0] not in skip]
+            if not ws:
+                return None, ""
+            i = int(getattr(self, "_suho_sweep_i", 0))
+            if i >= len(ws):
+                i = 0
+            for _ in range(max(1, SUHO_SWEEP_N)):
+                if i >= len(ws):                   # 한 바퀴 돌았다 → 잠깐 쉰다
+                    i = 0
+                    self._suho_sweep_rest = time.time()
+                    break
+                w = ws[i]; i += 1
+                img = self._suho_grab(w)
+                if img is None:
+                    continue
+                ok, why = self._suho_tpl_seen(img, suho_info_list()), "진입창"
+                if not ok and self._suho_tpl_seen(img, suho_screen_list()):
+                    if self._suho_cards(w):
+                        ok, why = True, "카드"
+                if ok:
+                    self._suho_sweep_i = i
+                    self._suho_hwnd = w[0]
+                    return w, f"{why}(스윕 — {w[5]})"
+            self._suho_sweep_i = i
+        except Exception:
+            pass
+        return None, ""
+
     def _suho_find_work(self, skip=()):
         """🔎 **할 일이 있는 다음 창**을 찾는다 → rect 또는 None (2026-11-06 사용자:
         *"내가 창을 만약 여러 개 띄워놓으면 어떻게 할래"*).
@@ -11537,11 +11594,15 @@ class App(tk.Tk):
             return True          # 감시를 못 켜는 환경이면 막지 않는다
 
     def _suho_stop_now(self):
+        """■ 멈춤 — 돌던 것을 멈추고 **자동도 끈다**.
+
+        🚫 자동을 켜둔 채 멈추면 `SUHO_RERUN_COOL`(3초) 뒤에 **또 돈다**.
+          2026-11-06 에 사용자가 *"멈춰봐"* 라고 했는데 계속 돌아서
+          `coords.json` 을 손으로 고쳐야 했다 — 그래서 여기서 끈다
+          (2026-08-10 규칙 — *멈췄다 다시 이어가는 개념은 없다*).
+        끔 상태는 **버튼에 보이므로** 잊어버릴 일은 없다."""
         self._suho_stop = True
-        try:
-            self.status.set("🌙 멈추는 중...")
-        except Exception:
-            pass
+        self._suho_set_auto(False)
 
     def _suho_regrab(self):
         """🖼 지금 창에서 '수호성 찾기' 글자를 **자동으로 다시 잘라** 등록한다.
@@ -11660,7 +11721,12 @@ class App(tk.Tk):
                 # 제목은 보인다 — 카드가 실제로 깔렸는지만 확인한다
                 if self._suho_cards(rect):
                     ok, why = True, "카드"
-            v = 1.0 if ok else 0.0
+            # 🔁 그 창에 없으면 **다른 창도 돌아본다** (한 틱에 몇 개씩).
+            #    이게 없으면 수호성을 띄워놓고 딴 창을 클릭했을 때 영영 못 찾는다.
+            if not ok and not getattr(self, "_suho_lock", None):
+                _sw, _swy = self._suho_sweep(skip=(rect[0],))
+                if _sw:
+                    rect, ok, why = _sw, True, _swy
             if not ok or not rect:
                 self._suho_latch = None
                 return
@@ -11714,6 +11780,59 @@ class App(tk.Tk):
             self._run_suho(src="화면 보고 자동")
         except Exception:
             pass
+
+    def _suho_btn_sync(self):
+        """🌙 메인런처 버튼에 **켬/끔을 보여준다** (2026-11-06 사용자 신고).
+
+        예전엔 켬/끔이 **수호성 창 안에만** 있어서, 꺼둔 것을 잊고
+        *"활성화를 해도 인식을 안 해"* 로 한참 헤맸다 (실측 — 그때 진입창
+        인식 점수는 **1.000** 이었다. 인식이 아니라 **꺼져 있던 것**이다).
+        👉 **상태는 늘 보이게 둘 것.** 이 동기화를 빼지 말 것."""
+        on = bool(self.cfg.get("suho_auto_on", True))
+        b = getattr(self, "_suho_onoff_btn", None)
+        try:
+            if b is not None and b.winfo_exists():
+                b.configure(text="🌙수호성" + chr(10) + ("켬" if on else "끔"),
+                            bg="#5b2c6f" if on else "#7f8c8d",
+                            activebackground="#4a235a" if on else "#5d6d7e")
+        except Exception:
+            pass
+        f = getattr(self, "_suho_win_sync", None)
+        if f is not None:
+            try:
+                f()
+            except Exception:
+                pass
+
+    def _suho_set_auto(self, on=None):
+        """🌙 자동을 켜고 끈다. `on=None` 이면 토글. 바뀐 값을 돌려준다.
+
+        켜고 끄는 길이 **세 곳**(메인 버튼 오른쪽클릭 · 수호성 창 토글 ·
+        ■ 멈춤)이라 **이 함수 하나로 모았다** — 한쪽만 고치는 사고를 막는다.
+        🚫 다른 곳에서 `cfg["suho_auto_on"]` 를 직접 쓰지 말 것."""
+        cur = bool(self.cfg.get("suho_auto_on", True))
+        new = (not cur) if on is None else bool(on)
+        self.cfg["suho_auto_on"] = new
+        try:
+            save_cfg(self.cfg)
+        except Exception:
+            pass
+        if not new:
+            self._suho_stop = True        # 돌고 있으면 바로 멈춘다
+            self._suho_latch = None
+        if new != cur:
+            click_log("[수호성] 🌙 자동 **" + ("켰다" if new else "껐다") + "** — "
+                      + ("수호성 화면이 뜨면 바로 돌린다"
+                         if new else "화면을 보지도 않는다 (비용 0)"))
+        msg = ("🌙 수호성 자동 **켬** — 화면이 뜨면 바로 돌립니다"
+               if new else "🌙 수호성 자동 **끔** — 화면을 보지 않습니다")
+        #   ⚠ 스레드에서도 불린다 → 화면 손질은 `after(0, …)` 로 넘긴다
+        try:
+            self.after(0, lambda: self.status.set(msg))
+            self.after(0, self._suho_btn_sync)
+        except Exception:
+            self._suho_btn_sync()
+        return new
 
     def _open_suho_win(self, reuse=False):
         """🌙 수호성 설정 창 — 횟수·끌기 거리·진단. **평소엔 안 띄운다.**
@@ -11776,17 +11895,27 @@ class App(tk.Tk):
                   command=self._suho_regrab).pack(side="left")
 
         v_on = tk.StringVar()
+        b_on = tk.Button(win, textvariable=v_on, font=("맑은 고딕", 10, "bold"),
+                         fg="white", width=38,
+                         command=lambda: self._suho_set_auto(None))
 
         def _sync():
-            v_on.set("🌙 수호성 화면이 뜨면 **바로 돌리기** "
-                     + ("(켬)" if self.cfg.get("suho_auto_on", True) else "(끔)"))
-
-        def _tog():
-            self.cfg["suho_auto_on"] = not self.cfg.get("suho_auto_on", True)
-            save_cfg(self.cfg); _sync()
+            try:
+                if not win.winfo_exists():
+                    return
+            except Exception:
+                return
+            on = bool(self.cfg.get("suho_auto_on", True))
+            v_on.set("🌙 화면이 뜨면 바로 돌리기 — "
+                     + ("켬 ✔" if on else "끔 ✘  (지금은 화면을 보지도 않습니다)"))
+            try:
+                b_on.configure(bg="#27ae60" if on else "#c0392b",
+                               activebackground="#1e8449" if on else "#922b21")
+            except Exception:
+                pass
+        self._suho_win_sync = _sync
         _sync()
-        tk.Button(win, textvariable=v_on, font=("맑은 고딕", 9),
-                  command=_tog).pack(pady=(6, 2))
+        b_on.pack(pady=(6, 2))
         tk.Label(win, font=("맑은 고딕", 8),
                  text="카드 6장 중 무작위로 하나를 눌러 아래로 끌어내립니다 "
                       "(사용자 지시 — 전부 랜덤)").pack()
@@ -37175,6 +37304,13 @@ class App(tk.Tk):
         self._dragon_stop    = True
         self._suho_stop      = True   # 🌙 수호성 — [■ 멈춤] 으로 즉시 멈춘다
         self._suho_latch     = None   #    멈춘 뒤 그 화면에서 또 안 걸리게
+        #   🚫 **자동도 끈다** — 켜둔 채 멈추면 3초 뒤에 또 돈다.
+        #      버튼에 '끔' 이 보이므로 꺼둔 것을 잊어버릴 일은 없다 (2026-11-06)
+        try:
+            if self.cfg.get("suho_auto_on", True):
+                self._suho_set_auto(False)
+        except Exception:
+            pass
         self._knight_stop    = True
         self._eventshop_stop = True
         self._fish_stop      = True
