@@ -1835,6 +1835,65 @@ def card_pick_open(names, anchor):
         return None, u"오류 %s" % e
 
 
+# 🗡 **라스타바드 그림·📐 범위를 자른 그때의 창 가로** (2026-11-07).
+#   창을 491 → 546 으로 키우면서(11-03) 좌표는 역산했는데 **그림·범위는 그대로**
+#   둬서 1.112배 어긋나 있었다. 섬 실행기에는 `img_k` 같은 보정이 한 줄도 없었다.
+#   👉 이 값만 두면 **그림을 다시 안 자르고도** 어느 창 크기에서나 맞는다
+#      (런처의 `IMG_BASE_W` 와 같은 방식).
+#   ⚠ 그림을 **546 창에서 다시 받으면** 이 값을 546 으로 바꿔야 한다.
+RASTA_BASE_W = 491
+#   창 크기 비율은 딱 맞지 않을 수 있다(테두리·HUD 가 비례하지 않는다) →
+#   그 둘레로 조금 흔들어 보고 **가장 잘 맞는 것**을 쓴다.
+#   🚫 용던고고처럼 0.80~1.25 를 넓게 훑지 말 것 — 라스타바드는 '똑같이 생긴 큐브
+#      둘 중 하나' 를 고르는 일이라 넓게 훑으면 헛걸림이 올라간다.
+RASTA_K_STEPS = (1.00, 0.94, 1.06)
+
+
+def rasta_k(win_w):
+    """창 가로 → 그림·범위에 곱할 배율 (491 창이면 1.0 = 예전과 똑같다)."""
+    try:
+        return max(0.5, min(2.5, float(win_w) / float(RASTA_BASE_W)))
+    except Exception:
+        return 1.0
+
+
+def rasta_tpl(j, k=1.0):
+    """칸 j 의 그림을 읽어 배율 k 로 맞춘다 (한글 경로 → `imdecode`)."""
+    import cv2, numpy as np
+    q = rasta_img_path(j)
+    t = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
+    if t is None:
+        return None
+    if abs(k - 1.0) > 0.01:
+        w2 = max(2, int(round(t.shape[1] * k)))
+        h2 = max(2, int(round(t.shape[0] * k)))
+        t = cv2.resize(t, (w2, h2),
+                       interpolation=cv2.INTER_AREA if k < 1 else cv2.INTER_CUBIC)
+    return t
+
+
+def rasta_best_res(j, big, k0):
+    """배율을 몇 개 흔들어 보고 **최고점이 가장 높은 것**을 돌려준다.
+
+    → (res, 그림) · 못 읽으면 (None, None).
+    ⚠ 배율마다 `res` 크기가 다르므로 **고른 배율의 res 로만** 후보를 뽑아야 한다."""
+    import cv2
+    best = None
+    for f in RASTA_K_STEPS:
+        t = rasta_tpl(j, k0 * f)
+        if t is None:
+            continue
+        if big.shape[0] < t.shape[0] or big.shape[1] < t.shape[1]:
+            continue
+        r = cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED)
+        m = float(r.max())
+        if best is None or m > best[0]:
+            best = (m, r, t)
+    if best is None:
+        return None, None
+    return best[1], best[2]
+
+
 def rasta_area_path(j):
     """📐 칸 j 의 '그림을 찾을 범위' 파일 — 클라 창 왼쪽위 기준 {dx,dy,w,h}."""
     return os.path.join(IMG_DIR, f"rasta_{j+1:02d}_area.json")
@@ -1866,7 +1925,12 @@ def rasta_crop(j, big):
     a = rasta_area(j)
     if not a:
         return big, 0, 0
-    dx, dy, w, h = a
+    #   🗡 **창 크기 비율로 늘린다** (2026-11-07) — 범위는 `RASTA_BASE_W` 창에서
+    #      잡은 것이다. 창이 커지면 게임 UI 도 비례해 커지므로 범위도 같이 늘려야
+    #      한다. 실측: 546 창에서 `(150,40) 240x170` → `(167,44) 267x189`.
+    #      🚫 이 보정을 빼지 말 것 — 빼면 대상이 범위 밖으로 나가 못 찾는다.
+    _k = rasta_k(big.shape[1])
+    dx, dy, w, h = [int(round(v * _k)) for v in a]
     H, W = big.shape[:2]
     x0, y0 = max(0, dx), max(0, dy)
     x1, y1 = min(W, dx + w), min(H, dy + h)
@@ -1889,12 +1953,12 @@ def rasta_find_all(j, anchor):
         if not got:
             return [], 0.0
         big, (ox, oy) = got
+        _k = rasta_k(big.shape[1])              # 🗡 창 크기 보정 (크롭 **전**에 잰다)
         big, _cx, _cy = rasta_crop(j, big)      # 📐 정해둔 범위 안만 본다
         ox += _cx; oy += _cy
-        tpl = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
-        if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
+        res, tpl = rasta_best_res(j, big, _k)
+        if res is None:
             return [], 0.0
-        res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
         thr = rasta_thr(j)
         mx = float(res.max())
         th, tw = tpl.shape[0], tpl.shape[1]
@@ -1930,12 +1994,12 @@ def rasta_find(j, anchor, pick="top"):
         if not got:
             return None, None, 0.0
         big, (ox, oy) = got
+        _k = rasta_k(big.shape[1])              # 🗡 창 크기 보정 (크롭 **전**에 잰다)
         big, _cx, _cy = rasta_crop(j, big)      # 📐 정해둔 범위 안만 본다
         ox += _cx; oy += _cy
-        tpl = cv2.imdecode(np.fromfile(q, np.uint8), cv2.IMREAD_COLOR)
-        if tpl is None or big.shape[0] < tpl.shape[0] or big.shape[1] < tpl.shape[1]:
+        res, tpl = rasta_best_res(j, big, _k)
+        if res is None:
             return None, None, 0.0
-        res = cv2.matchTemplate(big, tpl, cv2.TM_CCOEFF_NORMED)
         thr = rasta_thr(j)
         mx = float(res.max())
         ys, xs = np.where(res >= thr)
@@ -4421,6 +4485,37 @@ class IslandApp(tk.Tk):
                 except Exception:
                     pass
 
+    @staticmethod
+    def _rec_to_slot(ev, rects, src, idx):
+        """⏺ 녹화의 **마우스 좌표를 그 슬롯 클라로 옮긴다** (2026-11-07).
+
+        🚨 프리셋 녹화는 **기준슬롯(`src`)에서 찍은 절대좌표**다. 보정하지 않으면
+           어느 슬롯에 적용해도 **늘 그 기준 클라를 누른다** —
+           실측: `src=5` 프리셋을 #04·#12 에 적용했는데 둘 다 `(991,117)` =
+           **5번 클라(스크롤)** 를 눌렀다.
+        🧭 `mov` 는 `rel + rects[idx]` 로 이미 이렇게 하고 있었다. `rec` 만 빠져 있었다.
+        ⚠ 키 입력(`kd`/`ku`)은 좌표가 없으므로 그대로 둔다.
+        ⚠ 클라를 못 찾으면(`rects` 없음) **건드리지 않는다** — 모를 때는 그대로.
+        """
+        out = []
+        dx = dy = 0
+        try:
+            if rects and 0 <= src < len(rects) and 0 <= idx < len(rects):
+                dx = rects[idx][0] - rects[src][0]
+                dy = rects[idx][1] - rects[src][1]
+        except Exception:
+            dx = dy = 0
+        for e in (ev or []):
+            e = list(e)
+            if (dx or dy) and len(e) >= 4:
+                try:
+                    e[2] = int(e[2]) + dx
+                    e[3] = int(e[3]) + dy
+                except Exception:
+                    pass
+            out.append(e)
+        return out
+
     def _apply_preset(self, key, idx, pi):
         """슬롯 팝업의 프리셋 버튼 — 이 슬롯의 해당 번호만 삭제/이동 (나머지는 그대로)."""
         pr = self._presets(key)[pi]
@@ -4478,7 +4573,11 @@ class IslandApp(tk.Tk):
                 # 이 번호는 좌표 대신 '동영상(녹화)'을 쓴다
                 cs[j] = None
                 if j < len(ds): ds[j] = None
-                rc[str(j)] = list(it.get("ev") or [])
+                #   🚨 **그 슬롯 클라로 옮긴다** (2026-11-07) — 안 하면 늘
+                #      기준슬롯(src) 클라를 누른다. `mov` 와 같은 규칙.
+                rc[str(j)] = self._rec_to_slot(
+                    it.get("ev"), rects,
+                    max(0, int(pr.get("src", 1)) - 1), idx)
                 (slot.get("recs_off") or {}).pop(str(j), None)
                 movs.append(j + 1)
             else:
