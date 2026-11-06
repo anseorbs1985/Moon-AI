@@ -1348,6 +1348,8 @@ DEFAULT_CFG = {
     "tj_slots":      None,              # TJ성공!! — 16슬롯 × 좌표4 (인형탐험식 실행)
     "tj_front_added": False,            # 좌표를 맨 앞에 한 번 밀었나 (2026-10-07)
     "seq_speed_20261105": False,        # 🔆 절전해제 간격을 코드 기본으로 한 번 당겼나
+    "suho_auto_20261106": False,        # 🌙 수호성 자동을 한 번 되살렸나
+    "suho_close_on": True,              # 🌙 화면을 벗어나면 수호성 창을 치울까
     "pass_slots":   [{"name": "미등록", "coords": [None]*PASS_CLICKS} for _ in range(PASS_SLOTS)],
     "seq_slots":    [None]*SEQ_SLOTS,   # 연속 클릭 좌표 (각 [x,y] 또는 None)
     "seq_hotkey":   None,               # 연속 클릭 실행 단축키 (가상키 코드)
@@ -1706,6 +1708,24 @@ def load_cfg():
                               + " · ".join(_moved))
                 except Exception:
                     pass
+        # 🌙 **수호성 자동은 늘 켜둔다** (2026-11-06 사용자 지시 —
+        #    *"항상 온으로 해두고 각성처럼 그 화면일 때만 하는 거 어때"*).
+        #    예전 ■ 멈춤 이 **자동을 꺼버려서**, 한 번 멈추면 사용자가 다시
+        #    켜야 했다. 이제 멈춤은 **걸쇠만 채우고**(`_suho_hold`) 자동은
+        #    그대로 켠다 — 그래서 꺼져 있을 이유가 없다.
+        #    → 꺼진 채 저장돼 있는 컴퓨터를 **한 번만** 되살린다.
+        #    🚫 이 표시를 지우지 말 것 — 지우면 사용자가 일부러 끈 것을 또 켠다.
+        if not cfg.get("suho_auto_20261106"):
+            cfg["suho_auto_20261106"] = True
+            _CFG_FORCE.add("suho_auto_20261106")   # 표시가 디스크에 남아야 한 번만 돈다
+            if not cfg.get("suho_auto_on", True):
+                cfg["suho_auto_on"] = True
+                _CFG_FORCE.add("suho_auto_on")
+                try:
+                    click_log("[수호성] 🌙 자동이 꺼져 있어 **한 번만** 되살렸습니다 "
+                              "— 이제 ■ 멈춤 은 자동을 끄지 않습니다")
+                except Exception:
+                    pass
         # tj_slots (TJ성공!!) — 16슬롯 × 좌표 4 (맨 앞이 새 칸)
         nt = []
         for s in (cfg.get("tj_slots") or []):
@@ -1901,6 +1921,17 @@ def load_cfg():
     return _apply_local(dict(DEFAULT_CFG))
 
 
+# 🔑 **한 번만 하는 손질(migration)이 디스크에도 남게** 하려면 이 집합에
+#    그 키를 넣는다 (2026-11-06). `_cfg_disk_mark` 가 '출발점' 에서 그 키를
+#    빼므로, `save_cfg` 가 **'내가 바꾼 키'** 로 보고 다음 저장에 함께 쓴다.
+#    안 그러면 출발점이 **손질 뒤 값**이라(설계대로) 영영 저장되지 않고,
+#    **런처를 켤 때마다 같은 손질이 또 돈다** — 사용자가 일부러 끈 것을
+#    되살려버리는 사고가 된다.
+#    🚫 좌표처럼 **큰 키를 넣지 말 것** — 낡은 런처가 자기 옛 값으로
+#       덮어쓰는 통로가 된다 (2026-09-10 사고의 뿌리). 작은 설정값만.
+_CFG_FORCE = set()
+
+
 def _cfg_disk_mark(cfg):
     """이 프로세스의 '출발점'을 **마이그레이션까지 끝난 값**으로 잡는다 (2026-09-14).
 
@@ -1915,6 +1946,9 @@ def _cfg_disk_mark(cfg):
         _CFG_DISK = json.loads(json.dumps(
             {k: v for k, v in cfg.items() if k not in LOCAL_KEYS},
             ensure_ascii=False))
+        #   🔑 '한 번만' 손질한 키는 출발점에서 빼 **다음 저장에 함께 쓰이게** 한다
+        for _fk in _CFG_FORCE:
+            _CFG_DISK.pop(_fk, None)
     except Exception:
         _CFG_DISK = {}
 
@@ -11842,8 +11876,18 @@ class App(tk.Tk):
                     self._suho_swept = set()
                     self._suho_next = None
                 self._suho_busy = False
+                # ⏸ 사용자가 ■ 멈춤 을 눌렀으면 **그 화면에서는 다시 안 걸린다**
+                #    (걸쇠를 채운 채로 둔다 — 자동은 켠 그대로).
+                #    화면이 사라지면 걸쇠가 풀려 다시 뜰 때 또 돈다.
+                #    🚫 멈췄는데 걸쇠를 비우지 말 것 — 3초 뒤에 또 돈다.
+                if getattr(self, "_suho_stop", False):
+                    try:
+                        self._suho_hold()
+                    except Exception:
+                        pass
+                else:
+                    self._suho_latch = None  # 정상 종료 — 다시 뜨면 또 돈다
                 self._suho_lock = None
-                self._suho_latch = None      # 화면이 다시 뜨면 또 돈다
                 self._suho_done_at = time.time()
                 if _saved is not None:       # 숨긴 창을 원래대로 되돌린다
                     try:
@@ -12031,16 +12075,48 @@ class App(tk.Tk):
         except Exception:
             return True          # 감시를 못 켜는 환경이면 막지 않는다
 
-    def _suho_stop_now(self):
-        """■ 멈춤 — 돌던 것을 멈추고 **자동도 끈다**.
+    def _suho_hold(self):
+        """⏸ **지금 그 화면에서는 다시 걸지 않는다** — 걸쇠만 채운다.
 
-        🚫 자동을 켜둔 채 멈추면 `SUHO_RERUN_COOL`(3초) 뒤에 **또 돈다**.
-          2026-11-06 에 사용자가 *"멈춰봐"* 라고 했는데 계속 돌아서
-          `coords.json` 을 손으로 고쳐야 했다 — 그래서 여기서 끈다
-          (2026-08-10 규칙 — *멈췄다 다시 이어가는 개념은 없다*).
-        끔 상태는 **버튼에 보이므로** 잊어버릴 일은 없다."""
+        🌙 **자동(`suho_auto_on`)은 건드리지 않는다** (2026-11-06 사용자 지시 —
+           *"항상 온으로 해두고 **각성처럼 그 화면일 때만** 하는 거 어때"*).
+           예전에는 ■ 멈춤 이 자동을 **껐다** — 3초 뒤에 또 도는 것을 막으려고
+           그랬는데, 그러면 사용자가 **다시 켜야** 했다. 지금은 **각성과 같은
+           방식**으로 걸쇠(`_suho_latch`)만 채운다:
+             · 그 화면이 떠 있는 동안은 **다시 안 걸린다**
+             · 화면이 사라지면 걸쇠가 풀려(`_suho_latch = None`),
+               **다시 뜰 때 저절로 또 돈다**
+        🚫 여기서 `suho_auto_on` 을 끄지 말 것.
+        ⚠ 돌고 있을 때는 `_suho_lock`(그 창 손잡이)이 있으니 그것을 쓰고,
+          없으면 지금 고를 창을 찾아 채운다. `_suho_rect` 는 **화면을 캡처하지
+          않고** 창 목록만 보므로(실측 0.74ms) UI 스레드에서도 안전하다."""
+        try:
+            lk = getattr(self, "_suho_lock", None)
+            if lk:
+                try:
+                    import win32gui as _wg
+                    l, tp, r, b = _wg.GetWindowRect(lk)
+                    self._suho_latch = (lk, r - l, b - tp)
+                    return
+                except Exception:
+                    pass
+            r2 = self._suho_rect()
+            if r2:
+                self._suho_latch = (r2[0], r2[3], r2[4])
+        except Exception:
+            pass
+
+    def _suho_stop_now(self):
+        """■ 멈춤 — 돌던 것을 멈춘다. **자동은 그대로 켜둔다.**
+
+        🌙 2026-11-06 사용자 지시로 바뀌었다 — *"항상 온으로 해두고 각성처럼
+           그 화면일 때만 하는 거 어때"*. 멈춘 뒤 3초만에 또 도는 것은
+           **걸쇠**(`_suho_hold`)가 막는다: 그 화면이 떠 있는 동안은 안 걸리고,
+           **화면이 사라졌다 다시 뜰 때** 저절로 또 돈다.
+        🚫 여기서 `_suho_set_auto(False)` 를 다시 부르지 말 것 — 그러면
+           사용자가 매번 버튼으로 다시 켜야 한다."""
         self._suho_stop = True
-        self._suho_set_auto(False)
+        self._suho_hold()
 
     def _suho_regrab(self):
         """🖼 지금 창에서 '수호성 찾기' 글자를 **자동으로 다시 잘라** 등록한다.
@@ -12167,25 +12243,38 @@ class App(tk.Tk):
                     rect, ok, why = _sw, True, _swy
             if not ok or not rect:
                 self._suho_latch = None
+                #   🌙 **봤는데 수호성 화면이 아니다** → 창을 치운다 (각성과 같다)
+                self._suho_close_auto()
                 return
             key = (rect[0], rect[3], rect[4])
+            # 🔁 **사용자가 이미 ▶ 를 눌러 돌던 중이면 이어서 돈다.**
+            #    `_suho_next`(다음에 갈 창)는 **한 판이 끝날 때만** 정해지므로,
+            #    그게 있다는 것은 *"내가 시작 누르면 계속 작업해줘"* 그 상태다
+            #    (2026-11-06 사용자). 이때 창만 띄우면 **체인이 끊긴다.**
+            #    🚫 이 분기를 지우지 말 것 — 지우면 클라마다 ▶ 를 눌러야 한다.
+            if getattr(self, "_suho_next", None):
+                self._suho_latch = key
+                click_log("[수호성] 🔁 %s — 다음 창을 이어서 돌린다 "
+                          "(사용자가 ▶ 를 눌러 시작한 작업)" % why)
+                self._run_suho(src="다음 창 이어서")
+                return
             if getattr(self, "_suho_latch", None) == key:
                 return
             self._suho_latch = key
-            click_log(f"[수호성] 👀 {why} 을(를) 봤다 → **바로 돌린다** "
-                      f"(수호성 판만 떠 있을 때는 시작하지 않는다)")
-            self._run_suho(src="화면 보고 자동")
+            #   🌙 **돌리지 않는다 — 창만 띄운다** (2026-11-06 사용자 지시)
+            self._suho_show_win(why)
         except Exception:
             pass
 
     def _suho_auto(self, xy):
-        """사람이 클라를 클릭했을 때 — **수호성 화면이면 바로 돌린다.**
+        """사람이 클라를 클릭했을 때 — **수호성 화면이면 창을 띄운다.**
 
-        ⚠ 각성과 **다르다**: 각성은 창만 띄우고 사용자가 ▶ 를 누르지만,
-          수호성은 사용자 지시로 **무조건 바로 실행**한다
-          (*"이 화면이 뜨면은 너가 무조건 해줘. 각성이랑 달라"*).
-        걸쇠(`_suho_latch`)로 **같은 화면에서 두 번 걸리지 않게** 한다 —
-        한 번 돌면 끝날 때 풀리고, 화면이 다시 뜨면 또 돈다."""
+        🌙 **각성과 같다** (2026-11-06 사용자 지시 — *"각성처럼 해두고 …
+          내가 시작 누르면 … 화면이 다른 화면이면 각성처럼 꺼두고 어때"*).
+          창만 뜨고 **[▶ 지금 돌리기] 를 누를 때만** 돈다.
+        ⚠ 2026-11-05 의 *"무조건 바로 실행 — 각성이랑 달라"* 는 **폐지됐다.**
+        걸쇠(`_suho_latch`)로 **같은 화면에서 두 번 띄우지 않게** 한다 —
+        화면을 벗어나면 풀리고, 다시 뜨면 또 띄운다."""
         try:
             if not self.cfg.get("suho_auto_on", True):
                 return
@@ -12207,15 +12296,85 @@ class App(tk.Tk):
                 if ok:
                     break
             if not ok or not rect:
-                self._suho_latch = None   # 나갔다 → 다음에 뜨면 다시 돈다
+                self._suho_latch = None   # 나갔다 → 다음에 뜨면 다시 띄운다
+                self._suho_close_auto()   # 🌙 수호성 화면이 아니다 → 창을 치운다
                 return
             key = (rect[0], rect[3], rect[4])
             if getattr(self, "_suho_latch", None) == key:
                 return
             self._suho_latch = key
-            click_log(f"[수호성] 수호성 화면 확인 (일치도 {v:.2f}) → **바로 돌린다** "
-                      f"(사용자 지시 — 각성과 달리 ▶ 를 안 눌러도 된다)")
-            self._run_suho(src="화면 보고 자동")
+            #   🌙 **돌리지 않는다 — 창만 띄운다** (2026-11-06 사용자 지시)
+            self._suho_show_win("수호성 화면 (일치도 %.2f)" % v)
+        except Exception:
+            pass
+
+    def _suho_show_win(self, why="수호성 화면"):
+        """🌙 수호성 화면이 뜨면 **창만 띄운다. 돌리지 않는다.**
+
+        2026-11-06 사용자 지시 — *"각성처럼 해두고 화면을 수호성 시작 이런 식으로
+        하면 어때 / 그러면 **내가 시작 누르면** 활성화 버튼이 나오면 너가 계속
+        작업해주면 되지 않을까"*.
+        ⚠ 2026-11-05 의 *"이 화면이 뜨면은 너가 무조건 해줘. **각성이랑 달라**"* 는
+          **이 지시로 바뀌었다** — 이제 각성과 **같다**. 창만 뜨고,
+          **[▶ 지금 돌리기] 를 누를 때만** 돈다 (2026-08-10 최우선 규칙
+          *'실행은 사용자가 시킬 때만'* 과도 맞는다).
+        🚫 여기서 `_run_suho` 를 부르지 말 것.
+        ⚠ 창 조작은 **Tk 객체**라 `after(0, …)` 로 UI 스레드에 넘긴다.
+          (2026-10-19 의 '스레드에서 after 로 일을 넘기지 말 것' 은 **클릭 같은 일**
+           이야기다 — 창을 띄우는 것은 흘려져도 손해가 없다.)
+        ⚠ 반드시 **`reuse=True`** 로 부른다 — 그냥 부르면 창을 **다시 만들어**
+          사용자가 고쳐둔 횟수·끄는 거리가 날아간다 (2026-10-01 각성에서 배운 것)."""
+        try:
+            click_log("[수호성] 👀 %s 을(를) 봤다 → **수호성 창을 띄웠다** "
+                      "(실행은 [▶ 지금 돌리기] 를 누르실 때 시작합니다)" % why)
+        except Exception:
+            pass
+        try:
+            self.after(0, lambda: self.status.set(
+                "🌙 수호성 화면입니다 — [▶ 지금 돌리기] 를 누르세요"))
+        except Exception:
+            pass
+        try:
+            self.after(0, lambda: self._open_suho_win(reuse=True))
+        except Exception:
+            pass
+
+    def _suho_hide(self, win):
+        """수호성 창 숨기기 — UI 스레드에서만 부른다."""
+        try:
+            if win and win.winfo_exists():
+                win.withdraw()
+        except Exception:
+            pass
+
+    def _suho_close_auto(self, why="수호성 화면을 벗어났다"):
+        """🌙 **수호성 화면을 벗어나면 수호성 창을 치운다** (2026-11-06 사용자 지시 —
+           *"화면이 다른 화면이면 **각성처럼 꺼두고** 어때"*).
+
+        · **`destroy` 가 아니라 `withdraw`(숨김)** 다 — 고쳐둔 횟수·끄는 거리가
+          날아가지 않는다. 다시 수호성 화면이 뜨면 `_open_suho_win(reuse=True)` 이
+          `deiconify` 로 **그대로** 되살린다. 화면에서는 똑같이 사라진다.
+        · 🚫 **돌고 있으면 닫지 않는다** — 작업 중에 창이 사라지면 안 된다.
+        · 끄려면 `coords.json` 의 `suho_close_on` 을 false 로.
+        ⚠ **'봤는데 수호성 화면이 아니다' 일 때만** 부를 것. 자동이 꺼짐·다른 작업
+          중·쿨다운·사람이 마우스를 만짐 같은 이유로 **그냥 돌아간 길에서 부르면**
+          멀쩡한 창이 사라진다."""
+        try:
+            if not self.cfg.get("suho_close_on", True):
+                return
+            if getattr(self, "_suho_busy", False):
+                return                      # 돌고 있다 — 건드리지 않는다
+            win = getattr(self, "_suho_win", None)
+            if not (win and win.winfo_exists()):
+                return
+            try:
+                if not win.winfo_viewable():
+                    return                  # 이미 숨겨져 있다
+            except Exception:
+                pass
+            click_log("[수호성] %s → 수호성 창을 닫았다 "
+                      "(다시 수호성 화면이 뜨면 그대로 되살아난다)" % why)
+            self.after(0, lambda w=win: self._suho_hide(w))
         except Exception:
             pass
 
@@ -12260,9 +12419,11 @@ class App(tk.Tk):
             self._suho_latch = None
         if new != cur:
             click_log("[수호성] 🌙 자동 **" + ("켰다" if new else "껐다") + "** — "
-                      + ("수호성 화면이 뜨면 바로 돌린다"
+                      + ("수호성 화면이 뜨면 **창을 띄운다** "
+                         "(실행은 [▶ 지금 돌리기])"
                          if new else "화면을 보지도 않는다 (비용 0)"))
-        msg = ("🌙 수호성 자동 **켬** — 화면이 뜨면 바로 돌립니다"
+        msg = ("🌙 수호성 자동 **켬** — 화면이 뜨면 창을 띄웁니다 "
+               "(실행은 [▶ 지금 돌리기])"
                if new else "🌙 수호성 자동 **끔** — 화면을 보지 않습니다")
         #   ⚠ 스레드에서도 불린다 → 화면 손질은 `after(0, …)` 로 넘긴다
         try:
@@ -12344,7 +12505,7 @@ class App(tk.Tk):
             except Exception:
                 return
             on = bool(self.cfg.get("suho_auto_on", True))
-            v_on.set("🌙 화면이 뜨면 바로 돌리기 — "
+            v_on.set("🌙 화면이 뜨면 이 창 띄우기 — "
                      + ("켬 ✔" if on else "끔 ✘  (지금은 화면을 보지도 않습니다)"))
             try:
                 b_on.configure(bg="#27ae60" if on else "#c0392b",
@@ -38371,12 +38532,11 @@ class App(tk.Tk):
         self._market_stop    = True
         self._dragon_stop    = True
         self._suho_stop      = True   # 🌙 수호성 — [■ 멈춤] 으로 즉시 멈춘다
-        self._suho_latch     = None   #    멈춘 뒤 그 화면에서 또 안 걸리게
-        #   🚫 **자동도 끈다** — 켜둔 채 멈추면 3초 뒤에 또 돈다.
-        #      버튼에 '끔' 이 보이므로 꺼둔 것을 잊어버릴 일은 없다 (2026-11-06)
+        #   ⏸ **자동은 끄지 않는다** — 걸쇠만 채운다 (2026-11-06 사용자 지시).
+        #      그 화면이 떠 있는 동안은 다시 안 걸리고, **사라졌다 다시 뜰 때**
+        #      저절로 또 돈다 (각성과 같은 방식). 🚫 자동을 끄지 말 것.
         try:
-            if self.cfg.get("suho_auto_on", True):
-                self._suho_set_auto(False)
+            self._suho_hold()
         except Exception:
             pass
         self._knight_stop    = True
