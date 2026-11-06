@@ -4256,6 +4256,16 @@ def fix_quit_list():
 #       · 여러 개면 **[모두 복구]** 한 번
 FIX_TABS      = True                 # 끄면 예전(첫 줄 하나) 흐름으로 돌아간다
 FIX_TAB_MATCH = 0.70                 # 탭·[모두 복구] 그림 기준
+# 🧍 **사람이 하는 것처럼 — 여유를 둔다** (2026-11-06 사용자:
+#    *"복구하는 것도 스피드 있게 좋긴 한데 **사람이 하는 것처럼 약간의 여유시간**을
+#      줬으면. 어느 정도 다른 곳도 좀 클릭을 하고 … 너무 한 군데만 딱딱 클릭하면
+#      안 되고. 지금 속도의 **랜덤으로 20~50%** 까지는 여유 있을 것 같은데"*)
+#    🚫 값 하나로 고정하지 말 것 — 매번 다른 배수를 곱한다 (2026-09-07 상시 규칙).
+FIX_HUMAN_SLOW = (1.20, 1.50)        # 복구 흐름의 기다림에 곱하는 배수 (20~50% 여유)
+FIX_STRAY_P    = 0.30                # 이 확률로 **한 박자 더** 쉰다 (사람이 화면 보는 시간)
+FIX_STRAY_GAP  = (0.25, 0.70)
+#    ⚠ '다른 곳 클릭' 은 **같은 탭을 한 번 더 누르는 것**으로 한다 —
+#      빈 목록 줄을 누르면 **고른 줄(EXP)이 풀려** 버튼이 다시 회색이 된다.
 FIX_TAB_GAP   = (0.8, 1.2)           # 탭을 바꾼 뒤 기다림
 #    🚨 2026-11-06 실측 — 0.5~0.9 로는 **경험치 복구 탭이 다 안 그려져서**
 #       `[모두 복구] 를 못 찾았다` 로 빠졌다 (아이템 탭은 이미 선택돼 있어 됐다).
@@ -22242,6 +22252,34 @@ class App(tk.Tk):
                 json.dump({"slots": sorted(set(int(x) for x in slots))}, f)
         except Exception:
             pass
+        # 🔁 **목록에 남아 있으면 감시를 켠다** (2026-11-06 사용자:
+        #    *"복구해서 십자가가 없어졌으면 목록도 지워줘야 하잖아"* ·
+        #     *"가끔 그대로 복구해도 냅두는 경우가 많더라"*)
+        #    🚨 `_check_watch_tick` 은 목록이 비면 **스스로 멈추는데**,
+        #       다시 켜지는 길이 **F11 뿐**이었다. 그래서 복구 뒤
+        #       `_fix_verify` 가 한 번 놓치면 **정리해줄 사람이 없어** 그대로 남았다.
+        #    ✅ 목록이 비면 그 틱이 알아서 또 멈추므로 **부하 0**.
+        self._warn_watch_arm(slots)
+
+    def _warn_watch_arm(self, slots=None):
+        """🔁 목록에 남은 것이 있으면 **그 슬롯만 지켜보는 감시**를 켠다.
+
+        목록이 비면 `_check_watch_tick` 이 스스로 멈춘다 — 평소 부하 0.
+        🚫 이 되살리기를 없애지 말 것 — 없으면 복구한 글이 영영 남는다."""
+        try:
+            if slots is None:
+                slots = self._warn_load()
+            if not slots:
+                return
+            if getattr(self, "_check_watch_on", False):
+                return
+            self._check_watch_on = True
+            click_log(f"[경고확인] 🔁 목록에 {sorted(set(int(x) for x in slots))} 가 "
+                      f"남아 있어 **{WARN_IDLE_MS//1000}초마다 지켜본다** "
+                      f"(복구되면 알아서 지운다)")
+            self.after(WARN_IDLE_MS, self._check_watch_tick)
+        except Exception:
+            pass
 
     def _warn_add(self, slots):
         cur = set(self._warn_load()) | set(slots)
@@ -22448,6 +22486,11 @@ class App(tk.Tk):
                         self._fix_queue = q
                         self._fix_bulk_ready = False
                         self._fix_run_next()
+        except Exception:
+            pass
+        # 🔁 목록에 남은 것이 있으면 감시를 켠다 (꺼져 있을 때만 · 부하 0)
+        try:
+            self._warn_watch_arm()
         except Exception:
             pass
         self.after(FIX_IDLE_TICK_MS, self._fix_idle_tick)
@@ -24334,6 +24377,20 @@ class App(tk.Tk):
         # 끝난 뒤 **화면을 다시 봐서** 경고가 사라졌는지 확인하고 지운다
         self.after(300, lambda x=si: self._fix_verify(x, FIX_WATCH_N))
 
+    def _fix_nap(self, a, b=None):
+        """🧍 복구 흐름의 기다림 — **매번 다른 배수(20~50%)** 를 곱한다.
+
+        가끔 한 박자 더 쉰다 (사람이 화면을 보는 시간).
+        🚫 랜덤 폭을 0 으로 만들지 말 것."""
+        try:
+            v = random.uniform(a, b) if b is not None else float(a)
+            v *= random.uniform(*FIX_HUMAN_SLOW)
+            if random.random() < FIX_STRAY_P:
+                v += random.uniform(*FIX_STRAY_GAP)
+            nap(v)
+        except Exception:
+            nap(random.uniform(a, b) if b is not None else float(a))
+
     def _fix_tab_shot(self, si, big, nm):
         """🗒 탭 처리가 막혔을 때 **그 화면을 저장**한다 — 원격에서 원인을 짚는 통로.
 
@@ -24374,10 +24431,10 @@ class App(tk.Tk):
                 return
             # ① 십자가를 눌러 복구 창을 연다
             self._focus_client_at(c1)
-            nap(random.uniform(*FIX_FOCUS_WAIT))
+            self._fix_nap(*FIX_FOCUS_WAIT)
             click_at(*c1)
             click_log(f"fix #{si:02d} 🗂 칸1(십자가) {tuple(c1)} 눌러 복구 창을 연다")
-            nap(random.uniform(*FIX_TAB_GAP))
+            self._fix_nap(*FIX_TAB_GAP)
             self._fix_quit_clear(si, anc, "창 연 뒤")
             rect = client_rect_at(*c1)
             if not rect:
@@ -24403,7 +24460,7 @@ class App(tk.Tk):
                 click_at(tx, ty)
                 click_log(f"fix #{si:02d} 🗂 [{_ko}] 탭 ({tb[4]:.2f}) → ({tx},{ty}) "
                           f"눌렀다 (누르기 전 잉크 {_ink0})")
-                nap(random.uniform(*FIX_TAB_GAP))
+                self._fix_nap(*FIX_TAB_GAP)
                 # 🔢 **이제 밝아졌으니 숫자를 본다** — 없으면 할 게 없다
                 big = grab_window(c1)
                 tb0 = fix_tab_find(big, _nm) if big is not None else None
@@ -24447,21 +24504,27 @@ class App(tk.Tk):
                             _ex = L + tb4[0] + int(round(FIX_EXP_ROW[0] * _kx))
                             _ey = T + tb4[1] + int(round(FIX_EXP_ROW[1] * _kx))
                             click_at(_ex, _ey)
-                            nap(random.uniform(0.25, 0.45))
+                            self._fix_nap(0.25, 0.45)
                         elif c2:
                             click_at(*c2)
-                            nap(random.uniform(0.25, 0.45))
+                            self._fix_nap(0.25, 0.45)
                         fx, fy = L + fb[0] + fb[2] // 2, T + fb[1] + fb[3] // 2
                         click_at(fx, fy)
                         _did = True
+                        # 🧍 가끔 **같은 탭을 한 번 더** 누른다 — 사람처럼 보이게.
+                        #    🚫 빈 목록 줄은 누르지 말 것 (고른 줄이 풀린다).
+                        if random.random() < FIX_STRAY_P and tb4:
+                            click_at(L + tb4[0] + tb4[2] // 2,
+                                     T + tb4[1] + tb4[3] // 2)
+                            self._fix_nap(0.2, 0.5)
                         click_log(f"fix #{si:02d} ✅ [{_ko}] **EXP 아이콘** "
                                   f"({_ex},{_ey}) 눌러 고르고 **[{_how}]** "
                                   f"({fb[4]:.2f}) → ({fx},{fy}) 눌렀다 ({_f+1}번째)")
                         self.status.set(f"🆓 복구 #{si:02d} — 경험치 일일무료복구")
-                        nap(random.uniform(*FIX_ALL_WAIT))
+                        self._fix_nap(*FIX_ALL_WAIT)
                         if c5:
                             click_at(*c5)
-                            nap(random.uniform(*FIX_ALL_WAIT))
+                            self._fix_nap(*FIX_ALL_WAIT)
                         self._fix_quit_clear(si, anc, f"{_ko} {_f+1}번째 뒤")
                         # 아직 남았나 — 탭 숫자로 본다
                         big = grab_window(c1)
@@ -24493,7 +24556,7 @@ class App(tk.Tk):
                         if ab:
                             break
                     if _t < FIX_TAB_TRIES - 1:
-                        nap(random.uniform(*FIX_TAB_RETRY))
+                        self._fix_nap(*FIX_TAB_RETRY)
                         big = grab_window(c1)
                 if not ab:
                     click_log(f"fix #{si:02d} 🚫 [{_ko}] **[모두 복구] 를 못 찾았다** "
@@ -24506,11 +24569,11 @@ class App(tk.Tk):
                 click_log(f"fix #{si:02d} ✅ [{_ko}] **[모두 복구]** ({ab[4]:.2f}) → "
                           f"({mx},{my}) 눌렀다 · 동전 파란픽셀 {_blue}(아데나)")
                 self.status.set(f"🩹 복구 #{si:02d} — [{_ko}] 모두 복구")
-                nap(random.uniform(*FIX_ALL_WAIT))
+                self._fix_nap(*FIX_ALL_WAIT)
                 if c5:
                     click_at(*c5)
                     click_log(f"fix #{si:02d} 🗂 확인 {tuple(c5)} 눌렀다")
-                    nap(random.uniform(*FIX_ALL_WAIT))
+                    self._fix_nap(*FIX_ALL_WAIT)
                 self._fix_quit_clear(si, anc, f"{_ko} 뒤")
             # ④ ✕ 로 닫는다 — '아이템 복구' 그림에서 오른쪽으로 떨어진 자리
             try:
@@ -24522,7 +24585,7 @@ class App(tk.Tk):
                     cy = T + tb[1] + int(FIX_TAB_CLOSE[1] * k)
                     click_at(cx, cy)
                     click_log(f"fix #{si:02d} 🗂 ✕ ({cx},{cy}) 눌러 닫았다")
-                    nap(random.uniform(0.3, 0.5))
+                    self._fix_nap(0.3, 0.5)
                 self._fix_quit_clear(si, anc, "닫은 뒤")
             except Exception:
                 pass
