@@ -9058,35 +9058,17 @@ class App(tk.Tk):
         #    실행기 같은 별도 프로세스까지 **전부** 끈다. `_STOP_EVT` 를 세우므로
         #    기다리던 스레드가 **즉시** 깨어난다 (예전엔 간격이 끝나야 멈췄다).
         #    ⚠ ⏰ 2시간 반복 예약은 여기서 끄지 않는다 — 그건 [⏰] 버튼 (2026-08-15 규칙).
-        #   ⏰ **그 옆 절반에 [⏰ 반복]** (2026-11-07 사용자 지시:
-        #      *"멈춤 버튼 옆에 악몽의섬이나 섬/던전 실행기 그거 관련해서 반복을
-        #        옮겨줘. 멈춤버튼 절반 반복 절반"*)
-        #      → 72px 자리를 **35 + 35** 로 나눠 쓴다.
-        #      🚫 섹션행의 [⏰ 반복] 은 **지웠다** — 상태(켜진 개수·색)를 두 군데
-        #         두면 한쪽만 갱신돼 어긋난다 (2026-11-04 규칙). 다시 만들지 말 것.
-        _HW = 35
-        self._stop_wide = tk.Canvas(back_row, width=_HW, height=34, highlightthickness=0,
+        #   ⚠ ⏰ 반복은 **세로바(`_fold_stop` 옆)** 에 있다 — 2026-11-07 사용자:
+        #      *"세로 메인런처에 멈춤버튼 옆에 반복 버튼"*. 🚫 여기 만들지 말 것
+        #      (이 줄은 **펼쳤을 때만** 보여서 평소에 안 보인다).
+        self._stop_wide = tk.Canvas(back_row, width=72, height=34, highlightthickness=0,
                                     bg=self.cget("bg"), cursor="hand2")
         self._stop_wide.pack(side="left", padx=(LEFT, 0), pady=(3, 0))
-        self._stop_wide.create_rectangle(2, 2, _HW - 1, 32, fill="#c0392b",
+        self._stop_wide.create_rectangle(2, 2, 70, 32, fill="#c0392b",
                                          outline="#7b241c", width=2)
-        self._stop_wide.create_text(_HW // 2, 17, text="■" + chr(10) + "멈춤",
-                                    fill="white", justify="center",
-                                    font=("맑은 고딕", 7, "bold"))
+        self._stop_wide.create_text(36, 17, text="■ 멈춤", fill="white",
+                                    font=("맑은 고딕", 9, "bold"))
         self._stop_wide.bind("<Button-1>", lambda e: (self._stop() or "break"))
-        #   ⏰ 반복 — **묻지 않고 즉시** 2시간 N회 예약을 전부 끈다 (2026-08-09 규칙).
-        #      ⚠ [■ 멈춤] 과 **따로다** — 멈춤은 돌고 있는 작업만, 이건 예약만.
-        #      색·숫자는 `_refresh_rep_btn` 이 1.5초마다 갱신한다 (`_queue_tick`).
-        self._rep_wide = tk.Canvas(back_row, width=_HW, height=34, highlightthickness=0,
-                                   bg=self.cget("bg"), cursor="hand2")
-        self._rep_wide.pack(side="left", padx=(2, 0), pady=(3, 0))
-        self._rep_wide_box = self._rep_wide.create_rectangle(
-            2, 2, _HW - 1, 32, fill="#7f8c8d", outline="#4d5656", width=2)
-        self._rep_wide_txt = self._rep_wide.create_text(
-            _HW // 2, 17, text="⏰" + chr(10) + "없음", fill="white",
-            justify="center", font=("맑은 고딕", 7, "bold"))
-        self._rep_wide.bind("<Button-1>",
-                            lambda e: (self._rep_stop_click() or "break"))
         self._back_circle = tk.Canvas(back_row, width=WIDE, height=34, highlightthickness=0,
                                       bg=self.cget("bg"), cursor="hand2")
         self._back_circle.pack(side="left", padx=(GAP, 0), pady=(3, 0))
@@ -9640,12 +9622,40 @@ class App(tk.Tk):
         #    🎨 색: **실행 중이면 빨강 · 멈출 게 없으면 회색** (_refresh_stop_btn).
         #    ⚠ Tk 버튼은 모서리를 둥글게 못 한다 → Canvas 에 **알약**을 그린다.
         #       폭은 열 폭에 맞춰야 하므로 <Configure> 에서 다시 그린다.
-        self._fold_stop = tk.Canvas(_k0, height=38, highlightthickness=0,
+        #   ⏰ **그 옆 절반에 [⏰ 반복]** (2026-11-07 사용자 지시:
+        #      *"세로 메인런처에 멈춤버튼 옆에 반복 버튼 — 악몽의섬 반복버튼을.
+        #        멈춤버튼 절반 / 반복버튼 절반, 예전처럼"*)
+        #      → 한 줄을 `expand=True` 로 **반반** 나눠 쓴다 (열 폭을 따라간다).
+        #      🚫 [■ 멈춤] 과 **하나로 묶지 말 것** — 멈춤은 돌고 있는 작업·대기열,
+        #         ⏰ 는 2시간 N회 **예약만** 끈다 (2026-08-15 규칙).
+        #      🚨 **`pack(expand=True)` 로는 반반이 안 된다** (2026-11-07 실측) —
+        #         Canvas 의 기본 요청 폭이 **378px** 라 열(152px)을 통째로 먹고
+        #         옆 버튼이 **1px** 로 찌그러진다. `expand` 는 '남는 공간' 만
+        #         나누기 때문이다. → **grid + `uniform`** 으로 칸을 같게 묶고
+        #         Canvas 에는 `width=1` 을 줘서 요청 폭을 없앤다.
+        _k0h = tk.Frame(_k0); _k0h.pack(side="top", fill="x")
+        _k0h.columnconfigure(0, weight=1, uniform="k0h")
+        _k0h.columnconfigure(1, weight=1, uniform="k0h")
+        self._fold_stop = tk.Canvas(_k0h, width=1, height=38, highlightthickness=0,
                                     bd=0, cursor="hand2")
-        self._fold_stop.pack(side="top", fill="x")
+        self._fold_stop.grid(row=0, column=0, sticky="ew")
         self._fold_stop.bind("<Button-1>", lambda e: (self._stop() or "break"))
         self._fold_stop.bind("<Configure>", lambda e: self._fold_stop_draw())
         self._fold_stop_draw()
+        #   ⏰ 반복 — **묻지 않고 즉시** 그 던전들의 ⏰ 예약을 전부 끈다 (2026-08-09).
+        #      🧭 모양은 **예전 섹션행의 [⏰ 반복] 그대로** — 2026-11-07 사용자:
+        #         *"예전에 반복 밑에 16 이렇게 적혀있잖아. 반복을 16개 하니까.
+        #           그 버튼을 혈레이드/재시작 이렇게 반반 한 것처럼"*
+        #         → 윗줄 `⏰ 반복` · 아랫줄 `종료 16`(없으면 `없음`), 두 줄 버튼.
+        #      🚫 알약(Canvas)으로 바꾸지 말 것 — 두 줄 글자가 안 들어간다.
+        self._fold_rep = tk.Button(_k0h, text="⏰ 반복" + chr(10) + "없음",
+                                   font=("맑은 고딕", 8, "bold"),
+                                   bg="#7f8c8d", fg="white",
+                                   activebackground="#5d6d7e",
+                                   height=2, pady=0, bd=1,
+                                   command=self._rep_stop_click)
+        self._fold_rep.grid(row=0, column=1, sticky="ew", padx=(2, 0))
+        self._fold_rep_draw()
         tk.Button(_k0, text="🔄 업데이트", font=("맑은 고딕", 8, "bold"),
                   bg="#c0392b", fg="white", activebackground="#7b241c",
                   height=1, pady=3,
@@ -15159,10 +15169,40 @@ class App(tk.Tk):
             c.create_oval(0, 0, h, h, fill=bg, outline=bg)
             c.create_oval(w - h, 0, w, h, fill=bg, outline=bg)
             c.create_rectangle(r, 0, w - r, h, fill=bg, outline=bg)
+            #   ⚠ **절반 폭(약 74px)** 이라 글자를 줄였다 (2026-11-07) —
+            #      실제로 재보니 10pt `■ 멈춤 (실행 중)` 은 **105px** 로 넘친다.
+            #      색(빨강/회색)이 '실행 중' 을 말해주므로 `!` 하나로 충분하다.
             c.create_text(w // 2, h // 2,
-                          text=("■ 멈춤 (실행 중)" if busy else "■ 멈춤"),
-                          fill="white", font=("맑은 고딕", 10, "bold"))
+                          text=("■ 멈춤!" if busy else "■ 멈춤"),
+                          fill="white", font=("맑은 고딕", 9, "bold"))
             self._fold_stop_busy = bool(busy)
+        except Exception:
+            pass
+
+    def _fold_rep_draw(self, n=None):
+        """⏰ **반복 버튼의 글자·색을 맞춘다** — [■ 멈춤] 바로 오른쪽 절반.
+
+        🧭 모양은 **예전 섹션행의 [⏰ 반복] 그대로** (2026-11-07 사용자:
+           *"예전에 반복 밑에 16 이렇게 적혀있잖아"*) —
+           윗줄 `⏰ 반복` · 아랫줄 `종료 n` (켜진 것이 없으면 `없음`).
+        🎨 켜진 예약이 있으면 **빨강**, 없으면 **회색** (예전과 같은 규칙).
+        ⚠ 글자는 **8pt** — 절반 폭(약 74px)에 `종료 16` 이 들어가야 한다."""
+        b = getattr(self, "_fold_rep", None)
+        if b is None or not b.winfo_exists():
+            return
+        if n is None:
+            try:
+                n = self._rep_count()
+            except Exception:
+                n = 0
+        try:
+            if n:
+                b.config(text="⏰ 반복" + chr(10) + ("종료 %d" % n),
+                         bg="#c0392b", activebackground="#922b21")
+            else:
+                b.config(text="⏰ 반복" + chr(10) + "없음",
+                         bg="#7f8c8d", activebackground="#5d6d7e")
+            self._fold_rep_n = int(n)
         except Exception:
             pass
 
@@ -15240,21 +15280,10 @@ class App(tk.Tk):
 
     def _refresh_rep_btn(self):
         n = self._rep_count()
-        #   ⏰ **[■ 멈춤] 옆의 작은 반복 버튼** (2026-11-07 — 섹션행에서 옮겨왔다).
-        #      켜진 예약이 있으면 빨강 + 개수, 없으면 회색 + '없음'.
-        #      ⚠ `itemconfig` 로 색만 바꾼다 — 다시 그리면 어두운 화면이 bg 를
-        #         바꿔도 사각형이 덮고 있어 영향이 없다.
-        c = getattr(self, "_rep_wide", None)
-        if c is not None:
-            try:
-                if c.winfo_exists():
-                    c.itemconfig(self._rep_wide_box,
-                                 fill="#c0392b" if n else "#7f8c8d",
-                                 outline="#7b241c" if n else "#4d5656")
-                    c.itemconfig(self._rep_wide_txt,
-                                 text="⏰" + chr(10) + (f"{n}개" if n else "없음"))
-            except Exception:
-                pass
+        #   ⏰ **세로바의 반복 알약** ([■ 멈춤] 옆 절반 — 2026-11-07).
+        #      바뀔 때만 다시 그린다 (`_fold_stop_draw` 와 같은 규칙).
+        if getattr(self, "_fold_rep_n", None) != int(n):
+            self._fold_rep_draw(n)
         b = getattr(self, "btn_rep", None)
         if not b or not b.winfo_exists():
             return
