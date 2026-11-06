@@ -257,6 +257,14 @@ P0_LOG_EVERY  = 5       # '살아 있다' 기록을 몇 틱에 한 번 남기나
                         #    오판해 한참 헤맸다. 기록이 드물면 진단이 불가능하다.
                         #    🚫 다시 키우지 말 것 (하루 576줄 = 무시할 양).
 P0_WATCH_MS   = 30000   # 2026-11-03: 60초로는 문구를 자주 놓쳤다 (16클라 1회 1.0초)
+# 🏝 **섬/던전을 돌릴 때만 감시한다** (2026-11-06 사용자:
+#    *"섬/던전 실행기 여기 안에 들어갈 때만 하거든. 악몽의섬 오만의탑 잊혀진섬 에카
+#      이때만 하는 거라서"* · *"평소에는 안 쓴단 말이야"*)
+#    🚨 예전엔 **늘** 30초마다 16클라를 훑었다 — 1회 1.0초 = CPU **3.4%**.
+#       던전을 안 돌리는 동안은 쓸 이유가 없다.
+#    ✅ 이제 ① ⏰ 예약이 걸려 있거나 ② 섬 실행기가 최근에 돌았을 때만 감시한다.
+#       그 밖에는 **파일 시각만 보고 끝** — 부하 0.
+P0_WATCH_AFTER = 3 * 3600   # 섬/던전을 마지막 실행한 뒤 이만큼만 감시(초)
 P0_WATCH_COOL = 1200           # 같은 슬롯은 20분에 한 번만 다시 돌린다
 # 🕐 작업 중에 '물약 0개' 를 봤으면 적어뒀다가 작업이 끝난 뒤 돌린다.
 #    이만큼 지나면 버린다 — 그 사이 창고에서 채웠을 수 있다.
@@ -867,6 +875,16 @@ SUHO_POLL_MS     = 400
 #        **엉뚱한 창을 보고 있었던 것**이다).
 #    ⚠ 16개를 한꺼번에 훑으면 **498ms** (창 하나 31ms · 2026-11-06 실측)라
 #       폴링(0.4초)을 감당할 수 없다. 그래서 **한 틱에 몇 개씩**만 본다.
+SUHO_POLL_ON     = False             # 🚫 **스스로 돌며 찾기 — 껐다** (2026-11-06)
+#    사용자: *"야 수호성도 **사람이 클릭할 때만** 하면 안 되냐.
+#             수호성 찾기 들어갈 때만 하면 안 돼? **가끔 하는 건데**"*
+#    🚨 0.4초마다 **최대 3창**을 찍어 렉의 가장 큰 원인이었다 (실측):
+#       작은 창 48ms × 3 = 144ms / 400ms → CPU **36%**
+#       큰 창  123ms × 3 = 369ms / 400ms → CPU **92%**  ← 확대하면 한 코어를 태운다
+#       게다가 `_suho_rect` 는 '제일 큰 창' 을 우선해서 **확대한 그 창**을 계속 찍었다.
+#    ✅ 이제 **사람이 클라를 클릭했을 때만** 본다 (`_suho_auto`) — 각성·변신확정과 같다.
+#       평소 부하 **0** · 클릭할 때만 1창(48ms).
+#    🚫 클로드는 사용자 요청 없이 True 로 되돌리지 말 것.
 SUHO_SWEEP_N     = 2                 # 한 틱에 돌아볼 창 수 (16개 한 바퀴 ≈ 3초)
 SUHO_SWEEP_IDLE  = 3.0               # 한 바퀴 돌아 아무것도 없으면 쉬는 초
 #    ⓪ **진입부터** 한다 (2026-11-05 사용자: *"진입할 때부터 하자. 내가 수호성만
@@ -4264,6 +4282,13 @@ FIX_COIN_BLUE = 10                   # 파란 픽셀이 이보다 많으면 **�
 #       그 다음에 다야는 절대 사용하면 안 된다"*).
 #    ✅ 경험치는 **[일일무료복구] 만** 누른다. 그 버튼이 없거나 횟수를 다 쓰면 건너뛴다.
 FIX_FREE_TRIES = 3                   # 경험치 탭에서 [일일무료복구] 를 누를 최대 횟수
+# 🚨 **EXP 아이콘을 눌러야 [일일무료복구] 가 켜진다** (2026-11-06 사용자:
+#    *"EXP 누르면 일일복구가 활성화가 되는 거야"*).
+#    안 고르면 그 버튼은 **회색(비활성)** 이라 1.00 으로 정확히 눌러도
+#    **아무 일도 안 난다** (3번 눌렀는데 '경험치 복구 2건 남음' 그대로였다).
+#    ⚠ 등록 좌표 **칸2 는 글자 쪽**(창안 75,79)이라 아이콘이 아니다 —
+#      아이콘은 창안 (34, 81). 그래서 **탭 그림 기준으로 계산**한다.
+FIX_EXP_ROW   = (15, 39)             # 'fix_tab_exp' 좌상단 → 첫 줄 EXP 아이콘 중심
 # 🔢 **탭에 숫자가 없으면 할 게 없다** (사용자: *"아무것도 안 떠 있으면 취소를 누르고"*)
 #    탭 그림 **오른쪽 +1~+13px** 에 잉크가 있나로 본다.
 #    📏 실측 — 숫자 있음 15~21픽셀 · 없음 **0픽셀**. 아주 깨끗하게 갈린다.
@@ -23377,8 +23402,9 @@ class App(tk.Tk):
         while True:
             time.sleep(0.05)
             try:
-                # 👀 수호성 — **클릭을 기다리지 않고** 스스로 본다 (2026-11-05)
-                if time.time() - _spoll >= SUHO_POLL_MS / 1000.0:
+                # 👀 수호성 — 🚫 **스스로 찾기는 껐다** (2026-11-06, 렉).
+                #    아래 `_suho_auto` 가 **사람이 클릭할 때만** 본다.
+                if SUHO_POLL_ON and time.time() - _spoll >= SUHO_POLL_MS / 1000.0:
                     _spoll = time.time()
                     if self.cfg.get("suho_auto_on", True):
                         threading.Thread(target=self._suho_poll, daemon=True).start()
@@ -24333,6 +24359,7 @@ class App(tk.Tk):
             cs = slot.get("coords") or []
             anc = slot_anchor(slot)
             c1 = cs[0] if len(cs) > 0 and cs[0] else None
+            c2 = cs[1] if len(cs) > 1 and cs[1] else None   # 목록 **첫 줄** (사용자 등록)
             c5 = cs[4] if len(cs) > 4 and cs[4] else None   # 확인 팝업 (사용자 등록)
             if not c1 or not anc:
                 click_log(f"fix #{si:02d} 🗂 칸1(십자가) 좌표가 없어 못 연다")
@@ -24384,10 +24411,26 @@ class App(tk.Tk):
                                       f"· 💎 다야!! 로 표시한다")
                             self._fix_tab_shot(si, big, "free_none")
                             break
+                        # 🚨 **줄을 먼저 골라야 버튼이 켜진다** (2026-11-06 실측).
+                        #    안 고르면 [일일무료복구] 가 **회색(비활성)** 이라
+                        #    1.00 으로 정확히 눌러도 **아무 일도 안 난다**
+                        #    (3번 눌렀는데 '2건 남음' 그대로였다).
+                        #    🚫 이 '줄 고르기' 를 빼지 말 것.
+                        tb4 = fix_tab_find(big, _nm)
+                        if tb4:
+                            _kx = big.shape[1] / float(fix_tab_base() or IMG_BASE_W)
+                            _ex = L + tb4[0] + int(round(FIX_EXP_ROW[0] * _kx))
+                            _ey = T + tb4[1] + int(round(FIX_EXP_ROW[1] * _kx))
+                            click_at(_ex, _ey)
+                            nap(random.uniform(0.25, 0.45))
+                        elif c2:
+                            click_at(*c2)
+                            nap(random.uniform(0.25, 0.45))
                         fx, fy = L + fb[0] + fb[2] // 2, T + fb[1] + fb[3] // 2
                         click_at(fx, fy)
                         _did = True
-                        click_log(f"fix #{si:02d} ✅ [{_ko}] **[일일무료복구]** "
+                        click_log(f"fix #{si:02d} ✅ [{_ko}] **EXP 아이콘** "
+                                  f"({_ex},{_ey}) 눌러 고르고 **[일일무료복구]** "
                                   f"({fb[4]:.2f}) → ({fx},{fy}) 눌렀다 ({_f+1}번째)")
                         self.status.set(f"🆓 복구 #{si:02d} — 경험치 일일무료복구")
                         nap(random.uniform(*FIX_ALL_WAIT))
@@ -36745,6 +36788,38 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _p0_watch_need(self):
+        """🏝 **지금 물약감시가 필요한가** → (필요?, 왜).
+
+        (2026-11-06 사용자: *"섬/던전 실행기 안에 들어갈 때만 하거든"*)
+        ① 섬/던전 실행기가 **돌고 있다**
+        ② ⏰ 예약이 **걸려 있다** (반복으로 계속 들어간다)
+        ③ 섬 실행기가 **최근 `P0_WATCH_AFTER` 안에** 돌았다
+        🚫 그 밖에는 안 본다 — 파일 시각만 읽으므로 **부하 0**."""
+        try:
+            if self._island_running():
+                return True, "섬/던전 실행 중"
+            import json as _j
+            now = time.time()
+            p = os.path.join(LOCAL_DATA, "island_repeat.json")
+            if os.path.exists(p):
+                if now - os.path.getmtime(p) <= P0_WATCH_AFTER:
+                    return True, "⏰ 예약이 최근에 바뀜"
+                try:
+                    with open(p, encoding="utf-8-sig") as f:
+                        d = _j.load(f) or {}
+                    if any(isinstance(v, dict) and v.get("next")
+                           for k, v in d.items() if not str(k).startswith("_")):
+                        return True, "⏰ 예약이 걸려 있다"
+                except Exception:
+                    pass
+            r = os.path.join(LOCAL_DATA, "island_run.json")
+            if os.path.exists(r) and now - os.path.getmtime(r) <= P0_WATCH_AFTER:
+                return True, "최근에 섬/던전을 돌렸다"
+            return False, "섬/던전을 안 돌리는 중"
+        except Exception:
+            return True, "확인 불가 — 그냥 본다"
+
     def _p0_watch_tick(self):
         """`P0_WATCH_MS` 마다 16클라를 훑어 '체력 회복제가 0개' 를 찾는다
         (2026-10-17 사용자 지시로 2분 → 1분. 문구가 잠깐 떴다 사라져서
@@ -36766,6 +36841,19 @@ class App(tk.Tk):
             #    → 보는 것(PrintWindow)은 게임에 입력을 보내지 않아 **클릭과 무관**하다.
             #      실측 16클라 1.02초 = 1분당 1.7% — 팅김과 상관없다.
             #    → 대신 **돌리는 것만** 미룬다 (`_p0_pend`, 아래 참조).
+            # 🏝 **섬/던전을 돌릴 때만 본다** (2026-11-06 사용자 지시).
+            #    평소에는 파일 시각만 읽고 끝 — **부하 0**.
+            _need, _why = self._p0_watch_need()
+            if not _need:
+                if getattr(self, "_p0_skip_why", "") != _why:
+                    self._p0_skip_why = _why
+                    click_log(f"[물약감시] 💤 쉰다 — {_why} "
+                              f"(섬/던전을 돌리면 저절로 켜진다)")
+                self.after(P0_WATCH_MS, self._p0_watch_tick)
+                return
+            if getattr(self, "_p0_skip_why", None):
+                click_log(f"[물약감시] ▶ 다시 본다 — {_why}")
+                self._p0_skip_why = None
             if True:
                 def _both():
                     self._p0_watch_scan()
