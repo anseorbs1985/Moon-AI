@@ -1017,6 +1017,16 @@ SUHO_TITLE_BAND  = (0.0, 0.22)       # 📌 제목 그림은 창 **위쪽 22%** 
 #       그것은 **사실상 공짜**(0.01ms)다. 캡처(390ms)·대조(420ms)를 안 쓴다.
 #    · 수호성 창이 **안 떠 있으면 즉시 빠져나온다** → 평소 부하 0
 #    · 돌고 있으면(`_suho_busy`) 건드리지 않는다
+# ⓪ **[활성화] 가 뜰 때만 창을 띄운다** (2026-11-06 사용자 지시:
+#    *"수호성을 **활성화가 뜨면은 시작버튼이 같이 뜨게** 해주고
+#      **수호성만 들어가면 띄우지 말고**"*).
+#    🚨 전에는 **제목(수호성 찾기) + 카드** 로도 띄웠다 — 그래서 수호성 메뉴·
+#       트리 판에 들어가기만 해도 창이 떠서 사용자를 괴롭혔다.
+#    🧭 흐름상 [활성화] 는 **돌릴 준비가 됐을 때만** 뜬다 → 그때가 ▶ 를 누를 때다.
+#    ⚠ **체인(이미 ▶ 를 눌러 돌던 중)은 예외** — 카드만 깔려 있어도 이어서 돈다
+#      (창은 안 띄운다). 그래야 여러 클라를 한 번의 ▶ 로 돌 수 있다.
+#    🚫 `False` 로 되돌리지 말 것 — 수호성에 들어가기만 해도 창이 뜬다.
+SUHO_SHOW_INFO_ONLY = True           # 진입창([활성화])일 때만 창을 띄울까
 SUHO_WATCH_MS    = 400               # 창 크기를 보는 주기(ms) — 캡처 없음, 부하 0
 SUHO_WATCH_SEE   = 2.5               # 🖼 화면까지 보는 주기(초) — 캡처가 드니 느리게
 #    ⚠ 창이 떠 있는 동안만 돈다. 2504 창 캡처가 ~390ms 라 2.5초면 한 코어의 16%.
@@ -12138,7 +12148,7 @@ class App(tk.Tk):
             pass
         return sorted(out, key=lambda q: (q[1] // 200, q[2]))
 
-    def _suho_sweep(self, skip=()):
+    def _suho_sweep(self, skip=(), info_only=False):
         """🔁 **한 틱에 창 몇 개씩** 돌며 수호성 화면을 찾는다 → (rect, 이유).
 
         맨 앞 창(① )에 없을 때의 **보험**이다. 사용자가 그 클라를 클릭해 띄운
@@ -12167,7 +12177,10 @@ class App(tk.Tk):
                 if img is None:
                     continue
                 ok, why = self._suho_tpl_seen(img, suho_info_list(), band=SUHO_TITLE_BAND), "진입창"
-                if not ok and self._suho_tpl_seen(img, suho_screen_list(), band=SUHO_TITLE_BAND):
+                #   ⓪ `info_only` 면 **진입창만** 센다 (2026-11-06 사용자 지시 —
+                #      *"수호성만 들어가면 띄우지 말고"*). 카드는 체인에서만 쓴다.
+                if not ok and not info_only and self._suho_tpl_seen(
+                        img, suho_screen_list(), band=SUHO_TITLE_BAND):
                     if self._suho_cards(w, img):      # 방금 찍은 것을 돌려쓴다
                         ok, why = True, "카드"
                 if ok:
@@ -12511,9 +12524,17 @@ class App(tk.Tk):
             #    끝없이 반복하며 화면을 눌러댔다 (실측 06:45:31~48, 4초마다 한 판).
             #    👉 **할 일이 실제로 있을 때만** 시작한다:
             #       ⓪ 진입창(수호성 정보 + [활성화])  또는  ① 카드가 깔려 있을 때.
+            # 🔁 **체인** — 이미 ▶ 를 눌러 돌던 중인가 (그때는 카드만 있어도 이어간다)
+            _chain = bool(getattr(self, "_suho_next", None))
+            # ⓪ **[활성화](진입창)이 있을 때만 창을 띄운다** (2026-11-06 사용자:
+            #    *"활성화가 뜨면은 시작버튼이 같이 뜨게 해주고 **수호성만 들어가면
+            #      띄우지 말고**"*). 제목(수호성 찾기)만 보이는 메뉴·트리 판에서는
+            #    **아무것도 하지 않는다.**
             ok = self._suho_tpl_seen(img, suho_info_list(), band=SUHO_TITLE_BAND)
             why = "진입창"
-            if not ok and self._suho_tpl_seen(img, suho_screen_list(), band=SUHO_TITLE_BAND):
+            _cards_ok = (not SUHO_SHOW_INFO_ONLY) or _chain
+            if not ok and _cards_ok and self._suho_tpl_seen(
+                    img, suho_screen_list(), band=SUHO_TITLE_BAND):
                 # 제목은 보인다 — 카드가 실제로 깔렸는지만 확인한다
                 #   ⚡ 방금 찍은 `img` 를 넘긴다 (다시 찍지 않는다)
                 if self._suho_cards(rect, img):
@@ -12521,7 +12542,8 @@ class App(tk.Tk):
             # 🔁 그 창에 없으면 **다른 창도 돌아본다** (한 틱에 몇 개씩).
             #    이게 없으면 수호성을 띄워놓고 딴 창을 클릭했을 때 영영 못 찾는다.
             if not ok and not getattr(self, "_suho_lock", None):
-                _sw, _swy = self._suho_sweep(skip=(rect[0],))
+                _sw, _swy = self._suho_sweep(skip=(rect[0],),
+                                             info_only=not _cards_ok)
                 if _sw:
                     rect, ok, why = _sw, True, _swy
             if not ok or not rect:
@@ -12569,25 +12591,40 @@ class App(tk.Tk):
             if time.time() - getattr(self, "_suho_done_at", 0.0) < SUHO_RERUN_COOL:
                 return
             self._suho_see_at = time.time()
-            if not suho_screen_list():
+            if not suho_info_list():
                 return
-            ok, v, rect = False, 0.0, None
+            # ⓪ **[활성화](진입창)이 보일 때만 띄운다** (2026-11-06 사용자 지시).
+            #    🚫 제목만 보이는 수호성 메뉴·트리 판에서는 띄우지 않는다.
+            ok, rect = False, None
             prev = 0.0
             for w in SUHO_SEE_WAIT:      # 클릭 직후엔 화면이 덜 그려져 있다
                 nap(max(0.05, w - prev)); prev = w
-                ok, v, rect = self._suho_seen()
-                if ok:
+                rect = self._suho_rect()
+                if not rect:
+                    continue
+                img = self._suho_grab(rect)
+                if img is None:
+                    continue
+                if self._suho_tpl_seen(img, suho_info_list(),
+                                       band=SUHO_TITLE_BAND):
+                    ok = True
                     break
+                if not self._suho_here(img):
+                    #   수호성 화면이 아예 아니다 → 창을 치우고 끝
+                    self._suho_latch = None
+                    self._suho_close_auto()
+                    return
             if not ok or not rect:
-                self._suho_latch = None   # 나갔다 → 다음에 뜨면 다시 띄운다
-                self._suho_close_auto()   # 🌙 수호성 화면이 아니다 → 창을 치운다
+                #   수호성이긴 한데 **아직 [활성화] 가 없다** → 띄우지 않는다
+                #   (걸쇠도 비워 둬 [활성화] 가 뜨면 바로 띄우게 한다)
+                self._suho_latch = None
                 return
             key = (rect[0], rect[3], rect[4])
             if getattr(self, "_suho_latch", None) == key:
                 return
             self._suho_latch = key
             #   🌙 **돌리지 않는다 — 창만 띄운다** (2026-11-06 사용자 지시)
-            self._suho_show_win("수호성 화면 (일치도 %.2f)" % v)
+            self._suho_show_win("[활성화] 가 뜬 진입창")
         except Exception:
             pass
 
