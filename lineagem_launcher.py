@@ -440,6 +440,21 @@ FIX_SEE_GAP        = (0.25, 0.45)
 # 자리는 건드리지 않는다 — 떼었을 때 그 자리, 사용자가 옮긴 자리가 전부다
 # (2026-09-30 사용자 재지시: "떼면 그 자리에 그대로 올라오게 해주라")
 NIGHT_DOCK_MS      = 1000  # 앞뒤·최소화를 맞추는 간격(ms) — 창 두 개만 보므로 거의 공짜
+
+# 🏝 **미니 판으로 실행했으면 끝난 뒤 스스로 닫는다** (2026-11-07 사용자 요청)
+#   *"미니맵을 켜서 실행하는 건 실행이 완료되면 닫아줘. 그래야 클라를 안 가리니까.
+#     내가 필요하면 또 열어서 실행할게"*
+#   🚫 **[📤 따로] 로 뗀 판은 안 닫는다** — 그건 사용자가 계속 두려고 뗀 것이다.
+#      `🏝 섬/던전 미니!` 버튼으로 연 판만 해당한다 (`_night_by_mini`).
+#   🚫 판을 열어만 두고 실행하지 않으면 **그대로 둔다** (`_night_mini_ran`).
+NIGHT_MINI_CLOSE = True
+NIGHT_MINI_MS    = 1000   # 확인 간격(ms) — 표시가 없으면 **즉시 빠진다**(평소 부하 0)
+# 실행을 누른 직후에는 섬 실행기가 아직 안 떠 `_is_busy()` 가 False 다.
+#   그 틈에 '끝났다' 로 보고 닫아버리면 안 되므로 이만큼은 무조건 기다린다.
+NIGHT_MINI_GRACE = 8.0
+# 대기열이 다음 것을 꺼내는 사이(`_night_queue_tick` 6초)에도 잠깐 한가해 보인다.
+#   그래서 **연속 이만큼** 한가해야 닫는다 (이 저장소의 확립된 연속 확인 규칙).
+NIGHT_MINI_GONE  = 4
 TJ_CLICKS          = 4     # TJ성공!! 슬롯당 좌표 수
 #    2026-10-07 사용자 요청으로 3 → 4. **새 칸은 맨 앞(좌표1)** 이고 쓰던 세 개는
 #    한 칸씩 뒤로 밀렸다 (아래 `tj_front_added` 이사 코드가 한 번만 밀어준다).
@@ -16269,6 +16284,7 @@ class App(tk.Tk):
             self.status.set("🌑 악몽의섬 — 슬롯을 고르세요 ([+] 를 눌러 선택)"); return
         if self._is_busy():
             self._enqueue("악몽의섬 선택실행", self._run_night_sel); return
+        self._night_mini_mark()       # 🏝 미니 판이면 끝난 뒤 닫는다
         self._island_step_back()
         cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"),
                str(self.NIGHT_DIDX), "--run",
@@ -16406,6 +16422,7 @@ class App(tk.Tk):
 
     def _night_launch(self, slot_idx):
         """실제 실행 — 누른 때부터 2시간 N회를 다시 센다."""
+        self._night_mini_mark()       # 🏝 미니 판이면 끝난 뒤 닫는다
         self._island_step_back()
         cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"),
                str(self.NIGHT_DIDX), "--run", "--slot", str(slot_idx + 1)]
@@ -16597,10 +16614,79 @@ class App(tk.Tk):
         except Exception:
             return False
 
+    def _night_mini_mark(self):
+        """🏝 **미니 판으로 연 상태에서 실행을 시작했다** 고 표시하고 지켜보기를 켠다.
+
+        🧭 2026-11-07 사용자: *"미니맵을 켜서 실행하는 건 실행이 완료되면 닫아줘.
+           그래야 클라를 안 가리니까."*
+        🚫 미니 판이 아니면(= [📤 따로] 로 뗐거나 붙어 있으면) 아무것도 안 한다."""
+        if not NIGHT_MINI_CLOSE:
+            return
+        try:
+            if not (getattr(self, "_night_by_mini", False) and self._night_detached()):
+                return
+            self._night_mini_ran = True
+            self._night_mini_at = time.time()
+            self._night_mini_idle = 0
+            if not getattr(self, "_night_mini_on", False):
+                self._night_mini_on = True
+                self.after(NIGHT_MINI_MS, self._night_mini_tick)
+        except Exception:
+            pass
+
+    def _night_mini_tick(self):
+        """🏝 **전부 끝나면** 미니 판을 닫는다 — 표시가 없으면 즉시 빠진다(부하 0).
+
+        ⚠ 확인은 네 가지를 **전부** 본다 — 하나라도 남아 있으면 기다린다:
+             `_is_busy()` · `_island_running()` · `_night_queue` · `_task_queue`
+           실행을 누른 직후에는 섬 실행기가 아직 안 떠 전부 비어 보이므로
+           `NIGHT_MINI_GRACE` 동안은 무조건 기다리고, 그 뒤에도
+           **연속 `NIGHT_MINI_GONE` 번** 한가해야 닫는다 (대기열이 다음 것을
+           꺼내는 6초 사이에 잠깐 한가해 보이기 때문)."""
+        self._night_mini_on = False
+        try:
+            if not (NIGHT_MINI_CLOSE and getattr(self, "_night_mini_ran", False)):
+                return
+            #   판이 이미 닫혔으면 표시만 지우고 끝
+            if not self._night_detached():
+                self._night_mini_ran = False
+                return
+            busy = False
+            try:
+                busy = bool(self._is_busy() or self._island_running()
+                            or (getattr(self, "_night_queue", None) or [])
+                            or (getattr(self, "_task_queue", None) or []))
+            except Exception:
+                busy = True            # 모르면 **닫지 않는다**
+            if busy or (time.time() - getattr(self, "_night_mini_at", 0)
+                        < NIGHT_MINI_GRACE):
+                self._night_mini_idle = 0
+            else:
+                self._night_mini_idle = getattr(self, "_night_mini_idle", 0) + 1
+                if self._night_mini_idle >= NIGHT_MINI_GONE:
+                    self._night_mini_ran = False
+                    self._night_attach()
+                    try:
+                        click_log("[슬롯판] 🏝 미니 판 실행이 끝나 **스스로 닫았다** "
+                                  "(클라를 가리지 않게 — 2026-11-07 사용자 지시)")
+                    except Exception:
+                        pass
+                    self.status.set("🏝 실행이 끝나 미니 판을 닫았습니다 "
+                                    "— 필요하면 [🏝 섬/던전 미니!] 로 다시 여세요")
+                    return
+            self._night_mini_on = True
+            self.after(NIGHT_MINI_MS, self._night_mini_tick)
+        except Exception:
+            pass
+
     def _night_detach_toggle(self):
         if self._night_detached():
             self._night_attach()
         else:
+            #   🚫 [📤 따로] 로 뗀 판은 **스스로 닫지 않는다** — 사용자가
+            #      계속 두려고 뗀 것이다 (미니 판 버튼으로 연 것만 닫는다).
+            self._night_by_mini = False
+            self._night_mini_ran = False
             self._night_detach(front_only=True)
 
     def _hwnd_of(self, w):
@@ -16713,6 +16799,9 @@ class App(tk.Tk):
             if self._night_detached():
                 self._night_attach()
             else:
+                #   🏝 **미니 판으로 연 것** — 실행이 끝나면 스스로 닫는다
+                self._night_by_mini = True
+                self._night_mini_ran = False
                 self._night_detach()
                 self.after(80, self._night_place_beside)
                 self.after(200, lambda: self.status.set(
@@ -16845,6 +16934,9 @@ class App(tk.Tk):
 
     def _night_attach(self):
         """뗀 판을 메인런처 안으로 되돌린다."""
+        #   🏝 닫혔으니 '끝나면 닫기' 표시도 함께 지운다
+        self._night_by_mini = False
+        self._night_mini_ran = False
         self._night_user_front_set(False, "판을 다시 붙임")
         p = getattr(self, "_night_panel", None)
         if p is None or not p.winfo_exists() or not self._night_detached():
