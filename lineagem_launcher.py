@@ -759,6 +759,25 @@ AWAKEN_SEEN_MATCH = 0.90
 SUHO_SCREEN      = "suho_screen"     # '수호성 찾기' 글자 그림
 SUHO_BASE_W      = 546               # 그림·좌표를 뜬 창 크기
 SUHO_BASE_H      = 307
+# 🔍 **확대한 창에서만 한다** (2026-11-06 사용자 지시 —
+#    *"수호성 이거 그냥 **확대했을 때만** 할까? **작게 하니까 적용을 못하는** 것 같은데"*)
+#
+#    📏 같은 날 기록을 나란히 보면 사용자 말이 정확하다:
+#      2504(확대)  ①→②→③ 8회 → 🎉 성공! → [나가기] 눌러 닫았다 ✔  끝까지 돈다
+#                  카드 장수  3 → 2 → 2 → 1 → 1  (자연스럽게 줄어든다)
+#       546(작게)  1회 돌고 → 🚦 '화면이 바뀌었다' → 멈춤
+#                  카드 장수  7 → 4 → 6 → 4 → 5  🚨 매번 딴 숫자 (헛걸림)
+#                  💎 '수호석이 모자랍니다 (빨간 숫자 11픽셀)' → ESC  🚨 오판
+#
+#    🚨 작은 창에서 왜 안 되나 — **판정에 쓰는 것이 전부 너무 작다**:
+#      · 카드 뒷면이 작아 헛걸림이 생겨 **장수를 매번 다르게** 센다
+#      · 빨간 숫자(수호석)가 몇 픽셀뿐이라 **'모자람' 으로 오판**한다
+#        (`SUHO_RED_PIX`·`SUHO_BTN_MIN` 이 **2504 기준**이다)
+#      · 노란 선·버튼 띠도 같은 이유로 흔들린다
+#    🚫 **기준값을 내려 작은 창을 맞추려 하지 말 것** — 내리면 오탐이 늘어
+#       엉뚱한 카드를 끌거나 수호석을 쓴다. 확대해서 하는 것이 정답이다.
+SUHO_MIN_W       = 1200              # 창 가로가 이보다 작으면 **아무것도 하지 않는다**
+SUHO_SMALL_LOG   = 60.0              # '작아서 안 한다' 를 다시 적기까지(초)
 #    📏 실측 2026-11-05 (16클라) — 진짜 수호성 화면 **1.000** · 잡음 **0.289~0.320**
 #       → 여유 0.68. 0.85 면 양쪽으로 넉넉하다.
 #       🚫 0.50 밑으로 내리지 말 것 (잡음이 0.32 다). 자동 실행이라 더 조심한다.
@@ -10981,12 +11000,15 @@ class App(tk.Tk):
                 if not t.startswith("리니지M") or t.startswith("리니지M 자동 실행"):
                     return None
                 l, tp, r, b = win32gui.GetWindowRect(h)
-                if (r - l) < 200:
+                if (r - l) < SUHO_MIN_W:       # 🔍 작은 창은 안 한다
+                    self._suho_small = (t.split("l")[-1].strip()
+                                        if " l " in t else t, r - l)
                     return None
                 nm = t.split("l")[-1].strip() if " l " in t else t
                 return (h, l, tp, r - l, b - tp, nm)
             except Exception:
                 return None
+        self._suho_small = None        # 🔍 묵은 '작은 창' 기억으로 안내하지 않는다
         # 🔒 돌고 있는 중이면 **그 창에서만** — 회차마다 창이 바뀌면 안 된다
         lock = _mk(getattr(self, "_suho_lock", None))
         if lock:
@@ -11008,9 +11030,35 @@ class App(tk.Tk):
         if last:
             return last
         big = self._awaken_win_rect()
-        if big:
+        # 🔍 '제일 큰 창' 도 작으면 안 한다 — `_awaken_win_rect` 는 `_mk` 를 안 거친다
+        if big and int(big[3]) >= SUHO_MIN_W:
             self._suho_hwnd = big[0]
-        return big
+            return big
+        self._suho_note_small()
+        return None
+
+    def _suho_note_small(self):
+        """🔍 창이 작아서 안 한다는 것을 **기록에 남긴다** (같은 줄은 1분에 한 번).
+
+        🚫 조용히 빠져나가면 사용자가 '왜 안 되지' 로 헤맨다 — 이 저장소에서
+           같은 일을 열 번도 더 겪었다. 이 기록을 지우지 말 것."""
+        sm = getattr(self, "_suho_small", None)
+        if not sm:
+            return
+        if time.time() - getattr(self, "_suho_small_at", 0.0) < SUHO_SMALL_LOG:
+            return
+        self._suho_small_at = time.time()
+        try:
+            click_log(f"[수호성] 🔍 창이 작아서 안 한다 — {sm[0]} 가로 {sm[1]}px "
+                      f"(확대하면 돕니다 · 기준 {SUHO_MIN_W}px). "
+                      f"작은 창에서는 카드 장수·수호석 판정이 흔들립니다")
+        except Exception:
+            pass
+        try:
+            self.status.set(f"🌙 수호성은 **확대한 창에서만** 합니다 "
+                            f"(지금 {sm[1]}px · {SUHO_MIN_W}px 이상)")
+        except Exception:
+            pass
 
     def _suho_seen(self, rect=None, thr=None):
         """그 창이 **수호성 찾기 화면인가** → (맞나, 점수, rect).
@@ -11504,6 +11552,18 @@ class App(tk.Tk):
             except Exception:
                 pass
             return
+        # 🔍 **확대한 창이 없으면 아무것도 하지 않는다** — 왜 안 하는지 알려준다
+        if not self._suho_rect():
+            if not getattr(self, "_suho_small", None):
+                click_log("[수호성] 🔍 리니지M 창을 못 찾았다 — 아무것도 하지 않는다")
+                try:
+                    self.status.set("🌙 리니지M 창을 못 찾았습니다")
+                except Exception:
+                    pass
+            else:
+                self._suho_small_at = 0.0      # 버튼을 눌렀으니 바로 알려준다
+                self._suho_note_small()
+            return
         if times is None:
             try:
                 times = int(self.cfg.get("suho_times", SUHO_N))
@@ -11798,7 +11858,11 @@ class App(tk.Tk):
         threading.Thread(target=_go, daemon=True).start()
 
     def _suho_wins(self):
-        """지금 떠 있는 리니지M 창 전부 → [(hwnd, x, y, w, h, 이름), …] 왼쪽 위부터."""
+        """지금 떠 있는 리니지M 창 전부 → [(hwnd, x, y, w, h, 이름), …] 왼쪽 위부터.
+
+        🔍 **`SUHO_MIN_W` 보다 좁은 창은 넣지 않는다** — 작은 창에서는 카드 장수·
+           수호석 판정이 전부 흔들린다 (2026-11-06 사용자 지시). 여기 하나만
+           막으면 스윕(`_suho_sweep`)·다음 창 찾기(`_suho_find_work`)가 함께 막힌다."""
         out = []
         def _cb(h, _):
             try:
@@ -11808,7 +11872,9 @@ class App(tk.Tk):
                 if not t.startswith("리니지M") or t.startswith("리니지M 자동 실행"):
                     return True
                 l, tp, r, b = win32gui.GetWindowRect(h)
-                if (r - l) < 200:
+                if (r - l) < SUHO_MIN_W:       # 🔍 작은 창은 안 한다
+                    self._suho_small = (t.split("l")[-1].strip()
+                                        if " l " in t else t, r - l)
                     return True
                 nm = t.split("l")[-1].strip() if " l " in t else t
                 out.append((h, l, tp, r - l, b - tp, nm))
@@ -11816,6 +11882,7 @@ class App(tk.Tk):
                 pass
             return True
         try:
+            self._suho_small = None
             win32gui.EnumWindows(_cb, None)
         except Exception:
             pass
