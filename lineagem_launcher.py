@@ -875,6 +875,10 @@ SUHO_ESC_STOP_EARLY = False          # '닫힌 것 같으면 멈춘다' 를 쓸�
 SUHO_WIN_WAIT    = (0.6, 1.0)        # 🎉 성공 화면이 다 그려지기를 기다린다
 #    🚫 줄이지 말 것 — 뜨자마자 [나가기] 를 누르면 **안 먹는다** (2026-11-06 실측).
 SUHO_EXIT_TRIES  = 3                 # [나가기] 를 눌러보는 횟수 (닫히면 바로 멈춘다)
+# 🚪 **한 판이 끝나면 화면에서 나간다** (2026-11-06 사용자: *"야 성공하거나
+#    뭐 했으면 나가기 눌러야지"*). `_suho_leave` 가 맡는다.
+SUHO_ESC_AGAIN   = 25.0              # 방금 ESC 를 썼으면 이 초 안에는 또 안 누른다
+#    🚫 줄이지 말 것 — 다 닫힌 뒤 ESC 를 더 누르면 게임 **메뉴판이 열린다**(실측).
 SUHO_EXIT_WAIT   = (0.7, 1.0)        # 누르고 닫혔는지 보기까지
 SUHO_AFTER_DRAG  = (0.5, 0.8)        # ③ 끈 뒤 결과가 뜨기를 기다린다
 #    🚫 이것도 줄이지 말 것 — 끌자마자 카드를 찾으면 **넘어가는 중인 화면에
@@ -11852,6 +11856,14 @@ class App(tk.Tk):
                 except Exception:
                     pass
             finally:
+                #   🚪 **끝났으면 수호성 화면에서 나간다** (2026-11-06 사용자 지시).
+                #      성공·수호석부족 말고도 '횟수를 다 채웠다'·'카드가 없다' 처럼
+                #      화면이 열린 채 끝나는 길이 여럿 있었다.
+                #      🚫 ■ 멈춤 을 눌렀을 때는 아무것도 하지 않는다 (함수 안에서 본다).
+                try:
+                    self._suho_leave(rect)
+                except Exception:
+                    pass                        # rect 가 아직 없을 수도 있다
                 self._suho_cursor_back(_cur0)   # 🖱 커서를 사용자 자리로
                 # 🔁 **다음 창으로 넘어간다** — 여러 개 띄워뒀으면 순서대로 (사용자 지시)
                 try:
@@ -12035,9 +12047,62 @@ class App(tk.Tk):
             _gap = f"{SUHO_ESC_GAP[0]:.1f}~{SUHO_ESC_GAP[1]:.1f}초 간격"
             click_log(f"[수호성] ⎋ ESC {used}번 눌렀다 ({_gap} · {why}) — "
                       f"{'수호성 화면이 닫혔다 ✔' if gone else '⚠ 아직 화면이 남아 있다'}")
+            #   🕐 **방금 ESC 를 썼다**는 것을 남긴다 — `_suho_leave` 가 뒤이어
+            #      또 4번 누르면 다 닫힌 뒤라 **게임 메뉴판이 열린다**(실측).
+            self._suho_esc_at = time.time()
             return gone
         except Exception as e:
             click_log(f"[수호성] ⚠ ESC 오류 {e}")
+            return False
+
+    def _suho_leave(self, rect, why="끝났다"):
+        """🚪 **한 판이 끝나면 수호성 화면에서 나간다** (2026-11-06 사용자 지시 —
+           *"야 성공하거나 뭐 했으면 **나가기 눌러야지**"*).
+
+        예전에는 나가는 길이 **둘뿐**이었다 — 🎉 성공(→[나가기])과
+        💎 수호석 부족(→ESC). 그래서 아래 경우엔 **수호성 화면이 열린 채 남았다**:
+          · 정한 횟수를 다 채웠을 때            · 카드도 버튼도 결과창도 없을 때
+          · 끌기(③)가 실패했을 때               · 카드 고르기가 실패했을 때
+
+        🚫 **[나가기] 를 찾아 누르는 것은 '성공 화면' 일 때만** 한다.
+           `_suho_exit_btn` 은 *'빨간 짝이 없는 파란 버튼 중 맨 오른쪽'* 을 고르는데,
+           **진입창의 [활성화] 도 그 조건에 맞는다** → 누르면 **수호석이 나간다.**
+           그 밖에는 **ESC** 로만 나간다 (ESC = 취소라 돈이 안 든다).
+        🚫 사용자가 ■ 멈춤 을 눌렀으면 **아무것도 하지 않는다** — 멈추라고 한 것이다.
+        🚫 **수호성 화면이 아니면 아무것도 누르지 않는다**
+           (이 저장소 절대 규칙 — 「그림을 못 보면 누르지 않는다」)."""
+        try:
+            if not rect:
+                return False
+            if getattr(self, "_suho_stop", False):
+                return False              # 사용자가 멈췄다 — 건드리지 않는다
+            img = self._suho_grab(rect)
+            if img is None:
+                return False
+            if not self._suho_here(img):
+                return True               # 이미 나와 있다 — 할 일 없다
+            # 🎉 성공 화면이면 [나가기] — 검증된 그 길을 한 번 더 써본다
+            if self._suho_done_seen(img):
+                eb = self._suho_exit_btn(img)
+                if eb:
+                    L, T = rect[1], rect[2]
+                    pyautogui.click(L + eb[0], T + eb[1])
+                    click_log(f"[수호성] 🚪 성공 화면이 남아 있어 **[나가기]** 를 "
+                              f"눌렀다 ({L+eb[0]},{T+eb[1]} · {why})")
+                    self._suho_nap(*SUHO_EXIT_WAIT)
+                    _i2 = self._suho_grab(rect)
+                    if _i2 is None or not self._suho_here(_i2):
+                        click_log("[수호성] 🚪 수호성 화면이 닫혔다 ✔")
+                        return True
+            # ⎋ 그 밖은 ESC. 방금 ESC 를 썼으면 **또 누르지 않는다**
+            #    (다 닫힌 뒤 더 누르면 게임 메뉴판이 열린다 — 2026-11-06 실측)
+            if time.time() - getattr(self, "_suho_esc_at", 0.0) < SUHO_ESC_AGAIN:
+                click_log(f"[수호성] 🚪 화면이 남아 있지만 **방금 ESC 를 썼다** → "
+                          f"더 누르지 않는다 ({why})")
+                return False
+            return self._suho_esc_out(rect, why)
+        except Exception as e:
+            click_log(f"[수호성] 🚪 ⚠ 나가기 오류 {e}")
             return False
 
     def _suho_wait_human(self):
