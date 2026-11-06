@@ -4231,7 +4231,12 @@ def fix_quit_list():
 #       · 여러 개면 **[모두 복구]** 한 번
 FIX_TABS      = True                 # 끄면 예전(첫 줄 하나) 흐름으로 돌아간다
 FIX_TAB_MATCH = 0.70                 # 탭·[모두 복구] 그림 기준
-FIX_TAB_GAP   = (0.5, 0.9)           # 탭을 바꾼 뒤 기다림
+FIX_TAB_GAP   = (0.8, 1.2)           # 탭을 바꾼 뒤 기다림
+#    🚨 2026-11-06 실측 — 0.5~0.9 로는 **경험치 복구 탭이 다 안 그려져서**
+#       `[모두 복구] 를 못 찾았다` 로 빠졌다 (아이템 탭은 이미 선택돼 있어 됐다).
+#       기록: 14:21:26 탭 누름 → 14:21:27 못 찾음 (**1초**).
+FIX_TAB_TRIES = 4                    # [모두 복구] 가 보일 때까지 다시 보는 횟수
+FIX_TAB_RETRY = (0.45, 0.75)         # 다시 보는 간격
 FIX_ALL_WAIT  = (0.7, 1.1)           # [모두 복구] 뒤 확인창이 뜨기를
 FIX_TAB_CLOSE = (78.0, 9.5)          # '아이템 복구' 그림 좌상단 → ✕ 까지 (546 창 기준)
 FIX_COIN_BOX  = (0, -19, 12, -9)     # '모두 복구' 좌상단 기준 **합계 동전** 상자
@@ -24289,11 +24294,45 @@ class App(tk.Tk):
                 click_log(f"fix #{si:02d} 🗂 [{_ko}] 탭 ({tb[4]:.2f}) → ({tx},{ty}) 눌렀다")
                 nap(random.uniform(*FIX_TAB_GAP))
                 # ③ [모두 복구] 를 찾고 **동전 색**을 본다
-                big = grab_window(c1)
-                ab = fix_tab_find(big, "all") if big is not None else None
+                # 🔁 **보일 때까지 다시 본다** — 탭을 바꾸면 목록이 다시 그려진다.
+                #    🚫 한 번만 보고 넘어가지 말 것 (2026-11-06 실측으로 당했다).
+                ab, big, _sc = None, None, 0.0
+                for _t in range(FIX_TAB_TRIES):
+                    big = grab_window(c1)
+                    ab = fix_tab_find(big, "all") if big is not None else None
+                    if ab:
+                        break
+                    if big is not None:
+                        _p = fix_tab_img("all")
+                        try:
+                            import cv2 as _cv, numpy as _np
+                            _tt = _cv.imdecode(_np.fromfile(_p, dtype=_np.uint8),
+                                               _cv.IMREAD_COLOR)
+                            _k = big.shape[1] / float(fix_tab_base() or IMG_BASE_W)
+                            _t2 = _cv.resize(_tt, (max(3, int(round(_tt.shape[1]*_k))),
+                                                   max(3, int(round(_tt.shape[0]*_k)))))
+                            _sc = float(_cv.matchTemplate(
+                                big, _t2, _cv.TM_CCOEFF_NORMED).max())
+                        except Exception:
+                            pass
+                    if _t < FIX_TAB_TRIES - 1:
+                        nap(random.uniform(*FIX_TAB_RETRY))
                 if not ab:
                     click_log(f"fix #{si:02d} 🗂 [{_ko}] [모두 복구] 를 못 찾았다 "
-                              f"— 복구할 것이 없거나 창이 다르다")
+                              f"(최고 {_sc:.2f} · 기준 {FIX_TAB_MATCH} · "
+                              f"{FIX_TAB_TRIES}번 봤다) — 복구할 것이 없거나 "
+                              f"그 탭은 화면이 다르다")
+                    try:    # 🗒 무엇을 봤는지 사진으로 남긴다 (원격 확인용)
+                        if big is not None:
+                            import cv2 as _cv2
+                            _d = os.path.join(IMG_DIR_MINE, "_fixtab")
+                            os.makedirs(_d, exist_ok=True)
+                            _f = os.path.join(
+                                _d, f"{time.strftime('%m%d_%H%M%S')}_{_nm}.png")
+                            _cv2.imencode(".png", big)[1].tofile(_f)
+                            click_log(f"fix #{si:02d} 🗂 화면 {_f}")
+                    except Exception:
+                        pass
                     continue
                 _daya, _blue = fix_coin_is_daya(big, ab)
                 if _daya:
