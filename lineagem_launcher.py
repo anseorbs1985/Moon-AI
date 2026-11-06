@@ -8885,8 +8885,8 @@ class App(tk.Tk):
         # ── 매일 해야 하는 것 (네모 박스) : 용던고고!!! / 스케줄 ──
         daily = tk.LabelFrame(dc_col, text=" 매일 ", font=("맑은 고딕", 8, "bold"),
                               fg="#a04000", bd=2, relief="groove")
-        daily.pack(anchor="n", pady=(0, 5), padx=1)
-        d1 = tk.Frame(daily); d1.pack(anchor="n", padx=3, pady=(3, 0))
+        daily.pack(anchor="n", pady=(0, 2), padx=1)
+        d1 = tk.Frame(daily); d1.pack(anchor="n", padx=3, pady=(1, 0))
         tk.Button(d1, text="🐲 용던\n고고!!!",
             font=("맑은 고딕", 9, "bold"), bg="#a04000", fg="white",
             activebackground="#7b3000", width=7, height=2,
@@ -8895,7 +8895,7 @@ class App(tk.Tk):
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
             command=self._start_dragon).pack(side="left", padx=(2, 0))
-        d2 = tk.Frame(daily); d2.pack(anchor="n", padx=3, pady=(4, 4))
+        d2 = tk.Frame(daily); d2.pack(anchor="n", padx=3, pady=(2, 2))
         tk.Button(d2, text="📅 스케줄",
             font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
             activebackground="#0e6655", width=7, height=2,
@@ -8908,7 +8908,7 @@ class App(tk.Tk):
         #    *"야 던전끝 흑기사!! 위에 과거섬도 가져와줘"*)
         #    ⚠ 섹션행(`fixed`)에 있던 같은 버튼은 **지웠다** — 두 군데 있으면
         #      접었을 때와 펼쳤을 때가 달라 보인다 (2026-11-04 규칙).
-        pr0 = tk.Frame(dc_col); pr0.pack(anchor="n", pady=(0, 5))
+        pr0 = tk.Frame(dc_col); pr0.pack(anchor="n", pady=(0, 2))
         tk.Button(pr0, text="🏝 과거의\n말하는섬",
             font=("맑은 고딕", 9, "bold"), bg="#c0392b", fg="white",
             activebackground="#922b21", width=7, height=2,
@@ -8918,7 +8918,7 @@ class App(tk.Tk):
             activebackground="#1e8449", width=4, height=2,
             command=self._start_past).pack(side="left", padx=(2, 0))
         # 던전끝! 흑기사!! — [과거섬] 바로 아래
-        kr = tk.Frame(dc_col); kr.pack(anchor="n", pady=(0, 5))
+        kr = tk.Frame(dc_col); kr.pack(anchor="n", pady=(0, 2))
         tk.Button(kr, text="🖤 던전끝!\n흑기사!!",
             font=("맑은 고딕", 9, "bold"), bg="#212f3d", fg="white",
             activebackground="#17202a", width=7, height=2,
@@ -8937,7 +8937,7 @@ class App(tk.Tk):
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=2,
             command=self._start_dc).pack(side="left", padx=(2,0))
-        r2 = tk.Frame(dc_col); r2.pack(anchor="n", pady=(4,0))
+        r2 = tk.Frame(dc_col); r2.pack(anchor="n", pady=(2,0))
         tk.Button(r2, text="🧸 인형\n탐험",
             font=("맑은 고딕", 9, "bold"), bg="#b9770e", fg="white",
             activebackground="#8a5809", width=7, height=2,
@@ -8949,7 +8949,7 @@ class App(tk.Tk):
         # 인형탐험 아래: 매일매일 스케줄 (자주 쓰는 기능이라 앞으로 이동)
         # 스케줄은 위쪽 [매일] 박스로 옮겼다 (2026-08-16)
         # 아이템정리 (스케줄과 동일 구조 + 단축키)
-        r4 = tk.Frame(dc_col); r4.pack(anchor="n", pady=(4,0))
+        r4 = tk.Frame(dc_col); r4.pack(anchor="n", pady=(2,0))
         tk.Button(r4, text="🧹 아이템\n정리",
             font=("맑은 고딕", 9, "bold"), bg="#7d6608", fg="white",
             activebackground="#5d4c06", width=7, height=2,
@@ -8959,7 +8959,7 @@ class App(tk.Tk):
             activebackground="#1e8449", width=4, height=2,
             command=self._start_item).pack(side="left", padx=(2,0))
         # 아이템정리 아래(이 줄 끝): 🎣 낚시녹임 — 변신확인용과 동일 구조(dgn2)
-        r5 = tk.Frame(dc_col); r5.pack(anchor="n", pady=(4,0))
+        r5 = tk.Frame(dc_col); r5.pack(anchor="n", pady=(2,0))
         tk.Button(r5, text="🎣 낚시" + chr(10) + "녹임",
             font=("맑은 고딕", 9, "bold"), bg="#1a5276", fg="white",
             activebackground="#123c56", width=7, height=2,
@@ -8979,7 +8979,7 @@ class App(tk.Tk):
             width=12, height=2, command=self._mail_run_now)
         # 🗂 **여백을 줄였다** (2026-11-04) — 아래에 [던전] 상자와 [▶ 접기] 가
         #    더해지면서 화면 높이를 넘겨 맨 밑줄이 잘렸다.
-        self._warn_topbtn.pack(anchor="n", pady=(8, 0))
+        self._warn_topbtn.pack(anchor="n", pady=(4, 0))
 
         # 작업이 끝나면 여기에 큰 빨간 글씨로 '완료'가 1분간 뜬다
         self._done_var = tk.StringVar(value="")
@@ -9167,7 +9167,7 @@ class App(tk.Tk):
         #    낚시녹임 아래 · [▶ 전부 복구] 위.
         # 💰 다야 OCR — **낚시녹임 바로 아래** (2026-11-04 사용자:
         #    *"던전에 다야 OCR 은 낚시녹임 밑으로 빼주고"*)
-        _oc = tk.Frame(dc_col); _oc.pack(anchor="n", pady=(5, 0), before=self._warn_topbtn)
+        _oc = tk.Frame(dc_col); _oc.pack(anchor="n", pady=(2, 0), before=self._warn_topbtn)
         tk.Button(_oc, text="💰 다야\nOCR", font=("맑은 고딕", 9, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
                   width=7, height=2, command=self._open_ocr).pack(side="left")
@@ -9182,7 +9182,7 @@ class App(tk.Tk):
         #    🚫 켬/끔을 두 군데 두지 말 것 — 접었을 때와 펼쳤을 때가 달라 보인다
         #       (2026-11-04 규칙). 그래서 각성 옆 것은 **창 여는 버튼만** 남겼다.
         _sh = tk.Frame(dc_col)
-        _sh.pack(anchor="n", pady=(5, 0), before=self._warn_topbtn)
+        _sh.pack(anchor="n", pady=(2, 0), before=self._warn_topbtn)
         tk.Button(_sh, text="🌙 수호" + chr(10) + "성", font=("맑은 고딕", 9, "bold"),
                   bg="#5b2c6f", fg="white", activebackground="#4a235a",
                   width=7, height=2, command=self._open_suho_win).pack(side="left")
@@ -9198,12 +9198,12 @@ class App(tk.Tk):
 
         _dun = tk.LabelFrame(dc_col, text=" 던전 ", font=("맑은 고딕", 9, "bold"),
                              fg="#a04000", bd=2, relief="groove")
-        _dun.pack(anchor="n", pady=(6, 0), padx=1, before=self._warn_topbtn)
+        _dun.pack(anchor="n", pady=(2, 0), padx=1, before=self._warn_topbtn)
         if not hasattr(self, "_dun_imgs"):
             self._dun_imgs = {}
         for _i, (_nm, _bg) in enumerate((("오만의탑", "#8e44ad"), ("악몽의섬", "#2471a3"),
                                          ("잊혀진섬", "#16a085"), ("에카", "#d35400"))):
-            _rw = tk.Frame(_dun); _rw.pack(anchor="n", padx=3, pady=(3, 0))
+            _rw = tk.Frame(_dun); _rw.pack(anchor="n", padx=3, pady=(1, 0))
             _im = self._dun_imgs.get(_nm)
             if _im is None:
                 try:
