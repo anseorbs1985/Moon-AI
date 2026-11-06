@@ -4289,6 +4289,13 @@ FIX_FREE_TRIES = 3                   # 경험치 탭에서 [일일무료복구] 
 #    ⚠ 등록 좌표 **칸2 는 글자 쪽**(창안 75,79)이라 아이콘이 아니다 —
 #      아이콘은 창안 (34, 81). 그래서 **탭 그림 기준으로 계산**한다.
 FIX_EXP_ROW   = (15, 39)             # 'fix_tab_exp' 좌상단 → 첫 줄 EXP 아이콘 중심
+# 🎫 **일일무료복구를 다 쓰면 [구호증서복구(n)] 이 나온다** (2026-11-06 사용자:
+#    *"일일무료복구가 없으면 옆에 **구호증서 복구**가 있거든. 그걸 눌러서 복구를"*)
+#    그 자리에 버튼이 **둘** 나온다 — 실측 #06:
+#      `[5 복구]`(파랑)         💎 185 **다야** → 🚫 절대 누르지 않는다
+#      `[구호증서복구(2)]`(파랑) 구호증서 2장    → ✅ 이걸 누른다
+#    🚫 **[복구] 를 누르지 말 것** — 바로 옆이고 색도 같지만 **다야가 나간다.**
+#       그래서 글자(`fix_cert.png`)로 정확히 찾아 누른다.
 # 🔢 **탭에 숫자가 없으면 할 게 없다** (사용자: *"아무것도 안 떠 있으면 취소를 누르고"*)
 #    탭 그림 **오른쪽 +1~+13px** 에 잉크가 있나로 본다.
 #    📏 실측 — 숫자 있음 15~21픽셀 · 없음 **0픽셀**. 아주 깨끗하게 갈린다.
@@ -4308,6 +4315,7 @@ def fix_tab_ready():
     try:
         return all(os.path.exists(fix_tab_img(n))
                    for n in ("tab_exp", "tab_item", "all", "free"))
+        # ⚠ `cert`(구호증서복구)는 **없어도 된다** — 무료가 남아 있는 동안은 안 쓴다.
     except Exception:
         return False
 
@@ -24384,18 +24392,30 @@ class App(tk.Tk):
                 if not tb:
                     click_log(f"fix #{si:02d} 🗂 [{_ko}] 탭을 못 찾았다 — 건너뛴다")
                     continue
-                # 🔢 **숫자가 없으면 할 게 없다** — 누르지 않는다 (2026-11-06 사용자)
-                _has, _ink = fix_tab_has_num(big, tb)
-                if not _has:
-                    click_log(f"fix #{si:02d} 🗂 [{_ko}] 숫자가 없다 (잉크 {_ink}) "
-                              f"— 복구할 것이 없어 건너뛴다")
-                    continue
-                # ② 그 탭으로 바꾼다 (이미 그 탭이어도 무해하다)
+                # ② **먼저 그 탭으로 바꾼다** — 그래야 숫자를 제대로 읽는다.
+                #    🚨 **선택 안 된 탭은 글자가 어두워서** 숫자가 있어도 잉크가
+                #       2 밖에 안 잡힌다 (실측 15:19:48). 선택되면 15~21 이다.
+                #       그래서 **누르기 전 숫자로 건너뛰면 안 된다** —
+                #       사용자: *"경험치 복구할 때 잠시 옆을 보면 되는 거잖아.
+                #                그 옆에 아이템 복구가 없으면 꺼야지"*
+                _ink0 = fix_tab_has_num(big, tb)[1]
                 tx, ty = L + tb[0] + tb[2] // 2, T + tb[1] + tb[3] // 2
                 click_at(tx, ty)
-                click_log(f"fix #{si:02d} 🗂 [{_ko}] 탭 ({tb[4]:.2f} · 숫자 잉크 {_ink}) "
-                          f"→ ({tx},{ty}) 눌렀다")
+                click_log(f"fix #{si:02d} 🗂 [{_ko}] 탭 ({tb[4]:.2f}) → ({tx},{ty}) "
+                          f"눌렀다 (누르기 전 잉크 {_ink0})")
                 nap(random.uniform(*FIX_TAB_GAP))
+                # 🔢 **이제 밝아졌으니 숫자를 본다** — 없으면 할 게 없다
+                big = grab_window(c1)
+                tb0 = fix_tab_find(big, _nm) if big is not None else None
+                if tb0:
+                    _has, _ink = fix_tab_has_num(big, tb0)
+                    if not _has:
+                        click_log(f"fix #{si:02d} 🗂 [{_ko}] 숫자가 없다 "
+                                  f"(눌러서 밝게 한 뒤 잉크 {_ink}) "
+                                  f"— 복구할 것이 없어 건너뛴다")
+                        continue
+                    click_log(f"fix #{si:02d} 🗂 [{_ko}] 숫자 있다 (잉크 {_ink}) "
+                              f"→ 복구한다")
 
                 if _nm == "tab_exp":
                     # 🆓 **경험치는 [일일무료복구] 만 쓴다** — 🚫 다야는 절대 안 쓴다
@@ -24404,11 +24424,16 @@ class App(tk.Tk):
                     for _f in range(FIX_FREE_TRIES):
                         big = grab_window(c1)
                         fb = fix_tab_find(big, "free") if big is not None else None
+                        _how = "일일무료복구"
+                        if not fb:
+                            # 🎫 무료를 다 썼으면 **[구호증서복구]** 가 있다
+                            fb = fix_tab_find(big, "cert") if big is not None else None
+                            _how = "구호증서복구"
                         if not fb:
                             _paid = True
-                            click_log(f"fix #{si:02d} 🆓 [{_ko}] **[일일무료복구] 가 "
-                                      f"없다** ({_f}번 했다) → 🚫 다야는 쓰지 않는다 "
-                                      f"· 💎 다야!! 로 표시한다")
+                            click_log(f"fix #{si:02d} 🆓 [{_ko}] **[일일무료복구]도 "
+                                      f"[구호증서복구]도 없다** ({_f}번 했다) → "
+                                      f"🚫 [복구](다야)는 쓰지 않는다 · 💎 다야!! 로 표시")
                             self._fix_tab_shot(si, big, "free_none")
                             break
                         # 🚨 **줄을 먼저 골라야 버튼이 켜진다** (2026-11-06 실측).
@@ -24430,7 +24455,7 @@ class App(tk.Tk):
                         click_at(fx, fy)
                         _did = True
                         click_log(f"fix #{si:02d} ✅ [{_ko}] **EXP 아이콘** "
-                                  f"({_ex},{_ey}) 눌러 고르고 **[일일무료복구]** "
+                                  f"({_ex},{_ey}) 눌러 고르고 **[{_how}]** "
                                   f"({fb[4]:.2f}) → ({fx},{fy}) 눌렀다 ({_f+1}번째)")
                         self.status.set(f"🆓 복구 #{si:02d} — 경험치 일일무료복구")
                         nap(random.uniform(*FIX_ALL_WAIT))
