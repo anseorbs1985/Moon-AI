@@ -834,7 +834,17 @@ SUHO_ESC_TIMES   = 4                 # 수호성 화면을 빠져나오는 ESC *
 #    2026-11-06 사용자: *"3번이 아니고 네 번이었어"*.
 #    ⚠ 한도일 뿐이다 — **닫히는 순간 멈춘다**(`_suho_esc_out`). 다 닫힌 뒤에
 #      더 누르면 게임 **메뉴판이 열린다** (실측: 1번 확인창 · 2번 수호성 화면).
-SUHO_ESC_GAP     = (0.18, 0.32)      # ESC 사이 간격
+SUHO_ESC_GAP     = (0.5, 1.0)        # ESC 사이 간격
+#    2026-11-06 사용자: *"이걸 **0.5~1초 간격으로 4번**을 눌러줘야 할 것 같은데"*.
+#    🚫 **0.18~0.32 로 되돌리지 말 것** — 1초 안에 3번이 들어가 게임이 못 따라왔다
+#       (실측 13:13:46 → 13:13:47). 느린 것이 오히려 확실하다.
+SUHO_ESC_STOP_EARLY = False          # '닫힌 것 같으면 멈춘다' 를 쓸까
+#    🚫 **False 로 둔다 (2026-11-06 사용자 지시 — 4번 다 누른다).**
+#    예전엔 `_suho_here`(수호성 화면이 아직 있나)가 '없다' 고 하면 바로 멈췄는데,
+#    **3번째에 멈춰서** 밑에 남은 층이 안 닫혔다. 화면이 다 안 바뀐 순간을 본 것이거나
+#    수호성 화면 밑에 다른 층이 있는 것이다.
+#    ⚠ 다 닫힌 뒤 ESC 를 더 누르면 게임 **메뉴판이 열릴 수 있다**(2026-11-06 실측) —
+#      그래서 `SUHO_ESC_TIMES` 를 늘리지 말고 **4 로 둔다**.
 SUHO_WIN_WAIT    = (0.6, 1.0)        # 🎉 성공 화면이 다 그려지기를 기다린다
 #    🚫 줄이지 말 것 — 뜨자마자 [나가기] 를 누르면 **안 먹는다** (2026-11-06 실측).
 SUHO_EXIT_TRIES  = 3                 # [나가기] 를 눌러보는 횟수 (닫히면 바로 멈춘다)
@@ -11578,10 +11588,14 @@ class App(tk.Tk):
                 used = i + 1
                 self._suho_nap(*SUHO_ESC_GAP)
                 img = self._suho_grab(rect)
-                if img is None or not self._suho_here(img):
-                    gone = True
+                gone = (img is None or not self._suho_here(img))
+                # 🚦 `SUHO_ESC_STOP_EARLY` 가 켜져 있을 때만 중간에 멈춘다.
+                #    🚫 **기본은 꺼짐** — 2026-11-06 사용자 지시로 4번 다 누른다
+                #       (3번째에 멈춰서 밑에 남은 층이 안 닫혔다).
+                if SUHO_ESC_STOP_EARLY and gone:
                     break
-            click_log(f"[수호성] ⎋ ESC {used}번 눌러 나왔다 ({why}) — "
+            _gap = f"{SUHO_ESC_GAP[0]:.1f}~{SUHO_ESC_GAP[1]:.1f}초 간격"
+            click_log(f"[수호성] ⎋ ESC {used}번 눌렀다 ({_gap} · {why}) — "
                       f"{'수호성 화면이 닫혔다 ✔' if gone else '⚠ 아직 화면이 남아 있다'}")
             return gone
         except Exception as e:
