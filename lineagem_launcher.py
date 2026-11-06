@@ -4220,6 +4220,102 @@ def fix_quit_list():
     return out
 
 
+# 🗂 **복구 창은 탭이 둘이다** — `경험치 복구(n)` · `아이템 복구(n)` (2026-11-06)
+#    사용자: *"복구를 다 했잖아. 그런데 계속 안 없어지고 떠 있으면은 **옆에 장비가
+#    복구가 안 된** 거거든"* · *"저기 **아이템 복구도** 해야 하거든"*
+#    🚨 예전 흐름은 **지금 선택된 탭의 첫 줄 하나만** 복구했다. 다른 탭은 아예
+#       안 건드려서 십자가가 그대로 남았다.
+#    ✅ 사용자 확정 (2026-11-06):
+#       · 탭 **둘 다** 해야 십자가가 사라진다
+#       · **아데나는 써도 된다** — 🚫 **다야(파란 동전)일 때만** 멈추고 💎 표시
+#       · 여러 개면 **[모두 복구]** 한 번
+FIX_TABS      = True                 # 끄면 예전(첫 줄 하나) 흐름으로 돌아간다
+FIX_TAB_MATCH = 0.70                 # 탭·[모두 복구] 그림 기준
+FIX_TAB_GAP   = (0.5, 0.9)           # 탭을 바꾼 뒤 기다림
+FIX_ALL_WAIT  = (0.7, 1.1)           # [모두 복구] 뒤 확인창이 뜨기를
+FIX_TAB_CLOSE = (78.0, 9.5)          # '아이템 복구' 그림 좌상단 → ✕ 까지 (546 창 기준)
+FIX_COIN_BOX  = (0, -19, 12, -9)     # '모두 복구' 좌상단 기준 **합계 동전** 상자
+FIX_COIN_BLUE = 10                   # 파란 픽셀이 이보다 많으면 **다야** → 멈춘다
+#    📏 실측 2026-11-06 (#06) — 아데나 동전 **R-B +116 · B>R 픽셀 0**.
+#       다야는 파란 동전이라 B>R 가 많다 (오만의탑 `OMANST_COIN_BLUE` 와 같은 방식).
+#    🚫 평균 R-B 하나로 판정하지 말 것 — 갈색 배경이 평균을 지배한다 (2026-11-04 교훈).
+
+
+def fix_tab_img(nm):
+    return os.path.join(IMG_DIR, f"fix_{nm}.png")
+
+
+def fix_tab_ready():
+    """🗂 탭 흐름에 필요한 그림 셋이 다 있나 (없으면 예전 흐름으로)."""
+    try:
+        return all(os.path.exists(fix_tab_img(n))
+                   for n in ("tab_exp", "tab_item", "all"))
+    except Exception:
+        return False
+
+
+def fix_tab_base():
+    """🗂 탭 그림을 **어느 창 가로에서 잘랐나** (없으면 옛 기준 491)."""
+    try:
+        with open(os.path.join(IMG_DIR, "fix_tab_meta.json"),
+                  encoding="utf-8-sig") as f:
+            return int((json.load(f) or {}).get("w") or IMG_BASE_W)
+    except Exception:
+        return IMG_BASE_W
+
+
+def fix_tab_find(big, nm):
+    """🗂 그 그림을 창 안에서 찾는다 → (좌상단x, 좌상단y, 폭, 높이, 점수) 또는 None."""
+    try:
+        import cv2, numpy as np
+        p = fix_tab_img(nm)
+        if not os.path.exists(p):
+            return None
+        t = cv2.imdecode(np.fromfile(p, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if t is None:
+            return None
+        k = big.shape[1] / float(fix_tab_base() or IMG_BASE_W)
+        best = None
+        for kk in (k * 0.97, k, k * 1.03):
+            t2 = (cv2.resize(t, (max(3, int(round(t.shape[1] * kk))),
+                                 max(3, int(round(t.shape[0] * kk)))))
+                  if abs(kk - 1.0) > 0.01 else t)
+            if big.shape[0] < t2.shape[0] or big.shape[1] < t2.shape[1]:
+                continue
+            r = cv2.matchTemplate(big, t2, cv2.TM_CCOEFF_NORMED)
+            _, mx, _, loc = cv2.minMaxLoc(r)
+            if best is None or mx > best[4]:
+                best = (loc[0], loc[1], t2.shape[1], t2.shape[0], float(mx))
+        if best and best[4] >= FIX_TAB_MATCH:
+            return best
+        return None
+    except Exception:
+        return None
+
+
+def fix_coin_is_daya(big, allbox):
+    """💎 합계 동전이 **다야(파랑)** 인가 → (다야?, 파란 픽셀 수).
+
+    `allbox` 는 `fix_tab_find(big, "all")` 결과. 그 좌상단 기준으로 동전 자리를 잡는다.
+    🚫 평균 R-B 로 판정하지 말 것 — 갈색 배경이 평균을 지배한다 (2026-11-04)."""
+    try:
+        import numpy as np
+        k = big.shape[1] / float(fix_tab_base() or IMG_BASE_W)
+        ax, ay = allbox[0], allbox[1]
+        dx0, dy0, dx1, dy1 = FIX_COIN_BOX
+        x0 = int(ax + dx0 * k); y0 = int(ay + dy0 * k)
+        x1 = int(ax + dx1 * k); y1 = int(ay + dy1 * k)
+        x0, y0 = max(0, x0), max(0, y0)
+        x1, y1 = min(big.shape[1], x1), min(big.shape[0], y1)
+        if x1 - x0 < 3 or y1 - y0 < 3:
+            return False, -1
+        p = big[y0:y1, x0:x1].reshape(-1, 3).astype(int)
+        blue = int((p[:, 0] > p[:, 2]).sum())
+        return (blue >= FIX_COIN_BLUE), blue
+    except Exception:
+        return False, -1
+
+
 def fix_quit_meta():
     """🚪 종료창 그림을 **어느 창 가로에서 잘랐나** (없으면 옛 기준 491).
 
@@ -24129,9 +24225,122 @@ class App(tk.Tk):
             self._fix_ran = getattr(self, "_fix_ran", set()) | {int(si)}
         except Exception:
             pass
+        # 🗂 **탭 두 개를 도는 새 흐름** — 그림 셋이 다 있을 때만 (2026-11-06).
+        #    없으면 예전(첫 줄 하나) 흐름 그대로 — 안 쓰는 컴퓨터는 영향 0.
+        if FIX_TABS and fix_tab_ready():
+            try:
+                self._busy_task = "복구탭"
+            except Exception:
+                pass
+            self._minimize_claude()
+            self._send_to_back()
+            self._stay_back(90)
+            threading.Thread(target=self._fix_tabs_work,
+                             args=(si, idx), daemon=True).start()
+            return
         self._start_dgn2("fix", sel_list=[idx])
         # 끝난 뒤 **화면을 다시 봐서** 경고가 사라졌는지 확인하고 지운다
         self.after(300, lambda x=si: self._fix_verify(x, FIX_WATCH_N))
+
+    def _fix_tabs_work(self, si, idx):
+        """🗂 **탭 두 개를 돌며 [모두 복구]** — 복구의 새 흐름 (2026-11-06).
+
+        ① 칸1(십자가)을 눌러 복구 창을 연다
+        ② `경험치 복구` → 동전 확인 → [모두 복구] → 확인
+        ③ `아이템 복구` → 동전 확인 → [모두 복구] → 확인
+        ④ ✕ 로 닫는다
+
+        🚫 **다야(파란 동전)면 그 탭을 건너뛰고 💎 표시**한다 (사용자 지시).
+        🚫 그림(`fix_tab_exp/tab_item/all`)이 없으면 이 길로 오지 않는다."""
+        _did, _paid = False, False
+        try:
+            slots = self.cfg.get("fix_slots") or []
+            slot = slots[idx] if idx < len(slots) else {}
+            cs = slot.get("coords") or []
+            anc = slot_anchor(slot)
+            c1 = cs[0] if len(cs) > 0 and cs[0] else None
+            c5 = cs[4] if len(cs) > 4 and cs[4] else None   # 확인 팝업 (사용자 등록)
+            if not c1 or not anc:
+                click_log(f"fix #{si:02d} 🗂 칸1(십자가) 좌표가 없어 못 연다")
+                return
+            # ① 십자가를 눌러 복구 창을 연다
+            self._focus_client_at(c1)
+            nap(random.uniform(*FIX_FOCUS_WAIT))
+            click_at(*c1)
+            click_log(f"fix #{si:02d} 🗂 칸1(십자가) {tuple(c1)} 눌러 복구 창을 연다")
+            nap(random.uniform(*FIX_TAB_GAP))
+            self._fix_quit_clear(si, anc, "창 연 뒤")
+            rect = client_rect_at(*c1)
+            if not rect:
+                click_log(f"fix #{si:02d} 🗂 ⚠ 그 좌표의 클라 창을 못 찾았다")
+                return
+            L, T = rect[0], rect[1]
+            for _nm, _ko in (("tab_exp", "경험치 복구"), ("tab_item", "아이템 복구")):
+                big = grab_window(c1)
+                if big is None:
+                    click_log(f"fix #{si:02d} 🗂 ⚠ 창을 못 찍었다"); break
+                tb = fix_tab_find(big, _nm)
+                if not tb:
+                    click_log(f"fix #{si:02d} 🗂 [{_ko}] 탭을 못 찾았다 — 건너뛴다")
+                    continue
+                # ② 그 탭으로 바꾼다 (이미 그 탭이어도 무해하다)
+                tx, ty = L + tb[0] + tb[2] // 2, T + tb[1] + tb[3] // 2
+                click_at(tx, ty)
+                click_log(f"fix #{si:02d} 🗂 [{_ko}] 탭 ({tb[4]:.2f}) → ({tx},{ty}) 눌렀다")
+                nap(random.uniform(*FIX_TAB_GAP))
+                # ③ [모두 복구] 를 찾고 **동전 색**을 본다
+                big = grab_window(c1)
+                ab = fix_tab_find(big, "all") if big is not None else None
+                if not ab:
+                    click_log(f"fix #{si:02d} 🗂 [{_ko}] [모두 복구] 를 못 찾았다 "
+                              f"— 복구할 것이 없거나 창이 다르다")
+                    continue
+                _daya, _blue = fix_coin_is_daya(big, ab)
+                if _daya:
+                    _paid = True
+                    click_log(f"fix #{si:02d} 💎 [{_ko}] **다야**가 든다 "
+                              f"(파란 픽셀 {_blue} ≥ {FIX_COIN_BLUE}) → 누르지 않는다")
+                    self.status.set(f"💎 복구 #{si:02d} [{_ko}] — 다야가 들어 "
+                                    f"누르지 않았습니다")
+                    continue
+                mx, my = L + ab[0] + ab[2] // 2, T + ab[1] + ab[3] // 2
+                click_at(mx, my)
+                _did = True
+                click_log(f"fix #{si:02d} ✅ [{_ko}] **[모두 복구]** ({ab[4]:.2f}) → "
+                          f"({mx},{my}) 눌렀다 · 동전 파란픽셀 {_blue}(아데나)")
+                self.status.set(f"🩹 복구 #{si:02d} — [{_ko}] 모두 복구")
+                nap(random.uniform(*FIX_ALL_WAIT))
+                if c5:
+                    click_at(*c5)
+                    click_log(f"fix #{si:02d} 🗂 확인 {tuple(c5)} 눌렀다")
+                    nap(random.uniform(*FIX_ALL_WAIT))
+                self._fix_quit_clear(si, anc, f"{_ko} 뒤")
+            # ④ ✕ 로 닫는다 — '아이템 복구' 그림에서 오른쪽으로 떨어진 자리
+            try:
+                big = grab_window(c1)
+                tb = fix_tab_find(big, "tab_item") if big is not None else None
+                if tb:
+                    k = big.shape[1] / float(fix_tab_base() or IMG_BASE_W)
+                    cx = L + tb[0] + int(FIX_TAB_CLOSE[0] * k)
+                    cy = T + tb[1] + int(FIX_TAB_CLOSE[1] * k)
+                    click_at(cx, cy)
+                    click_log(f"fix #{si:02d} 🗂 ✕ ({cx},{cy}) 눌러 닫았다")
+                    nap(random.uniform(0.3, 0.5))
+                self._fix_quit_clear(si, anc, "닫은 뒤")
+            except Exception:
+                pass
+            if _paid and not _did:
+                self._fix_paid_mark(int(si), True)
+                click_log(f"fix #{si:02d} 💎 다야만 남아 아무것도 누르지 않았다 "
+                          f"— 초록 💎 다야!! 로 표시")
+        except Exception as e:
+            click_log(f"fix #{si:02d} 🗂 오류 {e}")
+        finally:
+            try:
+                self._clear_busy("복구탭")
+            except Exception:
+                pass
+            self.after(300, lambda x=si: self._fix_verify(x, FIX_WATCH_N))
 
     def _fix_verify(self, si, tries, marked=False):
         """복구를 돌린 뒤 **그 슬롯만 계속 지켜본다** — F11 의 5분 감시를 개별로.
