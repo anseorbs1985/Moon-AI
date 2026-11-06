@@ -4202,6 +4202,13 @@ FIX_QUIT_GAP   = (0.35, 0.60)
 #       *"다야복구면 당연히 다야 표기해두고 복구하지 말고"*) — `marked` 확인이
 #       `tries <= 0` 바로 밑에 있다. 그 확인을 절대 빼지 말 것.
 FIX_RETRY_MAX  = 3          # 1회차 뒤 **최대 이만큼 더** (총 4판)
+# 🚨 **복구를 돌린 슬롯도 '연속 2번' 안 보여야 지운다** (2026-11-06 사용자 신고:
+#    *"뭘 했다는 거냐 6번은 그대로 떠 있는데 십자가가"*)
+#    실측 — 십자가가 **떠 있는데 점수가 0.649**, 기준은 0.593 이라 **여유 0.056**.
+#    한 프레임만 흔들려도 '사라졌다' 가 된다. 그런데 `_fix_verify` 는
+#    **한 번만 안 보여도 바로 지웠다** (복구를 돌린 슬롯이라 믿고).
+#    👉 복구를 돌렸더라도 **연속 2번**은 확인한다. 1초만 더 쓰면 된다.
+FIX_VERIFY_GONE = 2         # 지우기 전 **연속 이만큼** 안 보여야 한다
 
 
 def fix_quit_list():
@@ -24394,10 +24401,14 @@ class App(tk.Tk):
                 self._fix_quit_clear(si, anc, "닫은 뒤")
             except Exception:
                 pass
-            if _paid and not _did:
+            # 💎 **한 탭이라도 다야면 표시한다** (2026-11-06) — 다른 탭을 했더라도
+            #    그 탭은 사용자가 손으로 해야 하므로 알려야 한다.
+            #    🚫 `_did` 와 상관없이 표시한다 (예전엔 `_paid and not _did` 였다).
+            if _paid:
                 self._fix_paid_mark(int(si), True)
-                click_log(f"fix #{si:02d} 💎 다야만 남아 아무것도 누르지 않았다 "
-                          f"— 초록 💎 다야!! 로 표시")
+                click_log(f"fix #{si:02d} 💎 **다야가 드는 탭이 있다** → 초록 "
+                          f"💎 다야!! 로 표시 (그 탭은 손으로 해주세요"
+                          + (" · 다른 탭은 복구했습니다)" if _did else ")"))
         except Exception as e:
             click_log(f"fix #{si:02d} 🗂 오류 {e}")
         finally:
@@ -24433,14 +24444,37 @@ class App(tk.Tk):
             if int(si) not in set(hit):
                 if int(si) in getattr(self, "_last_sleep", set()):
                     # 자고 있어서 십자가가 가려진 것 — 복구된 게 아니다. 지우지 않는다.
+                    self._fix_gone2 = getattr(self, "_fix_gone2", {})
+                    self._fix_gone2.pop(int(si), None)
                     self.after(FIX_WATCH_MS, lambda: self._fix_verify(si, tries - 1, marked))
                     return
+                # 🚦 **연속 2번** 안 보여야 지운다 (2026-11-06) — 점수가 0.649 로
+                #    기준(0.593)과 **0.056** 밖에 안 떠서 한 프레임만 흔들려도
+                #    '사라졌다' 가 됐다. 🚫 이 확인을 없애지 말 것.
+                self._fix_gone2 = getattr(self, "_fix_gone2", {})
+                _g = self._fix_gone2.get(int(si), 0) + 1
+                self._fix_gone2[int(si)] = _g
+                if _g < FIX_VERIFY_GONE and tries > 0:
+                    click_log(f"fix #{si:02d} 십자가가 안 보인다 "
+                              f"({_g}/{FIX_VERIFY_GONE}번째{self._warn_score_txt(si)}) "
+                              f"— 한 번 더 봐야 지운다")
+                    self.after(FIX_WATCH_MS,
+                               lambda: self._fix_verify(si, tries - 1, marked))
+                    return
+                self._fix_gone2.pop(int(si), None)
                 # 십자가가 사라졌다 = 복구됨
                 self._fix_paid_mark(int(si), False)
                 self._warn_remove(int(si))
-                click_log(f"fix #{si:02d} 복구 확인됨 — 십자가가 사라져 목록에서 지움")
+                click_log(f"fix #{si:02d} 복구 확인됨 — 십자가가 사라져 목록에서 지움 "
+                          f"(연속 {FIX_VERIFY_GONE}번 안 보였다"
+                          f"{self._warn_score_txt(si)})")
                 self.status.set(f"✅ 복구 #{si:02d} 확인 — 십자가가 사라져 지웠습니다")
                 return
+            # 보였다 → 센 것을 되돌린다 (연속이어야 한다)
+            try:
+                getattr(self, "_fix_gone2", {}).pop(int(si), None)
+            except Exception:
+                pass
             # 아직 남아 있다 — 처음 한 번만 '다야 필요'인지 판단해 초록으로
             if not marked:
                 try:
@@ -24580,14 +24614,33 @@ class App(tk.Tk):
         # 🖼 **영역과 기준 그림을 창 크기에 맞춰 늘린다** (2026-11-03).
         #    `check_area_rel` 과 `check_ref.png` 는 491 창에서 만든 것이라,
         #    546 창에서는 **훑는 자리도 밀리고 그림도 작다**.
-        _k = img_k((hw[0][2] - hw[0][0]) if hw else IMG_BASE_W)
+        # 📏 **기준 그림을 어느 창 가로에서 잘랐나** — `check_ref_meta.json`
+        #    (2026-11-06). 없으면 옛 기준 491. `img_k()` 를 그냥 쓰면 546 창에서
+        #    자른 그림을 **또 1.112배 늘려** 안 맞는다.
+        _refw = IMG_BASE_W
+        try:
+            with open(os.path.join(self._warn_dir(), "check_ref_meta.json"),
+                      encoding="utf-8-sig") as _f:
+                _refw = int((json.load(_f) or {}).get("w") or IMG_BASE_W)
+        except Exception:
+            try:
+                with open(os.path.join(IMG_DIR, "check_ref_meta.json"),
+                          encoding="utf-8-sig") as _f:
+                    _refw = int((json.load(_f) or {}).get("w") or IMG_BASE_W)
+            except Exception:
+                pass
+        _cw = (hw[0][2] - hw[0][0]) if hw else IMG_BASE_W
+        _k = img_k(_cw)                     # 영역(check_area_rel)은 491 기준 그대로
+        _kr = _cw / float(_refw or IMG_BASE_W)   # 기준 그림만 따로
         if abs(_k - 1.0) > 0.02:
             dx, dy = int(round(dx * _k)), int(round(dy * _k))
             w, h = int(round(w * _k)), int(round(h * _k))
             M = int(round(M * _k))
+            pass
+        if abs(_kr - 1.0) > 0.02:
             try:
-                ref = ref.resize((max(3, int(round(ref.width * _k))),
-                                  max(3, int(round(ref.height * _k)))))
+                ref = ref.resize((max(3, int(round(ref.width * _kr))),
+                                  max(3, int(round(ref.height * _kr)))))
             except Exception:
                 pass
         hit, slept, _scores, _raw = [], [], [], []
