@@ -4171,6 +4171,64 @@ def has_sleep_img(fkey):
         return False
 
 
+# 🚪 **"종료하시겠습니까?" 창** — 복구 중에 잘못 눌러서 뜨면 ESC 로 닫고 다시 한다
+#    (2026-11-06 사용자: *"가끔 복구를 하는데 종료하겠습니까? 이렇게 멘트가 떠 있을
+#     때가 있던데, 잘못 눌러서 그러면 그건 ESC 눌러서 다시 시도를 해줘야 하는데"*)
+#    🚨 **범인은 복구가 취소할 때 누르는 ESC 자체다.** 👁 '무료' 확인이 실패하거나
+#       ⛔ 금지 그림이 보이면 `press_esc(ESC_TIMES)` 로 빠져나오는데, 그 순간
+#       **이미 창이 다 닫혀 있으면 그 ESC 가 종료 확인창을 띄운다**
+#       (2026-10-27 교훈: "게임 창에 ESC 를 함부로 누르지 말 것 — 창이 없으면
+#        종료 확인이 뜬다"). 그 창이 남으면 다음 복구가 통째로 막힌다.
+#    ✅ ESC 는 그 창에서 **취소**다 — 한 번 더 누르면 안전하게 닫힌다.
+FIX_QUIT_MAX   = 4          # 이 컴퓨터 전용 그림 장수
+FIX_QUIT_MATCH = 0.80       # 판정 기준
+FIX_QUIT_TRIES = 3          # 닫힐 때까지 ESC 를 눌러보는 횟수
+FIX_QUIT_GAP   = (0.35, 0.60)
+
+
+def fix_quit_list():
+    """🚪 종료 확인창 그림 — 공용 1장 + 이 컴퓨터 전용 `FIX_QUIT_MAX` 장."""
+    out = []
+    try:
+        p0 = os.path.join(IMG_DIR, "fix_quit.png")
+        if os.path.exists(p0):
+            out.append(p0)
+        for i in range(1, FIX_QUIT_MAX + 1):
+            p = os.path.join(IMG_DIR_MINE, f"fix_quit_mine{i}.png")
+            if os.path.exists(p):
+                out.append(p)
+    except Exception:
+        pass
+    return out
+
+
+def fix_quit_open(anchor):
+    """그 클라에 **종료 확인창**이 떠 있나 → (떠 있나?, 점수, 어느 그림).
+
+    `grab_window`(PrintWindow)로 그 창을 직접 찍으므로 **가려져 있어도 정확하다.**
+    🚫 그림이 한 장도 없으면 **아무것도 하지 않는다** (안 쓰는 컴퓨터는 그대로)."""
+    ps = fix_quit_list()
+    if not ps or not anchor:
+        return False, -1.0, ""
+    try:
+        import cv2, numpy as np
+        got = grab_window(anchor)
+        if not got:
+            return False, 0.0, ""
+        big = got[0]
+        best, who = 0.0, ""
+        for p in ps:
+            t = cv2.imdecode(np.fromfile(p, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if t is None:
+                continue
+            v = match_scaled(big, t, img_k(big.shape[1]))[0]
+            if v > best:
+                best, who = float(v), os.path.basename(p)
+        return (best >= FIX_QUIT_MATCH), best, who
+    except Exception:
+        return False, 0.0, ""
+
+
 def grab_window(coord):
     """그 좌표가 있는 클라 창을 **직접** 캡처한다 (PrintWindow).
 
@@ -18016,6 +18074,17 @@ class App(tk.Tk):
                 if _hs:
                     sb2.bind("<Button-3>", lambda _e, f=fkey, b_=sb2:
                              self._del_sleep_image(f, b_))
+            if fkey == "fix":
+                # 🚪 — **"종료하시겠습니까?" 창**을 등록한다. 복구 중에 이게 보이면
+                #      ESC 로 닫고 다시 한다 (2026-11-06 사용자 요청).
+                _nq = len(fix_quit_list())
+                qb = tk.Button(dr, text=(f"🚪종료창{_nq}장" if _nq else "🚪 종료창그림"),
+                               font=("맑은 고딕", 8, "bold"), width=10, height=2,
+                               bg=("#922b21" if _nq else "#5d6d7e"), fg="white")
+                qb.config(command=lambda b_=qb: self._grab_quit_image(b_))
+                qb.pack(side="left", padx=(3, 0))
+                if _nq:
+                    qb.bind("<Button-3>", lambda _e, b_=qb: self._del_quit_image(b_))
             # 📤 — 원인 확인에 필요한 것(기록 + 사진 + 그림)을 바탕화면 한 폴더에 모은다.
             #      원격으로 로컬을 봐줄 때 이 폴더만 통째로 보내면 된다.
             tk.Button(dr, text="📤 진단모으기", font=("맑은 고딕", 8, "bold"),
@@ -18987,6 +19056,97 @@ class App(tk.Tk):
             self.status.set("😴 절전 화면 삭제 — 깨우기를 하지 않습니다")
         except Exception as e:
             self.status.set(f"😴 삭제 실패: {e}")
+
+    def _quit_btn_paint(self, btn):
+        try:
+            if btn and btn.winfo_exists():
+                _n = len(fix_quit_list())
+                btn.config(text=(f"🚪종료창{_n}장" if _n else "🚪 종료창그림"),
+                           bg=("#922b21" if _n else "#5d6d7e"))
+        except Exception:
+            pass
+
+    def _grab_quit_image(self, btn=None):
+        """🚪 **"종료하시겠습니까?" 창**을 드래그로 잘라 등록한다 (2026-11-06).
+
+        · 공용이 없으면 **공용**(저장소 → 로컬 21대에 배포)
+        · 이미 있으면 **이 컴퓨터 전용**으로 추가 (최대 `FIX_QUIT_MAX` 장)
+        🚫 빈 칸·단색은 **저장을 거부한다** — 단색은 어디서나 1.00 이 나온다
+           (2026-09-16 층그림 사고와 같은 뿌리)."""
+        self._quit_target = btn
+        self.status.set("🚪 '종료하시겠습니까?' **글자만** 작게 드래그해주세요 "
+                        "(숫자·시간은 넣지 마세요 · ESC 취소)")
+        # ⚠ 창을 **숨기고** 드래그한다 — 띄워둔 창이 그 자리를 덮으면 엉뚱한 것이
+        #   찍힌다 (2026-10-05 F11 에서 겪은 것과 같은 패턴).
+        for w in self._section_wins():
+            try: w.withdraw()
+            except Exception: pass
+        self.withdraw()
+        self.after(250, lambda: _PotionAreaOverlay(self, self._grab_quit_done))
+
+    def _grab_quit_done(self, x, y, w, h):
+        self.deiconify()
+        for wn in self._section_wins():
+            try: wn.deiconify()
+            except Exception: pass
+        btn = getattr(self, "_quit_target", None)
+        if w < 6 or h < 6:
+            self.status.set("🚪 너무 작습니다 — 다시 드래그해주세요"); return
+        try:
+            from PIL import ImageGrab
+            _pub = os.path.join(IMG_DIR, "fix_quit.png")
+            if os.path.exists(_pub):
+                os.makedirs(IMG_DIR_MINE, exist_ok=True)
+                _dst, _wh = None, ""
+                for i in range(1, FIX_QUIT_MAX + 1):
+                    _p = os.path.join(IMG_DIR_MINE, f"fix_quit_mine{i}.png")
+                    if not os.path.exists(_p):
+                        _dst, _wh = _p, f"이 컴퓨터 전용 {i}번"
+                        break
+                if _dst is None:
+                    self.status.set(f"🚪 전용 그림이 이미 {FIX_QUIT_MAX}장입니다 — "
+                                    f"오른쪽 클릭으로 지운 뒤 다시 등록해주세요")
+                    return
+            else:
+                os.makedirs(IMG_DIR, exist_ok=True)
+                _dst, _wh = _pub, "공용(로컬에도 배포)"
+            im = ImageGrab.grab(bbox=(x, y, x + w, y + h),
+                                all_screens=True).convert("RGB")
+            # 🚫 무늬가 없으면 저장하지 않는다
+            try:
+                import numpy as np
+                if float(np.asarray(im.convert("L"), dtype="float32").std()) < 3.0:
+                    self.status.set("🚪 ⚠ 무늬가 없는 자리입니다 (저장 안 함) — "
+                                    "**글자**가 들어가게 잘라주세요")
+                    return
+            except Exception:
+                pass
+            im.save(_dst)
+            self._quit_btn_paint(btn)
+            self.status.set(f"🚪 종료 확인창 저장 ({w}×{h} · {_wh}) — 복구 중에 "
+                            f"이게 보이면 ESC 로 닫고 다시 합니다")
+            click_log(f"[복구] 🚪 종료 확인창 그림 등록 {w}x{h} — {_dst}")
+        except Exception as e:
+            self.status.set(f"🚪 저장 실패: {e}")
+
+    def _del_quit_image(self, btn=None):
+        """🚪 오른쪽 클릭 — **전용이 있으면 전용만** 전부 지운다 (공용은 남는다)."""
+        try:
+            _mine = [os.path.join(IMG_DIR_MINE, f"fix_quit_mine{i}.png")
+                     for i in range(1, FIX_QUIT_MAX + 1)]
+            _mine = [p for p in _mine if os.path.exists(p)]
+            if _mine:
+                for p in _mine:
+                    os.remove(p)
+                self.status.set(f"🚪 이 컴퓨터 전용 {len(_mine)}장 삭제 (공용은 남았습니다)")
+            else:
+                _pub = os.path.join(IMG_DIR, "fix_quit.png")
+                if os.path.exists(_pub):
+                    os.remove(_pub)
+                self.status.set("🚪 종료창 그림 삭제 — 종료창 확인을 하지 않습니다")
+            self._quit_btn_paint(btn)
+        except Exception as e:
+            self.status.set(f"🚪 삭제 실패: {e}")
 
     def _collect_diag(self, fkey):
         """원인 확인에 필요한 것을 바탕화면 `진단_<런처>` 폴더 하나에 모은다 —
@@ -20592,6 +20752,16 @@ class App(tk.Tk):
             _nx, _ny, _ns = find_no_img(fkey, j, coord)
             if _nx is not None:
                 press_esc(ESC_TIMES)
+                # 🚪 **그 ESC 가 종료 확인창을 띄웠을 수 있다** (2026-11-06) —
+                #    창이 이미 다 닫혀 있었으면 ESC 가 종료 확인을 띄운다.
+                #    남겨두면 다음 복구가 통째로 막히므로 여기서 닫는다.
+                if fkey == "fix":
+                    nap(random.uniform(0.25, 0.45))
+                    # ⚠ 이 함수에는 슬롯 번호(`si`)가 없다 — **기록용으로만**
+                    #   설정에서 찾는다 (못 찾으면 #00 으로 남는다).
+                    _qi = next((_k + 1 for _k, _v in enumerate(
+                        self.cfg.get("fix_slots") or []) if _v is slot), 0)
+                    self._fix_quit_clear(_qi, slot_anchor(slot), "ESC 취소 뒤")
                 click_log(f"{fkey} [{_nm0}] 좌표{j+1} ⛔ 금지 그림 보임 "
                           f"(일치도 {_ns:.2f}) → ESC {ESC_TIMES}번 누르고 이 슬롯 중단")
                 self.status.set(f"⛔ [{_nm0}] 좌표{j+1} — 재화 쓰는 창이라 ESC 취소")
@@ -20726,6 +20896,16 @@ class App(tk.Tk):
                 # 그냥 멈추면 복구 창이 열린 채로 남는다.
                 save_miss_shot(fkey, j, coord)
                 press_esc(ESC_TIMES)
+                # 🚪 **그 ESC 가 종료 확인창을 띄웠을 수 있다** (2026-11-06) —
+                #    창이 이미 다 닫혀 있었으면 ESC 가 종료 확인을 띄운다.
+                #    남겨두면 다음 복구가 통째로 막히므로 여기서 닫는다.
+                if fkey == "fix":
+                    nap(random.uniform(0.25, 0.45))
+                    # ⚠ 이 함수에는 슬롯 번호(`si`)가 없다 — **기록용으로만**
+                    #   설정에서 찾는다 (못 찾으면 #00 으로 남는다).
+                    _qi = next((_k + 1 for _k, _v in enumerate(
+                        self.cfg.get("fix_slots") or []) if _v is slot), 0)
+                    self._fix_quit_clear(_qi, slot_anchor(slot), "ESC 취소 뒤")
                 click_log(f"{fkey} [{nm}] 좌표{j+1} 👁 확인 실패 (최고 {sc:.2f}) "
                           f"→ ESC {ESC_TIMES}번 누르고 이 슬롯 중단")
                 self.status.set(f"👁 [{nm}] 좌표{j+1} 다른 화면 ({sc:.2f}) — "
@@ -23706,6 +23886,40 @@ class App(tk.Tk):
             pass
         return None
 
+    def _fix_quit_clear(self, si, anc, why=""):
+        """🚪 **"종료하시겠습니까?" 창이 떠 있으면 ESC 로 닫는다** → 닫았나?
+
+        (2026-11-06 사용자: *"잘못 눌러서 종료하겠습니까 멘트가 떠 있으면
+        ESC 눌러서 다시 시도를 해줘야 하는데"*)
+
+        🚫 **등록 그림이 보일 때만 누른다** — 무조건 ESC 를 누르면 오히려 그 창을
+           띄운다. 그림이 없으면 아무것도 하지 않는다(안 쓰는 컴퓨터는 그대로).
+        ✅ ESC 는 그 창에서 **취소**라 안전하다."""
+        try:
+            if not anc or not fix_quit_list():
+                return False
+            for _t in range(FIX_QUIT_TRIES):
+                _op, _sc, _wh = fix_quit_open(anc)
+                if not _op:
+                    return _t > 0          # 한 번이라도 닫았으면 True
+                click_log(f"fix #{si:02d} 🚪 **종료 확인창**이 떠 있다 "
+                          f"({_wh.replace('.png','')} {_sc:.2f}"
+                          + (f" · {why}" if why else "") + f") → ESC 로 닫는다 "
+                          f"({_t+1}/{FIX_QUIT_TRIES})")
+                self.status.set(f"🚪 복구 #{si:02d} — 종료 확인창을 ESC 로 닫는 중…")
+                self._focus_client_at(anc)
+                nap(random.uniform(0.12, 0.22))
+                press_esc(1)
+                nap(random.uniform(*FIX_QUIT_GAP))
+            _op, _sc, _wh = fix_quit_open(anc)
+            if _op:
+                click_log(f"fix #{si:02d} ⚠ 종료 확인창이 {FIX_QUIT_TRIES}번 "
+                          f"눌러도 안 닫혔다 ({_sc:.2f}) — 그래도 진행한다")
+            return not _op
+        except Exception as e:
+            click_log(f"fix #{si:02d} 🚪 종료창 확인 건너뜀: {e}")
+            return False
+
     def _run_fix_slot(self, si, _bulk=False, slow=False):
         """'복구해야함 03' 을 누르면 **그 슬롯만** 복구를 돌린다 (2026-08-29 사용자 요청).
 
@@ -23796,6 +24010,10 @@ class App(tk.Tk):
                     nap(random.uniform(0.30, 0.55))
                 else:
                     click_log(f"fix #{si:02d} ⚠ 창이 안 닫혔다 — 그래도 진행한다")
+                # 🚪 **종료 확인창이 떠 있으면 먼저 닫는다** (2026-11-06).
+                #    지난 복구가 취소할 때 누른 ESC 가 띄워놓은 것일 수 있다.
+                #    그 창이 남아 있으면 십자가를 가려서 **이 슬롯이 통째로 막힌다.**
+                self._fix_quit_clear(si, _ea, "슬롯 시작")
         except Exception as _ee:
             click_log(f"fix #{si:02d} ESC 닫기 건너뜀: {_ee}")
         # ── ② 깨운 뒤에 십자가가 있는지 확인한다 ──
