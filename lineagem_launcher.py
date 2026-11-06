@@ -2339,6 +2339,12 @@ FRONT_ROW_EAST = True
 #       클로드는 사용자가 다시 요청하기 전까지 이 값을 올리지 말 것.
 DC_BTN_CUT = 0             # 접힌 창 폭에서 깎을 px (0 이면 예전 그대로)
 DC_MIN_W   = 110           # 그래도 이보다 좁히지 않는다 (글자가 잘린다)
+# 🧱 **접힌 런처의 가로를 고정한다** (2026-11-06 사용자: *"자꾸 메인런처 폭을
+#    움직이는데 좀 고정으로 해줘"*). `0` 이면 예전처럼 클라 오른쪽 끝을 재서 정한다.
+#    📏 지금 값 **152** = 화면 2560 − (게임창 끝 2352 + 옆바 56 = 2408)  [실측]
+#    🚫 **옆 바가 확장(112px)되어도 따라 줄어들지 않는다** — 그것이 폭이 멋대로
+#       줄어든 원인이었다. 배치를 바꿨으면 이 숫자만 고친다.
+FOLD_W_FIXED = 152
 # 🗂 **펼쳤을 때 앞줄을 두 줄로 쌓는다** (2026-11-04 사용자 요청 —
 #    한 줄이면 폭이 2553px 로 화면을 거의 다 덮는다. 세로는 남아돈다).
 #    🚫 False 로 되돌리면 다시 화면을 덮는다.
@@ -9011,14 +9017,25 @@ class App(tk.Tk):
                   bg="#6c3483", fg="white", activebackground="#512e5f",
                   width=2, height=2,
                   command=lambda: self._run_awaken(by_user=True, src="메인런처 ▶")).pack(side="left", padx=(2, 0))
-        # 🌙 수호성 — **각성 옆에** (2026-11-05 사용자 지시: "각성 옆에 배치해놔").
-        #    설정·진단 창일 뿐이다 — 실행은 화면이 뜨면 **자동으로** 돈다.
-        #    ⚠ **켬/끔 표시는 여기 두지 말 것** — 이 줄은 런처를 접으면 숨는다.
-        #      켬/끔은 **다야OCR 밑**(접어도 보이는 열)에 있다 (2026-11-06).
+        # 🌙 수호성 — **각성 옆** (2026-11-05 *"각성 옆에 배치해놔"* ·
+        #    2026-11-06 *"수호성을 이젠 메인런처에서 빼서 각성 옆으로 보내"*).
+        #    세로바(`dc_col`)에 있던 것은 **뺐다** — 켬/끔도 여기로 왔다.
+        #    ⚠ 이 줄은 런처를 **접으면 숨는다** (사용자가 그러기로 정했다).
+        #    🚫 켬/끔을 두 군데 두지 말 것 — `_suho_onoff_btn` 이 한쪽만 가리켜
+        #       표시가 어긋난다. 여기 **하나만** 둔다.
         tk.Button(_aw, text="🌙 수호" + chr(10) + "성", font=("맑은 고딕", 8, "bold"),
                   bg="#5b2c6f", fg="white", activebackground="#4a235a",
                   width=4, height=2,
                   command=self._open_suho_win).pack(side="left", padx=(4, 0))
+        _sb = tk.Button(_aw, text="자동" + chr(10) + "켬", font=("맑은 고딕", 8, "bold"),
+                        bg="#27ae60", fg="white", activebackground="#1e8449",
+                        width=3, height=2,
+                        command=lambda: self._suho_set_auto(None))
+        _sb.pack(side="left", padx=(2, 0))
+        #   🚫 `_suho_btn` 은 **버튼 색 덩어리를 찾는 메서드** 다 — 그 이름에
+        #      위젯을 넣으면 그 메서드가 조용히 사라진다 (2026-11-06 실제 사고).
+        self._suho_onoff_btn = _sb
+        self._suho_btn_sync()
         tk.Button(btn_row, text="🔑 계정\n관리",
             font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
             activebackground="#0e6655", width=7, height=2,
@@ -9572,26 +9589,15 @@ class App(tk.Tk):
                   bg="#1e8449", fg="white", activebackground="#145a32",
                   width=4, height=2, command=self._open_ocr_scan).pack(side="left", padx=(2, 0))
 
-        # 🌙 수호성 — **다야OCR 바로 아래** (2026-11-06 사용자:
-        #    *"수호성 자동켬이 어딧는가 내가 볼수잇게 다야OCR밑에 배치해줘"*).
-        #    ⚠ 여기(`dc_col`)는 **런처를 접어도 보이는 열**이라 켬/끔을 늘 볼 수 있다.
-        #       각성 옆 버튼은 접으면 숨으므로 상태를 거기 두면 안 된다.
-        #    🚫 켬/끔을 두 군데 두지 말 것 — 접었을 때와 펼쳤을 때가 달라 보인다
-        #       (2026-11-04 규칙). 그래서 각성 옆 것은 **창 여는 버튼만** 남겼다.
-        _sh = tk.Frame(dc_col)
-        _sh.pack(anchor="n", pady=(2, 0), before=self._warn_topbtn)
-        tk.Button(_sh, text="🌙 수호" + chr(10) + "성", font=("맑은 고딕", 9, "bold"),
-                  bg="#5b2c6f", fg="white", activebackground="#4a235a",
-                  width=7, height=2, command=self._open_suho_win).pack(side="left")
-        _sb = tk.Button(_sh, text="자동" + chr(10) + "켬", font=("맑은 고딕", 9, "bold"),
-                  bg="#27ae60", fg="white", activebackground="#1e8449",
-                  width=4, height=2,
-                  command=lambda: self._suho_set_auto(None))
-        _sb.pack(side="left", padx=(2, 0))
-        #   🚫 `_suho_btn` 은 **버튼 색 덩어리를 찾는 메서드** 다 — 그 이름에
-        #      위젯을 넣으면 그 메서드가 조용히 사라진다 (2026-11-06 실제 사고).
-        self._suho_onoff_btn = _sb
-        self._suho_btn_sync()
+        # 🌙 수호성은 **각성 옆으로 옮겼다** (2026-11-06 사용자 지시 —
+        #    *"수호성을 이젠 메인런처에서 빼서 각성 옆으로 보내"*).
+        #    켬/끔 버튼도 그쪽에 있다 (`_build_ui` 의 `_aw` 줄).
+        #    ⚠ 그래서 **런처를 접으면 수호성 버튼·켬끔이 안 보인다** — 사용자가
+        #      그러기로 정했다. 2026-11-06 의 *"다야OCR 밑에 배치해줘"* 와
+        #      2026-11-04 의 *"켬/끔을 두 군데 두지 말 것"* 중 **자리만** 바뀐 것이다.
+        #    🚫 여기(`dc_col`)에 수호성 버튼을 다시 만들지 말 것 — 두 군데가 되면
+        #       접었을 때와 펼쳤을 때가 달라 보이고, `_suho_onoff_btn` 이 한쪽만
+        #       가리켜 **켬/끔 표시가 어긋난다.**
 
         _dun = tk.LabelFrame(dc_col, text=" 던전 ", font=("맑은 고딕", 9, "bold"),
                              fg="#a04000", bd=2, relief="groove")
@@ -9843,10 +9849,21 @@ class App(tk.Tk):
         except Exception: pass
 
     def _fold_strip(self):
-        """리니지M 클라 **오른쪽 끝 ~ 화면 오른쪽 끝** 의 가로 길이 (못 재면 None).
+        """접힌 런처의 가로 — **`FOLD_W_FIXED` 가 있으면 그 값으로 고정**이다.
 
-        게임 창(`리니지M l …`)만 본다 — 옆 바(CEFCLIENT)는 가려도 된다.
+        🧱 2026-11-06 사용자: *"자꾸 메인런처 폭을 움직이는데 **좀 고정으로** 해줘.
+           왜 또 줄어들었냐"*.
+        🚨 **왜 줄어들었나 (실측으로 찾았다)** — 폭을 '클라+옆바 오른쪽 끝' 으로
+           **재서** 정했는데, **옆 바가 확장되면 56 → 112px** 이 되어 오른쪽 끝이
+           2408 → 2464 로 밀린다. 그러면 폭이 96 으로 계산되고 하한(120)에 걸려
+           **120 이 `fold_strip_w` 에 저장됐다.** 옆 바가 다시 접혀도 그 값이 남아
+           런처가 좁은 채로 있었다 (실측 2026-11-06: 저장값 120 · 올바른 값 152).
+        👉 그래서 **재지 않고 코드 값을 쓴다.** 배치를 바꾸면 `FOLD_W_FIXED` 숫자
+           하나만 고친다. `0` 으로 두면 예전처럼 재는 방식으로 돌아간다.
+        🚫 클로드는 사용자 요청 없이 이것을 다시 '재는 방식' 으로 바꾸지 말 것.
         """
+        if FOLD_W_FIXED:
+            return int(FOLD_W_FIXED)
         try:
             import win32gui
             edge = [0]
