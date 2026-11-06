@@ -1005,6 +1005,18 @@ SUHO_CARD_DOWN   = 0.5               # 🃏 카드는 **반으로 줄인 그림*
 #       한두 장 덜 잡혀도 해가 없고, **돈이 드는 판정에는 쓰이지 않는다.**
 #    🚫 `0` 으로 두면 예전처럼 원래 크기로만 찾는다.
 SUHO_TITLE_BAND  = (0.0, 0.22)       # 📌 제목 그림은 창 **위쪽 22%** 만 본다
+# 👁 **수호성 창이 떠 있는 동안만** 그 클라 창을 지켜본다 (2026-11-06 사용자:
+#    *"화면을 축소하거나 하면 **바로** 수호성을 없애줘야지"*).
+#    🚨 스스로 돌며 찾기(`SUHO_POLL_ON`)는 **렉 때문에 꺼져 있다** — 그래서
+#       **사람이 클릭할 때만** 감지했고, 창을 축소해도 수호성 창이 그대로 남았다.
+#    💡 **축소는 그림을 볼 필요가 없다** — `GetWindowRect` 한 번이면 알 수 있고
+#       그것은 **사실상 공짜**(0.01ms)다. 캡처(390ms)·대조(420ms)를 안 쓴다.
+#    · 수호성 창이 **안 떠 있으면 즉시 빠져나온다** → 평소 부하 0
+#    · 돌고 있으면(`_suho_busy`) 건드리지 않는다
+SUHO_WATCH_MS    = 400               # 창 크기를 보는 주기(ms) — 캡처 없음, 부하 0
+SUHO_WATCH_SEE   = 2.5               # 🖼 화면까지 보는 주기(초) — 캡처가 드니 느리게
+#    ⚠ 창이 떠 있는 동안만 돈다. 2504 창 캡처가 ~390ms 라 2.5초면 한 코어의 16%.
+#    🚫 더 짧게 하지 말 것 — 수호성 창을 열어둔 동안 계속 그만큼 먹는다.
 SUHO_INFO_GONE   = 2.5               # ⓪ [활성화] 뒤 **진입창이 사라지기를** 기다리는 한도(초)
 #    🚨 고정 대기만 두면 아직 진입창인 화면을 또 찍어 **[활성화] 를 두 번 누른다**
 #       (실측 2026-11-06 20:44:17·18 — 1초 안에 두 번). 🚫 고정 대기로 되돌리지 말 것.
@@ -7673,6 +7685,8 @@ class App(tk.Tk):
         threading.Thread(target=self._fix_clickwatch_loop, daemon=True).start()
         # ✨ 각성 창이 떠 있는 동안만 그 화면을 지켜본다 (화면이 바뀌면 닫는다)
         self.after(AWAKEN_WATCH_MS, self._awaken_watch_tick)
+        # 👁 수호성 창이 떠 있는 동안만 그 클라를 지켜본다 (축소하면 바로 닫는다)
+        self.after(SUHO_WATCH_MS + 150, self._suho_watch_tick)
         self.after(1800, self._itemreg_refresh)
         # 🚫🚫 **런처가 클로드를 자동으로 켜지 않는다** (2026-10-21 사용자 지시 — 절대 규칙)
         #   사용자: *"너 왜 재시작 하거나 중간에 수시로 문서를 여는 거야?
@@ -12611,6 +12625,87 @@ class App(tk.Tk):
             pass
         try:
             self.after(0, lambda: self._open_suho_win(reuse=True))
+        except Exception:
+            pass
+
+    def _suho_watch_tick(self):
+        """👁 **수호성 창이 떠 있는 동안만** 그 클라를 지켜본다 → 아니면 창을 치운다.
+
+        사용자: *"화면을 축소하거나 하면 **바로** 수호성을 없애줘야지"* (2026-11-06).
+        스스로 돌며 찾기(`SUHO_POLL_ON`)가 **렉 때문에 꺼져 있어** 사람이 클릭할
+        때만 감지했고, 그래서 창을 축소해도 수호성 창이 그대로 남았다.
+
+        **두 가지를 다른 주기로 본다 — 비용이 다르기 때문이다:**
+          ① 창 크기 (`SUHO_WATCH_MS` 0.4초) — `GetWindowRect` 하나, **공짜**
+             · 창이 없어졌다 / **`SUHO_MIN_W` 밑으로 축소됐다** → 바로 닫는다
+          ② 화면 (`SUHO_WATCH_SEE` 2.5초) — 캡처 ~390ms 라 느리게
+             · 수호성 화면이 아니면 닫는다
+        🚫 수호성 창이 안 떠 있으면 **즉시 빠져나온다** (평소 부하 0).
+        🚫 돌고 있으면(`_suho_busy`) 건드리지 않는다 — 작업 중에 창이 사라지면 안 된다.
+        ⚠ 화면을 긁는 것은 **백그라운드 스레드**로 (2026-09-16: 틱에서 긁으면
+          그만큼 런처가 멈춘다)."""
+        try:
+            self.after(SUHO_WATCH_MS, self._suho_watch_tick)
+        except Exception:
+            pass
+        try:
+            win = getattr(self, "_suho_win", None)
+            if not (win and win.winfo_exists()):
+                return                      # 창이 없다 — 부하 0
+            try:
+                if not win.winfo_viewable():
+                    return                  # 숨겨져 있다 — 부하 0
+            except Exception:
+                return
+            if getattr(self, "_suho_busy", False):
+                return                      # 돌고 있다 — 건드리지 않는다
+            lk = getattr(self, "_suho_latch", None)
+            if not lk:
+                return                      # 어느 창인지 모른다
+            h, w0, h0 = lk[0], lk[1], lk[2]
+            # ── ① 창 크기만 본다 (공짜) ──────────────────────────────
+            import win32gui
+            try:
+                if not win32gui.IsWindow(h) or not win32gui.IsWindowVisible(h):
+                    self._suho_latch = None
+                    self._suho_close_auto("리니지M 창이 없어졌다")
+                    return
+                l, t, r, b = win32gui.GetWindowRect(h)
+            except Exception:
+                self._suho_latch = None
+                self._suho_close_auto("리니지M 창을 못 찾았다")
+                return
+            w, ht = r - l, b - t
+            if w < SUHO_MIN_W:
+                self._suho_latch = None
+                self._suho_close_auto("화면을 축소했다 (%dpx → %dpx)" % (w0, w))
+                return
+            if (w, ht) != (w0, h0):
+                #   크기가 바뀌었다(아직 큰 창) → 걸쇠를 새 크기로 맞춘다
+                self._suho_latch = (h, w, ht)
+            # ── ② 화면까지 본다 (캡처가 드니 느리게) ────────────────
+            if time.time() - getattr(self, "_suho_watch_at", 0.0) < SUHO_WATCH_SEE:
+                return
+            self._suho_watch_at = time.time()
+            threading.Thread(target=self._suho_watch_see,
+                             args=((h, l, t, w, ht, ""),), daemon=True).start()
+        except Exception:
+            pass
+
+    def _suho_watch_see(self, rect):
+        """👁 그 창이 **아직 수호성 화면인가** — 아니면 창을 치운다 (백그라운드).
+
+        🚫 못 찍었으면 **단정하지 않는다** (창을 닫지 않는다)."""
+        try:
+            if getattr(self, "_suho_busy", False):
+                return
+            img = self._suho_grab(rect)
+            if img is None:
+                return
+            if self._suho_here(img):
+                return
+            self._suho_latch = None
+            self._suho_close_auto("수호성 화면이 아니다")
         except Exception:
             pass
 
