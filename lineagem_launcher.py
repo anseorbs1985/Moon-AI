@@ -801,7 +801,7 @@ SUHO_N           = 60                # 기본 **단계** 수 (한 장 뽑는 데
 #    화면이 사라지면 그 전에 알아서 끝난다
 #    ① 카드를 **클릭해서 고르고** → ② 그 카드를 **눌러 아래로 끈다** (2026-11-05 사용자 설명:
 #       *"카드를 먼저 클릭해서 확인을 하는데 … 그 카드를 선택하면 그때 마우스 클릭해서 내리는"*)
-SUHO_CLICK_WAIT  = (0.15, 0.26)      # 클릭하고 카드가 **골라지기까지**
+SUHO_CLICK_WAIT  = (0.09, 0.16)      # 클릭하고 카드가 **골라지기까지**
 #    ⚡ 사용자: *"2~3초 내에 언능 언능"* — 기다림만 줄인다.
 #       🚫 끌기(③)의 시간은 줄이지 말 것 — 짧으면 **안 잡힌다**(실측).
 #    🚫 **수호성 화면일 때만 누른다** (2026-11-05 사용자 지시 — 절대 규칙):
@@ -880,7 +880,12 @@ SUHO_EXIT_TRIES  = 3                 # [나가기] 를 눌러보는 횟수 (닫�
 SUHO_ESC_AGAIN   = 25.0              # 방금 ESC 를 썼으면 이 초 안에는 또 안 누른다
 #    🚫 줄이지 말 것 — 다 닫힌 뒤 ESC 를 더 누르면 게임 **메뉴판이 열린다**(실측).
 SUHO_EXIT_WAIT   = (0.7, 1.0)        # 누르고 닫혔는지 보기까지
-SUHO_AFTER_DRAG  = (0.5, 0.8)        # ③ 끈 뒤 결과가 뜨기를 기다린다
+SUHO_AFTER_DRAG  = (0.30, 0.50)      # ③ 끈 뒤 결과가 뜨기를 기다린다
+#    ⚠ 2026-11-06 에 0.5~0.8 → 0.30~0.50 으로 줄였다 (사용자: *"2배는 빨리"*).
+#      **그래도 안전한 이유**: 이 뒤에 바로 카드를 찾는데 그것이 또 0.1~0.5초
+#      걸리므로 실제로 화면이 가라앉을 시간은 0.4~1.0초다. 그리고 카드를
+#      못 찾으면 **아무것도 누르지 않고 그 판을 끝낸다.**
+#    🚫 이보다 더 줄이지 말 것 — 넘어가는 중인 화면에서 카드를 눌러버린다.
 #    🚫 이것도 줄이지 말 것 — 끌자마자 카드를 찾으면 **넘어가는 중인 화면에
 #       엉뚱한 클릭**이 들어간다 (2026-11-06 07:26:04 실측).
 SUHO_BLIND_MAX   = 3
@@ -968,8 +973,31 @@ SUHO_LINE_MIN    = 120               # 한 줄에 이만큼 노란 픽셀이 있
 SUHO_SEE         = 6                 # 화면이 (다시) 뜰 때까지 몇 번 보나.
 #    🚫 길게 기다리지 않는다 — 화면이 아니면 **빨리 끝내는 것**이 맞다 (사용자 지시).
 SUHO_SEE_GAP     = (0.12, 0.22)      # 그 사이 간격
-SUHO_GAP         = (0.15, 0.28)      # 끌고 난 뒤
+SUHO_GAP         = (0.08, 0.16)      # 끌고 난 뒤
 SUHO_ROUND       = (0.0, 0.0)        # 회차 사이 — 단계마다 쉬지 않는다
+# ⚡ **2배 빠르게** (2026-11-06 사용자: *"속도가 엄청나게 늦어 2배는 빨리 좀"*).
+#    📏 **실측으로 범인을 찾았다 — 템플릿 대조와 전체창 캡처다** (2504x1352 기준):
+#       창 캡처 1번            390 ms   (546 창 19ms × 픽셀 20.2배)
+#       대조 1번(전체창)        420 ms
+#       카드 찾기(재캡처+2장)  1340 ms   ← 한 회차마다
+#       `_suho_here`(제목)      420 ms   ← 한 회차에 두 번
+#    👉 **기다리는 시간이 아니라 '보는 비용' 이 느렸다.** 그래서
+#       ① 캡처를 **다시 하지 않고 돌려쓴다**  ② 카드는 **반으로 줄여 찾는다**
+#       ③ 제목은 **윗부분만** 본다            ④ 그림을 **한 번만 읽어 둔다**
+#    🚫 **판정 기준(`SUHO_*_MATCH`)은 하나도 건드리지 않았다** — 돈(수호석)이
+#       걸린 판정이라 기준을 흔들면 안 된다. 줄인 것은 **보는 범위와 횟수**뿐이다.
+SUHO_CARD_DOWN   = 0.5               # 🃏 카드는 **반으로 줄인 그림**에서 찾는다
+#    ⚡ 대조 비용은 (넓이 × 그림넓이) 이라 **반으로 줄이면 16배 빠르다**(950→60ms).
+#    🛟 줄인 쪽에서 **하나도 못 찾으면 원래 크기로 다시 찾는다** — 그래서
+#       지금보다 못 찾는 일은 없다. 카드를 고르는 것은 **전부 랜덤**이라
+#       한두 장 덜 잡혀도 해가 없고, **돈이 드는 판정에는 쓰이지 않는다.**
+#    🚫 `0` 으로 두면 예전처럼 원래 크기로만 찾는다.
+SUHO_TITLE_BAND  = (0.0, 0.22)       # 📌 제목 그림은 창 **위쪽 22%** 만 본다
+SUHO_REUSE_SEC   = 0.35              # 📸 이 안에 찍어둔 캡처는 **돌려쓴다**
+#    ⚠ 화면이 바뀌면 안 되므로 **짧게** 둔다. 끌고 난 뒤 → 다음 회차처럼
+#      **그 사이에 아무것도 누르지 않은** 자리에서만 쓴다.
+#    📏 제목 자리는 `SUHO_TITLE_BOX` 로 **세로 2.6~8.5%** 다 — 22% 는 넉넉하다.
+#    🛟 윗부분에서 못 찾으면 **창 전체로 한 번 더** 본다 (놓치지 않는다).
 SUHO_JITTER      = (0.85, 1.15)      # 간격을 매번 ±15% 흔든다 (사람처럼)
 SUHO_PAUSE_P     = 0.12              # 이 확률로
 SUHO_PAUSE       = (0.15, 0.45)      #   한 박자 더 쉰다
@@ -11306,10 +11334,17 @@ class App(tk.Tk):
 
     def _suho_here(self, img):
         """🚦 **지금 수호성 화면인가** — 제목(수호성 찾기) 또는 진입창(수호성 정보)
-        또는 결과(실패/성공). 누르기 전마다 본다. 🚫 빼지 말 것."""
-        return self._suho_tpl_seen(
-            img, suho_screen_list() + suho_info_list()
-            + suho_close_list() + suho_done_list())
+        또는 결과(실패/성공). 누르기 전마다 본다. 🚫 빼지 말 것.
+
+        ⚡ 제목·진입창·성공 글자는 **창 위쪽에만** 있으므로 `SUHO_TITLE_BAND`
+           (윗 22%)만 먼저 본다 — 실측 전체창 420ms → **84ms**.
+           띠에서 못 찾으면 `_suho_tpl_seen` 이 **창 전체로 한 번 더** 본다.
+        ⚠ 실패 글자(`suho_close`, '화면을 터치하여 … 닫습니다')는 **아래쪽**이라
+           띠를 주지 않는다. 🚫 거기에 띠를 주지 말 것 — 못 찾는다."""
+        if self._suho_tpl_seen(img, suho_screen_list() + suho_info_list()
+                               + suho_done_list(), band=SUHO_TITLE_BAND):
+            return True
+        return self._suho_tpl_seen(img, suho_close_list())
 
     def _suho_wait_stage(self, rect, what, max_s=None):
         """⚡ **다음 단계가 뜰 때까지만** 기다린다 (고정 대기를 없앤다).
@@ -11350,29 +11385,76 @@ class App(tk.Tk):
 
     def _suho_done_seen(self, img):
         """🎉 **성공 화면**인가 ('수호성 찾기 성공!')."""
-        return self._suho_tpl_seen(img, suho_done_list())
+        return self._suho_tpl_seen(img, suho_done_list(), band=SUHO_TITLE_BAND)
 
     def _suho_close_seen(self, img):
         """💧 **실패 화면**인가 ('화면을 터치하여 … 닫습니다')."""
         return self._suho_tpl_seen(img, suho_close_list())
 
-    def _suho_tpl_seen(self, img, lst):
+    def _suho_tpl(self, p, bw, w, sc=1.0):
+        """그림을 **한 번만 읽어 창 크기에 맞춰 두고 돌려쓴다** (2026-11-06).
+
+        예전에는 대조할 때마다 `imdecode`(디스크 읽기) + `resize` 를 했다 —
+        한 회차에 여러 번이라 쓸데없이 느렸다. 기준은 **하나도 안 바뀐다.**"""
+        key = (p, int(bw or SUHO_BASE_W), int(w), round(float(sc), 3))
+        c = getattr(self, "_suho_tplc", None)
+        if c is None:
+            c = self._suho_tplc = {}
+        if key in c:
+            return c[key]
+        out = None
         try:
             import cv2, numpy as np
-            for p, bw in lst:
-                t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
-                if t is None:
-                    continue
-                k = img.shape[1] / float(bw or SUHO_BASE_W)
-                if k < SUHO_MIN_K:
-                    continue
+            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            if t is not None:
+                k = (w / float(bw or SUHO_BASE_W)) * float(sc)
                 if abs(k - 1.0) > 0.02:
                     t = cv2.resize(t, None, fx=k, fy=k,
                                    interpolation=(cv2.INTER_AREA if k < 1
                                                   else cv2.INTER_CUBIC))
-                if t.shape[0] > img.shape[0] or t.shape[1] > img.shape[1]:
+                out = (t, k)
+        except Exception:
+            out = None
+        if len(c) > 160:
+            c.clear()
+        c[key] = out
+        return out
+
+    def _suho_tpl_seen(self, img, lst, band=None):
+        """그림 중 **하나라도 보이면** True (첫 번째로 맞는 것에서 멈춘다).
+
+        ⚡ `band=(위, 아래)` 비율을 주면 **그 띠만** 본다 — 제목은 창 위쪽에만
+           있으므로 띠만 보면 대조 비용이 **5배 가까이** 줄어든다 (실측
+           전체창 420ms → 윗 22% 84ms).
+        🛟 **띠에서 못 찾으면 창 전체로 한 번 더 본다** — 놓치는 일이 없다.
+        🚫 기준(`SUHO_SEEN_MATCH`)은 건드리지 않는다."""
+        if band:
+            if self._suho_tpl_seen_in(img, lst, band):
+                return True
+            return self._suho_tpl_seen_in(img, lst, None)
+        return self._suho_tpl_seen_in(img, lst, None)
+
+    def _suho_tpl_seen_in(self, img, lst, band):
+        try:
+            import cv2
+            sub = img
+            if band:
+                H = img.shape[0]
+                y0 = max(0, int(H * band[0]))
+                y1 = min(H, int(H * band[1]))
+                if y1 - y0 < 24:
+                    return False
+                sub = img[y0:y1]
+            for p, bw in lst:
+                got = self._suho_tpl(p, bw, img.shape[1])
+                if not got:
                     continue
-                if float(cv2.matchTemplate(img, t,
+                t, k = got
+                if k < SUHO_MIN_K:
+                    continue
+                if t.shape[0] > sub.shape[0] or t.shape[1] > sub.shape[1]:
+                    continue
+                if float(cv2.matchTemplate(sub, t,
                                            cv2.TM_CCOEFF_NORMED).max()) >= SUHO_SEEN_MATCH:
                     return True
         except Exception:
@@ -11411,60 +11493,82 @@ class App(tk.Tk):
         except Exception:
             return False
 
-    def _suho_cards(self, rect):
+    def _suho_cards(self, rect, img=None):
         """🃏 지금 화면의 **카드를 전부 찾는다** → [(화면x, 화면y), …] 왼쪽부터.
 
         🚫 고정 좌표를 쓰지 않는다 — 개수(3~20장)도 자리도 매번 바뀐다.
            실측: 6장이던 화면이 한 장 뽑히자 **5장 · 가운데가 빈 자리**가 됐다.
         카드가 많으면 작게 그려지므로 **크기를 바꿔가며** 보고,
-        가장 많이 잡힌 배율을 쓴다 (같은 수면 점수가 높은 쪽)."""
+        가장 많이 잡힌 배율을 쓴다 (같은 수면 점수가 높은 쪽).
+
+        ⚡ **2026-11-06 — 두 가지로 빠르게 했다** (기준은 안 건드렸다):
+          ① `img` 를 받으면 **다시 캡처하지 않는다** (전체창 캡처 390ms 절약)
+          ② **반으로 줄인 그림**(`SUHO_CARD_DOWN`)에서 먼저 찾는다 — 대조 비용은
+             (넓이 × 그림넓이) 라 **16배** 빠르다 (실측 950 → 60ms).
+             🛟 줄인 쪽에서 **하나도 못 찾으면 원래 크기로 다시 찾는다** →
+                지금보다 못 찾는 일은 없다.
+          ③ 기본 배율에서 찾았으면 **그림 루프까지** 멈춘다 (전엔 배율 루프만
+             멈춰 두 번째 그림을 쓸데없이 더 훑었다 — 475ms 절약)."""
         try:
             import cv2, numpy as np
             imgs = suho_card_list()
             if not imgs:
                 return []
-            big = grab_window((rect[1] + 40, rect[2] + 40))
+            big = img if img is not None else grab_window((rect[1] + 40,
+                                                           rect[2] + 40))
             if big is None:
                 return []
-            H, W = big.shape[0], big.shape[1]
-            best = (0, 0.0, [])
-            for p, bw in imgs:
-                t0 = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
-                if t0 is None:
-                    continue
-                k = W / float(bw or SUHO_BASE_W)
-                for sc in SUHO_CARD_SCALES:
-                    kk = k * sc
-                    t = cv2.resize(t0, None, fx=kk, fy=kk,
-                                   interpolation=(cv2.INTER_AREA if kk < 1
-                                                  else cv2.INTER_CUBIC))
-                    th, tw = t.shape[0], t.shape[1]
-                    if th > H or tw > W or th < 12 or tw < 12:
-                        continue
-                    res = cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED)
-                    ys, xs = np.where(res >= SUHO_CARD_MATCH)
-                    if not len(xs):
-                        continue
-                    pts = sorted(zip(xs, ys), key=lambda q: -res[q[1], q[0]])
-                    pick = []
-                    for x, y in pts:
-                        # 같은 카드를 여러 번 세지 않는다 (겹치면 버린다)
-                        if all(abs(x - px) > tw * 0.6 or abs(y - py) > th * 0.6
-                               for px, py in pick):
-                            pick.append((x, y))
-                        if len(pick) > SUHO_CARD_MAX:
-                            break
-                    if not pick or len(pick) > SUHO_CARD_MAX:
-                        continue
-                    mean = float(np.mean([res[y, x] for x, y in pick]))
-                    if (len(pick), mean) > (best[0], best[1]):
-                        best = (len(pick), mean,
-                                [(rect[1] + int(x + tw // 2),
-                                  rect[2] + int(y + th // 2)) for x, y in pick])
-                    if best[0] >= 1 and sc == SUHO_CARD_SCALES[0]:
-                        break              # ⚡ 기본 배율에서 찾았으면 더 안 훑는다
-            # 왼쪽 → 오른쪽 (같은 줄이면 위부터)
-            return sorted(best[2], key=lambda q: (q[1] // 40, q[0]))
+
+            def _scan(src, mul):
+                """`src` 에서 카드를 찾는다. 좌표는 `mul` 배 해 원래 크기로 되돌린다."""
+                H, W = src.shape[0], src.shape[1]
+                best = (0, 0.0, [])
+                for p, bw in imgs:
+                    for sc in SUHO_CARD_SCALES:
+                        got = self._suho_tpl(p, bw, int(W * mul), sc / mul)
+                        if not got:
+                            continue
+                        t, _kk = got
+                        th, tw = t.shape[0], t.shape[1]
+                        if th > H or tw > W or th < 12 or tw < 12:
+                            continue
+                        res = cv2.matchTemplate(src, t, cv2.TM_CCOEFF_NORMED)
+                        ys, xs = np.where(res >= SUHO_CARD_MATCH)
+                        if not len(xs):
+                            continue
+                        pts = sorted(zip(xs, ys), key=lambda q: -res[q[1], q[0]])
+                        pick = []
+                        for x, y in pts:
+                            # 같은 카드를 여러 번 세지 않는다 (겹치면 버린다)
+                            if all(abs(x - px) > tw * 0.6 or abs(y - py) > th * 0.6
+                                   for px, py in pick):
+                                pick.append((x, y))
+                            if len(pick) > SUHO_CARD_MAX:
+                                break
+                        if not pick or len(pick) > SUHO_CARD_MAX:
+                            continue
+                        mean = float(np.mean([res[y, x] for x, y in pick]))
+                        if (len(pick), mean) > (best[0], best[1]):
+                            best = (len(pick), mean,
+                                    [(rect[1] + int((x + tw // 2) * mul),
+                                      rect[2] + int((y + th // 2) * mul))
+                                     for x, y in pick])
+                        if best[0] >= 1 and sc == SUHO_CARD_SCALES[0]:
+                            break      # ⚡ 기본 배율에서 찾았다
+                    if best[0] >= 1:
+                        break          # ⚡ 그림 루프까지 멈춘다 (2026-11-06)
+                # 왼쪽 → 오른쪽 (같은 줄이면 위부터)
+                return sorted(best[2], key=lambda q: (q[1] // 40, q[0]))
+
+            d = SUHO_CARD_DOWN
+            if d and 0.2 < d < 1.0 and min(big.shape[:2]) * d > 120:
+                small = cv2.resize(big, None, fx=d, fy=d,
+                                   interpolation=cv2.INTER_AREA)
+                out = _scan(small, 1.0 / d)
+                if out:
+                    return out
+                # 🛟 줄인 쪽에서 못 찾았다 → 원래 크기로 다시 (놓치지 않는다)
+            return _scan(big, 1.0)
         except Exception as e:
             click_log(f"[수호성] ⚠ 카드 찾기 오류 {e}")
             return []
@@ -11670,7 +11774,15 @@ class App(tk.Tk):
                         click_log(f"[수호성] {n}회째 — 리니지M 창을 못 찾았다 → 끝낸다")
                         break
                     self._suho_focus(rect)
-                    img0 = self._suho_grab(rect)
+                    #   ⚡ 방금(0.35초 안에) 같은 창을 찍어뒀으면 **그것을 쓴다**
+                    img0 = None
+                    _ru = getattr(self, "_suho_reuse", None)
+                    if (_ru and _ru[1] == rect[0]
+                            and time.time() - _ru[0] < SUHO_REUSE_SEC):
+                        img0 = _ru[2]
+                    self._suho_reuse = None
+                    if img0 is None:
+                        img0 = self._suho_grab(rect)
                     if img0 is None:
                         click_log(f"[수호성] {n}회째 — 창을 못 찍었다 → 끝낸다")
                         break
@@ -11699,7 +11811,7 @@ class App(tk.Tk):
                     line = self._suho_line(img)
                     if btn:
                         # ⓪ [활성화] 또는 ② [확인] — 🚫 [취소](빨강)는 절대 안 누른다
-                        _info = self._suho_tpl_seen(img, suho_info_list())
+                        _info = self._suho_tpl_seen(img, suho_info_list(), band=SUHO_TITLE_BAND)
                         # 💎 수호석이 모자라면 **누르지 않고 끝낸다**
                         _sh, _np_ = self._suho_short(img)
                         if _sh:
@@ -11740,6 +11852,11 @@ class App(tk.Tk):
                         #       넘어가는 중인 화면에서 카드를 눌러버린다.
                         self._suho_nap(*SUHO_AFTER_DRAG)
                         _im2 = self._suho_grab(rect)
+                        #   ⚡ **다음 회차가 이 캡처를 돌려쓴다** — 바로 이어서
+                        #      또 찍으면 전체창 캡처가 한 번 더 든다 (게임 창은
+                        #      PrintWindow 가 94~296 ms/Mpx 로 느리다, 실측).
+                        if _im2 is not None:
+                            self._suho_reuse = (time.time(), rect[0], _im2)
                         if _im2 is not None and self._suho_line(_im2) is not None:
                             _bad = getattr(self, "_suho_dragfail", 0) + 1
                             self._suho_dragfail = _bad
@@ -11810,7 +11927,9 @@ class App(tk.Tk):
                                   f"다시 본다 ({blind}/{SUHO_BLIND_MAX})")
                         self._suho_nap(*SUHO_CLICK_WAIT)
                         continue
-                    cards = self._suho_cards(rect)      # 🃏 지금 몇 장인가
+                    #   ⚡ **방금 찍은 `img` 를 그대로 넘긴다** — 다시 찍으면
+                    #      전체창 캡처가 390ms 더 든다 (2026-11-06 실측)
+                    cards = self._suho_cards(rect, img)   # 🃏 지금 몇 장인가
                     if not cards:
                         # 🚫 **카드도 버튼도 없으면 아무것도 누르지 않고 끝낸다**
                         #    (2026-11-06 사용자: *"수호성이 될 때 내가 아무것도
@@ -11989,9 +12108,9 @@ class App(tk.Tk):
                 img = self._suho_grab(w)
                 if img is None:
                     continue
-                ok, why = self._suho_tpl_seen(img, suho_info_list()), "진입창"
-                if not ok and self._suho_tpl_seen(img, suho_screen_list()):
-                    if self._suho_cards(w):
+                ok, why = self._suho_tpl_seen(img, suho_info_list(), band=SUHO_TITLE_BAND), "진입창"
+                if not ok and self._suho_tpl_seen(img, suho_screen_list(), band=SUHO_TITLE_BAND):
+                    if self._suho_cards(w, img):      # 방금 찍은 것을 돌려쓴다
                         ok, why = True, "카드"
                 if ok:
                     self._suho_sweep_i = i
@@ -12016,9 +12135,9 @@ class App(tk.Tk):
                 img = self._suho_grab(w)
                 if img is None:
                     continue
-                if self._suho_tpl_seen(img, suho_info_list()):
+                if self._suho_tpl_seen(img, suho_info_list(), band=SUHO_TITLE_BAND):
                     return w
-                if self._suho_tpl_seen(img, suho_screen_list()) and self._suho_cards(w):
+                if self._suho_tpl_seen(img, suho_screen_list(), band=SUHO_TITLE_BAND) and self._suho_cards(w, img):
                     return w
         except Exception as e:
             click_log(f"[수호성] ⚠ 다음 창 찾기 오류 {e}")
@@ -12300,6 +12419,11 @@ class App(tk.Tk):
             rect = self._suho_rect()
             if not rect:
                 self._suho_latch = None
+                #   🚪 **창이 없거나 작아졌다 → 수호성 창도 치운다** (2026-11-06
+                #      사용자: *"화면이 변경돼도 계속 띄우고"*). 예전에는 이 길에서
+                #      걸쇠만 비우고 **창은 그대로 뒀다** — 그래서 화면을 바꿔도
+                #      수호성 창이 영영 떠 있었다. 🚫 이 줄을 빼지 말 것.
+                self._suho_close_auto("리니지M 창이 없거나 작아졌다")
                 return
             img = self._suho_grab(rect)
             if img is None:
@@ -12311,11 +12435,12 @@ class App(tk.Tk):
             #    끝없이 반복하며 화면을 눌러댔다 (실측 06:45:31~48, 4초마다 한 판).
             #    👉 **할 일이 실제로 있을 때만** 시작한다:
             #       ⓪ 진입창(수호성 정보 + [활성화])  또는  ① 카드가 깔려 있을 때.
-            ok = self._suho_tpl_seen(img, suho_info_list())
+            ok = self._suho_tpl_seen(img, suho_info_list(), band=SUHO_TITLE_BAND)
             why = "진입창"
-            if not ok and self._suho_tpl_seen(img, suho_screen_list()):
+            if not ok and self._suho_tpl_seen(img, suho_screen_list(), band=SUHO_TITLE_BAND):
                 # 제목은 보인다 — 카드가 실제로 깔렸는지만 확인한다
-                if self._suho_cards(rect):
+                #   ⚡ 방금 찍은 `img` 를 넘긴다 (다시 찍지 않는다)
+                if self._suho_cards(rect, img):
                     ok, why = True, "카드"
             # 🔁 그 창에 없으면 **다른 창도 돌아본다** (한 틱에 몇 개씩).
             #    이게 없으면 수호성을 띄워놓고 딴 창을 클릭했을 때 영영 못 찾는다.
@@ -12414,6 +12539,16 @@ class App(tk.Tk):
         try:
             self.after(0, lambda: self.status.set(
                 "🌙 수호성 화면입니다 — [▶ 지금 돌리기] 를 누르세요"))
+        except Exception:
+            pass
+        #   🚫 **이미 보이고 있으면 다시 끌어올리지 않는다** (2026-11-06 사용자:
+        #      *"화면이 변경돼도 계속 띄우고"*). `_open_suho_win(reuse=True)` 는
+        #      `lift()` 를 하므로, 걸쇠가 풀렸다 다시 걸릴 때마다 창이 **앞으로
+        #      튀어나와** 사용자를 괴롭혔다.
+        try:
+            _w = getattr(self, "_suho_win", None)
+            if _w is not None and _w.winfo_exists() and _w.winfo_viewable():
+                return
         except Exception:
             pass
         try:
