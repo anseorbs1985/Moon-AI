@@ -816,6 +816,18 @@ SUHO_BACK_SEC    = 25.0              # 도는 동안 런처를 뒤로 미는 시
 #    ⚠ 판정은 **`precise_click.human_idle_seconds()`** 뿐이다 (2026-10-20 결론).
 #       `_system_idle_seconds()` 는 **우리 클릭도 세어** 영영 멈추고,
 #       `precise_click.idle_seconds()` 는 **원격에서 사람 입력까지 걸러** 안 멈춘다.
+# ✋ **양보하지 않는다 — ▶ 를 눌렀으면 끝까지 돈다** (2026-11-06 사용자 지시:
+#    *"아니 **내가 마우스 움직여서 그냥 계속 해줘**. 내가 돌리기를 누르면은"* ·
+#    *"**어차피 마우스 움직이는 거 의미가 없거든**"*).
+#    🚨 왜 껐나 — 양보가 **사용자를 괴롭혔다**:
+#      · 화면을 보려고 마우스를 움직이면 `✋ 멈춘다` → 손을 떼야 이어감
+#      · `SUHO_QUIET_MAX`(6초) 넘게 쓰면 **그 판을 끝내버렸다**
+#      · 그리고 그 끝남을 `_suho_leave` 가 '끝났다' 로 보고 **ESC 로 화면을 닫았다**
+#        (실측 20:44:56 양보 → 20:45:17 ESC — 사용자: *"내가 활성화를 해도
+#        너가 그냥 꺼버려"*)
+#    👉 **▶ 를 누른 것이 곧 '해줘' 다.** 멈추려면 ■ 멈춤 을 누른다.
+#    🚫 클로드는 사용자 요청 없이 `True` 로 되돌리지 말 것.
+SUHO_YIELD_ON    = False             # ✋ 사람이 마우스를 만지면 양보할까
 SUHO_QUIET       = 1.2               # 사람이 만진 뒤 이만큼 조용해지면 이어서 한다
 SUHO_QUIET_MAX   = 6.0               # 계속 만지면 **그 판을 끝낸다** (컴퓨터를 돌려준다)
 SUHO_RERUN_COOL  = 3.0               # 한 판 끝난 뒤 같은 창에서 다시 걸리기까지(초)
@@ -993,6 +1005,9 @@ SUHO_CARD_DOWN   = 0.5               # 🃏 카드는 **반으로 줄인 그림*
 #       한두 장 덜 잡혀도 해가 없고, **돈이 드는 판정에는 쓰이지 않는다.**
 #    🚫 `0` 으로 두면 예전처럼 원래 크기로만 찾는다.
 SUHO_TITLE_BAND  = (0.0, 0.22)       # 📌 제목 그림은 창 **위쪽 22%** 만 본다
+SUHO_INFO_GONE   = 2.5               # ⓪ [활성화] 뒤 **진입창이 사라지기를** 기다리는 한도(초)
+#    🚨 고정 대기만 두면 아직 진입창인 화면을 또 찍어 **[활성화] 를 두 번 누른다**
+#       (실측 2026-11-06 20:44:17·18 — 1초 안에 두 번). 🚫 고정 대기로 되돌리지 말 것.
 SUHO_REUSE_SEC   = 0.35              # 📸 이 안에 찍어둔 캡처는 **돌려쓴다**
 #    ⚠ 화면이 바뀌면 안 되므로 **짧게** 둔다. 끌고 난 뒤 → 다음 회차처럼
 #      **그 사이에 아무것도 누르지 않은** 자리에서만 쓴다.
@@ -11733,6 +11748,7 @@ class App(tk.Tk):
         def _go():
             self._suho_busy = True
             self._suho_stop = False
+            self._suho_yield = False      # 🙅 양보 표시도 비운다 (판마다 새로)
             # 🖱 시작할 때 커서 자리를 기억해 **끝나면 제자리로** 돌려놓는다
             try:
                 _cur0 = pyautogui.position()
@@ -11767,6 +11783,13 @@ class App(tk.Tk):
                         break
                     # ✋ **사람이 마우스를 만지면 양보한다** (누르기 전마다)
                     if not self._suho_wait_human():
+                        #   🙅 **양보해서 끝난 것**이다 — '끝났다' 가 아니다.
+                        #      그런데 `_suho_leave` 가 그것을 '끝났다' 로 보고
+                        #      ESC 4번을 눌러 **사용자가 보던 화면을 닫아버렸다**
+                        #      (2026-11-06 실측). 양보로 끝나면 화면을 안 건드린다.
+                        #      🚫 이 표시를 지우지 말 것 (`SUHO_YIELD_ON` 을 다시
+                        #         켤 때 이것이 안전장치가 된다).
+                        self._suho_yield = True
                         break
                     # ── ⚡ 한 회차에 **한 번만 찍는다** (전에는 두 번 찍어 느렸다) ──
                     rect = self._suho_rect()
@@ -11830,7 +11853,24 @@ class App(tk.Tk):
                         self.after(0, lambda n=n, i2=_info: self.status.set(
                             f"🌙 수호성 {n}회 — {'활성화' if i2 else '확인'}"))
                         if _info:
-                            self._suho_nap(*SUHO_CLICK_WAIT)
+                            # 🚨 **진입창이 사라질 때까지 기다린다** — 고정 대기만
+                            #    두면 아직 진입창인 화면을 또 찍어 **[활성화] 를
+                            #    두 번 누른다** (실측 2026-11-06 20:44:17·18,
+                            #    1초 안에 두 번). 🚫 고정 대기로 되돌리지 말 것.
+                            _t0 = time.time()
+                            while time.time() - _t0 < SUHO_INFO_GONE:
+                                if getattr(self, "_suho_stop", False):
+                                    break
+                                nap(random.uniform(0.06, 0.12))
+                                _i3 = self._suho_grab(rect)
+                                if _i3 is None:
+                                    continue
+                                if not self._suho_tpl_seen(
+                                        _i3, suho_info_list(),
+                                        band=SUHO_TITLE_BAND):
+                                    #   ⚡ 방금 찍은 것을 다음 회차가 돌려쓴다
+                                    self._suho_reuse = (time.time(), rect[0], _i3)
+                                    break
                             continue
                         # ② 확인 뒤에는 ③ 끌기가 바로 온다 — **이어서** 한다
                         ln = self._suho_wait_stage(rect, "line")
@@ -12205,6 +12245,8 @@ class App(tk.Tk):
            **진입창의 [활성화] 도 그 조건에 맞는다** → 누르면 **수호석이 나간다.**
            그 밖에는 **ESC** 로만 나간다 (ESC = 취소라 돈이 안 든다).
         🚫 사용자가 ■ 멈춤 을 눌렀으면 **아무것도 하지 않는다** — 멈추라고 한 것이다.
+        🚫 **양보해서 끝난 것**도 건드리지 않는다 (`_suho_yield` — 2026-11-06
+           *"내가 활성화를 해도 너가 그냥 꺼버려"*).
         🚫 **수호성 화면이 아니면 아무것도 누르지 않는다**
            (이 저장소 절대 규칙 — 「그림을 못 보면 누르지 않는다」)."""
         try:
@@ -12212,6 +12254,12 @@ class App(tk.Tk):
                 return False
             if getattr(self, "_suho_stop", False):
                 return False              # 사용자가 멈췄다 — 건드리지 않는다
+            if getattr(self, "_suho_yield", False):
+                #   🙅 **사람이 쓰는 중이라 양보했다** — 사용자가 직접 하고 있는
+                #      화면이므로 ESC·나가기 를 누르면 안 된다 (2026-11-06 사고).
+                click_log("[수호성] 🙅 사람이 쓰는 중이라 양보했다 → "
+                          "**화면을 건드리지 않는다** (나가기·ESC 안 누름)")
+                return False
             img = self._suho_grab(rect)
             if img is None:
                 return False
@@ -12244,9 +12292,15 @@ class App(tk.Tk):
     def _suho_wait_human(self):
         """✋ 사람이 마우스를 만지는 중이면 **양보한다** → 이어서 해도 되나.
 
-        손을 떼면 `SUHO_QUIET` 뒤 **즉시** 이어서 하므로 평소엔 안 느려진다.
+        🚫 **`SUHO_YIELD_ON = False` 면 양보하지 않고 그냥 True** (2026-11-06 사용자
+           지시 — *"내가 마우스 움직여서 그냥 계속 해줘"* · *"어차피 마우스
+           움직이는 거 의미가 없거든"*). ▶ 를 누른 것이 곧 '해줘' 이고,
+           멈추는 것은 ■ 멈춤 이다.
+        (켜져 있을 때) 손을 떼면 `SUHO_QUIET` 뒤 **즉시** 이어서 한다.
         `SUHO_QUIET_MAX` 넘게 계속 만지면 **False** — 그 판을 끝내고 컴퓨터를 돌려준다.
         🚫 `_system_idle_seconds()`·`precise_click.idle_seconds()` 를 쓰지 말 것."""
+        if not SUHO_YIELD_ON:
+            return True
         try:
             import precise_click as _pc
             t0 = time.time()
@@ -12408,13 +12462,17 @@ class App(tk.Tk):
             if not (suho_screen_list() or suho_info_list()):
                 return
             # ✋ 사람이 마우스를 만지는 중이면 **아예 시작하지 않는다**
-            #    (시작했다가 바로 양보하면 화면만 한 번 찍고 끝나 낭비다)
-            try:
-                import precise_click as _pc
-                if _pc.human_idle_seconds() < SUHO_QUIET:
-                    return
-            except Exception:
-                pass
+            #    🚫 **`SUHO_YIELD_ON = False` 면 보지 않는다** (2026-11-06 사용자:
+            #       *"어차피 마우스 움직이는 거 의미가 없거든"*). 지금 이 길은
+            #       **창만 띄울 뿐**이라 마우스와 상관없고, 보면 사용자가 방금
+            #       화면에 들어오며 마우스를 움직일 때 **창이 안 뜬다.**
+            if SUHO_YIELD_ON:
+                try:
+                    import precise_click as _pc
+                    if _pc.human_idle_seconds() < SUHO_QUIET:
+                        return
+                except Exception:
+                    pass
             # ⚡ 진입창(수호성 정보)을 먼저 본다 — 결과 그림까지 보면 느리다
             rect = self._suho_rect()
             if not rect:
