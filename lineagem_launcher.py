@@ -9647,14 +9647,17 @@ class App(tk.Tk):
         #         *"예전에 반복 밑에 16 이렇게 적혀있잖아. 반복을 16개 하니까.
         #           그 버튼을 혈레이드/재시작 이렇게 반반 한 것처럼"*
         #         → 윗줄 `⏰ 반복` · 아랫줄 `종료 16`(없으면 `없음`), 두 줄 버튼.
-        #      🚫 알약(Canvas)으로 바꾸지 말 것 — 두 줄 글자가 안 들어간다.
-        self._fold_rep = tk.Button(_k0h, text="⏰ 반복" + chr(10) + "없음",
-                                   font=("맑은 고딕", 8, "bold"),
-                                   bg="#7f8c8d", fg="white",
-                                   activebackground="#5d6d7e",
-                                   height=2, pady=0, bd=1,
-                                   command=self._rep_stop_click)
+        #      🎨 **모양은 [■ 멈춤] 과 똑같이 — 알약(Canvas)** (2026-11-07 사용자:
+        #         *"이왕 맞추는 거 멈춤버튼처럼 똑같은 모형으로 해줘야지"*).
+        #         알약 안에 **두 줄 글자**를 넣는다 (`create_text` 는 여러 줄 된다) —
+        #         실측 9pt 두 줄 `47x30` 이 칸 `76x38` 안에 들어간다.
+        #      🚫 tk.Button 으로 되돌리지 말 것 — 모서리가 각져 멈춤과 달라 보인다.
+        self._fold_rep = tk.Canvas(_k0h, width=1, height=38, highlightthickness=0,
+                                   bd=0, cursor="hand2")
         self._fold_rep.grid(row=0, column=1, sticky="ew", padx=(2, 0))
+        self._fold_rep.bind("<Button-1>",
+                            lambda e: (self._rep_stop_click() or "break"))
+        self._fold_rep.bind("<Configure>", lambda e: self._fold_rep_draw())
         self._fold_rep_draw()
         tk.Button(_k0, text="🔄 업데이트", font=("맑은 고딕", 8, "bold"),
                   bg="#c0392b", fg="white", activebackground="#7b241c",
@@ -15180,28 +15183,40 @@ class App(tk.Tk):
             pass
 
     def _fold_rep_draw(self, n=None):
-        """⏰ **반복 버튼의 글자·색을 맞춘다** — [■ 멈춤] 바로 오른쪽 절반.
+        """⏰ **반복 알약을 다시 그린다** — [■ 멈춤] 바로 오른쪽 절반.
 
-        🧭 모양은 **예전 섹션행의 [⏰ 반복] 그대로** (2026-11-07 사용자:
+        🎨 모양은 **[■ 멈춤] 과 똑같은 알약** (2026-11-07 사용자:
+           *"이왕 맞추는 거 멈춤버튼처럼 똑같은 모형으로"*).
+        🧭 글자는 **예전 섹션행의 [⏰ 반복] 그대로 두 줄** (2026-11-07 사용자:
            *"예전에 반복 밑에 16 이렇게 적혀있잖아"*) —
            윗줄 `⏰ 반복` · 아랫줄 `종료 n` (켜진 것이 없으면 `없음`).
         🎨 켜진 예약이 있으면 **빨강**, 없으면 **회색** (예전과 같은 규칙).
-        ⚠ 글자는 **8pt** — 절반 폭(약 74px)에 `종료 16` 이 들어가야 한다."""
-        b = getattr(self, "_fold_rep", None)
-        if b is None or not b.winfo_exists():
+        ⚠ Canvas 라 폭이 바뀔 때마다 다시 그려야 한다 (<Configure>).
+        ⚠ 글자는 **9pt** — 실측 두 줄 `47x30` 이 칸 `76x38` 안에 들어간다."""
+        c = getattr(self, "_fold_rep", None)
+        if c is None or not c.winfo_exists():
             return
         if n is None:
             try:
                 n = self._rep_count()
             except Exception:
                 n = 0
+        w = max(40, c.winfo_width())
+        h = max(20, c.winfo_height())
+        bg = "#c0392b" if n else "#7f8c8d"          # 빨강 / 회색
         try:
-            if n:
-                b.config(text="⏰ 반복" + chr(10) + ("종료 %d" % n),
-                         bg="#c0392b", activebackground="#922b21")
-            else:
-                b.config(text="⏰ 반복" + chr(10) + "없음",
-                         bg="#7f8c8d", activebackground="#5d6d7e")
+            c.delete("all")
+            try:
+                c.configure(bg=_parent_bg(c))
+            except Exception:
+                pass
+            r = h // 2
+            c.create_oval(0, 0, h, h, fill=bg, outline=bg)
+            c.create_oval(w - h, 0, w, h, fill=bg, outline=bg)
+            c.create_rectangle(r, 0, w - r, h, fill=bg, outline=bg)
+            c.create_text(w // 2, h // 2, justify="center",
+                          text="⏰ 반복" + chr(10) + (("종료 %d" % n) if n else "없음"),
+                          fill="white", font=("맑은 고딕", 9, "bold"))
             self._fold_rep_n = int(n)
         except Exception:
             pass
