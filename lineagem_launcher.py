@@ -4184,6 +4184,15 @@ FIX_QUIT_MAX   = 4          # 이 컴퓨터 전용 그림 장수
 FIX_QUIT_MATCH = 0.80       # 판정 기준
 FIX_QUIT_TRIES = 3          # 닫힐 때까지 ESC 를 눌러보는 횟수
 FIX_QUIT_GAP   = (0.35, 0.60)
+# 🔁 **십자가가 안 사라졌으면 한 번 더 복구한다** (2026-11-06 사용자 지시:
+#    *"한 번 복구를 하더라도 하나 더 떠 있을 때가 있거든. 십자가 안 없어졌으면
+#      한 번 더 복구를 해줘"*)
+#    🚨 '실패해서' 가 아니라 **그 클라에 복구할 것이 여러 개**라서다 —
+#       하나를 복구해도 다음 십자가가 그대로 남는다. 그래서 횟수를 늘린다.
+#    🚫 **💎 다야가 드는 슬롯은 여기서 멈춘다** (사용자 지시:
+#       *"다야복구면 당연히 다야 표기해두고 복구하지 말고"*) — `marked` 확인이
+#       `tries <= 0` 바로 밑에 있다. 그 확인을 절대 빼지 말 것.
+FIX_RETRY_MAX  = 3          # 1회차 뒤 **최대 이만큼 더** (총 4판)
 
 
 def fix_quit_list():
@@ -4202,6 +4211,20 @@ def fix_quit_list():
     return out
 
 
+def fix_quit_meta():
+    """🚪 종료창 그림을 **어느 창 가로에서 잘랐나** (없으면 옛 기준 491).
+
+    ⚠ `img_k()` 는 그림이 **491 창**에서 만들어졌다고 보고 늘린다. 546 창에서
+      자른 그림에 그걸 쓰면 **1.112배로 더 늘려** 안 맞는다 — 그래서 따로 적어둔다
+      (`potion0_meta.json` 과 같은 방식)."""
+    try:
+        with open(os.path.join(IMG_DIR, "fix_quit_meta.json"),
+                  encoding="utf-8-sig") as f:
+            return int((json.load(f) or {}).get("w") or IMG_BASE_W)
+    except Exception:
+        return IMG_BASE_W
+
+
 def fix_quit_open(anchor):
     """그 클라에 **종료 확인창**이 떠 있나 → (떠 있나?, 점수, 어느 그림).
 
@@ -4216,12 +4239,13 @@ def fix_quit_open(anchor):
         if not got:
             return False, 0.0, ""
         big = got[0]
+        _base = fix_quit_meta() or IMG_BASE_W
         best, who = 0.0, ""
         for p in ps:
             t = cv2.imdecode(np.fromfile(p, dtype=np.uint8), cv2.IMREAD_COLOR)
             if t is None:
                 continue
-            v = match_scaled(big, t, img_k(big.shape[1]))[0]
+            v = match_scaled(big, t, big.shape[1] / float(_base))[0]
             if v > best:
                 best, who = float(v), os.path.basename(p)
         return (best >= FIX_QUIT_MATCH), best, who
@@ -19122,6 +19146,20 @@ class App(tk.Tk):
             except Exception:
                 pass
             im.save(_dst)
+            # 📏 **어느 창 가로에서 잘랐는지 적어둔다** — 안 적으면 491 창 기준으로
+            #    보고 엉뚱하게 늘려 비교한다 (2026-11-06).
+            try:
+                _bw = 0
+                for (l0, t0, r0, b0, _h0) in (self._client_hwnds_by_slot() or []):
+                    if l0 <= x <= r0 and t0 <= y <= b0:
+                        _bw = r0 - l0
+                        break
+                if _bw:
+                    with open(os.path.join(IMG_DIR, "fix_quit_meta.json"),
+                              "w", encoding="utf-8") as _f:
+                        json.dump({"w": int(_bw)}, _f)
+            except Exception:
+                pass
             self._quit_btn_paint(btn)
             self.status.set(f"🚪 종료 확인창 저장 ({w}×{h} · {_wh}) — 복구 중에 "
                             f"이게 보이면 ESC 로 닫고 다시 합니다")
@@ -24125,17 +24163,22 @@ class App(tk.Tk):
                     return          # 💎 다야 필요 — 실패가 아니다. 다시 돌리지 않는다
                 # 🐢 **실패 → 한 번 더, 이번엔 꼼꼼히** (2026-10-13 사용자 지시)
                 self._fix_retry = getattr(self, "_fix_retry", {})
-                if self._fix_retry.get(int(si), 0) < 1 and not self._is_busy():
-                    self._fix_retry[int(si)] = 1
-                    click_log(f"fix #{si:02d} 1회차 실패(십자가 남음) → "
-                              f"2회차 **꼼꼼히** 다시 (간격 ×{FIX_SLOW_MULT}, "
-                              f"👁 확인 {CHECK_TRIES_SLOW}번)")
-                    self.status.set(f"🐢 복구 #{si:02d} 실패 — 더 천천히 "
-                                    f"한 번 더 눌러봅니다")
+                _done = self._fix_retry.get(int(si), 0)
+                if _done < FIX_RETRY_MAX and not self._is_busy():
+                    self._fix_retry[int(si)] = _done + 1
+                    click_log(f"fix #{si:02d} {_done+1}회차 뒤에도 십자가가 남아 "
+                              f"**한 번 더** 복구한다 ({_done+2}/{FIX_RETRY_MAX+1}판 · "
+                              f"꼼꼼히 — 간격 ×{FIX_SLOW_MULT}, "
+                              f"👁 확인 {CHECK_TRIES_SLOW}번) "
+                              f"— 복구할 것이 하나 더 있을 수 있다")
+                    self.status.set(f"🔁 복구 #{si:02d} — 십자가가 남아 "
+                                    f"한 번 더 ({_done+2}/{FIX_RETRY_MAX+1}판)")
                     self.after(800, lambda i=si: self._run_fix_slot(i, slow=True))
                     return
                 self.status.set(f"🩹 복구 #{si:02d} — 십자가가 아직 남아 있습니다 "
-                                f"(두 번 해봤습니다 · 목록은 그대로 둡니다)")
+                                f"({FIX_RETRY_MAX+1}번 해봤습니다 · 목록은 그대로 둡니다)")
+                click_log(f"fix #{si:02d} ⚠ {FIX_RETRY_MAX+1}판을 해도 십자가가 남았다 "
+                          f"— 목록은 그대로 둔다 (손으로 확인해주세요)")
                 return
             self.after(FIX_WATCH_MS, lambda: self._fix_verify(si, tries - 1, marked))
         except Exception as e:
