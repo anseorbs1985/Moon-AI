@@ -2283,6 +2283,15 @@ WARN_GONE_N = 4   # 2026-11-03: 3 → 4 (지울 때는 더 조심한다)
 # 다야(재화) 복구는 하지 않는다 — 좌표4 의 👁 '무료' 확인이 그대로 막는다.
 FIX_IDLE_SEC     = 300      # 5분
 FIX_IDLE_TICK_MS = 20000    # 20초마다 '마지막 입력 이후 몇 초' 만 본다 (거의 공짜)
+# 🔁 **한 바퀴 돌고도 남아 있으면 계속 다시 돈다** (2026-11-06 사용자 지시:
+#    *"5분 동안 아무런 작업이 없으면 자동복구 하지 않아? **계속 자동복구** 해줬으면"*)
+#    🚨 예전엔 `_fix_idle_done` 이 **한 번 돌면 True 로 굳어서**, 사람이 컴퓨터를
+#       다시 만지기 전까지 **영영 다시 안 돌았다.** 실패했거나 십자가가 새로 떠도
+#       그대로 남았다.
+#    👉 이제 **이 시간이 지나면 또 돈다** (목록에 남아 있고 사람이 계속 자리에 없을 때).
+#    🚫 **💎 다야 슬롯은 여전히 건너뛴다** — 그 슬롯만 남으면 아무것도 하지 않는다
+#       (2026-09-30: "계속해서 절전모드를 해제해서 복구를 시도하냐. 답답하다.")
+FIX_IDLE_AGAIN   = 180      # 한 바퀴 끝난 뒤 다시 돌기까지(초)
 # 🖱 사람이 리니지M 창을 클릭하면 **그 슬롯 하나만** 십자가를 확인한다
 # (2026-09-30 사용자 요청: "내가 마우스로 절전모드 해제를 누르면 자동으로 십자가 인식을
 #  해줄 순 없나?") — 손으로 깨운 그 순간이 십자가가 드러나는 순간이다.
@@ -22223,9 +22232,13 @@ class App(tk.Tk):
                 self._fix_idle_done = False
             else:
                 idle = self._system_idle_seconds()
+                _last = max(float(getattr(self, "_fix_idle_at", 0.0)),
+                            float(getattr(self, "_fix_last_act", 0.0)))
                 if idle < FIX_IDLE_SEC:
                     self._fix_idle_done = False        # 사람이 만졌다 → 다시 무장
-                elif not getattr(self, "_fix_idle_done", False):
+                    self._fix_idle_at = 0.0
+                elif (time.time() - _last >= FIX_IDLE_AGAIN
+                      and not getattr(self, "_fix_queue", None)):
                     # 💎 다야 슬롯은 건너뛴다 (2026-09-30 사용자 지시).
                     # 다야가 드는 것은 '무료' 확인에서 반드시 멈추므로, 자동복구가
                     # 5분마다 그 클라를 깨워 헛수고만 한다 —
@@ -22237,8 +22250,11 @@ class App(tk.Tk):
                                   f"(사람이 직접 써야 한다)")
                     if q and not self._is_busy():
                         self._fix_idle_done = True
+                        self._fix_idle_at = time.time()
                         click_log(f"[유휴복구] {int(idle)}초 동안 입력 없음 → "
-                                  f"놓친 복구 {len(q)}개 {q} 를 순서대로 (다야는 안 함)")
+                                  f"놓친 복구 {len(q)}개 {q} 를 순서대로 (다야는 안 함)"
+                                  + ("" if _last <= 0 else
+                                     f" · 지난번에서 {int(time.time()-_last)}초 만에 **다시**"))
                         self.status.set(
                             f"😴 {int(idle)//60}분째 조용 — 놓친 복구 {len(q)}개 "
                             f"{q} 를 순서대로 돌립니다 (다야는 하지 않습니다)")
@@ -24126,6 +24142,11 @@ class App(tk.Tk):
         · **다야가 들어야 하는 것**이면 → `💎 다야!! NN` 초록으로 바꾼다
         3초마다 최대 `FIX_WATCH_N` 번(=약 90초) 본다. 실행 중이면 기다린다.
         지켜보는 동안 사용자가 손으로 복구해도 사라지면 바로 지워진다."""
+        # 🔁 **"복구가 아직 돌고 있다" 는 표시** — 유휴 자동복구가 겹쳐 시작하지
+        #    않게 한다. 이 함수는 1초마다 스스로 다시 불리므로, 확인이 끝나면
+        #    시각이 멈추고 `FIX_IDLE_AGAIN` 뒤에 다시 돌 수 있게 된다.
+        #    🚫 이 한 줄을 빼면 확인하는 중에 또 복구가 시작돼 클릭이 엉킨다.
+        self._fix_last_act = time.time()
         try:
             if self._is_busy():                    # 아직 돌고 있으면 기다린다
                 self.after(500, lambda: self._fix_verify(si, tries, marked))
