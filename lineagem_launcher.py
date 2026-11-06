@@ -8606,16 +8606,12 @@ class App(tk.Tk):
                   command=lambda: self._run_awaken(by_user=True, src="메인런처 ▶")).pack(side="left", padx=(2, 0))
         # 🌙 수호성 — **각성 옆에** (2026-11-05 사용자 지시: "각성 옆에 배치해놔").
         #    설정·진단 창일 뿐이다 — 실행은 화면이 뜨면 **자동으로** 돈다.
-        _sb = tk.Button(_aw, text="🌙수호성" + chr(10) + "켬",
-                  font=("맑은 고딕", 8, "bold"),
+        #    ⚠ **켬/끔 표시는 여기 두지 말 것** — 이 줄은 런처를 접으면 숨는다.
+        #      켬/끔은 **다야OCR 밑**(접어도 보이는 열)에 있다 (2026-11-06).
+        tk.Button(_aw, text="🌙 수호" + chr(10) + "성", font=("맑은 고딕", 8, "bold"),
                   bg="#5b2c6f", fg="white", activebackground="#4a235a",
-                  width=5, height=2,
-                  command=self._open_suho_win)
-        _sb.pack(side="left", padx=(4, 0))
-        self._suho_onoff_btn = _sb   # 🚫 _suho_btn 은 **색 덩어리 찾는 메서드** 다
-        #   🖱 **오른쪽 클릭 = 켬/끔** (왼쪽 클릭은 그대로 설정·진단 창)
-        _sb.bind("<Button-3>", lambda e: self._suho_set_auto(None))
-        self._suho_btn_sync()
+                  width=4, height=2,
+                  command=self._open_suho_win).pack(side="left", padx=(4, 0))
         tk.Button(btn_row, text="🔑 계정\n관리",
             font=("맑은 고딕", 9, "bold"), bg="#16a085", fg="white",
             activebackground="#0e6655", width=7, height=2,
@@ -9168,6 +9164,27 @@ class App(tk.Tk):
         tk.Button(_oc, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
                   bg="#1e8449", fg="white", activebackground="#145a32",
                   width=4, height=2, command=self._open_ocr_scan).pack(side="left", padx=(2, 0))
+
+        # 🌙 수호성 — **다야OCR 바로 아래** (2026-11-06 사용자:
+        #    *"수호성 자동켬이 어딧는가 내가 볼수잇게 다야OCR밑에 배치해줘"*).
+        #    ⚠ 여기(`dc_col`)는 **런처를 접어도 보이는 열**이라 켬/끔을 늘 볼 수 있다.
+        #       각성 옆 버튼은 접으면 숨으므로 상태를 거기 두면 안 된다.
+        #    🚫 켬/끔을 두 군데 두지 말 것 — 접었을 때와 펼쳤을 때가 달라 보인다
+        #       (2026-11-04 규칙). 그래서 각성 옆 것은 **창 여는 버튼만** 남겼다.
+        _sh = tk.Frame(dc_col)
+        _sh.pack(anchor="n", pady=(5, 0), before=self._warn_topbtn)
+        tk.Button(_sh, text="🌙 수호" + chr(10) + "성", font=("맑은 고딕", 9, "bold"),
+                  bg="#5b2c6f", fg="white", activebackground="#4a235a",
+                  width=7, height=2, command=self._open_suho_win).pack(side="left")
+        _sb = tk.Button(_sh, text="자동" + chr(10) + "켬", font=("맑은 고딕", 9, "bold"),
+                  bg="#27ae60", fg="white", activebackground="#1e8449",
+                  width=4, height=2,
+                  command=lambda: self._suho_set_auto(None))
+        _sb.pack(side="left", padx=(2, 0))
+        #   🚫 `_suho_btn` 은 **버튼 색 덩어리를 찾는 메서드** 다 — 그 이름에
+        #      위젯을 넣으면 그 메서드가 조용히 사라진다 (2026-11-06 실제 사고).
+        self._suho_onoff_btn = _sb
+        self._suho_btn_sync()
 
         _dun = tk.LabelFrame(dc_col, text=" 던전 ", font=("맑은 고딕", 9, "bold"),
                              fg="#a04000", bd=2, relief="groove")
@@ -11792,9 +11809,9 @@ class App(tk.Tk):
         b = getattr(self, "_suho_onoff_btn", None)
         try:
             if b is not None and b.winfo_exists():
-                b.configure(text="🌙수호성" + chr(10) + ("켬" if on else "끔"),
-                            bg="#5b2c6f" if on else "#7f8c8d",
-                            activebackground="#4a235a" if on else "#5d6d7e")
+                b.configure(text="자동" + chr(10) + ("켬" if on else "끔"),
+                            bg="#27ae60" if on else "#c0392b",
+                            activebackground="#1e8449" if on else "#922b21")
         except Exception:
             pass
         f = getattr(self, "_suho_win_sync", None)
