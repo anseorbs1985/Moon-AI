@@ -24480,14 +24480,17 @@ class App(tk.Tk):
                 big = grab_window(c1)
                 tb0 = fix_tab_find(big, _nm) if big is not None else None
                 if tb0:
+                    # 🔢 숫자는 **기록만** 남긴다 — 🚫 이걸로 **건너뛰지 않는다**
+                    #    (2026-11-06 사용자: *"내가 경험치 복구 다 하면 옆에 장비
+                    #     클릭해서 복구해 달라니까 **왜 안 하냐고**"*)
+                    #    🚨 잉크가 0 이어도 **실제로는 있을 수 있다** — 글자가
+                    #       어둡거나 `(` 가 템플릿에 들어가 자리가 어긋날 수 있다.
+                    #       놓치는 것보다 **눌러보고 버튼이 없으면 빠지는 쪽**이 안전하다.
+                    #       (버튼이 없으면 어차피 아무것도 안 누른다)
                     _has, _ink = fix_tab_has_num(big, tb0)
-                    if not _has:
-                        click_log(f"fix #{si:02d} 🗂 [{_ko}] 숫자가 없다 "
-                                  f"(눌러서 밝게 한 뒤 잉크 {_ink}) "
-                                  f"— 복구할 것이 없어 건너뛴다")
-                        continue
-                    click_log(f"fix #{si:02d} 🗂 [{_ko}] 숫자 있다 (잉크 {_ink}) "
-                              f"→ 복구한다")
+                    click_log(f"fix #{si:02d} 🗂 [{_ko}] 숫자 "
+                              f"{'있다' if _has else '안 보인다'} (잉크 {_ink}) "
+                              f"→ **그래도 버튼이 있는지 본다**")
 
                 if _nm == "tab_exp" and not FIX_EXP_ON:
                     # 🚨 **경험치 복구 끔** (2026-11-06 — 다야가 나갔다는 신고).
