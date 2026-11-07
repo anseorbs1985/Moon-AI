@@ -4814,6 +4814,9 @@ def warn_green_mask(rgb):
     return (m.astype("uint8") * 255)
 
 
+DUNGEONS_LABEL = {0: "오만의탑", 1: "악몽의섬", 2: "잊혀진섬", 3: "에카",
+                  4: "귀환주문서", 5: "카매사오기"}   # 기록에 쓸 이름 (섬 실행기 순서)
+
 IMG_BASE_W = 491          # 그림·영역을 만든 기준 창 가로
 
 
@@ -9735,14 +9738,34 @@ class App(tk.Tk):
         #         Canvas 에는 `width=1` 을 줘서 요청 폭을 없앤다.
         # ⏰ 반복은 **던전 상자 안 · 에카 밑**으로 옮겼다 (2026-11-07 사용자 지시)
         #    → 여기는 [■ 멈춤] 혼자 한 줄을 쓴다.
+        # 🚨 **[■ 멈춤] 과 [⏰ 반복] 은 반반으로 나란히** (2026-11-07 사용자:
+        #    *"반복없음은 **멈춤버튼 옆에 냅두고**"*)
+        #    ⚠ `pack(expand=True)` 로는 반반이 안 된다 — Canvas 의 기본 요청 폭이
+        #      378px 라 열을 통째로 먹는다. **grid + uniform** 을 쓰고 Canvas 에
+        #      `width=1` 을 줘서 요청 폭을 없앤다.
+        #    🚫 클로드는 ⏰ 반복을 던전 상자로 옮기지 말 것 (한 번 잘못 옮겼다).
         _k0h = tk.Frame(_k0); _k0h.pack(side="top", fill="x")
-        _k0h.columnconfigure(0, weight=1)
+        _k0h.columnconfigure(0, weight=1, uniform="k0h")
+        _k0h.columnconfigure(1, weight=1, uniform="k0h")
         self._fold_stop = tk.Canvas(_k0h, width=1, height=38, highlightthickness=0,
                                     bd=0, cursor="hand2")
         self._fold_stop.grid(row=0, column=0, sticky="ew")
         self._fold_stop.bind("<Button-1>", lambda e: (self._stop() or "break"))
         self._fold_stop.bind("<Configure>", lambda e: self._fold_stop_draw())
         self._fold_stop_draw()
+        # ⏰ **반복 — [■ 멈춤] 바로 옆** (2026-11-07 사용자 지시)
+        #    묻지 않고 **즉시** 그 던전들의 ⏰ 예약을 전부 끈다 (2026-08-09 규칙).
+        #    ⚠ [■ 전체멈춤] 과 **따로**다 — 멈춤은 돌던 작업만, ⏰ 는 예약만.
+        #    🎨 모양은 [■ 멈춤] 과 같은 **알약(Canvas)** · 두 줄 글자
+        #       (윗줄 `⏰ 반복` · 아랫줄 `종료 16`, 없으면 `없음`).
+        #    🚫 tk.Button 으로 되돌리지 말 것 — 모서리가 각져 멈춤과 달라 보인다.
+        self._fold_rep = tk.Canvas(_k0h, width=1, height=38, highlightthickness=0,
+                                   bd=0, cursor="hand2")
+        self._fold_rep.grid(row=0, column=1, sticky="ew", padx=(2, 0))
+        self._fold_rep.bind("<Button-1>",
+                            lambda e: (self._rep_stop_click() or "break"))
+        self._fold_rep.bind("<Configure>", lambda e: self._fold_rep_draw())
+        self._fold_rep_draw()
         #   ⏰ 반복 — **묻지 않고 즉시** 그 던전들의 ⏰ 예약을 전부 끈다 (2026-08-09).
         #      🧭 모양은 **예전 섹션행의 [⏰ 반복] 그대로** — 2026-11-07 사용자:
         #         *"예전에 반복 밑에 16 이렇게 적혀있잖아. 반복을 16개 하니까.
@@ -9890,21 +9913,34 @@ class App(tk.Tk):
                       bg="#27ae60", fg="white", activebackground="#1e8449",
                       width=4, height=2,
                       command=lambda x=_i: self._run_island_slot(x)).pack(side="left", padx=(2, 0))
-        # ⏰ **반복 — 던전 상자 안, 에카 바로 아래** (2026-11-07 사용자:
-        #    *"반복 에카 밑으로 넣어주고"*)
-        #    묻지 않고 **즉시** 그 던전들의 ⏰ 예약을 전부 끈다 (2026-08-09 규칙).
-        #    ⚠ [■ 전체멈춤] 과 **따로**다 — 멈춤은 돌던 작업만, ⏰ 는 예약만.
-        #    🎨 모양은 [■ 멈춤] 과 같은 **알약(Canvas)** · 두 줄 글자
-        #       (윗줄 `⏰ 반복` · 아랫줄 `종료 16`, 없으면 `없음`).
-        #    🚫 tk.Button 으로 되돌리지 말 것 — 모서리가 각져 멈춤과 달라 보인다.
-        _rrw = tk.Frame(_dun); _rrw.pack(anchor="n", padx=3, pady=(4, 0), fill="x")
-        self._fold_rep = tk.Canvas(_rrw, width=1, height=38, highlightthickness=0,
-                                   bd=0, cursor="hand2")
-        self._fold_rep.pack(fill="x", expand=True)
-        self._fold_rep.bind("<Button-1>",
-                            lambda e: (self._rep_stop_click() or "break"))
-        self._fold_rep.bind("<Configure>", lambda e: self._fold_rep_draw())
-        self._fold_rep_draw()
+        # 🏴 **해적섬 — 던전 상자 안, 에카 바로 아래** (2026-11-07 사용자:
+        #    *"해적섬을 따로 만들어서 던전 안으로 넣어주라니까"*)
+        #    🧭 던전은 **악몽의섬과 같은 것**(토요일_악몽의섬)이고, 프리셋만 다르다.
+        #       그래서 ▶실행은 그 던전을 돌리되 **해적섬 프리셋인 슬롯만** 고른다
+        #       (`--ver 해적섬` → 섬 실행기가 `_slot_ver` 로 골라낸다).
+        #    🚫 **⏰ 반복을 걸지 않는다** — 시간이 남을 때 손으로 한 번 돌리는 용도
+        #       (`REPEAT_NONE_VER`). 던전 이름 버튼은 악몽의섬 좌표 창을 연다.
+        _prw = tk.Frame(_dun); _prw.pack(anchor="n", padx=3, pady=(1, 0))
+        _pb = tk.Button(_prw, text="해적섬", font=("맑은 고딕", 9, "bold"),
+                        bg="#1a5276", fg="white", width=7, height=2,
+                        command=lambda: self._open_past_slot(1))
+        _pim = self._dun_imgs.get("해적섬")
+        if _pim is None:
+            try:
+                _pp = os.path.join(IMG_DIR, "dun_해적섬.png")
+                if os.path.exists(_pp):
+                    _pim = tk.PhotoImage(file=_pp)
+                    self._dun_imgs["해적섬"] = _pim
+            except Exception:
+                _pim = None
+        if _pim is not None:
+            _pb.config(image=_pim, compound="right", width=72, height=34, padx=1)
+        _pb.pack(side="left")
+        tk.Button(_prw, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#27ae60", fg="white", activebackground="#1e8449",
+                  width=4, height=2,
+                  command=lambda: self._run_island_ver(1, "해적섬")).pack(
+                      side="left", padx=(2, 0))
 
         # 🏝 **섬/던전 미니! — 던전 상자 안, 에카 바로 아래** (2026-11-04 사용자:
         #    *"던전 안 에카 밑에 넣어줘야 해. 버튼 크기는 전부복구와 같은 사이즈로"*)
@@ -15653,6 +15689,28 @@ class App(tk.Tk):
         proc = subprocess.Popen([r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(idx), "--run"])
         self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
+
+    def _run_island_ver(self, idx, ver):
+        """🏴 그 던전에서 **그 프리셋(버전)인 슬롯만** 돌린다 (2026-11-07).
+
+        해적섬처럼 **던전은 같고 프리셋만 다른** 것을 따로 돌리려고 만들었다.
+        어느 슬롯이 그 버전인지는 **섬 실행기가 `_slot_ver` 로 판단**한다 —
+        🚫 런처가 그 규칙을 베껴 쓰지 말 것 (한쪽만 고치는 사고가 난다)."""
+        if self._is_busy():
+            self._enqueue(f"{ver}",
+                          lambda: self._run_island_ver(idx, ver)); return
+        self._island_step_back()
+        try:
+            click_log(f"[{ver}] ▶ 실행 — {DUNGEONS_LABEL.get(idx, idx)} 던전에서 "
+                      f"'{ver}' 프리셋 슬롯만 돌린다")
+        except Exception:
+            pass
+        proc = subprocess.Popen([r"pythonw",
+                                 os.path.join(BASE, "lineagem_island.py"),
+                                 str(idx), "--run", "--ver", ver])
+        self._island_proc = proc
+        threading.Thread(target=self._watch_island,
+                         args=(proc,), daemon=True).start()
 
     def _open_sched_win(self):
         self._open_section_win("_sched_win", "📅 매일매일 스케줄", self._build_sched, w=470, h=620)

@@ -2617,6 +2617,34 @@ class IslandApp(tk.Tk):
                 self._auto_run = True
             except Exception:
                 self._auto_slots = None
+        # 🏴 --ver <이름> : 그 **프리셋(버전)인 슬롯만** 골라 실행 (2026-11-07).
+        #    해적섬처럼 **던전은 같고 프리셋만 다른** 것을 따로 돌리려고 만들었다.
+        #    판정은 `_slot_ver` 하나로만 한다 — 🚫 런처가 그 규칙을 베껴 쓰지 말 것.
+        #    ⚠ `--slots` 와 **같은 길**로 흘려보낸다 (새 실행 경로를 만들지 않는다).
+        #    🚫 **OFF 슬롯은 고르지 않는다** (2026-08-29 규칙).
+        self._auto_ver = None
+        if "--ver" in sys.argv and focus_idx is not None:
+            try:
+                _vn = sys.argv[sys.argv.index("--ver") + 1].strip()
+                _vk = DUNGEONS[focus_idx]["key"]
+                _vs = self.cfg.get(_vk) or []
+                _vp = [i for i, _sl in enumerate(_vs[:16])
+                       if _sl and _sl.get("enabled", True)
+                       and self._slot_ver(_vk, _sl) == _vn]
+                self._auto_ver = _vn
+                self._rlog(f"🏴 --ver {_vn} → 고른 슬롯 "
+                      + (str([i + 1 for i in _vp]) if _vp else "없음"))
+                if _vp:
+                    self._auto_slots = _vp
+                    self._auto_run = True
+                else:
+                    # 🚫 그 프리셋인 슬롯이 없으면 **아무것도 하지 않는다** —
+                    #    창도 숨겨져 있으니 그대로 끝낸다.
+                    self._auto_slots = None
+                    self._auto_run = False
+                    self._ver_none = _vn
+            except Exception as _e:
+                self._rlog(f"🏴 --ver 읽기 실패 {_e}")
         # --slot N : 그 슬롯 하나만 실행 (진단·테스트용)
         self._auto_slot = None
         if "--slot" in sys.argv:
@@ -2627,6 +2655,12 @@ class IslandApp(tk.Tk):
                 self._auto_slot = None
 
         self._build_ui()
+        # 🏴 `--ver` 로 골랐는데 그 프리셋인 슬롯이 없으면 바로 끝낸다 (2026-11-07)
+        if getattr(self, "_ver_none", None):
+            try:
+                self.after(400, self.destroy)
+            except Exception:
+                pass
         # 조작 감지 — 3분 무조작이면 메인런처 앞(클라 뒤)으로 물러남
         self._last_active = time.time()
         def _bump(e=None):
