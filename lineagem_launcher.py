@@ -4615,7 +4615,21 @@ FIX_BTN_SETTLE = (0.6, 1.0)          # 버튼이 켜진 뒤 누르기까지 — 
 #       에 떠서 16번 칸5(확인 2132,1331) 와 겹친다 — 그래서 16번쪽만 안 됐다.
 #    ⚠ 오프셋은 **창 가로에 비례**해 늘린다. 창 밖으로는 안 나간다.
 #    🚫 `[복구](다야) 자리(창안 x < FIX_PAY_ZONE)` 로는 **절대 내려가지 않는다.**
-FIX_OK_OFFS    = ((-70, 0), (-45, 0), (-95, 0), (0, 0))
+# 🖱 **왼쪽부터 여러 자리**를 눌러본다 (2026-11-08 사용자: *"확인 버튼을
+#    **최대한 왼쪽**"* · *"**실패하면 좀 여러 군데**를 눌러줘"*).
+#    화면이 바뀌면(`FIX_OK_DIFF`) 바로 멈춰 헛클릭이 게임에 안 떨어진다.
+# 📏 실측 2026-11-08 (16번 창 546x307 · 확인 줄 y250):
+#      🔴 취소 창안 x **182~266**   ⬛ 사이 267~277
+#      🔵 확인 창안 x **278~362** (폭 85) · 등록 좌표 326 은 그 안이다
+# 🚨 예전 값 `(-70, -45, -95, 0)` 은 **-70(256)·-95(231) 이 [취소] 버튼**이라
+#    **복구를 취소시켜 버렸다.** 그래서 16번이 안 됐다 (워터마크가 아니었다).
+FIX_OK_OFFS    = ((-38, 0), (-25, 0), (-12, 0), (0, 0), (15, 0))
+#    → 창안 288 · 301 · 314 · 326 · 341 — **전부 확인 버튼 안**
+# 🚫 **창안 이보다 왼쪽은 [취소] 다** — 절대 가지 않는다.
+#    (`FIX_PAY_ZONE` 95 는 취소를 전혀 못 막는다. 272 보다 내리지 말 것)
+FIX_OK_MIN     = 272
+# 🖱 복구의 '확인' 칸 (0부터 센 칸 번호) — 이 칸만 왼쪽부터 여러 자리를 누른다
+FIX_OK_CELL    = 4
 #    🎯 2026-11-07 사용자: *"확인버튼이 뜰 때 **가운데 말고 좌측**을 눌러주면
 #       복구가 확인이 될 거 같은데"* → **좌측부터** 보고, 등록 자리는 맨 뒤로.
 #    ⚠ 화면이 바뀌면 **거기서 끝**이라 보통 **첫 자리 하나만** 눌린다.
@@ -22505,6 +22519,21 @@ class App(tk.Tk):
             click_log(f"{fkey} [{_en}] 좌표{j+1} ⎋ ESC 를 {_et}번 눌렀다")
             self.status.set(f"⎋ [{_en}] 좌표{j+1} — ESC")
             return "ESC"
+        # 🖱 **복구의 확인 칸** — 왼쪽부터 여러 자리를 눌러본다 (2026-11-08).
+        #    ⚠ 이 처리가 **탭 흐름에만** 있어서 예전 좌표 흐름(로컬이 쓰는 길)은
+        #      칸5 를 **그냥 눌렀다.** 🚫 복구(fix)의 그 칸에서만 동작한다.
+        if fkey == "fix" and j == FIX_OK_CELL and coord:
+            _sn = 0
+            try:
+                for _i, _s in enumerate(self.cfg.get("fix_slots") or []):
+                    if _s is slot:
+                        _sn = _i + 1
+                        break
+            except Exception:
+                pass
+            self._click_log(fkey, j, coord, slot, "확인")
+            self._fix_ok_press(coord, _sn)
+            return "확인"
         if j in HOVER_INDICES.get(fkey, ()):
             self._click_log(fkey, j, coord, slot, "마우스올림")
             move_at(*coord)                   # 커서는 그대로, 그 자리에 올림 신호만
@@ -26159,6 +26188,27 @@ class App(tk.Tk):
         except Exception:
             return None
 
+    def _fix_ok_press(self, coord, si=0):
+        """🖱 **복구 확인 — 왼쪽부터 여러 자리**를 눌러본다 (2026-11-08).
+
+        사용자: *"확인 버튼 누르는 걸 **왼쪽 끝쯤**을 눌러주면 된다니까"* ·
+               *"만약 **실패하면 좀 여러 군데**를 눌러줘"*
+        ⚠ 이 처리가 **탭 흐름에만** 있어서, 예전 좌표 흐름(로컬이 쓰는 길)은
+          칸5 좌표를 **그냥 눌렀다.** 그래서 같은 함수를 여기서도 쓴다.
+        🚫 못 재면 원래 좌표를 그냥 누른다 (막지 않는다)."""
+        try:
+            rect = client_rect_at(*coord)
+            if not rect:
+                click_at(*coord)
+                return
+            big = grab_window(coord)
+            self._fix_ok_click(coord, rect[0], rect[1], big, int(si), "확인")
+        except Exception:
+            try:
+                click_at(*coord)
+            except Exception:
+                pass
+
     def _fix_ok_click(self, c5, L, T, big, si, ko):
         """🖱 **확인을 여러 자리에서** 누른다 — 좌측부터 (2026-11-07).
 
@@ -26193,7 +26243,14 @@ class App(tk.Tk):
             # 🚫 창 밖 · [복구](다야) 자리로는 가지 않는다
             if big is not None:
                 _ix = x - L
-                if _ix < FIX_PAY_ZONE * k or _ix > big.shape[1] - 4:
+                # 🚫 **[취소] 버튼으로는 절대 가지 않는다** (2026-11-08 실측 —
+                #    취소 창안 182~266 · 확인 278~362). 예전 오프셋이 취소를
+                #    눌러 **복구를 취소시켰다.**
+                if (_ix < FIX_OK_MIN * k or _ix < FIX_PAY_ZONE * k
+                        or _ix > big.shape[1] - 4):
+                    click_log(f"fix #{si:02d} 🚫 확인 자리 창안 {int(_ix)} 는 "
+                              f"**[취소] 쪽이라 건너뛴다** "
+                              f"(확인은 창안 {int(FIX_OK_MIN * k)} 보다 오른쪽)")
                     continue
             # 🖼 누르기 **전** 화면 (바뀌었는지 보려고)
             _b0 = None
