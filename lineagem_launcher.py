@@ -4544,6 +4544,20 @@ FIX_ITEM_FIRST = True
 #    칸1(십자가)을 다시 눌러 열고 그 탭을 한 번 더 찾는다 (**탭마다** 1번).
 #    🚫 흔적이 있으면 다시 열지 않는다 (창이 두 겹 쌓인다).
 FIX_REOPEN     = 1
+# 📍 **복구 창 안의 고정 자리** (546x307 창 기준 · 가운데, 폭, 높이).
+#    실측 2026-11-08 — 세 슬롯(#07 #09 #16)에서 **창안 좌표가 완전히 같았다.**
+#    그림은 메인에서 자른 것이라 **로컬에선 안 맞을 수 있다** → 그때 이 자리를 쓴다.
+# 🚫 **`free`(일일무료복구)는 넣지 말 것** — 무료를 다 쓰면 **그 자리가
+#    `[복구]`(다야)** 다 (실측 둘 다 창안 x54). 그림으로 글자를 봤을 때만 누른다.
+FIX_POS_W   = 546
+FIX_POS = {
+    "tab_exp":  (43, 48, 49, 12),
+    "tab_item": (106, 47, 50, 13),
+    "all":      (121, 269, 51, 13),
+}
+FIX_POS_FALLBACK = True      # 🚫 사용자 요청 없이 False 로 되돌리지 말 것
+# 🚨 탭을 하나도 못 찾으면 **예전 좌표 흐름**으로 (목록은 절대 안 지운다).
+FIX_TABS_FALLBACK = True
 # 🎯 **한 판에 탭 하나만** (2026-11-07 사용자 설계: *"경험치 복구를 하고
 #    **닫어**. 그리고 안 없어지고 떠 있으면 복구를 다시 돌리면 너가 확인하고
 #    **경험치 복구가 없으면 아이템 복구를** 해줘"*)
@@ -4649,6 +4663,23 @@ FIX_NUM_INK   = 4                    # 잉크가 이보다 많으면 '숫자 있
 
 def fix_tab_img(nm):
     return os.path.join(IMG_DIR, f"fix_{nm}.png")
+
+
+def fix_pos_box(nm, win_w):
+    """📍 그림을 못 찾을 때 쓸 **고정 자리** → (x0, y0, w, h, 0.0).
+
+    창 가로에 맞춰 늘린다. 없는 이름이면 None (= 폴백 금지).
+    🚫 `free` 는 일부러 `FIX_POS` 에 없다 — 그 자리가 [복구](다야)일 수 있다."""
+    try:
+        p = FIX_POS.get(nm)
+        if not p:
+            return None
+        k = float(win_w or FIX_POS_W) / float(FIX_POS_W)
+        cx, cy, w, h = p
+        w2, h2 = max(1, int(w * k)), max(1, int(h * k))
+        return (int(cx * k) - w2 // 2, int(cy * k) - h2 // 2, w2, h2, 0.0)
+    except Exception:
+        return None
 
 
 def fix_tab_ready():
@@ -25921,7 +25952,11 @@ class App(tk.Tk):
             pass
         # 🗂 **탭 두 개를 도는 새 흐름** — 그림 셋이 다 있을 때만 (2026-11-06).
         #    없으면 예전(첫 줄 하나) 흐름 그대로 — 안 쓰는 컴퓨터는 영향 0.
-        if FIX_TABS and fix_tab_ready():
+        # 🚨 탭이 이 컴퓨터에서 **끝내 안 잡히는 것이 확인됐으면** 처음부터
+        #    예전 좌표 흐름으로 간다. 세션 메모리라 런처를 다시 켜면
+        #    한 번 더 시도한다 — 그림을 보강하면 저절로 돌아온다.
+        if (FIX_TABS and fix_tab_ready()
+                and not getattr(self, "_fix_tab_bad", False)):
             try:
                 self._busy_task = "복구탭"
             except Exception:
@@ -25992,6 +26027,20 @@ class App(tk.Tk):
                     pass
             if _t < FIX_TAB_TRIES - 1:
                 self._fix_nap(*FIX_TAB_RETRY)
+        # 📍 **고정 자리로 떨어진다** (2026-11-08) — 그림은 메인에서 자른 것이라
+        #    로컬에선 안 맞는다. 복구 창 안의 탭 자리는 **창 안에서 고정**이다
+        #    (실측 세 슬롯 전부 같다). 탭은 눌러도 돈이 안 들어 안전하다.
+        #    🚫 여기서 그만두면 **그 슬롯이 통째로 복구되지 않는다.**
+        if FIX_POS_FALLBACK and big is not None:
+            _pb = fix_pos_box(nm, big.shape[1])
+            if _pb:
+                click_log(f"fix #{si:02d} 📍 [{ko}] 탭 그림을 못 찾아 "
+                          f"**고정 자리**를 쓴다 "
+                          f"(창안 {_pb[0] + _pb[2] // 2},{_pb[1] + _pb[3] // 2} "
+                          f"· 최고 {best:.2f} · 기준 {FIX_TAB_MATCH}) "
+                          f"— 그림이 이 컴퓨터 화면과 다를 수 있다")
+                self._fix_tab_shot(si, big, nm + "_notab")
+                return big, _pb
         click_log(f"fix #{si:02d} 🗂 [{ko}] ⚠ **탭을 못 찾았다** "
                   f"(최고 {best:.2f} · 기준 {FIX_TAB_MATCH} · "
                   f"{FIX_TAB_TRIES}번 봤다)")
@@ -26058,6 +26107,27 @@ class App(tk.Tk):
             click_log(f"fix #{si:02d} 🎨 [{ko}] **전부 꺼져 있다** — {_txt} "
                       f"(기준 {FIX_BTN_BRIGHT} · {_n}번 봤다) — 복구할 것이 없다")
             return big, None, "OFF"
+        # 📍 **고정 자리로 떨어진다** — 단 `FIX_POS` 에 있는 것만 (= `all`).
+        #    🚫 `free`(일일무료복구)는 없다 — 무료를 다 쓰면 그 자리가
+        #       **[복구](다야)** 라서 누르면 돈이 나간다.
+        #    ✅ `fix_btn_on`(밝기)으로 **켜졌을 때만** 누르고, 아이템 쪽은
+        #       **동전 판정**이 다야를 한 겹 더 막는다.
+        if FIX_POS_FALLBACK and big is not None:
+            for _nm2, _ko2 in names:
+                _pb = fix_pos_box(_nm2, big.shape[1])
+                if not _pb:
+                    continue
+                _on, _bn = fix_btn_on(big, _pb) if need_on else (True, -1)
+                if _on:
+                    click_log(f"fix #{si:02d} 📍 [{ko}] [{_ko2}] 그림을 못 찾아 "
+                              f"**고정 자리**를 쓴다 (밝은 픽셀 {_bn} · "
+                              f"가장 닮은 것 {best:.2f}) — 그림이 이 컴퓨터 "
+                              f"화면과 다를 수 있다")
+                    return big, _pb, _ko2
+                click_log(f"fix #{si:02d} 📍 [{ko}] [{_ko2}] 고정 자리가 "
+                          f"**꺼져 있다** (밝은 픽셀 {_bn} < "
+                          f"{FIX_BTN_BRIGHT}) — 복구할 것이 없다")
+                return big, None, "OFF"
         click_log(f"fix #{si:02d} 🔁 [{ko}] 버튼을 못 찾았다 "
                   f"({_n}번 봤다 · 가장 닮은 것 {bko or chr(45)} "
                   f"{best:.2f} · 기준 {FIX_TAB_MATCH})")
@@ -26519,6 +26589,27 @@ class App(tk.Tk):
             #    오탐으로 또 눌러 던전에 들어간다.** → 목록에서 지운다.
             #    🚫 💎 는 붙이지 않는다 (다야가 아니라 오탐이다).
             if _notab and not _did:
+                if FIX_TABS_FALLBACK:
+                    # 🚨 **고정 자리로도 안 됐다** (2026-11-08).
+                    #    🚫 **목록에서 지우지 않는다** — 복구할 것이 있는데
+                    #       지워버리면 그 슬롯이 영영 복구되지 않는다.
+                    #       (그것이 로컬 복구를 죽인 범인이었다)
+                    #    → **예전 좌표 흐름**으로 다시 한다 (사용자: *"예전에는
+                    #       엄청 잘 됐는데"*). 👁 '무료' 확인이 그대로 있어
+                    #       **다야는 여전히 안 쓴다.**
+                    self._fix_tab_bad = True      # 다음부터는 처음부터 예전 흐름
+                    click_log(f"fix #{si:02d} 🚨 **탭을 하나도 못 찾았다** "
+                              f"(고정 자리도 안 됐다) → **예전 좌표 흐름으로 "
+                              f"다시 한다** · 목록은 그대로 둔다"
+                              + self._warn_score_txt(si))
+                    self.status.set(f"🔁 복구 #{si:02d} — **예전 좌표 방식**으로 "
+                                    f"다시 합니다")
+                    try:
+                        self.after(300, lambda i=idx:
+                                   self._start_dgn2("fix", sel_list=[i]))
+                    except Exception:
+                        pass
+                    return
                 try:
                     self._warn_save(sorted(set(self._warn_load()) - {int(si)}))
                     self._fix_paid_mark(int(si), False)
