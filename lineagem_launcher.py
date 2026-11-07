@@ -25629,6 +25629,23 @@ class App(tk.Tk):
                 return
         except Exception:
             pass
+        # 🐢 **여기부터 전부 백그라운드 스레드** (2026-11-07 사용자: *"전부 복구
+        #    버튼을 누르면 **메인런처가 계속 멈추는 현상**이 발견됨"*).
+        #    아래 몸통은 절전 깨우기(~2초) · ESC 닫기(~1.1초) ·
+        #    십자가 확인(최대 7번) 이라 **최악 8초**가 걸린다. 그걸 UI 스레드에서
+        #    하면 그만큼 런처가 통째로 얼어붙는다. `[▶ 전부 복구]` 는
+        #    `_fix_run_next`(200ms 틱)로 **슬롯마다** 이걸 돌린다.
+        #    🚫 몸통을 다시 UI 스레드로 되돌리지 말 것.
+        threading.Thread(target=self._run_fix_slot_work,
+                         args=(int(si), idx), daemon=True).start()
+
+    def _run_fix_slot_work(self, si, idx):
+        """🐢 `_run_fix_slot` 의 **무거운 몸통** — 백그라운드 스레드에서 돈다.
+
+        ① 절전이면 깨우고 → ② 열린 창을 ESC 로 닫고 → ③ 십자가를 확인하고
+        → ④ 탭 두 개를 돈다. 🚫 이 순서를 바꾸지 말 것 (절전 화면이 십자가를 가린다).
+        ⚠ 여기서 **Tk 위젯을 직접 만지지 말 것** — `status.set` 은 StringVar 라
+           괜찮지만, 버튼을 다시 그리는 것은 `self.after(0, …)` 로 넘긴다."""
         # ── ① 절전이면 **먼저 Z 를 눌러 깨운다** (2026-08-29 — 순서가 중요) ──
         # 절전 화면이 십자가를 가려서, 깨우기 전에 십자가를 보면 '없다'고 판단해
         # 아무것도 못 하고 목록만 지워버렸다. 그래서 깨우기가 맨 앞이다.
@@ -25703,9 +25720,13 @@ class App(tk.Tk):
             #    예전엔 **한 번이라도 보이면** 실행해서, 한 프레임 오탐에
             #    칸1을 눌러 **던전에 들어가 버렸다** (사용자 신고).
             #    🚫 1 로 되돌리지 말 것.
+            # 🐢 **`only={si}` — 볼 것은 그 슬롯 하나뿐이다** (2026-11-07).
+            #    16개를 긁으면 0.81초, 한 개면 **0.05초**다 (16배).
+            #    최대 7번 보므로 5.67초 → **0.35초**.
+            #    🚫 `only` 를 빼지 말 것.
             hit, _seen, _run2 = None, False, 0
             for _t in range(FIX_SEE_TRIES + FIX_GO_N):
-                hit = self._check_hits()
+                hit = self._check_hits(only={int(si)})
                 if hit is None:
                     break                  # 확인 자체가 불가(기준 그림 없음 등)
                 if int(si) in set(hit):
@@ -25762,10 +25783,11 @@ class App(tk.Tk):
             self._minimize_claude()
             self._send_to_back()
             self._stay_back(90)
-            threading.Thread(target=self._fix_tabs_work,
-                             args=(si, idx), daemon=True).start()
+            # 🧵 **이미 스레드 안이므로 직접 부른다** — 또 띄우지 않는다.
+            self._fix_tabs_work(si, idx)
             return
-        self._start_dgn2("fix", sel_list=[idx])
+        # ⚠ 옛 경로(그림이 없는 컴퓨터)는 **UI 를 만지므로** UI 스레드로 돌려준다
+        self.after(0, lambda: self._start_dgn2("fix", sel_list=[idx]))
         # 끝난 뒤 **화면을 다시 봐서** 경고가 사라졌는지 확인하고 지운다
         self.after(300, lambda x=si: self._fix_verify(x, FIX_WATCH_N))
 
@@ -26724,9 +26746,33 @@ class App(tk.Tk):
         return hit
 
     def _check_scan(self, quiet=False):
-        """지정 영역에 마크가 보이면 경고를 남기고, 이후 5분간 지켜본다 (F11 때 자동).
-        지켜보는 동안 마크가 사라진 슬롯은 경고를 자동으로 지운다 —
-        내가 ✕로 지우는 것도 그대로 쓸 수 있다."""
+        """⚠ 경고(십자가) 스캔 — **무거우니 백그라운드 스레드**에서 돌린다.
+
+        16클라 캡처가 **0.81초**인데 F11 뒤에 (깨우기 전·후) **두 번** 돌아
+        그만큼 런처가 멈췄다 (2026-11-07). 🚫 UI 스레드로 되돌리지 말 것.
+        ⚠ `_scan_busy` 로 겹쳐 돌지 않게 하고, 예외 때도 **반드시 풀어준다** —
+           안 풀면 그 뒤로 스캔이 영영 안 돈다."""
+        if getattr(self, "_scan_busy", False):
+            return
+        self._scan_busy = True
+
+        def _sw(q=quiet):
+            try:
+                self._check_scan_work(q)
+            except Exception as _e:
+                try:
+                    click_log(f"[경고확인] ⚠ 오류 {_e}")
+                except Exception:
+                    pass
+            finally:
+                self._scan_busy = False
+        threading.Thread(target=_sw, daemon=True).start()
+
+    def _check_scan_work(self, quiet=False):
+        """🐢 `_check_scan` 의 몸통 — **스레드에서** 돈다.
+
+        ⚠ 버튼을 다시 그리는 것(`_warn_refresh`)과 감시 시작(`_check_watch_start`)은
+           **Tk 위젯을 만지므로** `self.after(0, …)` 로 UI 에 넘긴다."""
         hit = self._check_hits()
         if hit is None and quiet:
             try:      # 조용히 실패해도 이유는 기록해 둔다 (원격 확인용)
@@ -26819,7 +26865,8 @@ class App(tk.Tk):
         # 안 보인다고 바로 지우지 않는다 — 연속 WARN_GONE_N 번 확인 (2026-09-29)
         gone = sorted(self._warn_gone_filter(set(hit), before, _keep))
         self._warn_save(sorted((before - set(gone)) | set(hit)))
-        self._warn_refresh()
+        # ⚠ **Tk 위젯을 만지므로 UI 스레드로 넘긴다** (여기는 스레드다)
+        self.after(0, self._warn_refresh)
         self._fix_bulk_ready = True      # 다음 한 번은 '단체 복구'
         try:      # 슬롯별 점수를 남긴다 — 왜 몇 개를 못 잡는지 원격에서 보려고
             _ss = getattr(self, "_last_scores", []) or []
@@ -26846,7 +26893,8 @@ class App(tk.Tk):
         if gone:
             _msg += f" · 사라진 {gone} 자동 삭제"
         self.status.set(_msg + " · 5분간 지켜봅니다")
-        self._check_watch_start()
+        # ⚠ 감시 틱을 거는 것도 **UI 스레드**에서 (여기는 스레드다)
+        self.after(0, self._check_watch_start)
 
     def _wake_slots(self, slots):
         """자는 클라들을 깨운다 (F11 확인 전에 쓴다, 2026-08-29).
