@@ -4520,6 +4520,22 @@ FIX_FREE_TRIES = 8                   # 경험치 탭에서 복구를 누를 최�
 #    *"**한 번만 복구하고 꺼버리는 경우도 있고**"*).
 #    복구 **직후**에는 목록이 다시 그려지는 중이라 버튼이 잠깐 회색이다.
 FIX_ON_MORE    = 4                   # 한 번이라도 복구했으면 이만큼 더 본다
+# 🆓 **장비 + 일일무료복구만 한다** (2026-11-07 사용자 지시:
+#    *"**다야 써야 하는 복구는 그대로 냅두자 내가 따로 복구를 할게.**
+#      그냥 너는 **장비랑 일일무료복구만** 좀 해주라"*)
+# 🚫 **구호증서복구를 안 본다** — 사용자가 손으로 한다. 템플릿이 하나뿐이라
+#    못 찾을 때 헛기다림도 줄고 `가장 닮은 것 구호증서복구 0.52` 헛걸림도 사라진다.
+#    켜려면 True (그림 `fix_cert.png` 는 그대로 남겨뒀다).
+FIX_CERT_ON    = False
+# 📦 **장비(아이템)를 먼저 한다** — 짧고 확실한 것부터 끝내 장비를 확보한다.
+#    🚨 예전 순서(경험치 → 장비)에서는 경험치가 30초 헛돌다 **창이 닫혀**
+#       장비 탭을 못 찾고 끝났다 (실측 16:52 — 장비 복구 0회).
+#    ✅ 창을 열면 아이템 탭이 **이미 선택돼 있어** 바로 찾힌다.
+FIX_ITEM_FIRST = True
+# 🔁 탭을 못 찾았는데 **복구 창 흔적이 하나도 없으면 닫힌 것** →
+#    칸1(십자가)을 다시 눌러 열고 그 탭을 한 번 더 찾는다 (**탭마다** 1번).
+#    🚫 흔적이 있으면 다시 열지 않는다 (창이 두 겹 쌓인다).
+FIX_REOPEN     = 1
 # 🚨 **십자가가 연속 이만큼 보여야 복구를 시작한다** (2026-11-07 사용자:
 #    *"십자가가 없으면 복구를 띄우면 안 되는데 그 자리에 다른 게 있다고
 #      복구를 띄우고 **그 던전 버튼을 눌러버리는 현상**이 있어"*).
@@ -25985,6 +26001,7 @@ class App(tk.Tk):
         🚫 **다야(파란 동전)면 그 탭을 건너뛰고 💎 표시**한다 (사용자 지시).
         🚫 그림(`fix_tab_exp/tab_item/all`)이 없으면 이 길로 오지 않는다."""
         _did, _paid, _notab = False, False, False
+        _reopen = 0            # 🔁 탭마다 창을 다시 열 수 있는 횟수를 센다
         try:
             slots = self.cfg.get("fix_slots") or []
             slot = slots[idx] if idx < len(slots) else {}
@@ -26008,13 +26025,48 @@ class App(tk.Tk):
                 click_log(f"fix #{si:02d} 🗂 ⚠ 그 좌표의 클라 창을 못 찾았다")
                 return
             L, T = rect[0], rect[1]
-            for _nm, _ko in (("tab_exp", "경험치 복구"), ("tab_item", "아이템 복구")):
+            # 📦 **장비(아이템)를 먼저** (2026-11-07) — 짧고 확실한 것부터.
+            #    🚨 경험치를 먼저 하면 거기서 30초 헛돌다 **창이 닫혀** 장비 탭을
+            #       못 찾고 끝났다 (실측 16:52 — 장비 복구 0회).
+            _tabs = (("tab_item", "아이템 복구"), ("tab_exp", "경험치 복구"))
+            if not FIX_ITEM_FIRST:
+                _tabs = tuple(reversed(_tabs))
+            for _nm, _ko in _tabs:
                 #   🔁 **보일 때까지 다시 본다** — 한 번만 보면 화면이 덜 그려진
                 #      순간에 그대로 건너뛴다 (장비 복구가 통째로 빠지던 원인).
                 big, tb = self._fix_tab_look(c1, _nm, _ko, si)
-                if big is None:
-                    click_log(f"fix #{si:02d} 🗂 ⚠ 창을 못 찍었다"); break
                 if not tb:
+                    # 🔁 **창이 닫혔으면 다시 열어서 한 번 더 찾는다** (2026-11-07).
+                    #    복구 창 흔적(탭·버튼)이 **하나도 없으면 닫힌 것**이다.
+                    #    이것이 '앞 탭이 뒤 탭을 망치는' 사슬을 끊어준다.
+                    #    🚫 흔적이 있으면 다시 열지 않는다 (창이 두 겹 쌓인다).
+                    try:
+                        _sign = False
+                        if big is not None:
+                            for _n4 in ("tab_exp", "tab_item", "free",
+                                        "cert", "all"):
+                                if fix_tab_find(big, _n4):
+                                    _sign = True
+                                    break
+                        if not _sign and _reopen < FIX_REOPEN:
+                            _reopen += 1
+                            click_log(f"fix #{si:02d} 🔁 [{_ko}] **복구 창이 "
+                                      f"닫혀 있다 — 칸1(십자가)을 다시 눌러 연다** "
+                                      f"({_reopen}/{FIX_REOPEN})")
+                            self._focus_client_at(c1)
+                            self._fix_nap(*FIX_FOCUS_WAIT)
+                            click_at(*c1)
+                            self._fix_nap(*FIX_TAB_GAP)
+                            self._fix_quit_clear(si, anc, "다시 연 뒤")
+                            big, tb = self._fix_tab_look(c1, _nm, _ko, si)
+                    except Exception:
+                        pass
+                if not tb:
+                    # 🚫 **break 가 아니라 continue** — 예전엔 창을 한 번 못 찍으면
+                    #    `break` 로 **장비를 아예 안 돌았다.**
+                    if big is None:
+                        click_log(f"fix #{si:02d} 🗂 ⚠ [{_ko}] 창을 못 찍었다 "
+                                  f"— 다음 탭으로 넘어간다")
                     _notab = True
                     continue
                 # ② **먼저 그 탭으로 바꾼다** — 그래야 숫자를 제대로 읽는다.
@@ -26057,6 +26109,14 @@ class App(tk.Tk):
                     # 🆓 **경험치는 [일일무료복구] 만 쓴다** — 🚫 다야는 절대 안 쓴다
                     #    (2026-11-06 사용자: *"일일무료복구만 쓰고 그 다음에
                     #     다야는 절대 사용하면 안 된다"*)
+                    # 🚫 **구호증서도 안 본다** (2026-11-07 사용자: *"다야 써야 하는
+                    #    복구는 그대로 냅두자 **내가 따로 복구를 할게**"*).
+                    #    🎯 남는 판정은 **[일일무료복구] 가 파랗게 켜져 있나** 하나다 —
+                    #       그 버튼에서는 **다야가 나갈 수 없다** (이름이 무료다).
+                    #    켜려면 `FIX_CERT_ON = True`.
+                    _names = (("free", "일일무료복구"),)
+                    if FIX_CERT_ON:
+                        _names = _names + (("cert", "구호증서복구"),)
                     _hit = 0
                     for _f in range(FIX_FREE_TRIES):
                         # ① 🖱 **EXP(줄)를 한 번만 누른다** (2026-11-07 사용자:
@@ -26070,8 +26130,7 @@ class App(tk.Tk):
                         #    🔁 이미 한 번이라도 복구했으면 **더 오래** 기다린다 —
                         #       복구 직후에는 목록이 다시 그려지는 중이다.
                         big, fb, _how = self._fix_btn_look(
-                            c1, (("free", "일일무료복구"), ("cert", "구호증서복구")),
-                            si, _ko, need_on=True,
+                            c1, _names, si, _ko, need_on=True,
                             more=(FIX_ON_MORE if _hit else 0))
                         if not fb:
                             # 🎨 **끝까지 꺼져 있었다** = 복구할 것이 없다 (💎 아님)
@@ -26086,9 +26145,9 @@ class App(tk.Tk):
                                           f"({_hit}번) — 버튼도 숫자도 사라졌다")
                             else:
                                 _paid = True
-                                click_log(f"fix #{si:02d} 🆓 [{_ko}] **[일일무료복구]도 "
-                                          f"[구호증서복구]도 없다** ({_hit}번 했다) → "
-                                          f"🚫 [복구](다야)는 쓰지 않는다 · 💎 다야!! 로 표시")
+                                click_log(f"fix #{si:02d} 🆓 [{_ko}] **[일일무료복구]가 "
+                                          f"없다** ({_hit}번 했다) → 🚫 다야·구호증서는 "
+                                          f"쓰지 않는다 · 💎 표시 (손으로 해주세요)")
                                 self._fix_tab_shot(si, big, "free_none")
                             break
                         # ③ ✅ 이제 **복구 버튼을 한 번** 누른다 (아래 click_at).
@@ -26284,8 +26343,9 @@ class App(tk.Tk):
                 _paid = False
             if _paid:
                 self._fix_paid_mark(int(si), True)
-                click_log(f"fix #{si:02d} 💎 **다야가 드는 탭이 있다** → 초록 "
-                          f"💎 다야!! 로 표시 (그 탭은 손으로 해주세요"
+                click_log(f"fix #{si:02d} 💎 **무료로 안 되는 탭이 있다** "
+                          f"(다야·구호증서) → 초록 💎 다야!! 로 표시 "
+                          f"(그 탭은 손으로 해주세요"
                           + (" · 다른 탭은 복구했습니다)" if _did else ")"))
         except Exception as e:
             click_log(f"fix #{si:02d} 🗂 오류 {e}")
@@ -26314,7 +26374,33 @@ class App(tk.Tk):
             if self._is_busy():                    # 아직 돌고 있으면 기다린다
                 self.after(500, lambda: self._fix_verify(si, tries, marked))
                 return
-            hit = self._check_hits()
+            # 🐢 **화면 긁기를 UI 스레드에서 하면 창이 멈춘다** (2026-11-07
+            #    사용자: *"전부 복구 버튼을 누르면 **메인런처가 계속 멈추는
+            #    현상**이 발견됨"*). 이 함수는 `after(1000)` 으로 **1초마다 60번**
+            #    불리는데 16클라 캡처가 **0.81초**라 **1초마다 0.8초씩 얼어붙었다.**
+            #    ① `only={si}` — 볼 것은 그 슬롯 하나뿐이다 (0.81초 → **0.05초**)
+            #    ② 그래도 **백그라운드 스레드**로 돌린다 → UI 정지 **0**
+            #    🚫 `self.after` 틱 안에서 `_check_hits` 를 다시 부르지 말 것.
+            def _vw(_si=int(si), _t=tries, _m=marked):
+                try:
+                    _h = self._check_hits(only={_si})
+                except Exception:
+                    _h = None
+                try:
+                    self.after(0, lambda: self._fix_verify_got(_si, _t, _m, _h))
+                except Exception:
+                    pass
+            threading.Thread(target=_vw, daemon=True).start()
+            return
+        except Exception as e:
+            self.status.set(f"🩹 복구 #{si:02d} 확인 실패: {e}")
+
+    def _fix_verify_got(self, si, tries, marked, hit):
+        """🩹 `_fix_verify` 가 **스레드에서 본 결과**로 판단한다 (2026-11-07).
+
+        🚫 여기서 화면을 다시 긁지 말 것 — 여기는 **UI 스레드**다.
+           다시 봐야 하면 `_fix_verify` 를 부른다 (그쪽이 스레드를 띄운다)."""
+        try:
             if hit is None:
                 self.status.set(f"🩹 복구 #{si:02d} 끝 — 십자가 기준 그림이 없어 "
                                 f"자동 확인은 못 합니다")
@@ -26823,12 +26909,43 @@ class App(tk.Tk):
                 self._check_watch_on = False
                 self.status.set("⚠ 확인 끝 — 남은 경고 없음")
                 return
+            # 🐢 **화면 긁기는 백그라운드 스레드** (2026-11-07) — 여기는
+            #    `self.after` 틱이라 UI 스레드다. 16클라 캡처가 **0.81초**인데
+            #    `WARN_TICK_MS`(5초)마다 돌아 **5초마다 0.8초씩 창이 멈췄다.**
+            #    🚫 되돌리지 말 것 (2026-09-16 과 같은 사고다).
+            if getattr(self, "_warn_tick_busy", False):
+                self.after(WARN_TICK_MS, self._check_watch_tick)
+                return
+            self._warn_tick_busy = True
+            _only = set(_left) if _idle else None
+
+            def _ww(_id=_idle, _lf=set(_left), _on=_only):
+                _h = None
+                try:
+                    _h = self._check_hits(only=_on)
+                except Exception:
+                    pass
+                try:
+                    self.after(0, lambda: self._check_watch_got(_id, _lf, _h))
+                except Exception:
+                    self._warn_tick_busy = False
+            threading.Thread(target=_ww, daemon=True).start()
+            return
+        except Exception:
+            self._warn_tick_busy = False
+        self.after(WARN_TICK_MS, self._check_watch_tick)
+
+    def _check_watch_got(self, _idle, _left, now_hit):
+        """⚠ `_check_watch_tick` 이 **스레드에서 본 결과**로 목록을 맞춘다.
+
+        🚫 여기서 화면을 다시 긁지 말 것 — 여기는 **UI 스레드**다."""
+        self._warn_tick_busy = False
+        try:
             if _idle:
                 # 🔁 5분이 지났지만 **목록이 남아 있다** — 그 슬롯만 계속 지켜본다.
                 #    사람이 손으로 복구하면 여기서 지워진다 (2026-10-23).
                 # ⚠ `_warn_load()` 와 `_check_hits()` 는 **둘 다 1부터**다
                 #   (`hit.append(i + 1)`). 여기서 +1 을 더하면 엉뚱한 슬롯을 본다.
-                now_hit = self._check_hits(only=set(_left))
                 if now_hit is not None:
                     _slept = getattr(self, "_last_sleep", set())
                     _keep = _left & _slept
@@ -26847,7 +26964,6 @@ class App(tk.Tk):
                                         f"{len(self._warn_load())}개")
                 self.after(WARN_IDLE_MS, self._check_watch_tick)
                 return
-            now_hit = self._check_hits()
             if now_hit is not None:
                 before = set(self._warn_load())
                 _slept = getattr(self, "_last_sleep", set())
