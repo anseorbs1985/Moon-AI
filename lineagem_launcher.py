@@ -4473,7 +4473,12 @@ FIX_TAB_MATCH = 0.70                 # 탭·[모두 복구] 그림 기준
 #      안 되고. 지금 속도의 **랜덤으로 20~50%** 까지는 여유 있을 것 같은데"*)
 #    🚫 값 하나로 고정하지 말 것 — 매번 다른 배수를 곱한다 (2026-09-07 상시 규칙).
 FIX_HUMAN_SLOW = (1.20, 1.50)        # 복구 흐름의 기다림에 곱하는 배수 (20~50% 여유)
-FIX_STRAY_P    = 0.30                # 이 확률로 **한 박자 더** 쉰다 (사람이 화면 보는 시간)
+FIX_STRAY_P    = 0.30                # 이 확률로 **한 박자 더 쉰다** (사람이 화면 보는 시간)
+#    ⚠ **이것은 쉬는 것이지 클릭이 아니다** — 2026-11-06 사용자가 요청한 여유다.
+#    🚫 2026-11-07 — 이 확률로 **같은 탭을 한 번 더 누르던 코드는 지웠다**
+#       (사용자: *"복구하는 거 복구만 하면 되지 왜 다른 버튼까지 클릭을 하냐고"*).
+#       복구는 사용자가 보고 있는 짧은 작업이라 군더더기 클릭이 바로 눈에 띈다.
+#       🚫 복구 흐름에 '사람처럼 보이려는 클릭'을 다시 넣지 말 것.
 FIX_STRAY_GAP  = (0.25, 0.70)
 #    ⚠ '다른 곳 클릭' 은 **같은 탭을 한 번 더 누르는 것**으로 한다 —
 #      빈 목록 줄을 누르면 **고른 줄(EXP)이 풀려** 버튼이 다시 회색이 된다.
@@ -4540,6 +4545,12 @@ FIX_ON_TRIES   = 6                   # 버튼이 켜질 때까지 다시 보는 
 #    🚫 `[복구](다야) 자리(창안 x < FIX_PAY_ZONE)` 로는 **절대 내려가지 않는다.**
 FIX_OK_OFFS    = ((-42, 0), (0, 0), (-78, 0))   # 546 창 기준 (좌측 → 등록자리 → 더 좌측)
 FIX_OK_GAP     = (0.30, 0.55)        # 자리를 옮겨 누르는 사이
+# 🚨 **한 번 누르고 화면이 바뀌면 거기서 끝낸다** (2026-11-07).
+#    3자리를 내리 누르다가 **첫 번에 창이 닫혀 나머지 2번이 게임 화면**에
+#    떨어졌다 (사용자: "왜 다른 버튼까지 클릭을 하냐고").
+#    📏 화면 차이 — 같은 화면 ~0.0 · 창이 닫히면 8 이상 (2026-11-04 실측과 같다).
+FIX_OK_DIFF    = 2.0                 # 평균 차이가 이보다 크면 **먹었다** → 그만 누른다
+FIX_OK_SEE     = (0.35, 0.55)        # 누른 뒤 화면을 다시 보기까지
 # 🚨🚨 **[복구] 는 다야다. 절대 누르지 않는다** (2026-11-06 사용자: *"저렇게 해서
 #    복구 버튼을 누르면 **다야를 쓰는 거야. 절대 그렇게 하면 안 돼**"*)
 #    그림으로만 찾아도 안 눌리지만(실측 [복구] 영역 최고 **0.444**, 기준 0.70),
@@ -25795,7 +25806,7 @@ class App(tk.Tk):
                  if big is not None else 1.0)
         except Exception:
             k = 1.0
-        _done = []
+        _done, _why = [], ""
         for _i, (_dx, _dy) in enumerate(FIX_OK_OFFS):
             x = int(c5[0] + _dx * k); y = int(c5[1] + _dy * k)
             # 🚫 창 밖 · [복구](다야) 자리로는 가지 않는다
@@ -25803,12 +25814,33 @@ class App(tk.Tk):
                 _ix = x - L
                 if _ix < FIX_PAY_ZONE * k or _ix > big.shape[1] - 4:
                     continue
+            # 🖼 누르기 **전** 화면 (바뀌었는지 보려고)
+            _b0 = None
+            try:
+                _b0 = grab_window(c5)
+            except Exception:
+                pass
             click_at(x, y)
             _done.append((x, y))
+            # 🚨 **화면이 바뀌었으면 거기서 끝** — 더 누르면 게임 화면에 떨어진다
+            self._fix_nap(*FIX_OK_SEE)
+            try:
+                import numpy as _np
+                _b1 = grab_window(c5)
+                if (_b0 is not None and _b1 is not None
+                        and _b0.shape == _b1.shape):
+                    _d = float(_np.abs(_b0.astype("int16")
+                                       - _b1.astype("int16")).mean())
+                    if _d >= FIX_OK_DIFF:
+                        _why = f" · 화면이 바뀌어(차이 {_d:.1f}) **그만 누름**"
+                        break
+                    _why = f" · 화면 그대로(차이 {_d:.1f})"
+            except Exception:
+                pass
             if _i < len(FIX_OK_OFFS) - 1:
                 self._fix_nap(*FIX_OK_GAP)
-        click_log(f"fix #{si:02d} 🗂 [{ko}] 확인을 **{len(_done)}자리**에서 "
-                  f"눌렀다 {_done} (좌측부터 · 정품인증 워터마크 대비)")
+        click_log(f"fix #{si:02d} 🗂 [{ko}] 확인 {len(_done)}번 "
+                  f"{_done}{_why}")
 
     def _fix_tabs_work(self, si, idx):
         """🗂 **탭 두 개를 돌며 [모두 복구]** — 복구의 새 흐름 (2026-11-06).
@@ -25952,12 +25984,11 @@ class App(tk.Tk):
                         click_at(fx, fy)
                         _did = True
                         _hit += 1
-                        # 🧍 가끔 **같은 탭을 한 번 더** 누른다 — 사람처럼 보이게.
-                        #    🚫 빈 목록 줄은 누르지 말 것 (고른 줄이 풀린다).
-                        if random.random() < FIX_STRAY_P and tb4:
-                            click_at(L + tb4[0] + tb4[2] // 2,
-                                     T + tb4[1] + tb4[3] // 2)
-                            self._fix_nap(0.2, 0.5)
+                        # 🚫 **'사람처럼' 같은 탭을 한 번 더 누르던 것은 지웠다**
+                        #    (2026-11-07 사용자: *"복구하는 거 복구만 하면 되지
+                        #     왜 다른 버튼까지 클릭을 하냐고"*).
+                        #    복구는 사용자가 보고 있는 짧은 작업이라 군더더기
+                        #    클릭이 바로 눈에 띈다. 🚫 다시 넣지 말 것.
                         click_log(f"fix #{si:02d} ✅ [{_ko}] 줄 "
                                   f"{_rp if _rp else '못 고름'} 눌러 고르고 "
                                   f"**[{_how}]** ({fb[4]:.2f}) → ({fx},{fy}) "
@@ -26056,6 +26087,21 @@ class App(tk.Tk):
             try:
                 big = grab_window(c1)
                 tb = fix_tab_find(big, "tab_item") if big is not None else None
+                # 🚪 **복구 창 흔적이 하나도 없으면 이미 닫힌 것** — ESC 를 누르면
+                #    그 키가 **게임으로 가서** "게임을 종료 하시겠습니까?" 가 뜬다
+                #    (2026-11-07 사용자: "왜 다른 버튼까지 클릭을 하냐고").
+                _gone = True
+                try:
+                    if big is not None:
+                        for _n3 in ("tab_exp", "tab_item", "free", "cert", "all"):
+                            if fix_tab_find(big, _n3):
+                                _gone = False; break
+                except Exception:
+                    _gone = False
+                if _gone:
+                    click_log(f"fix #{si:02d} 🚪 복구 창이 **이미 닫혀 있다** "
+                              f"— ESC 도 ✕ 도 누르지 않는다")
+                    tb, _notab = None, False
                 if not tb and _notab:
                     #   🚪 탭을 못 찾았으면 ✕ 자리도 모른다 → **ESC 로 닫는다.**
                     #      안 닫으면 복구 창이 열린 채 남아 다음 복구가 통째로 막힌다.
