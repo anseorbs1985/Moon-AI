@@ -2359,6 +2359,16 @@ WARN_HIGH   = 0.56      # 🚨 **기준 상한** (2026-11-07: 0.72 → 0.56).
 #    겨루기만 두면 **16개 전부 십자가일 때** 바닥도 높아져 하나도 못 잡는다.
 #    실측 잡음 천장은 546 창에서 0.56 이라 0.72 는 넉넉히 위다.
 #    🚫 이 값을 0.6 아래로 내리지 말 것 — 그러면 겨루기가 무력해진다.
+# 🟢 **십자가는 초록으로 찾는다** (2026-11-07 — 인식률 문제의 근본 해결).
+#    흑백(matchTemplate)은 색을 버려서 진짜 0.56~0.64 와 잡음 0.54 가 겹쳤다.
+#    실측 — 기준 그림 초록 **85개** vs 16클라 경고영역 초록 **0개**.
+#    🚫 이 판정을 없애지 말 것. 흑백 비교도 그대로 남겨 둘 중 하나면 ok.
+WARN_GREEN_ON    = True
+WARN_G_MIN       = 40    # G - max(R,B) 가 이보다 커야 초록
+WARN_G_V         = 130   # 그리고 G 가 이보다 밝아야 한다
+WARN_GREEN_PIX   = 12    # 초록 픽셀이 이보다 적으면 없다 (기준 그림은 85개)
+WARN_GREEN_MATCH = 0.45  # 초록 **가면끼리** 모양 맞추기 기준
+#    ⚠ 개수와 모양을 **둘 다** 넘어야 인정한다 — 아무 초록은 모양이 안 맞는다.
 WARN_MARGIN = 60        # 경고영역 주변 이만큼 더 넓게 훑는다 (전 20)
 WARN_TICK_MS = 5000     # F11 뒤 지켜보는 간격(ms) — 전 15초
 # 🔆 **F11 뒤 첫 스캔까지(ms)** — 2026-11-06 사용자 신고:
@@ -4498,6 +4508,11 @@ FIX_EXP_ON     = True                # 경험치 탭 복구 (문제 생기면 Fa
 #                                     **[구호증서복구]** 를 누른다
 #    🚫 **[복구] 를 누르는 코드를 절대 만들지 말 것.**
 FIX_FREE_TRIES = 5                   # 경험치 탭에서 [일일무료복구] 를 누를 최대 횟수
+# 🔁 **아이템 탭도 숫자가 남으면 한 번 더** (2026-11-07 사용자:
+#    *"하나 하고 또하고 이런 식으로 해달라니까 하나만 하고 꺼버린다"*)
+#    🚫 멈추는 조건은 **버튼이 사라졌을 때**다 — 탭 숫자로 멈추면
+#       화면이 덜 그려진 한 순간에 통째로 끝난다 (2026-11-06 교훈).
+FIX_ALL_TRIES  = 3                   # 아이템 탭에서 [모두 복구] 를 누를 최대 횟수
 # 🚨🚨 **[복구] 는 다야다. 절대 누르지 않는다** (2026-11-06 사용자: *"저렇게 해서
 #    복구 버튼을 누르면 **다야를 쓰는 거야. 절대 그렇게 하면 안 돼**"*)
 #    그림으로만 찾아도 안 눌리지만(실측 [복구] 영역 최고 **0.444**, 기준 0.70),
@@ -4781,6 +4796,22 @@ def nap_clear():
         _STOP_EVT.clear()
     except Exception:
         pass
+
+
+def warn_green_mask(rgb):
+    """🟢 십자가의 **초록만** 남긴 가면 (RGB -> 0/255). 2026-11-07.
+
+    rgb 는 PIL 이미지든 numpy 배열이든 된다 (RGB 순서).
+    초록 판정은 **밝기가 아니라 색**이다 — 밝기로는 흰 글자와 겹친다
+    (실측: 초록 121~272 · 흰 글자 151~674 로 **겹친다**,
+     색으로는 G-R 이 +11 vs +132~197 로 **깨끗이 갈린다**)."""
+    import numpy as np
+    a = np.asarray(rgb, dtype="int16")
+    if a.ndim != 3 or a.shape[2] < 3:
+        return None
+    r, g, b = a[:, :, 0], a[:, :, 1], a[:, :, 2]
+    m = (g - np.maximum(r, b) >= WARN_G_MIN) & (g >= WARN_G_V)
+    return (m.astype("uint8") * 255)
 
 
 IMG_BASE_W = 491          # 그림·영역을 만든 기준 창 가로
@@ -25555,6 +25586,64 @@ class App(tk.Tk):
         self._fix_tab_shot(si, big, nm + "_notab")
         return big, None
 
+    def _fix_btn_look(self, c1, names, si, ko):
+        """🔁 그 **버튼**을 보일 때까지 다시 본다 -> (big, box, 이름).
+
+        `names` 는 ((그림이름, 보여줄이름), ...) 순서 — **앞에 있는 것이 먼저**다
+        (일일무료복구 -> 구호증서복구).
+
+        🚨 **한 번만 보고 포기하면 안 된다** (2026-11-07 사용자 신고:
+           *"하나만 하고 꺼버린다"*). 복구를 한 직후에는 목록이 **다시
+           그려지는 중**이라 그 순간 찍으면 버튼 글자가 안 나온다.
+           `[모두 복구]` 에만 있던 재시도를 **여기에도** 넣은 것이다.
+        🗒 못 찾으면 최고 점수를 남긴다 — 기준이 모자란 것인지,
+           정말 없는 것인지 가릴 수 있는 유일한 통로다."""
+        big, best, bko = None, 0.0, ""
+        for _t in range(FIX_TAB_TRIES):
+            big = grab_window(c1)
+            if big is not None:
+                for _nm2, _ko2 in names:
+                    bx = fix_tab_find(big, _nm2)
+                    if bx:
+                        return big, bx, _ko2
+                    try:
+                        _b = fix_tab_find(big, _nm2, lo=True)
+                        if _b and float(_b[4]) > best:
+                            best, bko = float(_b[4]), _ko2
+                    except Exception:
+                        pass
+            if _t < FIX_TAB_TRIES - 1:
+                self._fix_nap(*FIX_TAB_RETRY)
+        click_log(f"fix #{si:02d} 🔁 [{ko}] 버튼을 못 찾았다 "
+                  f"({FIX_TAB_TRIES}번 봤다 · 가장 닮은 것 {bko or chr(45)} "
+                  f"{best:.2f} · 기준 {FIX_TAB_MATCH})")
+        return big, None, ""
+
+    def _fix_row_pick(self, big, L, T, c2, si, ko):
+        """🖱 목록 **첫 줄을 고른다** -> 고른 자리 (못 고르면 None).
+
+        🚨 **줄을 고르지 않으면 버튼이 회색이라 눌러도 안 먹는다**
+           (2026-11-06 실측 — 1.00 으로 3번 눌렀는데 건수가 그대로였다).
+           경험치만 이걸 하고 **아이템은 안 해서 "그냥 안 됨"** 이었다.
+        🧭 자리는 **fix_tab_exp 그림 기준** `FIX_EXP_ROW` — 검증된 한 벌로
+           두 탭 모두 같은 자리가 나온다 (탭은 둘 다 늘 보인다).
+           못 찾으면 사용자가 등록한 **칸2**로 떨어진다."""
+        try:
+            _te = fix_tab_find(big, "tab_exp") if big is not None else None
+            if _te:
+                _kx = big.shape[1] / float(fix_tab_base() or IMG_BASE_W)
+                _p = (L + _te[0] + int(round(FIX_EXP_ROW[0] * _kx)),
+                      T + _te[1] + int(round(FIX_EXP_ROW[1] * _kx)))
+            elif c2:
+                _p = (int(c2[0]), int(c2[1]))
+            else:
+                return None
+            click_at(*_p)
+            self._fix_nap(0.25, 0.45)
+            return _p
+        except Exception:
+            return None
+
     def _fix_tabs_work(self, si, idx):
         """🗂 **탭 두 개를 돌며 [모두 복구]** — 복구의 새 흐름 (2026-11-06).
 
@@ -25638,36 +25727,36 @@ class App(tk.Tk):
                     # 🆓 **경험치는 [일일무료복구] 만 쓴다** — 🚫 다야는 절대 안 쓴다
                     #    (2026-11-06 사용자: *"일일무료복구만 쓰고 그 다음에
                     #     다야는 절대 사용하면 안 된다"*)
+                    _hit = 0
                     for _f in range(FIX_FREE_TRIES):
-                        big = grab_window(c1)
-                        fb = fix_tab_find(big, "free") if big is not None else None
-                        _how = "일일무료복구"
+                        # 🔁 **보일 때까지 다시 본다** (2026-11-07) — 복구 직후에는
+                        #    목록이 다시 그려지는 중이라 한 번 찍어서는 안 보인다.
+                        #    예전엔 한 번 보고 못 찾으면 💎 + 끝 = "하나만 하고 꺼버린다".
+                        big, fb, _how = self._fix_btn_look(
+                            c1, (("free", "일일무료복구"), ("cert", "구호증서복구")),
+                            si, _ko)
                         if not fb:
-                            # 🎫 무료를 다 썼으면 **[구호증서복구]** 가 있다
-                            fb = fix_tab_find(big, "cert") if big is not None else None
-                            _how = "구호증서복구"
-                        if not fb:
-                            _paid = True
-                            click_log(f"fix #{si:02d} 🆓 [{_ko}] **[일일무료복구]도 "
-                                      f"[구호증서복구]도 없다** ({_f}번 했다) → "
-                                      f"🚫 [복구](다야)는 쓰지 않는다 · 💎 다야!! 로 표시")
-                            self._fix_tab_shot(si, big, "free_none")
+                            # 🔢 **다 한 것**과 **다야뿐인 것**을 가린다 —
+                            #    한 번이라도 했고 숫자가 사라졌으면 '다 했다'.
+                            tbz = fix_tab_find(big, _nm) if big is not None else None
+                            _left = fix_tab_has_num(big, tbz)[0] if tbz else True
+                            if _hit and not _left:
+                                click_log(f"fix #{si:02d} 🆓 [{_ko}] **다 했다** "
+                                          f"({_hit}번) — 버튼도 숫자도 사라졌다")
+                            else:
+                                _paid = True
+                                click_log(f"fix #{si:02d} 🆓 [{_ko}] **[일일무료복구]도 "
+                                          f"[구호증서복구]도 없다** ({_hit}번 했다) → "
+                                          f"🚫 [복구](다야)는 쓰지 않는다 · 💎 다야!! 로 표시")
+                                self._fix_tab_shot(si, big, "free_none")
                             break
                         # 🚨 **줄을 먼저 골라야 버튼이 켜진다** (2026-11-06 실측).
                         #    안 고르면 [일일무료복구] 가 **회색(비활성)** 이라
                         #    1.00 으로 정확히 눌러도 **아무 일도 안 난다**
                         #    (3번 눌렀는데 '2건 남음' 그대로였다).
                         #    🚫 이 '줄 고르기' 를 빼지 말 것.
-                        tb4 = fix_tab_find(big, _nm)
-                        if tb4:
-                            _kx = big.shape[1] / float(fix_tab_base() or IMG_BASE_W)
-                            _ex = L + tb4[0] + int(round(FIX_EXP_ROW[0] * _kx))
-                            _ey = T + tb4[1] + int(round(FIX_EXP_ROW[1] * _kx))
-                            click_at(_ex, _ey)
-                            self._fix_nap(0.25, 0.45)
-                        elif c2:
-                            click_at(*c2)
-                            self._fix_nap(0.25, 0.45)
+                        _rp = self._fix_row_pick(big, L, T, c2, si, _ko)
+                        tb4 = fix_tab_find(big, _nm) if big is not None else None
                         fx, fy = L + fb[0] + fb[2] // 2, T + fb[1] + fb[3] // 2
                         # 🚨 **[복구](다야) 자리면 절대 누르지 않는다** — 자리로 한 겹 더.
                         _kz = big.shape[1] / float(fix_tab_base() or IMG_BASE_W)
@@ -25682,70 +25771,104 @@ class App(tk.Tk):
                             break
                         click_at(fx, fy)
                         _did = True
+                        _hit += 1
                         # 🧍 가끔 **같은 탭을 한 번 더** 누른다 — 사람처럼 보이게.
                         #    🚫 빈 목록 줄은 누르지 말 것 (고른 줄이 풀린다).
                         if random.random() < FIX_STRAY_P and tb4:
                             click_at(L + tb4[0] + tb4[2] // 2,
                                      T + tb4[1] + tb4[3] // 2)
                             self._fix_nap(0.2, 0.5)
-                        click_log(f"fix #{si:02d} ✅ [{_ko}] **EXP 아이콘** "
-                                  f"({_ex},{_ey}) 눌러 고르고 **[{_how}]** "
-                                  f"({fb[4]:.2f}) → ({fx},{fy}) 눌렀다 ({_f+1}번째)")
-                        self.status.set(f"🆓 복구 #{si:02d} — 경험치 일일무료복구")
+                        click_log(f"fix #{si:02d} ✅ [{_ko}] 줄 "
+                                  f"{_rp if _rp else '못 고름'} 눌러 고르고 "
+                                  f"**[{_how}]** ({fb[4]:.2f}) → ({fx},{fy}) "
+                                  f"눌렀다 ({_hit}번째)")
+                        self.status.set(f"🆓 복구 #{si:02d} — 경험치 {_how} {_hit}번째")
                         self._fix_nap(*FIX_ALL_WAIT)
                         if c5:
                             click_at(*c5)
                             self._fix_nap(*FIX_ALL_WAIT)
-                        self._fix_quit_clear(si, anc, f"{_ko} {_f+1}번째 뒤")
-                        # 아직 남았나 — 탭 숫자로 본다
-                        big = grab_window(c1)
-                        tb3 = fix_tab_find(big, _nm) if big is not None else None
-                        if not tb3 or not fix_tab_has_num(big, tb3)[0]:
-                            click_log(f"fix #{si:02d} 🆓 [{_ko}] 다 했다 "
-                                      f"({_f+1}번) — 숫자가 사라졌다")
-                            break
+                        self._fix_quit_clear(si, anc, f"{_ko} {_hit}번째 뒤")
+                        # 🔢 남은 건수는 **기록만** 한다 — 🚫 숫자로 멈추지 않는다.
+                        #    (2026-11-06 규칙: 어두운 탭은 숫자가 있어도 잉크 2밖에
+                        #     안 잡힌다. 멈추는 것은 **버튼이 사라졌을 때**다 —
+                        #     다음 바퀴가 버튼을 못 찾으면 그때 끝난다.)
+                        try:
+                            big = grab_window(c1)
+                            tb3 = fix_tab_find(big, _nm) if big is not None else None
+                            if tb3:
+                                _h2, _i2 = fix_tab_has_num(big, tb3)
+                                click_log(f"fix #{si:02d} 🔢 [{_ko}] 남은 건수 "
+                                          f"{'있다' if _h2 else '안 보인다'} "
+                                          f"(잉크 {_i2}) → **버튼으로 판단한다**")
+                        except Exception:
+                            pass
                     continue
 
-                # 📦 아이템 — 💰 동전을 먼저 보고 [모두 복구]
-                big = grab_window(c1)
-                tb2 = fix_tab_find(big, _nm) if big is not None else None
-                _blue = -1
-                if tb2:
-                    _daya, _blue = fix_coin_is_daya(big, tb2, FIX_COIN_FROM.get(_nm))
-                    if _daya:
-                        _paid = True
-                        click_log(f"fix #{si:02d} 💎 [{_ko}] **다야**가 든다 "
-                                  f"(파란 픽셀 {_blue} ≥ {FIX_COIN_BLUE}) → 누르지 않는다")
-                        self._fix_tab_shot(si, big, _nm + "_daya")
-                        self.status.set(f"💎 복구 #{si:02d} [{_ko}] — 다야가 들어 "
-                                        f"누르지 않았습니다")
-                        continue
-                ab, _sc = None, 0.0
-                for _t in range(FIX_TAB_TRIES):
-                    if big is not None:
-                        ab = fix_tab_find(big, "all")
-                        if ab:
+                # 📦 아이템 — 💰 동전을 먼저 보고 **줄을 고른 뒤** [모두 복구]
+                #    🔁 숫자가 남으면 **한 번 더** (2026-11-07 사용자 지시).
+                _ihit = 0
+                for _a in range(FIX_ALL_TRIES):
+                    big = grab_window(c1)
+                    tb2 = fix_tab_find(big, _nm) if big is not None else None
+                    _blue = -1
+                    if tb2:
+                        _daya, _blue = fix_coin_is_daya(big, tb2,
+                                                        FIX_COIN_FROM.get(_nm))
+                        if _daya:
+                            _paid = True
+                            click_log(f"fix #{si:02d} 💎 [{_ko}] **다야**가 든다 "
+                                      f"(파란 픽셀 {_blue} ≥ {FIX_COIN_BLUE}) → "
+                                      f"누르지 않는다")
+                            self._fix_tab_shot(si, big, _nm + "_daya")
+                            self.status.set(f"💎 복구 #{si:02d} [{_ko}] — 다야가 "
+                                            f"들어 누르지 않았습니다")
                             break
-                    if _t < FIX_TAB_TRIES - 1:
-                        self._fix_nap(*FIX_TAB_RETRY)
-                        big = grab_window(c1)
-                if not ab:
-                    click_log(f"fix #{si:02d} 🚫 [{_ko}] **[모두 복구] 를 못 찾았다** "
-                              f"({FIX_TAB_TRIES}번 봤다) — 아무것도 누르지 않는다")
-                    self._fix_tab_shot(si, big, _nm)
-                    continue
-                mx, my = L + ab[0] + ab[2] // 2, T + ab[1] + ab[3] // 2
-                click_at(mx, my)
-                _did = True
-                click_log(f"fix #{si:02d} ✅ [{_ko}] **[모두 복구]** ({ab[4]:.2f}) → "
-                          f"({mx},{my}) 눌렀다 · 동전 파란픽셀 {_blue}(아데나)")
-                self.status.set(f"🩹 복구 #{si:02d} — [{_ko}] 모두 복구")
-                self._fix_nap(*FIX_ALL_WAIT)
-                if c5:
-                    click_at(*c5)
-                    click_log(f"fix #{si:02d} 🗂 확인 {tuple(c5)} 눌렀다")
+                    # 🚨 **줄을 먼저 고른다** — 이것이 '아이템 복구가 그냥 안 됨' 의
+                    #    원인이었다 (2026-11-07). 안 고르면 [모두 복구] 가 회색이라
+                    #    1.00 으로 정확히 눌러도 **아무 일도 안 난다.**
+                    #    🚫 이 줄 고르기를 빼지 말 것.
+                    _rp = self._fix_row_pick(big, L, T, c2, si, _ko)
+                    big, ab, _ = self._fix_btn_look(
+                        c1, (("all", "모두 복구"),), si, _ko)
+                    if not ab:
+                        if _ihit:
+                            click_log(f"fix #{si:02d} 📦 [{_ko}] **다 했다** "
+                                      f"({_ihit}번) — [모두 복구] 가 사라졌다")
+                        else:
+                            click_log(f"fix #{si:02d} 🚫 [{_ko}] **[모두 복구] 를 "
+                                      f"못 찾았다** — 아무것도 누르지 않는다")
+                            self._fix_tab_shot(si, big, _nm)
+                        break
+                    mx, my = L + ab[0] + ab[2] // 2, T + ab[1] + ab[3] // 2
+                    click_at(mx, my)
+                    _did = True
+                    _ihit += 1
+                    click_log(f"fix #{si:02d} ✅ [{_ko}] 줄 "
+                              f"{_rp if _rp else '못 고름'} 눌러 고르고 "
+                              f"**[모두 복구]** ({ab[4]:.2f}) → ({mx},{my}) "
+                              f"눌렀다 ({_ihit}번째) · 동전 파란픽셀 {_blue}(아데나)")
+                    self.status.set(f"🩹 복구 #{si:02d} — [{_ko}] 모두 복구 "
+                                    f"{_ihit}번째")
                     self._fix_nap(*FIX_ALL_WAIT)
-                self._fix_quit_clear(si, anc, f"{_ko} 뒤")
+                    if c5:
+                        click_at(*c5)
+                        click_log(f"fix #{si:02d} 🗂 확인 {tuple(c5)} 눌렀다")
+                        self._fix_nap(*FIX_ALL_WAIT)
+                    self._fix_quit_clear(si, anc, f"{_ko} {_ihit}번째 뒤")
+                    # 🔢 남은 건수가 **안 보이면** 다 한 것 — 그때만 멈춘다.
+                    #    (보이면 다음 바퀴가 버튼을 다시 찾아 한 번 더 한다)
+                    try:
+                        big = grab_window(c1)
+                        tb5 = fix_tab_find(big, _nm) if big is not None else None
+                        if tb5:
+                            _h3, _i3 = fix_tab_has_num(big, tb5)
+                            click_log(f"fix #{si:02d} 🔢 [{_ko}] 남은 건수 "
+                                      f"{'있다' if _h3 else '안 보인다'} "
+                                      f"(잉크 {_i3})")
+                            if not _h3:
+                                break
+                    except Exception:
+                        pass
             # ④ ✕ 로 닫는다 — '아이템 복구' 그림에서 오른쪽으로 떨어진 자리
             try:
                 big = grab_window(c1)
@@ -25973,7 +26096,8 @@ class App(tk.Tk):
             return None
         try:
             from PIL import Image
-            ref = Image.open(ref_p).convert("L")
+            _refim = Image.open(ref_p).convert("RGB")
+            ref = _refim.convert("L")
         except Exception:
             return None
         dx, dy, w, h = rel
@@ -26007,11 +26131,27 @@ class App(tk.Tk):
             pass
         if abs(_kr - 1.0) > 0.02:
             try:
-                ref = ref.resize((max(3, int(round(ref.width * _kr))),
-                                  max(3, int(round(ref.height * _kr)))))
+                _rz = (max(3, int(round(ref.width * _kr))),
+                       max(3, int(round(ref.height * _kr))))
+                ref = ref.resize(_rz)
+                # 🟢 초록 가면은 **늘린 뒤**에 만든다 — 먼저 만들어 늘리면
+                #    보간이 0/255 사이 값을 만들어 가면이 뭉개진다.
+                _refim = _refim.resize(_rz, Image.NEAREST)
             except Exception:
                 pass
+        # 🟢 **기준 그림의 초록 가면** — 한 번만 만들어 16슬롯이 돌려 쓴다.
+        #    초록이 거의 없으면(다르게 자른 기준 그림) 초록 판정을 **끈다**.
+        _refg, _refgn = None, 0
+        if WARN_GREEN_ON:
+            try:
+                _refg = warn_green_mask(_refim)
+                _refgn = int((_refg > 0).sum()) if _refg is not None else 0
+                if _refgn < WARN_GREEN_PIX:
+                    _refg = None
+            except Exception:
+                _refg, _refgn = None, 0
         hit, slept, _scores, _raw = [], [], [], []
+        _ghit, _grn = [], {}      # 🟢 초록으로 찾은 슬롯 · 슬롯별 (모양, 개수)
         _sleep_t = None
         try:
             if has_sleep_img("fix"):
@@ -26030,10 +26170,25 @@ class App(tk.Tk):
                 x0, y0 = max(0, dx - M), max(0, dy - M)
                 x1, y1 = min(W, dx + w + M), min(H, dy + h + M)
                 _full = self._grab_client(hwnd, W, H)
-                im = _full.crop((x0, y0, x1, y1)).convert("L")
+                _box = _full.crop((x0, y0, x1, y1))
+                im = _box.convert("L")
                 _sc = self._img_match(im, ref)
                 _scores.append((i + 1, round(_sc, 2)))
                 _raw.append((i + 1, float(_sc)))   # 겨루기는 루프가 끝난 뒤
+                # 🟢 **초록 가면으로도 본다** (2026-11-07 — 이쪽이 주력이다).
+                #    개수(기준 그림 85개 vs 잡음 0개)와 **모양**을 둘 다 본다.
+                if _refg is not None:
+                    try:
+                        _ag = warn_green_mask(_box.convert("RGB"))
+                        _gn = int((_ag > 0).sum()) if _ag is not None else 0
+                        _gm = 0.0
+                        if _gn >= WARN_GREEN_PIX:
+                            _gm = float(self._img_match(_ag, _refg))
+                        _grn[i + 1] = (round(_gm, 2), _gn)
+                        if _gm >= WARN_GREEN_MATCH and _gn >= WARN_GREEN_PIX:
+                            _ghit.append(i + 1)
+                    except Exception:
+                        pass
                 # 같은 캡처로 '지금 자고 있나'도 본다 — 자는 동안은 십자가가 가려서
                 # 안 보이므로, 그걸 '복구됨'으로 오해해 지우면 안 된다 (2026-08-29)
                 try:
@@ -26066,6 +26221,17 @@ class App(tk.Tk):
             _need = max(WARN_MATCH, min(WARN_HIGH, _base * WARN_RATIO))
         self._warn_need = _need
         hit = [sn for sn, v in _raw if v >= _need]
+        # 🟢 **초록으로 찾은 것을 더한다** (2026-11-07).
+        #    흑백은 색을 버려 진짜(0.56~0.64)와 잡음(0.54)이 겹치므로,
+        #    초록이 사실상 주력이다. 둘 중 하나라도 맞으면 떠 있는 것이다.
+        if _ghit:
+            hit = sorted(set(hit) | set(_ghit))
+        if _only is None:
+            self._last_green = _grn
+        else:
+            _kg = dict(getattr(self, "_last_green", None) or {})
+            _kg.update(_grn)
+            self._last_green = _kg
         # 🩹 **한 슬롯만 본 결과로 전체 기록을 지우지 않습니다** (2026-10-03).
         #    `only` 를 주면 그 슬롯만 훑는데, 예전엔 `slept` 를 통째로 덮어써서
         #    **나머지 15개의 '자고 있음' 표시가 사라졌다.** 그러면 바로 뒤에
@@ -26184,6 +26350,17 @@ class App(tk.Tk):
         self._fix_bulk_ready = True      # 다음 한 번은 '단체 복구'
         try:      # 슬롯별 점수를 남긴다 — 왜 몇 개를 못 잡는지 원격에서 보려고
             _ss = getattr(self, "_last_scores", []) or []
+            # 🟢 초록 가면 결과도 함께 남긴다 — 어느 쪽이 잡았는지 보인다
+            try:
+                _gg = getattr(self, "_last_green", None) or {}
+                if _gg:
+                    click_log("[경고확인] 🟢 초록 "
+                              + " ".join("%02d:%.2f/%d" % (k, v[0], v[1])
+                                         for k, v in sorted(_gg.items()))
+                              + " (모양 %.2f · 개수 %d 둘 다 넘어야 인정)"
+                              % (WARN_GREEN_MATCH, WARN_GREEN_PIX))
+            except Exception:
+                pass
             click_log("[경고확인] 십자가 점수 " +
                       " ".join(f"{a:02d}:{b:.2f}" for a, b in _ss) +
                       f"  (기준 {getattr(self, '_warn_need', WARN_MATCH):.2f}"
