@@ -21511,11 +21511,27 @@ class App(tk.Tk):
     # (사용자가 제일 중요하게 보는 것 — 겹치면 팅긴다)
     CLICK_GUARD = ("dragon", "knight", "sched")
 
+    def _slot_label(self, fkey, slot):
+        """🔢 **#02 이름** 처럼 슬롯 번호를 붙인 이름 (2026-11-07).
+
+        🚨 16슬롯 이름이 전부 `미등록` 이면 로그로 **어느 슬롯인지 알 수 없다.**
+           `_run_note` 는 이름으로 묶으므로 **11개 문제가 "1개" 로 뭉쳤다.**
+        🚫 이 번호를 빼지 말 것 — 없으면 "왜 안 됐나" 를 영영 못 짚는다."""
+        nm = ((slot or {}).get("name") or "미등록")
+        try:
+            key = (self._dgn2_info(fkey) or (None,))[0]
+            for i, sx in enumerate(self.cfg.get(key) or []):
+                if sx is slot:
+                    return f"#{i+1:02d} {nm}"
+        except Exception:
+            pass
+        return nm
+
     def _click_log(self, fkey, j, coord, slot, act):
         """이 클릭이 '리니지M 창'에 제대로 갔는지 기록한다 (씹힘 찾기용)."""
         if fkey not in self.LOG_FKEYS:
             return
-        nm = (slot or {}).get("name", "?")
+        nm = self._slot_label(fkey, slot)
         tt, ok = click_target(coord[0], coord[1])
         if ok:
             click_log(f"{fkey} [{nm}] 좌표{j+1} ({coord[0]},{coord[1]}) {act} → {tt}")
@@ -22047,7 +22063,7 @@ class App(tk.Tk):
                                     f"누르지 않았습니다 (🏢 에서 층을 정해주세요)")
                     return False
                 return True                       # 이 슬롯은 층 확인을 안 쓴다
-            nm = (slot or {}).get("name", f"#{si+1}")
+            nm = self._slot_label(fkey, slot)
             # 🚫 오토 금지 층 — 층이 맞든 아니든 **여기서 무조건 끝낸다.**
             #    (2026-09-16 사용자 지시: 용의계곡 7층은 절대 오토를 누르면 안 된다)
             if fl in FLOOR_NO_AUTO.get(fkey, ()):
@@ -22403,7 +22419,7 @@ class App(tk.Tk):
                 click_at(*coord)
             return "클릭"
         if has_img(fkey, j):
-            nm = (slot or {}).get("name", "?")
+            nm = self._slot_label(fkey, slot)
             try:      # 이 자리에 등록된 좌표가 따로 있나 (없으면 그림을 직접 누른다)
                 _cl = (slot or {}).get("coords") or []
                 _own_coord = bool(j < len(_cl) and _cl[j])
@@ -22976,6 +22992,9 @@ class App(tk.Tk):
             else:
                 _act = self._do_click_or_wheel(fkey, j, _cd, st["slot"])
             if _act == "이미지없음":
+                # ⛔ **중단 이유를 남긴다** (2026-11-07) — `j = nclk` 로 끝내면
+                #    "덜 돈 슬롯" 에 안 나와 **'끝까지 완료' 로 보였다.**
+                st["cut"] = st.get("cut") or f"좌표{j+1}"
                 st["j"] = nclk          # 이 슬롯만 끝 — 다른 슬롯은 그대로 계속
                 continue
             _sa = stop_at(fkey)
@@ -23049,12 +23068,22 @@ class App(tk.Tk):
             try:      # 슬롯별로 끝까지 갔는지 남긴다 (누락 확인용)
                 short = [f"#{si+1:02d} {state[si]['j']}/{nclk}"
                          for si, _s in targets if state[si]["j"] < nclk]
+                # ⛔ **중단된 슬롯** — `j = nclk` 라 위 목록에는 안 나온다 (2026-11-07)
+                cuts = [f"#{si+1:02d} {state[si]['cut']}"
+                        for si, _s in targets if state[si].get("cut")]
+                # 🔎 **웨이브가 왜 끝났나** — 일찍 끝나면 그 사실이 보여야 한다
+                _why = ("■ 멈춤" if getattr(self, stop, False)
+                        else ("전부 끝남" if not active and not waiting
+                              else f"🚨 **일찍 끝남** — 도는 중 {len(active)} · "
+                                   f"대기 {len(waiting)}"))
                 click_log(f"[웨이브끝] {fkey} {len(targets)}슬롯 · 클릭 {done}회 · "
                           + (f"⚠ 덜 돈 슬롯: {', '.join(short)}" if short
-                             else "전 슬롯 끝까지 완료"))
-                if short:
-                    self.status.set(f"{icon} 완료 — ⚠ 덜 돈 슬롯 {len(short)}개 "
-                                    f"(클릭기록 확인)")
+                             else "전 슬롯 끝까지 완료")
+                          + (f" · ⛔ 중단된 슬롯: {', '.join(cuts)}" if cuts else "")
+                          + f" (끝난 이유: {_why})")
+                if short or cuts:
+                    self.status.set(f"{icon} 완료 — ⚠ 덜 돈 {len(short)}개 · "
+                                    f"⛔ 중단 {len(cuts)}개 (클릭기록 확인)")
             except Exception:
                 pass
 
