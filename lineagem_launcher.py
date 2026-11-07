@@ -11109,11 +11109,13 @@ class App(tk.Tk):
 
     def _build_rec_win(self, slots):
         import tkinter.filedialog as fd
-        win = getattr(self, "_rec_win", None)
+        # ⚠ 메서드 `_rec_win`(🎹 녹화하기 창) 과 **이름이 겹치면 안 된다** —
+        #    `self._rec_win = win` 이 그 메서드를 덮어 버튼이 죽는다 (2026-11-07).
+        win = getattr(self, "_recdist_win", None)
         if win and win.winfo_exists():
             try: win.destroy()
             except Exception: pass
-        win = tk.Toplevel(self); self._rec_win = win
+        win = tk.Toplevel(self); self._recdist_win = win
         win.title("🎬 녹화 배포 — 16클라 똑같이")
         win.geometry("760x620"); win.attributes("-topmost", True)
         if not hasattr(self, "_section_attrs"):
@@ -31470,13 +31472,14 @@ class App(tk.Tk):
             base = int(self._doll_pw["src"].get()) - 1
         except Exception:
             base = 0
-        self._doll_pick = {"jx": jx, "base": base}
+        # ⚠ 메서드 `_doll_pick(active)` 과 **이름이 겹치면 안 된다** (2026-11-07)
+        self._doll_pickpos = {"jx": jx, "base": base}
         self.status.set(f"📍 클릭 {jx+1} 번을 바꿀 위치를 3초 후 화면에서 클릭하세요")
         self.after(1500, lambda: CoordOverlay(self, mode="dollpreset"))
 
     def on_dollpreset_coord(self, x, y):
-        pm = getattr(self, "_doll_pick", None) or {}
-        self._doll_pick = None
+        pm = getattr(self, "_doll_pickpos", None) or {}
+        self._doll_pickpos = None
         jx, base = pm.get("jx", 0), pm.get("base", 0)
         rects = self._client_rects_by_slot()
         hit = None
@@ -37527,7 +37530,7 @@ class App(tk.Tk):
         try:
             import datetime, cv2, numpy as np
             from PIL import ImageGrab
-            d = os.path.join(TPL_DIR, "_login")
+            d = os.path.join(IMG_DIR_MINE, "_login")
             os.makedirs(d, exist_ok=True)
             sc = np.array(ImageGrab.grab().convert("RGB"))[:, :, ::-1].copy()
             # 훑은 범위를 노란 상자로 그린다
@@ -41403,7 +41406,7 @@ class CoordOverlay(tk.Toplevel):
         elif mode == "dc":
             label = f"일반던전충전 #{app._dc_reg_idx+1} 위치"
         elif mode == "dollpreset":
-            label = f"인형탐험 프리셋 — 클릭 {getattr(app, '_doll_pick', {}).get('jx', 0)+1} 번 위치"
+            label = f"인형탐험 프리셋 — 클릭 {(getattr(app, '_doll_pickpos', None) or {}).get('jx', 0)+1} 번 위치"
         elif mode == "doll":
             label = f"인형탐험 #{app._doll_reg_idx+1} 좌표{app._doll_reg_step+1} 위치"
         elif mode == "wdoff":
