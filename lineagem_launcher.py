@@ -22836,6 +22836,11 @@ class App(tk.Tk):
             _act = self._do_click_or_wheel(fkey, j, _cd, slot)
             done += 1
             if _act == "이미지없음":
+                # ⛔ **중단 이유를 남긴다** (2026-11-07) — 좌표5(마름모)는 이
+                #    완주 구간에서 돈다. 여기서 끝내면 `j` 가 nclk 가 되어
+                #    "덜 돈 슬롯" 에 안 나와 **'끝까지 완료' 로 보였다**
+                #    (사용자가 2·3·6 번이 왜 안 됐는지 못 짚은 이유).
+                st["cut"] = st.get("cut") or f"좌표{j+1}"
                 break                         # 이 슬롯만 끝
             self.status.set(f"{icon} [{name}] {_act}{j+1}/{nclk}  (이어서 완주)")
             _sa = stop_at(fkey)
