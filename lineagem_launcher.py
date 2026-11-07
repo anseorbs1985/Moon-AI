@@ -4515,7 +4515,11 @@ FIX_EXP_ON     = True                # 경험치 탭 복구 (문제 생기면 Fa
 #      · `[복구]` 로 바뀌어 있으면   → 🚫 그건 **다야**다. 절대 누르지 않고
 #                                     **[구호증서복구]** 를 누른다
 #    🚫 **[복구] 를 누르는 코드를 절대 만들지 말 것.**
-FIX_FREE_TRIES = 5                   # 경험치 탭에서 [일일무료복구] 를 누를 최대 횟수
+FIX_FREE_TRIES = 8                   # 경험치 탭에서 복구를 누를 최대 횟수 (5 → 8)
+# 🔁 **이미 복구했으면 더 오래 기다린다** (2026-11-07 사용자:
+#    *"**한 번만 복구하고 꺼버리는 경우도 있고**"*).
+#    복구 **직후**에는 목록이 다시 그려지는 중이라 버튼이 잠깐 회색이다.
+FIX_ON_MORE    = 4                   # 한 번이라도 복구했으면 이만큼 더 본다
 # 🔁 **아이템 탭도 숫자가 남으면 한 번 더** (2026-11-07 사용자:
 #    *"하나 하고 또하고 이런 식으로 해달라니까 하나만 하고 꺼버린다"*)
 #    🚫 멈추는 조건은 **버튼이 사라졌을 때**다 — 탭 숫자로 멈추면
@@ -4549,7 +4553,10 @@ FIX_BTN_SETTLE = (0.6, 1.0)          # 버튼이 켜진 뒤 누르기까지 — 
 #       에 떠서 16번 칸5(확인 2132,1331) 와 겹친다 — 그래서 16번쪽만 안 됐다.
 #    ⚠ 오프셋은 **창 가로에 비례**해 늘린다. 창 밖으로는 안 나간다.
 #    🚫 `[복구](다야) 자리(창안 x < FIX_PAY_ZONE)` 로는 **절대 내려가지 않는다.**
-FIX_OK_OFFS    = ((-42, 0), (0, 0), (-78, 0))   # 546 창 기준 (좌측 → 등록자리 → 더 좌측)
+FIX_OK_OFFS    = ((-70, 0), (-45, 0), (-95, 0), (0, 0))
+#    🎯 2026-11-07 사용자: *"확인버튼이 뜰 때 **가운데 말고 좌측**을 눌러주면
+#       복구가 확인이 될 거 같은데"* → **좌측부터** 보고, 등록 자리는 맨 뒤로.
+#    ⚠ 화면이 바뀌면 **거기서 끝**이라 보통 **첫 자리 하나만** 눌린다.
 FIX_OK_GAP     = (0.30, 0.55)        # 자리를 옮겨 누르는 사이
 # 🚨 **한 번 누르고 화면이 바뀌면 거기서 끝낸다** (2026-11-07).
 #    3자리를 내리 누르다가 **첫 번에 창이 닫혀 나머지 2번이 게임 화면**에
@@ -25714,7 +25721,7 @@ class App(tk.Tk):
         self._fix_tab_shot(si, big, nm + "_notab")
         return big, None
 
-    def _fix_btn_look(self, c1, names, si, ko, need_on=False):
+    def _fix_btn_look(self, c1, names, si, ko, need_on=False, more=0):
         """🔁 그 **버튼**을 보일 때까지 다시 본다 -> (big, box, 이름).
 
         `names` 는 ((그림이름, 보여줄이름), ...) 순서 — **앞에 있는 것이 먼저**다
@@ -25731,7 +25738,8 @@ class App(tk.Tk):
         #    목록이 다시 그려지는 중이라 버튼이 회색이다. 1초 만에 포기하면
         #    **복구할 것이 있는데도 "없다" 로 넘어간다** (사용자 신고).
         _n = max(FIX_TAB_TRIES, FIX_ON_TRIES) if need_on else FIX_TAB_TRIES
-        _off, _last = [], None
+        _n += max(0, int(more or 0))
+        _off, _last = {}, None
         for _t in range(_n):
             big = grab_window(c1)
             if big is not None:
@@ -25749,10 +25757,16 @@ class App(tk.Tk):
                         if _on:
                             if _off:
                                 click_log(f"fix #{si:02d} 🕐 [{ko}] **{_t+1}번째에 "
-                                          f"켜졌다** (밝은 픽셀 {_bn} · 그 전 {_off})")
+                                          f"[{_ko2}] 가 켜졌다** (밝은 픽셀 {_bn} · "
+                                          f"그 전 {_off})")
                             return big, bx, _ko2
-                        _off.append(_bn); _last = _ko2
-                        break
+                        # 🚨 **꺼져 있으면 다음 이름을 본다** (2026-11-07).
+                        #    예전엔 여기서 `break` 라, [일일무료복구] 가 **회색으로
+                        #    남아 있으면** 옆의 **[구호증서복구] 를 아예 안 봤다**
+                        #    (사용자: "일일복구가 없고 구호증서가 있는데 복구도 안 하고").
+                        #    🚫 `break` 로 되돌리지 말 것.
+                        _off.setdefault(_ko2, []).append(_bn); _last = _ko2
+                        continue
                     try:
                         _b = fix_tab_find(big, _nm2, lo=True)
                         if _b and float(_b[4]) > best:
@@ -25762,10 +25776,10 @@ class App(tk.Tk):
             if _t < _n - 1:
                 self._fix_nap(*FIX_TAB_RETRY)
         if _off:
-            # 🎨 찾기는 했는데 **끝까지 꺼져 있었다** = 복구할 것이 없다
-            click_log(f"fix #{si:02d} 🎨 [{ko}] **[{_last}] 가 끝까지 꺼져 있다** "
-                      f"(밝은 픽셀 {_off} · 기준 {FIX_BTN_BRIGHT} · {_n}번 봤다) "
-                      f"— 복구할 것이 없다")
+            # 🎨 찾기는 했는데 **전부 끝까지 꺼져 있었다** = 복구할 것이 없다
+            _txt = " · ".join(f"[{k2}] {v2}" for k2, v2 in _off.items())
+            click_log(f"fix #{si:02d} 🎨 [{ko}] **전부 꺼져 있다** — {_txt} "
+                      f"(기준 {FIX_BTN_BRIGHT} · {_n}번 봤다) — 복구할 것이 없다")
             return big, None, "OFF"
         click_log(f"fix #{si:02d} 🔁 [{ko}] 버튼을 못 찾았다 "
                   f"({_n}번 봤다 · 가장 닮은 것 {bko or chr(45)} "
@@ -25824,6 +25838,11 @@ class App(tk.Tk):
             _b0 = None
             try:
                 _b0 = grab_window(c5)
+                # 🗂 **확인 팝업이 뜬 그 화면을 남긴다** (2026-11-07) —
+                #    버튼 자리를 다음에 **정확히** 맞추려면 이 화면이 필요하다.
+                #    복구할 것이 있을 때만 오므로 드물게 쌓인다.
+                if _i == 0 and _b0 is not None:
+                    self._fix_tab_shot(si, _b0, "ok")
             except Exception:
                 pass
             click_at(x, y)
@@ -25941,9 +25960,12 @@ class App(tk.Tk):
                         # ② 🕐 버튼이 **켜질 때까지 보기만 한다** (클릭하지 않는다).
                         #    복구 직후·탭 전환 직후에는 목록이 다시 그려지는 중이라
                         #    그 순간에는 회색이다. 천천히 기다린다.
+                        #    🔁 이미 한 번이라도 복구했으면 **더 오래** 기다린다 —
+                        #       복구 직후에는 목록이 다시 그려지는 중이다.
                         big, fb, _how = self._fix_btn_look(
                             c1, (("free", "일일무료복구"), ("cert", "구호증서복구")),
-                            si, _ko, need_on=True)
+                            si, _ko, need_on=True,
+                            more=(FIX_ON_MORE if _hit else 0))
                         if not fb:
                             # 🎨 **끝까지 꺼져 있었다** = 복구할 것이 없다 (💎 아님)
                             if _how == "OFF":
@@ -26050,7 +26072,8 @@ class App(tk.Tk):
                     _rp = self._fix_row_pick(big, L, T, c2, si, _ko)
                     # ② 🕐 **켜질 때까지 보기만 한다** (클릭하지 않는다)
                     big, ab, _ok2 = self._fix_btn_look(
-                        c1, (("all", "모두 복구"),), si, _ko, need_on=True)
+                        c1, (("all", "모두 복구"),), si, _ko, need_on=True,
+                        more=(FIX_ON_MORE if _ihit else 0))
                     if not ab:
                         if _ok2 == "OFF":
                             break
