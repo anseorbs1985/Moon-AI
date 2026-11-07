@@ -5970,6 +5970,12 @@ class IslandApp(tk.Tk):
     #      라스타바드 = 4시간 1회 + 2시간 5회 = 6회
     #    `0` = 첫 회차도 평소 주기. 여기 있는 프리셋은 `REPEAT_FIRST`(던전 전체)보다 이긴다.
     REPEAT_FIRST_VER = {"라스타바드": 4, "악몽의섬": 0}
+    # ⏰ **프리셋별 주기(시간)** — 2026-11-07 사용자: *"라바는 4시간으로 해줄 수
+    #    있냐. **라바 들어가면 시간이 4시간**으로 되고, **악몽의섬은 들어가면
+    #    그대로 2시간**씩 가능해?"*
+    #    전: 라바 4시간 1회 + 2시간 5회 → 후: **라바 4시간씩 6회**
+    #    🚫 악몽의섬은 넣지 않는다 — REPEAT_FIXED(2,6) 그대로 2시간씩이다.
+    REPEAT_H_VER = {"라스타바드": 4}
     # ⏱ 반복 간격에 **더 주는 여유(분)** — 같은 악몽의섬이라도 프리셋마다 다르다.
     #    (2026-10-03 사용자: "라바는 들어가고 이동하는 시간이 좀 많기 때문에
     #     마무리되고 4분을 좀 더, 악몽의섬도 한 3분만 더 줬으면 좋겠어")
@@ -6050,6 +6056,15 @@ class IslandApp(tk.Tk):
         except Exception:
             pass
         fx = self.REPEAT_FIXED.get(key)
+        # ⏰ **프리셋이 주기를 정한다** — 라바 4시간 · 악몽의섬 2시간 (2026-11-07).
+        #    슬롯에 저장된 repeat_h 보다 **이것이 먼저**다 — 라바로 바꾼 슬롯에
+        #    옛 2시간이 남아 있어도 4시간으로 간다.
+        try:
+            _v = self._slot_ver(key, slot or {})
+            if _v in self.REPEAT_H_VER:
+                return int(self.REPEAT_H_VER[_v]), (n or (fx[1] if fx else 8))
+        except Exception:
+            pass
         if fx:
             return (h or fx[0]), (n or fx[1])
         return (h or 2), (n or 8)
