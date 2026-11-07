@@ -1849,10 +1849,28 @@ RASTA_BASE_W = 491
 RASTA_K_STEPS = (1.00, 0.94, 1.06)
 
 
-def rasta_k(win_w):
-    """창 가로 → 그림·범위에 곱할 배율 (491 창이면 1.0 = 예전과 똑같다)."""
+def rasta_base_w(j):
+    """칸 j 의 그림·📐 범위를 **어느 창 가로에서** 잘랐나.
+
+    🧭 `rasta_NN_meta.json` 의 `w` — 없으면 `RASTA_BASE_W`(491, 옛 판).
+       칸마다 다를 수 있다 (칸28·31 은 546 에서 다시 잘랐고 나머지는 491 판).
+    🚫 이 파일을 지우면 그 칸이 491 로 되돌아가 배율이 1.112 배 어긋난다."""
     try:
-        return max(0.5, min(2.5, float(win_w) / float(RASTA_BASE_W)))
+        p = os.path.join(IMG_DIR, f"rasta_{j+1:02d}_meta.json")
+        with open(p, encoding="utf-8") as f:
+            w = int((json.load(f) or {}).get("w") or 0)
+        if w > 0:
+            return w
+    except Exception:
+        pass
+    return RASTA_BASE_W
+
+
+def rasta_k(win_w, j=None):
+    """창 가로 → 그림·범위에 곱할 배율 (기준 창과 같으면 1.0)."""
+    try:
+        base = rasta_base_w(j) if j is not None else RASTA_BASE_W
+        return max(0.5, min(2.5, float(win_w) / float(base)))
     except Exception:
         return 1.0
 
@@ -1929,7 +1947,7 @@ def rasta_crop(j, big):
     #      잡은 것이다. 창이 커지면 게임 UI 도 비례해 커지므로 범위도 같이 늘려야
     #      한다. 실측: 546 창에서 `(150,40) 240x170` → `(167,44) 267x189`.
     #      🚫 이 보정을 빼지 말 것 — 빼면 대상이 범위 밖으로 나가 못 찾는다.
-    _k = rasta_k(big.shape[1])
+    _k = rasta_k(big.shape[1], j)
     dx, dy, w, h = [int(round(v * _k)) for v in a]
     H, W = big.shape[:2]
     x0, y0 = max(0, dx), max(0, dy)
@@ -1953,7 +1971,7 @@ def rasta_find_all(j, anchor):
         if not got:
             return [], 0.0
         big, (ox, oy) = got
-        _k = rasta_k(big.shape[1])              # 🗡 창 크기 보정 (크롭 **전**에 잰다)
+        _k = rasta_k(big.shape[1], j)           # 🗡 창 크기 보정 (크롭 **전**에 잰다)
         big, _cx, _cy = rasta_crop(j, big)      # 📐 정해둔 범위 안만 본다
         ox += _cx; oy += _cy
         res, tpl = rasta_best_res(j, big, _k)
@@ -1994,7 +2012,7 @@ def rasta_find(j, anchor, pick="top"):
         if not got:
             return None, None, 0.0
         big, (ox, oy) = got
-        _k = rasta_k(big.shape[1])              # 🗡 창 크기 보정 (크롭 **전**에 잰다)
+        _k = rasta_k(big.shape[1], j)           # 🗡 창 크기 보정 (크롭 **전**에 잰다)
         big, _cx, _cy = rasta_crop(j, big)      # 📐 정해둔 범위 안만 본다
         ox += _cx; oy += _cy
         res, tpl = rasta_best_res(j, big, _k)
