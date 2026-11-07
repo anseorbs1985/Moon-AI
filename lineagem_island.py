@@ -291,7 +291,12 @@ CARD_DEFAULT = {"수금_오만의탑": "오만과신념의탑",
 #    어느 쪽인지는 **프리셋이 이미 정하고 있다**(`_slot_ver` — 칸26~35 의 `rasta`).
 #    🚫 라스타바드 슬롯이 다른 카드로 들어가면 칸26~35 가 통째로 어긋난다 —
 #       그래서 이것은 슬롯 지정([🃏])보다 **먼저**다.
-CARD_BY_VER = {"토요일_악몽의섬": {"라스타바드": "라스타바드"}}
+PIRATE_VERS   = ("해적섬",)   # 🏴 이 카드면 '해적섬 프리셋' 으로 본다
+REPEAT_NONE_VER = ("해적섬",)   # 🚫 이 버전은 **⏰ 반복을 걸지 않는다**
+#    사용자 2026-11-07: *"시간이 남으면 해적섬만 따로 돌릴 거라서.
+#    이건 **반복 없어 넣지 마**"* — 실행해도 예약이 안 걸린다.
+CARD_BY_VER = {"토요일_악몽의섬": {"라스타바드": "라스타바드",
+                                   "해적섬": "해적섬"}}
 # 🃏 **우선순위** — 슬롯에 따로 안 적었을 때, 이 순서로 보고 **안 잠긴 첫 카드**.
 CARD_ORDER = {"토요일_악몽의섬": ["테베라스사막", "아틀란티스", "티칼사원",
                                   "악몽의섬", "해적섬"]}
@@ -3538,7 +3543,12 @@ class IslandApp(tk.Tk):
         #    때문에 기존 6개(0~5)의 설정이 그대로 유지된다. 가운데에 끼우면 전부 밀린다.
         "토요일_악몽의섬": [("악몽의섬", ["주홍이 기본!", "주홍이 48%", "주홍이 82%",
                                           "빨갱이 기본!", "빨갱이 48%", "빨갱이 82%"]),
-                             ("라스타바드", ["기본!!", "주홍이 48%", "주홍이 82%"])],
+                             ("라스타바드", ["기본!!", "주홍이 48%", "주홍이 82%"]),
+                             # 🏴 해적섬 — 악몽의섬과 **똑같고 카드만 해적섬**.
+                             #    시간이 남을 때 따로 돌리는 용도라 **⏰ 반복이 없다.**
+                             #    ⚠ 반드시 **맨 뒤**에 둔다 (앞 번호가 밀리면
+                             #      저장된 프리셋 설정이 전부 어긋난다).
+                             ("해적섬", ["주홍이 48%"])],
     }
     PRESET_DEFAULT = [("", ["주홍이 기본!", "주홍이 48%", "주홍이 82%",
                             "빨갱이 기본!", "빨갱이 48%", "빨갱이 82%"])]
@@ -4648,6 +4658,16 @@ class IslandApp(tk.Tk):
                 if it.get("off"):
                     _r1["off"] = list(it["off"])
                 slot.setdefault("rasta", {})[str(j)] = _r1
+                # 🃏 프리셋이 **갈 카드**를 적어두면 슬롯에 옮긴다 (2026-11-07).
+                #    해적섬 프리셋이 이것으로 '해적섬' 을 적는다.
+                #    카드가 안 적힌 프리셋이면 **그 슬롯의 카드를 지운다** —
+                #    안 지우면 악몽의섬으로 바꿔도 해적섬 카드로 계속 들어간다.
+                if it.get("act") == CARD_MODE:
+                    _cn = (it.get("card") or "").strip()
+                    if _cn:
+                        slot["card"] = _cn
+                    elif (slot.get("card") or "").strip() in PIRATE_VERS:
+                        slot.pop("card", None)
                 movs.append(j + 1)
                 continue
             elif it.get("act") == "rec":
@@ -5980,6 +6000,10 @@ class IslandApp(tk.Tk):
                     return "라스타바드"
             except Exception:
                 pass
+        # 🏴 **해적섬** — 칸26~35 를 안 쓰므로 라스타바드와 구분된다.
+        #    프리셋이 `slot["card"]` 에 '해적섬' 을 적어둔다 (2026-11-07).
+        if ((slot or {}).get("card") or "").strip() in PIRATE_VERS:
+            return "해적섬"
         return "악몽의섬"
 
     def _rep_extra_sec(self, key, slot):
@@ -6192,6 +6216,18 @@ class IslandApp(tk.Tk):
                 slot = (self.cfg.get(key) or [])[i] if i < len(self.cfg.get(key) or []) else {}
                 if key not in self.REPEAT_FIXED and not (slot.get("repeat_h") or 0):
                     continue                      # 반복을 안 켠 슬롯은 그대로
+                # 🏴 **해적섬 프리셋은 ⏰ 를 걸지 않는다** (2026-11-07 사용자 지시:
+                #    "시간이 남으면 해적섬만 따로 돌릴 거라서. 이건 **반복 없어 넣지 마**")
+                #    🚫 클로드는 이 건너뛰기를 없애지 말 것.
+                if self._slot_ver(key, slot) in REPEAT_NONE_VER:
+                    try:
+                        slot["repeat_h"] = 0
+                    except Exception:
+                        pass
+                    st.pop(f"{key}|{i}", None)    # 전에 걸려 있던 예약도 지운다
+                    self._rlog(f"[반복] 🏴 {key} #{i+1:02d} 는 **해적섬 프리셋**이라 "
+                               f"⏰ 를 걸지 않는다 (시간 남을 때 손으로 돌리는 용도)")
+                    continue
                 h, n = self._rep_hn(key, slot)    # 고정 던전은 코드값(2시간 6회)
                 st.pop("_off", None)      # 직접 실행했으니 '꺼둠' 표시 해제
                 st[f"{key}|{i}"] = {"h": h, "left": max(0, n - 1), "run": 1,

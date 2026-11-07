@@ -9702,9 +9702,10 @@ class App(tk.Tk):
         #         옆 버튼이 **1px** 로 찌그러진다. `expand` 는 '남는 공간' 만
         #         나누기 때문이다. → **grid + `uniform`** 으로 칸을 같게 묶고
         #         Canvas 에는 `width=1` 을 줘서 요청 폭을 없앤다.
+        # ⏰ 반복은 **던전 상자 안 · 에카 밑**으로 옮겼다 (2026-11-07 사용자 지시)
+        #    → 여기는 [■ 멈춤] 혼자 한 줄을 쓴다.
         _k0h = tk.Frame(_k0); _k0h.pack(side="top", fill="x")
-        _k0h.columnconfigure(0, weight=1, uniform="k0h")
-        _k0h.columnconfigure(1, weight=1, uniform="k0h")
+        _k0h.columnconfigure(0, weight=1)
         self._fold_stop = tk.Canvas(_k0h, width=1, height=38, highlightthickness=0,
                                     bd=0, cursor="hand2")
         self._fold_stop.grid(row=0, column=0, sticky="ew")
@@ -9721,13 +9722,7 @@ class App(tk.Tk):
         #         알약 안에 **두 줄 글자**를 넣는다 (`create_text` 는 여러 줄 된다) —
         #         실측 9pt 두 줄 `47x30` 이 칸 `76x38` 안에 들어간다.
         #      🚫 tk.Button 으로 되돌리지 말 것 — 모서리가 각져 멈춤과 달라 보인다.
-        self._fold_rep = tk.Canvas(_k0h, width=1, height=38, highlightthickness=0,
-                                   bd=0, cursor="hand2")
-        self._fold_rep.grid(row=0, column=1, sticky="ew", padx=(2, 0))
-        self._fold_rep.bind("<Button-1>",
-                            lambda e: (self._rep_stop_click() or "break"))
-        self._fold_rep.bind("<Configure>", lambda e: self._fold_rep_draw())
-        self._fold_rep_draw()
+        #      📍 **자리는 던전 상자 안 · 에카 밑** (아래 `_dun` 에서 만든다).
         tk.Button(_k0, text="🔄 업데이트", font=("맑은 고딕", 8, "bold"),
                   bg="#c0392b", fg="white", activebackground="#7b241c",
                   height=1, pady=3,
@@ -9864,6 +9859,22 @@ class App(tk.Tk):
                       bg="#27ae60", fg="white", activebackground="#1e8449",
                       width=4, height=2,
                       command=lambda x=_i: self._run_island_slot(x)).pack(side="left", padx=(2, 0))
+        # ⏰ **반복 — 던전 상자 안, 에카 바로 아래** (2026-11-07 사용자:
+        #    *"반복 에카 밑으로 넣어주고"*)
+        #    묻지 않고 **즉시** 그 던전들의 ⏰ 예약을 전부 끈다 (2026-08-09 규칙).
+        #    ⚠ [■ 전체멈춤] 과 **따로**다 — 멈춤은 돌던 작업만, ⏰ 는 예약만.
+        #    🎨 모양은 [■ 멈춤] 과 같은 **알약(Canvas)** · 두 줄 글자
+        #       (윗줄 `⏰ 반복` · 아랫줄 `종료 16`, 없으면 `없음`).
+        #    🚫 tk.Button 으로 되돌리지 말 것 — 모서리가 각져 멈춤과 달라 보인다.
+        _rrw = tk.Frame(_dun); _rrw.pack(anchor="n", padx=3, pady=(4, 0), fill="x")
+        self._fold_rep = tk.Canvas(_rrw, width=1, height=38, highlightthickness=0,
+                                   bd=0, cursor="hand2")
+        self._fold_rep.pack(fill="x", expand=True)
+        self._fold_rep.bind("<Button-1>",
+                            lambda e: (self._rep_stop_click() or "break"))
+        self._fold_rep.bind("<Configure>", lambda e: self._fold_rep_draw())
+        self._fold_rep_draw()
+
         # 🏝 **섬/던전 미니! — 던전 상자 안, 에카 바로 아래** (2026-11-04 사용자:
         #    *"던전 안 에카 밑에 넣어줘야 해. 버튼 크기는 전부복구와 같은 사이즈로"*)
         #    누르면 **세로바 옆에 펼쳐진다** (다시 누르거나 ✕ 로 닫으면 되돌아간다).
