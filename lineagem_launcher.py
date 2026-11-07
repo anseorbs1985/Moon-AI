@@ -4520,6 +4520,19 @@ FIX_FREE_TRIES = 8                   # 경험치 탭에서 복구를 누를 최�
 #    *"**한 번만 복구하고 꺼버리는 경우도 있고**"*).
 #    복구 **직후**에는 목록이 다시 그려지는 중이라 버튼이 잠깐 회색이다.
 FIX_ON_MORE    = 4                   # 한 번이라도 복구했으면 이만큼 더 본다
+# 🚨 **십자가가 연속 이만큼 보여야 복구를 시작한다** (2026-11-07 사용자:
+#    *"십자가가 없으면 복구를 띄우면 안 되는데 그 자리에 다른 게 있다고
+#      복구를 띄우고 **그 던전 버튼을 눌러버리는 현상**이 있어"*).
+#    예전엔 **한 번이라도 보이면** 실행해서, 한 프레임 오탐에 칸1을 눌러
+#    **던전에 들어가 버렸다.** 🚫 1 로 되돌리지 말 것.
+FIX_GO_N       = 2                   # 복구를 시작하려면 연속 이만큼 보여야 한다
+# 🎯 **확인은 파란 버튼 안의 왼쪽을 누른다** (2026-11-07 사용자:
+#    *"확인점을 좀 **파란색 안에서 확인버튼은 왼쪽**에 누르면 될 것 같은데"*).
+#    `Windows 정품 인증` 워터마크가 가운데를 덮어도 **왼쪽은 눌린다.**
+FIX_OK_BLUE_R  = 70                  # 확인 좌표 둘레 이만큼에서 파란 버튼을 찾는다
+FIX_OK_BLUE_X  = 0.25                # 그 버튼의 가로 이 지점(왼쪽)을 누른다
+FIX_OK_BLUE    = 40                  # B-R 이 이보다 크고
+FIX_OK_BLUE_V  = 90                  # B 가 이보다 밝으면 파란 버튼
 # 🔁 **아이템 탭도 숫자가 남으면 한 번 더** (2026-11-07 사용자:
 #    *"하나 하고 또하고 이런 식으로 해달라니까 하나만 하고 꺼버린다"*)
 #    🚫 멈추는 조건은 **버튼이 사라졌을 때**다 — 탭 숫자로 멈추면
@@ -4679,6 +4692,40 @@ def fix_coin_is_daya(big, box, off=None):
         return (blue >= FIX_COIN_BLUE), blue
     except Exception:
         return False, -1
+
+
+def fix_ok_blue(big, ix, iy, k=1.0):
+    """🎯 확인 좌표 둘레에서 **파란 버튼**을 찾아 **그 안의 왼쪽** 자리.
+
+    돌려주는 값은 **창 안 좌표** (ix, iy) 또는 못 찾으면 None.
+    사용자 2026-11-07: *"파란색 안에서 확인버튼은 **왼쪽**에 누르면"*
+    — 워터마크가 가운데를 덮어도 왼쪽은 눌린다."""
+    try:
+        import cv2, numpy as np
+        R = max(10, int(FIX_OK_BLUE_R * k))
+        H, W = big.shape[0], big.shape[1]
+        x0, y0 = max(0, ix - R), max(0, iy - R // 2)
+        x1, y1 = min(W, ix + R), min(H, iy + R // 2)
+        if x1 - x0 < 8 or y1 - y0 < 5:
+            return None
+        sub = big[y0:y1, x0:x1]
+        b = sub[:, :, 0].astype("int16")
+        r = sub[:, :, 2].astype("int16")
+        m = ((b - r >= FIX_OK_BLUE) & (b >= FIX_OK_BLUE_V)).astype("uint8")
+        if int(m.sum()) < 30:
+            return None
+        n, lab, stt, _c = cv2.connectedComponentsWithStats(m, 8)
+        if n < 2:
+            return None
+        i = 1 + int(np.argmax(stt[1:, cv2.CC_STAT_AREA]))
+        bx = int(stt[i, cv2.CC_STAT_LEFT]); bw = int(stt[i, cv2.CC_STAT_WIDTH])
+        by = int(stt[i, cv2.CC_STAT_TOP]);  bh = int(stt[i, cv2.CC_STAT_HEIGHT])
+        if bw < 12 or bh < 6:
+            return None
+        return (x0 + bx + int(bw * FIX_OK_BLUE_X), y0 + by + bh // 2,
+                bw, bh)
+    except Exception:
+        return None
 
 
 def fix_btn_on(big, box):
@@ -25602,18 +25649,30 @@ class App(tk.Tk):
             # 🔍 **한 번만 보고 판단하지 않는다** (2026-10-11).
             #    한 번 놓치면 복구를 하나도 안 하고 목록에서 지워버렸다.
             #    보이면 첫 번에 끝나므로 **속도는 그대로다.**
-            hit, _seen = None, False
-            for _t in range(FIX_SEE_TRIES):
+            # 🚨 **연속 FIX_GO_N 번 보여야 실행한다** (2026-11-07).
+            #    예전엔 **한 번이라도 보이면** 실행해서, 한 프레임 오탐에
+            #    칸1을 눌러 **던전에 들어가 버렸다** (사용자 신고).
+            #    🚫 1 로 되돌리지 말 것.
+            hit, _seen, _run2 = None, False, 0
+            for _t in range(FIX_SEE_TRIES + FIX_GO_N):
                 hit = self._check_hits()
                 if hit is None:
                     break                  # 확인 자체가 불가(기준 그림 없음 등)
                 if int(si) in set(hit):
-                    _seen = True
-                    if _t:
-                        click_log(f"fix #{si:02d} 십자가가 {_t+1}번째에 보였다 — "
-                                  f"한 번만 봤으면 복구를 안 하고 지웠을 것")
-                    break
-                if _t < FIX_SEE_TRIES - 1:
+                    _run2 += 1
+                    if _run2 >= FIX_GO_N:
+                        _seen = True
+                        click_log(f"fix #{si:02d} 십자가 **연속 {FIX_GO_N}번 확인** "
+                                  f"({_t+1}번째까지 봤다)"
+                                  + self._warn_score_txt(si))
+                        break
+                else:
+                    if _run2:
+                        click_log(f"fix #{si:02d} 십자가가 {_run2}번만 보이고 "
+                                  f"끊겼다 — **연속 {FIX_GO_N}번이어야 한다** "
+                                  f"(오탐일 수 있다)")
+                    _run2 = 0
+                if _t < FIX_SEE_TRIES + FIX_GO_N - 1:
                     nap(random.uniform(*FIX_SEE_GAP))
             if hit is not None and not _seen:
                 _still_sleep = int(si) in getattr(self, "_last_sleep", set())
@@ -25826,8 +25885,22 @@ class App(tk.Tk):
                  if big is not None else 1.0)
         except Exception:
             k = 1.0
+        # 🎯 **파란 버튼(확인)을 찾아 그 안의 왼쪽**을 먼저 누른다 (2026-11-07)
+        _offs = list(FIX_OK_OFFS)
+        try:
+            if big is not None:
+                _bl = fix_ok_blue(big, int(c5[0] - L), int(c5[1] - T), k)
+                if _bl:
+                    _dx0 = int(_bl[0] - (c5[0] - L))
+                    _dy0 = int(_bl[1] - (c5[1] - T))
+                    _offs = [(int(_dx0 / (k or 1.0)), int(_dy0 / (k or 1.0)))] + _offs
+                    click_log(f"fix #{si:02d} 🎯 [{ko}] **파란 버튼** "
+                              f"{_bl[2]}x{_bl[3]} 안의 왼쪽 "
+                              f"(창안 {_bl[0]},{_bl[1]} · 오프셋 {_dx0:+d},{_dy0:+d})")
+        except Exception:
+            pass
         _done, _why = [], ""
-        for _i, (_dx, _dy) in enumerate(FIX_OK_OFFS):
+        for _i, (_dx, _dy) in enumerate(_offs):
             x = int(c5[0] + _dx * k); y = int(c5[1] + _dy * k)
             # 🚫 창 밖 · [복구](다야) 자리로는 가지 않는다
             if big is not None:
@@ -25862,7 +25935,7 @@ class App(tk.Tk):
                     _why = f" · 화면 그대로(차이 {_d:.1f})"
             except Exception:
                 pass
-            if _i < len(FIX_OK_OFFS) - 1:
+            if _i < len(_offs) - 1:
                 self._fix_nap(*FIX_OK_GAP)
         click_log(f"fix #{si:02d} 🗂 [{ko}] 확인 {len(_done)}번 "
                   f"{_done}{_why}")
@@ -26157,6 +26230,24 @@ class App(tk.Tk):
             # 💎 **한 탭이라도 다야면 표시한다** (2026-11-06) — 다른 탭을 했더라도
             #    그 탭은 사용자가 손으로 해야 하므로 알려야 한다.
             #    🚫 `_did` 와 상관없이 표시한다 (예전엔 `_paid and not _did` 였다).
+            # 🚨 **복구 창이 한 번도 안 떴다 = 십자가 오탐** (2026-11-07).
+            #    칸1을 눌렀는데 탭이 하나도 안 보이면 복구 창이 안 열린 것이다
+            #    (= 십자가가 아니라 다른 것을 눌렀다). 그대로 두면 **같은
+            #    오탐으로 또 눌러 던전에 들어간다.** → 목록에서 지운다.
+            #    🚫 💎 는 붙이지 않는다 (다야가 아니라 오탐이다).
+            if _notab and not _did:
+                try:
+                    self._warn_save(sorted(set(self._warn_load()) - {int(si)}))
+                    self._fix_paid_mark(int(si), False)
+                    self.after(0, self._warn_refresh)
+                except Exception:
+                    pass
+                click_log(f"fix #{si:02d} 🚨 **복구 창이 안 떴다** — 십자가가 아닌 "
+                          f"다른 것을 눌렀을 수 있다 (오탐) → 목록에서 지운다"
+                          + self._warn_score_txt(si))
+                self.status.set(f"🚨 복구 #{si:02d} — 복구 창이 안 떠서 목록에서 "
+                                f"지웠습니다 (십자가 오탐)")
+                _paid = False
             if _paid:
                 self._fix_paid_mark(int(si), True)
                 click_log(f"fix #{si:02d} 💎 **다야가 드는 탭이 있다** → 초록 "
