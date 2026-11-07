@@ -4536,6 +4536,17 @@ FIX_ITEM_FIRST = True
 #    칸1(십자가)을 다시 눌러 열고 그 탭을 한 번 더 찾는다 (**탭마다** 1번).
 #    🚫 흔적이 있으면 다시 열지 않는다 (창이 두 겹 쌓인다).
 FIX_REOPEN     = 1
+# 🎯 **한 판에 탭 하나만** (2026-11-07 사용자 설계: *"경험치 복구를 하고
+#    **닫어**. 그리고 안 없어지고 떠 있으면 복구를 다시 돌리면 너가 확인하고
+#    **경험치 복구가 없으면 아이템 복구를** 해줘"*)
+#    1판 경험치가 켜져 있으면 → 경험치만 하고 닫는다
+#    2판 경험치가 없으면      → 아이템 [모두 복구] → 닫는다
+#    → **앞 탭이 뒤 탭을 망칠 수가 없다.** 2판은 깨끗한 창에서 시작한다.
+#    🚫 False 로 되돌리면 한 판에 둘 다 해서 다시 서로를 망친다.
+FIX_ONE_TAB    = True
+# 🔁 경험치를 하고 닫은 뒤 **바로 다음 판**을 도는 횟수 (무한 방지).
+#    이 판은 실패가 아니라 정상 진행이라 **느리게 하지 않는다**.
+FIX_MORE_MAX   = 3
 # 🚨 **십자가가 연속 이만큼 보여야 복구를 시작한다** (2026-11-07 사용자:
 #    *"십자가가 없으면 복구를 띄우면 안 되는데 그 자리에 다른 게 있다고
 #      복구를 띄우고 **그 던전 버튼을 눌러버리는 현상**이 있어"*).
@@ -25603,6 +25614,15 @@ class App(tk.Tk):
                 getattr(self, "_fix_retry", {}).pop(int(si), None)
             except Exception:
                 pass
+            # 🎯 '경험치 하고 닫기' 로 이어 도는 횟수도 비운다 (2026-11-07) —
+            #    사용자가 새로 누른 것이면 처음부터 다시 셀 수 있게.
+            #    ⚠ `_fix_more`(이번에 이어 돌라는 표시) 는 **지우지 않는다** —
+            #       그것이 바로 이어 도는 신호다.
+            try:
+                if int(si) not in getattr(self, "_fix_more", set()):
+                    getattr(self, "_fix_more_n", {}).pop(int(si), None)
+            except Exception:
+                pass
         # F11 로 목록을 새로 만든 뒤 **첫 번째로 누르는 것은 '단체 복구'** 다.
         # 뜬 것들을 번호 순서대로 한 번에 처리하고, 그 뒤부터는 개별로만 돈다
         # (2026-08-29 사용자 지시).
@@ -26053,6 +26073,10 @@ class App(tk.Tk):
             _tabs = (("tab_item", "아이템 복구"), ("tab_exp", "경험치 복구"))
             if not FIX_ITEM_FIRST:
                 _tabs = tuple(reversed(_tabs))
+            if FIX_ONE_TAB:
+                # 🎯 **경험치부터 본다** — 켜져 있으면 그것만 하고 닫는다.
+                #    회색이면(무료를 다 썼다) 그대로 아이템으로 내려간다.
+                _tabs = (("tab_exp", "경험치 복구"), ("tab_item", "아이템 복구"))
             for _nm, _ko in _tabs:
                 #   🔁 **보일 때까지 다시 본다** — 한 번만 보면 화면이 덜 그려진
                 #      순간에 그대로 건너뛴다 (장비 복구가 통째로 빠지던 원인).
@@ -26231,6 +26255,24 @@ class App(tk.Tk):
                                           f"(잉크 {_i2}) → **버튼으로 판단한다**")
                         except Exception:
                             pass
+                    # 🎯 **경험치를 했으면 여기서 닫는다** (2026-11-07 사용자 설계).
+                    #    아이템은 **다음 판**에 깨끗한 창에서 한다 —
+                    #    경험치 복구 직후에는 목록이 다시 그려져 아이템 탭 찾기가
+                    #    불안하고, 그러다 창이 닫히면 아이템이 통째로 날아갔다.
+                    if FIX_ONE_TAB and _hit:
+                        self._fix_more_n = getattr(self, "_fix_more_n", {})
+                        _mn = self._fix_more_n.get(int(si), 0)
+                        if _mn < FIX_MORE_MAX:
+                            self._fix_more_n[int(si)] = _mn + 1
+                            self._fix_more = (getattr(self, "_fix_more", set())
+                                              | {int(si)})
+                            click_log(f"fix #{si:02d} 🎯 [{_ko}] {_hit}번 하고 "
+                                      f"**여기서 닫는다** — 아이템은 **다음 판**에 "
+                                      f"깨끗한 창에서 한다 ({_mn+1}/{FIX_MORE_MAX})")
+                        else:
+                            click_log(f"fix #{si:02d} 🎯 [{_ko}] {_hit}번 했다 — "
+                                      f"다음 판을 {FIX_MORE_MAX}번 써서 여기서 끝낸다")
+                        break
                     continue
 
                 # 📦 아이템 — 💰 동전을 먼저 보고 **줄을 고른 뒤** [모두 복구]
@@ -26473,6 +26515,23 @@ class App(tk.Tk):
                         marked = True
                 except Exception:
                     pass
+            # 🎯 **경험치만 하고 닫은 판** — 아이템이 남았으니 **바로 다음 판**
+            #    (2026-11-07 사용자 설계). 실패가 아니므로:
+            #    · `slow` 를 쓰지 않는다 (간격 ×2.2 는 실패 재시도용이다)
+            #    · `_fix_retry` 를 올리지 않는다 (재시도 기회를 깎지 않는다)
+            #    십자가가 **남아 있을 때만** 온다 (사라졌으면 위에서 지우고 끝).
+            try:
+                if int(si) in getattr(self, "_fix_more", set()):
+                    self._fix_more.discard(int(si))
+                    click_log(f"fix #{si:02d} 🎯 경험치를 하고 닫았다 — "
+                              f"십자가가 남아 **아이템 복구로 이어 간다** "
+                              f"(깨끗한 창에서 · 평소 속도)")
+                    self.status.set(f"🔁 복구 #{si:02d} — 경험치 끝, "
+                                    f"이제 **아이템 복구**로 이어 갑니다")
+                    self.after(600, lambda i=si: self._run_fix_slot(i))
+                    return
+            except Exception:
+                pass
             if tries <= 0:
                 if marked:
                     return          # 💎 다야 필요 — 실패가 아니다. 다시 돌리지 않는다
