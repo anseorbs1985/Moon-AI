@@ -4660,6 +4660,21 @@ FIX_PAY_ZONE   = 95                  # 창안 x 가 이보다 왼쪽이면 **[�
 #    **아무 일도 안 난다** (3번 눌렀는데 '경험치 복구 2건 남음' 그대로였다).
 #    ⚠ 등록 좌표 **칸2 는 글자 쪽**(창안 75,79)이라 아이콘이 아니다 —
 #      아이콘은 창안 (34, 81). 그래서 **탭 그림 기준으로 계산**한다.
+# 📐 **복구 좌표 한 벌** — 클라 창 기준 (2026-11-08).
+#    복구 창 속 자리는 **창 기준으로 늘 같다** (메인 16슬롯 실측 ±2px).
+#    [📐 좌표맞추기] 가 이 한 벌을 그 컴퓨터 창 자리에 맞춰 넣는다.
+# 🚨 11-03 에 창을 491 → 546 으로 키우며 **메인만** 좌표를 환산했고
+#    `coords.json` 은 머신별이라 **로컬은 옛 좌표 그대로**였다. 어긋남이
+#    오른쪽·아래로 갈수록 커져 **16번은 창 밖**으로 나갔다 (그래서 안 됐다).
+# 🚫 좌표 배포가 아니다 — 코드에 두고 **사용자가 누를 때만** 넣는다.
+FIX_REL_W = 546                      # 이 한 벌을 잰 창 가로
+FIX_REL_H = 307                      # 〃 세로
+FIX_REL = {0: (365, 17),             # 칸1 십자가(경고 마크)
+           1: (76, 80),              # 칸2 첫 줄 / EXP 아이콘
+           2: (51, 268),             # 칸3 [일일무료복구] 자리
+           4: (326, 250),            # 칸5 확인
+           5: (151, 46)}             # 칸6 ✕ 닫기
+#    ⚠ 칸4(0부터 세면 3)·7·8 은 **비워둔다** — 칸4 는 👁 '무료' 확인(그림) 전용.
 FIX_EXP_ROW   = (15, 39)             # 'fix_tab_exp' 좌상단 → 첫 줄 EXP 아이콘 중심
 # 🎫 **일일무료복구를 다 쓰면 [구호증서복구(n)] 이 나온다** (2026-11-06 사용자:
 #    *"일일무료복구가 없으면 옆에 **구호증서 복구**가 있거든. 그걸 눌러서 복구를"*)
@@ -19815,6 +19830,14 @@ class App(tk.Tk):
                 qb.pack(side="left", padx=(3, 0))
                 if _nq:
                     qb.bind("<Button-3>", lambda _e, b_=qb: self._del_quit_image(b_))
+                # 📐 — **복구 좌표를 지금 클라 창에 맞춘다** (2026-11-08).
+                #      로컬은 11-03 창 확대 때 좌표가 환산되지 않아 **16번처럼
+                #      오른쪽·아래 슬롯이 창 밖을 눌렀다.** 한 번 누르면 고쳐진다.
+                tk.Button(dr, text="📐 좌표맞추기",
+                          font=("맑은 고딕", 8, "bold"), width=10, height=2,
+                          bg="#6c3483", fg="white",
+                          command=self._fix_rel_apply).pack(side="left",
+                                                            padx=(3, 0))
             # 📤 — 원인 확인에 필요한 것(기록 + 사진 + 그림)을 바탕화면 한 폴더에 모은다.
             #      원격으로 로컬을 봐줄 때 이 폴더만 통째로 보내면 된다.
             tk.Button(dr, text="📤 진단모으기", font=("맑은 고딕", 8, "bold"),
@@ -26247,6 +26270,99 @@ class App(tk.Tk):
                              daemon=True).start()
         except Exception:
             pass
+
+    def _fix_rel_apply(self):
+        """📐 **복구 좌표를 지금 클라 창에 맞춘다** — 16슬롯 한 번에 (2026-11-08).
+
+        복구 창 속 자리는 **클라 창 기준으로 늘 같다**. 그래서 `FIX_REL`(창 기준)
+        한 벌을 그 컴퓨터의 **각 클라 창 왼쪽위 + 창 크기 비율**로 넣는다.
+        창 크기·격자가 어떻든 맞는다.
+
+        🚨 왜 필요한가 — 11-03 에 창을 491 → 546 으로 키우며 **메인만** 좌표를
+           환산했다. `coords.json` 은 머신별이라 로컬은 옛 좌표 그대로였고,
+           어긋남이 오른쪽·아래로 커져 **16번은 창 밖**을 눌렀다.
+        🚫 덮어쓰기라 **한 번 물어본다.** 직전 좌표는 백업한다.
+        🚫 클라 16개를 못 찾으면 **아무것도 하지 않는다** (격자를 못 세운다).
+        """
+        import tkinter.messagebox as mb
+        import shutil as _sh, datetime as _dt
+        try:
+            rects = self._client_rects_by_slot()
+            if not rects or len(rects) < 16:
+                mb.showwarning("복구 좌표 맞추기",
+                               "리니지M 클라 16개를 찾지 못했습니다.\n"
+                               "클라를 전부 켜고 다시 눌러주세요.")
+                return
+            cur = self.cfg.get("fix_slots") or []
+            _old = sum(1 for _s in cur
+                       for _c in ((_s or {}).get("coords") or []) if _c)
+            if not mb.askyesno(
+                    "복구 좌표 맞추기",
+                    "16슬롯의 복구 좌표를 지금 클라 창에 맞춰 넣습니다.\n\n"
+                    + "  지금 등록된 좌표 " + str(_old) + "개 → 새로 "
+                    + str(len(FIX_REL) * 16) + "개\n"
+                    + "  칸 "
+                    + " ".join(str(k + 1) for k in sorted(FIX_REL))
+                    + " (칸4 는 👁 '무료' 확인이라 비워둡니다)\n\n"
+                    + "직전 좌표는 백업합니다. 계속할까요?"):
+                return
+            # 📦 직전 좌표를 백업 — 되돌리려면 [♻ 좌표복구] 또는 이 파일
+            _bk = ""
+            try:
+                _bd = os.path.join(os.environ.get("LOCALAPPDATA", BASE),
+                                   "MoonAI", "backups")
+                os.makedirs(_bd, exist_ok=True)
+                _bk = os.path.join(
+                    _bd, _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    + "_before_fixrel_coords.json")
+                _sh.copy2(CONFIG_FILE, _bk)
+            except Exception:
+                pass
+            while len(cur) < 16:
+                cur.append({})
+            _lines = []
+            for i in range(16):
+                L, T, R, B = (rects[i][0], rects[i][1],
+                              rects[i][2], rects[i][3])
+                kx = (R - L) / float(FIX_REL_W)
+                ky = (B - T) / float(FIX_REL_H)
+                sl = cur[i] if isinstance(cur[i], dict) else {}
+                cs = list(sl.get("coords") or [])
+                while len(cs) < FIX_CLICKS:
+                    cs.append(None)
+                for j, rxy in FIX_REL.items():
+                    if j < len(cs):
+                        cs[j] = [int(L + rxy[0] * kx), int(T + rxy[1] * ky)]
+                sl["coords"] = cs[:FIX_CLICKS]
+                cur[i] = sl
+                _lines.append(
+                    "#" + format(i + 1, "02d") + " "
+                    + str(R - L) + "x" + str(B - T) + " → "
+                    + " ".join("(" + str(cs[j][0]) + "," + str(cs[j][1]) + ")"
+                                for j in sorted(FIX_REL)))
+            self.cfg["fix_slots"] = cur
+            save_cfg(self.cfg)
+            click_log("[복구좌표] 📐 16슬롯을 지금 클라 창에 맞췄다 (창 기준 "
+                      + " ".join("칸" + str(k + 1) + str(tuple(v))
+                                  for k, v in sorted(FIX_REL.items()))
+                      + " · 잰 창 " + str(FIX_REL_W) + "x" + str(FIX_REL_H)
+                      + " · 전 " + str(_old) + "개)")
+            for _l in _lines:
+                click_log("[복구좌표]   " + _l)
+            if _bk:
+                click_log("[복구좌표] 📦 직전 좌표 백업: " + _bk)
+            self.status.set("📐 복구 좌표를 16슬롯에 맞췄습니다 — "
+                            "[복구해야함] 을 눌러 확인해보세요")
+            mb.showinfo("복구 좌표 맞추기",
+                        "✔ 16슬롯에 넣었습니다.\n\n"
+                        + "\n".join(_lines[:4]) + "\n  …\n" + _lines[-1]
+                        + "\n\n되돌리려면 [♻ 좌표복구] 를 누르세요.")
+        except Exception as e:
+            click_log("[복구좌표] ⚠ 오류 " + repr(e))
+            try:
+                mb.showerror("복구 좌표 맞추기", str(e))
+            except Exception:
+                pass
 
     def _fix_ok_press(self, coord, si=0):
         """🖱 **복구 확인 — 왼쪽부터 여러 자리**를 눌러본다 (2026-11-08).
