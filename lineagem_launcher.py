@@ -204,7 +204,10 @@ RUN_PER_CLICK = {"dragon": 3.0}
 PACE_FLOOR = 0.60
 NLCH = chr(10)
 # 실행이 끝나면 '진단만' 저장소 diag/ 로 올리는 런처 (2026-08-28 사용자 지시)
-DIAG_SHARE = ("dragon",)
+# 📡 **복구(fix)도 올린다** (2026-11-08) — 로컬에서만 안 되는 것을
+#    메인에서 읽으려고. 사용자: *"도대체 그럼 16번 클라 복구가 왜 안 되는데"*
+DIAG_SHARE = ("dragon", "fix")
+FIX_DIAG_COOL = 180                  # 복구 진단을 올리는 간격(초)
 
 EXTRA_GAPS = {"dragon": DRAGON_EXTRA, "knight": KNIGHT_EXTRA}
 
@@ -21049,6 +21052,43 @@ class App(tk.Tk):
                          " · ".join(k + "(" + str(v) + ")" for k, v in sz.items()))
             except Exception:
                 pass
+            # 📍 **슬롯 좌표를 창 기준으로** (2026-11-08) — 어느 슬롯이
+            #    틀렸는지 한눈에 보인다. 복구는 16번만 안 된다는 신고가 많았다.
+            try:
+                key = self._dgn2_info(fkey)[0]
+                L.append("")
+                L.append("[슬롯 좌표 — 창 기준]")
+                for _i, _sl in enumerate(self.cfg.get(key) or []):
+                    _cs = (_sl or {}).get("coords") or []
+                    _an = slot_anchor(_sl)
+                    _rc = client_rect_at(*_an) if _an else None
+                    if not _rc:
+                        L.append("  #%02d 창을 못 찾음" % (_i + 1))
+                        continue
+                    _ps = []
+                    for _p in _cs[:8]:
+                        _ps.append("(%d,%d)" % (_p[0] - _rc[0], _p[1] - _rc[1])
+                                   if _p else "-")
+                    L.append("  #%02d %dx%d  %s"
+                             % (_i + 1, _rc[2] - _rc[0], _rc[3] - _rc[1],
+                                " ".join(_ps)))
+            except Exception:
+                pass
+            # 🗂 복구 그림이 이 컴퓨터에 있나 (없거나 안 맞으면 고정 자리로 간다)
+            if fkey == "fix":
+                try:
+                    L.append("")
+                    L.append("[복구 그림]")
+                    L.append("기준 창 가로 %s · fix_tab_ready=%s · FIX_POS_FALLBACK=%s"
+                             % (fix_tab_base(), fix_tab_ready(), FIX_POS_FALLBACK))
+                    for _n3 in ("tab_exp", "tab_item", "all", "free", "cert",
+                                "quit"):
+                        _p3 = fix_tab_img(_n3)
+                        L.append("  %-9s %s" % (_n3,
+                                 ("%d바이트" % os.path.getsize(_p3))
+                                 if os.path.exists(_p3) else "**없음**"))
+                except Exception:
+                    pass
             L.append("")
             L.append("[이번 실행 기록]")
             try:
@@ -26188,6 +26228,26 @@ class App(tk.Tk):
         except Exception:
             return None
 
+    def _fix_diag_maybe(self):
+        """📡 복구 진단을 저장소 `diag/` 로 올린다 — **로컬만** (2026-11-08).
+
+        나는 로컬 화면도 로그도 볼 수 없다. 그래서 로컬에서만 안 되는 것을
+        **계속 추측**해야 했다 (사용자: *"도대체 왜 안 되는데"*).
+        복구를 한 번 돌리면 그 기록이 저장소로 올라와 메인에서 바로 읽힌다.
+        🚫 올리는 것은 `diag/` 아래 파일뿐이다 — 코드·좌표·계정은 안 올라간다.
+        ⏱ `FIX_DIAG_COOL` 에 한 번만."""
+        try:
+            if load_local().get("is_main"):
+                return                      # 메인은 읽는 쪽이다
+            _t = time.time()
+            if _t - getattr(self, "_fix_diag_at", 0) < FIX_DIAG_COOL:
+                return
+            self._fix_diag_at = _t
+            threading.Thread(target=self._share_diag_now, args=("fix",),
+                             daemon=True).start()
+        except Exception:
+            pass
+
     def _fix_ok_press(self, coord, si=0):
         """🖱 **복구 확인 — 왼쪽부터 여러 자리**를 눌러본다 (2026-11-08).
 
@@ -26700,6 +26760,12 @@ class App(tk.Tk):
         finally:
             try:
                 self._clear_busy("복구탭")
+            except Exception:
+                pass
+            # 📡 **로컬이면 진단을 저장소에 올린다** (2026-11-08) — 메인에서
+            #    로컬이 왜 안 되는지 읽으려고. 메인은 올리지 않는다.
+            try:
+                self._fix_diag_maybe()
             except Exception:
                 pass
             self.after(300, lambda x=si: self._fix_verify(x, FIX_WATCH_N))
