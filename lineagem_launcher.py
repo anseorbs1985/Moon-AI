@@ -10016,13 +10016,42 @@ class App(tk.Tk):
         #    낚시녹임 아래 · [▶ 전부 복구] 위.
         # 💰 다야 OCR — **낚시녹임 바로 아래** (2026-11-04 사용자:
         #    *"던전에 다야 OCR 은 낚시녹임 밑으로 빼주고"*)
-        _oc = tk.Frame(dc_col); _oc.pack(anchor="n", pady=(2, 0), before=self._warn_topbtn)
-        tk.Button(_oc, text="💰 다야\nOCR", font=("맑은 고딕", 9, "bold"),
-                  bg="#27ae60", fg="white", activebackground="#1e8449",
-                  width=7, height=2, command=self._open_ocr).pack(side="left")
-        tk.Button(_oc, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
+        # 💰 **수량을 보여주는 버튼 하나** (2026-11-07 사용자 요청:
+        #    *"좌표 입력은 다 됐으니까 이건 **안 보이는 곳으로 보내고**,
+        #      다야OCR 저기에는 **다야 수량 파악한 거** … 그걸 저기에 넣어서
+        #      볼 수 있게 해줘. **펼치면은 볼 수 있게 복사랑 할 수 있게**"*)
+        #    누르면 `💰 다야 카운트` 판이 **세로바 바로 옆**에 펼쳐진다
+        #    (16슬롯 수량 · 📋 복사 · 📊 측정 · ⌖ 좌표 입력).
+        # 🚫 Toplevel 을 새로 만들지 말 것 — `_open_daya_win` 은
+        #    `_section_wins()` 에 들어 있어 **작업이 돌 때 저절로 치워진다.**
+        #    세로바 왼쪽은 **클라 영역**이라 안 치우면 좌표 클릭을 먹는다.
+        _oc = tk.Frame(dc_col)
+        _oc.pack(anchor="n", pady=(2, 0), before=self._warn_topbtn)
+        self._fold_daya_var = tk.StringVar(
+            value="💰 다야" + chr(10) + "수량")
+        # 🎣 **낚시녹임과 같은 모양** (2026-11-07 사용자: *"낚시녹임처럼
+        #    다야수량 (실행) 이렇게"*) — width=7 + [▶실행] width=4.
+        self._daya_btn = tk.Button(_oc, textvariable=self._fold_daya_var,
+                                   font=("맑은 고딕", 9, "bold"),
+                                   bg="#27ae60", fg="white",
+                                   activebackground="#1e8449",
+                                   width=7, height=2,
+                                   command=self._open_daya_win)
+        self._daya_btn.pack(side="left")
+        # ▶ **수량을 새로 잰다** (OCR). 판은 왼쪽 버튼을 누르면 펼쳐진다.
+        tk.Button(_oc, text="▶" + chr(10) + "실행",
+                  font=("맑은 고딕", 8, "bold"),
                   bg="#1e8449", fg="white", activebackground="#145a32",
-                  width=4, height=2, command=self._open_ocr_scan).pack(side="left", padx=(2, 0))
+                  width=4, height=2,
+                  command=self._open_ocr_scan).pack(side="left", padx=(2, 0))
+        self._fold_daya_sync()
+        # 🔢 합계가 바뀌면 **저절로 따라간다** (폴링 없음 · 비용 0).
+        #    Tk 8.6 미만이면 조용히 건너뛴다 (켤 때 값은 보인다).
+        try:
+            self._cnt_total_var.trace_add(
+                "write", lambda *_a: self._fold_daya_sync())
+        except Exception:
+            pass
 
         # 🌙 수호성은 **각성 옆으로 옮겼다** (2026-11-06 사용자 지시 —
         #    *"수호성을 이젠 메인런처에서 빼서 각성 옆으로 보내"*).
@@ -10165,47 +10194,10 @@ class App(tk.Tk):
 
         tk.Frame(front_row, width=2, bg="#bbb").pack(side="left", fill="y", padx=(4,8))
 
-        # 다야 수량 컨트롤 + 그리드
-        daya_inner = tk.Frame(front_row); daya_inner.pack(side="left", anchor="n")
-        ctrl = tk.Frame(daya_inner); ctrl.pack(side="left", padx=(4,8), anchor="n")
-        tk.Label(ctrl, text="💰 다야 수량", font=("맑은 고딕", 9, "bold"), fg="#2c3e50").pack(anchor="w")
-        tk.Button(ctrl, text="📊 OCR 실행", font=("맑은 고딕", 8, "bold"),
-                  bg="#27ae60", fg="white", width=10,
-                  command=self._open_ocr_scan).pack(fill="x", pady=1)
-        tk.Button(ctrl, text="📋 복사", font=("맑은 고딕", 8, "bold"),
-                  bg="#2471a3", fg="white", width=10,
-                  command=self._copy_daya_counts).pack(fill="x", pady=1)
-        tk.Label(ctrl, textvariable=self._cnt_date_var,
-                 font=("맑은 고딕", 7), fg="#555").pack(anchor="w", pady=(4,0))
-        tk.Label(ctrl, textvariable=self._cnt_total_var,
-                 font=("맑은 고딕", 10, "bold"), fg="#c0392b").pack(anchor="w")
-        tk.Label(ctrl, textvariable=self._cnt_diff_var,
-                 font=("맑은 고딕", 9, "bold"), fg="#8e44ad").pack(anchor="w")
-
-        self._cnt_img_labels = []
-        self._cnt_thumbs = [None] * 16
-        grid = tk.Frame(daya_inner); grid.pack(side="left", anchor="n")
-        for r in range(4):
-            for c in range(4):
-                idx = r * 4 + c
-                cell = tk.Frame(grid, bd=1, relief="groove")
-                cell.grid(row=r, column=c, padx=1, pady=1, sticky="n")
-                head = tk.Frame(cell); head.pack()
-                tk.Label(head, text=f"{idx+1:02d}", font=("맑은 고딕", 7), fg="#aaa").pack(side="left")
-                cntlbl = tk.Label(head, textvariable=self._cnt_cell_vars[idx],
-                         font=("맑은 고딕", 11, "bold"), fg="#2980b9", cursor="hand2")
-                cntlbl.pack(side="left", padx=(2,0))
-                cntlbl.bind("<Button-1>", lambda e, x=idx: self._edit_daya_count(x))
-                imbox = tk.Frame(cell, width=93, height=33, bg="#f4f4f4")
-                imbox.pack()
-                imbox.pack_propagate(False)
-                imlbl = tk.Label(imbox, bg="#f4f4f4", fg="#ccc", font=("맑은 고딕", 7))
-                imlbl.pack(fill="both", expand=True)
-                self._cnt_img_labels.append(imlbl)
-                tk.Button(cell, text="재측정", font=("맑은 고딕", 6, "bold"),
-                          bg="#27ae60", fg="white", pady=0,
-                          command=lambda x=idx: self._rescan_daya_slot(x)).pack(fill="x")
-        self._load_daya_thumbs()
+        # 💰 **다야 수량 판** — `_build_daya_full` 한 곳에서 만든다 (2026-11-07).
+        #    세로바 [💰 다야] 로 펼치는 판과 **똑같은 것**이다.
+        #    🚫 여기서 따로 만들지 말 것 (사진·재측정·수정이 빠진다).
+        self._build_daya_full(front_row)
 
         # 다야 수량 우측: 귀환주문서 슬롯별 실행 그리드 (좌표는 섬/던전 실행기에서 관리)
         # 안 쓰는 런처는 **아예 만들지 않는다** — 위젯을 안 만드는 만큼 그대로 빨라진다
@@ -15869,28 +15861,106 @@ class App(tk.Tk):
     def _open_dungeon_win(self):
         self._open_section_win("_dungeon_win", "🏰 변신확인용", self._build_dungeon, w=470, h=600, pinnable=True)
 
-    def _open_daya_win(self):
-        self._open_section_win("_daya_win", "💰 다야 카운트", self._build_daya_panel, w=500, h=260)
+    def _fold_daya_sync(self):
+        """💰 **세로바 버튼에 다야 합계를 보여준다** (2026-11-07).
 
-    def _build_daya_panel(self, parent):
-        cnt_box = tk.Frame(parent); cnt_box.pack(padx=8, pady=8, fill="both", expand=True)
-        tk.Label(cnt_box, text="현재 다야 수량",
-                 font=("맑은 고딕", 14, "bold"), fg="#2c3e50").grid(row=0, column=0, columnspan=2, sticky="w", padx=4)
-        tk.Button(cnt_box, text="📊 OCR", font=("맑은 고딕", 7, "bold"), bg="#27ae60", fg="white",
-                  width=8, command=self._open_ocr).grid(row=0, column=2, columnspan=2, sticky="w", padx=2)
-        tk.Button(cnt_box, text="📋 복사", font=("맑은 고딕", 7, "bold"), bg="#2471a3", fg="white",
-                  width=8, command=self._copy_daya_counts).grid(row=0, column=4, columnspan=2, sticky="w", padx=2)
-        tk.Label(cnt_box, textvariable=self._cnt_total_var,
-                 font=("맑은 고딕", 14, "bold"), fg="#c0392b").grid(row=0, column=6, columnspan=4, sticky="e", padx=4)
+        `_cnt_total_var`("합계: 48,424") 를 그대로 쓴다 — `trace_add` 로
+        바뀔 때마다 불린다. 🚫 여기서 무거운 일을 하지 말 것 (글자만 만든다)."""
+        try:
+            t = (self._cnt_total_var.get() or "").replace("합계:", "").strip()
+            self._fold_daya_var.set("💰 다야" + chr(10)
+                                    + (t or "수량"))
+        except Exception:
+            pass
+
+    def _open_daya_win(self):
+        """💰 다야 수량 판 — **세로바 바로 옆**에 펼쳐진다.
+
+        `_open_section_win` 을 쓰므로 자리(`_place_beside`)와 작업 중 치우기
+        (`_section_wins`)가 **공짜로 따라온다**. 🚫 Toplevel 을 새로 만들지 말 것."""
+        self._open_section_win("_daya_win", "💰 다야 수량",
+                               self._build_daya_panel, w=560, h=400)
+
+    def _alive(self, w):
+        """그 위젯이 아직 살아 있나 (판을 닫으면 사라진다)."""
+        try:
+            return bool(w is not None and w.winfo_exists())
+        except Exception:
+            return False
+
+    def _build_daya_full(self, parent, with_coord=False):
+        """💰 **다야 수량 판** — 메인런처에 있던 그 판을 그대로 떼어낸 것.
+
+        제목 · 📊 측정 · 📋 복사 · 📅 날짜 · 합계 · 차이
+        + 4×4 (번호 · 수량(**눌러서 수정**) · **사진** · [재측정])
+
+        🧭 2026-11-07 사용자: *"현재 다야 수량 안에 예전에 메인처럼 **사진을
+           찍는 게 있어야 하고 수정할 수 있어야 해.** 그냥 **메인런처 표기된
+           것을 그대로 표로 가져오면** 될 건데 왜 이렇게 한 거야"* — 맞는 말이라
+           **한 함수로 모아** 메인런처와 펼친 판이 똑같은 것을 보여주게 했다.
+        🚫 둘을 따로 만들지 말 것 — 한쪽만 고치는 사고가 난다."""
+        daya_inner = tk.Frame(parent); daya_inner.pack(side="left", anchor="n")
+        ctrl = tk.Frame(daya_inner); ctrl.pack(side="left", padx=(4,8), anchor="n")
+        tk.Label(ctrl, text="💰 다야 수량", font=("맑은 고딕", 9, "bold"), fg="#2c3e50").pack(anchor="w")
+        tk.Button(ctrl, text="📊 측정", font=("맑은 고딕", 8, "bold"),
+                  bg="#27ae60", fg="white", width=10,
+                  command=self._open_ocr_scan).pack(fill="x", pady=1)
+        tk.Button(ctrl, text="📋 복사", font=("맑은 고딕", 8, "bold"),
+                  bg="#2471a3", fg="white", width=10,
+                  command=self._copy_daya_counts).pack(fill="x", pady=1)
+        tk.Label(ctrl, textvariable=self._cnt_date_var,
+                 font=("맑은 고딕", 7), fg="#555").pack(anchor="w", pady=(4,0))
+        tk.Label(ctrl, textvariable=self._cnt_total_var,
+                 font=("맑은 고딕", 10, "bold"), fg="#c0392b").pack(anchor="w")
+        tk.Label(ctrl, textvariable=self._cnt_diff_var,
+                 font=("맑은 고딕", 9, "bold"), fg="#8e44ad").pack(anchor="w")
+        _labels = []
+        grid = tk.Frame(daya_inner); grid.pack(side="left", anchor="n")
         for r in range(4):
             for c in range(4):
                 idx = r * 4 + c
-                cell = tk.Frame(cnt_box, bd=1, relief="flat", width=70, height=44)
-                cell.grid(row=r+1, column=c, padx=2, pady=2)
-                cell.pack_propagate(False)
-                tk.Label(cell, text=f"{idx+1:02d}", font=("맑은 고딕", 10), fg="#aaa").pack()
-                tk.Label(cell, textvariable=self._cnt_cell_vars[idx],
-                         font=("맑은 고딕", 14, "bold"), fg="#2980b9").pack()
+                cell = tk.Frame(grid, bd=1, relief="groove")
+                cell.grid(row=r, column=c, padx=1, pady=1, sticky="n")
+                head = tk.Frame(cell); head.pack()
+                tk.Label(head, text=f"{idx+1:02d}", font=("맑은 고딕", 7), fg="#aaa").pack(side="left")
+                cntlbl = tk.Label(head, textvariable=self._cnt_cell_vars[idx],
+                         font=("맑은 고딕", 11, "bold"), fg="#2980b9", cursor="hand2")
+                cntlbl.pack(side="left", padx=(2,0))
+                cntlbl.bind("<Button-1>", lambda e, x=idx: self._edit_daya_count(x))
+                imbox = tk.Frame(cell, width=93, height=33, bg="#f4f4f4")
+                imbox.pack()
+                imbox.pack_propagate(False)
+                imlbl = tk.Label(imbox, bg="#f4f4f4", fg="#ccc", font=("맑은 고딕", 7))
+                imlbl.pack(fill="both", expand=True)
+                _labels.append(imlbl)
+                tk.Button(cell, text="재측정", font=("맑은 고딕", 6, "bold"),
+                          bg="#27ae60", fg="white", pady=0,
+                          command=lambda x=idx: self._rescan_daya_slot(x)).pack(fill="x")
+        # 🖼 **이 판의 사진 라벨을 등록한다** — 여러 판이 동시에 있어도
+        #    `_load_daya_thumbs` 가 전부 채운다. 죽은 판은 걸러낸다.
+        _sets = [x for x in (getattr(self, '_cnt_img_sets', None) or [])
+                 if x and self._alive(x[0])]
+        _sets.append(_labels)
+        self._cnt_img_sets = _sets
+        self._cnt_img_labels = _labels      # 옛 코드 호환
+        if with_coord:
+            # ⌖ **좌표 입력** — 다 해놨으니 평소엔 안 보이는 이 안쪽에 둔다
+            #    (2026-11-07 사용자: *"좌표 입력은 다 됐으니까 안 보이는 곳으로"*)
+            tk.Button(ctrl, text='⌖ 좌표 입력', font=('맑은 고딕', 8),
+                      bg='#7f8c8d', fg='white', activebackground='#616a6b',
+                      width=10,
+                      command=self._open_ocr).pack(fill='x', pady=(6, 1))
+        self._load_daya_thumbs()
+        return daya_inner
+    def _build_daya_panel(self, parent):
+        """💰 펼친 판 — **메인런처와 똑같은 것**(`_build_daya_full`) + ⌖ 좌표 입력.
+
+        🚫 따로 만들지 말 것 — 사진·재측정·수정이 빠진 판이 되어
+           *"메인런처 표기된 것을 그대로 가져오면 될 건데"* 라는
+           지적을 받았다 (2026-11-07)."""
+        box = tk.Frame(parent)
+        box.pack(padx=6, pady=6, fill="both", expand=True)
+        self._build_daya_full(box, with_coord=True)
 
     def _make_cnt_loader(self):
         import datetime as _dt
@@ -15992,31 +16062,53 @@ class App(tk.Tk):
             self._cnt_diff_var.set("")
 
     def _load_daya_thumbs(self):
-        """daya_crops/slot_i.png (OCR가 캡처한 숫자 이미지)을 각 셀에 표시."""
-        labels = getattr(self, "_cnt_img_labels", None)
-        if not labels:
+        """daya_crops/slot_i.png (OCR 가 캡처한 숫자 이미지)을 **모든 판**에 넣는다.
+
+        ⚠ 사진은 `Label.config(image=…)` 라 **판마다 따로** 넣어야 한다
+          (숫자는 StringVar 를 공유하므로 저절로 같다).
+          `PhotoImage` 는 **16개만 만들어** 모든 판에 같이 쓴다.
+        ⚠ `self._cnt_thumbs` 에 참조를 들고 있어야 **사진이 안 지워진다.**
+        🚫 한 벌(`_cnt_img_labels`)로 되돌리지 말 것 — 두 판이 동시에
+           있으면 한쪽만 사진이 나온다."""
+        sets = [x for x in (getattr(self, "_cnt_img_sets", None) or [])
+                if x and self._alive(x[0])]
+        if not sets:
+            _lb = getattr(self, "_cnt_img_labels", None)
+            if _lb:
+                sets = [_lb]
+        if not sets:
             return
         try:
             from PIL import Image, ImageTk
         except Exception:
             return
+        if not isinstance(getattr(self, "_cnt_thumbs", None), dict):
+            self._cnt_thumbs = {}
         crop_dir = os.path.join(LOCAL_DATA, "daya_crops")
-        for i, lbl in enumerate(labels):
+        for i in range(16):
             p = os.path.join(crop_dir, f"slot_{i}.png")
+            ph = None
             try:
                 if os.path.exists(p):
                     with Image.open(p) as _im0:
                         im = _im0.copy()
-                    scale = 30.0 / max(im.height, 1)          # 기존 20px → 1.5배(30px)
+                    scale = 30.0 / max(im.height, 1)   # 20px → 1.5배(30px)
                     w = max(1, min(180, int(im.width * scale)))
                     im = im.resize((w, 30), Image.LANCZOS)
                     ph = ImageTk.PhotoImage(im)
-                    self._cnt_thumbs[i] = ph            # 참조 유지
-                    lbl.config(image=ph, text="")
-                else:
-                    lbl.config(image="", text="-")
+                    self._cnt_thumbs[i] = ph        # ⚠ 참조 유지
             except Exception:
-                pass
+                ph = None
+            for labels in sets:
+                if i >= len(labels) or not self._alive(labels[i]):
+                    continue
+                try:
+                    if ph is not None:
+                        labels[i].config(image=ph, text="")
+                    else:
+                        labels[i].config(image="", text="-")
+                except Exception:
+                    pass
 
     def _rescan_daya_slot(self, idx):
         """해당 슬롯 하나만 다야 OCR 재측정 (별도 프로세스 --slot)."""
