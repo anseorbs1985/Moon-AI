@@ -4535,7 +4535,9 @@ FIX_BTN_PAD    = 6                   # 버튼 그림 둘레 이만큼까지 본�
 #    탭을 바꾸면 목록이 **다시 그려지는 중**이라 그 순간에는 버튼이 회색이다.
 #    기록: 탭 누름 → **1초 뒤** "꺼져 있다" 로 끝냄. 화면에는 (1) 이 있었다.
 #    ⚠ 꺼져 있을 때만 더 본다 → 켜져 있으면 첫 번에 끝나 느려지지 않는다.
-FIX_ON_TRIES   = 6                   # 버튼이 켜질 때까지 다시 보는 횟수
+FIX_ON_TRIES   = 10                  # 버튼이 켜질 때까지 다시 보는 횟수
+#    ⏱ 2026-11-07 사용자: *"**좀 천천히 해도 되니까 제대로 좀** 해주라"* →
+#       6 → 10 (약 6초). 켜져 있으면 첫 번에 끝나므로 평소엔 안 느려진다.
 # 🖱 **확인은 여러 자리를 눌러본다 — 좌측부터** (2026-11-07 사용자:
 #    *"확인버튼을 여러군데로 눌러줘야 해. **제일 좌측으로** 눌러봐바"* ·
 #     *"**정품인증** 이것 때문에 안 눌려"*).
@@ -25708,7 +25710,7 @@ class App(tk.Tk):
         self._fix_tab_shot(si, big, nm + "_notab")
         return big, None
 
-    def _fix_btn_look(self, c1, names, si, ko, need_on=False, pick=None):
+    def _fix_btn_look(self, c1, names, si, ko, need_on=False):
         """🔁 그 **버튼**을 보일 때까지 다시 본다 -> (big, box, 이름).
 
         `names` 는 ((그림이름, 보여줄이름), ...) 순서 — **앞에 있는 것이 먼저**다
@@ -25729,12 +25731,11 @@ class App(tk.Tk):
         for _t in range(_n):
             big = grab_window(c1)
             if big is not None:
-                # 🖱 줄을 다시 골라야 켜지는 경우가 있다 (목록이 새로 그려지면 풀린다)
-                if need_on and pick and _t > 0:
-                    try:
-                        pick(big)
-                    except Exception:
-                        pass
+                # 🚫 **여기서는 아무것도 누르지 않는다** (2026-11-07 사용자:
+                #    *"왜 EXP 를 두 번 누르냐고. 한 번 누르고 아래 활성화되면
+                #      한 번 누르고 확인 한 번 누르고"*).
+                #    기다리는 함수는 **보기만** 한다 — 누르는 것은 부르는 쪽이
+                #    **한 번만** 한다. 🚫 pick(클릭)을 다시 넣지 말 것.
                 for _nm2, _ko2 in names:
                     bx = fix_tab_find(big, _nm2)
                     if bx:
@@ -25927,14 +25928,17 @@ class App(tk.Tk):
                     #     다야는 절대 사용하면 안 된다"*)
                     _hit = 0
                     for _f in range(FIX_FREE_TRIES):
-                        # 🔁 **보일 때까지 다시 본다** (2026-11-07) — 복구 직후에는
-                        #    목록이 다시 그려지는 중이라 한 번 찍어서는 안 보인다.
-                        #    예전엔 한 번 보고 못 찾으면 💎 + 끝 = "하나만 하고 꺼버린다".
-                        # 🕐 **켜진 버튼**을 찾을 때까지 본다 — 줄도 다시 골라준다
+                        # ① 🖱 **EXP(줄)를 한 번만 누른다** (2026-11-07 사용자:
+                        #    *"한 번 누르고 아래 활성화되면 한 번 누르고
+                        #      확인 한 번 누르고"* · *"딱딱딱 정확히"*)
+                        #    🚨 줄을 안 고르면 버튼이 **회색**이라 눌러도 안 먹는다.
+                        _rp = self._fix_row_pick(grab_window(c1), L, T, c2, si, _ko)
+                        # ② 🕐 버튼이 **켜질 때까지 보기만 한다** (클릭하지 않는다).
+                        #    복구 직후·탭 전환 직후에는 목록이 다시 그려지는 중이라
+                        #    그 순간에는 회색이다. 천천히 기다린다.
                         big, fb, _how = self._fix_btn_look(
                             c1, (("free", "일일무료복구"), ("cert", "구호증서복구")),
-                            si, _ko, need_on=True,
-                            pick=lambda b: self._fix_row_pick(b, L, T, c2, si, _ko))
+                            si, _ko, need_on=True)
                         if not fb:
                             # 🎨 **끝까지 꺼져 있었다** = 복구할 것이 없다 (💎 아님)
                             if _how == "OFF":
@@ -25953,12 +25957,8 @@ class App(tk.Tk):
                                           f"🚫 [복구](다야)는 쓰지 않는다 · 💎 다야!! 로 표시")
                                 self._fix_tab_shot(si, big, "free_none")
                             break
-                        # 🚨 **줄을 먼저 골라야 버튼이 켜진다** (2026-11-06 실측).
-                        #    안 고르면 [일일무료복구] 가 **회색(비활성)** 이라
-                        #    1.00 으로 정확히 눌러도 **아무 일도 안 난다**
-                        #    (3번 눌렀는데 '2건 남음' 그대로였다).
-                        #    🚫 이 '줄 고르기' 를 빼지 말 것.
-                        _rp = self._fix_row_pick(big, L, T, c2, si, _ko)
+                        # ③ ✅ 이제 **복구 버튼을 한 번** 누른다 (아래 click_at).
+                        #    🚫 여기서 줄을 또 누르지 말 것 — 위 ① 에서 이미 눌렀다.
                         tb4 = fix_tab_find(big, _nm) if big is not None else None
                         fx, fy = L + fb[0] + fb[2] // 2, T + fb[1] + fb[3] // 2
                         # 🚨 **[복구](다야) 자리면 절대 누르지 않는다** — 자리로 한 겹 더.
@@ -26038,11 +26038,11 @@ class App(tk.Tk):
                     #    원인이었다 (2026-11-07). 안 고르면 [모두 복구] 가 회색이라
                     #    1.00 으로 정확히 눌러도 **아무 일도 안 난다.**
                     #    🚫 이 줄 고르기를 빼지 말 것.
+                    # ① 🖱 **줄을 한 번만** 누른다 (안 고르면 버튼이 회색이다)
                     _rp = self._fix_row_pick(big, L, T, c2, si, _ko)
-                    # 🕐 **켜진 [모두 복구]** 를 찾을 때까지 본다 — 줄도 다시 골라준다
+                    # ② 🕐 **켜질 때까지 보기만 한다** (클릭하지 않는다)
                     big, ab, _ok2 = self._fix_btn_look(
-                        c1, (("all", "모두 복구"),), si, _ko, need_on=True,
-                        pick=lambda b: self._fix_row_pick(b, L, T, c2, si, _ko))
+                        c1, (("all", "모두 복구"),), si, _ko, need_on=True)
                     if not ab:
                         if _ok2 == "OFF":
                             break
