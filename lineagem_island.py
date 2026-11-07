@@ -1440,7 +1440,70 @@ def rasta_thr(j):
         return RASTA_MATCH
 
 
+class _DeadSlot(tuple):
+    """🪟 그 자리의 리니지M 창이 **없다**(팅겼다).
+
+    튜플처럼 풀리지만 **거짓**이라 `if not rc:` 로 걸러낼 수 있다.
+    좌표는 -32000(화면 밖) · 손잡이는 0 이라, 캡처하면 빈 그림이고 창 조작은 실패한다.
+    🚫 클로드는 이것을 `None` 으로 되돌리지 말 것 — `None` 이면 튜플을 푸는
+       사용처 33군데가 전부 터진다 (2026-11-07 실측).
+    """
+    __slots__ = ()
+
+    def __bool__(self):
+        return False
+
+
+def _grid_fit(wins, xi=0, yi=1):
+    """창 목록 → **16칸 자리표** (세로 열우선 01~16). 빈 칸은 `_DeadSlot`.
+
+    ① x 를 묶어 열, y 를 묶어 줄을 만든다 (각각 200px·150px 넘게 떨어지면 다른 묶음)
+    ② 창이 많은 순으로 **4열·4줄** 만 남긴다 (여분을 아래/옆에 세워둬도 안 섞인다)
+    ③ 창마다 **가장 가까운 열·줄**을 찾아 그 칸에 넣는다 → 빈 칸은 그대로 비어 있다
+    ⚠ 16개가 다 있으면 예전과 **똑같은 결과**가 나온다.
+    ⚠ 한 열이나 한 줄이 통째로 비면(4개가 같이 팅기면) 격자를 못 세워 None 이다."""
+    try:
+        if not wins:
+            return None
+        def _clump(vals, gap):
+            out, cur = [], [vals[0]]
+            for v in vals[1:]:
+                if v - cur[-1] > gap:
+                    out.append(cur); cur = [v]
+                else:
+                    cur.append(v)
+            out.append(cur)
+            return out
+        cols = _clump(sorted(w[xi] for w in wins), 200)
+        rows = _clump(sorted(w[yi] for w in wins), 150)
+        if len(cols) < 4 or len(rows) < 4:
+            return None
+        cols = sorted(sorted(cols, key=lambda c: -len(c))[:4], key=min)
+        rows = sorted(sorted(rows, key=lambda r: -len(r))[:4], key=min)
+        cx = [sum(c) / len(c) for c in cols]
+        ry = [sum(r) / len(r) for r in rows]
+        wide = len(wins[0])
+        hole = _DeadSlot(tuple(-32000 if i in (xi, yi) else 0 for i in range(wide)))
+        out = [hole] * 16
+        for w in wins:
+            ci = min(range(4), key=lambda i: abs(w[xi] - cx[i]))
+            ri = min(range(4), key=lambda i: abs(w[yi] - ry[i]))
+            if abs(w[xi] - cx[ci]) > 200 or abs(w[yi] - ry[ri]) > 150:
+                continue                      # 격자 밖에 세워둔 여분
+            k = ci * 4 + ri
+            if out[k] is hole:
+                out[k] = w
+        return out
+    except Exception:
+        return None
+
+
 def grid16(wins, xi=0, yi=1):
+    """🪟 **자리로** 슬롯을 정한다 — 팅겨서 빈 칸이 생겨도 번호가 안 밀린다."""
+    return _grid_fit(wins, xi, yi)
+
+
+def grid16_old(wins, xi=0, yi=1):
     """창 목록에서 **격자 16개만** 골라 슬롯 순서(01~16, 세로 열우선)로 돌려준다.
 
     (2026-10-13 사용자 지시: "16개를 초과해도 돌려주고 좌표상으로만 돌려줘.

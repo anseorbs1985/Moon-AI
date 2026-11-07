@@ -7583,6 +7583,64 @@ class WindowSizeLock:
             nap(0.3)
 
 
+class _DeadSlot(tuple):
+    """🪟 그 자리의 리니지M 창이 **없다**(팅겼다).
+
+    튜플처럼 풀리지만 **거짓**이라 `if not rc:` 로 걸러낼 수 있다.
+    좌표는 -32000(화면 밖) · 손잡이는 0 이라, 캡처하면 빈 그림이고 창 조작은 실패한다.
+    🚫 클로드는 이것을 `None` 으로 되돌리지 말 것 — `None` 이면 튜플을 푸는
+       사용처 33군데가 전부 터진다 (2026-11-07 실측).
+    """
+    __slots__ = ()
+
+    def __bool__(self):
+        return False
+
+
+def _grid_fit(wins, xi=0, yi=1):
+    """창 목록 → **16칸 자리표** (세로 열우선 01~16). 빈 칸은 `_DeadSlot`.
+
+    ① x 를 묶어 열, y 를 묶어 줄을 만든다 (각각 200px·150px 넘게 떨어지면 다른 묶음)
+    ② 창이 많은 순으로 **4열·4줄** 만 남긴다 (여분을 아래/옆에 세워둬도 안 섞인다)
+    ③ 창마다 **가장 가까운 열·줄**을 찾아 그 칸에 넣는다 → 빈 칸은 그대로 비어 있다
+    ⚠ 16개가 다 있으면 예전과 **똑같은 결과**가 나온다.
+    ⚠ 한 열이나 한 줄이 통째로 비면(4개가 같이 팅기면) 격자를 못 세워 None 이다."""
+    try:
+        if not wins:
+            return None
+        def _clump(vals, gap):
+            out, cur = [], [vals[0]]
+            for v in vals[1:]:
+                if v - cur[-1] > gap:
+                    out.append(cur); cur = [v]
+                else:
+                    cur.append(v)
+            out.append(cur)
+            return out
+        cols = _clump(sorted(w[xi] for w in wins), 200)
+        rows = _clump(sorted(w[yi] for w in wins), 150)
+        if len(cols) < 4 or len(rows) < 4:
+            return None
+        cols = sorted(sorted(cols, key=lambda c: -len(c))[:4], key=min)
+        rows = sorted(sorted(rows, key=lambda r: -len(r))[:4], key=min)
+        cx = [sum(c) / len(c) for c in cols]
+        ry = [sum(r) / len(r) for r in rows]
+        wide = len(wins[0])
+        hole = _DeadSlot(tuple(-32000 if i in (xi, yi) else 0 for i in range(wide)))
+        out = [hole] * 16
+        for w in wins:
+            ci = min(range(4), key=lambda i: abs(w[xi] - cx[i]))
+            ri = min(range(4), key=lambda i: abs(w[yi] - ry[i]))
+            if abs(w[xi] - cx[ci]) > 200 or abs(w[yi] - ry[ri]) > 150:
+                continue                      # 격자 밖에 세워둔 여분
+            k = ci * 4 + ri
+            if out[k] is hole:
+                out[k] = w
+        return out
+    except Exception:
+        return None
+
+
 class App(tk.Tk):
     def _tk_err(self, exc, val, tb):
         """🐞 **버튼을 눌러 난 예외**를 기록에 남긴다 (2026-11-04).
@@ -26343,6 +26401,11 @@ class App(tk.Tk):
 
     @staticmethod
     def _grid16(wins):
+        """🪟 **자리로** 슬롯을 정한다 — 팅겨서 빈 칸이 생겨도 번호가 안 밀린다."""
+        return _grid_fit(wins, 0, 1)
+
+    @staticmethod
+    def _grid16_old(wins):
         """창 목록에서 **격자 16개만** 고른다 → 슬롯 순서(01~16, 세로 열우선).
 
         (2026-10-13 사용자 지시: "16개를 초과해도 돌려주고 좌표상으로만 돌려줘.
@@ -32370,7 +32433,8 @@ class App(tk.Tk):
         src = clip["src"]; note = ""
         if src != idx:
             rects = self._client_rects_by_slot()
-            if rects:
+            # 🪟 둘 중 하나라도 **팅겨서 빈 자리**면 보정하지 않는다 (2026-11-07)
+            if rects and rects[idx] and rects[src]:
                 dx = rects[idx][0] - rects[src][0]
                 dy = rects[idx][1] - rects[src][1]
                 for c in shifted:
@@ -32409,12 +32473,16 @@ class App(tk.Tk):
                     f"#{src+1:02d} 의 좌표를 16슬롯 전부에 붙입니다. 슬롯마다 클라 위치로 자동보정됩니다. 기존 좌표는 덮어써집니다. 계속할까요?"):
                 return
         slots = self.cfg.get(sp["key"]) or []
-        cnt = 0
+        cnt = 0; _dead = []
         for idx in range(min(16, len(slots))):
             if idx == src:
                 continue                     # 원본은 그대로
+            # 🪟 그 자리의 클라가 **팅겨서 없으면 비워두고 넘어간다** (2026-11-07
+            #    사용자 지시: "빈 공간이 있으면 그 빈 공간을 비워두고 계속 실행")
+            if rects and not rects[idx]:
+                _dead.append(idx + 1); continue
             shifted = copy.deepcopy(clip["coords"])
-            if rects:
+            if rects and rects[src]:
                 dx = rects[idx][0] - rects[src][0]
                 dy = rects[idx][1] - rects[src][1]
                 for c in shifted:
@@ -32430,7 +32498,8 @@ class App(tk.Tk):
         _n = sum(1 for c in clip["coords"] if c)
         self.status.set(f"✔ {sp['title']} 전체붙임 완료 — #{src+1:02d} 의 좌표 {_n}개를 "
                         f"{cnt}개 슬롯에 붙였습니다"
-                        + ("" if rects else " (⚠ 클라 감지 실패 — 위치 보정 없음)"))
+                        + ("" if rects else " (⚠ 클라 감지 실패 — 위치 보정 없음)")
+                        + (f" · 🪟 팅긴 자리 {_dead} 는 비워뒀습니다" if _dead else ""))
 
     # ── 공용 그리드 (연속클릭/주말던전끄기 — 슬롯당 좌표 1개) ──
     def _build_flat_grid(self, parent, fkey):
@@ -32567,7 +32636,8 @@ class App(tk.Tk):
         x, y = clip["coord"]; src = clip["src"]; note = ""
         if src != idx:
             rects = self._client_rects_by_slot()
-            if rects:
+            # 🪟 둘 중 하나라도 **팅겨서 빈 자리**면 보정하지 않는다 (2026-11-07)
+            if rects and rects[idx] and rects[src]:
                 x += rects[idx][0] - rects[src][0]
                 y += rects[idx][1] - rects[src][1]
                 note = " — 클라이언트 위치 자동보정"
@@ -32609,12 +32679,14 @@ class App(tk.Tk):
         while len(slots) < 16:
             slots.append(None)
         bx, by = clip["coord"]
-        cnt = 0
+        cnt = 0; _dead = []
         for idx in range(16):
             if idx == src:
                 continue                       # 원본은 그대로
+            if rects and not rects[idx]:       # 🪟 팅긴 자리는 비워둔다
+                _dead.append(idx + 1); continue
             x, y = int(bx), int(by)
-            if rects:
+            if rects and rects[src]:
                 x += rects[idx][0] - rects[src][0]
                 y += rects[idx][1] - rects[src][1]
             slots[idx] = [x, y]
@@ -32631,7 +32703,8 @@ class App(tk.Tk):
                     pass
         self.status.set(f"✔ {sp['title']} 전체붙임 완료 — #{src+1:02d} 좌표를 "
                         f"{cnt}개 슬롯에 붙였습니다"
-                        + ("" if rects else " (⚠ 클라 감지 실패 — 위치 보정 없음)"))
+                        + ("" if rects else " (⚠ 클라 감지 실패 — 위치 보정 없음)")
+                        + (f" · 🪟 팅긴 자리 {_dead} 는 비워뒀습니다" if _dead else ""))
 
     def _flat_preview(self, fkey, idx):
         sp = self._flat_spec(fkey)
@@ -32703,7 +32776,8 @@ class App(tk.Tk):
         note = ""
         if src is not None and src != idx:
             rects = self._client_rects_by_slot()
-            if rects:
+            # 🪟 둘 중 하나라도 **팅겨서 빈 자리**면 보정하지 않는다 (2026-11-07)
+            if rects and rects[idx] and rects[src]:
                 dx = rects[idx][0] - rects[src][0]
                 dy = rects[idx][1] - rects[src][1]
                 for c in shifted:
@@ -32751,12 +32825,14 @@ class App(tk.Tk):
                 f"자동보정됩니다. 기존 좌표는 덮어써집니다. 계속할까요?"):
             return
         _nm = getattr(self, "_doll_clip_name", "")
-        cnt = 0
+        cnt = 0; _dead = []
         for idx in range(min(DOLL_SLOTS, len(self.cfg.get("doll_slots") or []))):
             if idx == src:
                 continue                       # 원본은 그대로
+            if rects and not rects[idx]:       # 🪟 팅긴 자리는 비워둔다
+                _dead.append(idx + 1); continue
             shifted = copy.deepcopy(clip)
-            if rects:
+            if rects and rects[src]:
                 dx = rects[idx][0] - rects[src][0]
                 dy = rects[idx][1] - rects[src][1]
                 for c in shifted:
@@ -32778,7 +32854,8 @@ class App(tk.Tk):
         _n = sum(1 for c in clip if c)
         self.status.set(f"✔ 인형탐험 전체붙임 완료 — #{src+1:02d} 의 좌표 {_n}개를 "
                         f"{cnt}개 슬롯에 붙였습니다"
-                        + ("" if rects else " (⚠ 클라 감지 실패 — 위치 보정 없음)"))
+                        + ("" if rects else " (⚠ 클라 감지 실패 — 위치 보정 없음)")
+                        + (f" · 🪟 팅긴 자리 {_dead} 는 비워뒀습니다" if _dead else ""))
 
     def _doll_wait(self, sec):
         end = time.time() + sec
@@ -34420,6 +34497,12 @@ class App(tk.Tk):
                 random.shuffle(targets)   # 슬롯 실행 순서 매번 랜덤
             # 🧭 기준 슬롯(#05) 확장 확인 — 과거섬도 같은 옆 바를 쓴다
             self._base_expand_ok("🏝 과거섬")
+            # 🗒 **기록이 없으면 원격에서 아무것도 짚을 수 없다** (2026-11-07).
+            #    예전엔 한 줄도 안 남겨서 "몇 개 하고 아웃된다" 를 볼 자료가 0 이었다.
+            #    🚫 클로드는 이 기록을 지우지 말 것.
+            _t0 = time.time(); _done = 0
+            click_log(f"[past] ▶ 시작 — 돌 슬롯 {len(targets)}개 "
+                      f"{[i+1 for i, _ in targets]} (순서는 매번 랜덤)")
             for si, slot in targets:
                 if self._past_stop: break
                 name   = slot.get("name", f"#{si+1}")
@@ -34433,29 +34516,46 @@ class App(tk.Tk):
                     nap(0.5); elapsed += 0.5
                 if self._past_stop: break
                 # 0: 클릭1(신규) → 1: 마우스이동(hover) → 2: 클릭
+                _step = []
                 if coords[0]:
                     self.status.set(f"🏝 [{name}] 클릭1...")
                     pyautogui.click(*coords[0])
+                    _step.append(f"클릭1{tuple(coords[0])}")
                     nap(random.uniform(3.0, 6.0) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._past_stop: break
                 if coords[1]:
                     self.status.set(f"🏝 [{name}] 마우스 이동...")
                     self._hover_move("past", coords[1], name, si=si,
                                      move_fn=lambda x, y: pyautogui.moveTo(x, y))
+                    _step.append("마우스올림")
                     nap(random.uniform(3.0, 5.0) + random.uniform(EXTRA_GAP_MIN, EXTRA_GAP_MAX))
                 if self._past_stop: break
                 if len(coords) > 2 and coords[2]:
                     self.status.set(f"🏝 [{name}] 클릭2...")
-                    self._row_click("past", coords[2], name, si=si,
-                                    click_fn=lambda x, y: pyautogui.click(x, y))
+                    _ok2 = self._row_click("past", coords[2], name, si=si,
+                                           click_fn=lambda x, y: pyautogui.click(x, y))
+                    _step.append("클릭2 ✔" if _ok2 else "클릭2 **못 눌렀다**")
+                click_log(f"[past] #{si+1:02d} [{name}] " + (" → ".join(_step) or "할 것 없음"))
+                _done += 1
                 if self._past_stop: break
                 # 슬롯 간 대기 (가끔 긴 휴식)
                 pause = random.uniform(4.0, 8.0)
                 if random.random() < 0.25:
                     pause += random.uniform(3.0, 7.0)
                 nap(pause)
+            if self._past_stop:
+                click_log(f"[past] ⏹ **[■ 멈춤] 으로 중단** — {_done}/{len(targets)}개 "
+                          f"하고 멈췄다 ({time.time()-_t0:.0f}초)")
+            else:
+                click_log(f"[past] ✅ 끝 — {_done}/{len(targets)}개 "
+                          f"({time.time()-_t0:.0f}초)")
             self.status.set("✔ 과거의말하는섬 완료!")
         except Exception as e:
+            # 🚨 예전엔 상태줄에만 적었다. 실행하면 창을 최소화하므로 **아무도 못 본다**
+            #    → "몇 개 하고 아웃된다" 의 이유를 영영 알 수 없었다.
+            import traceback
+            click_log(f"[past] 🐞 **오류로 중단** {type(e).__name__}: {e} "
+                      f"| {traceback.format_exc().splitlines()[-2].strip()}")
             self.status.set(f"오류: {e}")
         finally:
             self.after(0, self._restore_back)
