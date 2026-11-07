@@ -4526,6 +4526,11 @@ FIX_ALL_TRIES  = 3                   # 아이템 탭에서 [모두 복구] 를 �
 FIX_BTN_BRIGHT = 10                  # 버튼 둘레에 밝은 픽셀이 이보다 적으면 **꺼져 있다**
 FIX_BTN_V      = 120                 # 이보다 밝으면 밝은 픽셀
 FIX_BTN_PAD    = 6                   # 버튼 그림 둘레 이만큼까지 본다
+# 🕐 **켜질 때까지 기다린다** (2026-11-07 — 1초 만에 포기하던 것).
+#    탭을 바꾸면 목록이 **다시 그려지는 중**이라 그 순간에는 버튼이 회색이다.
+#    기록: 탭 누름 → **1초 뒤** "꺼져 있다" 로 끝냄. 화면에는 (1) 이 있었다.
+#    ⚠ 꺼져 있을 때만 더 본다 → 켜져 있으면 첫 번에 끝나 느려지지 않는다.
+FIX_ON_TRIES   = 6                   # 버튼이 켜질 때까지 다시 보는 횟수
 # 🖱 **확인은 여러 자리를 눌러본다 — 좌측부터** (2026-11-07 사용자:
 #    *"확인버튼을 여러군데로 눌러줘야 해. **제일 좌측으로** 눌러봐바"* ·
 #     *"**정품인증** 이것 때문에 안 눌려"*).
@@ -25692,7 +25697,7 @@ class App(tk.Tk):
         self._fix_tab_shot(si, big, nm + "_notab")
         return big, None
 
-    def _fix_btn_look(self, c1, names, si, ko):
+    def _fix_btn_look(self, c1, names, si, ko, need_on=False, pick=None):
         """🔁 그 **버튼**을 보일 때까지 다시 본다 -> (big, box, 이름).
 
         `names` 는 ((그림이름, 보여줄이름), ...) 순서 — **앞에 있는 것이 먼저**다
@@ -25705,23 +25710,49 @@ class App(tk.Tk):
         🗒 못 찾으면 최고 점수를 남긴다 — 기준이 모자란 것인지,
            정말 없는 것인지 가릴 수 있는 유일한 통로다."""
         big, best, bko = None, 0.0, ""
-        for _t in range(FIX_TAB_TRIES):
+        # 🕐 `need_on` 이면 **켜질 때까지** 본다 (2026-11-07) — 탭을 바꾼 직후에는
+        #    목록이 다시 그려지는 중이라 버튼이 회색이다. 1초 만에 포기하면
+        #    **복구할 것이 있는데도 "없다" 로 넘어간다** (사용자 신고).
+        _n = max(FIX_TAB_TRIES, FIX_ON_TRIES) if need_on else FIX_TAB_TRIES
+        _off, _last = [], None
+        for _t in range(_n):
             big = grab_window(c1)
             if big is not None:
+                # 🖱 줄을 다시 골라야 켜지는 경우가 있다 (목록이 새로 그려지면 풀린다)
+                if need_on and pick and _t > 0:
+                    try:
+                        pick(big)
+                    except Exception:
+                        pass
                 for _nm2, _ko2 in names:
                     bx = fix_tab_find(big, _nm2)
                     if bx:
-                        return big, bx, _ko2
+                        if not need_on:
+                            return big, bx, _ko2
+                        _on, _bn = fix_btn_on(big, bx)
+                        if _on:
+                            if _off:
+                                click_log(f"fix #{si:02d} 🕐 [{ko}] **{_t+1}번째에 "
+                                          f"켜졌다** (밝은 픽셀 {_bn} · 그 전 {_off})")
+                            return big, bx, _ko2
+                        _off.append(_bn); _last = _ko2
+                        break
                     try:
                         _b = fix_tab_find(big, _nm2, lo=True)
                         if _b and float(_b[4]) > best:
                             best, bko = float(_b[4]), _ko2
                     except Exception:
                         pass
-            if _t < FIX_TAB_TRIES - 1:
+            if _t < _n - 1:
                 self._fix_nap(*FIX_TAB_RETRY)
+        if _off:
+            # 🎨 찾기는 했는데 **끝까지 꺼져 있었다** = 복구할 것이 없다
+            click_log(f"fix #{si:02d} 🎨 [{ko}] **[{_last}] 가 끝까지 꺼져 있다** "
+                      f"(밝은 픽셀 {_off} · 기준 {FIX_BTN_BRIGHT} · {_n}번 봤다) "
+                      f"— 복구할 것이 없다")
+            return big, None, "OFF"
         click_log(f"fix #{si:02d} 🔁 [{ko}] 버튼을 못 찾았다 "
-                  f"({FIX_TAB_TRIES}번 봤다 · 가장 닮은 것 {bko or chr(45)} "
+                  f"({_n}번 봤다 · 가장 닮은 것 {bko or chr(45)} "
                   f"{best:.2f} · 기준 {FIX_TAB_MATCH})")
         return big, None, ""
 
@@ -25867,10 +25898,15 @@ class App(tk.Tk):
                         # 🔁 **보일 때까지 다시 본다** (2026-11-07) — 복구 직후에는
                         #    목록이 다시 그려지는 중이라 한 번 찍어서는 안 보인다.
                         #    예전엔 한 번 보고 못 찾으면 💎 + 끝 = "하나만 하고 꺼버린다".
+                        # 🕐 **켜진 버튼**을 찾을 때까지 본다 — 줄도 다시 골라준다
                         big, fb, _how = self._fix_btn_look(
                             c1, (("free", "일일무료복구"), ("cert", "구호증서복구")),
-                            si, _ko)
+                            si, _ko, need_on=True,
+                            pick=lambda b: self._fix_row_pick(b, L, T, c2, si, _ko))
                         if not fb:
+                            # 🎨 **끝까지 꺼져 있었다** = 복구할 것이 없다 (💎 아님)
+                            if _how == "OFF":
+                                break
                             # 🔢 **다 한 것**과 **다야뿐인 것**을 가린다 —
                             #    한 번이라도 했고 숫자가 사라졌으면 '다 했다'.
                             tbz = fix_tab_find(big, _nm) if big is not None else None
@@ -25892,21 +25928,6 @@ class App(tk.Tk):
                         #    🚫 이 '줄 고르기' 를 빼지 말 것.
                         _rp = self._fix_row_pick(big, L, T, c2, si, _ko)
                         tb4 = fix_tab_find(big, _nm) if big is not None else None
-                        # 🎨 **줄을 고른 뒤에도 꺼져 있으면 할 게 없다** (2026-11-07).
-                        #    회색 버튼을 1.00 으로 찾아 **5번 헛눌렀던** 그 자리다.
-                        #    🚫 💎 를 붙이지 않는다 — 다야가 아니라 **할 일이 없는 것**.
-                        try:
-                            big = grab_window(c1) or big
-                            fb2 = fix_tab_find(big, "free") or fix_tab_find(big, "cert")
-                        except Exception:
-                            fb2 = None
-                        _on, _bn = fix_btn_on(big, fb2 or fb)
-                        if not _on:
-                            click_log(f"fix #{si:02d} 🎨 [{_ko}] **[{_how}] 가 "
-                                      f"꺼져 있다** (밝은 픽셀 {_bn} < {FIX_BTN_BRIGHT}) "
-                                      f"— 복구할 것이 없다. 누르지 않고 끝낸다 "
-                                      f"({_hit}번 했다)")
-                            break
                         fx, fy = L + fb[0] + fb[2] // 2, T + fb[1] + fb[3] // 2
                         # 🚨 **[복구](다야) 자리면 절대 누르지 않는다** — 자리로 한 겹 더.
                         #    🚨 **다만 [일일무료복구] 일 때는 자리를 보지 않는다**
@@ -25987,9 +26008,13 @@ class App(tk.Tk):
                     #    1.00 으로 정확히 눌러도 **아무 일도 안 난다.**
                     #    🚫 이 줄 고르기를 빼지 말 것.
                     _rp = self._fix_row_pick(big, L, T, c2, si, _ko)
-                    big, ab, _ = self._fix_btn_look(
-                        c1, (("all", "모두 복구"),), si, _ko)
+                    # 🕐 **켜진 [모두 복구]** 를 찾을 때까지 본다 — 줄도 다시 골라준다
+                    big, ab, _ok2 = self._fix_btn_look(
+                        c1, (("all", "모두 복구"),), si, _ko, need_on=True,
+                        pick=lambda b: self._fix_row_pick(b, L, T, c2, si, _ko))
                     if not ab:
+                        if _ok2 == "OFF":
+                            break
                         if _ihit:
                             click_log(f"fix #{si:02d} 📦 [{_ko}] **다 했다** "
                                       f"({_ihit}번) — [모두 복구] 가 사라졌다")
@@ -25997,13 +26022,6 @@ class App(tk.Tk):
                             click_log(f"fix #{si:02d} 🚫 [{_ko}] **[모두 복구] 를 "
                                       f"못 찾았다** — 아무것도 누르지 않는다")
                             self._fix_tab_shot(si, big, _nm)
-                        break
-                    # 🎨 **꺼져 있으면 할 게 없다** (2026-11-07 — 경험치와 같은 이유)
-                    _on, _bn = fix_btn_on(big, ab)
-                    if not _on:
-                        click_log(f"fix #{si:02d} 🎨 [{_ko}] **[모두 복구] 가 "
-                                  f"꺼져 있다** (밝은 픽셀 {_bn} < {FIX_BTN_BRIGHT}) "
-                                  f"— 복구할 것이 없다 ({_ihit}번 했다)")
                         break
                     mx, my = L + ab[0] + ab[2] // 2, T + ab[1] + ab[3] // 2
                     click_at(mx, my)
