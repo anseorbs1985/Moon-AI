@@ -8424,8 +8424,12 @@ class IslandApp(tk.Tk):
                     if not did:
                         continue
                     # 📍 누른 좌표를 남긴다 (2026-11-03) — 웨이브와 **한 쌍**이다
-                    _cj = coords[j] if j < len(coords) else None
-                    _xy = (f" ({_cj[0]},{_cj[1]})" if _cj else "") + (" +녹화" if rec else "")
+                    # ⚠ 그림·카드 자리는 **좌표를 누르지 않는다** — 그런데 여기서
+                    #    coords[j] 를 찍어 '좌표도 눌렀다' 로 보였다 (2026-11-07 오해).
+                    #    누른 것만 적는다.
+                    _cj = (coords[j] if j < len(coords) else None) if _rm not in RASTA_FIRST else None
+                    _xy = (f" ({_cj[0]},{_cj[1]})" if _cj else
+                           (f" [{_rm}]" if _rm in RASTA_FIRST else "")) + (" +녹화" if rec else "")
                     self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) 실행{_xy}")
                     # 🚪 **첫 좌표(절전해제)를 누른 바로 다음에** 창을 확인한다.
                     #    ⚠ 그 전에 보면 **절전 화면이 인벤토리를 덮고 있어 안 보인다**
