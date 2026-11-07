@@ -184,6 +184,43 @@ def load_coord_lock():
         return set(), set()
 
 
+def load_done(done_p):
+    """↩ '이 컴퓨터에서 이미 했다' 표시를 읽는다 — 항상 **사전**으로 돌려준다.
+    (%LOCALAPPDATA%\\MoonAI\\restore_done.json — 머신별 파일이라 git과 무관)
+
+    ⚠ 이 파일은 그동안 **두 가지 형식**으로 쓰여 왔다:
+      · `apply_restore_order`         → 목록  ["20260819_lastrun_rollback"]
+      · `fix_omanst_floor_once` ·
+        `restore_local_coords_once`   → 사전  {"20261105_omanst_floor": "…"}
+    목록이 들어 있는 컴퓨터에서 사전 쪽이 `done.get(…)` 을 불러
+    **'list' object has no attribute 'get' 으로 업데이트 파일복사가 통째로 멈췄다**
+    (2026-11-08 — `fix_omanst_floor_once` 는 자기 try/except 가 없어서 예외가
+    파일복사 핸들러까지 올라갔다. 그 뒤에 있는 `click_templates` 배포가
+    영영 건너뛰어져, 수호성·복구 그림이 저장소엔 있는데 바탕화면엔 없었다.
+    실측: 막혀 있던 파일 92개. 🔄 를 몇 번 눌러도 같은 자리에서 실패).
+
+    🚫 클로드는 이 함수를 거치지 않고 `restore_done.json` 을 직접 읽지 말 것.
+       형식이 또 갈리면 같은 사고가 돌아온다."""
+    try:
+        with open(done_p, encoding="utf-8") as fp:
+            d = json.load(fp)
+    except Exception:
+        return {}
+    if isinstance(d, list):                  # 옛 형식(목록) → 사전으로 맞춘다
+        return {str(x): True for x in d}
+    return d if isinstance(d, dict) else {}
+
+
+def save_done(done_p, done):
+    """위 표시를 **사전 형식으로** 저장한다 (실패해도 조용히 넘어간다)."""
+    try:
+        os.makedirs(os.path.dirname(done_p), exist_ok=True)
+        with open(done_p, "w", encoding="utf-8") as fp:
+            json.dump(done, fp, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
 def sync_times(log):
     # 🔒🔒 간격(gap_list)도 island_coords.json 을 고치는 길이라 함께 막는다
     if NEVER_ISLAND:
@@ -451,19 +488,13 @@ def apply_restore_order(log):
             return
         ldir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
         done_p = os.path.join(ldir, "restore_done.json")
-        try:
-            with open(done_p, encoding="utf-8") as f:
-                done = json.load(f) or []
-        except Exception:
-            done = []
+        done = load_done(done_p)
         if oid in done:
             return                                    # 이미 되돌린 컴퓨터
         if str(order.get("mode") or "") == "last_run":
             _restore_last_run(log, order)
-            done.append(oid)
-            os.makedirs(ldir, exist_ok=True)
-            with open(done_p, "w", encoding="utf-8") as f:
-                json.dump(done, f, ensure_ascii=False, indent=2)
+            done[oid] = time.strftime("%Y-%m-%d %H:%M:%S")
+            save_done(done_p, done)
             return
         bdir = os.path.join(ldir, "backups")
         if not os.path.isdir(bdir):
@@ -528,10 +559,8 @@ def apply_restore_order(log):
             log(f"   ↩ 좌표 되돌림 — {', '.join(msgs)}"
                 + (" (녹화는 지금 것 그대로)" if keep else ""))
             log(f"      되돌리기 직전 상태는 backups\\{now}_before_restore_* 에 백업")
-        done.append(oid)
-        os.makedirs(ldir, exist_ok=True)
-        with open(done_p, "w", encoding="utf-8") as f:
-            json.dump(done, f, ensure_ascii=False, indent=2)
+        done[oid] = time.strftime("%Y-%m-%d %H:%M:%S")
+        save_done(done_p, done)
     except Exception as e:
         log(f"   ⚠ 되돌리기 실패: {e}")
 
@@ -1851,21 +1880,13 @@ def fix_omanst_floor_once(log):
         return
     ldir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
     done_p = os.path.join(ldir, "restore_done.json")
-    try:
-        done = json.load(open(done_p, encoding="utf-8")) if os.path.exists(done_p) else {}
-    except Exception:
-        done = {}
+    done = load_done(done_p)
     if done.get(FLOOR_FIX_ID):
         return                                   # 이 컴퓨터에서 이미 했다
 
     def _mark():
-        try:
-            os.makedirs(ldir, exist_ok=True)
-            done[FLOOR_FIX_ID] = time.strftime("%Y-%m-%d %H:%M:%S")
-            with open(done_p, "w", encoding="utf-8") as f:
-                json.dump(done, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        done[FLOOR_FIX_ID] = time.strftime("%Y-%m-%d %H:%M:%S")
+        save_done(done_p, done)
 
     K, FI = FLOOR_FIX_KEY, FLOOR_FIX_IDX
     try:
@@ -1988,10 +2009,7 @@ def restore_local_coords_once(log):
         return          # 지시서가 비어 있으면 아무것도 하지 않는다 (기본값)
     ldir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
     done_p = os.path.join(ldir, "restore_done.json")
-    try:
-        done = json.load(open(done_p, encoding="utf-8")) if os.path.exists(done_p) else {}
-    except Exception:
-        done = {}
+    done = load_done(done_p)
     if done.get(COORDS_ROLLBACK_ID):
         return                                   # 이 컴퓨터에서 이미 했다
     dst = os.path.join(DESK, "coords.json")
@@ -2045,9 +2063,7 @@ def restore_local_coords_once(log):
             json.dump(data, f, ensure_ascii=False, indent=2)
         _coords_guard_resnap(data)               # 잠금이 이걸 되돌리지 않게
         done[COORDS_ROLLBACK_ID] = time.strftime("%Y-%m-%d %H:%M:%S")
-        os.makedirs(ldir, exist_ok=True)
-        with open(done_p, "w", encoding="utf-8") as f:
-            json.dump(done, f, ensure_ascii=False, indent=2)
+        save_done(done_p, done)
         log(f"   🔁 좌표 되돌리기 ✔ {tag} 에서 복원 — 좌표 {now_cnt}개 → {cnt}개 "
             f"({os.path.basename(path)}) · 직전 상태는 backups 에 보관")
     except Exception as e:
@@ -2222,18 +2238,27 @@ def main():
                 else:
                     log(f"   ⚠ {f} 복사 검증 실패 — 업데이트를 한 번 더 실행해주세요")
             if not is_main:
+                # ⚠ 동기화 하나가 터져도 **파일복사를 멈추지 않는다** (2026-11-08).
+                #   `fix_omanst_floor_once` 가 예외를 흘려서, 뒤에 있는
+                #   `click_templates` 배포가 통째로 건너뛰어지는 사고가 있었다
+                #   (막혀 있던 파일 92개 — 수호성·복구 그림이 안 넘어왔다).
+                #   🚫 이 감싸기를 없애지 말 것 — 하나가 실패해도 나머지는 받아야 한다.
                 # 🔁 먼저 이 컴퓨터 자기 백업으로 좌표를 되돌린다 (한 번만).
                 #    그 위에 아래 동기화(허락한 항목)가 얹힌다.
-                restore_local_coords_once(log)
-                sync_times(log)          # 좌표는 그대로, 시간만 메인과 맞춤
-                sync_coord_keys(log)     # 지정한 항목(낚시녹임 등)만 좌표도 받음
-                sync_coord_fix(log)      # 📏 역산된 **좌표만** (ON/OFF·설정은 그대로)
-                sync_island_keys(log)    # 지정한 던전은 통째로 받음
-                sync_recs(log)           # 지정한 녹화(⏺)만 받음 — 좌표는 그대로
-                # 🏢 동기화가 **얹힌 뒤에** 오만의탑 층을 되살린다 (한 번만).
-                #    순서가 중요하다 — 앞에 두면 sync_island_keys 가 또 덮는다.
-                fix_omanst_floor_once(log)
-                apply_restore_order(log)  # 되돌리기 지시가 있으면 한 번만 수행
+                # 🏢 오만의탑 층은 동기화가 **얹힌 뒤에** 되살린다 (한 번만) —
+                #    순서가 중요하다. 앞에 두면 sync_island_keys 가 또 덮는다.
+                for _syn, _nm in ((restore_local_coords_once, "좌표 되돌리기"),
+                                  (sync_times,       "시간 동기화"),
+                                  (sync_coord_keys,  "항목 좌표 동기화"),
+                                  (sync_coord_fix,   "역산 좌표 동기화"),
+                                  (sync_island_keys, "던전 동기화"),
+                                  (sync_recs,        "녹화 동기화"),
+                                  (fix_omanst_floor_once, "오만의탑 층 복구"),
+                                  (apply_restore_order,   "되돌리기 지시")):
+                    try:
+                        _syn(log)
+                    except Exception as _se:
+                        log(f"   ⚠ {_nm} 실패(건너뜀): {_se}")
             # 섬/던전 창 위치(island_win_pos.json)도 메인 것을 받는다
             try:
                 src_w = os.path.join(REPO, "island_win_pos.json")
@@ -2350,7 +2375,13 @@ def main():
                                  for x in ((json.load(_f) or {}).get("files") or [])]
             except Exception as e:
                 log(f"   ⚠ 배포 제외 목록 읽기 실패: {e}")
-            import fnmatch as _fn
+            # 🚫 별명을 `_fn` 으로 되돌리지 말 것 — 아래 키설정교체 배포의
+            #    `for _fn in os.listdir(...)` 가 이 모듈을 **문자열로 덮어써서**,
+            #    share_skip.json 에 한 줄만 들어가면 `_fn.fnmatch` 가
+            #    'str' object has no attribute 'fnmatch' 로 터지고
+            #    **파일복사가 통째로 멈춘다** (2026-11-08 — 같은 종류의 사고를
+            #    restore_done.json 형식에서 이미 한 번 당했다).
+            import fnmatch as _fnm
             # 십자가 기준 그림 — %LOCALAPPDATA%\MoonAI\check_ref.png 로 받는다
             # (경고영역 check_area_rel 은 share_coords 로 함께 온다, 2026-08-29)
             try:
@@ -2457,14 +2488,14 @@ def main():
                 os.makedirs(ddir, exist_ok=True)
                 _sk = 0
                 for fn in os.listdir(sdir):
-                    if any(_fn.fnmatch(f"{d}/{fn}", pat) for pat in _skip):
+                    if any(_fnm.fnmatch(f"{d}/{fn}", pat) for pat in _skip):
                         _sk += 1
                         continue                      # 제외 목록 — 로컬 것 그대로
                     pass
                 if _sk:
                     log(f"   배포 제외 — {d}: {_sk}개 (로컬 것 그대로 둠)")
                 for fn in os.listdir(sdir):
-                    if any(_fn.fnmatch(f"{d}/{fn}", pat) for pat in _skip):
+                    if any(_fnm.fnmatch(f"{d}/{fn}", pat) for pat in _skip):
                         continue
                     sp_, dp_ = os.path.join(sdir, fn), os.path.join(ddir, fn)
                     # 크기만 비교하면 '내용은 바뀌었는데 크기가 같은' 파일을 놓친다 —
