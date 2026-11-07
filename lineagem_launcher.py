@@ -26661,6 +26661,16 @@ class App(tk.Tk):
                               + self._warn_score_txt(si))
                     self.status.set(f"🔁 복구 #{si:02d} — **예전 좌표 방식**으로 "
                                     f"다시 합니다")
+                    # 🚪 **창을 확실히 닫고 간다** (2026-11-08) — 복구 창이
+                    #    열린 채로 예전 흐름을 돌리면 **칸1(십자가)이 그 창에
+                    #    가려 엉뚱한 곳이 눌린다** (사용자: *"16번 클라 화면처럼
+                    #    떠버려 아무것도 못 해"*).
+                    try:
+                        press_esc(1)
+                        self._fix_nap(0.3, 0.5)
+                        self._fix_quit_clear(si, anc, "폴백 전 닫기")
+                    except Exception:
+                        pass
                     try:
                         self.after(300, lambda i=idx:
                                    self._start_dgn2("fix", sel_list=[i]))
@@ -26764,6 +26774,24 @@ class App(tk.Tk):
                                lambda: self._fix_verify(si, tries - 1, marked))
                     return
                 self._fix_gone2.pop(int(si), None)
+                # 🎯 **경험치만 하고 닫은 판이면 아이템을 한 번 더 확인한다**
+                #    (2026-11-08). 경험치를 복구하면 **십자가가 잠깐 사라진다** —
+                #    그때 여기서 끝내버려 **아이템 복구를 영영 안 했다.**
+                #    (사용자: *"여전히 아이템 복구는 안 되고"*)
+                #    아이템도 할 게 없으면 그 판이 조용히 끝나고 그때 지워진다.
+                #    🚫 이 확인을 빼지 말 것.
+                try:
+                    if int(si) in getattr(self, "_fix_more", set()):
+                        self._fix_more.discard(int(si))
+                        click_log(f"fix #{si:02d} 🎯 십자가는 사라졌지만 "
+                                  f"**아이템 복구를 한 번 더 확인한다** "
+                                  f"(경험치를 복구하면 십자가가 잠깐 사라진다)")
+                        self.status.set(f"🔁 복구 #{si:02d} — 경험치 끝, "
+                                        f"**아이템**을 한 번 더 봅니다")
+                        self.after(600, lambda i=si: self._run_fix_slot(i))
+                        return
+                except Exception:
+                    pass
                 # 십자가가 사라졌다 = 복구됨
                 self._fix_paid_mark(int(si), False)
                 self._warn_remove(int(si))
