@@ -4516,6 +4516,25 @@ FIX_FREE_TRIES = 5                   # 경험치 탭에서 [일일무료복구] 
 #    🚫 멈추는 조건은 **버튼이 사라졌을 때**다 — 탭 숫자로 멈추면
 #       화면이 덜 그려진 한 순간에 통째로 끝난다 (2026-11-06 교훈).
 FIX_ALL_TRIES  = 3                   # 아이템 탭에서 [모두 복구] 를 누를 최대 횟수
+# 🚨 **회색(비활성) 버튼은 누르지 않는다** (2026-11-07 — 헛클릭 5번의 원인).
+#    `TM_CCOEFF_NORMED` 는 밝기에 둔감해 **회색이어도 1.00** 으로 찾는다.
+#    📏 실측 (16번 · 저장된 화면 5개 전부 같다):
+#       비활성 [일일무료복구]  파란 픽셀 **0개** · 밝은 픽셀(>120) **0개** · 평균 29.9
+#       그때 목록 5칸은 전부 검정(평균 22~27) = **복구할 것이 없다**
+#    파란 버튼이면 글자(흰색)+배경(파랑)으로 밝은 픽셀이 수백 개 나온다.
+#    🚫 이 확인을 없애지 말 것 — 없애면 또 5번 헛누르고 💎 를 잘못 붙인다.
+FIX_BTN_BRIGHT = 10                  # 버튼 둘레에 밝은 픽셀이 이보다 적으면 **꺼져 있다**
+FIX_BTN_V      = 120                 # 이보다 밝으면 밝은 픽셀
+FIX_BTN_PAD    = 6                   # 버튼 그림 둘레 이만큼까지 본다
+# 🖱 **확인은 여러 자리를 눌러본다 — 좌측부터** (2026-11-07 사용자:
+#    *"확인버튼을 여러군데로 눌러줘야 해. **제일 좌측으로** 눌러봐바"* ·
+#     *"**정품인증** 이것 때문에 안 눌려"*).
+#    📏 `Windows 정품 인증` 워터마크가 **화면 우하단(x 2110~2450 · y 1285~1320)**
+#       에 떠서 16번 칸5(확인 2132,1331) 와 겹친다 — 그래서 16번쪽만 안 됐다.
+#    ⚠ 오프셋은 **창 가로에 비례**해 늘린다. 창 밖으로는 안 나간다.
+#    🚫 `[복구](다야) 자리(창안 x < FIX_PAY_ZONE)` 로는 **절대 내려가지 않는다.**
+FIX_OK_OFFS    = ((-42, 0), (0, 0), (-78, 0))   # 546 창 기준 (좌측 → 등록자리 → 더 좌측)
+FIX_OK_GAP     = (0.30, 0.55)        # 자리를 옮겨 누르는 사이
 # 🚨🚨 **[복구] 는 다야다. 절대 누르지 않는다** (2026-11-06 사용자: *"저렇게 해서
 #    복구 버튼을 누르면 **다야를 쓰는 거야. 절대 그렇게 하면 안 돼**"*)
 #    그림으로만 찾아도 안 눌리지만(실측 [복구] 영역 최고 **0.444**, 기준 0.70),
@@ -4631,6 +4650,28 @@ def fix_coin_is_daya(big, box, off=None):
         return (blue >= FIX_COIN_BLUE), blue
     except Exception:
         return False, -1
+
+
+def fix_btn_on(big, box):
+    """🎨 그 버튼이 **켜져 있나**(밝은가) -> (켜짐?, 밝은 픽셀 수). 2026-11-07.
+
+    🚨 `matchTemplate` 은 **밝기에 둔감**해서 회색 버튼도 1.00 으로 찾는다.
+       그래서 **눌러도 아무 일이 안 나는 버튼을 계속 눌렀다** (실측 5번).
+    📏 비활성 실측 — 밝은 픽셀(>120) **0개** (저장된 화면 5개 전부).
+    ⚠ 못 재면 **막지 않는다** (True) — 모를 때 막으면 기능이 통째로 죽는다."""
+    try:
+        import numpy as np
+        x, y, w, h = box[0], box[1], box[2], box[3]
+        p = FIX_BTN_PAD
+        y0, y1 = max(0, y - p), min(big.shape[0], y + h + p)
+        x0, x1 = max(0, x - p), min(big.shape[1], x + w + p)
+        if y1 - y0 < 3 or x1 - x0 < 3:
+            return True, -1
+        sub = big[y0:y1, x0:x1]
+        n = int((sub.max(axis=2) > FIX_BTN_V).sum())
+        return (n >= FIX_BTN_BRIGHT), n
+    except Exception:
+        return True, -1          # 못 재면 막지 않는다
 
 
 def fix_tab_has_num(big, tb):
@@ -25709,6 +25750,35 @@ class App(tk.Tk):
         except Exception:
             return None
 
+    def _fix_ok_click(self, c5, L, T, big, si, ko):
+        """🖱 **확인을 여러 자리에서** 누른다 — 좌측부터 (2026-11-07).
+
+        `Windows 정품 인증` 워터마크가 화면 우하단에 떠서 16번쪽 클라의
+        확인 버튼과 겹친다. 사용자: *"확인버튼을 여러군데로 눌러줘야 해.
+        **제일 좌측으로** 눌러봐바"*
+        🚫 `[복구](다야) 자리` 로는 절대 내려가지 않는다."""
+        if not c5:
+            return
+        try:
+            k = (big.shape[1] / float(fix_tab_base() or IMG_BASE_W)
+                 if big is not None else 1.0)
+        except Exception:
+            k = 1.0
+        _done = []
+        for _i, (_dx, _dy) in enumerate(FIX_OK_OFFS):
+            x = int(c5[0] + _dx * k); y = int(c5[1] + _dy * k)
+            # 🚫 창 밖 · [복구](다야) 자리로는 가지 않는다
+            if big is not None:
+                _ix = x - L
+                if _ix < FIX_PAY_ZONE * k or _ix > big.shape[1] - 4:
+                    continue
+            click_at(x, y)
+            _done.append((x, y))
+            if _i < len(FIX_OK_OFFS) - 1:
+                self._fix_nap(*FIX_OK_GAP)
+        click_log(f"fix #{si:02d} 🗂 [{ko}] 확인을 **{len(_done)}자리**에서 "
+                  f"눌렀다 {_done} (좌측부터 · 정품인증 워터마크 대비)")
+
     def _fix_tabs_work(self, si, idx):
         """🗂 **탭 두 개를 돌며 [모두 복구]** — 복구의 새 흐름 (2026-11-06).
 
@@ -25822,6 +25892,21 @@ class App(tk.Tk):
                         #    🚫 이 '줄 고르기' 를 빼지 말 것.
                         _rp = self._fix_row_pick(big, L, T, c2, si, _ko)
                         tb4 = fix_tab_find(big, _nm) if big is not None else None
+                        # 🎨 **줄을 고른 뒤에도 꺼져 있으면 할 게 없다** (2026-11-07).
+                        #    회색 버튼을 1.00 으로 찾아 **5번 헛눌렀던** 그 자리다.
+                        #    🚫 💎 를 붙이지 않는다 — 다야가 아니라 **할 일이 없는 것**.
+                        try:
+                            big = grab_window(c1) or big
+                            fb2 = fix_tab_find(big, "free") or fix_tab_find(big, "cert")
+                        except Exception:
+                            fb2 = None
+                        _on, _bn = fix_btn_on(big, fb2 or fb)
+                        if not _on:
+                            click_log(f"fix #{si:02d} 🎨 [{_ko}] **[{_how}] 가 "
+                                      f"꺼져 있다** (밝은 픽셀 {_bn} < {FIX_BTN_BRIGHT}) "
+                                      f"— 복구할 것이 없다. 누르지 않고 끝낸다 "
+                                      f"({_hit}번 했다)")
+                            break
                         fx, fy = L + fb[0] + fb[2] // 2, T + fb[1] + fb[3] // 2
                         # 🚨 **[복구](다야) 자리면 절대 누르지 않는다** — 자리로 한 겹 더.
                         #    🚨 **다만 [일일무료복구] 일 때는 자리를 보지 않는다**
@@ -25858,8 +25943,8 @@ class App(tk.Tk):
                                   f"눌렀다 ({_hit}번째)")
                         self.status.set(f"🆓 복구 #{si:02d} — 경험치 {_how} {_hit}번째")
                         self._fix_nap(*FIX_ALL_WAIT)
+                        self._fix_ok_click(c5, L, T, big, si, _ko)
                         if c5:
-                            click_at(*c5)
                             self._fix_nap(*FIX_ALL_WAIT)
                         self._fix_quit_clear(si, anc, f"{_ko} {_hit}번째 뒤")
                         # 🔢 남은 건수는 **기록만** 한다 — 🚫 숫자로 멈추지 않는다.
@@ -25913,6 +25998,13 @@ class App(tk.Tk):
                                       f"못 찾았다** — 아무것도 누르지 않는다")
                             self._fix_tab_shot(si, big, _nm)
                         break
+                    # 🎨 **꺼져 있으면 할 게 없다** (2026-11-07 — 경험치와 같은 이유)
+                    _on, _bn = fix_btn_on(big, ab)
+                    if not _on:
+                        click_log(f"fix #{si:02d} 🎨 [{_ko}] **[모두 복구] 가 "
+                                  f"꺼져 있다** (밝은 픽셀 {_bn} < {FIX_BTN_BRIGHT}) "
+                                  f"— 복구할 것이 없다 ({_ihit}번 했다)")
+                        break
                     mx, my = L + ab[0] + ab[2] // 2, T + ab[1] + ab[3] // 2
                     click_at(mx, my)
                     _did = True
@@ -25924,9 +26016,8 @@ class App(tk.Tk):
                     self.status.set(f"🩹 복구 #{si:02d} — [{_ko}] 모두 복구 "
                                     f"{_ihit}번째")
                     self._fix_nap(*FIX_ALL_WAIT)
+                    self._fix_ok_click(c5, L, T, big, si, _ko)
                     if c5:
-                        click_at(*c5)
-                        click_log(f"fix #{si:02d} 🗂 확인 {tuple(c5)} 눌렀다")
                         self._fix_nap(*FIX_ALL_WAIT)
                     self._fix_quit_clear(si, anc, f"{_ko} {_ihit}번째 뒤")
                     # 🔢 남은 건수가 **안 보이면** 다 한 것 — 그때만 멈춘다.
