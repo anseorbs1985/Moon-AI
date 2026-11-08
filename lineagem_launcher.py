@@ -4588,6 +4588,25 @@ FIX_ONE_TAB    = True
 # 🔁 경험치를 하고 닫은 뒤 **바로 다음 판**을 도는 횟수 (무한 방지).
 #    이 판은 실패가 아니라 정상 진행이라 **느리게 하지 않는다**.
 FIX_MORE_MAX   = 3
+# 🔁 [▶ 전부 복구] 가 끝난 뒤 **남은 것을 몇 바퀴 더** 돌릴까 (2026-11-08
+#    사용자: *"전부복구 밑에 복구가 남아 있으면 너가 다시 한번 돌려줘"*).
+#    🚫 한 바퀴에 아무것도 줄지 않으면 멈춘다 (무한 고리 방지).
+FIX_ALL_ROUNDS = 3
+
+
+class _FixSkipCross(Exception):
+    """🎯 이어 가는 판에서 **십자가 확인을 건너뛴다**는 신호 (2026-11-08).
+
+    `_run_fix_slot_body` 의 십자가 확인은 통째로 `try/except Exception` 안에
+    있어서, 이것을 던지면 **그 블록만 빠져나와 바로 탭 흐름으로 간다.**
+    🚫 이 예외를 따로 잡아 기록하지 말 것 — 정상 흐름이다."""
+# 💎 를 세운 **이유** — 성격이 다르다 (2026-11-08 사용자 지시).
+#    🚫 **진짜 다야는 절대 다시 돌리지 않는다** (다야가 나가면 되돌릴 수 없다)
+#    🔁 오인일 수 있는 것만 다시 돌린다
+#    📏 `free` 가 사용자가 말한 그것이다 — 실측 0.72 vs 기준 0.75 인데
+#       같은 화면의 다른 슬롯은 0.84 였다. **무료인데 그림이 아슬아슬해 놓친 것.**
+FIX_PAID_REAL  = ("coin", "zone")    # 🚫 진짜 다야 — 다시 돌리지 않는다
+FIX_PAID_MAYBE = ("btn", "free")     # 🔁 오인일 수 있다 — 다시 돌린다
 # 🩹 **복구는 하나씩 — 완전히 끝나야 다음** (2026-11-08 사용자 지시:
 #    *"복구는 웨이브 하지 마. 하나씩 완벽하게 마무리하고 다른 거 하나씩"*).
 #    한 슬롯은 클릭이 끝나도 안 끝난다 — 확인(최대 60초) · 아이템 판 · 2회차가
@@ -11682,7 +11701,7 @@ class App(tk.Tk):
         self._suho_note_small()
         return None
 
-    def _suho_note_small(self):
+    def _suho_note_small(self, loud=False):
         """🔍 창이 작아서 안 한다는 것을 **기록에 남긴다** (같은 줄은 1분에 한 번).
 
         🚫 조용히 빠져나가면 사용자가 '왜 안 되지' 로 헤맨다 — 이 저장소에서
@@ -11699,6 +11718,13 @@ class App(tk.Tk):
                       f"작은 창에서는 카드 장수·수호석 판정이 흔들립니다")
         except Exception:
             pass
+        # 🔇 **자동 틱은 상태줄을 건드리지 않는다** (2026-11-08 사용자:
+        #    *"전부복구를 누르면 '수호성은 큰 창에서만 됩니다' 뭐 이런 식으로 된다"*).
+        #    이 함수는 0.4초마다 도는 엿보기 틱에서도 불리므로, 상태줄에 쓰면
+        #    **복구가 띄운 안내를 덮는다.** 기록은 덮이지 않으니 거기 남긴다.
+        #    🚫 상시 틱에서 `status.set` 을 하지 말 것.
+        if not loud:
+            return
         try:
             self.status.set(f"🌙 수호성은 **확대한 창에서만** 합니다 "
                             f"(지금 {sm[1]}px · {SUHO_MIN_W}px 이상)")
@@ -12287,7 +12313,7 @@ class App(tk.Tk):
                     pass
             else:
                 self._suho_small_at = 0.0      # 버튼을 눌렀으니 바로 알려준다
-                self._suho_note_small()
+                self._suho_note_small(loud=True)
             return
         if times is None:
             try:
@@ -24022,8 +24048,23 @@ class App(tk.Tk):
         except Exception:
             pass
 
-    def _fix_paid_mark(self, si, on=True):
-        """다야를 써야 하는 슬롯으로 표시(초록)하거나 해제한다."""
+    def _fix_paid_mark(self, si, on=True, why=""):
+        """다야를 써야 하는 슬롯으로 표시(초록)하거나 해제한다.
+
+        `why` 는 **왜 세웠나** (2026-11-08) — `coin`·`zone` 은 진짜 다야,
+        `btn`·`free` 는 오인일 수 있다. [▶ 전부 복구] 가 한 바퀴 더 돌 때
+        **오인만** 다시 돌린다. 🚫 진짜 다야는 절대 다시 돌리지 말 것."""
+        try:
+            w = getattr(self, "_fix_paid_why", None)
+            if w is None:
+                w = self._fix_paid_why = {}
+            if on:
+                if why:
+                    w[int(si)] = why
+            else:
+                w.pop(int(si), None)
+        except Exception:
+            pass
         cur = self._fix_paid_load()
         cur.add(int(si)) if on else cur.discard(int(si))
         self._fix_paid_save(cur)
@@ -24063,6 +24104,37 @@ class App(tk.Tk):
                       bg="#7f8c8d", fg="white",
                       command=lambda x=si: self._warn_remove(x)).pack(side="left", padx=(2, 0))
 
+    def _fix_redo_list(self):
+        """🔁 **다시 돌릴 슬롯** — 목록에 남은 것 중 (2026-11-08 사용자 지시).
+
+        사용자: *"전부복구 밑에 복구가 남아 있으면 너가 다시 한번 돌려줘.
+               다야 복구도 다시 돌려주고 — **진짜 다야면 돌리지 말고**,
+               그냥 **잘못 인식된 다야복구**(일일복구가 있는데 그렇게 뜬 거면)
+               복구를 다시 해줘"*
+        ```
+        💎 아님            → 🔁 다시
+        💎 (btn · free)    → 🔁 다시 (오인일 수 있다)
+        💎 (coin · zone)   → 🚫 건너뛴다 — **진짜 다야다. 손으로.**
+        ```
+        📏 `free` 가 사용자가 말한 그것이다 — 실측 '무료' 그림 **0.72 vs 기준 0.75**
+           인데 같은 화면의 다른 슬롯은 **0.84** 였다. 무료인데 놓친 것이다.
+        🚫 `coin`(동전이 파랗다)·`zone`([복구] 자리)는 **절대** 넣지 말 것 —
+           다야가 나가면 되돌릴 수 없다."""
+        left = sorted(self._warn_load())
+        paid = set(self._fix_paid_load())
+        why = getattr(self, "_fix_paid_why", None) or {}
+        redo, skip = [], []
+        for si in left:
+            if si not in paid:
+                redo.append(si)
+                continue
+            w = why.get(int(si), "")
+            if w in FIX_PAID_REAL:
+                skip.append((si, w))
+            else:
+                redo.append(si)        # 오인일 수 있다 (btn·free·모름)
+        return redo, skip
+
     def _fix_run_all(self):
         """▶ 전부 복구 — 지금 목록에 뜬 슬롯을 **번호 순서대로 하나씩** 복구한다.
 
@@ -24076,6 +24148,9 @@ class App(tk.Tk):
             return
         self._fix_queue = q
         self._fix_bulk_ready = False
+        # 🔁 **한 바퀴 더** 를 세기 시작한다 (2026-11-08 사용자 지시)
+        self._fix_round = 1
+        self._fix_round_before = len(q)
         # 🔙 복구는 **뒤에서 조용히** 돈다 (2026-10-06 사용자: "복구를 누르면
         #    메인런처 창이 앞으로 안 튀어나오고 그냥 뒤에서 그대로 처리")
         self._stay_back(len(q) * 14 + 10)
@@ -24092,6 +24167,54 @@ class App(tk.Tk):
         """대기열에서 하나씩 꺼내 돌린다 — 앞 슬롯이 끝나야 다음."""
         q = getattr(self, "_fix_queue", None)
         if not q:
+            # 🔁 **남아 있으면 한 바퀴 더** (2026-11-08 사용자:
+            #    *"전부복구 밑에 복구가 남아 있으면 너가 다시 한번 돌려줘"*).
+            #    🚫 앞 슬롯의 사슬이 끝나야 센다 — 잠금이 있으면 기다린다.
+            if getattr(self, "_fix_hold", None) is not None:
+                self.after(900, self._fix_run_next)
+                return
+            try:
+                _r = int(getattr(self, "_fix_round", 0) or 0)
+                if _r:
+                    redo, skip = self._fix_redo_list()
+                    _bf = int(getattr(self, "_fix_round_before", 0) or 0)
+                    _msg = (f"남은 {len(redo)}개 {redo}"
+                            + (f" · 🚫 진짜 다야 {[x for x, _ in skip]} 는 건너뜀"
+                               if skip else ""))
+                    if not redo:
+                        click_log(f"fix 🔁 {_r}바퀴 끝 — 다시 돌릴 것이 없다"
+                                  + (f" (🚫 진짜 다야 {[x for x, _ in skip]} 는 "
+                                     f"손으로 해주세요)" if skip else ""))
+                        self.status.set("▶ 전부 복구 완료"
+                                        + (f" · 💎 다야 {[x for x, _ in skip]} 는 "
+                                           f"손으로 해주세요" if skip else ""))
+                        self._fix_round = 0
+                        return
+                    if _r >= FIX_ALL_ROUNDS:
+                        click_log(f"fix 🔁 {FIX_ALL_ROUNDS}바퀴를 다 돌았다 — "
+                                  f"{_msg} · 여기서 멈춘다")
+                        self.status.set(f"▶ 전부 복구 — {FIX_ALL_ROUNDS}바퀴 했는데 "
+                                        f"{len(redo)}개가 남았습니다 {redo}")
+                        self._fix_round = 0
+                        return
+                    # 🚫 **한 바퀴에 하나도 줄지 않으면 멈춘다** (무한 고리 방지)
+                    if _bf and len(redo) >= _bf:
+                        click_log(f"fix 🔁 {_r}바퀴를 돌았는데 줄지 않았다 "
+                                  f"({_bf} → {len(redo)}) — 여기서 멈춘다 · {_msg}")
+                        self.status.set(f"▶ 전부 복구 — 더 줄지 않아 멈췄습니다 "
+                                        f"({len(redo)}개 남음 {redo})")
+                        self._fix_round = 0
+                        return
+                    self._fix_round = _r + 1
+                    self._fix_round_before = len(redo)
+                    self._fix_queue = list(redo)
+                    click_log(f"fix 🔁 **{_r + 1}바퀴** 시작 — {_msg}")
+                    self.status.set(f"🔁 전부 복구 {_r + 1}바퀴 — {len(redo)}개 {redo}")
+                    self._stay_back(len(redo) * 14 + 20)
+                    self.after(1200, self._fix_run_next)
+                    return
+            except Exception as _e:
+                click_log(f"fix 🔁 바퀴 판단 중 오류 {_e!r}")
             self.status.set("▶ 전부 복구 완료")
             return
         # 🩹 **앞 슬롯의 사슬이 완전히 끝나야** 다음을 꺼낸다 (2026-11-08).
@@ -24195,10 +24318,15 @@ class App(tk.Tk):
                     # 다야가 드는 것은 '무료' 확인에서 반드시 멈추므로, 자동복구가
                     # 5분마다 그 클라를 깨워 헛수고만 한다 —
                     # 사용자: "계속해서 절전모드를 해제해서 복구를 시도하냐. 답답하다."
-                    _paid = self._fix_paid_load()
-                    q = [s for s in sorted(self._warn_load()) if s not in _paid]
+                    # 💎 **진짜 다야만** 건너뛴다 (2026-11-08 사용자 지시:
+                    #    *"진짜 다야 복구면 돌리지 말고, 잘못 인식된 다야복구는
+                    #      복구를 다시 해줘"*).
+                    #    `coin`(동전이 파랗다)·`zone`([복구] 자리) = 진짜 → 건너뜀
+                    #    `btn`·`free`(그림이 아슬아슬) = 오인일 수 있다 → 돌린다
+                    q, _sk = self._fix_redo_list()
+                    _paid = [x for x, _w in _sk]
                     if _paid:
-                        click_log(f"[유휴복구] 💎 다야 슬롯 {sorted(_paid)} 는 건너뜀 "
+                        click_log(f"[유휴복구] 💎 **진짜** 다야 슬롯 {sorted(_paid)} 는 건너뜀 "
                                   f"(사람이 직접 써야 한다)")
                     if q and not self._is_busy():
                         self._fix_idle_done = True
@@ -26186,6 +26314,14 @@ class App(tk.Tk):
             #    최대 7번 보므로 5.67초 → **0.35초**.
             #    🚫 `only` 를 빼지 말 것.
             hit, _seen, _run2 = None, False, 0
+            # 🎯 **이어 가는 판(아이템)은 십자가 확인을 건너뛴다** (2026-11-08) —
+            #    경험치를 복구하면 십자가가 사라져 **늘 취소**됐다.
+            #    🚫 이 표시는 그 한 판에만 쓰고 바로 지운다.
+            if getattr(self, "_fix_skip_cross", None) == int(si):
+                self._fix_skip_cross = None
+                click_log(f"fix #{si:02d} 🎯 이어 가는 판 — "
+                          f"십자가 확인을 건너뛰고 바로 탭을 본다")
+                raise _FixSkipCross()
             for _t in range(FIX_SEE_TRIES + FIX_GO_N):
                 hit = self._check_hits(only={int(si)})
                 if hit is None:
@@ -26774,6 +26910,7 @@ class App(tk.Tk):
                               f"→ **그래도 버튼이 있는지 본다**")
 
                 if _nm == "tab_exp" and not FIX_EXP_ON:
+                    _why_paid = "off"
                     # 🚨 **경험치 복구 끔** (2026-11-06 — 다야가 나갔다는 신고).
                     #    원인을 확인하기 전까지 **아무것도 누르지 않는다.**
                     _paid = True
@@ -26826,6 +26963,7 @@ class App(tk.Tk):
                                           f"({_hit}번) — 버튼도 숫자도 사라졌다")
                             else:
                                 _paid = True
+                                _why_paid = "btn"     # 🔁 애매 — 다시 돌린다
                                 click_log(f"fix #{si:02d} 🆓 [{_ko}] **[일일무료복구]가 "
                                           f"없다** ({_hit}번 했다) → 🚫 다야·구호증서는 "
                                           f"쓰지 않는다 · 💎 표시 (손으로 해주세요)")
@@ -26852,6 +26990,7 @@ class App(tk.Tk):
                         _inx = fb[0] + fb[2] // 2
                         if _how != "일일무료복구" and _inx < FIX_PAY_ZONE * _kz:
                             _paid = True
+                            _why_paid = "zone"        # 🚫 진짜 다야 쪽
                             click_log(f"fix #{si:02d} 🚨 [{_ko}] 찾은 자리가 "
                                       f"**[복구](다야) 쪽이다** (창안 x{_inx} < "
                                       f"{int(FIX_PAY_ZONE * _kz)}) — 누르지 않는다 "
@@ -26926,6 +27065,7 @@ class App(tk.Tk):
                                                         FIX_COIN_FROM.get(_nm))
                         if _daya:
                             _paid = True
+                            _why_paid = "coin"        # 🚫 진짜 다야 (동전이 파랗다)
                             click_log(f"fix #{si:02d} 💎 [{_ko}] **다야**가 든다 "
                                       f"(파란 픽셀 {_blue} ≥ {FIX_COIN_BLUE}) → "
                                       f"누르지 않는다")
@@ -27076,7 +27216,8 @@ class App(tk.Tk):
                                 f"지웠습니다 (십자가 오탐)")
                 _paid = False
             if _paid:
-                self._fix_paid_mark(int(si), True)
+                self._fix_paid_mark(int(si), True,
+                                    why=locals().get("_why_paid") or "btn")
                 click_log(f"fix #{si:02d} 💎 **무료로 안 되는 탭이 있다** "
                           f"(다야·구호증서) → 초록 💎 다야!! 로 표시 "
                           f"(그 탭은 손으로 해주세요"
@@ -27197,9 +27338,16 @@ class App(tk.Tk):
                 try:
                     if int(si) in getattr(self, "_fix_more", set()):
                         self._fix_more.discard(int(si))
+                        # 🎯 **그 판은 십자가 확인을 건너뛴다** (2026-11-08) —
+                        #    경험치를 복구하면 십자가가 사라지므로, 확인을 두면
+                        #    **아이템 탭을 열어보지도 않고 취소**된다 (실측 09:31
+                        #    *"십자가가 5번 다 안 보였다 — 이미 복구된 것으로 보고"*).
+                        #    아이템 탭에 할 것이 없으면 '버튼이 꺼져 있다' 로 끝난다.
+                        #    🚫 **일반 실행의 십자가 확인은 그대로다** (2026-08-29).
+                        self._fix_skip_cross = int(si)
                         click_log(f"fix #{si:02d} 🎯 십자가는 사라졌지만 "
                                   f"**아이템 복구를 한 번 더 확인한다** "
-                                  f"(경험치를 복구하면 십자가가 잠깐 사라진다)")
+                                  f"(그 판은 십자가 확인을 건너뛴다)")
                         self.status.set(f"🔁 복구 #{si:02d} — 경험치 끝, "
                                         f"**아이템**을 한 번 더 봅니다")
                         self.after(600, lambda i=si: self._run_fix_slot(i))
@@ -27225,7 +27373,8 @@ class App(tk.Tk):
                 try:
                     _nt = getattr(self, "_run_note", None) or []
                     if any("👁 확인" in m for _n, m in _nt):
-                        self._fix_paid_mark(int(si), True)
+                        # 🔁 '무료' 그림이 기준에 모자란 것 — **오인일 수 있다**
+                        self._fix_paid_mark(int(si), True, why="free")
                         click_log(f"fix #{si:02d} '무료'가 아니라 취소 — 다야 필요(초록)")
                         self.status.set(f"💎 복구 #{si:02d} — 무료가 아니라 취소했습니다. "
                                         f"다야를 써야 하는 슬롯입니다")
