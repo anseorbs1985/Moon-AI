@@ -4621,6 +4621,11 @@ class _FixSkipCross(Exception):
 #       같은 화면의 다른 슬롯은 0.84 였다. **무료인데 그림이 아슬아슬해 놓친 것.**
 FIX_PAID_REAL  = ("coin", "zone")    # 🚫 진짜 다야 — 다시 돌리지 않는다
 FIX_PAID_MAYBE = ("btn", "free")     # 🔁 오인일 수 있다 — 다시 돌린다
+# 💎 **다야로 뜬 슬롯을 몇 번까지 다시 돌릴까** (2026-11-08 사용자:
+#    *"한 번 해서 다시 다야 뜨면은 하지 마. 내가 할게. **시도를 한 번만 더**"*).
+#    1 = 💎 가 처음 떴을 때만 한 번 더. 두 번째로 💎 면 그만둔다.
+#    🚫 올리지 말 것 — 진짜 다야면 매번 '무료' 확인에서 멈춰 **계속 시도만** 한다.
+FIX_PAID_TRY   = 1
 # 🩹 **복구는 하나씩 — 완전히 끝나야 다음** (2026-11-08 사용자 지시:
 #    *"복구는 웨이브 하지 마. 하나씩 완벽하게 마무리하고 다른 거 하나씩"*).
 #    한 슬롯은 클릭이 끝나도 안 끝난다 — 확인(최대 60초) · 아이템 판 · 2회차가
@@ -24092,11 +24097,17 @@ class App(tk.Tk):
             w = getattr(self, "_fix_paid_why", None)
             if w is None:
                 w = self._fix_paid_why = {}
+            n = getattr(self, "_fix_paid_n", None)
+            if n is None:
+                n = self._fix_paid_n = {}
             if on:
                 if why:
                     w[int(si)] = why
+                # 💎 **몇 번째인가** — 1번째면 한 번 더, 2번째면 그만 (2026-11-08)
+                n[int(si)] = int(n.get(int(si), 0)) + 1
             else:
                 w.pop(int(si), None)
+                n.pop(int(si), None)       # 복구됐다 → 다음에 또 뜨면 기회를 준다
         except Exception:
             pass
         cur = self._fix_paid_load()
@@ -24225,8 +24236,14 @@ class App(tk.Tk):
             w = why.get(int(si), "")
             if w in FIX_PAID_REAL:
                 skip.append((si, w))
-            else:
-                redo.append(si)        # 오인일 수 있다 (btn·free·모름)
+                continue
+            # 💎 **한 번만 더** (2026-11-08 사용자: *"다시 다야 뜨면은 하지 마"*).
+            #    `_fix_paid_n` = 💎 를 세운 횟수. 1번째면 한 번 더, 2번째면 그만.
+            _n = int((getattr(self, "_fix_paid_n", None) or {}).get(int(si), 1))
+            if _n > FIX_PAID_TRY:
+                skip.append((si, f"{w or '모름'}·{_n}번째"))
+                continue
+            redo.append(si)            # 오인일 수 있다 (btn·free·모름)
         return redo, skip
 
     def _fix_run_all(self):
@@ -24365,8 +24382,24 @@ class App(tk.Tk):
             si = self._slot_of_anchor(anchor)
             if si is None:
                 return
-            hit = self._check_hits(only={si})
-            if not hit or si not in set(hit):
+            # 🚦 **연속 FIX_SEE_ADD 번 보여야 올린다** (2026-11-08 사용자 신고:
+            #    *"십자가가 안 떠 있는데 복구하라고 뜬다 · 예전보다 바보같아졌다"*).
+            #    여기는 **Z 로 깨운 직후**라 화면이 다시 그려지는 중 —
+            #    **오탐이 가장 잘 나는 순간**이다. 한 슬롯 0.05초라 +0.5초면 된다.
+            #    🚫 한 번만 보고 올리게 되돌리지 말 것.
+            _sc = []
+            for _t in range(FIX_SEE_ADD):
+                if _t:
+                    nap(random.uniform(0.35, 0.55))
+                hit = self._check_hits(only={si})
+                _sc.append(bool(hit and si in set(hit)))
+                if not _sc[-1]:
+                    break
+            if not all(_sc) or len(_sc) < FIX_SEE_ADD:
+                if _sc and _sc[0]:
+                    click_log(f"[깨움확인] #{si:02d} 십자가가 1번만 보이고 "
+                              f"다시 보니 없다{self._warn_score_txt(si)} "
+                              f"— **올리지 않는다** (깨운 직후라 화면이 흔들린다)")
                 return
             cur = set(self._warn_load())
             if si in cur:
@@ -24374,7 +24407,8 @@ class App(tk.Tk):
             cur.add(si)
             self._warn_save(sorted(cur))
             self.after(0, self._warn_refresh)
-            click_log(f"[깨움확인] #{si:02d} 십자가 보임{(' · ' + why) if why else ''}"
+            click_log(f"[깨움확인] #{si:02d} 십자가 **연속 {FIX_SEE_ADD}번 보임**"
+                      f"{self._warn_score_txt(si)}{(' · ' + why) if why else ''}"
                       f" → 목록에만 올림 (복구는 누르거나 5분 유휴 때)")
             self.after(0, lambda s=si: self.status.set(
                 f"🩹 #{si:02d} 복구해야함 — 목록에 올렸습니다 "
