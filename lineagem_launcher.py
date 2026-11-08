@@ -25992,6 +25992,11 @@ class App(tk.Tk):
                                 f"순서대로 단체 복구합니다")
                 click_log(f"fix F11 이후 첫 실행 → 단체 복구 {_q}")
                 self._fix_queue = _q
+                # 🔓 **잠금을 먼저 푼다** (2026-11-08) — 안 풀면 `_fix_run_next` 가
+                #    *"앞 슬롯이 아직 돈다"* 로 보고 **900ms 마다 기다리기만** 한다.
+                #    그게 *"전부복구를 눌러도 안 된다"* 의 정체였다.
+                #    대기열이 슬롯마다 다시 잠근다.
+                self._fix_done(si, "F11 뒤 첫 실행 — 단체 복구로 넘긴다")
                 self._fix_run_next()
                 return
         # 🔙 개별 복구도 **뒤에서** 돈다 — 앞으로 튀어나오지 않는다 (2026-10-06)
@@ -26004,6 +26009,9 @@ class App(tk.Tk):
             if idx < 0 or idx >= len(slots) or not any(slots[idx].get("coords") or []):
                 self.status.set(f"🩹 복구 #{si:02d} — 좌표가 등록돼 있지 않습니다. "
                                 f"[🩹복구] 창에서 먼저 좌표를 넣어주세요")
+                click_log(f"fix #{si:02d} ⚠ 좌표가 등록돼 있지 않다 — "
+                          f"[📐 좌표맞추기] 를 한 번 눌러주세요")
+                self._fix_done(si, "좌표가 없다")      # 🔓 안 풀면 다음 슬롯이 막힌다
                 return
         except Exception:
             pass
@@ -26018,6 +26026,22 @@ class App(tk.Tk):
                          args=(int(si), idx), daemon=True).start()
 
     def _run_fix_slot_work(self, si, idx):
+        """🧵 **스레드 껍데기** — 어떤 예외가 나도 잠금을 풀고 기록을 남긴다.
+
+        🚫 이 껍데기를 없애지 말 것. 스레드에서 터진 예외는 **조용히 죽어서**
+           원인을 짚을 수 없고, `_fix_hold` 가 남아 **다음 복구가 전부 막힌다**
+           (2026-11-08 — 사용자: *"전부복구 누르면 복구 해줘야 하잖아"*)."""
+        try:
+            self._run_fix_slot_body(si, idx)
+        except Exception as _e:
+            click_log(f"fix #{si:02d} ⚠ 복구 중 오류 {_e!r} — 잠금을 풀고 넘어간다")
+            try:
+                self.status.set(f"🩹 복구 #{si:02d} 오류: {_e}")
+            except Exception:
+                pass
+            self._fix_done(si, "복구 중 오류")
+
+    def _run_fix_slot_body(self, si, idx):
         """🐢 `_run_fix_slot` 의 **무거운 몸통** — 백그라운드 스레드에서 돈다.
 
         ① 절전이면 깨우고 → ② 열린 창을 ESC 로 닫고 → ③ 십자가를 확인하고
@@ -26141,6 +26165,7 @@ class App(tk.Tk):
                               f"화면을 못 봤으므로 목록은 그대로 둔다")
                     self.status.set(f"✖ 복구 #{si:02d} — 아직 절전이라 화면을 못 봤습니다 "
                                     f"(목록은 그대로 둡니다)")
+                self._fix_done(si, "십자가가 없어 실행하지 않았다")   # 🔓 다음 슬롯으로
                 return
         except Exception:
             pass
