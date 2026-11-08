@@ -206,8 +206,13 @@ NLCH = chr(10)
 # 실행이 끝나면 '진단만' 저장소 diag/ 로 올리는 런처 (2026-08-28 사용자 지시)
 # 📡 **복구(fix)도 올린다** (2026-11-08) — 로컬에서만 안 되는 것을
 #    메인에서 읽으려고. 사용자: *"도대체 그럼 16번 클라 복구가 왜 안 되는데"*
-DIAG_SHARE = ("dragon", "fix")
-FIX_DIAG_COOL = 180                  # 복구 진단을 올리는 간격(초)
+# 🚫 **복구(fix)는 넣지 않는다** (2026-11-08) — 이 길(`_run_dgn2`)은
+#    `fix_diag_on` 스위치를 보지 않아 **사용자 화면에 창이 뜬다.**
+#    복구 진단은 `_fix_diag_maybe` **한 입구**로만 올린다.
+DIAG_SHARE = ("dragon",)
+# 🚫 복구 진단 업로드는 **기본 꺼짐**이다 (`coords.json` 의 `fix_diag_on`).
+#    켜면 복구가 끝날 때마다 저장소에 올린다 — 내가 로컬을 봐야 할 때만 켠다.
+FIX_DIAG_COOL = 180                  # 켰을 때 올리는 간격(초)
 
 EXTRA_GAPS = {"dragon": DRAGON_EXTRA, "knight": KNIGHT_EXTRA}
 
@@ -26400,6 +26405,14 @@ class App(tk.Tk):
         🚫 올리는 것은 `diag/` 아래 파일뿐이다 — 코드·좌표·계정은 안 올라간다.
         ⏱ `FIX_DIAG_COOL` 에 한 번만."""
         try:
+            # 🚫 **기본은 꺼짐** (2026-11-08 사용자: *"계속 복구하면 깃허브가
+            #    뜬다"*). 이 통로는 **내가 로컬을 보려고** 만든 것이라, 복구할
+            #    때마다 git push 를 하면 **사용자 화면에 창이 뜨고 느려진다.**
+            #    내가 로컬 데이터가 필요할 때만 `coords.json` 에
+            #    `"fix_diag_on": true` 를 넣어 켠다.
+            #    🚫 사용자 요청 없이 기본 켜짐으로 되돌리지 말 것.
+            if not self.cfg.get("fix_diag_on"):
+                return
             if load_local().get("is_main"):
                 return                      # 메인은 읽는 쪽이다
             _t = time.time()

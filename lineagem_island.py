@@ -17,9 +17,13 @@ def _island_cmd_arg(cmdline):
     return None
 
 try:
+    # 🖥 **창을 띄우지 않는다** (2026-11-08) — 섬 실행기는 `pythonw` 로 뜨므로
+    #    `shell=True` 면 켤 때마다 **검은 cmd 창이 번쩍인다.**
+    #    🚫 `creationflags` 를 빼지 말 것.
     out = subprocess.check_output(
         'wmic process where "name=\'pythonw.exe\'" get processid,commandline /format:csv',
-        shell=True, stderr=subprocess.DEVNULL).decode(errors="ignore")
+        shell=True, stderr=subprocess.DEVNULL,
+        creationflags=0x08000000).decode(errors="ignore")
     _my_arg = sys.argv[1] if len(sys.argv) > 1 else None
     for line in out.splitlines():
         if "lineagem_island" not in line.lower():
@@ -30,12 +34,16 @@ try:
             continue
         if _my_arg is None:
             # 전체 실행기: 기존 전부 종료 (기존 동작)
-            subprocess.call(f"taskkill /F /PID {pid}", shell=True, stderr=subprocess.DEVNULL)
+            subprocess.call(f"taskkill /F /PID {pid}", shell=True,
+                                stderr=subprocess.DEVNULL,
+                                creationflags=0x08000000)   # 창 없이
         else:
             # 단독 컬럼 모드: '같은 컬럼'으로 떠 있는 창만 종료 → 중복 방지, 다른 컬럼은 공존
             cl = ",".join(parts[1:-1])
             if _island_cmd_arg(cl) == _my_arg:
-                subprocess.call(f"taskkill /F /PID {pid}", shell=True, stderr=subprocess.DEVNULL)
+                subprocess.call(f"taskkill /F /PID {pid}", shell=True,
+                                stderr=subprocess.DEVNULL,
+                                creationflags=0x08000000)   # 창 없이
 except Exception:
     pass
 try:
