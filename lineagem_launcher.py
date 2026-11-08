@@ -24104,6 +24104,59 @@ class App(tk.Tk):
         self._fix_paid_save(cur)
         self._warn_refresh()
 
+    def _fix_btn_look_set(self, si, st):
+        """⚡ **그 슬롯 버튼을 즉시** 바꾼다 (2026-11-08 사용자:
+        *"내가 누른지 모르고 몇 번을 더 누르게 되는데"*).
+
+        `st` — `"run"` ⏳ 복구중 · `"wait"` ⌛ 대기 · `None` 원래대로
+        🚫 `update_idletasks()` 를 빼지 말 것 — 없으면 Tk 가 다음 틱까지
+           안 그려서 **또 '안 눌렸다'** 가 된다."""
+        try:
+            stt = getattr(self, "_fix_btn_st", None)
+            if stt is None:
+                stt = self._fix_btn_st = {}
+            if st:
+                stt[int(si)] = st
+            else:
+                stt.pop(int(si), None)
+            b = (getattr(self, "_warn_btns", None) or {}).get(int(si))
+            if b is None or not b.winfo_exists():
+                return
+            self._fix_btn_paint(b, int(si), st)
+            self.update_idletasks()        # ⚡ 그 자리에서 다시 그린다
+        except Exception:
+            pass
+
+    def _fix_btn_paint(self, b, si, st):
+        """그 버튼에 상태를 입힌다 (`_warn_refresh` 도 이걸 쓴다 —
+        다시 그려도 **상태가 유지되게**)."""
+        _paid = int(si) in self._fix_paid_load()
+        if st == "run":
+            b.config(text=f"⏳ 복구중 {si:02d}", bg="#d35400",
+                     activebackground="#a04000", fg="white",
+                     font=("맑은 고딕", 10, "bold"))
+        elif st == "wait":
+            b.config(text=f"⌛ 대기 {si:02d}", bg="#b7950b",
+                     activebackground="#9a7d0a", fg="white",
+                     font=("맑은 고딕", 10, "bold"))
+        else:
+            b.config(text=(f"💎 다야!! {si:02d}" if _paid
+                           else f"복구해야함 {si:02d} ▶"),
+                     bg=("#1e8449" if _paid else "#c0392b"),
+                     activebackground=("#186a3b" if _paid else "#922b21"),
+                     fg=("#fff9c4" if _paid else "white"),
+                     font=("맑은 고딕", 11 if _paid else 9, "bold"))
+
+    def _fix_press(self, si):
+        """⚡ 복구해야함 버튼을 눌렀을 때 — **먼저 버튼을 바꾸고** 돌린다.
+
+        게임에서 첫 클릭이 보이기까지 몇 초가 걸린다(절전 깨우기·ESC·십자가
+        확인). 그 사이 '안 눌렸다' 고 또 누르게 되므로 **즉시** 바꿔준다.
+        🚫 이 순서를 바꾸지 말 것 — 돌리기 전에 바꿔야 즉각적으로 보인다."""
+        self._fix_btn_look_set(si, "run")
+        self.status.set(f"⏳ 복구 #{int(si):02d} 시작합니다 — 절전이면 먼저 깨웁니다")
+        self._run_fix_slot(si)
+
     def _warn_refresh(self):
         box = getattr(self, "_warn_rows", None)
         if not box or not box.winfo_exists():
@@ -24117,6 +24170,8 @@ class App(tk.Tk):
         hdr = getattr(self, "_warn_hdr", None)   # 개수 표시는 쓰지 않는다 (사용자 지시)
         if hdr and hdr.winfo_exists():
             hdr.pack_forget()
+        self._warn_btns = {}
+        _stt = getattr(self, "_fix_btn_st", None) or {}
         for si in slots:
             row = tk.Frame(box); row.pack(fill="x", pady=1)
             # 누르면 그 슬롯만 복구를 돌린다 (2026-08-29 사용자 요청).
@@ -24124,7 +24179,7 @@ class App(tk.Tk):
             # 다야(재화)를 써야 하는 슬롯은 **초록** — 무료로 안 되는 것을 한눈에
             # (2026-08-29 사용자 요청). 무료로 되는 것은 빨강 그대로.
             _paid = si in _paidset
-            tk.Button(row,
+            _b = tk.Button(row,
                       text=(f"💎 다야!! {si:02d}" if _paid
                             else f"복구해야함 {si:02d} ▶"),
                       font=("맑은 고딕", 11 if _paid else 9, "bold"),
@@ -24133,7 +24188,12 @@ class App(tk.Tk):
                       activebackground=("#186a3b" if _paid else "#922b21"),
                       width=(11 if _paid else 13), anchor="w", padx=3, pady=0,
                       cursor="hand2",
-                      command=lambda x=si: self._run_fix_slot(x)).pack(side="left")
+                      command=lambda x=si: self._fix_press(x))
+            _b.pack(side="left")
+            self._warn_btns[int(si)] = _b
+            # ⚡ 다시 그려도 **상태가 유지되게** (⏳ 복구중 · ⌛ 대기)
+            if _stt.get(int(si)):
+                self._fix_btn_paint(_b, int(si), _stt[int(si)])
             tk.Button(row, text="✕", font=("맑은 고딕", 8, "bold"), width=2, pady=0,
                       bg="#7f8c8d", fg="white",
                       command=lambda x=si: self._warn_remove(x)).pack(side="left", padx=(2, 0))
@@ -24193,6 +24253,10 @@ class App(tk.Tk):
         #    *"복구 자체가 뒤에서 된다는 게 무슨 말이야"*). 복구는 평소처럼
         #    게임 창을 클릭한다 — 런처가 클라를 가려 클릭을 먹지 않게
         #    **런처만** 맨 뒤로 보내는 것이다 (2026-10-06 사용자 지시).
+        # ⚡ **누르는 즉시 전부 ⌛ 대기 로** (2026-11-08) — 몇 개가 줄 서 있는지
+        #    한눈에 보인다. 돌기 시작하면 그 슬롯만 ⏳ 복구중 으로 바뀐다.
+        for _x in q:
+            self._fix_btn_look_set(_x, "wait")
         self.status.set(f"▶ 전부 복구 시작 — {len(q)}개 {q} · 하나씩 순서대로 "
                         f"(런처 창만 뒤로 보냅니다 — 복구는 그대로 돕니다)")
         self._fix_run_next()
@@ -24274,6 +24338,7 @@ class App(tk.Tk):
         self.status.set(f"▶ 전부 복구 — #{si:02d} 차례 "
                         f"(남은 {len(q)}개 · 끝나면 다음으로)")
         self._stay_back(len(q) * 14 + 20)      # 🔙 남은 만큼 계속 뒤에 둔다
+        self._fix_btn_look_set(si, "run")      # ⚡ 그 슬롯이 지금 돈다
         self._run_fix_slot(si, _bulk=True)
         # 🩹 다음은 **그 슬롯이 끝나면** `_fix_done` 이 불러준다 (2026-11-08).
         #    여기서 `after(1500)` 으로 밀면 확인·아이템 판이 끝나기 전에
@@ -26236,6 +26301,7 @@ class App(tk.Tk):
                     if si not in _q2:
                         _q2.append(int(si))
                         _q2.sort()
+                    self._fix_btn_look_set(si, "wait")      # ⌛ 눈에 보이게
                     click_log(f"fix #{si:02d} ⏸ #{int(_h):02d} 가 아직 돌고 있다 "
                               f"— **대기열에 넣었다** (하나씩 순서대로)")
                     self.status.set(f"⏸ 복구 #{si:02d} — #{int(_h):02d} 가 끝나면 "
@@ -27378,6 +27444,10 @@ class App(tk.Tk):
         🚫 아이템 판·2회차로 **이어 갈 때는 부르지 말 것** — 사슬이 계속된다.
         🔓 여기서만 풀린다: 목록에서 지움 · 💎 다야 · 판을 다 씀 ·
            기준 그림 없음 · 오류."""
+        try:
+            self._fix_btn_look_set(si, None)       # ⚡ 버튼을 원래대로
+        except Exception:
+            pass
         try:
             if getattr(self, "_fix_hold", None) == int(si):
                 self._fix_hold = None
