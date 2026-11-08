@@ -657,7 +657,14 @@ CARDFIX_MIN_K  = 0.55
 #     `_system_idle_seconds`(GetLastInputInfo)는 **우리 클릭도 세어** 영영 멈추고,
 #     `precise_click.idle_seconds()`는 **원격에서 사람 입력까지 걸러** 절대 안 멈춘다
 #     (2026-10-20 에 우편에서 세 함수를 실측으로 가린 그 결론 그대로).
-CARDFIX_QUIET     = 1.0    # 사람이 만진 뒤 이만큼 조용해지면 돈다
+# 🃏 2026-11-08 — 1.0 → 2.0초. 확대는 '버튼 클릭 → 창이 커짐 → 눌러 보기' 처럼
+#    **연달아 만지는 동작**이라 1초는 짧다. (8초 한도는 그대로)
+CARDFIX_QUIET     = 2.0
+# 🃏 **창 자리를 두 번 재서 같을 때만** 누른다 — 확대·축소 중이면 넘긴다
+#    (2026-11-08 사용자: *"가끔 확대할 때 너 맘대로 클릭할 때가 있더라"*).
+#    🚫 이 확인을 없애지 말 것 — 사용자가 창을 만지는 중에 클릭이 들어가면
+#       그 창이 앞으로 가고 포커스를 빼앗겨 하던 일이 끊긴다.
+CARDFIX_STABLE    = 0.35    # 사람이 만진 뒤 이만큼 조용해지면 돈다
 CARDFIX_QUIET_MAX = 8.0    # 그래도 계속 만지면 포기한다 (끼어들지 않는다)
 CARDFIX_BASE_W = 491            # 그림을 자른 창 가로
 CARDFIX_SEE_COOL = 0.6          # 화면을 다시 보기까지 (초) — 전 2.0 (클릭을
@@ -2533,6 +2540,13 @@ FIX_IDLE_TICK_MS = 20000    # 20초마다 '마지막 입력 이후 몇 초' 만 
 #    🚫 **💎 다야 슬롯은 여전히 건너뛴다** — 그 슬롯만 남으면 아무것도 하지 않는다
 #       (2026-09-30: "계속해서 절전모드를 해제해서 복구를 시도하냐. 답답하다.")
 FIX_IDLE_AGAIN   = 180      # 한 바퀴 끝난 뒤 다시 돌기까지(초)
+# 🪟 **확대·축소된 창에는 자동 클릭을 하지 않는다** (2026-11-08 사용자:
+#    *"가끔 확대할 때 너 맘대로 클릭할 때가 있더라"*).
+#    좌표는 **평소 창 크기 기준**이라, 확대한 창에 그대로 누르면 엉뚱한 자리다
+#    (HUD 는 창 크기에 비례해 커지지 않는다 — 2026-10-13 실측).
+#    기준은 **지금 떠 있는 클라들의 가장 흔한 가로**(최빈값)다.
+#    🚫 사용자가 직접 누른 것은 막지 않는다 — **스스로 시작하는 것**만 막는다.
+WIN_ODD_TOL      = 0.10     # 최빈 가로와 이보다 많이 다르면 '확대·축소된 창'
 # 🖱 사람이 리니지M 창을 클릭하면 **그 슬롯 하나만** 십자가를 확인한다
 # (2026-09-30 사용자 요청: "내가 마우스로 절전모드 해제를 누르면 자동으로 십자가 인식을
 #  해줄 순 없나?") — 손으로 깨운 그 순간이 십자가가 드러나는 순간이다.
@@ -14705,6 +14719,26 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _cardfix_stable(self, hwnd):
+        """🃏 그 창이 **크기·자리가 멈춰 있나** (확대·축소 중이면 False).
+
+        확대는 창 테두리가 움직이는 동작이다. `CARDFIX_STABLE` 간격으로
+        두 번 재서 **같을 때만** True. 못 재면 True (막지 않는다).
+        🚫 이 확인을 없애지 말 것."""
+        try:
+            import win32gui
+            a = win32gui.GetWindowRect(hwnd)
+            nap(random.uniform(CARDFIX_STABLE, CARDFIX_STABLE * 1.4))
+            b = win32gui.GetWindowRect(hwnd)
+            if a != b:
+                click_log(f"[변신확정] 🪟 **창 크기를 바꾸는 중** "
+                          f"{a[2]-a[0]}x{a[3]-a[1]} → {b[2]-b[0]}x{b[3]-b[1]}"
+                          f" — 누르지 않고 넘긴다 (손을 떼면 다시 봅니다)")
+                return False
+            return True
+        except Exception:
+            return True
+
     def _cardfix_quiet_wait(self, why=""):
         """✋ **사람이 손을 멈출 때까지** 기다린다 → 돌아도 되면 True.
 
@@ -24292,6 +24326,63 @@ class App(tk.Tk):
     #    늘 '유휴'로 보여 위험하다 — 여기서는 쓰지 않는다)
     # · 돌고 나면 **사람이 다시 만지기 전까지 두 번 걸리지 않는다**
     # · 다야는 좌표4 의 👁 '무료' 확인이 그대로 막는다 — 재화를 쓰는 일은 없다
+    def _win_odd_size(self, si):
+        """🪟 그 슬롯 창이 **평소 크기에서 벗어났나** → (벗어남, 가로, 평소가로).
+
+        좌표는 평소 창 크기 기준이라, **확대한 창에 그대로 누르면 엉뚱한 자리**다.
+        그래서 **스스로 시작하는** 자동 클릭(유휴복구·물약감시·마을감시)은
+        그런 슬롯을 건너뛴다.
+        🚫 사용자가 직접 누른 것은 막지 않는다.
+        🚫 **못 재면 막지 않는다** — 모를 때 막으면 기능이 통째로 죽는다."""
+        try:
+            import win32gui
+            ws = []
+            def _cb(h, _):
+                if win32gui.IsWindowVisible(h) and not win32gui.IsIconic(h):
+                    t = win32gui.GetWindowText(h)
+                    if (t.startswith("리니지M")
+                            and not t.startswith("리니지M 자동 실행")):
+                        l, tp, r, b = win32gui.GetWindowRect(h)
+                        if r - l > 100 and b - tp > 100:
+                            ws.append(r - l)
+                return True
+            win32gui.EnumWindows(_cb, None)
+            if len(ws) < 3:
+                return False, 0, 0        # 못 재면 막지 않는다
+            from collections import Counter
+            base = Counter(ws).most_common(1)[0][0]
+            rects = self._client_rects_by_slot()
+            if not rects or int(si) - 1 >= len(rects):
+                return False, 0, base
+            r = rects[int(si) - 1]
+            w = int(r[2]) - int(r[0])
+            bad = abs(w - base) > max(8, base * WIN_ODD_TOL)
+            return bad, w, base
+        except Exception:
+            return False, 0, 0
+
+    def _win_odd_skip(self, si, who):
+        """🪟 확대·축소된 창이면 **건너뛴다** (기록을 남긴다). True = 건너뛴다.
+
+        🗒 조용히 빠지면 또 '왜 안 되지' 가 된다 — 같은 줄은 2분에 한 번."""
+        try:
+            bad, w, base = self._win_odd_size(si)
+            if not bad:
+                return False
+            _k = f"{who}|{int(si)}|{w}"
+            _m = getattr(self, "_odd_logged", None)
+            if _m is None:
+                _m = self._odd_logged = {}
+            if time.time() - _m.get(_k, 0) > 120:
+                _m[_k] = time.time()
+                click_log(f"[{who}] 🪟 #{int(si):02d} 창이 **평소 크기가 아니다** "
+                          f"(가로 {w}px · 평소 {base}px) — 자동 클릭을 "
+                          f"건너뛴다 (좌표가 어긋난다). 창을 원래 크기로 "
+                          f"돌리면 다시 돕니다")
+            return True
+        except Exception:
+            return False
+
     def _fix_idle_tick(self):
         try:
             # ✅ **기본 켬 그대로** — 2026-10-20 에 잠깐 껐다가 사용자 지시로 되살렸다:
@@ -24324,6 +24415,9 @@ class App(tk.Tk):
                     #    `coin`(동전이 파랗다)·`zone`([복구] 자리) = 진짜 → 건너뜀
                     #    `btn`·`free`(그림이 아슬아슬) = 오인일 수 있다 → 돌린다
                     q, _sk = self._fix_redo_list()
+                    # 🪟 **확대·축소된 창은 건너뛴다** (2026-11-08) — 복구 좌표는
+                    #    평소 창 크기 기준이라 엉뚱한 자리를 누른다.
+                    q = [x for x in q if not self._win_odd_skip(x, "유휴복구")]
                     _paid = [x for x, _w in _sk]
                     if _paid:
                         click_log(f"[유휴복구] 💎 **진짜** 다야 슬롯 {sorted(_paid)} 는 건너뜀 "
@@ -39926,6 +40020,9 @@ class App(tk.Tk):
         _note = []
         _fire = False
         for si, slot in enumerate(_ic.get(key) or []):
+            # 🪟 **확대·축소된 창은 건너뛴다** (2026-11-08)
+            if self._win_odd_skip(si, "마을감시"):
+                continue
             if not isinstance(slot, dict) or not slot.get("enabled", True):
                 seen.pop(si, None)
                 continue
@@ -40112,6 +40209,10 @@ class App(tk.Tk):
                         continue
                     if not slot.get("enabled", True):
                         continue            # 🚫 OFF 슬롯은 보지 않는다
+                    # 🪟 **확대·축소된 창은 건너뛴다** (2026-11-08) — 섬 실행기가
+                    #    평소 크기 기준 좌표를 그 창에 그대로 누르면 엉뚱한 자리다.
+                    if self._win_odd_skip(si, "물약감시"):
+                        continue
                     a0 = _isl.IslandApp._slot_anchor(slot)
                     if a0:
                         ancs[si] = a0
