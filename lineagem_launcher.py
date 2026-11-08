@@ -4608,12 +4608,9 @@ FIX_MORE_MAX   = 3
 FIX_ALL_ROUNDS = 3
 
 
-class _FixSkipCross(Exception):
-    """🎯 이어 가는 판에서 **십자가 확인을 건너뛴다**는 신호 (2026-11-08).
-
-    `_run_fix_slot_body` 의 십자가 확인은 통째로 `try/except Exception` 안에
-    있어서, 이것을 던지면 **그 블록만 빠져나와 바로 탭 흐름으로 간다.**
-    🚫 이 예외를 따로 잡아 기록하지 말 것 — 정상 흐름이다."""
+# 🚫 `_FixSkipCross` 는 **삭제했다** (2026-11-08) — 십자가 확인을
+#    건너뛰게 만들어 **게임 화면(월드던전)을 눌렀다.**
+#    십자가가 사라진 것은 '할 일이 없다' 는 뜻이다. 되살리지 말 것.
 # 💎 를 세운 **이유** — 성격이 다르다 (2026-11-08 사용자 지시).
 #    🚫 **진짜 다야는 절대 다시 돌리지 않는다** (다야가 나가면 되돌릴 수 없다)
 #    🔁 오인일 수 있는 것만 다시 돌린다
@@ -26520,14 +26517,12 @@ class App(tk.Tk):
             #    최대 7번 보므로 5.67초 → **0.35초**.
             #    🚫 `only` 를 빼지 말 것.
             hit, _seen, _run2 = None, False, 0
-            # 🎯 **이어 가는 판(아이템)은 십자가 확인을 건너뛴다** (2026-11-08) —
-            #    경험치를 복구하면 십자가가 사라져 **늘 취소**됐다.
-            #    🚫 이 표시는 그 한 판에만 쓰고 바로 지운다.
-            if getattr(self, "_fix_skip_cross", None) == int(si):
-                self._fix_skip_cross = None
-                click_log(f"fix #{si:02d} 🎯 이어 가는 판 — "
-                          f"십자가 확인을 건너뛰고 바로 탭을 본다")
-                raise _FixSkipCross()
+            # 🚫 **십자가 확인을 건너뛰는 길을 만들지 말 것** (2026-11-08 사고).
+            #    `_fix_skip_cross` 로 건너뛰게 했더니, 십자가가 없는 자리
+            #    (= **게임 화면**)를 눌러 **월드던전이 열렸다**
+            #    (사용자: *"왜 월드던전까지 클릭을 하는 거야"*).
+            #    십자가가 사라진 것은 **할 일이 없다**는 뜻이다 (2026-11-07 사용자:
+            #    *"복구할 게 없으면 저 십자가가 안 떠"*).
             for _t in range(FIX_SEE_TRIES + FIX_GO_N):
                 hit = self._check_hits(only={int(si)})
                 if hit is None:
@@ -26568,7 +26563,15 @@ class App(tk.Tk):
                                     f"(목록은 그대로 둡니다)")
                 self._fix_done(si, "십자가가 없어 실행하지 않았다")   # 🔓 다음 슬롯으로
                 return
-        except Exception:
+        except Exception as _ce:
+            # 🗒 **조용히 삼키지 말 것** (2026-11-08) — 예전엔 `pass` 라,
+            #    십자가 확인에서 예외가 나면 그대로 탭 흐름으로 내려가
+            #    **칸1(게임 화면)을 눌렀다.** 아래 `_fix_cross_now` 가 한 겹 더 막는다.
+            try:
+                click_log(f"fix #{si:02d} ⚠ 십자가 확인 중 오류 — {_ce} "
+                          f"(칸1 을 누르기 전에 한 번 더 확인한다)")
+            except Exception:
+                pass
             pass
         self.status.set(f"🩹 복구 #{si:02d} 실행 — '무료'가 아니면 그 자리에서 멈춥니다")
         # **실제로 복구를 돌린 슬롯**으로 표시해둔다 — 이 슬롯만 십자가가 사라지면
@@ -27015,6 +27018,22 @@ class App(tk.Tk):
         click_log(f"fix #{si:02d} 🗂 [{ko}] 확인 {len(_done)}번 "
                   f"{_done}{_why}")
 
+    def _fix_cross_now(self, si):
+        """🚨 **지금 그 슬롯에 십자가가 있나** — 칸1 을 누르기 직전에 본다.
+
+        십자가가 없으면 그 자리는 **게임 화면**이다 — 누르면 **월드던전**
+        같은 엉뚱한 것이 열린다 (2026-11-08 사용자 신고).
+        `True` 있다 · `False` 없다 · `None` **확인 불가**
+        🚫 `None` 일 때 막지 말 것 — 모를 때 막으면 복구가 통째로 죽는다.
+        ⏱ `only={si}` 라 **0.05초**다 (16개를 긁으면 0.81초)."""
+        try:
+            hit = self._check_hits(only={int(si)})
+            if hit is None:
+                return None
+            return int(si) in set(hit)
+        except Exception:
+            return None
+
     def _fix_tabs_work(self, si, idx):
         """🗂 **탭 두 개를 돌며 [모두 복구]** — 복구의 새 흐름 (2026-11-06).
 
@@ -27037,6 +27056,18 @@ class App(tk.Tk):
             c5 = cs[4] if len(cs) > 4 and cs[4] else None   # 확인 팝업 (사용자 등록)
             if not c1 or not anc:
                 click_log(f"fix #{si:02d} 🗂 칸1(십자가) 좌표가 없어 못 연다")
+                return
+            # 🚨 **십자가가 있을 때만 누른다** (2026-11-08) — 없으면 그 자리는
+            #    **게임 화면**이라 월드던전 같은 것이 열린다.
+            #    🚫 이 관문을 없애지 말 것.
+            _cn = self._fix_cross_now(si)
+            if _cn is False:
+                click_log(f"fix #{si:02d} 🚫 **십자가가 없다** "
+                          f"{self._warn_score_txt(si)} — 칸1 을 누르면 그 자리는 "
+                          f"**게임 화면**이다. 아무것도 누르지 않는다")
+                self.status.set(f"🩹 복구 #{si:02d} — 십자가가 없어 "
+                                f"아무것도 누르지 않았습니다")
+                self._fix_done(si, "십자가가 없다 — 아무것도 누르지 않았다")
                 return
             # ① 십자가를 눌러 복구 창을 연다
             self._focus_client_at(c1)
@@ -27077,7 +27108,16 @@ class App(tk.Tk):
                                 if fix_tab_find(big, _n4):
                                     _sign = True
                                     break
+                        # 🚨 **다시 열 때도 십자가를 먼저 본다** (2026-11-08) —
+                        #    여기엔 확인이 **아예 없어서** 창이 닫히고 십자가도
+                        #    사라진 뒤 **게임 화면을 눌렀다**.
                         if not _sign and _reopen < FIX_REOPEN:
+                            if self._fix_cross_now(si) is False:
+                                click_log(f"fix #{si:02d} 🚫 [{_ko}] 창이 닫혔는데 "
+                                          f"**십자가도 없다**"
+                                          f"{self._warn_score_txt(si)} — 다시 열지 "
+                                          f"않는다 (그 자리는 게임 화면이다)")
+                                break
                             _reopen += 1
                             click_log(f"fix #{si:02d} 🔁 [{_ko}] **복구 창이 "
                                       f"닫혀 있다 — 칸1(십자가)을 다시 눌러 연다** "
@@ -27552,29 +27592,15 @@ class App(tk.Tk):
                                lambda: self._fix_verify(si, tries - 1, marked))
                     return
                 self._fix_gone2.pop(int(si), None)
-                # 🎯 **경험치만 하고 닫은 판이면 아이템을 한 번 더 확인한다**
-                #    (2026-11-08). 경험치를 복구하면 **십자가가 잠깐 사라진다** —
-                #    그때 여기서 끝내버려 **아이템 복구를 영영 안 했다.**
-                #    (사용자: *"여전히 아이템 복구는 안 되고"*)
-                #    아이템도 할 게 없으면 그 판이 조용히 끝나고 그때 지워진다.
-                #    🚫 이 확인을 빼지 말 것.
+                # 🚫 **십자가가 사라졌으면 그 슬롯은 끝이다** (2026-11-08 사용자:
+                #    *"복구가 삭제되면 멈춰야지 어디 계속 클릭을 하냐고"*).
+                #    여기에 '아이템을 한 번 더' 를 넣었다가 **십자가가 없는 자리
+                #    (= 게임 화면)를 눌러 월드던전이 열렸다.**
+                #    아이템이 남아 있으면 십자가가 **다시 뜨므로** 연속 2번을
+                #    못 채워 지우지 않고, 아래 '남아 있을 때' 경로가 이어 간다.
+                #    🚫 여기에 이어가기를 다시 넣지 말 것.
                 try:
-                    if int(si) in getattr(self, "_fix_more", set()):
-                        self._fix_more.discard(int(si))
-                        # 🎯 **그 판은 십자가 확인을 건너뛴다** (2026-11-08) —
-                        #    경험치를 복구하면 십자가가 사라지므로, 확인을 두면
-                        #    **아이템 탭을 열어보지도 않고 취소**된다 (실측 09:31
-                        #    *"십자가가 5번 다 안 보였다 — 이미 복구된 것으로 보고"*).
-                        #    아이템 탭에 할 것이 없으면 '버튼이 꺼져 있다' 로 끝난다.
-                        #    🚫 **일반 실행의 십자가 확인은 그대로다** (2026-08-29).
-                        self._fix_skip_cross = int(si)
-                        click_log(f"fix #{si:02d} 🎯 십자가는 사라졌지만 "
-                                  f"**아이템 복구를 한 번 더 확인한다** "
-                                  f"(그 판은 십자가 확인을 건너뛴다)")
-                        self.status.set(f"🔁 복구 #{si:02d} — 경험치 끝, "
-                                        f"**아이템**을 한 번 더 봅니다")
-                        self.after(250, lambda i=si: self._run_fix_slot(i))
-                        return
+                    self._fix_more.discard(int(si))
                 except Exception:
                     pass
                 # 십자가가 사라졌다 = 복구됨
