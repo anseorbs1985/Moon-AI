@@ -4665,6 +4665,18 @@ FIX_BTN_PAD    = 6                   # 버튼 그림 둘레 이만큼까지 본�
 #    기록: 탭 누름 → **1초 뒤** "꺼져 있다" 로 끝냄. 화면에는 (1) 이 있었다.
 #    ⚠ 꺼져 있을 때만 더 본다 → 켜져 있으면 첫 번에 끝나 느려지지 않는다.
 FIX_ON_TRIES   = 7                   # 버튼이 켜질 때까지 다시 보는 횟수
+# 🎨 **밝은 픽셀이 연속 이만큼 0 이면 확실히 꺼져 있다** (2026-11-08).
+#    사용자: *"하나 끝나면 **바로 다른 클라를** 해줘야지 왜 버퍼링이 심해"*.
+#    회색 버튼을 7~11번 보며 **10초**를 버리고 있었다.
+#    📏 실측 — 켜지는 것은 **3번째**에 켜지고(4건 전부 · 그 전 [0,0] · 켜진 값
+#       179~186), 꺼진 것은 7·11번 **전부 0**(96개 값 전부 0). 중간값이 없다.
+#    🚫 **3 밑으로 내리지 말 것** — 진짜가 3번째에 켜진다. 2 면 복구할 것이
+#       있는데 "없다" 로 넘어간다.
+FIX_OFF_SURE   = 4
+# ⏱ 지우기 전 **연속 확인 사이** 간격(ms) — `FIX_WATCH_MS`(지켜보기 주기)와
+#    다르다. 400ms 면 화면이 24프레임 바뀌므로 '한 프레임 흔들림' 은 그대로
+#    걸러진다. 🚫 `FIX_VERIFY_GONE`(연속 2번)은 건드리지 말 것.
+FIX_GONE_MS    = 400
 #    ⏱ 2026-11-07 사용자: *"**너무 천천히 말고 기존 시간에서 1~2초 정도 더**
 #       주고 **확실히 정확히** 눌러달라는 거야"* → 10 은 과했다. **7** (3.2~5.3초).
 #       켜져 있으면 첫 번에 끝나므로 평소엔 안 느려진다.
@@ -26585,7 +26597,7 @@ class App(tk.Tk):
         # ⚠ 옛 경로(그림이 없는 컴퓨터)는 **UI 를 만지므로** UI 스레드로 돌려준다
         self.after(0, lambda: self._start_dgn2("fix", sel_list=[idx]))
         # 끝난 뒤 **화면을 다시 봐서** 경고가 사라졌는지 확인하고 지운다
-        self.after(300, lambda x=si: self._fix_verify(x, FIX_WATCH_N))
+        self.after(150, lambda x=si: self._fix_verify(x, FIX_WATCH_N))
 
     def _fix_nap(self, a, b=None):
         """🧍 복구 흐름의 기다림 — **매번 다른 배수(20~50%)** 를 곱한다.
@@ -26708,6 +26720,16 @@ class App(tk.Tk):
                         #    🚫 `break` 로 되돌리지 말 것.
                         _off.setdefault(_ko2, []).append(_bn); _last = _ko2
                         continue
+                # 🎨 **전부 찾았고 전부 밝은 픽셀 0 이면 확실히 꺼져 있다**
+                #    (2026-11-08) — 회색 버튼을 11번 보며 10초를 버렸다.
+                #    📏 실측: 켜지는 것은 3번째에 0 → 179 로 켜진다(중간값 없다).
+                #    🚫 그림을 **못 찾은 이름이 있으면** 일찍 끝내지 않는다 —
+                #       그건 리드로우 중일 수 있다.
+                if (need_on and _off and len(_off) == len(names)
+                        and _t + 1 >= FIX_OFF_SURE
+                        and all(v == 0 for vs in _off.values() for v in vs)):
+                    _n = _t + 1
+                    break
                     try:
                         _b = fix_tab_find(big, _nm2, lo=True)
                         if _b and float(_b[4]) > best:
@@ -26720,7 +26742,8 @@ class App(tk.Tk):
             # 🎨 찾기는 했는데 **전부 끝까지 꺼져 있었다** = 복구할 것이 없다
             _txt = " · ".join(f"[{k2}] {v2}" for k2, v2 in _off.items())
             click_log(f"fix #{si:02d} 🎨 [{ko}] **전부 꺼져 있다** — {_txt} "
-                      f"(기준 {FIX_BTN_BRIGHT} · {_n}번 봤다) — 복구할 것이 없다")
+                      f"(기준 {FIX_BTN_BRIGHT} · {_n}번 봤다 · 연속 0 이 "
+                      f"{FIX_OFF_SURE}번이면 그만 본다) — 복구할 것이 없다")
             return big, None, "OFF"
         # 📍 **고정 자리로 떨어진다** — 단 `FIX_POS` 에 있는 것만 (= `all`).
         #    🚫 `free`(일일무료복구)는 없다 — 무료를 다 쓰면 그 자리가
@@ -27429,7 +27452,7 @@ class App(tk.Tk):
                 self._fix_diag_maybe()
             except Exception:
                 pass
-            self.after(300, lambda x=si: self._fix_verify(x, FIX_WATCH_N))
+            self.after(150, lambda x=si: self._fix_verify(x, FIX_WATCH_N))
 
     def _fix_verify(self, si, tries, marked=False):
         """복구를 돌린 뒤 **그 슬롯만 계속 지켜본다** — F11 의 5분 감시를 개별로.
@@ -27491,7 +27514,7 @@ class App(tk.Tk):
             self._fix_hold = None
         try:
             if getattr(self, "_fix_queue", None):
-                self.after(600, self._fix_run_next)
+                self.after(200, self._fix_run_next)     # ⚡ 바로 다음 클라로
         except Exception:
             pass
 
@@ -27523,7 +27546,9 @@ class App(tk.Tk):
                     click_log(f"fix #{si:02d} 십자가가 안 보인다 "
                               f"({_g}/{FIX_VERIFY_GONE}번째{self._warn_score_txt(si)}) "
                               f"— 한 번 더 봐야 지운다")
-                    self.after(FIX_WATCH_MS,
+                    # ⚡ **연속 확인은 빠르게** (2026-11-08) — 지켜보기 주기
+                    #    (`FIX_WATCH_MS`)와 다르다. 연속 2번 규칙은 그대로다.
+                    self.after(FIX_GONE_MS,
                                lambda: self._fix_verify(si, tries - 1, marked))
                     return
                 self._fix_gone2.pop(int(si), None)
@@ -27548,7 +27573,7 @@ class App(tk.Tk):
                                   f"(그 판은 십자가 확인을 건너뛴다)")
                         self.status.set(f"🔁 복구 #{si:02d} — 경험치 끝, "
                                         f"**아이템**을 한 번 더 봅니다")
-                        self.after(600, lambda i=si: self._run_fix_slot(i))
+                        self.after(250, lambda i=si: self._run_fix_slot(i))
                         return
                 except Exception:
                     pass
@@ -27592,7 +27617,7 @@ class App(tk.Tk):
                               f"(깨끗한 창에서 · 평소 속도)")
                     self.status.set(f"🔁 복구 #{si:02d} — 경험치 끝, "
                                     f"이제 **아이템 복구**로 이어 갑니다")
-                    self.after(600, lambda i=si: self._run_fix_slot(i))
+                    self.after(250, lambda i=si: self._run_fix_slot(i))
                     return
             except Exception:
                 pass
