@@ -24071,7 +24071,12 @@ class App(tk.Tk):
         #    메인런처 창이 앞으로 안 튀어나오고 그냥 뒤에서 그대로 처리")
         self._stay_back(len(q) * 14 + 10)
         self._send_behind_only()
-        self.status.set(f"▶ 전부 복구 시작 — {len(q)}개 {q} (하나씩 순서대로, 뒤에서)")
+        # 🗣 **"뒤에서" 는 런처 창 이야기다** (2026-11-08 사용자가 오해했다:
+        #    *"복구 자체가 뒤에서 된다는 게 무슨 말이야"*). 복구는 평소처럼
+        #    게임 창을 클릭한다 — 런처가 클라를 가려 클릭을 먹지 않게
+        #    **런처만** 맨 뒤로 보내는 것이다 (2026-10-06 사용자 지시).
+        self.status.set(f"▶ 전부 복구 시작 — {len(q)}개 {q} · 하나씩 순서대로 "
+                        f"(런처 창만 뒤로 보냅니다 — 복구는 그대로 돕니다)")
         self._fix_run_next()
 
     def _fix_run_next(self):
@@ -24100,7 +24105,8 @@ class App(tk.Tk):
         if si not in set(self._warn_load()):     # 그 사이 사라졌으면 건너뛴다
             self.after(200, self._fix_run_next)
             return
-        self.status.set(f"▶ 전부 복구 — #{si:02d} 차례 (남은 {len(q)}개)")
+        self.status.set(f"▶ 전부 복구 — #{si:02d} 차례 "
+                        f"(남은 {len(q)}개 · 끝나면 다음으로)")
         self._stay_back(len(q) * 14 + 20)      # 🔙 남은 만큼 계속 뒤에 둔다
         self._run_fix_slot(si, _bulk=True)
         # 🩹 다음은 **그 슬롯이 끝나면** `_fix_done` 이 불러준다 (2026-11-08).
