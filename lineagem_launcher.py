@@ -25792,9 +25792,14 @@ class App(tk.Tk):
                     #    올라가 진짜를 버린 날에도 "점수 0.64(기준 0.55)" 로
                     #    **거짓말**을 했다. 기록이 거짓말하면 원인을 못 짚는다.
                     _nd = getattr(self, "_warn_need", None) or WARN_MATCH
+                    # ⚠ **기준 바로 둘레일 때만** 경고한다 (2026-11-08).
+                    #    예전 조건 `_v >= _nd - 0.06` 은 **기준을 넘은 모든
+                    #    점수**가 걸려, 0.82(기준 0.56)에도 "기준에 가깝다" 가
+                    #    떴다 — 로컬 기록이 거짓 경고로 덮였다.
+                    #    🚫 기록이 거짓말하면 원인을 영영 못 짚는다.
                     return (f" · 점수 {_v:.2f}(기준 {_nd:.2f})"
                             + ("  ⚠ 기준에 가깝다 — 가려졌을 수 있다"
-                               if _v >= _nd - 0.06 else ""))
+                               if _nd - 0.06 <= _v <= _nd + 0.04 else ""))
         except Exception:
             pass
         return ""
@@ -26659,6 +26664,11 @@ class App(tk.Tk):
                     if FIX_CERT_ON:
                         _names = _names + (("cert", "구호증서복구"),)
                     _hit = 0
+                    # 🔢 **남은 건수가 보일 때만** 버튼을 더 기다린다
+                    #    (2026-11-08 로컬 진단 — 잉크 0 인데 11번을 보며
+                    #     13초를 썼다). 🚫 숫자로 **멈추지는 않는다** —
+                    #    멈추는 것은 여전히 '버튼이 사라졌을 때' 다.
+                    _lastnum = True
                     for _f in range(FIX_FREE_TRIES):
                         # ① 🖱 **EXP(줄)를 한 번만 누른다** (2026-11-07 사용자:
                         #    *"한 번 누르고 아래 활성화되면 한 번 누르고
@@ -26672,7 +26682,7 @@ class App(tk.Tk):
                         #       복구 직후에는 목록이 다시 그려지는 중이다.
                         big, fb, _how = self._fix_btn_look(
                             c1, _names, si, _ko, need_on=True,
-                            more=(FIX_ON_MORE if _hit else 0))
+                            more=(FIX_ON_MORE if (_hit and _lastnum) else 0))
                         if not fb:
                             # 🎨 **끝까지 꺼져 있었다** = 복구할 것이 없다 (💎 아님)
                             if _how == "OFF":
@@ -26745,9 +26755,13 @@ class App(tk.Tk):
                             tb3 = fix_tab_find(big, _nm) if big is not None else None
                             if tb3:
                                 _h2, _i2 = fix_tab_has_num(big, tb3)
+                                _lastnum = bool(_h2)
                                 click_log(f"fix #{si:02d} 🔢 [{_ko}] 남은 건수 "
                                           f"{'있다' if _h2 else '안 보인다'} "
-                                          f"(잉크 {_i2}) → **버튼으로 판단한다**")
+                                          f"(잉크 {_i2}) → **버튼으로 판단한다**"
+                                          + ("" if _h2 else
+                                             " · 건수가 없으니 버튼은 "
+                                             "짧게만 본다"))
                         except Exception:
                             pass
                     # 🎯 **경험치를 했으면 여기서 닫는다** (2026-11-07 사용자 설계).
