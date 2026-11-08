@@ -11083,21 +11083,51 @@ class App(tk.Tk):
 
     # ⏱ 섬 실행기와 **같은 값**을 둘 것 (lineagem_island.py 의 REPEAT_EXTRA_MIN)
     REPEAT_EXTRA_MIN = {"라스타바드": (14, 20), "악몽의섬": (10, 16)}   # 2026-10-17 +5~6분
+    # 🗡 라스타바드 칸 (프리셋이 이 칸에 그림 설정을 적는다) —
+    #    🚨 **칸6 의 🃏 카드 설정도 같은 `slot["rasta"]` 에 적힌다.**
+    #       그래서 이 범위로 걸러야 한다 (2026-11-05 에 섬 실행기만 고쳤고
+    #       런처는 2026-11-08 까지 카드만 있는 슬롯을 라바로 보고 있었다).
+    #    ⚠ `lineagem_island.py` 의 `RASTA_RANGE` 와 **같은 값**이어야 한다.
+    RASTA_RANGE = (26, 35)
+    # 🏴 해적섬 — 프리셋이 `slot["card"]` 에 적어둔다 (2026-11-07)
+    PIRATE_VERS = ("해적섬",)
+    # 🚫 이 버전은 **⏰ 반복을 걸지 않는다** (사용자: *"이건 반복 없어 넣지 마"*).
+    #    런처 쪽에서도 **다시 채우지 않는다** — `REPEAT_FIXED` 는 던전 단위라
+    #    이 확인이 없으면 해적섬도 6회를 영영 다시 채운다.
+    #    ⚠ `lineagem_island.py` 의 `REPEAT_NONE_VER` 와 **같은 값**이어야 한다.
+    REPEAT_NONE_VER = ("해적섬",)
 
     def _slot_ver(self, key, bi):
-        """그 슬롯이 **라스타바드**인지 **악몽의섬**인지 (악몽의섬 던전만 해당).
+        """그 슬롯이 **라스타바드 / 해적섬 / 악몽의섬** 중 무엇인지.
 
         프리셋을 적용하면 라스타바드 칸(26~35)은 `slot["rasta"]` 에 그림 설정이
-        적히고, 악몽의섬 프리셋은 그 칸을 ✖삭제 해서 `rasta` 를 지운다.
-        그래서 **`rasta` 가 비어 있지 않으면 라스타바드**다 (이름보다 확실하다).
-        모르면 빈 값 → 예전 기본 여유를 쓴다."""
+        적히고, 악몽의섬 프리셋은 그 칸을 ✖삭제 해서 지운다. 해적섬 프리셋은
+        `slot["card"]` 에 '해적섬' 을 적어둔다.
+        모르면 빈 값 → 예전 기본 여유를 쓴다.
+
+        🚨 **`rasta` 에 들어 있다고 다 라스타바드가 아니다** (2026-11-05 버그).
+           칸6 의 🃏 카드 설정도 **같은 `rasta`** 에 적힌다 — 그걸 세는 바람에
+           카드만 골라둔 악몽의섬 슬롯이 **라스타바드로 잡혀** ⏰ 간격이
+           4시간 1회 + 여유 14~20분으로 걸렸다. **칸26~35 만** 센다.
+           (섬 실행기는 그날 고쳤는데 **런처는 2026-11-08 까지 안 고쳐져 있었다** —
+            🚫 두 파일의 이 함수는 **한 쌍이다. 같이 고칠 것.**)"""
         if key != "토요일_악몽의섬" or bi is None:
             return ""
         try:
-            sl = (self._island_cfg().get(key) or [])[int(bi)]
+            sl = (self._island_cfg().get(key) or [])[int(bi)] or {}
         except Exception:
             return ""
-        return "라스타바드" if ((sl or {}).get("rasta")) else "악몽의섬"
+        _a, _b = self.RASTA_RANGE
+        for k3 in (sl.get("rasta") or {}):
+            try:
+                if _a <= int(k3) + 1 <= _b:
+                    return "라스타바드"
+            except Exception:
+                pass
+        # 🏴 해적섬 — 칸26~35 를 안 쓰므로 라스타바드와 구분된다
+        if (sl.get("card") or "").strip() in self.PIRATE_VERS:
+            return "해적섬"
+        return "악몽의섬"
 
     def _island_cfg(self):
         try:
@@ -15763,7 +15793,15 @@ class App(tk.Tk):
             kk = f"{key}|{bi}"
             e["left"] = int(e.get("left", 1)) - 1
             e["run"]  = int(e.get("run", 0)) + 1      # 이번이 몇 회차인지 (물약 교체용)
-            if e["left"] <= 0 and key in self.REPEAT_FIXED:
+            # 🏴 **해적섬은 다시 채우지 않는다** (2026-11-08) — `REPEAT_FIXED` 는
+            #    **던전 단위**라 해적섬도 '토요일_악몽의섬' 이다. 이 확인이 없으면
+            #    6회를 영영 다시 채운다 (사용자: *"이건 반복 없어 넣지 마"*).
+            _nov = self._slot_ver(key, bi) in self.REPEAT_NONE_VER
+            if e["left"] <= 0 and _nov:
+                st.pop(kk, None)
+                self._rep_log(f"{key} #{bi+1:02d} 🏴 해적섬은 반복을 다시 채우지 "
+                              f"않는다 — 여기서 끝 (사용자 지시)")
+            elif e["left"] <= 0 and key in self.REPEAT_FIXED:
                 # 고정 던전 — 횟수를 다 채우면 끄지 않고 처음부터 다시
                 e["left"] = self._rep_full_n(key, bi)
                 e["run"]  = 0                          # 다음 실행이 다시 1회차
