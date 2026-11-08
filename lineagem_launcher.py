@@ -436,6 +436,10 @@ FIX_ESC_TRIES      = 2         # 복구 전 열린 창을 ESC 로 닫아보는 �
 #    접속 직후 로딩 화면의 오탐이 올라왔다 — 실측 1번째만 0.55+, 그 뒤 5번 0.45.
 #    🚫 1 로 되돌리지 말 것. 지우는 쪽(FIX_SEE_TRIES)은 그대로 5번이다.
 FIX_SEE_ADD        = 2
+# 🔁 F11 스캔은 **한 번 누르면 끝**이라, 그 자리에서 두 번 보고 **둘 다**
+#    보인 것만 올린다 (counter 만으로는 영영 못 올린다). 둘째 번까지 쉬는 시간.
+#    📏 16클라 한 바퀴 0.8초 → +0.8초. F11 전체가 수 초라 무시할 양이다.
+WARN_SCAN_GAP      = 0.6
 FIX_SEE_TRIES      = 5   # 2026-11-03: 3 → 5. 십자가 점수는 **있을 때 0.62~0.90 ·
                          # 없을 때 0.38~0.54** 로 갈리므로(실측) 기준(0.55)은 맞다.
                          # 못 보는 것은 점수가 아니라 **창이 가려졌거나 절전**이라
@@ -25853,6 +25857,50 @@ class App(tk.Tk):
             pass
         return ""
 
+    def _warn_add_filter(self, now_hit, before):
+        """🚦 십자가가 보인다고 **바로 올리지 않는다** (2026-11-08 사용자 신고:
+        *"복구 안 떠 있는데 복구해야함으로 또 인식한다"*).
+
+        **지우는 쪽(`_warn_gone_filter`)의 거울**이다. 지우기는 연속
+        `WARN_GONE_N`(4)번을 요구하는데 **올리기는 한 프레임**이면 됐다 —
+        점수가 흔들리므로 그 한 프레임이 오탐이 된다.
+
+        📏 실측(메인 11-08) — 여유가 **0.07** 밖에 없다:
+           🟢 초록 모양  있을 때 0.52~0.70 · 없을 때 0.00~0.38 (기준 0.45)
+           ⬛ 흑백       있을 때 0.78~0.85 · 없을 때 0.42~0.54 (기준 0.55)
+           🚨 초록 '개수' 관문은 아무 것도 못 막는다 (없을 때도 18~862개) —
+              실제 관문은 **모양 하나뿐**이다. 기준을 올리면 진짜(0.52)를 놓친다.
+           → **연속 확인**이 정답이다.
+
+        돌려주는 것: **올려도 되는** 슬롯 집합 (이미 목록에 있는 것은 그대로).
+        🚫 지우는 쪽은 건드리지 말 것 — 두 방향은 다른 사고를 막는다."""
+        seen = getattr(self, "_warn_seen2", None)
+        if seen is None:
+            seen = self._warn_seen2 = {}
+        ok = set()
+        for si in sorted(now_hit):
+            si = int(si)
+            if si in before:
+                ok.add(si)             # 이미 목록에 있다 — 그대로 둔다
+                seen.pop(si, None)
+                continue
+            seen[si] = seen.get(si, 0) + 1
+            if seen[si] >= FIX_SEE_ADD:
+                ok.add(si)
+                seen.pop(si, None)
+                click_log(f"[경고확인] #{si:02d} 목록에 올린다"
+                          f"{self._warn_score_txt(si)} · "
+                          f"연속 {FIX_SEE_ADD}번 보였다")
+            else:
+                click_log(f"[경고확인] #{si:02d} 십자가 보임 "
+                          f"({seen[si]}/{FIX_SEE_ADD}번째"
+                          f"{self._warn_score_txt(si)}) — 한 번 더 봐야 올린다")
+        # 🚦 **한 번이라도 안 보이면 0 으로 되돌린다** — 진짜 '연속' 이어야 한다
+        for si in list(seen):
+            if si not in now_hit:
+                seen.pop(si, None)
+        return ok
+
     def _warn_gone_filter(self, now_hit, before, keep=()):
         """십자가가 안 보인다고 **바로 지우지 않는다** (2026-09-29 사용자 신고).
 
@@ -27595,9 +27643,24 @@ class App(tk.Tk):
         before = set(self._warn_load())
         _slept = getattr(self, "_last_sleep", set())
         _keep = before & _slept          # 자는 슬롯은 십자가가 가려 안 보인다 → 유지
+        # 🚦 **두 번 보고 둘 다 보인 것만 올린다** (2026-11-08 사용자 신고:
+        #    *"복구 안 떠 있는데 복구해야함으로 또 인식한다"*).
+        #    F11 은 한 번 누르면 끝이라 counter 만으로는 영영 못 올린다.
+        #    📏 +0.8초 (16클라 한 바퀴) — F11 전체가 수 초라 무시할 양이다.
+        _add = set(hit)
+        try:
+            if _add - before:                     # 새로 올릴 것이 있을 때만
+                self._warn_add_filter(set(hit), before)   # 1번째
+                nap(WARN_SCAN_GAP)
+                _h2 = self._check_hits()
+                if _h2 is not None:
+                    _add = self._warn_add_filter(set(_h2), before)
+                    hit = sorted(set(_h2))        # 지우기 판정도 **새로 본 것**으로
+        except Exception:
+            pass
         # 안 보인다고 바로 지우지 않는다 — 연속 WARN_GONE_N 번 확인 (2026-09-29)
         gone = sorted(self._warn_gone_filter(set(hit), before, _keep))
-        self._warn_save(sorted((before - set(gone)) | set(hit)))
+        self._warn_save(sorted((before - set(gone)) | _add))
         # ⚠ **Tk 위젯을 만지므로 UI 스레드로 넘긴다** (여기는 스레드다)
         self.after(0, self._warn_refresh)
         self._fix_bulk_ready = True      # 다음 한 번은 '단체 복구'
@@ -27751,9 +27814,12 @@ class App(tk.Tk):
                 _keep = before & _slept      # 자는 슬롯은 유지 (십자가가 가려 안 보임)
                 # 안 보인다고 바로 지우지 않는다 (2026-09-29 사용자 신고)
                 gone = sorted(self._warn_gone_filter(set(now_hit), before, _keep))
-                new_ = sorted(set(now_hit) - before)
+                # 🚦 **연속 FIX_SEE_ADD 번 보여야 올린다** (2026-11-08) —
+                #    이 틱은 5초마다 저절로 반복되므로 counter 만으로 충분하다.
+                _add = self._warn_add_filter(set(now_hit), before)
+                new_ = sorted(_add - before)
                 if gone or new_:
-                    self._warn_save(sorted((before - set(gone)) | set(now_hit)))
+                    self._warn_save(sorted((before - set(gone)) | _add))
                     self._warn_refresh()
                     msg = []
                     if new_:
