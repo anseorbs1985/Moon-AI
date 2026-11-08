@@ -234,7 +234,7 @@ FIX_GAP_MIN        = 0.80   # 2026-11-03 "또박또박" — 0.70~1.25 에서 14%
 FIX_GAP_MAX        = 1.35   # (창 뜨는 애니메이션이 끝나기 전에 다음 좌표가 눌리던 것)
 # 슬롯의 **첫 좌표를 누르기 전에** 그 창을 앞으로 올리고 이만큼 기다린다.
 # 비활성 창의 첫 클릭은 '창 띄우기'로만 먹히고 사라진다 (2026-08-24 에 이미 겪은 것).
-FIX_FOCUS_WAIT     = (0.45, 0.75)   # 창을 올린 뒤 십자가를 누르기까지
+FIX_FOCUS_WAIT     = (0.35, 0.60)   # 🐢 창을 올린 뒤 (2026-11-08)   # 창을 올린 뒤 십자가를 누르기까지
 #   2026-10-20 사용자: *"십자가를 … 너무 빨리 눌러버려서 실패율이 좀 있어.
 #   확실히 눌러줘."* → 0.35~0.60 에서 조금 늘렸다 (랜덤 폭은 그대로).
 FIX_FOCUS_TRIES    = 3              # 창이 앞으로 올라올 때까지 몇 번 시도할지
@@ -4483,8 +4483,11 @@ FIX_TAB_MATCH = 0.70                 # 탭·[모두 복구] 그림 기준
 #      줬으면. 어느 정도 다른 곳도 좀 클릭을 하고 … 너무 한 군데만 딱딱 클릭하면
 #      안 되고. 지금 속도의 **랜덤으로 20~50%** 까지는 여유 있을 것 같은데"*)
 #    🚫 값 하나로 고정하지 말 것 — 매번 다른 배수를 곱한다 (2026-09-07 상시 규칙).
-FIX_HUMAN_SLOW = (1.20, 1.50)        # 복구 흐름의 기다림에 곱하는 배수 (20~50% 여유)
-FIX_STRAY_P    = 0.30                # 이 확률로 **한 박자 더 쉰다** (사람이 화면 보는 시간)
+# 🐢 2026-11-08 — 사용자: *"복구가 **상당히 늦어졌다**"*. 1.20~1.50 → 1.00~1.18.
+#    🚫 랜덤 폭을 0 으로 만들지 말 것 (항상 사람이 하는 것처럼).
+#    🚫 1.00 밑으로 내리지 말 것 — 등록한 간격보다 빠르게 누르는 셈이 된다.
+FIX_HUMAN_SLOW = (1.00, 1.18)        # 복구 흐름의 기다림에 곱하는 배수 (20~50% 여유)
+FIX_STRAY_P    = 0.10        # 🐢 0.30 → 0.10 (2026-11-08) — 순전한 덧살이었다                # 이 확률로 **한 박자 더 쉰다** (사람이 화면 보는 시간)
 #    ⚠ **이것은 쉬는 것이지 클릭이 아니다** — 2026-11-06 사용자가 요청한 여유다.
 #    🚫 2026-11-07 — 이 확률로 **같은 탭을 한 번 더 누르던 코드는 지웠다**
 #       (사용자: *"복구하는 거 복구만 하면 되지 왜 다른 버튼까지 클릭을 하냐고"*).
@@ -4493,12 +4496,16 @@ FIX_STRAY_P    = 0.30                # 이 확률로 **한 박자 더 쉰다** (
 FIX_STRAY_GAP  = (0.25, 0.70)
 #    ⚠ '다른 곳 클릭' 은 **같은 탭을 한 번 더 누르는 것**으로 한다 —
 #      빈 목록 줄을 누르면 **고른 줄(EXP)이 풀려** 버튼이 다시 회색이 된다.
-FIX_TAB_GAP   = (0.8, 1.2)           # 탭을 바꾼 뒤 기다림
+# 🔑 0.8~1.2 → 0.45~0.75 (2026-11-08). 이 값을 올린 11-06 에는 '한 번 보고
+#    못 찾으면 포기' 였으니 **고정 대기로 버텨야** 했다. 지금은
+#    `_fix_tab_look` 이 **보일 때까지 다시 본다** — 기다림을 재시도가 맡는다.
+#    🚫 `FIX_TAB_TRIES` 를 줄이지 말 것 (그게 성공률이다).
+FIX_TAB_GAP   = (0.45, 0.75)           # 탭을 바꾼 뒤 기다림
 #    🚨 2026-11-06 실측 — 0.5~0.9 로는 **경험치 복구 탭이 다 안 그려져서**
 #       `[모두 복구] 를 못 찾았다` 로 빠졌다 (아이템 탭은 이미 선택돼 있어 됐다).
 #       기록: 14:21:26 탭 누름 → 14:21:27 못 찾음 (**1초**).
 FIX_TAB_TRIES = 4                    # [모두 복구] 가 보일 때까지 다시 보는 횟수
-FIX_TAB_RETRY = (0.45, 0.75)         # 다시 보는 간격
+FIX_TAB_RETRY = (0.30, 0.50)   # 다시 보는 간격 — 짧을수록 **빨리 찾는다**         # 다시 보는 간격
 FIX_ALL_WAIT  = (0.7, 1.1)           # [모두 복구] 뒤 확인창이 뜨기를
 FIX_TAB_CLOSE = (78.0, 9.5)          # '아이템 복구' 그림 좌상단 → ✕ 까지 (546 창 기준)
 FIX_COIN_BOX  = (0, -19, 12, -9)     # '모두 복구' 좌상단 기준 **합계 동전** 상자
@@ -4572,6 +4579,12 @@ FIX_ONE_TAB    = True
 # 🔁 경험치를 하고 닫은 뒤 **바로 다음 판**을 도는 횟수 (무한 방지).
 #    이 판은 실패가 아니라 정상 진행이라 **느리게 하지 않는다**.
 FIX_MORE_MAX   = 3
+# 🩹 **복구는 하나씩 — 완전히 끝나야 다음** (2026-11-08 사용자 지시:
+#    *"복구는 웨이브 하지 마. 하나씩 완벽하게 마무리하고 다른 거 하나씩"*).
+#    한 슬롯은 클릭이 끝나도 안 끝난다 — 확인(최대 60초) · 아이템 판 · 2회차가
+#    `after()` 로 되돌아온다. 그 사슬 전체를 `_fix_hold` 로 잠근다.
+# ⏱ 굳으면 복구가 영영 멈추므로 이 시효가 지나면 푼다. 🚫 없애지 말 것.
+FIX_HOLD_TTL   = 240.0
 # 🚨 **십자가가 연속 이만큼 보여야 복구를 시작한다** (2026-11-07 사용자:
 #    *"십자가가 없으면 복구를 띄우면 안 되는데 그 자리에 다른 게 있다고
 #      복구를 띄우고 **그 던전 버튼을 눌러버리는 현상**이 있어"*).
@@ -4610,7 +4623,10 @@ FIX_ON_TRIES   = 7                   # 버튼이 켜질 때까지 다시 보는 
 #       켜져 있으면 첫 번에 끝나므로 평소엔 안 느려진다.
 # 🎯 **켜진 것을 보고 바로 누르지 않는다** — 막 그려진 순간에 누르면 씹힌다.
 #    한 박자 쉬고 눌러야 **확실히** 먹는다 (사용자: "확실히 정확히").
-FIX_BTN_SETTLE = (0.6, 1.0)          # 버튼이 켜진 뒤 누르기까지 — 자리 잡을 틈
+# 🔑 0.6~1.0 → 0.35~0.60 (2026-11-08). '켜진 직후 바로 누르지 않는다' 는 뜻은
+#    지키되(한 박자), `_fix_btn_look` 이 켜질 때까지 보므로 길게 둘 이유가 없다.
+#    🚫 0 으로 만들지 말 것 — 막 그려진 순간에 누르면 씹힌다.
+FIX_BTN_SETTLE = (0.35, 0.60)          # 버튼이 켜진 뒤 누르기까지 — 자리 잡을 틈
 # 🖱 **확인은 여러 자리를 눌러본다 — 좌측부터** (2026-11-07 사용자:
 #    *"확인버튼을 여러군데로 눌러줘야 해. **제일 좌측으로** 눌러봐바"* ·
 #     *"**정품인증** 이것 때문에 안 눌려"*).
@@ -5456,9 +5472,15 @@ def share_diag(fkey, lines, shots=()):
                 pass
         env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
         def g(*args, t=60):
+            # 🖥 **창을 띄우지 않는다** (2026-11-08 사용자: *"왜 깃허브 검은 화면이
+            #    뜨는 거야?"*). 런처는 `pythonw`(콘솔 없음)라, `creationflags` 가
+            #    없으면 윈도가 git 마다 **콘솔 창을 새로 띄운다** — 한 번 올릴 때
+            #    add·diff·commit·fetch·rebase·push **여섯 번**이다.
+            # 🚫 이 값을 빼지 말 것. 이 저장소의 다른 subprocess 도 전부 이걸 쓴다.
             return _sp.run(["git"] + list(args), cwd=repo, capture_output=True,
                            text=True, encoding="utf-8", errors="replace",
-                           timeout=t, env=env)
+                           timeout=t, env=env,
+                           creationflags=0x08000000)   # CREATE_NO_WINDOW
         g("add", "--", *rel)
         if not g("diff", "--cached", "--quiet", "--", *rel).returncode:
             return True                     # 바뀐 게 없으면 그냥 끝
@@ -24020,6 +24042,19 @@ class App(tk.Tk):
         if not q:
             self.status.set("▶ 전부 복구 완료")
             return
+        # 🩹 **앞 슬롯의 사슬이 완전히 끝나야** 다음을 꺼낸다 (2026-11-08).
+        #    `_is_busy()` 만으로는 못 막는다 — `_fix_tabs_work` 의 finally 가
+        #    **확인이 시작되기 전에** busy 를 풀기 때문에, 확인·아이템 판·2회차가
+        #    다음 슬롯과 **겹쳐 돌았다** (사용자가 본 '웨이브').
+        _h = getattr(self, "_fix_hold", None)
+        if _h is not None:
+            if time.time() - getattr(self, "_fix_hold_at", 0) > FIX_HOLD_TTL:
+                click_log(f"fix 🔓 #{int(_h):02d} 잠금이 "
+                          f"{FIX_HOLD_TTL:.0f}초를 넘겨 굳은 것으로 보고 푼다")
+                self._fix_hold = None
+            else:
+                self.after(900, self._fix_run_next)
+                return
         if self._is_busy():                      # 아직 돌고 있으면 기다린다
             self.after(700, self._fix_run_next)
             return
@@ -24030,8 +24065,12 @@ class App(tk.Tk):
         self.status.set(f"▶ 전부 복구 — #{si:02d} 차례 (남은 {len(q)}개)")
         self._stay_back(len(q) * 14 + 20)      # 🔙 남은 만큼 계속 뒤에 둔다
         self._run_fix_slot(si, _bulk=True)
-        # 끝나고 확인까지 마칠 시간을 준 뒤 다음으로
-        self.after(1500, self._fix_run_next)
+        # 🩹 다음은 **그 슬롯이 끝나면** `_fix_done` 이 불러준다 (2026-11-08).
+        #    여기서 `after(1500)` 으로 밀면 확인·아이템 판이 끝나기 전에
+        #    다음 슬롯이 시작돼 **겹쳐 돈다.**
+        #    🛟 사슬이 어떤 이유로 잠금을 못 풀어도 멈추지 않게 **보험 틱**만 둔다
+        #       (잠겨 있으면 그냥 다시 기다린다).
+        self.after(int(FIX_HOLD_TTL * 1000) + 2000, self._fix_run_next)
     def _after_wake_fix(self, anchor, why=""):
         """😴 **깨운 직후 그 클라 하나만** 십자가를 본다 — 확인만 한다 (2026-09-29).
 
@@ -25856,6 +25895,33 @@ class App(tk.Tk):
         1회차는 **지금 속도 그대로**다."""
         # 🐢 이 실행의 속도를 정한다. `_run_fix_slot` 이 복구의 **유일한 입구**라
         #    (개별·전체·유휴·단축키 전부 여기를 지난다) 여기서 정하면 샐 곳이 없다.
+        # 🩹 **하나씩** — 다른 슬롯이 아직 사슬을 돌고 있으면 **대기열에 넣는다**
+        #    (2026-11-08 사용자: *"웨이브 하지 마. 하나씩 완벽하게 마무리하고"*).
+        #    같은 슬롯이면 아이템 판·2회차로 **이어 가는 것**이라 통과시킨다.
+        try:
+            _h = getattr(self, "_fix_hold", None)
+            if _h is not None and int(_h) != int(si):
+                if time.time() - getattr(self, "_fix_hold_at", 0) > FIX_HOLD_TTL:
+                    click_log(f"fix 🔓 #{int(_h):02d} 잠금이 "
+                              f"{FIX_HOLD_TTL:.0f}초를 넘겨 굳은 것으로 보고 푼다")
+                    self._fix_hold = None
+                else:
+                    _q2 = getattr(self, "_fix_queue", None)
+                    if _q2 is None:
+                        _q2 = self._fix_queue = []
+                    if si not in _q2:
+                        _q2.append(int(si))
+                        _q2.sort()
+                    click_log(f"fix #{si:02d} ⏸ #{int(_h):02d} 가 아직 돌고 있다 "
+                              f"— **대기열에 넣었다** (하나씩 순서대로)")
+                    self.status.set(f"⏸ 복구 #{si:02d} — #{int(_h):02d} 가 끝나면 "
+                                    f"바로 합니다 (하나씩 순서대로)")
+                    self.after(900, self._fix_run_next)
+                    return
+        except Exception:
+            pass
+        self._fix_hold = int(si)
+        self._fix_hold_at = time.time()
         self._fix_slow = bool(slow)
         if not slow:
             # 사용자가 직접 다시 누른 것 = 1회차 → 2회차 기회를 다시 준다
@@ -26924,6 +26990,27 @@ class App(tk.Tk):
             return
         except Exception as e:
             self.status.set(f"🩹 복구 #{si:02d} 확인 실패: {e}")
+            click_log(f"fix #{si:02d} ⚠ 확인을 시작하지 못했다 {e!r}")
+            self._fix_done(si, "확인을 시작하지 못했다")
+
+    def _fix_done(self, si, why=""):
+        """🩹 그 슬롯의 **사슬이 진짜로 끝났다** — 잠금을 풀고 다음으로 (2026-11-08).
+
+        🚫 아이템 판·2회차로 **이어 갈 때는 부르지 말 것** — 사슬이 계속된다.
+        🔓 여기서만 풀린다: 목록에서 지움 · 💎 다야 · 판을 다 씀 ·
+           기준 그림 없음 · 오류."""
+        try:
+            if getattr(self, "_fix_hold", None) == int(si):
+                self._fix_hold = None
+                if why:
+                    click_log(f"fix #{si:02d} 🔓 끝 — {why} (다음 슬롯으로)")
+        except Exception:
+            self._fix_hold = None
+        try:
+            if getattr(self, "_fix_queue", None):
+                self.after(600, self._fix_run_next)
+        except Exception:
+            pass
 
     def _fix_verify_got(self, si, tries, marked, hit):
         """🩹 `_fix_verify` 가 **스레드에서 본 결과**로 판단한다 (2026-11-07).
@@ -26934,6 +27021,7 @@ class App(tk.Tk):
             if hit is None:
                 self.status.set(f"🩹 복구 #{si:02d} 끝 — 십자가 기준 그림이 없어 "
                                 f"자동 확인은 못 합니다")
+                self._fix_done(si, "십자가 기준 그림이 없다")
                 return
             if int(si) not in set(hit):
                 if int(si) in getattr(self, "_last_sleep", set()):
@@ -26981,6 +27069,7 @@ class App(tk.Tk):
                           f"(연속 {FIX_VERIFY_GONE}번 안 보였다"
                           f"{self._warn_score_txt(si)})")
                 self.status.set(f"✅ 복구 #{si:02d} 확인 — 십자가가 사라져 지웠습니다")
+                self._fix_done(si, "복구 확인됨")
                 return
             # 보였다 → 센 것을 되돌린다 (연속이어야 한다)
             try:
@@ -27018,7 +27107,9 @@ class App(tk.Tk):
                 pass
             if tries <= 0:
                 if marked:
-                    return          # 💎 다야 필요 — 실패가 아니다. 다시 돌리지 않는다
+                    # 💎 다야 필요 — 실패가 아니다. 다시 돌리지 않는다
+                    self._fix_done(si, "💎 다야를 써야 하는 슬롯")
+                    return
                 # 🐢 **실패 → 한 번 더, 이번엔 꼼꼼히** (2026-10-13 사용자 지시)
                 self._fix_retry = getattr(self, "_fix_retry", {})
                 _done = self._fix_retry.get(int(si), 0)
@@ -27037,10 +27128,13 @@ class App(tk.Tk):
                                 f"({FIX_RETRY_MAX+1}번 해봤습니다 · 목록은 그대로 둡니다)")
                 click_log(f"fix #{si:02d} ⚠ {FIX_RETRY_MAX+1}판을 해도 십자가가 남았다 "
                           f"— 목록은 그대로 둔다 (손으로 확인해주세요)")
+                self._fix_done(si, f"{FIX_RETRY_MAX+1}판을 다 썼다")
                 return
             self.after(FIX_WATCH_MS, lambda: self._fix_verify(si, tries - 1, marked))
         except Exception as e:
             self.status.set(f"🩹 복구 #{si:02d} 확인 실패: {e}")
+            click_log(f"fix #{si:02d} ⚠ 확인 중 오류 {e!r}")
+            self._fix_done(si, "확인 중 오류")
 
     @staticmethod
     def _rect_owner(rects, x, y):
