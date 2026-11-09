@@ -5129,13 +5129,25 @@ QUEST_SLOT_GAP = (0.5, 0.9)   # 클라 사이
 #    16클라 ≈ 83초, 받을 것이 3개면 ≈ 89초, 전부 자고 있으면 ≈ 115초.
 #    🚫 `QUEST_SCROLL_N` 을 3 으로 되돌리면 **한 클라당 +2초**(16클라 +32초) 라
 #       2분을 넘긴다. 실측(#03)에서 숨은 [완료] 는 **2번째**에 나왔다.
-QUEST_BUDGET = (80, 120)      # 안내용 — 넘으면 기록에 남긴다
+# ⏱ 사용자: *"굳이 안 줄여도 된다 **2분~2분40초**까지 해서 마무리해줘도 된다"*
+#    (실측 143초 — 16클라가 **전부 자고 있을 때**. 평소엔 더 빠르다)
+QUEST_BUDGET = (120, 160)     # 안내용 — 넘으면 기록에 남긴다
 QUEST_SCROLL_N = 2            # 목록을 몇 번까지 끌어올려 볼까
 QUEST_WAKE = True             # 😴 자고 있으면 깨우고 받는다
 QUEST_WAKE_WAIT = (0.6, 1.0)  # 깨운 뒤 화면이 그려질 때까지
 QUEST_SHUFFLE = True          # 🎲 클라 순서를 섞는다 (늘 #01 부터면 그것도 규칙)
 QUEST_DRAG_AT = (120, 140)    # 끌기 시작 자리 (목록 안)
 QUEST_DRAG_DY = 55            # 한 번에 창 안 몇 px
+# 🔙 **맨 위로 확실히** 되돌린다 (2026-11-09 사용자: *"조금 더 약간 올려야 해"*)
+#    🧭 맨 위에 닿으면 **더 안 움직인다** — 넉넉히 끌어도 안전하다.
+QUEST_BACK_EXTRA = 1          # 내린 횟수보다 **한 번 더**
+QUEST_BACK_DY = 1.35          # 되돌릴 때 **더 길게** 끈다
+QUEST_BACK_TRIES = 2          # 그래도 안 돌아갔으면 더 끌어본다
+# 📜 **끌어도 목록이 안 바뀌면 그만** (2026-11-09 실측)
+#    라벨 칸(x 3~24)만 비교한다: **안 바뀜 3점 · 바뀜 922점**.
+#    🚫 목록 **전체**(x 0~230)로 보면 게임 배경이 계속 바뀌어 1965 vs 9684 로
+#       **겹쳐서 못 가린다.** 라벨 칸만 볼 것.
+QUEST_MOVE_MIN = 100
 
 
 def quest_done_rows(im):
@@ -5171,6 +5183,26 @@ def quest_done_rows(im):
         return out
     except Exception:
         return []
+
+
+def quest_moved(a, b):
+    """📜 끌어서 목록이 **실제로 바뀌었나** — 라벨 칸만 본다.
+
+    ⚠ 목록 전체를 보면 **게임 배경**이 계속 바뀌어 못 가린다
+      (실측 안 바뀜 1965 · 바뀜 9684 — 겹친다).
+      라벨 칸(x 3~24)만 보면 **3 vs 922** 로 깨끗하다."""
+    try:
+        import cv2 as _cv
+        hh, ww = a.shape[:2]
+        if b.shape[:2] != (hh, ww):
+            return True            # 크기가 달라졌다 — 모르면 '바뀐 쪽'
+        kx, ky = ww / float(QUEST_BASE_W), hh / float(QUEST_BASE_H)
+        y0, y1 = int(QUEST_LIST_Y[0] * ky), int(QUEST_LIST_Y[1] * ky)
+        x0, x1 = int(QUEST_LAB_X[0] * kx), int(QUEST_LAB_X[1] * kx)
+        d = _cv.absdiff(a[y0:y1, x0:x1], b[y0:y1, x0:x1])
+        return int((d.sum(axis=2) > 60).sum()) >= QUEST_MOVE_MIN
+    except Exception:
+        return True                # 🚫 모르면 **계속 본다** (놓치지 않는 쪽)
 
 
 def quest_reward_seen(im):
@@ -28840,6 +28872,7 @@ class App(tk.Tk):
         kx, ky = ww / float(QUEST_BASE_W), hh / float(QUEST_BASE_H)
         cen = (l + ww // 2, t + hh // 2)
         got, moved = 0, 0
+        im0 = im_last = None      # 🔙 맨 처음 화면 · 끌기 직전 화면
         # 😴 **자고 있으면 깨우고 받는다** (2026-11-09 사용자 지시:
         #    *"받으려고 하는 클라 절전을 너가 해제시키고 받아야 해"*)
         #    ⚠ 절전 화면이 퀘스트 HUD 를 **덮는다** — 깨우지 않으면 [완료] 가
@@ -28865,6 +28898,9 @@ class App(tk.Tk):
                     if im is None:
                         click_log("[퀘스트] #%02d 화면을 못 찍었다 — 건너뛴다" % (si + 1))
                         return got
+                    if im0 is None:
+                        im0 = im          # 🔙 **맨 처음** 화면 (되돌림 확인용)
+                    im_last = im          # 📜 끌기 직전 화면 (바뀌었나 비교용)
                     rows = quest_done_rows(im)
                     if not rows:
                         break
@@ -28907,6 +28943,14 @@ class App(tk.Tk):
                 nap(random.uniform(0.30, 0.50))
                 # ⚠ 끌기가 **클릭으로 먹혀** 보상 창이 떴을 수 있다 → 닫아준다
                 im3 = grab_window(cen)
+                # 📜 **안 바뀌면 그만** — 목록이 짧아 더 볼 것이 없다.
+                #    실제로 안 움직였으니 **되돌리지도 않는다** (`moved -= 1`).
+                if im3 is not None and im_last is not None \
+                        and not quest_moved(im_last, im3):
+                    moved -= 1
+                    click_log("[퀘스트] #%02d 📜 끌어도 목록이 그대로다 — "
+                              "더 볼 것이 없어 끝낸다" % (si + 1))
+                    break
                 if im3 is not None:
                     wht, mn = quest_reward_seen(im3)
                     if wht >= QUEST_REW_WHITE and mn < QUEST_REW_DARK:
@@ -28919,10 +28963,27 @@ class App(tk.Tk):
         except Exception as e:
             click_log("[퀘스트] #%02d ⚠ 오류 %s" % (si + 1, e))
         finally:
-            # 🔙 **원래대로** — 내린 만큼 올린다 (사용자가 보던 화면을 바꾸지 않는다)
-            for _ in range(moved):
-                self._quest_drag(l, t, kx, ky, QUEST_DRAG_DY)
-                nap(0.25)
+            # 🔙 **맨 위로 확실히 되돌린다** (2026-11-09 사용자: *"스크롤로 내리잖아
+            #    그걸 다시 원상복구 해놔야 해 … **조금 더 약간 올려야** 해"*)
+            #    🧭 맨 위에 닿으면 **더 안 움직인다** — 넉넉히 끌어도 안전하다.
+            #    🚫 `moved` 가 0 이면(끌어도 안 바뀐 클라) 아무것도 하지 않는다.
+            if moved > 0:
+                _back = int(QUEST_DRAG_DY * QUEST_BACK_DY)
+                for _ in range(moved + QUEST_BACK_EXTRA):
+                    self._quest_drag(l, t, kx, ky, _back)
+                    nap(0.25)
+                # 🔎 **정말 맨 위로 돌아갔나** 보고, 아니면 더 끈다
+                _ok = False
+                for _t in range(QUEST_BACK_TRIES):
+                    _im = grab_window(cen)
+                    if _im is None or im0 is None or not quest_moved(im0, _im):
+                        _ok = True
+                        break
+                    self._quest_drag(l, t, kx, ky, _back)
+                    nap(0.25)
+                click_log("[퀘스트] #%02d 🔙 목록을 되돌렸다 (%d번 내리고 %d번 올림)%s"
+                          % (si + 1, moved, moved + QUEST_BACK_EXTRA,
+                             "" if _ok else " — ⚠ 처음과 다르다"))
         return got
 
     def _quest_drag(self, l, t, kx, ky, dy):
