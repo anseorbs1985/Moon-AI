@@ -4436,9 +4436,35 @@ def sleep_img_path(fkey):
     return os.path.join(IMG_DIR, f"{fkey}_sleep.png")
 
 
+# 😴 절전 그림을 **읽을 때만** 쓰는 폴백 순서 (2026-11-09).
+#    네 그림은 **md5 가 전부 같다** (같은 화면을 복사한 것) — 그래서 안전하다.
+#    로컬이 `fix_sleep.png` 를 아직 못 받았어도 다른 것으로 깨운다.
+SLEEP_IMG_ALT = ("fix", "dragon", "jakwi", "mondex")
+
+
+def sleep_img_read(fkey):
+    """😴 절전 그림 **읽을 경로** — 그 런처 것이 없으면 다른 런처 것을 쓴다.
+
+    🚫 `sleep_img_path` 에 이 폴백을 넣지 말 것 — 그 함수는 **등록·삭제**에도
+       쓰여서, 폴백을 넣으면 [😴 절전그림] 이 **다른 런처 그림을 덮어쓴다.**"""
+    try:
+        p = sleep_img_path(fkey)
+        if p and os.path.exists(p):
+            return p
+        for a in SLEEP_IMG_ALT:
+            if a == fkey:
+                continue
+            q = sleep_img_path(a)
+            if q and os.path.exists(q):
+                return q
+    except Exception:
+        pass
+    return None
+
+
 def has_sleep_img(fkey):
     try:
-        return os.path.exists(sleep_img_path(fkey))
+        return bool(sleep_img_read(fkey))
     except Exception:
         return False
 
@@ -5175,8 +5201,12 @@ def sleep_spot_screen(fkey, coord):
 
 
 def find_sleep_img(fkey, coord):
-    """그 클라가 절전 화면인가 — **창을 직접 캡처**해서 본다(가려져도 정확)."""
-    q = sleep_img_path(fkey)
+    """그 클라가 절전 화면인가 — **창을 직접 캡처**해서 본다(가려져도 정확).
+
+    ⚠ 그림은 `sleep_img_read` 로 찾는다 — 그 런처 것이 없으면 **다른 런처 것**
+      (네 그림은 md5 가 같다). 2026-11-09: 로컬이 `fix_sleep.png` 를 못 받아
+      **절전을 깨우지도 않고 복구도 안 하던** 현상의 한 원인이었다."""
+    q = sleep_img_read(fkey)
     if not (q and os.path.exists(q) and coord):
         return None, None, 0.0
     try:
@@ -26431,6 +26461,52 @@ class App(tk.Tk):
                 pass
             self._fix_done(si, "복구 중 오류")
 
+    def _fix_anchor(self, si, idx):
+        """😴 그 슬롯이 **어느 클라인지** 알려줄 좌표 → (좌표, 어디서)
+
+        등록된 첫 좌표를 쓰고, **좌표가 하나도 없으면 그 슬롯 창 가운데**를 쓴다
+        (2026-10-18 스케줄에서 쓴 방법). 좌표가 없어도 **절전은 깨울 수 있다.**"""
+        try:
+            a = slot_anchor((self.cfg.get("fix_slots") or [])[idx])
+            if a:
+                return a, "등록 좌표"
+        except Exception:
+            pass
+        try:
+            rs = self._client_rects_by_slot()
+            if rs and 0 <= idx < len(rs):
+                l, t, r, b = rs[idx][:4]
+                return [int((l + r) // 2), int((t + b) // 2)], "창 가운데"
+        except Exception:
+            pass
+        return None, ""
+
+    def _fix_see_cross(self, si, tag=""):
+        """🩹 십자가를 **연속 `FIX_GO_N` 번** 볼 때까지 확인 → (보였나, hit)
+
+        `hit is None` = 확인 자체가 불가(기준 그림 없음 등).
+        ⏱ `only={si}` 라 한 번 0.05초다 (16개를 긁으면 0.81초)."""
+        hit, _run2 = None, 0
+        for _t in range(FIX_SEE_TRIES + FIX_GO_N):
+            hit = self._check_hits(only={int(si)})
+            if hit is None:
+                return False, None
+            if int(si) in set(hit):
+                _run2 += 1
+                if _run2 >= FIX_GO_N:
+                    click_log(f"fix #{si:02d} 십자가 **연속 {FIX_GO_N}번 확인** "
+                              f"({_t+1}번째까지 봤다){tag}"
+                              + self._warn_score_txt(si))
+                    return True, hit
+            else:
+                if _run2:
+                    click_log(f"fix #{si:02d} 십자가가 {_run2}번만 보이고 끊겼다 "
+                              f"— **연속 {FIX_GO_N}번이어야 한다** (오탐일 수 있다)")
+                _run2 = 0
+            if _t < FIX_SEE_TRIES + FIX_GO_N - 1:
+                nap(random.uniform(*FIX_SEE_GAP))
+        return False, hit
+
     def _run_fix_slot_body(self, si, idx):
         """🐢 `_run_fix_slot` 의 **무거운 몸통** — 백그라운드 스레드에서 돈다.
 
@@ -26442,9 +26518,18 @@ class App(tk.Tk):
         # 절전 화면이 십자가를 가려서, 깨우기 전에 십자가를 보면 '없다'고 판단해
         # 아무것도 못 하고 목록만 지워버렸다. 그래서 깨우기가 맨 앞이다.
         _was_sleep, _woke = False, True
+        _anc, _how = self._fix_anchor(si, idx)
+        _can_sleep = has_sleep_img("fix")
         try:
-            _anc = slot_anchor((self.cfg.get("fix_slots") or [])[idx])
-            if _anc and has_sleep_img("fix"):
+            # 🗒 **건너뛸 때는 이유를 남긴다** (2026-11-09) — 예전엔 조용히 넘어가
+            #    *"절전을 해제하지도 않고 복구도 안 한다"* 의 원인을 짚을 수 없었다.
+            if not _anc:
+                click_log(f"fix #{si:02d} 😴 절전 확인을 건너뛴다 — **어느 클라인지 "
+                          f"알 수 없다** (좌표가 하나도 없고 클라 창도 못 찾았다)")
+            elif not _can_sleep:
+                click_log(f"fix #{si:02d} 😴 절전 확인을 건너뛴다 — **절전 그림이 "
+                          f"없다** (click_templates\\fix_sleep.png · 🔄 업데이트로 받는다)")
+            if _anc and _can_sleep:
                 _sx, _sy, _ss = find_sleep_img("fix", _anc)
                 if _sx is not None:
                     _was_sleep = True
@@ -26516,36 +26601,32 @@ class App(tk.Tk):
             #    16개를 긁으면 0.81초, 한 개면 **0.05초**다 (16배).
             #    최대 7번 보므로 5.67초 → **0.35초**.
             #    🚫 `only` 를 빼지 말 것.
-            hit, _seen, _run2 = None, False, 0
-            # 🚫 **십자가 확인을 건너뛰는 길을 만들지 말 것** (2026-11-08 사고).
-            #    `_fix_skip_cross` 로 건너뛰게 했더니, 십자가가 없는 자리
-            #    (= **게임 화면**)를 눌러 **월드던전이 열렸다**
-            #    (사용자: *"왜 월드던전까지 클릭을 하는 거야"*).
-            #    십자가가 사라진 것은 **할 일이 없다**는 뜻이다 (2026-11-07 사용자:
-            #    *"복구할 게 없으면 저 십자가가 안 떠"*).
-            for _t in range(FIX_SEE_TRIES + FIX_GO_N):
-                hit = self._check_hits(only={int(si)})
-                if hit is None:
-                    break                  # 확인 자체가 불가(기준 그림 없음 등)
-                if int(si) in set(hit):
-                    _run2 += 1
-                    if _run2 >= FIX_GO_N:
-                        _seen = True
-                        click_log(f"fix #{si:02d} 십자가 **연속 {FIX_GO_N}번 확인** "
-                                  f"({_t+1}번째까지 봤다)"
-                                  + self._warn_score_txt(si))
-                        break
-                else:
-                    if _run2:
-                        click_log(f"fix #{si:02d} 십자가가 {_run2}번만 보이고 "
-                                  f"끊겼다 — **연속 {FIX_GO_N}번이어야 한다** "
-                                  f"(오탐일 수 있다)")
-                    _run2 = 0
-                if _t < FIX_SEE_TRIES + FIX_GO_N - 1:
-                    nap(random.uniform(*FIX_SEE_GAP))
+            _seen, hit = self._fix_see_cross(si)
+            if hit is not None and not _seen:
+                # 🎯 **못 봤는데 절전인가** — 한 번 더 보고, 절전이면 깨워서 다시 본다
+                #    (2026-11-09). 깨우기를 건너뛴 경우의 **안전망**이다.
+                #    사용자: *"절전이 되어버리면 절전을 스스로 해제하지 않고
+                #              복구를 안 하는 현상"*
+                #    🚫 이 안전망을 없애지 말 것.
+                if _anc and _can_sleep and not _was_sleep:
+                    try:
+                        _s2 = find_sleep_img("fix", _anc)
+                        if _s2[0] is not None:
+                            click_log(f"fix #{si:02d} 😴 십자가가 안 보였는데 "
+                                      f"**절전이었다** (일치도 {_s2[2]:.2f}) → "
+                                      f"깨우고 다시 본다")
+                            self.status.set(f"😴 복구 #{si:02d} — 절전이라 깨우고 "
+                                            f"다시 봅니다")
+                            _was_sleep = True
+                            _woke = self._wake_until(_anc, si, tag="fix")
+                            self._fix_quit_clear(si, _anc, "깨운 뒤")
+                            _seen, hit = self._fix_see_cross(si, tag=" (깨운 뒤)")
+                    except Exception as _we:
+                        click_log(f"fix #{si:02d} ⚠ 절전 재확인 중 오류 — {_we}")
             if hit is not None and not _seen:
                 _still_sleep = int(si) in getattr(self, "_last_sleep", set())
-                if _woke and not _still_sleep:
+                # 🚫 **절전인지조차 모르면 지우지 않는다** (2026-11-09 · 2026-08-29 규칙)
+                if _woke and not _still_sleep and _can_sleep:
                     self._warn_save(sorted(set(self._warn_load()) - {int(si)}))
                     self._fix_paid_mark(int(si), False)     # 💎 다야 표시도 해제
                     self.after(0, self._warn_refresh)
@@ -26556,9 +26637,11 @@ class App(tk.Tk):
                     self.status.set(f"✅ #{si:02d} 십자가가 없어 목록에서 지웠습니다 "
                                     f"(이미 복구된 것 — 아무것도 누르지 않았습니다)")
                 else:
-                    click_log(f"fix #{si:02d} 십자가가 안 보이지만 "
-                              f"{'깨우기 실패' if not _woke else '아직 절전'} — "
-                              f"화면을 못 봤으므로 목록은 그대로 둔다")
+                    _why2 = ("깨우기 실패" if not _woke
+                             else "절전 그림이 없어 절전인지 모른다" if not _can_sleep
+                             else "아직 절전")
+                    click_log(f"fix #{si:02d} 십자가가 안 보이지만 **{_why2}** — "
+                              f"화면을 못 봤으므로 **목록은 그대로 둔다**")
                     self.status.set(f"✖ 복구 #{si:02d} — 아직 절전이라 화면을 못 봤습니다 "
                                     f"(목록은 그대로 둡니다)")
                 self._fix_done(si, "십자가가 없어 실행하지 않았다")   # 🔓 다음 슬롯으로
