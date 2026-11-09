@@ -8498,6 +8498,7 @@ class IslandApp(tk.Tk):
                         d_ = None
                     rec = recs.get(str(j))
                     did = False
+                    _skip1 = False        # 😴 좌표1(절전해제)을 건너뛰었나 — 로그용
                     # 🔄 **슬롯을 시작할 때 지금 화면에 맞는 칸부터** (2026-11-05).
                     #    ⚠ **칸 루프 맨 앞**이어야 한다 — 아래 `elif coords[j]`
                     #      분기 안에 두면 **카드·그림 칸(RASTA_FIRST)에는 적용되지
@@ -8563,7 +8564,8 @@ class IslandApp(tk.Tk):
                         #    못 고르면 `_omanst_try` 가 **스스로 True 를 돌려** 좌표를
                         #    안 누르게 한다 — 정복을 누르느니 아무것도 안 누른다.
                         #    ⚠ `continue` 로 빠져나가지 말 것 (뒤 간격·횟수가 건너뛰어진다).
-                        if j == 0 and self._wake_skip1(si, slot, name):
+                        _skip1 = (j == 0 and self._wake_skip1(si, slot, name))
+                        if _skip1:
                             pass                      # 깨어 있다 — 좌표1 은 안 누른다
                         elif self._omanst_try(key, si, slot, j):
                             pass                      # 이미 골랐다 — 좌표는 안 누른다
@@ -8593,10 +8595,15 @@ class IslandApp(tk.Tk):
                     # ⚠ 그림·카드 자리는 **좌표를 누르지 않는다** — 그런데 여기서
                     #    coords[j] 를 찍어 '좌표도 눌렀다' 로 보였다 (2026-11-07 오해).
                     #    누른 것만 적는다.
-                    _cj = (coords[j] if j < len(coords) else None) if _rm not in RASTA_FIRST else None
+                    #    😴 깨어 있어 좌표1 을 건너뛴 때도 좌표를 찍어
+                    #       **'눌렀다' 로 보였다** (2026-11-09 — 이 거짓 로그에
+                    #       클로드가 속아 엉뚱한 곳을 팠다). 건너뛴 것은 그렇게 적는다.
+                    _cj = (coords[j] if j < len(coords) else None)                         if (_rm not in RASTA_FIRST and not _skip1) else None
                     _xy = (f" ({_cj[0]},{_cj[1]})" if _cj else
                            (f" [{_rm}]" if _rm in RASTA_FIRST else "")) + (" +녹화" if rec else "")
-                    self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) 실행{_xy}")
+                    _act = "😴 깨어있어 좌표1 건너뜀" if _skip1 else f"실행{_xy}"
+                    self._rlog(f"[클릭] {key} #{si+1:02d} {j+1}번({lbl}) {_act}"
+                               + (f"{_xy}" if (_skip1 and rec) else ""))
                     # 🚪 **첫 좌표(절전해제)를 누른 바로 다음에** 창을 확인한다.
                     #    ⚠ 그 전에 보면 **절전 화면이 인벤토리를 덮고 있어 안 보인다**
                     #      (2026-08-29 복구에서 똑같이 겪었다: "순서가 중요하다 —
