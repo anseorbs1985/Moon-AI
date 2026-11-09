@@ -10995,6 +10995,79 @@ class App(tk.Tk):
             try: click_log(f"[창자리] ⚠ {_e}")
             except Exception: pass
 
+    def _pop_host(self):
+        """🧭 지금 **커서 아래에 있는 내 창**(Toplevel)을 찾는다.
+
+        좌표 팝업은 용던고고·섬 실행기 같은 창 안의 버튼에서 뜬다. 방금 그 버튼을
+        눌렀으니 커서가 거기 있다 → 그 위젯의 toplevel 이 곧 부모 창이다.
+        ⚠ **팝업을 만들기 전에** 불러야 한다 — 만든 뒤엔 팝업 자신이 잡힌다."""
+        try:
+            x, y = win32gui.GetCursorPos()
+            w = self.winfo_containing(x, y)
+            if w is not None:
+                t = w.winfo_toplevel()
+                if t is not None and t.winfo_exists():
+                    return t
+        except Exception:
+            pass
+        return None
+
+    def _pop_beside(self, win, host=None):
+        """🧭 팝업을 **그 창 바로 왼쪽**에 붙인다 — 멀리 뜨지 않게 (2026-11-09).
+
+        🚫 세로바 기준(`_place_beside`)을 쓰지 않는다 — 부모 창과 겹친다.
+        ⚠ 크기·자리는 **`GetWindowRect`(테두리 포함)** 로만 잰다.
+          `winfo_reqwidth()`·`winfo_rootx()` 는 **안쪽** 기준이라 섞으면 어긋난다.
+        ⚠ 띄운 뒤 **실제 자리를 다시 재서** 보이지 않는 테두리만큼 되돌린다."""
+        try:
+            win.update_idletasks()
+            try:
+                fr = win32gui.GetWindowRect(int(win.wm_frame(), 16))
+                ww, hh = fr[2] - fr[0], fr[3] - fr[1]
+            except Exception:
+                ww, hh = win.winfo_reqwidth(), win.winfo_reqheight()
+            sw = self.winfo_screenwidth()
+            bot = self._work_bottom()
+            hl = ht = hr = None
+            if host is not None and host is not win:
+                try:
+                    r = win32gui.GetWindowRect(int(host.wm_frame(), 16))
+                    hl, ht, hr = r[0], r[1], r[2]
+                except Exception:
+                    hl = ht = hr = None
+            if hl is None:
+                # 부모 창을 모르면 **커서 옆** — 그래도 멀리 가지는 않는다
+                try:
+                    cx, cy = win32gui.GetCursorPos()
+                except Exception:
+                    cx, cy = sw // 2, 200
+                x, y = cx - ww - 12, cy - 40
+                _why = "커서"
+            else:
+                x = hl - ww - 8                     # 부모 창 왼쪽
+                if x < 0:                           # 화면 밖이면 오른쪽으로
+                    x = min(hr + 8, sw - ww)
+                y = ht
+                _why = "부모창"
+            x = max(0, min(int(x), sw - ww))
+            y = max(0, min(int(y), bot - hh - 8))
+            win.geometry("+%d+%d" % (x, y))
+            try:
+                win.update_idletasks()
+                f2 = win32gui.GetWindowRect(int(win.wm_frame(), 16))
+                dx, dy = f2[0] - x, f2[1] - y
+                if dx or dy:
+                    win.geometry("+%d+%d" % (x - dx, y - dy))
+            except Exception:
+                dx = dy = 0
+            click_log("[창자리] 팝업 %s → (%d,%d) %dx%d · 기준 %s · 어긋남 %d,%d"
+                      % (win.title()[:24], x, y, ww, hh, _why, dx, dy))
+        except Exception as _e:
+            try:
+                click_log("[창자리] ⚠ 팝업 %s" % _e)
+            except Exception:
+                pass
+
     def _open_section_win(self, attr, title, build_fn, w=420, h=700, pinnable=False, fit=True):
         win = getattr(self, attr, None)
         if win and win.winfo_exists():
@@ -33614,6 +33687,7 @@ class App(tk.Tk):
 
     def _open_doll_slot(self, idx):
         """슬롯 하나의 18좌표 등록 팝업 (셀의 '좌표 x/18' 클릭 시)."""
+        _host = self._pop_host()        # 🧭 팝업을 만들기 **전에** 부모 창을 잡는다
         if getattr(self, "_doll_pop_win", None) and self._doll_pop_win.winfo_exists():
             try: self._doll_pop_win.destroy()
             except Exception: pass
@@ -33664,6 +33738,7 @@ class App(tk.Tk):
                   command=lambda: self._del_doll(idx)).pack(side="left", padx=3)
         tk.Button(bot, text="닫기", font=("맑은 고딕", 8),
                   command=win.destroy).pack(side="left", padx=3)
+        self._pop_beside(win, _host)    # 🧭 다 만든 뒤에 그 창 옆으로
 
     def _save_doll_pop_name(self):
         i = getattr(self, "_doll_pop_slot", None)
@@ -34033,6 +34108,9 @@ class App(tk.Tk):
         """슬롯 좌표 등록 팝업 — 클릭N 버튼(✔/✗), 이름, 전체삭제."""
         sp = self._grid_spec(fkey)
         st = self._grid_state[fkey]
+        # 🧭 **팝업을 만들기 전에** 부모 창을 잡아둔다 (2026-11-09) —
+        #    만든 뒤엔 커서 아래가 팝업 자신이라 못 찾는다.
+        _host = self._pop_host()
         old = st.get("pop")
         if old and old.winfo_exists():
             try: old.destroy()
@@ -34260,6 +34338,8 @@ class App(tk.Tk):
         tk.Button(bot, text="× 전체삭제", font=("맑은 고딕", 8), fg="white", bg="#c0392b",
                   command=lambda: sp["delete"](idx)).pack(side="left", padx=3)
         tk.Button(bot, text="닫기", font=("맑은 고딕", 8), command=win.destroy).pack(side="left", padx=3)
+        # 🧭 다 만든 **뒤**에 자리를 잡는다 — 그 전에는 크기를 알 수 없다
+        self._pop_beside(win, _host)
 
     def _pick_paste(self, fkey, idx, j):
         """붙여넣기 자리는 슬롯마다 한 곳만 — 체크하면 나머지는 자동으로 풀린다."""

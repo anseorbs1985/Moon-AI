@@ -3391,9 +3391,94 @@ class IslandApp(tk.Tk):
         except Exception as e:
             self._status.set(f"⚠ 갈 층 저장 실패: {e}")
 
+    def _pop_host(self):
+        """🧭 커서 아래에 있는 **내 창**(Toplevel) — 팝업을 만들기 **전에** 부른다."""
+        try:
+            import ctypes.wintypes as _wt
+            pt = _wt.POINT()
+            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+            w = self.winfo_containing(pt.x, pt.y)
+            if w is not None:
+                t = w.winfo_toplevel()
+                if t is not None and t.winfo_exists():
+                    return t
+        except Exception:
+            pass
+        return None
+
+    def _pop_rect(self, win):
+        """그 창의 **테두리 포함** 자리 (l, t, r, b) — 없으면 None."""
+        try:
+            import ctypes.wintypes as _wt
+            r = _wt.RECT()
+            ctypes.windll.user32.GetWindowRect(int(win.wm_frame(), 16),
+                                               ctypes.byref(r))
+            return (r.left, r.top, r.right, r.bottom)
+        except Exception:
+            return None
+
+    def _pop_beside(self, win, host=None):
+        """🧭 팝업을 **그 창 바로 왼쪽**에 붙인다 — 멀리 뜨지 않게 (2026-11-09).
+
+        사용자: *"좌표창들도 **바로 옆에** 뜨게 해줘 … **멀리 보내지 말고**"*
+        ⚠ 크기·자리는 **`GetWindowRect`(테두리 포함)** 로만 잰다 —
+          `winfo_reqwidth()`·`winfo_rootx()` 는 **안쪽** 기준이라 섞으면 어긋난다.
+        ⚠ 띄운 뒤 **실제 자리를 다시 재서** 보이지 않는 테두리만큼 되돌린다."""
+        try:
+            win.update_idletasks()
+            fr = self._pop_rect(win)
+            if fr:
+                ww, hh = fr[2] - fr[0], fr[3] - fr[1]
+            else:
+                ww, hh = win.winfo_reqwidth(), win.winfo_reqheight()
+            sw = self.winfo_screenwidth()
+            # 🖥 작업표시줄을 뺀 아래 끝 (screenheight 를 쓰면 표시줄을 덮는다)
+            try:
+                import ctypes.wintypes as _wt
+                _r = _wt.RECT()
+                ctypes.windll.user32.SystemParametersInfoW(0x0030, 0,
+                                                           ctypes.byref(_r), 0)
+                bot = int(_r.bottom) if int(_r.bottom) > 200 else self.winfo_screenheight()
+            except Exception:
+                bot = self.winfo_screenheight()
+            hr_ = self._pop_rect(host) if (host is not None and host is not win) else None
+            if not hr_:
+                try:
+                    import ctypes.wintypes as _wt
+                    pt = _wt.POINT()
+                    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+                    cx, cy = pt.x, pt.y
+                except Exception:
+                    cx, cy = sw // 2, 200
+                x, y = cx - ww - 12, cy - 40
+            else:
+                x = hr_[0] - ww - 8                 # 부모 창 왼쪽
+                if x < 0:                           # 화면 밖이면 오른쪽으로
+                    x = min(hr_[2] + 8, sw - ww)
+                y = hr_[1]
+            x = max(0, min(int(x), sw - ww))
+            y = max(0, min(int(y), bot - hh - 8))
+            win.geometry("+%d+%d" % (x, y))
+            try:
+                win.update_idletasks()
+                f2 = self._pop_rect(win)
+                if f2:
+                    dx, dy = f2[0] - x, f2[1] - y
+                    if dx or dy:
+                        win.geometry("+%d+%d" % (x - dx, y - dy))
+            except Exception:
+                pass
+        except Exception as _e:
+            # 🗒 조용히 실패하지 않는다 — 자리가 엉뚱하면 이 줄로 원인을 짚는다
+            try:
+                self._rlog("[창자리] ⚠ 팽업 자리잡기 실패: %s" % _e)
+            except Exception:
+                pass
+
     def _open_slot_pop(self, key, idx):
         """슬롯 좌표 등록 팝업 — 이름 + 클릭1~6 버튼 + 그룹복사."""
         d = next(x for x in DUNGEONS if x["key"] == key)
+        _host = self._pop_host()        # 🧭 팝업을 만들기 **전에** 부모 창을 잡는다
         old = self._pop.get("win")
         if old and old.winfo_exists():
             try: old.destroy()
@@ -3583,6 +3668,8 @@ class IslandApp(tk.Tk):
                 en.pack()
                 tk.Label(gc, text="ㅡ", font=("맑은 고딕", 8, "bold"), fg="#888").pack()
                 en.bind("<FocusOut>", _save_gaps); en.bind("<Return>", _save_gaps)
+        # 🧭 다 만든 **뒤**에 그 창 바로 옆으로 (2026-11-09) — 멀리 뜨지 않게
+        self._pop_beside(win, _host)
     # ── 프리셋 P1~P5 — 좌표 목록에서 번호별로 [그대로/삭제/위치변경]을 골라 저장 ──
     # 던전별 기본 프리셋 구성 — (층, [이름들])
     PRESET_LAYOUT = {
