@@ -5136,13 +5136,21 @@ QUEST_SCROLL_N = 2            # 목록을 몇 번까지 끌어올려 볼까
 QUEST_WAKE = True             # 😴 자고 있으면 깨우고 받는다
 QUEST_WAKE_WAIT = (0.6, 1.0)  # 깨운 뒤 화면이 그려질 때까지
 QUEST_SHUFFLE = True          # 🎲 클라 순서를 섞는다 (늘 #01 부터면 그것도 규칙)
-QUEST_DRAG_AT = (120, 140)    # 끌기 시작 자리 (목록 안)
-QUEST_DRAG_DY = 55            # 한 번에 창 안 몇 px
+# 📜 **끌기는 방향마다 시작점이 다르다** — 둘 다 목록(85~160) **안**에 머물게.
+#    🚨 2026-11-10 사고: 시작점을 140 으로 **고정**해 두고 되돌릴 때 +74 를 끌었더니
+#       **214 = 목록 밖(게임 화면)** 이라 그 드래그가 목록에 **안 먹었다.**
+#       사용자: *"스크롤을 올려서 아래꺼 받았으면 **다시 내려서 원상태로** 해놔라니까
+#       왜 **두 번 다 올리는** 거야"*
+#    🚫 거리를 늘려 더 끌려 하지 말 것 — 목록 밖으로 나가 **아예 안 먹는다.**
+#       더 되돌려야 하면 **횟수**(`QUEST_BACK_EXTRA`)로 한다.
+QUEST_DRAG_X = 120            # 끌기 가로 (목록 안)
+QUEST_DRAG_LO = 150           # 목록 **아래쪽** 자리
+QUEST_DRAG_HI = 95            # 목록 **위쪽** 자리
+#    위로 끌기(아래 것 보기)  LO → HI      아래로 끌기(되돌리기)  HI → LO
 # 🔙 **맨 위로 확실히** 되돌린다 (2026-11-09 사용자: *"조금 더 약간 올려야 해"*)
 #    🧭 맨 위에 닿으면 **더 안 움직인다** — 넉넉히 끌어도 안전하다.
-QUEST_BACK_EXTRA = 1          # 내린 횟수보다 **한 번 더**
-QUEST_BACK_DY = 1.35          # 되돌릴 때 **더 길게** 끈다
-QUEST_BACK_TRIES = 2          # 그래도 안 돌아갔으면 더 끌어본다
+QUEST_BACK_EXTRA = 2          # 내린 횟수보다 **두 번 더** (맨 위에 닿으면 안 움직인다)
+QUEST_BACK_TRIES = 3          # 그래도 처음과 다르면 더 끌어본다
 # 📜 **끌어도 목록이 안 바뀌면 그만** (2026-11-09 실측)
 #    라벨 칸(x 3~24)만 비교한다: **안 바뀜 3점 · 바뀜 922점**.
 #    🚫 목록 **전체**(x 0~230)로 보면 게임 배경이 계속 바뀌어 1965 vs 9684 로
@@ -28937,7 +28945,7 @@ class App(tk.Tk):
                 if _s >= QUEST_SCROLL_N:
                     break
                 # 📜 아래에 숨은 [완료] 를 보려고 **끌어올린다**
-                if not self._quest_drag(l, t, kx, ky, -QUEST_DRAG_DY):
+                if not self._quest_drag(l, t, kx, ky, -1):      # - = 위로
                     break
                 moved += 1
                 nap(random.uniform(0.30, 0.50))
@@ -28968,7 +28976,7 @@ class App(tk.Tk):
             #    🧭 맨 위에 닿으면 **더 안 움직인다** — 넉넉히 끌어도 안전하다.
             #    🚫 `moved` 가 0 이면(끌어도 안 바뀐 클라) 아무것도 하지 않는다.
             if moved > 0:
-                _back = int(QUEST_DRAG_DY * QUEST_BACK_DY)
+                _back = 1          # 부호만 쓴다 (+ = 아래로 = 되돌리기)
                 for _ in range(moved + QUEST_BACK_EXTRA):
                     self._quest_drag(l, t, kx, ky, _back)
                     nap(0.25)
@@ -28981,8 +28989,11 @@ class App(tk.Tk):
                         break
                     self._quest_drag(l, t, kx, ky, _back)
                     nap(0.25)
-                click_log("[퀘스트] #%02d 🔙 목록을 되돌렸다 (%d번 내리고 %d번 올림)%s"
-                          % (si + 1, moved, moved + QUEST_BACK_EXTRA,
+                click_log("[퀘스트] #%02d 🔙 목록을 되돌렸다 — %d번 내리고(y%d→y%d) "
+                          "%d번 올림(y%d→y%d)%s"
+                          % (si + 1, moved, QUEST_DRAG_LO, QUEST_DRAG_HI,
+                             moved + QUEST_BACK_EXTRA,
+                             QUEST_DRAG_HI, QUEST_DRAG_LO,
                              "" if _ok else " — ⚠ 처음과 다르다"))
         return got
 
@@ -28992,9 +29003,15 @@ class App(tk.Tk):
         🚫 끝낼 때 **반드시 mouseUp** — 안 하면 마우스가 눌린 채 남는다."""
         down = False
         try:
-            x = int(l + QUEST_DRAG_AT[0] * kx)
-            y0 = int(t + QUEST_DRAG_AT[1] * ky)
-            y1 = int(t + (QUEST_DRAG_AT[1] + dy) * ky)
+            # 📜 **방향에 따라 시작점을 바꾼다** — 둘 다 목록 안에 머물러야
+            #    드래그가 목록에 먹는다 (2026-11-10 사고).
+            up = dy < 0
+            _sy = QUEST_DRAG_LO if up else QUEST_DRAG_HI
+            _ey = QUEST_DRAG_HI if up else QUEST_DRAG_LO
+            self._quest_drag_last = (_sy, _ey)
+            x = int(l + QUEST_DRAG_X * kx)
+            y0 = int(t + _sy * ky)
+            y1 = int(t + _ey * ky)
             pyautogui.moveTo(x, y0)
             nap(0.12)
             pyautogui.mouseDown()
