@@ -5124,7 +5124,16 @@ QUEST_SEE_GAP = (0.20, 0.32)
 QUEST_MAX = 6                 # 한 클라에서 최대 몇 개까지 (무한 방지)
 QUEST_GAP = (0.35, 0.60)      # 하나 받고 다음까지
 QUEST_SLOT_GAP = (0.5, 0.9)   # 클라 사이
-QUEST_SCROLL_N = 3            # 목록을 몇 번까지 끌어올려 볼까
+# ⏱ **1분20초~2분** 안에 끝낸다 (2026-11-09 사용자 지시).
+#    실측 — 없는 클라 약 5.2초 · 있는 클라 +2초 · 자는 클라 +2초
+#    16클라 ≈ 83초, 받을 것이 3개면 ≈ 89초, 전부 자고 있으면 ≈ 115초.
+#    🚫 `QUEST_SCROLL_N` 을 3 으로 되돌리면 **한 클라당 +2초**(16클라 +32초) 라
+#       2분을 넘긴다. 실측(#03)에서 숨은 [완료] 는 **2번째**에 나왔다.
+QUEST_BUDGET = (80, 120)      # 안내용 — 넘으면 기록에 남긴다
+QUEST_SCROLL_N = 2            # 목록을 몇 번까지 끌어올려 볼까
+QUEST_WAKE = True             # 😴 자고 있으면 깨우고 받는다
+QUEST_WAKE_WAIT = (0.6, 1.0)  # 깨운 뒤 화면이 그려질 때까지
+QUEST_SHUFFLE = True          # 🎲 클라 순서를 섞는다 (늘 #01 부터면 그것도 규칙)
 QUEST_DRAG_AT = (120, 140)    # 끌기 시작 자리 (목록 안)
 QUEST_DRAG_DY = 55            # 한 번에 창 안 몇 px
 
@@ -28788,7 +28797,13 @@ class App(tk.Tk):
             click_log("[퀘스트] 🚫 리니지M 창 16개를 못 찾았다 — 아무것도 하지 않는다")
             return
         got, seen, done = 0, 0, []
-        for si in range(16):
+        t0 = time.time()
+        # 🎲 **순서를 섞는다** (2026-11-09 사용자: *"클라 랜덤으로 해야 해"*)
+        #    늘 #01 부터 돌면 그것도 하나의 규칙이 된다.
+        order = list(range(16))
+        if QUEST_SHUFFLE:
+            random.shuffle(order)
+        for si in order:
             if self._stop_flag or getattr(self, "_quest_stop", False):
                 click_log("[퀘스트] ■ 멈춤")
                 break
@@ -28801,10 +28816,17 @@ class App(tk.Tk):
                 done.append("#%02d\u00d7%d" % (si + 1, n))
                 self.status.set("🎁 보상 %d개 받는 중... (%s)" % (got, " ".join(done)))
             nap(random.uniform(*QUEST_SLOT_GAP))
+        el = time.time() - t0
         msg = ("🎁 퀘스트 보상 **%d개** 받았습니다 — %s" % (got, " ".join(done))
                if got else "🎁 받을 완료 퀘스트가 없었습니다")
-        self.status.set(msg.replace("**", ""))
-        click_log("[퀘스트] %s (%d클라 확인)" % (msg, seen))
+        self.status.set("%s (%.0f초)" % (msg.replace("**", ""), el))
+        # ⏱ **걸린 시간을 남긴다** — 목표(1분20초~2분)를 넘으면 그 줄로 조정한다
+        _t = ("✔ 목표 안" if el <= QUEST_BUDGET[1]
+              else "⚠ %.0f초 초과" % (el - QUEST_BUDGET[1]))
+        click_log("[퀘스트] %s (%d클라 확인) · 순서 %s"
+                  % (msg, seen, "🎲섞음" if QUEST_SHUFFLE else "번호순"))
+        click_log("[퀘스트] ⏱ 전체 **%.0f초** / 목표 %d~%d초 %s"
+                  % (el, QUEST_BUDGET[0], QUEST_BUDGET[1], _t))
 
     def _quest_one(self, si, rect):
         """한 클라에서 [완료] 를 **보이는 대로 다** 받는다. 받은 개수를 돌려준다.
@@ -28818,6 +28840,22 @@ class App(tk.Tk):
         kx, ky = ww / float(QUEST_BASE_W), hh / float(QUEST_BASE_H)
         cen = (l + ww // 2, t + hh // 2)
         got, moved = 0, 0
+        # 😴 **자고 있으면 깨우고 받는다** (2026-11-09 사용자 지시:
+        #    *"받으려고 하는 클라 절전을 너가 해제시키고 받아야 해"*)
+        #    ⚠ 절전 화면이 퀘스트 HUD 를 **덮는다** — 깨우지 않으면 [완료] 가
+        #      아예 안 보인다 (이 저장소에서 여러 번 겪은 성질).
+        #    🧭 깨우기는 `_wake_until` **하나**를 쓴다 (복구·F11 과 같은 함수) —
+        #      같은 코드를 두 군데 두면 한쪽만 고치는 사고가 난다.
+        if QUEST_WAKE:
+            try:
+                if find_sleep_img("fix", cen)[0] is not None:
+                    ok = self._wake_until(cen, si + 1, tag="퀘스트", fkey="fix")
+                    click_log("[퀘스트] #%02d 😴 절전이라 깨웠다%s"
+                              % (si + 1, "" if ok else " — ⚠ 안 깨어났다, 그래도 본다"))
+                    nap(random.uniform(*QUEST_WAKE_WAIT))
+            except Exception as e:
+                click_log("[퀘스트] #%02d 😴 깨우기 중 오류 %s — 그래도 본다"
+                          % (si + 1, e))
         try:
             for _s in range(QUEST_SCROLL_N + 1):
                 for _i in range(QUEST_MAX):
