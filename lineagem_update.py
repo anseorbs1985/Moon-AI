@@ -165,7 +165,7 @@ DATA_DIRS  = ["reroll_templates", "click_templates"]   # 이미지 클릭 그림
 #    (*"역산한 좌표 안 올렸냐 이거 전부 올려줘야지"*).
 #    🚫 **배포가 끝나면 다시 True 로 돌려놓을 것** (2026-10-14 사용자 지시).
 #       물약 칸은 `share_island.json` 의 `keep_cells` 가 로컬 것을 지킨다.
-NEVER_ISLAND = False  # 🔓 2026-11-09 잊섬 1회 배포 — **받으면 True 로 되돌린다**            # 🔒 island_coords.json 은 어떤 경로로도 받지 않는다
+NEVER_ISLAND = True            # 🔒 island_coords.json 은 어떤 경로로도 받지 않는다
 #    🚨 2026-10-14 사용자 최우선 지시로 **코드에 박은** 보호다.
 #       *"섬/던전 실행기 여기 있는 것들이 돌아가면 내가 정말 미쳐버림"*
 #    🚫 **끄지 말 것.** 2026-11-04 에 클로드가 끄고 5시간 26분 열어둬
