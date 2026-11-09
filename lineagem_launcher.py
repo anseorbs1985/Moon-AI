@@ -16268,11 +16268,18 @@ class App(tk.Tk):
                  font=("맑은 고딕", 10, "bold"), fg="#c0392b").pack(anchor="w")
         tk.Label(ctrl, textvariable=self._cnt_diff_var,
                  font=("맑은 고딕", 9, "bold"), fg="#8e44ad").pack(anchor="w")
-        _labels = []
+        # 🖥 **화면 그대로 — 세로(열 우선)** 로 놓는다 (2026-11-09 사용자 지시)
+        #    01·02·03·04 가 **첫 열에 위아래로** = 리니지M 클라 격자와 같은 자리다.
+        #    사용자: *"1번2번3번4번을 세로로 해줘야지 바로 파악이 되지
+        #    가로로 해두면 파악을 어떻게 하냐 **화면상 그대로** 해줘야지"*
+        #    🚫 `idx = r * 4 + c`(가로) 로 되돌리지 말 것 — 화면과 어긋나 못 알아본다.
+        #    🚫 `_copy_daya_counts`(📋 복사)도 **같은 모양**이어야 한다 — 한쪽만
+        #       고치면 화면과 엑셀이 어긋나 더 헷갈린다.
+        _labels = [None] * 16
         grid = tk.Frame(daya_inner); grid.pack(side="left", anchor="n")
-        for r in range(4):
-            for c in range(4):
-                idx = r * 4 + c
+        for c in range(4):
+            for r in range(4):
+                idx = c * 4 + r
                 cell = tk.Frame(grid, bd=1, relief="groove")
                 cell.grid(row=r, column=c, padx=1, pady=1, sticky="n")
                 head = tk.Frame(cell); head.pack()
@@ -16286,7 +16293,10 @@ class App(tk.Tk):
                 imbox.pack_propagate(False)
                 imlbl = tk.Label(imbox, bg="#f4f4f4", fg="#ccc", font=("맑은 고딕", 7))
                 imlbl.pack(fill="both", expand=True)
-                _labels.append(imlbl)
+                # ⚠ **append 가 아니다** — 루프 순서가 번호 순서와 달라도
+                #    `_load_daya_thumbs` 의 `labels[i]` 와 맞아야 한다.
+                #    (append 로 두면 **사진이 엉뚱한 칸에** 들어간다)
+                _labels[idx] = imlbl
                 tk.Button(cell, text="재측정", font=("맑은 고딕", 6, "bold"),
                           bg="#27ae60", fg="white", pady=0,
                           command=lambda x=idx: self._rescan_daya_slot(x)).pack(fill="x")
@@ -16333,11 +16343,15 @@ class App(tk.Tk):
 
     def _copy_daya_counts(self):
         values = [v.get().replace(",", "").replace("-", "0") for v in self._cnt_cell_vars]
-        rows = ["\t".join(values[r*4:(r+1)*4]) for r in range(4)]
+        # 🖥 **화면과 같은 모양**으로 복사한다 (2026-11-09) — 화면이 세로(열 우선)
+        #    이므로 엑셀도  01 05 09 13 / 02 06 10 14 / …  로 간다.
+        #    🚫 `values[r*4:(r+1)*4]`(가로) 로 되돌리지 말 것 — 화면과 어긋난다.
+        rows = ["\t".join(values[c * 4 + r] for c in range(4)) for r in range(4)]
         text = "\n".join(rows)
         self.clipboard_clear()
         self.clipboard_append(text)
-        self.status.set("✔ 다야 수량 클립보드 복사 완료 — 엑셀에 붙여넣기 하세요")
+        self.status.set("✔ 다야 수량 복사 완료 — 화면과 같은 세로 배치로 "
+                        "엑셀에 붙여넣기 하세요")
 
     def _refresh_count(self):
         data = self._cnt_load()
