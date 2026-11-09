@@ -20,7 +20,12 @@ r"""🩹 **섬/던전 좌표를 그 던전만 되살린다** — 로컬 전용 (
 py fix_local_island.py              ← 무엇을 되살릴 수 있나 **보여만 준다**
 py fix_local_island.py --go         ← 되살린다 (직전 상태는 자동 백업)
 py fix_local_island.py 잊혀진섬 --go  ← 그 던전만
+
+py fix_local_island.py --presets --go   🧪 **프리셋만** (좌표는 그대로 둔다)
+py fix_local_island.py --coords --go    📍 **좌표만** (프리셋은 그대로 둔다)
+py fix_local_island.py --pick 3         📦 3번째 백업을 쓴다 (목록의 번호)
 ```
+⚠ **좌표를 이미 다시 찍었으면 `--presets` 를 쓰세요** — 그래야 찍은 좌표가 안 날아간다.
 🚫 **메인에서는 거부한다** — 메인은 좌표 원본이다.
 🛟 되살리기 전 상태는 `backups\<시각>_before_islfix_island_coords.json` 로 남긴다.
 🧷 되살리는 것: 그 던전의 **슬롯 전체**(좌표·간격·방향·이름표·녹화·프리셋 설정) +
@@ -75,8 +80,29 @@ def main():
         print("   되살리면 안 된다. 이 도구는 **로컬에서만** 쓴다.")
         return 2
 
-    want = [a for a in sys.argv[1:] if not a.startswith("-")]
-    go = "--go" in sys.argv
+    argv = sys.argv[1:]
+    go = "--go" in argv
+    only_pr = "--presets" in argv          # 🧪 프리셋만
+    only_co = "--coords" in argv           # 📍 좌표만
+    pick = 0
+    if "--pick" in argv:
+        try:
+            pick = int(argv[argv.index("--pick") + 1])
+        except Exception:
+            pick = 0
+    _skipnext = False
+    want = []
+    for a in argv:
+        if _skipnext:
+            _skipnext = False
+            continue
+        if a == "--pick":
+            _skipnext = True
+            continue
+        if not a.startswith("-"):
+            want.append(a)
+    if only_pr and only_co:
+        only_pr = only_co = False          # 둘 다 주면 둘 다 한다
 
     cur = jload(F)
     if cur is None:
@@ -111,9 +137,16 @@ def main():
                                                time.localtime(os.path.getmtime(F)))))
     print("   백업 폴더 : %s" % BK)
     print("   '날아가기 전'(11-04 17:00 이전) 백업 %d개" % len(cands))
-    for m, p in cands[:6]:
-        print("      %s  %9d B  %s" % (time.strftime("%m-%d %H:%M", time.localtime(m)),
-                                       os.path.getsize(p), os.path.basename(p)))
+    print("     번호  시각          프리셋            좌표합   파일")
+    for _bi, (m, p) in enumerate(cands[:12], 1):
+        _d = jload(p) or {}
+        _pr = (_d.get("_presets") or {})
+        _ps = " ".join("%s%d" % (k[:2], len(_pr.get(k) or []))
+                       for k in keys if k in _pr) or "-"
+        _cs = sum(dsum(_d, k)[0] for k in keys)
+        print("      [%d]  %s  %-16s %6d   %s"
+              % (_bi, time.strftime("%m-%d %H:%M", time.localtime(m)),
+                 _ps[:16], _cs, os.path.basename(p)[:34]))
     if not cands:
         print()
         print("🚫 **되살릴 백업이 없다.**")
@@ -122,9 +155,14 @@ def main():
         print("   (클라 창 위치가 자동 보정된다).")
         return 1
 
-    # 가장 가까운 백업에서 그 던전을 꺼낸다
+    # 가장 가까운 백업에서 그 던전을 꺼낸다 (--pick n 이면 그 번호)
     src = None
-    for m, p in cands:
+    if pick and 1 <= pick <= len(cands):
+        _m, _p = cands[pick - 1]
+        _d = jload(_p)
+        if _d:
+            src = (_m, _p, _d)
+    for m, p in ([] if src else cands):
         d = jload(p)
         if not d:
             continue
@@ -141,6 +179,12 @@ def main():
     print("   📦 쓸 백업 : %s  (%s)"
           % (os.path.basename(sp), time.strftime("%m-%d %H:%M", time.localtime(sm))))
     print()
+    print()
+    print("   되살릴 범위 : %s"
+          % ("🧪 **프리셋만** (좌표는 그대로 둡니다)" if only_pr else
+             "📍 **좌표만** (프리셋은 그대로 둡니다)" if only_co else
+             "좌표 + 프리셋 (둘 다)"))
+    print()
     print("   던전                  지금 → 되살림      슬롯")
     print("   " + "-" * 62)
     plan = []
@@ -155,22 +199,26 @@ def main():
         mark = "이미 같음" if same else "되살린다"
         print("   %-20s 좌표 %4d → %4d     %2d → %2d   %s"
               % (k, c0, c1, n0, n1, mark))
-        if not same:
+        if not same and not only_pr:
             plan.append(k)
 
     # 프리셋도 같이 (presets: True 로 배포됐다)
     pr_cur = (cur.get("_presets") or {})
     pr_src = (sd.get("_presets") or {})
     pplan = []
-    for k in plan:
-        if k in pr_src and json.dumps(pr_cur.get(k), ensure_ascii=False,
-                                      sort_keys=True) != \
-                json.dumps(pr_src.get(k), ensure_ascii=False, sort_keys=True):
-            pplan.append(k)
+    if not only_co:
+        for k in keys:
+            if k in pr_src and json.dumps(pr_cur.get(k), ensure_ascii=False,
+                                          sort_keys=True) != \
+                    json.dumps(pr_src.get(k), ensure_ascii=False, sort_keys=True):
+                pplan.append(k)
+    # 🧪 프리셋 개수 비교 — 몇 개가 되살아나나
     if pplan:
         print()
-        print("   🧪 프리셋도 되살린다 (11-04 배포가 presets:True 였다): %s"
-              % " · ".join(pplan))
+        print("   🧪 프리셋 — 지금 → 되살림")
+        for k in pplan:
+            print("      %-20s %d개 → %d개"
+                  % (k, len(pr_cur.get(k) or []), len(pr_src.get(k) or [])))
 
     if not plan and not pplan:
         print()
@@ -182,8 +230,13 @@ def main():
         print()
         print("=" * 94)
         print("  위 내용이 맞으면 **--go** 를 붙여 다시 실행하세요:")
-        print("     py fix_local_island.py%s --go"
-              % ("" if not want else " " + " ".join(want)))
+        _opt = (" --presets" if only_pr else " --coords" if only_co else "")
+        _opt += (" --pick %d" % pick) if pick else ""
+        print("     py fix_local_island.py%s%s --go"
+              % ("" if not want else " " + " ".join(want), _opt))
+        if not only_pr and not only_co:
+            print("  🧪 **프리셋만** 되살리려면 (좌표를 이미 다시 찍었으면 이것):")
+            print("     py fix_local_island.py --presets --go")
         print("  ⚠ 먼저 **메인런처와 섬/던전 실행기를 꺼주세요** (켜져 있으면 저장이 엉킵니다)")
         print("=" * 94)
         return 0
