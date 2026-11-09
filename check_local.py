@@ -8,6 +8,7 @@ u"""🩺 로컬 진단 — 좌표가 왜 안 들어오나 · 녹화가 왜 안 �
        *"여전히 마우스/키 녹화하기 안 돼. 재부팅을 하고 다시 시작해도 안 들어와 있다고"*
 """
 import sys, os, io, json, glob, hashlib, time
+import ast
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -380,9 +381,125 @@ if os.path.isdir(_shot):
         for f in _ss:
             print("     " + f)
 
-# ── ⑨ 업데이트 기록 ────────────────────────────────────────────────
+# ── ⑨ 🏝 섬/던전 (잊섬 등) ─────────────────────────────────────────
+# 🚨 2026-11-04 17:15~22:41 (5시간 26분) 동안 `NEVER_ISLAND=False` 로 배포가 열려
+#    있었다. 그 사이 🔄 를 누른 로컬은 잊섬·악몽의섬·에카·오만의탑 좌표와
+#    프리셋이 **메인 것으로 통째로** 갈렸다 (= "좌표가 날아갔다").
+#    되살리기: `py fix_local_island.py` → `--go`
+print("\n⑨ 🏝 섬/던전 — 좌표·실행 대상")
+_if = os.path.join(DESK, "island_coords.json")
+try:
+    _isz, _ism = os.path.getsize(_if), time.strftime(
+        "%m-%d %H:%M", time.localtime(os.path.getmtime(_if)))
+except Exception:
+    _isz, _ism = 0, "(없음)"
+print("   island_coords.json  %s B · %s" % ("{:,}".format(_isz), _ism))
+_id = {}
+try:
+    _id = json.load(io.open(_if, encoding="utf-8-sig")) or {}
+except Exception as _e:
+    print("   🚫 읽을 수 없다: %s" % str(_e)[:60])
+
+# 섬 실행기의 칸 수 (코드에서 읽는다 — 손으로 적으면 어긋난다)
+_clk = {}
+try:
+    _isrc = io.open(os.path.join(DESK, "lineagem_island.py"),
+                    encoding="utf-8").read()
+    _i0 = _isrc.index("CLICKS_BY_KEY")
+    _i1 = _isrc.index("}", _i0) + 1
+    _clk = ast.literal_eval(_isrc[_isrc.index("{", _i0):_i1])
+except Exception:
+    pass
+
+
+def _nco(sl):
+    if not isinstance(sl, dict):
+        return 0
+    return len([c for c in (sl.get("coords") or []) if c])
+
+
+print("   던전                 슬롯  ON  좌표합  **실행대상**  칸수   비고")
+print("   " + "-" * 76)
+for _k in [x for x in _id if not str(x).startswith("_")]:
+    _L = _id.get(_k) or []
+    if not isinstance(_L, list):
+        continue
+    _on = [i for i, s_ in enumerate(_L)
+           if isinstance(s_, dict) and s_.get("enabled", True)]
+    # 🎯 섬 실행기 `_run` 의 targets 와 **같은 조건**:
+    #    enabled(없으면 ON) 이고 (좌표가 하나라도 있거나 방향이 하나라도 있다)
+    _tg = [i for i, s_ in enumerate(_L)
+           if isinstance(s_, dict) and s_.get("enabled", True)
+           and (any(c for c in (s_.get("coords") or []))
+                or any(s_.get("dirs") or []))]
+    _cs = sum(_nco(s_) for s_ in _L)
+    _note = ""
+    if not _L:
+        _note = "🚫 슬롯이 없다"
+    elif not _tg:
+        if not _on:
+            _note = "🚫 **전부 OFF** — 그 던전 창에서 슬롯을 ON"
+        else:
+            _note = "🚫 **좌표·방향이 전부 비었다**"
+    elif len(_tg) < len(_on):
+        _note = "⚠ ON 인데 좌표가 없는 슬롯 %s" % [i + 1 for i in _on if i not in _tg]
+    print("   %-20s %3d %3d %6d %8d %6s   %s"
+          % (_k, len(_L), len(_on), _cs, len(_tg),
+             _clk.get(_k, "-"), _note))
+
+# 🧪 프리셋 — 11-04 배포가 `presets:True` 였다
+_pr = _id.get("_presets") or {}
+if _pr:
+    print("   🧪 프리셋: " + " · ".join("%s %d개" % (k, len(v) if hasattr(v, "__len__")
+                                                  else 0) for k, v in _pr.items()))
+
+# 📦 '날아가기 전' 백업이 있나 (되살릴 수 있나)
+_bd = os.path.join(LA, "backups")
+_bad = time.mktime(time.strptime("2026-11-04 17:00", "%Y-%m-%d %H:%M"))
+_old = []
+for _p in glob.glob(os.path.join(_bd, "*island_coords.json")):
+    try:
+        _m = os.path.getmtime(_p)
+    except Exception:
+        continue
+    if _m < _bad and os.path.getsize(_p) > 2000:
+        _old.append((_m, _p))
+_old.sort(reverse=True)
+print("   📦 '날아가기 전'(11-04 17:00 이전) 백업 %d개%s"
+      % (len(_old), ("  최근: " + time.strftime("%m-%d %H:%M",
+                                               time.localtime(_old[0][0])))
+         if _old else ""))
+if _old:
+    print("      → 되살리려면  py fix_local_island.py      (보기)")
+    print("                     py fix_local_island.py --go (실행)")
+else:
+    print("      → 백업이 없다. 한 슬롯만 다시 찍고 그 던전 창의")
+    print("        **[📋 전체붙임]** 을 누르면 16슬롯에 퍼진다 (창 위치 자동보정)")
+
+# ⏰ 반복 상태 (꺼져 있으면 ⏰ 가 안 걸린 것 — 실행 자체와는 별개다)
+_rp = os.path.join(LA, "island_repeat.json")
+try:
+    _rd = json.load(io.open(_rp, encoding="utf-8-sig")) or {}
+    _cnt = len([k for k in _rd if "|" in str(k)])
+    print("   ⏰ island_repeat.json  걸린 예약 %d개" % _cnt)
+except Exception:
+    print("   ⏰ island_repeat.json  (없다 — 걸린 예약 없음)")
+
+# 🗒 최근 실행 기록 — 왜 안 돌았는지가 여기 남는다
+_rl = os.path.join(LA, "repeat_log.txt")
+try:
+    _ls = [l.rstrip() for l in io.open(_rl, encoding="utf-8",
+                                       errors="replace").read().split("\n")
+           if l.strip()]
+    print("   🗒 repeat_log.txt 마지막 14줄:")
+    for l in _ls[-14:]:
+        print("     " + l[:112])
+except Exception:
+    print("   🗒 repeat_log.txt (없다 — 섬/던전을 한 번도 안 돌렸다)")
+
+# ── ⑩ 업데이트 기록 ────────────────────────────────────────────────
 ul = os.path.join(LA, "update_log.txt")
-print("\n⑨ 업데이트 기록 마지막 40줄  (%s)" % ul)
+print("\n⑩ 업데이트 기록 마지막 40줄  (%s)" % ul)
 try:
     lines = io.open(ul, encoding="utf-8", errors="replace").read().split("\n")
     for ln in lines[-40:]:
