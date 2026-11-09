@@ -2849,6 +2849,10 @@ SEQ_SKIP_AWAKE = True
 #    (2026-10-18 사용자: "절전모드 상태면 네가 확인해서 해제를 하고
 #     그 다음 버튼을 눌러주면 되는 거거든").
 SCHED_WAKE = True
+# 🏹 사냥도 **슬롯을 시작하기 전에 자고 있으면 깨운다** (2026-11-10 사용자:
+#    *"접속하고 사냥을 돌릴 때 **절전되어 있는 클라는 절전을 해제하고** 가야 해"*).
+#    🚫 깨어 있으면 아무것도 안 한다 — 화면 확인 한 번(약 60ms)뿐이다.
+HUNT_WAKE = True
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║ 🧩 클라 **오른쪽 옆 바** (퍼플 CEF 창 `index.html?type=live`)             ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
@@ -8070,6 +8074,27 @@ def win_is_enlarged(hwnd, w0, h0, margin=None):
         return (r[2] - r[0]) > int(w0) + m or (r[3] - r[1]) > int(h0) + m
     except Exception:
         return False
+
+
+def win_keep_big(hwnd, w0, h0, who=""):
+    """🔍 **사람이 키운 창이면 건드리지 않는다** → True(건너뛰어라).
+
+    2026-11-10 사용자: *"클라 확대하면 **어떤 놈이 계속 축소하는 거야** …
+    **확대하면 축소하지 마 내가 할 테니까**"*
+
+    🚫 창 크기를 되돌리는 코드를 새로 만들 때는 **반드시 이것을 먼저 부를 것.**
+       실측(2026-11-10): 되돌리는 곳이 다섯인데 보호가 **둘에만** 있었다.
+    🚫 못 재면 False(막지 않는다) — 모를 때 막으면 창 정리가 통째로 죽는다."""
+    if not win_is_enlarged(hwnd, w0, h0):
+        return False
+    try:
+        r = win32gui.GetWindowRect(hwnd)
+        click_log(f"[창] 🔍 {who} **키워둔 창이라 건드리지 않는다** "
+                  f"({r[2]-r[0]}x{r[3]-r[1]} · 기준 {int(w0)}x{int(h0)}) "
+                  f"— 줄이려면 사용자가 직접 줄인다")
+    except Exception:
+        pass
+    return True
 
 
 class WindowSizeLock:
@@ -37729,8 +37754,13 @@ class App(tk.Tk):
         except Exception:
             return None
 
-    def _sched_wake(self, si, coord, name=""):
-        """📅 그 클라가 **자고 있으면 깨운다** — 스케줄은 절전해제 좌표가 없다.
+    def _sched_wake(self, si, coord, name="", tag="스케줄", anc=None, on=None):
+        """😴 그 클라가 **자고 있으면 깨운다** — 📅 스케줄 · 🏹 사냥 **공용**.
+
+        🚫 **같은 일을 하는 함수를 또 만들지 말 것** — `tag`/`anc`/`on` 만 바꿔
+           쓰면 된다 (기본값이 스케줄 것이라 기존 호출부는 그대로 돈다).
+          · `tag` 기록에 쓸 이름   · `anc` 볼 자리(없으면 그 슬롯 창 가운데)
+          · `on`  켬/끔(없으면 `SCHED_WAKE`)
 
         2026-10-18 사용자: "스케줄을 할 때 이것 또한 절전이 되어 있으면 네가 절전을
         풀고 스케줄을 클릭해주면 되거든 … 이건 따로 절전모드 해제 이런 게 없어."
@@ -37740,57 +37770,64 @@ class App(tk.Tk):
           아니다. 클릭1 은 상단바(ngptop)라 거기선 절전을 볼 수 없다.
         ⚠ 깨우기는 `_wake_until` 하나로 모았다 — 1번째 Z, 2번째부터 '절전모드 해제'
           글자 클릭 (2026-09-30). 같은 코드를 또 만들지 말 것."""
-        if not SCHED_WAKE:
+        if not (SCHED_WAKE if on is None else on):
             return
         try:
             q = sleep_img_path("fix")
             if not (q and os.path.exists(q)):
-                self._sched_wake_note("절전 그림(fix_sleep.png)이 없다")
+                self._sched_wake_note("절전 그림(fix_sleep.png)이 없다", tag)
                 return
-            anc = self._sched_anchor(si)
+            if anc is None:
+                anc = self._sched_anchor(si)
             if not anc:
-                self._sched_wake_note("리니지M 창 16개를 못 찾았다")
+                self._sched_wake_note("볼 자리를 못 찾았다 (리니지M 창 16개를 못 찾고 좌표도 없다)", tag)
                 return
             _x, _y, _v = find_sleep_img("fix", anc)
             if _x is None:
-                self._sched_wake_cnt(False, _v)
+                self._sched_wake_cnt(False, _v, tag)
                 return                      # 깨어 있다 — 아무것도 안 한다
             self.status.set(f"😴 [{name}] #{si+1:02d} 절전 — 깨우고 누릅니다 ({_v:.2f})")
-            ok = self._wake_until(anc, si + 1, tag="sched", fkey="fix")
-            self._sched_wake_cnt(True, _v)
-            click_log(f"[스케줄] #{si+1:02d} {name} 절전 상태 ({_v:.2f}) → "
+            ok = self._wake_until(anc, si + 1, tag=tag, fkey="fix")
+            self._sched_wake_cnt(True, _v, tag)
+            click_log(f"[{tag}] #{si+1:02d} {name} 절전 상태 ({_v:.2f}) → "
                       + ("깨웠다" if ok else "⚠ 안 깨어남 — 그대로 진행"))
             nap(random.uniform(0.5, 0.9))   # 화면이 돌아올 틈
         except Exception as e:
             try:
-                click_log(f"[스케줄] #{si+1:02d} 깨우기 오류: {e}")
+                click_log(f"[{tag}] #{si+1:02d} 깨우기 오류: {e}")
             except Exception:
                 pass
 
-    def _sched_wake_cnt(self, slept, v):
+    def _wake_bag(self, tag):
+        """한 번 실행의 깨우기 결과를 담아둔다 — **런처(tag)마다 따로**."""
+        b = getattr(self, "_wakebag", None)
+        if b is None:
+            b = self._wakebag = {}
+        return b.setdefault(tag, {"잠": 0, "깸": 0, "점수": []})
+
+    def _sched_wake_cnt(self, slept, v, tag="스케줄"):
         """한 번 실행에 **한 줄 요약**을 남기려고 세어둔다 (조용히 실패하지 않게)."""
-        d = getattr(self, "_schwake", None)
-        if d is None:
-            d = self._schwake = {"잠": 0, "깸": 0, "점수": []}
+        d = self._wake_bag(tag)
         d["잠" if slept else "깸"] += 1
         d["점수"].append(f"{v:.2f}")
 
-    def _sched_wake_note(self, why):
-        d = getattr(self, "_schwake", None)
-        if d is None:
-            d = self._schwake = {"잠": 0, "깸": 0, "점수": []}
-        d["막힘"] = why
+    def _sched_wake_note(self, why, tag="스케줄"):
+        self._wake_bag(tag)["막힘"] = why
 
-    def _sched_wake_log(self):
-        """스케줄이 끝날 때 한 줄로 남긴다 — **왜 안 깨웠는지**가 여기 적힌다."""
-        d = getattr(self, "_schwake", None)
+    def _sched_wake_log(self, tag="스케줄"):
+        """끝날 때 한 줄로 남긴다 — **왜 안 깨웠는지**가 여기 적힌다.
+
+        🚫 지우지 말 것 — 깨어 있으면 조용히 넘어가는 설계라, 이 한 줄이
+        없으면 *"왜 안 깨웠지"* 를 짚을 수가 없다."""
+        b = getattr(self, "_wakebag", None)
+        d = (b or {}).get(tag)
         if not d:
             return
-        self._schwake = None
+        b.pop(tag, None)
         if d.get("막힘"):
-            click_log(f"[스케줄] 😴 깨우기 못 함 — {d['막힘']}")
+            click_log(f"[{tag}] 😴 깨우기 못 함 — {d['막힘']}")
             return
-        click_log(f"[스케줄] 😴 절전 {d['잠']}개 깨움 · {d['깸']}개는 이미 깨어 있었다 "
+        click_log(f"[{tag}] 😴 절전 {d['잠']}개 깨움 · {d['깸']}개는 이미 깨어 있었다 "
                   f"(점수 {' '.join(d['점수'][:16])} · 기준 {SLEEP_MATCH:.2f})")
 
     def _run_sched_seq(self, targets):
@@ -38962,6 +38999,10 @@ class App(tk.Tk):
                         and abs((rr[2] - rr[0]) - w) <= GRID_SLACK
                         and abs((rr[3] - rr[1]) - hh) <= GRID_SLACK)
 
+            # 🔍 **사람이 키운 창은 격자로 되돌리지 않는다** (2026-11-10).
+            #    🚫 '어긋났다' 로 세지도 않는다 — 일부러 키운 것이다.
+            if win_keep_big(h, w, hh, f"격자 {nm}"):
+                continue
             if _ok(r):
                 continue
             # 🔁 **옮기고 → 다시 재서 확인 → 어긋나면 다시** (2026-11-04).
@@ -39231,7 +39272,9 @@ class App(tk.Tk):
 
                 if matched_si is not None:
                     aw_data = slots[matched_si].get("assigned_window")
-                    if aw_data and all(k in aw_data for k in ("x","y","w","h")):
+                    if (aw_data and all(k in aw_data for k in ("x","y","w","h"))
+                            and not win_keep_big(hwnd, aw_data["w"], aw_data["h"],
+                                                 f"OCR복원 {ocr_name}")):
                         ctypes.windll.user32.SetWindowPos(hwnd, 0,
                             aw_data["x"], aw_data["y"], aw_data["w"], aw_data["h"], SWP_NOZORDER)
                         self.after(0, lambda n=ocr_name, s=matched_si: self.status.set(f"✔ '{n}' → #{s+1:02d} 복원"))
@@ -39284,6 +39327,10 @@ class App(tk.Tk):
                 ocr_name = " ".join(results).strip()
                 self.after(0, lambda n=ocr_name: self.status.set(f"OCR: '{n}' 확인 중..."))
                 if slot_name and (slot_name in ocr_name or ocr_name in slot_name):
+                    # 🔍 사람이 키운 창은 건드리지 않는다 (2026-11-10)
+                    if win_keep_big(hwnd, aw_data["w"], aw_data["h"],
+                                    f"OCR맞춤 {slot_name}"):
+                        return
                     ctypes.windll.user32.SetWindowPos(hwnd, 0,
                         aw_data["x"], aw_data["y"], aw_data["w"], aw_data["h"], SWP_NOZORDER)
                     self.after(0, lambda: self.status.set(f"✔ '{slot_name}' → #{slot_idx+1:02d} 복원 완료"))
@@ -42267,6 +42314,24 @@ class App(tk.Tk):
         self._hunt_stop = False
         self.deiconify()
 
+    def _hunt_anchor(self, si, h):
+        """🏹 그 슬롯이 **어느 클라인지** — 절전을 볼 자리.
+
+        ① 그 슬롯의 **리니지M 창 가운데** (가장 튼튼하다 — 좌표가 어긋나도 맞다)
+        ② 창 16개를 못 찾으면 **그 슬롯의 첫 등록 좌표**
+        실측(2026-11-10): 사냥 좌표는 16슬롯 전부 게임 창(GLFW30) 안이라
+        ② 로도 맞는다. 스케줄 클릭1 이 상단바(ngptop)인 것과 다르다."""
+        try:
+            anc = self._sched_anchor(si)
+            if anc:
+                return anc
+            for c in (h.get("coords") or []):
+                if c:
+                    return (int(c[0]), int(c[1]))
+        except Exception:
+            pass
+        return None
+
     def _run_hunt(self, limit=None, only=None):
         """`only` 에 슬롯번호(0부터)를 주면 **그 슬롯만** 돈다 — 개별 ▶ 가 쓴다.
 
@@ -42301,6 +42366,14 @@ class App(tk.Tk):
                 _t_s = time.time()
                 if not self._hunt_wait(slot_delay): self.status.set("사냥 멈춤"); return
                 _hw.append((slot_delay, time.time() - _t_s))
+                # 😴 **자고 있으면 깨우고 간다** (2026-11-10 사용자: *"접속하고
+                #    사냥을 돌릴 때 절전되어 있는 클라는 절전을 해제하고 가야 해"*).
+                #    절전 화면이 덮고 있으면 좌표를 눌러도 사냥을 못 간다.
+                #    🚫 깨어 있으면 아무것도 안 한다 (확인 한 번, 약 60ms).
+                self._sched_wake(i, (h.get("coords") or [None])[0], name,
+                                 tag="사냥", anc=self._hunt_anchor(i, h),
+                                 on=HUNT_WAKE)
+                if self._hunt_stop: self.status.set("사냥 멈춤"); return
                 for j, coord in enumerate(h["coords"]):
                     if not coord: continue
                     if self._hunt_stop: self.status.set("사냥 멈춤"); return
@@ -42329,6 +42402,7 @@ class App(tk.Tk):
                         self.status.set("사냥 멈춤"); return
             # 사냥 전체 소요시간 기록 (180초 목표 확인)
             _he = time.time() - _hunt_t0
+            self._sched_wake_log("사냥")      # 😴 몇 개를 깨웠나 한 줄
             _hmark = "✔180초이내" if _he <= 180 else "⚠180초초과!"
             if _hw:
                 _want = sum(a for a, _b in _hw); _got = sum(b for _a, b in _hw)
