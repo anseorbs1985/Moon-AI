@@ -1326,7 +1326,14 @@ UPDATE_RESTART = True       # 업데이트 끝에 런처를 다시 띄운다 (�
 #      · `__pycache__` 삭제 (옛 .pyc 가 살아남는 것 방지)
 #    🚫 클로드는 느린 폴링을 다시 넣지 말 것 — 그게 100초를 만들었다.
 RESTART_FAST   = True
-RESTART_WAIT   = 1.6        # 종료 뒤 이만큼만 쉰다 (초)
+RESTART_WAIT   = 1.6        # 종료 뒤 **최소** 이만큼은 쉰다 (초)
+# 🔁 **빠른 재시작도 확인은 한다** (2026-11-09 사용자: *"재시작을 인식을 못해
+#    그래서 따로 재시작을 눌러야 하는 현상"*).
+#    📏 실측 — 비싼 것은 `_any_py_running`(3.1초) 하나였다.
+#       `_launcher_running`(창 목록)은 **16ms** 이고 지문 확인은 파일 tail 이라 싸다.
+#    🚫 지문 확인을 다시 빼지 말 것 — 그것이 '두 번 눌러야 한다' 의 원인이다.
+KILL_WAIT_MAX   = 6.0       # 창이 사라질 때까지 이만큼까지 기다린다 (초)
+FAST_VERIFY_SEC = 12        # 새 런처가 지문을 남길 때까지 이만큼까지 기다린다
 
 
 def _any_py_running():
@@ -1402,7 +1409,7 @@ def _spawn_launcher(log=None):
     return False
 
 
-def _launcher_code_ok(since, log=None):
+def _launcher_code_ok(since, log=None, wait=20):
     """새로 뜬 런처가 **새 코드**인가 — `click_log` 의 `[재시작] 켜짐` 줄을 읽는다.
 
     런처는 켜질 때 `code_stamp()`(크기·시각·md5 앞 8자리)를 남긴다. 그 지문이
@@ -1417,7 +1424,7 @@ def _launcher_code_ok(since, log=None):
         return True
     p = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI",
                      "click_log.txt")
-    for _ in range(20):                 # 런처가 그 줄을 쓸 때까지 최대 20초
+    for _ in range(int(wait)):          # 런처가 그 줄을 쓸 때까지
         time.sleep(1)
         try:
             with open(p, "rb") as f:
@@ -1456,7 +1463,24 @@ def kill_launchers(log=None):
     #    Stop-Process 는 바로 먹으므로 확인은 값에 비해 너무 비쌌다.
     if RESTART_FAST:
         sh(["powershell", "-NoProfile", "-Command", _ps])
+        # 🔁 **창이 사라질 때까지** 기다린다 (2026-11-09) — `_launcher_running`
+        #    은 창 목록이라 **16ms** 다. 사라지면 즉시 넘어가므로 보통 더 빠르다.
+        #    🚫 여기서 `_any_py_running()` 을 쓰지 말 것 — 한 번에 3.1초다.
+        #    ⚠ 섬 실행기는 `--run` 이면 창을 숨긴다 → `RESTART_WAIT` 를
+        #       **최소 대기**로 지켜 그것도 죽을 시간을 준다.
+        _t0 = time.time()
         time.sleep(RESTART_WAIT)
+        while time.time() - _t0 < KILL_WAIT_MAX:
+            try:
+                if not _launcher_running():
+                    break
+            except Exception:
+                break
+            time.sleep(0.25)
+        else:
+            if log:
+                log("   ⚠ 런처 창이 %.0f초 안에 안 닫혔습니다 — 그래도 새로 띄웁니다"
+                    % KILL_WAIT_MAX)
         return True
     for _try in range(2):
         sh(["powershell", "-NoProfile", "-Command", _ps])
@@ -1497,17 +1521,29 @@ def force_restart_launcher(log=None):
     # ⚡ 빠른 길 — 끄고 · 캐시 지우고 · 띄운다. 지문 확인은 **안 기다린다.**
     #    ('무조건 끄고 무조건 띄운다' 는 그대로라 "두 번 재시작" 은 안 돌아온다)
     if RESTART_FAST:
-        if log:
-            log("   옛 런처를 내리고 새로 띄웁니다 (빠른 재시작)")
-        kill_launchers(log)
-        _clear_pycache(log)
-        ok = _spawn_launcher(log)
-        if log:
-            if ok:
-                log("   ✔ 런처를 띄웠습니다 (새 코드 지문 %s)" % (_code_md5() or "?"))
-            else:
-                log("   ⚠ 런처가 안 떴습니다")
-        return ok
+        # 🔁 **지문까지 확인한다** (2026-11-09) — 예전엔 띄우고 바로 끝내서,
+        #    옛 런처가 안 죽으면 **두 개가 떠 있고** 사용자가 보는 것은 옛 것이었다
+        #    (*"따로 재시작을 눌러야 하는 현상"*). 다르면 **한 번 더** 끄고 띄운다.
+        for _ft in (1, 2):
+            if log:
+                log("   옛 런처를 내리고 새로 띄웁니다 (빠른 재시작%s)"
+                    % ("" if _ft == 1 else " — 2번째"))
+            try:
+                since = os.path.getsize(p)
+            except Exception:
+                since = 0
+            kill_launchers(log)
+            _clear_pycache(log)
+            ok = _spawn_launcher(log)
+            if not ok:
+                if log:
+                    log("   ⚠ 런처가 안 떴습니다")
+                continue
+            if _launcher_code_ok(since, log, wait=FAST_VERIFY_SEC):
+                return True
+            if _ft == 1 and log:
+                log("   → 옛 런처가 살아남았습니다. **한 번 더** 확실히 내리고 띄웁니다")
+        return _launcher_running()
     for _try in (1, 2):
         if log:
             log("   옛 런처를 종료합니다 (%d/2 — 전부 내려갈 때까지 확인)" % _try)
