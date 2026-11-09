@@ -1,40 +1,21 @@
 {
- "keys": [],
- "keep_local": [
-  "name",
-  "enabled",
-  "repeat_h",
-  "repeat_n",
-  "omanst_pref",
-  "omanst_floor"
- ],
- "keep_cells": {
-  "수금_오만의탑": [
-   11,
-   12,
-   22
+  "_설명": "클로드가 사용자 요청으로 켠 1회성 배포 — 받으면 즉시 keys 를 비우고 NEVER_ISLAND=True 로 되돌린다",
+  "keys": [
+    "수금_오만의탑",
+    "토요일_악몽의섬",
+    "월요일_잊혀진섬",
+    "화요일_에카",
+    "귀환주문서",
+    "카매사오기"
   ],
-  "토요일_악몽의섬": [
-   16,
-   17
+  "presets": true,
+  "presets_only": [],
+  "fill_only": [],
+  "keep_local": [
+    "enabled",
+    "repeat_h",
+    "repeat_n"
   ],
-  "월요일_잊혀진섬": [
-   13,
-   14
-  ],
-  "화요일_에카": [
-   11,
-   12
-  ]
- },
- "fill_only": [],
- "_메모": "🔒 닫힘. keys 를 열 때는 keep_cells 에 **층 칸(오만 22)** 이 들어 있는지 반드시 확인할 것 — 2026-11-05 에 그걸 빼먹어 로컬 15슬롯이 5층으로 갈렸다. 배포가 끝나면 keys·presets 를 비우고 py check_share.py 로 확인한다.",
- "ignore_lock": true,
- "keep_preset_cells": {
-  "수금_오만의탑": [
-   11,
-   12,
-   22
-  ]
- }
+  "keep_cells": {},
+  "keep_preset_cells": {}
 }
