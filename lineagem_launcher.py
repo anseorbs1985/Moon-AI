@@ -645,6 +645,13 @@ CARDFIX_MATCH  = 0.75           # 화면 판정 기준 (cardfix_meta.json 이 �
 #     (실측 5.1배 → 진짜가 0.561 로 기준 미달 = 안 누른다).
 #   ⚠ 0.55 보다 내리지 말 것. 올리는 것은 안전하다(그 그림을 안 쓸 뿐).
 CARDFIX_MIN_K  = 0.55
+# 🐢 **큰 창에서 창 전체를 대조하면 723ms** (2026-11-06 실측). 확대한 클라를
+#    클릭할 때마다 그만큼 멈춰 보였다 → **반으로 줄여 먼저 거른다**(4배 빠름).
+#    🚫 줄인 점수로 바로 누르지 않는다 — 변신확정은 자동으로 5번 클릭하므로
+#       오판이 위험하다. 걸리면 **원래 크기로 다시 확인**한다.
+CARDFIX_DOWN   = 0.5    # 거를 때 줄이는 배율 (0 이면 줄이지 않는다)
+CARDFIX_DOWN_W = 900    # 창 가로가 이보다 클 때만 줄여서 거른다
+CARDFIX_DOWN_SLACK = 0.15   # 줄이면 점수가 조금 내려가므로 이만큼 깎아 본다
 
 # ✋ **사람이 만지는 중이면 변신확정을 돌리지 않는다** (2026-10-21 사용자 지시)
 #   사용자: *"가끔 어느 때 내가 전혀 다른 작업을 하는데 너가 클릭을 알아서 할 때가
@@ -3407,6 +3414,34 @@ def cardfix_seen(coord):
         if big is None:
             return False, 0.0
         thr, _w1 = cardfix_meta()
+        # 🐢 **큰 창은 반으로 줄여 먼저 거른다** (2026-11-09) — 창 전체 대조는
+        #    2504x1352 에서 723ms 라, 확대한 클라를 클릭할 때마다 멈춰 보였다.
+        #    줄여서 `기준-여유` 도 못 넘으면 **확실히 없는 것**이라 거기서 끝낸다.
+        #    넘으면 아래 원래 크기 대조로 정확히 확인한다 (오판 방지).
+        if CARDFIX_DOWN and big.shape[1] >= CARDFIX_DOWN_W:
+            try:
+                _sm = cv2.resize(big, None, fx=CARDFIX_DOWN, fy=CARDFIX_DOWN,
+                                 interpolation=cv2.INTER_AREA)
+                _rough = 0.0
+                for q, bw in imgs:
+                    t = cardfix_tpl(q)
+                    if t is None:
+                        continue
+                    k = big.shape[1] / float(bw or CARDFIX_BASE_W) * CARDFIX_DOWN
+                    if k < CARDFIX_MIN_K * CARDFIX_DOWN:
+                        continue
+                    t2 = cv2.resize(t, (max(3, int(t.shape[1] * k)),
+                                        max(3, int(t.shape[0] * k))))
+                    if _sm.shape[0] < t2.shape[0] or _sm.shape[1] < t2.shape[1]:
+                        continue
+                    _rough = max(_rough, float(cv2.matchTemplate(
+                        _sm, t2, cv2.TM_CCOEFF_NORMED).max()))
+                    if _rough >= thr - CARDFIX_DOWN_SLACK:
+                        break
+                if _rough < thr - CARDFIX_DOWN_SLACK:
+                    return False, _rough        # ⚡ 확실히 아니다 — 여기서 끝
+            except Exception:
+                pass
         best = 0.0
         for q, bw in imgs:
             t = cardfix_tpl(q)
@@ -25563,14 +25598,11 @@ class App(tk.Tk):
                 # ✨ 각성 화면이면 각성강화 창을 띄운다 (띄우기만 · 2026-10-01).
                 # 🩹 십자가 확인보다 **먼저** 둔다 — 각성은 '크게 띄운 창' 에서 하므로
                 #    16슬롯 어디에도 안 들어가고, 아래 슬롯 확인에서 걸러져 버린다.
-                threading.Thread(target=self._awaken_autoshow, args=(xy,),
-                                 daemon=True).start()
-                # 🃏 카드교체 화면이면 변신확정 창을 띄운다 (2026-10-19)
-                threading.Thread(target=self._cardfix_click_check,
-                                 args=(xy,), daemon=True).start()
-                # 🌙 수호성 찾기 화면이면 **바로 돌린다** (2026-11-05 사용자 지시 —
-                #    각성과 달리 창을 띄우지 않고 무조건 실행한다)
-                threading.Thread(target=self._suho_auto, args=(xy,),
+                # 🐢 **셋을 한 스레드에서 차례로** (2026-11-09) — 예전엔 스레드
+                #    셋이 동시에 떠서, 확대한 클라(픽셀 20배)를 클릭하면 각자
+                #    큰 창을 캡처·대조하느라 **엄청나게 버퍼링**이 생겼다.
+                #    셋은 **서로 다른 화면**이라 동시에 맞을 수 없다.
+                threading.Thread(target=self._click_screen_checks, args=(xy,),
                                  daemon=True).start()
                 if not self.cfg.get("check_area_rel"):
                     continue                      # 경고영역이 없으면 볼 수가 없다
@@ -25584,6 +25616,25 @@ class App(tk.Tk):
                                  daemon=True).start()
             except Exception:
                 continue
+
+    def _click_screen_checks(self, xy):
+        """🖱 사람이 클라를 클릭했을 때 보는 **화면 셋을 차례로** (2026-11-09).
+
+        ✨ 각성 · 🃏 카드교체 · 🌙 수호성 — 서로 **다른 화면**이다.
+        🐢 예전엔 스레드 셋이 **동시에** 떠서, 확대한 클라(픽셀 20배)를 클릭할 때마다
+          각자 큰 창을 캡처·대조했다 → CPU 피크 3배 → 게임이 버벅였다.
+          이제 **차례로** 돈다 — 총 일은 같지만 피크가 1/3 이다.
+        ⚠ 셋 다 값을 돌려주지 않으므로(전부 `return` 만) **중간에 끊지 못한다.**
+          끊고 싶으면 각 함수가 '그 화면이 맞았다' 일 때 `True` 를 돌려주게
+          고쳐야 한다. 🚫 돌려주지도 않는데 `if _fn(xy): return` 으로 적어
+          **거짓 주석**을 만들지 말 것 (2026-11-09 에 한 번 그랬다).
+        🚫 기능은 그대로다 — 순서와 동시성만 바꿨다."""
+        for _fn in (self._awaken_autoshow, self._cardfix_click_check,
+                    self._suho_auto):
+            try:
+                _fn(xy)
+            except Exception:
+                pass
 
     def _fix_click_check(self, si):
         """클릭한 그 슬롯 하나만 십자가를 본다.
@@ -25601,6 +25652,12 @@ class App(tk.Tk):
                (자는 화면은 십자가를 가리므로 '없다' 고 말할 수 없다)
              · 목록에 없는 슬롯은 아예 손대지 않는다"""
         try:
+            # 🐢 **확대·축소된 창은 보지 않는다** (2026-11-09) — 경고영역은 격자
+            #    16창 기준이라 확대 창에서는 **다른 자리를 가리킨다.** 게다가
+            #    절전이면 최대 12초를 기다리며 큰 창을 4~5번 캡처해
+            #    **버퍼링의 가장 큰 몫**이었다.
+            if self._win_odd_skip(si, "클릭확인"):
+                return
             _in_list = int(si) in set(self._warn_load())
             # 🩹 목록에 있으면 '지워도 되나' 를 판단해야 하므로 **더 많이** 본다
             #    (2026-11-03 사용자: *"복구를 하지 않았는데 없애는 경우가 있어"*).
