@@ -6125,6 +6125,9 @@ LOGIN_STEPS = [
 LOGIN_IDX  = {k: i for i, (k, _) in enumerate(LOGIN_STEPS)}
 LOGIN_NAME = dict(LOGIN_STEPS)
 LOGIN_TRIES = 5                # 그림을 못 찾으면 몇 번까지 다시 볼까
+# 🔎 못 찾았을 때 **범위 밖에 있는지** 둘레 이만큼까지 더 보고 **기록만** 한다.
+#    🚫 거기를 누르지는 않는다 (2026-10-05 규칙) — 어디를 고쳐야 하는지만 알려준다.
+LOGIN_OUT_PAD = 140
 LOGIN_WAIT  = (0.5, 0.9)       # 다시 보기 간격(초) — 사람처럼 랜덤
 # ⚠ `char_btns`(캐릭터 접속 버튼)는 그림으로 하지 않는다 — 계정마다 캐릭이 달라
 #   같은 그림이 여러 자리에 있고, 어느 칸인지는 '몇 번째' 로만 정해진다.
@@ -40085,14 +40088,77 @@ class App(tk.Tk):
         #    앞으로 나와 **퍼플 메뉴를 덮고** 그림이 전부 0.4대로 떨어진다.
         #    그 창 이름을 남겨야 원격에서 짚을 수 있다.
         _cv = self._cover_who(base[0], base[1])
+        # 🔎 **📐 범위 밖에 있나** — 기록만 남긴다 (🚫 누르지 않는다).
+        #    2026-11-10: 퍼플에 '설치한 게임' 라벨이 생겨 리니지M 이 24px 밀렸는데
+        #    범위가 그대로라 영영 못 찾았다. "최고 0.23" 만으로는 *그림이 안 맞는지*
+        #    *범위 밖인지* 가릴 수 없다 — 그 한 줄이 없어 화면을 열어 재봐야 했다.
+        _out = self._login_out_of_area(j, base)
         _shot = self._login_shot(key, j, base)      # 📸 로컬 진단용
         click_log(f"[접속] ✘ {nm} 그림을 못 찾음 (최고 {best:.2f}, "
                   f"{LOGIN_TRIES}번 봤다) → **아무것도 누르지 않고 중단** "
-                  f"· 그 자리 맨 위 창 {_cv}"
+                  f"· 그 자리 맨 위 창 {_cv}" + _out
                   + (f" · 화면 {_shot}" if _shot else ""))
         self.status.set(f"✘ 접속 중단 — '{nm}' 그림을 못 찾았습니다 "
-                        f"(최고 {best:.2f}) · 엉뚱한 곳을 누르지 않았습니다")
+                        f"(최고 {best:.2f})"
+                        + ("  📐 **범위 밖에 있습니다** — 범위를 넓혀주세요"
+                           if _out else " · 엉뚱한 곳을 누르지 않았습니다"))
         return None
+
+    def _login_out_of_area(self, j, base):
+        """🔎 못 찾은 그림이 **📐 범위 밖**에 있나 — 사람이 읽을 한 줄 (없으면 "").
+
+        🚫 **누르지 않는다.** 범위를 정해뒀으면 그 밖은 누르지 않는 것이 규칙이고
+        (2026-10-05), 이것은 **어디를 고쳐야 하는지 알려주기만** 한다.
+        🚫 지우지 말 것 — 이 한 줄이 없어서 2026-11-10 에 저장된 화면을 열어
+        직접 재보고서야 '범위가 24px 모자랐다' 를 알았다."""
+        try:
+            if not area_is_set(LOGIN_FKEY, j):
+                return ""                      # 범위를 안 정했으면 해당 없음
+            box = search_box(LOGIN_FKEY, j, base)
+            paths = img_list(LOGIN_FKEY, j)
+            if not box or not paths:
+                return ""
+            import cv2, numpy as np
+            from PIL import ImageGrab
+            sw, sh = pyautogui.size()
+            wb = (max(0, int(box[0]) - LOGIN_OUT_PAD),
+                  max(0, int(box[1]) - LOGIN_OUT_PAD),
+                  min(sw, int(box[2]) + LOGIN_OUT_PAD),
+                  min(sh, int(box[3]) + LOGIN_OUT_PAD))
+            shot = ImageGrab.grab(bbox=wb, all_screens=True).convert("RGB")
+            big = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2BGR)
+            best, at, tsz = 0.0, None, (0, 0)
+            for p in paths:
+                try:
+                    t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+                except Exception:
+                    t = None
+                if (t is None or big.shape[0] < t.shape[0]
+                        or big.shape[1] < t.shape[1]):
+                    continue
+                r = cv2.matchTemplate(big, t, cv2.TM_CCOEFF_NORMED)
+                _mn, mx, _ml, lo = cv2.minMaxLoc(r)
+                if mx > best:
+                    best = float(mx)
+                    at = (wb[0] + lo[0] + t.shape[1] // 2,
+                          wb[1] + lo[1] + t.shape[0] // 2)
+                    tsz = (t.shape[1], t.shape[0])
+            if at is None or best < img_thr(LOGIN_FKEY, j):
+                return ""                      # 둘레에도 없다 — 다른 이유다
+            # 🎯 **가운데가 아니라 그림 전체**가 범위 안에 들어가야 찾을 수 있다.
+            #    matchTemplate 은 템플릿이 통째로 들어갈 때만 보므로, 가운데만
+            #    비교하면 **경계에 걸친 경우를 놓친다** (2026-11-10 실측: 글자
+            #    189~207 · 범위 150~198 인데 가운데 198 이 "안" 으로 보였다).
+            _x1 = at[0] - tsz[0] // 2; _y1 = at[1] - tsz[1] // 2
+            if (_x1 >= box[0] and _y1 >= box[1]
+                    and _x1 + tsz[0] <= box[2] and _y1 + tsz[1] <= box[3]):
+                return ""                      # 통째로 범위 안 — 범위 탓이 아니다
+            return (f" · 🔎 **범위 밖에 있다** — ({at[0]},{at[1]}) 에서 {best:.2f} "
+                    f"· 지금 범위 ({box[0]},{box[1]})~({box[2]},{box[3]}) "
+                    f"→ click_templates\\{LOGIN_FKEY}_{j + 1:02d}_area.json "
+                    f"을 넓혀주세요 (📐 로 다시 잡아도 된다)")
+        except Exception:
+            return ""
 
     def _login_shot(self, key, j, base):
         """📸 접속 단계가 **실패한 그 화면**을 남긴다 → 저장한 경로.
