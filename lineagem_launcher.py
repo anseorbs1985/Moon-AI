@@ -5142,15 +5142,18 @@ QUEST_SHUFFLE = True          # 🎲 클라 순서를 섞는다 (늘 #01 부터�
 #       사용자: *"스크롤을 올려서 아래꺼 받았으면 **다시 내려서 원상태로** 해놔라니까
 #       왜 **두 번 다 올리는** 거야"*
 #    🚫 거리를 늘려 더 끌려 하지 말 것 — 목록 밖으로 나가 **아예 안 먹는다.**
-#       더 되돌려야 하면 **횟수**(`QUEST_BACK_EXTRA`)로 한다.
+#       더 되돌려야 하면 **횟수**로 한다 (1:1 로 올리고 **돌아왔으면 그만**).
 QUEST_DRAG_X = 120            # 끌기 가로 (목록 안)
 QUEST_DRAG_LO = 150           # 목록 **아래쪽** 자리
 QUEST_DRAG_HI = 95            # 목록 **위쪽** 자리
 #    위로 끌기(아래 것 보기)  LO → HI      아래로 끌기(되돌리기)  HI → LO
 # 🔙 **맨 위로 확실히** 되돌린다 (2026-11-09 사용자: *"조금 더 약간 올려야 해"*)
 #    🧭 맨 위에 닿으면 **더 안 움직인다** — 넉넉히 끌어도 안전하다.
-QUEST_BACK_EXTRA = 2          # 내린 횟수보다 **두 번 더** (맨 위에 닿으면 안 움직인다)
-QUEST_BACK_TRIES = 3          # 그래도 처음과 다르면 더 끌어본다
+# 🔙 **1:1 로 되돌리고, 돌아왔으면 그만** (2026-11-10 사용자: *"그렇게 안 길어
+#    그냥 **한 번 해서 복원 됐다 싶으면 그만**해도 되는데? 그냥 마우스로 **한 번 하면
+#    아래로 가고 한 번 하면 위로 가고** 그러거든"*)
+#    🚫 넉넉히 더 끌지 말 것 — 내린 만큼만 올리고 **매번 확인해서 바로 멈춘다.**
+QUEST_BACK_TRIES = 2          # 내린 만큼 올려도 안 돌아왔을 때만 **더** (안전망)
 # 📜 **끌어도 목록이 안 바뀌면 그만** (2026-11-09 실측)
 #    라벨 칸(x 3~24)만 비교한다: **안 바뀜 3점 · 바뀜 922점**.
 #    🚫 목록 **전체**(x 0~230)로 보면 게임 배경이 계속 바뀌어 1965 vs 9684 로
@@ -28976,25 +28979,32 @@ class App(tk.Tk):
             #    🧭 맨 위에 닿으면 **더 안 움직인다** — 넉넉히 끌어도 안전하다.
             #    🚫 `moved` 가 0 이면(끌어도 안 바뀐 클라) 아무것도 하지 않는다.
             if moved > 0:
-                _back = 1          # 부호만 쓴다 (+ = 아래로 = 되돌리기)
-                for _ in range(moved + QUEST_BACK_EXTRA):
-                    self._quest_drag(l, t, kx, ky, _back)
+                # 🔙 **한 번 올리고 보고, 돌아왔으면 그만** (끌기는 1:1 이다)
+                #    상한은 `moved + QUEST_BACK_TRIES` — 안 돌아올 때의 안전망.
+                # 🔎 판정은 **"더 끌어도 안 움직이나"** 다 (= 맨 위에 닿았다).
+                #    🚫 "처음 화면과 같나" 로 보면 안 된다 — **받고 나면 목록이
+                #       바뀌어** 맨 위로 돌아가도 처음과 절대 같아지지 않는다.
+                _ok, _n = False, 0
+                _prev = grab_window(cen)
+                for _t in range(moved + QUEST_BACK_TRIES):
+                    self._quest_drag(l, t, kx, ky, 1)      # + = 아래로 = 되돌리기
+                    _n += 1
                     nap(0.25)
-                # 🔎 **정말 맨 위로 돌아갔나** 보고, 아니면 더 끈다
-                _ok = False
-                for _t in range(QUEST_BACK_TRIES):
                     _im = grab_window(cen)
-                    if _im is None or im0 is None or not quest_moved(im0, _im):
-                        _ok = True
+                    if _im is None or _prev is None:
+                        if _n >= moved:        # 못 보면 **적어도 내린 만큼은** 올린다
+                            break
+                        _prev = _im
+                        continue
+                    if not quest_moved(_prev, _im):
+                        _ok = True             # 🔎 더 안 움직인다 — **맨 위다. 그만**
                         break
-                    self._quest_drag(l, t, kx, ky, _back)
-                    nap(0.25)
+                    _prev = _im
                 click_log("[퀘스트] #%02d 🔙 목록을 되돌렸다 — %d번 내리고(y%d→y%d) "
                           "%d번 올림(y%d→y%d)%s"
                           % (si + 1, moved, QUEST_DRAG_LO, QUEST_DRAG_HI,
-                             moved + QUEST_BACK_EXTRA,
-                             QUEST_DRAG_HI, QUEST_DRAG_LO,
-                             "" if _ok else " — ⚠ 처음과 다르다"))
+                             _n, QUEST_DRAG_HI, QUEST_DRAG_LO,
+                             " ✔ 맨 위까지" if _ok else " — ⚠ 더 올려야 할 수도"))
         return got
 
     def _quest_drag(self, l, t, kx, ky, dy):
