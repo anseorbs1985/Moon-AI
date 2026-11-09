@@ -2567,10 +2567,20 @@ class IslandApp(tk.Tk):
                 pass
 
             def _clear_run_flag():
+                _d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+                # 💧 **마지막 실행 시각을 남긴다** (2026-11-09) — `island_run.json`
+                #    은 여기서 지워지므로, 그것만 보면 런처의 물약감시가
+                #    **실행이 끝나는 순간 증거를 잃고 영영 쉰다.**
+                #    물약은 **사냥 중에** 떨어지니 그때도 봐줘야 한다.
+                #    🚫 이 줄을 지우지 말 것.
                 try:
-                    os.remove(os.path.join(
-                        os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
-                        "island_run.json"))
+                    with open(os.path.join(_d, "island_last.json"), "w",
+                              encoding="utf-8") as _f:
+                        json.dump({"ts": time.time()}, _f)
+                except Exception:
+                    pass
+                try:
+                    os.remove(os.path.join(_d, "island_run.json"))
                 except Exception:
                     pass
             import atexit

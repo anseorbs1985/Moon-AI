@@ -272,7 +272,9 @@ P0_WATCH_MS   = 30000   # 2026-11-03: 60초로는 문구를 자주 놓쳤다 (16
 #       던전을 안 돌리는 동안은 쓸 이유가 없다.
 #    ✅ 이제 ① ⏰ 예약이 걸려 있거나 ② 섬 실행기가 최근에 돌았을 때만 감시한다.
 #       그 밖에는 **파일 시각만 보고 끝** — 부하 0.
-P0_WATCH_AFTER = 3 * 3600   # 섬/던전을 마지막 실행한 뒤 이만큼만 감시(초)
+P0_WATCH_AFTER = 8 * 3600   # 섬/던전을 마지막 실행한 뒤 이만큼만 감시(초)
+#   ⏱ 3시간 → **8시간** (2026-11-09). 던전은 2시간마다 돌지만 **물약은 그 사이
+#      아무 때나 떨어진다.** 3시간이면 손으로 한 번 돌린 날 금방 꺼졌다.
 P0_WATCH_COOL = 1200           # 같은 슬롯은 20분에 한 번만 다시 돌린다
 # 🕐 작업 중에 '물약 0개' 를 봤으면 적어뒀다가 작업이 끝난 뒤 돌린다.
 #    이만큼 지나면 버린다 — 그 사이 창고에서 채웠을 수 있다.
@@ -40122,7 +40124,15 @@ class App(tk.Tk):
         ① 섬/던전 실행기가 **돌고 있다**
         ② ⏰ 예약이 **걸려 있다** (반복으로 계속 들어간다)
         ③ 섬 실행기가 **최근 `P0_WATCH_AFTER` 안에** 돌았다
-        🚫 그 밖에는 안 본다 — 파일 시각만 읽으므로 **부하 0**."""
+
+        🚨 **`island_run.json` 하나만 보면 영영 쉰다** (2026-11-09 사고).
+          그 파일은 섬 실행기가 **끝날 때 `atexit` 으로 지운다**(요약런처용 표시).
+          그래서 실행이 끝나는 순간 증거가 사라지는데, **물약은 사냥 중에
+          떨어진다** — 그때는 섬 실행기가 이미 꺼져 있어 **구조적으로 못 잡았다.**
+          → `island_last.json`(섬 실행기가 끝낼 때 남긴다)과
+            `repeat_log.txt`(섬 실행기가 클릭마다 쓴다)도 함께 본다.
+          🚫 이 둘을 빼지 말 것.
+        🚫 그 밖에는 안 본다 — 파일 **시각만** 읽으므로 **부하 0**."""
         try:
             if self._island_running():
                 return True, "섬/던전 실행 중"
@@ -40143,6 +40153,16 @@ class App(tk.Tk):
             r = os.path.join(LOCAL_DATA, "island_run.json")
             if os.path.exists(r) and now - os.path.getmtime(r) <= P0_WATCH_AFTER:
                 return True, "최근에 섬/던전을 돌렸다"
+            # 💧 **끝난 뒤에도 본다** — 위 파일은 끝날 때 지워진다
+            for _nm, _wh in (("island_last.json", "섬/던전이 최근에 돌았다"),
+                             ("island_counts.json", "오늘 섬/던전을 돌렸다"),
+                             ("repeat_log.txt", "섬/던전 기록이 최근에 쓰였다")):
+                _p = os.path.join(LOCAL_DATA, _nm)
+                try:
+                    if os.path.exists(_p) and now - os.path.getmtime(_p) <= P0_WATCH_AFTER:
+                        return True, _wh
+                except Exception:
+                    pass
             return False, "섬/던전을 안 돌리는 중"
         except Exception:
             return True, "확인 불가 — 그냥 본다"
