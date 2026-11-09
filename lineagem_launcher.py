@@ -5087,6 +5087,100 @@ def grab_window(coord):
         return None
 
 
+# ═══════════ 🎁 **완료 퀘스트 보상 받기** (2026-11-09 사용자 요청) ═══════════
+#
+# 사용자: *"퀘스트가 완료되면 저렇게 **클릭하라고 나오거든** 저걸 너가 좀 해줄 수가
+#   있어? … 저거 클릭하면 창에 받았다고 뜨는데 그때 그냥 **아무 곳이나 한 번 더
+#   클릭**하면 되거든"*
+#
+# 📏 실측 (2026-11-09 · 546x307 창 · 16클라):
+#   퀘스트 목록 줄  **y 98 · 121 · 141** (간격 22~23px) — 왼쪽 라벨은 x 5~21
+#   [완료] 빨강     **62점**   ·  [일일] 파랑 · [메인] 노랑 은 빨강 **0점**
+#                   (없는 클라 13개 전부 0~8점 → 기준 25 로 깨끗이 갈린다)
+#   🚫 그림 매칭이 필요 없다 — **색**으로 갈린다.
+#
+#   보상 창    '보 상' 흰 글자 **y 100~107 · x 264~281**
+#              + 화면 전체가 어두워진다 (밝기 **38 → 11**, 모달)
+#              실측: 떴을 때 흰점 59·밝기 17.0 / 닫혔을 때 흰점 0·밝기 33.4
+#   닫기       **아무 곳이나** 한 번 더 — '보 상' 글자를 누른다 (창 안이라 확실)
+#              실측 0.25초에 닫혔다
+#
+# 🚫 **보상 창을 못 봤으면 더 누르지 않는다** — 용던고고의 '그림을 못 보면 중단'
+#    규칙 그대로. 창이 없는데 누르면 그 자리는 **게임 화면**이라 캐릭터가 걸어간다.
+# 🚫 확대·축소된 창은 **건너뛴다** (`_win_odd_skip`) — HUD 가 비례해서 커지지 않아
+#    그 자리가 엉뚱한 곳을 가리킨다 (2026-10-13 교훈).
+QUEST_ON = True
+QUEST_BASE_W, QUEST_BASE_H = 546, 307
+QUEST_LAB_X = (3, 24)         # 왼쪽 라벨 [완료]/[일일]/[메인] 자리
+QUEST_LIST_Y = (85, 160)      # 퀘스트 목록 세로 (줄 y98·121·141)
+QUEST_ROW_MIN = 25            # 그 줄의 빨간 점이 이보다 많아야 [완료]
+QUEST_CLICK_X = 50            # 누를 자리 — 그 줄의 제목 글자
+QUEST_REW_BOX = (255, 96, 292, 112)   # '보 상' 글자 둘레
+QUEST_REW_WHITE = 20          # 흰 점이 이보다 많고
+QUEST_REW_DARK = 25.0         # 화면이 이보다 어두우면 **보상 창이 떴다**
+QUEST_REW_CLICK = (272, 103)  # 닫기 — '보 상' 글자 가운데
+QUEST_SEE_N = 12              # 보상 창이 뜰 때까지 보는 횟수 (실측 0.75초에 떴다)
+QUEST_SEE_GAP = (0.20, 0.32)
+QUEST_MAX = 6                 # 한 클라에서 최대 몇 개까지 (무한 방지)
+QUEST_GAP = (0.35, 0.60)      # 하나 받고 다음까지
+QUEST_SLOT_GAP = (0.5, 0.9)   # 클라 사이
+QUEST_SCROLL_N = 3            # 목록을 몇 번까지 끌어올려 볼까
+QUEST_DRAG_AT = (120, 140)    # 끌기 시작 자리 (목록 안)
+QUEST_DRAG_DY = 55            # 한 번에 창 안 몇 px
+
+
+def quest_done_rows(im):
+    """🔴 [완료] 줄 — [(**창 안**(546x307) y중심, 빨간 점 수), …]"""
+    try:
+        import numpy as _np
+        hh, ww = im.shape[:2]
+        kx, ky = ww / float(QUEST_BASE_W), hh / float(QUEST_BASE_H)
+        x0, x1 = int(QUEST_LAB_X[0] * kx), int(QUEST_LAB_X[1] * kx)
+        y0, y1 = int(QUEST_LIST_Y[0] * ky), int(QUEST_LIST_Y[1] * ky)
+        sub = im[y0:y1, x0:x1]
+        b = sub[:, :, 0].astype(int)
+        g = sub[:, :, 1].astype(int)
+        r = sub[:, :, 2].astype(int)
+        red = (r > 110) & (r - g > 55) & (r - b > 55)
+        nz = _np.argwhere(red)
+        if not len(nz):
+            return []
+        ys = sorted(set(nz[:, 0]))
+        rows, cur = [], [ys[0]]
+        for y in ys[1:]:
+            if y - cur[-1] <= 4:
+                cur.append(y)
+            else:
+                rows.append(cur)
+                cur = [y]
+        rows.append(cur)
+        out = []
+        for rr in rows:
+            n = int(red[rr[0]:rr[-1] + 1].sum())
+            if n >= QUEST_ROW_MIN:
+                out.append((int((y0 + (rr[0] + rr[-1]) // 2) / max(ky, .001)), n))
+        return out
+    except Exception:
+        return []
+
+
+def quest_reward_seen(im):
+    """🎁 보상 창이 떴나 — ('보 상' 흰 점 수, 화면 밝기).
+
+    ⚠ 예외면 **(0, 99)** 를 돌려준다 = '안 떴다' — 닫기를 안 누르는 쪽이 안전하다."""
+    try:
+        hh, ww = im.shape[:2]
+        kx, ky = ww / float(QUEST_BASE_W), hh / float(QUEST_BASE_H)
+        x0, y0, x1, y1 = QUEST_REW_BOX
+        sub = im[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)]
+        b = sub[:, :, 0].astype(int)
+        g = sub[:, :, 1].astype(int)
+        r = sub[:, :, 2].astype(int)
+        return int(((b > 150) & (g > 150) & (r > 150)).sum()), float(im.mean())
+    except Exception:
+        return 0, 99.0
+
+
 # 🖼 **그림을 창 크기에 맞춰 늘려서 찾는다** (2026-11-03).
 #    그림(`fix_sleep.png`·`check_ref.png` 등)과 `check_area_rel` 은 전부
 #    **491x276 창에서** 만든 것이다. 창을 546x307 로 키우자
@@ -9992,13 +10086,27 @@ class App(tk.Tk):
         #   *"우편지금받기랑 전부복구 위치 위아래 바꿔줘"*).
         #   ⚠ 이 자리는 **목록 길이와 무관하게 고정**이다 — `before=` 의 기준으로도
         #     쓰이므로(던전 상자·오만 줄) 변수는 `_warn_topbtn` 으로 둔다.
+        # 📬🎁 **반반** (2026-11-09 사용자: *"우편지금받기 < 우편받기!! < 이름수정하고
+        #    이걸로 그 옆에 **절반씩** 해서 **퀘스트받기!!** 이걸로 해줘"*)
+        #    ⚠ `before=` 의 기준은 이제 **`_warn_toprow`(Frame)** 다 — Button 을
+        #      Frame 안에 넣으면 그것은 `dc_col` 의 자식이 아니게 된다.
+        #    🧭 반반은 `_dc_fill` 이 해준다 (2버튼 + width 같음 → 각각 expand).
+        self._warn_toprow = tk.Frame(dc_col)
+        self._warn_toprow.pack(anchor="n", pady=(4, 0), fill="x")
         self._warn_topbtn = tk.Button(
-            dc_col, text="📬 우편 지금 받기", font=("맑은 고딕", 8, "bold"),
+            self._warn_toprow, text="📬 우편" + chr(10) + "받기!!",
+            font=("맑은 고딕", 8, "bold"),
             bg="#2471a3", fg="white", activebackground="#1a5276", pady=0,
-            width=12, height=2, command=self._mail_run_now)
-        # 🗂 **여백을 줄였다** (2026-11-04) — 아래에 [던전] 상자와 [▶ 접기] 가
-        #    더해지면서 화면 높이를 넘겨 맨 밑줄이 잘렸다.
-        self._warn_topbtn.pack(anchor="n", pady=(4, 0))
+            width=6, height=2, command=self._mail_run_now)
+        self._warn_topbtn.pack(side="left")
+        # 🎁 **완료 퀘스트 보상 받기** — 16클라를 돌며 [완료] 를 받고 창을 닫는다.
+        #    🚫 **사용자가 누를 때만** 돈다 (상시 감시 없음 · 평소 부하 0).
+        self._quest_btn = tk.Button(
+            self._warn_toprow, text="🎁 퀘스트" + chr(10) + "받기!!",
+            font=("맑은 고딕", 8, "bold"),
+            bg="#d35400", fg="white", activebackground="#a04000", pady=0,
+            width=6, height=2, command=self._quest_run)
+        self._quest_btn.pack(side="left", padx=(2, 0))
 
         # 작업이 끝나면 여기에 큰 빨간 글씨로 '완료'가 1분간 뜬다
         self._done_var = tk.StringVar(value="")
@@ -10242,7 +10350,7 @@ class App(tk.Tk):
         #    `_section_wins()` 에 들어 있어 **작업이 돌 때 저절로 치워진다.**
         #    세로바 왼쪽은 **클라 영역**이라 안 치우면 좌표 클릭을 먹는다.
         _oc = tk.Frame(dc_col)
-        _oc.pack(anchor="n", pady=(2, 0), before=self._warn_topbtn)
+        _oc.pack(anchor="n", pady=(2, 0), before=self._warn_toprow)
         self._fold_daya_var = tk.StringVar(
             value="💰 다야" + chr(10) + "수량")
         # 🎣 **낚시녹임과 같은 모양** (2026-11-07 사용자: *"낚시녹임처럼
@@ -10281,7 +10389,7 @@ class App(tk.Tk):
 
         _dun = tk.LabelFrame(dc_col, text=" 던전 ", font=("맑은 고딕", 9, "bold"),
                              fg="#a04000", bd=2, relief="groove")
-        _dun.pack(anchor="n", pady=(2, 0), padx=1, before=self._warn_topbtn)
+        _dun.pack(anchor="n", pady=(2, 0), padx=1, before=self._warn_toprow)
         if not hasattr(self, "_dun_imgs"):
             self._dun_imgs = {}
         for _i, (_nm, _bg) in enumerate((("오만의탑", "#8e44ad"), ("악몽의섬", "#2471a3"),
@@ -10353,7 +10461,14 @@ class App(tk.Tk):
         # 🚫 **키우지 않는다** — 클라 옆 빈 자리가 150px 남짓이라
         #    (게임창 끝 2352 · 옆 바 끝 2408 · 화면 2560) 키우면 클라를 덮는다
         #    (2026-11-04 사용자: *"버튼들 사이즈 좀 줄여도 되니까"*).
-        self._warn_topbtn.config(width=11)
+        # 🧭 **반반**이라 각각 절반으로 요청한다 — 실제 폭은 `_dc_fill` 이
+        #    `fill="x", expand=True` 로 열에 맞춰 반씩 나눈다.
+        #    🚫 11 로 두면 둘이 합쳐 22칸을 요구해 **열을 넘겨 잘린다.**
+        self._warn_topbtn.config(width=5)
+        try:
+            self._quest_btn.config(width=5)
+        except Exception:
+            pass
 
         # ── ◀ 열기 / ▶ 접기 — **맨 밑줄** (복구해야함 목록 아래) ──
         #    접으면 `side="bottom"` 으로 **창 맨 아래**에 붙는다 (2026-11-04 사용자:
@@ -28648,6 +28763,159 @@ class App(tk.Tk):
             return self._grid16(wins)
         except Exception:
             return None
+
+    # ═══════════ 🎁 완료 퀘스트 보상 받기 (2026-11-09) ═══════════
+    def _quest_run(self):
+        """🎁 16클라를 돌며 **[완료] 퀘스트 보상**을 받는다 (사용자가 누를 때만)."""
+        if not QUEST_ON:
+            self.status.set("🎁 퀘스트 받기가 꺼져 있습니다")
+            return
+        if not self._try_busy_or_queue("퀘스트 받기", self._quest_run):
+            return
+        self._quest_stop = False
+        self.status.set("🎁 완료 퀘스트 보상 받기 — 16클라를 봅니다...")
+        self._minimize_claude()      # 클로드는 항상 위라 클릭을 가린다
+        self._send_to_back()         # 🔙 런처는 **맨 뒤로** (최소화가 아니다)
+        self._stay_back(240)
+        threading.Thread(target=self._run_task,
+                         args=("퀘스트 받기", self._quest_work),
+                         daemon=True).start()
+
+    def _quest_work(self):
+        ws = self._client_hwnds_by_slot()
+        if not ws:
+            self.status.set("⚠ 리니지M 클라 16개가 보이지 않습니다")
+            click_log("[퀘스트] 🚫 리니지M 창 16개를 못 찾았다 — 아무것도 하지 않는다")
+            return
+        got, seen, done = 0, 0, []
+        for si in range(16):
+            if self._stop_flag or getattr(self, "_quest_stop", False):
+                click_log("[퀘스트] ■ 멈춤")
+                break
+            if self._win_odd_skip(si, "퀘스트"):
+                continue
+            n = self._quest_one(si, ws[si])
+            seen += 1
+            if n:
+                got += n
+                done.append("#%02d\u00d7%d" % (si + 1, n))
+                self.status.set("🎁 보상 %d개 받는 중... (%s)" % (got, " ".join(done)))
+            nap(random.uniform(*QUEST_SLOT_GAP))
+        msg = ("🎁 퀘스트 보상 **%d개** 받았습니다 — %s" % (got, " ".join(done))
+               if got else "🎁 받을 완료 퀘스트가 없었습니다")
+        self.status.set(msg.replace("**", ""))
+        click_log("[퀘스트] %s (%d클라 확인)" % (msg, seen))
+
+    def _quest_one(self, si, rect):
+        """한 클라에서 [완료] 를 **보이는 대로 다** 받는다. 받은 개수를 돌려준다.
+
+        🚫 보상 창을 **못 보면 더 누르지 않고** 이 클라를 끝낸다.
+        🔙 목록을 끌어내렸으면 **원래대로 되돌린다**."""
+        l, t, r, b = rect[0], rect[1], rect[2], rect[3]
+        ww, hh = r - l, b - t
+        if ww < 100 or hh < 100:
+            return 0
+        kx, ky = ww / float(QUEST_BASE_W), hh / float(QUEST_BASE_H)
+        cen = (l + ww // 2, t + hh // 2)
+        got, moved = 0, 0
+        try:
+            for _s in range(QUEST_SCROLL_N + 1):
+                for _i in range(QUEST_MAX):
+                    if self._stop_flag or getattr(self, "_quest_stop", False):
+                        return got
+                    im = grab_window(cen)
+                    if im is None:
+                        click_log("[퀘스트] #%02d 화면을 못 찍었다 — 건너뛴다" % (si + 1))
+                        return got
+                    rows = quest_done_rows(im)
+                    if not rows:
+                        break
+                    qy, pts = rows[0]
+                    cx, cy = int(l + QUEST_CLICK_X * kx), int(t + qy * ky)
+                    self._focus_client_at((cx, cy))
+                    nap(random.uniform(0.20, 0.35))
+                    click_at(cx, cy)
+                    # 🎁 보상 창이 **뜰 때까지** 본다 (실측 0.75초)
+                    wht = mn = -1
+                    ok = False
+                    for _k in range(QUEST_SEE_N):
+                        nap(random.uniform(*QUEST_SEE_GAP))
+                        im2 = grab_window(cen)
+                        if im2 is None:
+                            continue
+                        wht, mn = quest_reward_seen(im2)
+                        if wht >= QUEST_REW_WHITE and mn < QUEST_REW_DARK:
+                            ok = True
+                            break
+                    if not ok:
+                        click_log("[퀘스트] #%02d 🚫 **보상 창을 못 봤다** "
+                                  "(흰점 %s · 밝기 %s) — 더 누르지 않고 이 클라는 끝낸다"
+                                  % (si + 1, wht, ("%.1f" % mn) if mn >= 0 else "?"))
+                        return got
+                    # 🖱 닫기 — **아무 곳이나** ('보 상' 글자 = 창 안이라 확실)
+                    click_at(int(l + QUEST_REW_CLICK[0] * kx),
+                             int(t + QUEST_REW_CLICK[1] * ky))
+                    got += 1
+                    click_log("[퀘스트] #%02d 🎁 **보상 받았다** (%d번째) — "
+                              "[완료] 줄 창안y%d (빨강 %d점) · 창 뜸 0.%ds"
+                              % (si + 1, got, qy, pts, _k + 1))
+                    nap(random.uniform(*QUEST_GAP))
+                if _s >= QUEST_SCROLL_N:
+                    break
+                # 📜 아래에 숨은 [완료] 를 보려고 **끌어올린다**
+                if not self._quest_drag(l, t, kx, ky, -QUEST_DRAG_DY):
+                    break
+                moved += 1
+                nap(random.uniform(0.30, 0.50))
+                # ⚠ 끌기가 **클릭으로 먹혀** 보상 창이 떴을 수 있다 → 닫아준다
+                im3 = grab_window(cen)
+                if im3 is not None:
+                    wht, mn = quest_reward_seen(im3)
+                    if wht >= QUEST_REW_WHITE and mn < QUEST_REW_DARK:
+                        click_at(int(l + QUEST_REW_CLICK[0] * kx),
+                                 int(t + QUEST_REW_CLICK[1] * ky))
+                        got += 1
+                        click_log("[퀘스트] #%02d 🎁 끌다가 눌려 보상 창이 떠서 받았다"
+                                  % (si + 1))
+                        nap(random.uniform(*QUEST_GAP))
+        except Exception as e:
+            click_log("[퀘스트] #%02d ⚠ 오류 %s" % (si + 1, e))
+        finally:
+            # 🔙 **원래대로** — 내린 만큼 올린다 (사용자가 보던 화면을 바꾸지 않는다)
+            for _ in range(moved):
+                self._quest_drag(l, t, kx, ky, QUEST_DRAG_DY)
+                nap(0.25)
+        return got
+
+    def _quest_drag(self, l, t, kx, ky, dy):
+        """📜 퀘스트 목록을 끈다 (dy<0 = 위로 = 아래 것 보기).
+
+        🚫 끝낼 때 **반드시 mouseUp** — 안 하면 마우스가 눌린 채 남는다."""
+        down = False
+        try:
+            x = int(l + QUEST_DRAG_AT[0] * kx)
+            y0 = int(t + QUEST_DRAG_AT[1] * ky)
+            y1 = int(t + (QUEST_DRAG_AT[1] + dy) * ky)
+            pyautogui.moveTo(x, y0)
+            nap(0.12)
+            pyautogui.mouseDown()
+            down = True
+            nap(0.18)
+            for i in range(1, 9):
+                pyautogui.moveTo(x, int(y0 + (y1 - y0) * i / 8.0))
+                nap(0.03)
+            nap(0.15)
+            pyautogui.mouseUp()
+            down = False
+            return True
+        except Exception:
+            return False
+        finally:
+            if down:
+                try:
+                    pyautogui.mouseUp()
+                except Exception:
+                    pass
 
     def _potion_check(self):
         area = self.cfg.get("potion_area_rel")
