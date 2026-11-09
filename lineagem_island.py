@@ -4551,9 +4551,22 @@ class IslandApp(tk.Tk):
         except Exception:
             src = 1
         pres = self._presets(key)
+        # 📐 **찍을 때의 창 크기를 함께 남긴다** (2026-11-09) — 창 크기가 다른
+        #    컴퓨터에서 이 프리셋을 눌러도 `_apply_preset` 이 비율로 맞춘다.
+        #    못 재면 넣지 않는다 (그러면 예전처럼 보정 없이 동작한다).
+        _bw = _bh = None
+        try:
+            _rc = self._client_rects_by_slot()
+            _si = max(0, src - 1)
+            if _rc and _si < len(_rc):
+                _bw = int(_rc[_si][2] - _rc[_si][0])
+                _bh = int(_rc[_si][3] - _rc[_si][1])
+        except Exception:
+            pass
         pres[pi] = {"floor": pres[pi].get("floor", ""),
                     "name": pw["name"].get().strip(), "src": src,
                     "abs": bool(pw.get("abs")),
+                    "bw": _bw, "bh": _bh,
                     "items": {k2: dict(v) for k2, v in pw["items"].items()}}
         # 같은 이름의 다른 층 프리셋에도 공유 클릭(12·13번)을 함께 저장
         sync = self.PRESET_SYNC_CLICKS.get(key, ())
@@ -4736,7 +4749,19 @@ class IslandApp(tk.Tk):
             else:
                 rel = it.get("rel") or [0, 0]
                 if rects and not pr.get("abs"):
-                    cs[j] = [rel[0] + rects[idx][0], rel[1] + rects[idx][1]]
+                    # 📐 **창 크기가 다르면 비율로 맞춘다** (2026-11-09).
+                    #    예전엔 창 **왼쪽위만** 더해서, 프리셋을 찍은 컴퓨터와
+                    #    창 크기가 다르면 **눌러도 계속 빗나갔다**
+                    #    (사용자: "로컬에 물약 사는 좌표가 바보가 된 상황").
+                    #    🚫 `bw`/`bh`(찍을 때의 창 크기) 가 **없으면 보정하지 않는다** —
+                    #       옛 프리셋이 몇 기준인지 알 수 없으므로 예전 그대로 둔다.
+                    _L, _T, _R, _B = rects[idx][0], rects[idx][1],                         rects[idx][2], rects[idx][3]
+                    _bw, _bh = pr.get("bw"), pr.get("bh")
+                    if _bw and _bh:
+                        cs[j] = [int(round(rel[0] * (_R - _L) / float(_bw))) + _L,
+                                 int(round(rel[1] * (_B - _T) / float(_bh))) + _T]
+                    else:
+                        cs[j] = [rel[0] + _L, rel[1] + _T]
                 else:
                     cs[j] = [rel[0], rel[1]]
                 # ⏺ **이 칸을 '좌표 클릭'으로 쓰겠다는 프리셋**이다.
