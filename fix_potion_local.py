@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""💊 **로컬의 물약 칸을 그 컴퓨터 창 크기에 맞게 고친다** (2026-11-09).
+r"""💊 **로컬의 물약 칸을 그 컴퓨터 창 크기에 맞게 고친다** (2026-11-09).
 
 사용자: *"로컬에 지금 잊혀진섬에 대한 **물약사는 좌표가 바보가 된 상황**이야
 다른곳을 완전 클릭해. 여기(메인)는 정상인데 어떻게 처리하면 좋을까"*
@@ -115,6 +115,19 @@ def grid16():
     return res if len(res) == 16 else out[:16] if len(out) >= 16 else []
 
 
+def locked():
+    """🔒 좌표잠금(머신별 파일)에 걸린 던전 — **알려주기만** 한다.
+
+    잠금은 '업데이트가 내 좌표를 덮어쓰지 마라' 는 뜻이다.
+    이 도구는 **사용자가 직접 돌리는 것**이라 잠금과 무관하게 고친다 —
+    다만 잠긴 것을 모르고 고치면 놀라므로 표시한다."""
+    try:
+        with io.open(os.path.join(LOCAL, "coord_lock.json"), encoding="utf-8-sig") as f:
+            return set((json.load(f) or {}).get("island") or [])
+    except Exception:
+        return set()
+
+
 def potion_of(name):
     """슬롯 이름에서 물약 종류·퍼센트를 읽는다 → '주홍이 48%' 같은 키."""
     s = str(name or "")
@@ -157,6 +170,11 @@ def main():
         print("   창 크기가 메인과 같다 — 값을 그대로 넣는다 (좌표가 깨졌으면 복구된다)")
     print("=" * 96)
 
+    LOCKED = locked()
+    if LOCKED:
+        print("🔒 좌표잠금: %s" % ", ".join(sorted(LOCKED)))
+        print("   → 잠금은 **업데이트**가 덮어쓰는 것을 막는 것이고,")
+        print("     이 도구는 사용자가 직접 돌리는 것이라 **그대로 고친다**")
     chg = 0
     for key in keys:
         if key not in cfg:
@@ -164,7 +182,8 @@ def main():
         a, b = CELL[key]
         tbl = POTION_REL.get(key) or {}
         print()
-        print("■ %s  칸%d·칸%d" % (key, a + 1, b + 1))
+        _lk = " 🔒 좌표잠금 중 (업데이트는 못 건드린다 — **이 도구는 고친다**)"             if key in LOCKED else ""
+        print("■ %s  칸%d·칸%d%s" % (key, a + 1, b + 1, _lk))
         for si, slot in enumerate(cfg[key][:16]):
             if not isinstance(slot, dict):
                 continue
