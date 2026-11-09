@@ -24,6 +24,7 @@ py fix_local_island.py 잊혀진섬 --go  ← 그 던전만
 py fix_local_island.py --presets --go   🧪 **프리셋만** (좌표는 그대로 둔다)
 py fix_local_island.py --coords --go    📍 **좌표만** (프리셋은 그대로 둔다)
 py fix_local_island.py --pick 3         📦 3번째 백업을 쓴다 (목록의 번호)
+py fix_local_island.py --undo --go      ↩ **방금 되살린 것을 취소**한다
 ```
 ⚠ **좌표를 이미 다시 찍었으면 `--presets` 를 쓰세요** — 그래야 찍은 좌표가 안 날아간다.
 🚫 **메인에서는 거부한다** — 메인은 좌표 원본이다.
@@ -103,6 +104,49 @@ def main():
             want.append(a)
     if only_pr and only_co:
         only_pr = only_co = False          # 둘 다 주면 둘 다 한다
+
+    # ↩ **방금 되살린 것을 취소한다** (--undo)
+    if "--undo" in argv:
+        _us = []
+        for _p in glob.glob(os.path.join(BK, "*_before_islfix_island_coords.json")):
+            try:
+                _us.append((os.path.getmtime(_p), _p))
+            except Exception:
+                pass
+        _us.sort(reverse=True)
+        print()
+        print("=" * 94)
+        print("↩ **되살리기 취소** — before_islfix 백업 %d개" % len(_us))
+        print("=" * 94)
+        for _i, (_m, _p) in enumerate(_us[:8], 1):
+            print("   [%d] %s  %9d B  %s"
+                  % (_i, time.strftime("%m-%d %H:%M", time.localtime(_m)),
+                     os.path.getsize(_p), os.path.basename(_p)))
+        if not _us:
+            print("   🚫 취소할 백업이 없다 (되살리기를 아직 안 했다)")
+            return 1
+        _pk = pick if (pick and 1 <= pick <= len(_us)) else 1
+        _m, _p = _us[_pk - 1]
+        print()
+        print("   ↩ 쓸 백업: %s  (%s)"
+              % (os.path.basename(_p), time.strftime("%m-%d %H:%M", time.localtime(_m))))
+        if not go:
+            print()
+            print("   맞으면  py fix_local_island.py --undo --go")
+            return 0
+        try:
+            _bk2 = os.path.join(BK, time.strftime("%Y%m%d_%H%M%S")
+                                + "_before_undo_island_coords.json")
+            shutil.copy2(F, _bk2)
+            shutil.copy2(_p, F)
+        except Exception as _e:
+            print("   🚫 실패: %s" % _e)
+            return 1
+        print()
+        print("✅ **취소했다** — 되살리기 직전 상태로 돌아갔다")
+        print("   (지금 상태는 %s 로 남겼다)" % os.path.basename(_bk2))
+        print("   메인런처를 다시 켜고 그 던전 창을 닫았다 다시 열어주세요.")
+        return 0
 
     cur = jload(F)
     if cur is None:
