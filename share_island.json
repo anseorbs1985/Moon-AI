@@ -1,42 +1,17 @@
 {
- "_설명": "닫혔 있다. 섬/던전 좌표는 배포하지 않는다 (NEVER_ISLAND=True). 정말 보내야 하면 사용자가 콕 집어 말했을 때만 열고, 같은 대화 안에서 되돌린다.",
- "keys": [],
- "presets": false,
- "ignore_lock": false,
+ "_설명": "🏝 잊혀진섬만 통째로 배포 (2026-11-09 사용자 요청). 🚫 로컬이 받으면 **같은 대화 안에서 비울 것** — 열어두면 업데이트마다 로컬 좌표를 계속 덮어쓴다.",
+ "keys": [
+  "월요일_잊혀진섬"
+ ],
+ "presets": true,
+ "ignore_lock": true,
  "keep_local": [
-  "name",
   "enabled",
   "repeat_h",
-  "repeat_n",
-  "omanst_pref",
-  "omanst_floor"
+  "repeat_n"
  ],
- "keep_cells": {
-  "수금_오만의탑": [
-   11,
-   12,
-   22
-  ],
-  "토요일_악몽의섬": [
-   16,
-   17
-  ],
-  "월요일_잊혀진섬": [
-   13,
-   14
-  ],
-  "화요일_에카": [
-   11,
-   12
-  ]
- },
- "keep_preset_cells": {
-  "수금_오만의탑": [
-   11,
-   12,
-   22
-  ]
- },
+ "keep_cells": {},
+ "keep_preset_cells": {},
  "presets_only": [],
  "fill_only": []
 }
