@@ -3108,6 +3108,17 @@ class IslandApp(tk.Tk):
         self._p0_btns[key] = (_pb, _tb)
         self._potion0_paint()
         self._place_paint(key)
+        # 4줄: 📋 **전체붙임** — 한 슬롯을 나머지 슬롯 전부에 (2026-11-09)
+        #      ⚠ 새로 만들지 않고 `_slot_paste` 를 그대로 돌린다 —
+        #        녹화 숨겨 보관·라바설정·카드·창 위치 보정이 전부 따라온다.
+        b4 = tk.Frame(ab); b4.pack(fill="x", pady=(3, 0))
+        tk.Label(b4, text="📋", font=("맑은 고딕", 8)).pack(side="left")
+        tk.Button(b4, text="📋 전체붙임 (복사한 슬롯 → 나머지 전부)",
+                  font=("맑은 고딕", 7, "bold"), bg="#8e44ad", fg="white",
+                  command=lambda k=key: self._slot_paste_all(k)
+                  ).pack(side="left", padx=(4, 0))
+        tk.Label(b4, text="먼저 슬롯에서 [복사] · ON/OFF·⏰ 는 그대로",
+                 font=("맑은 고딕", 7), fg="#7f8c8d").pack(side="left", padx=(6, 0))
 
         # ── 번호 지정 일괄 적용 — 지정한 클릭 번호만 전 슬롯에 복사/삭제 ──
         nb = tk.LabelFrame(parent, text="번호 지정 일괄 (예: 3,7,12-14)",
@@ -5149,6 +5160,68 @@ class IslandApp(tk.Tk):
                          bg=("#117864" if nm else "#95a5a6"), fg="white")
             except Exception:
                 pass
+
+    def _slot_paste_all(self, key):
+        """📋 **전체붙임** — 복사한 슬롯을 그 던전의 **나머지 슬롯 전부**에.
+
+        🎯 `_slot_paste` 를 그대로 16번 돌린다 — 붙여넣기 규칙이 한 군데뿐이라
+           **한쪽만 고치는 사고가 없다.**
+        🚫 원본 슬롯은 건드리지 않는다.
+        🚫 ON/OFF(`enabled`)·⏰(`repeat_*`)는 `_slot_paste` 가 애초에 안 옮긴다.
+        ⚠ 덮어쓰기라 되돌릴 수 없어 **한 번 물어본다** (dgn2 의 전체붙임과 같다).
+        """
+        from tkinter import messagebox
+        clip = getattr(self, "_slot_clip", None)
+        if not clip or clip.get("key") != key:
+            self._status.set("📋 먼저 이 던전의 슬롯에서 [복사] 를 누르세요")
+            return
+        src = int(clip.get("src", 0))
+        slots = self.cfg.get(key) or []
+        n = len(slots)
+        if n < 2:
+            self._status.set("📋 붙여넣을 슬롯이 없습니다")
+            return
+        # 🪟 클라 16개를 못 찾으면 **보정 없이** 붙는다 → 그 사실을 먼저 알린다
+        _warn = ""
+        try:
+            if not self._client_rects_by_slot():
+                if not messagebox.askyesno(
+                        "📋 전체붙임",
+                        "리니지M 창 16개를 못 찾았습니다.\n\n"
+                        "**클라 위치 보정 없이** 원본 좌표 그대로 붙습니다 "
+                        "(모든 슬롯이 같은 클라를 누르게 됩니다).\n\n"
+                        "그래도 계속할까요?"):
+                    self._status.set("📋 전체붙임 취소")
+                    return
+                _warn = " ⚠ 보정 없음"
+        except Exception:
+            pass
+        if not messagebox.askyesno(
+                "📋 전체붙임",
+                "#%02d 을(를) **나머지 %d개 슬롯 전부**에 붙여넣습니다.\n\n"
+                "좌표·간격·방향·이름·이름표·녹화·라바설정·카드가 덮어써집니다.\n"
+                "(클라 위치는 자동보정됩니다)\n\n"
+                "🚫 ON/OFF 와 ⏰ 반복은 그대로 둡니다.\n"
+                "🛡 덮이는 녹화는 숨겨 보관합니다.\n\n"
+                "되돌릴 수 없습니다. 계속할까요?" % (src + 1, n - 1)):
+            self._status.set("📋 전체붙임 취소")
+            return
+        done, fail = 0, []
+        for i in range(n):
+            if i == src:
+                continue
+            try:
+                self._slot_paste(key, i)
+                done += 1
+            except Exception as e:
+                fail.append("#%02d(%s)" % (i + 1, e))
+        msg = "✔ 📋 전체붙임 — #%02d → %d개 슬롯%s" % (src + 1, done, _warn)
+        if fail:
+            msg += " · ⚠ 실패 " + " ".join(fail[:3])
+        self._status.set(msg)
+        self._rlog("[전체붙임] %s #%02d → %d개 슬롯%s%s"
+                   % (key, src + 1, done, _warn,
+                      (" · 실패 " + " ".join(fail)) if fail else ""))
 
     def _slot_copy(self, key, idx):
         """슬롯 좌표 복사 — 원하는 슬롯에서 [붙임]으로 붙여넣기 (인형탐험과 동일)."""
