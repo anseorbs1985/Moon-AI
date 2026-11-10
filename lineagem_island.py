@@ -1289,6 +1289,42 @@ TOWN_KEY = "_마을"
 PLACE_RATIO = 1.25     # 1등이 2등보다 이만큼은 높아야 그 던전으로 인정한다
 
 
+def slots_in_dungeon(slots, keys=None):
+    """🧭 지금 **어느 슬롯이 던전 안인가** → {슬롯(0부터): (던전키, 점수, 배수)}.
+
+    2026-11-10 사용자: *"던전 안에 있으면 **'실행중'** 처럼 다른 색깔로 해두면 안 돼?
+    그러면 전체를 누르면 **실행중인 건 빼고** 선택되고"*
+
+    `slots` 는 **anchor 를 얻을 슬롯 목록** — 어느 던전 것이든 같은 클라를 가리킨다.
+    🚫 **마을은 담지 않는다** — 마을은 '돌고 있는 중' 이 아니다.
+    🚫 판정은 **겨루기**다 (1등 ≥ PLACE_MATCH 이고 1등 ÷ 2등 ≥ PLACE_RATIO).
+       절대 점수 하나로 바꾸지 말 것 — 이 저장소가 여러 번 당한 함정이다.
+    ⚠ 16클라를 찍으므로 **약 1초** 걸린다 — 버튼을 누를 때만 부를 것.
+       `self.after` 틱에서 부르지 말 것 (창이 멈춘다)."""
+    out = {}
+    try:
+        if keys is None:
+            keys = [d["key"] for d in DUNGEONS[:4]] + [TOWN_KEY]
+        for si, slot in enumerate(slots or []):
+            if not isinstance(slot, dict):
+                continue
+            anc = IslandApp._slot_anchor(slot)
+            if not anc:
+                continue
+            sv = place_scores(keys, anc)
+            if not sv:
+                continue
+            r = sorted(sv.items(), key=lambda kv: -kv[1])
+            t, v = r[0]
+            v2 = r[1][1] if len(r) > 1 else 0.0
+            rat = (v / v2) if v2 > 0 else 99.0
+            if (t != TOWN_KEY and v >= PLACE_MATCH and rat >= PLACE_RATIO):
+                out[si] = (t, float(v), float(rat))
+    except Exception:
+        pass
+    return out
+
+
 def place_scores(keys, anchor):
     """🧭 **한 캡처로 여러 던전을 겨룬다** → `{던전: 점수}` (못 찍으면 `{}`).
 

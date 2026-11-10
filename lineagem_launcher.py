@@ -290,6 +290,9 @@ P0_PEND_MAX   = 1800           # 적어둔 것은 30분까지만 유효
 #       악몽의섬은 칸6 카드가 비어 **좌표로** 누르는데 카드 순서가 날마다
 #       바뀌어 **해적섬 같은 엉뚱한 던전**으로 들어갔다.
 IDLE_RERUN_KEY  = "토요일_악몽의섬"   # 기억도 다수결도 없을 때의 마지막 기본값
+# 🧭 슬롯판의 '지금 돌고 있나' 를 다시 훑기까지 (초). 훑는 데 약 1초 들므로
+#    이 안이면 방금 본 것을 그대로 쓴다 (2026-11-10).
+NIGHT_INSIDE_TTL = 40
 MANY_MIN  = 2    # 다수결 — 같은 던전에 **이만큼은** 있어야 믿는다
 MANY_LEAD = 2    # 2등 던전보다 **이만큼은** 많아야 한다 (비슷하면 안 믿는다)
 # 🧪 **물약이 없어서 나온 것일 때만** 다시 돌린다 (2026-10-17 사용자 재지시):
@@ -17173,6 +17176,10 @@ class App(tk.Tk):
         tk.Button(hd, text="▶선택실행", font=("맑은 고딕", 7, "bold"),
                   bg="#1e8449", fg="white", bd=0, padx=5, pady=1,
                   command=self._run_night_sel).pack(side="left", padx=(3, 0))
+        # 🧭 **지금 어느 슬롯이 돌고 있나** 다시 본다 (약 1초)
+        tk.Button(r1, text="🧭", font=("맑은 고딕", 8, "bold"), bd=0,
+                  bg="#1e8449", fg="white", padx=3,
+                  command=self._night_scan_inside).pack(side="left", padx=(3, 0))
         tk.Button(hd, text="해제", font=("맑은 고딕", 7),
                   bg="#95a5a6", fg="white", bd=0, padx=5, pady=1,
                   command=lambda: self._night_sel_clear()).pack(side="left", padx=(3, 0))
@@ -17280,6 +17287,9 @@ class App(tk.Tk):
         # 📅 오늘 요일에 맞는 던전으로 연다 (월 잊섬 · 화 에카 · 수목금 오만 · 토일 악몽)
         self.after(300, self._day_tab_tick)
         self.after(1200, self._refresh_night_btns)
+        # 🧭 판이 뜨고 나면 **한 번** 훑어 '실행중' 을 칠해 둔다 (조용히).
+        #    🚫 되풀이하지 않는다 — 16클라를 찍는 일이라 비싸다.
+        self.after(2600, lambda: self._night_scan_inside(quiet=True))
         # 켜질 때는 **항상 붙은 채로** 시작한다 (2026-09-30 사용자 지시)
         self.after(1500, self._night_detach_restore)
         # 📤 떼어낸 판을 메인런처 바로 아래·바로 앞에 붙여 두고, 최소화도 같이 따라간다
@@ -17300,9 +17310,71 @@ class App(tk.Tk):
             sel.add(idx)
         self._refresh_night_plus()
 
-    def _night_sel_all(self):
+    def _night_scan_inside(self, quiet=False, then=None):
+        """🧭 **지금 어느 슬롯이 던전 안인가** 를 훑어 버튼에 보여준다.
+
+        🚫 16클라를 찍으므로 약 1초 — **버튼을 누를 때만** 부른다
+           (`self.after` 틱에서 부르면 그만큼 창이 멈춘다).
+        ⚠ 화면을 긁으므로 **백그라운드 스레드**에서 돌리고, 버튼 칠하기만
+          `self.after(0, ...)` 로 UI 에 돌려준다 (2026-09-16 사고)."""
+        if getattr(self, "_night_scanning", False):
+            return
+        self._night_scanning = True
+        if not quiet:
+            self.status.set("🧭 어느 슬롯이 돌고 있는지 보는 중... (약 1초)")
+
+        def _work():
+            got = {}
+            try:
+                import lineagem_island as _isl
+                slots = self._island_cfg().get(self.NIGHT_KEY) or []
+                got = _isl.slots_in_dungeon(slots)
+            except Exception as e:
+                try:
+                    click_log(f"[슬롯판] 🧭 던전 안 확인 실패: {e}")
+                except Exception:
+                    pass
+            finally:
+                self._night_scanning = False
+
+            def _done():
+                self._night_inside = got
+                self._night_inside_at = time.time()
+                try:
+                    self._refresh_night_btns()
+                except Exception:
+                    pass
+                if not quiet:
+                    if got:
+                        _t = " ".join(f"#{i+1:02d}" for i in sorted(got))
+                        self.status.set(f"🧭 지금 돌고 있는 슬롯 {len(got)}개 — {_t} "
+                                        f"(전체선택에서 빠집니다 · 직접 고르면 같이 돕니다)")
+                    else:
+                        self.status.set("🧭 던전 안인 슬롯이 없습니다 "
+                                        "(전부 [실행] 할 수 있습니다)")
+                if then:
+                    try:
+                        then()
+                    except Exception:
+                        pass
+            self.after(0, _done)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _night_sel_all(self, _after=False):
         """좌표가 등록된 슬롯을 전부 선택한다 (실행은 [▶ 선택실행] 을 눌러야 시작).
-        이미 전부 선택돼 있으면 해제 — 한 버튼으로 켜고 끈다."""
+        이미 전부 선택돼 있으면 해제 — 한 버튼으로 켜고 끈다.
+
+        🧭 **지금 돌고 있는(던전 안인) 슬롯은 빼고** 고른다 (2026-11-10 사용자 지시).
+           본 지 `NIGHT_INSIDE_TTL` 초가 지났으면 **먼저 훑고 이어서** 고른다
+           (훑기는 스레드라 비동기 — 그래서 `then` 으로 이어붙인다)."""
+        if (not _after and not getattr(self, "_night_sel", None)
+                and (time.time() - getattr(self, "_night_inside_at", 0))
+                > NIGHT_INSIDE_TTL):
+            self._night_scan_inside(quiet=True,
+                                    then=lambda: self._night_sel_all(True))
+            self.status.set("🧭 돌고 있는 슬롯을 먼저 확인합니다... (약 1초)")
+            return
         try:
             slots = self._island_cfg().get(self.NIGHT_KEY) or []
         except Exception:
@@ -17316,11 +17388,26 @@ class App(tk.Tk):
                 and not s_.get("enabled", True)]
         if not able:
             self.status.set("좌표가 등록된 (켜져 있는) 슬롯이 없습니다"); return
+        # 🧭 **지금 돌고 있는(던전 안인) 슬롯은 뺀다** (2026-11-10 사용자 지시).
+        #    🚫 직접 [+] 로 고른 것은 막지 않는다 — "내가 선택하면 같이 돌려줘".
+        _in = getattr(self, "_night_inside", None) or {}
+        _busy = {i for i in able if i in _in}
+        able = able - _busy
+        if not able:
+            self.status.set(f"🧭 {len(_busy)}개가 전부 돌고 있어 고를 것이 없습니다 "
+                            f"— 그래도 돌리려면 [+] 로 직접 고르세요")
+            return
         cur = getattr(self, "_night_sel", set()) or set()
         self._night_sel = set() if cur >= able else set(able)
         self._refresh_night_plus()
-        if self._night_sel and _off:
-            self.status.set(f"✔ {len(self._night_sel)}개 선택 — OFF 슬롯 {_off} 는 제외")
+        _ex = []
+        if _off:
+            _ex.append(f"OFF {_off}")
+        if _busy:
+            _ex.append(f"🧭 돌고 있는 {sorted(i+1 for i in _busy)}")
+        if self._night_sel and _ex:
+            self.status.set(f"✔ {len(self._night_sel)}개 선택 — "
+                            + " · ".join(_ex) + " 는 제외")
             return
         if self._night_sel:
             self.status.set(f"악몽의섬 {len(able)}개 슬롯 전체선택 — "
@@ -17381,8 +17468,13 @@ class App(tk.Tk):
                         continue
                     _on = (i < len(_sl) and isinstance(_sl[i], dict)
                            and _sl[i].get("enabled", True))
+                    _ins = (getattr(self, "_night_inside", None) or {})
                     if i < len(_sl) and not _on:
                         xb.config(text="OFF", bg="#7f8c8d")
+                    elif i in _ins:
+                        # 🧭 **지금 던전 안** — 돌고 있다는 뜻이라 초록으로 (2026-11-10).
+                        #    🚫 누르는 것을 막지는 않는다 — 사용자가 고르면 같이 돈다.
+                        xb.config(text="실행중", bg="#1e8449")
                     else:
                         xb.config(text="실행", bg="#2471a3")
             except Exception:

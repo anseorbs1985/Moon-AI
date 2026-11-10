@@ -16,6 +16,7 @@ import time
 import datetime
 import random
 import subprocess
+import threading
 import tkinter as tk
 
 BASE   = os.path.dirname(os.path.abspath(__file__))
@@ -42,6 +43,9 @@ DAY_DUNGEON = {0: "월요일_잊혀진섬", 1: "화요일_에카",
                2: "수금_오만의탑", 3: "수금_오만의탑", 4: "수금_오만의탑",
                5: "토요일_악몽의섬", 6: "토요일_악몽의섬"}
 ALPHAS = [1.0, 0.85, 0.7, 0.55, 0.4]
+# 🧭 '지금 돌고 있나' 를 다시 훑기까지(초) — 훑는 데 약 1초 든다 (2026-11-10)
+INSIDE_TTL = 40
+
 LEFT_COLORS = {6: "#1e8449", 5: "#27ae60", 4: "#16a085",
                3: "#2980b9", 2: "#8e44ad", 1: "#c0392b"}
 
@@ -168,6 +172,10 @@ class Bar(tk.Tk):
         tk.Button(r1, text="해제", font=("맑은 고딕", 8), bd=0,
                   bg="#7f8c8d", fg="white", pady=2,
                   command=self._sel_clear).pack(side="left")
+        # 🧭 지금 어느 슬롯이 돌고 있나 다시 본다 (약 1초)
+        tk.Button(r1, text="🧭", font=("맑은 고딕", 8, "bold"), bd=0,
+                  bg="#1e8449", fg="white", padx=3, pady=2,
+                  command=self._scan_inside).pack(side="left", padx=(3, 0))
         tk.Button(r1, text="⌖", font=("맑은 고딕", 8, "bold"), bd=0,
                   bg="#3a4149", fg=self.FG, padx=5, pady=2,
                   command=self._open_win).pack(side="left", padx=(3, 0))
@@ -268,6 +276,10 @@ class Bar(tk.Tk):
             elif not slots[i].get("enabled", True):
                 # OFF 슬롯은 **회색 'OFF'** 로 보여준다 (2026-08-29 사용자 지시)
                 run.config(text=f"{i+1:02d} OFF", bg="#7f8c8d")
+            elif i in (getattr(self, "inside", None) or {}):
+                # 🧭 **지금 던전 안** = 돌고 있다 → 초록 (2026-11-10 사용자 요청).
+                #    🚫 누르는 것은 막지 않는다 — 직접 고르면 같이 돈다.
+                run.config(text=f"{i+1:02d} 실행중", bg="#1e8449")
             else:
                 run.config(text=f"{i+1:02d} 실행", bg="#2471a3")
             e = st.get(f"{key}|{i}")
@@ -336,13 +348,60 @@ class Bar(tk.Tk):
         self.sel.discard(i) if i in self.sel else self.sel.add(i)
         self._refresh()
 
-    def _sel_all(self):
+    def _sel_all(self, _after=False):
+        """🧭 **지금 돌고 있는(던전 안인) 슬롯은 빼고** 고른다 (2026-11-10 사용자 지시:
+        *"전체를 누르면 실행중인 건 빼고 선택되고, 내가 직접 고르면 같이 돌려주고"*).
+        본 지 오래됐으면 **먼저 훑고 이어서** 고른다 (훑기는 스레드라 비동기)."""
+        if (not _after and not self.sel
+                and (time.time() - getattr(self, "inside_at", 0)) > INSIDE_TTL):
+            self._scan_inside(quiet=True, then=lambda: self._sel_all(True))
+            return
         # OFF 슬롯은 전체선택에서 뺀다 (2026-08-29 사용자 지시 — 골라도 안 돈다)
         able = {i for i, s in enumerate(self._slots()[:16])
                 if isinstance(s, dict) and any(s.get("coords") or [])
                 and s.get("enabled", True)}
+        _in = getattr(self, "inside", None) or {}
+        able = {i for i in able if i not in _in}
         self.sel = set() if self.sel >= able and able else able
         self._refresh()
+
+    def _scan_inside(self, quiet=False, then=None):
+        """🧭 지금 **어느 슬롯이 던전 안인가** 를 훑는다 (약 1초).
+
+        🚫 `after` 틱에서 부르지 말 것 — 화면을 긁으므로 창이 그만큼 멈춘다.
+           여기서는 **백그라운드 스레드**로 돌리고 칠하기만 UI 에 돌려준다."""
+        if getattr(self, "_scanning", False):
+            return
+        self._scanning = True
+
+        def _work():
+            got = {}
+            try:
+                import lineagem_island as _isl
+                got = _isl.slots_in_dungeon(self._slots()[:16])
+            except Exception:
+                pass
+            finally:
+                self._scanning = False
+
+            def _done():
+                self.inside = got
+                self.inside_at = time.time()
+                try:
+                    self._refresh()
+                except Exception:
+                    pass
+                if then:
+                    try:
+                        then()
+                    except Exception:
+                        pass
+            try:
+                self.after(0, _done)
+            except Exception:
+                pass
+
+        threading.Thread(target=_work, daemon=True).start()
 
     def _sel_clear(self):
         self.sel = set()
