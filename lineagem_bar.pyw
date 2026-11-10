@@ -378,7 +378,9 @@ class Bar(tk.Tk):
             got = {}
             try:
                 import lineagem_island as _isl
-                got = _isl.slots_in_dungeon(self._slots()[:16])
+                # 🧭 **지금 탭의 던전 안**일 때만 '실행중' (2026-11-10)
+                got = _isl.slots_in_dungeon(self._slots()[:16],
+                                            only=self._cur()[2])
             except Exception:
                 pass
             finally:

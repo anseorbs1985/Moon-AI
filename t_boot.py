@@ -42,6 +42,15 @@ def boot(name, args, wait=14.0):
     err = io.open(ep, encoding="utf-8", errors="replace").read().strip()
     if alive:
         print("  ✔ %-14s %.1f초 살아 있었다 → 끔" % (name, el))
+    elif pr.returncode == 0 and not err and el < 4.0:
+        # 🔒 **뮤텍스** — 이미 켜져 있으면 조용히(code 0) 끝난다. 죽은 것이 아니다.
+        #    🚫 이것을 '통과' 로 넘기지 말 것 — 그 판은 **아무것도 시험하지 못했다.**
+        OK = False
+        print("  🔒 %-14s %.1f초에 조용히 끝났다 (code 0 · 오류 없음)"
+              % (name, el))
+        print("     → **이미 켜져 있다.** 끄고 다시 돌려야 진짜로 시험된다:")
+        print("        powershell \"Get-CimInstance Win32_Process -Filter \\\"Name='pythonw.exe'\\\" |")
+        print("          ? { $_.CommandLine -like '*%s*' } | %% { Stop-Process -Id $_.ProcessId -Force }\"" % name)
     else:
         OK = False
         print("  🚨 %-14s **%.1f초에 죽었다** (code=%s)" % (name, el, pr.returncode))

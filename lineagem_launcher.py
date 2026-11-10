@@ -17328,7 +17328,9 @@ class App(tk.Tk):
             try:
                 import lineagem_island as _isl
                 slots = self._island_cfg().get(self.NIGHT_KEY) or []
-                got = _isl.slots_in_dungeon(slots)
+                # 🧭 **지금 보고 있는 탭의 던전 안**일 때만 '실행중' —
+                #    마을·다른 사냥터는 '밖' 이다 (2026-11-10 사용자 지시).
+                got = _isl.slots_in_dungeon(slots, only=self.NIGHT_KEY)
             except Exception as e:
                 try:
                     click_log(f"[슬롯판] 🧭 던전 안 확인 실패: {e}")

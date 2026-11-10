@@ -1289,13 +1289,25 @@ TOWN_KEY = "_마을"
 PLACE_RATIO = 1.25     # 1등이 2등보다 이만큼은 높아야 그 던전으로 인정한다
 
 
-def slots_in_dungeon(slots, keys=None):
+# 🧭 '실행중' 으로 볼 기준 — **평소(PLACE_MATCH 0.75)보다 엄격하다** (2026-11-10).
+#    등록하지 않은 장소(기린 마을 등)가 같은 길이의 던전 이름 그림에 **0.857** 까지
+#    걸리기 때문이다 (실측). 진짜 던전 안은 0.917~1.000 이라 0.90 이면 갈린다.
+#    🚫 내리지 말 것 — 내리면 **마을에 있는 캐릭이 '실행중' 으로 보여 전체선택에서
+#       빠진다** (= 안 돌린다). 못 잡는 쪽은 '실행' 으로 보여 안전하다.
+INSIDE_MATCH = 0.90
+
+
+def slots_in_dungeon(slots, keys=None, only=None, match=None):
     """🧭 지금 **어느 슬롯이 던전 안인가** → {슬롯(0부터): (던전키, 점수, 배수)}.
 
     2026-11-10 사용자: *"던전 안에 있으면 **'실행중'** 처럼 다른 색깔로 해두면 안 돼?
     그러면 전체를 누르면 **실행중인 건 빼고** 선택되고"*
 
     `slots` 는 **anchor 를 얻을 슬롯 목록** — 어느 던전 것이든 같은 클라를 가리킨다.
+    `only` 를 주면 **그 던전이 1등일 때만** 담는다 (2026-11-10 사용자 지시:
+    *"항상 던전 안에 있는 것들만, 예를 들어 **오만의탑 이런 것들만 안**이고
+    나머진 밖"*). 슬롯판은 **지금 보고 있는 탭의 던전**을 넘긴다 — 그래야
+    "에카를 돌리려는데 에카 안인 슬롯만 빠진다" 가 된다.
     🚫 **마을은 담지 않는다** — 마을은 '돌고 있는 중' 이 아니다.
     🚫 판정은 **겨루기**다 (1등 ≥ PLACE_MATCH 이고 1등 ÷ 2등 ≥ PLACE_RATIO).
        절대 점수 하나로 바꾸지 말 것 — 이 저장소가 여러 번 당한 함정이다.
@@ -1305,6 +1317,7 @@ def slots_in_dungeon(slots, keys=None):
     try:
         if keys is None:
             keys = [d["key"] for d in DUNGEONS[:4]] + [TOWN_KEY]
+        thr = INSIDE_MATCH if match is None else match
         for si, slot in enumerate(slots or []):
             if not isinstance(slot, dict):
                 continue
@@ -1318,8 +1331,11 @@ def slots_in_dungeon(slots, keys=None):
             t, v = r[0]
             v2 = r[1][1] if len(r) > 1 else 0.0
             rat = (v / v2) if v2 > 0 else 99.0
-            if (t != TOWN_KEY and v >= PLACE_MATCH and rat >= PLACE_RATIO):
-                out[si] = (t, float(v), float(rat))
+            if t == TOWN_KEY or v < thr or rat < PLACE_RATIO:
+                continue
+            if only and t != only:
+                continue
+            out[si] = (t, float(v), float(rat))
     except Exception:
         pass
     return out
