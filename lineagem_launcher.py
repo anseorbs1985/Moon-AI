@@ -17462,25 +17462,9 @@ class App(tk.Tk):
         """반복이 걸린 슬롯은 남은 횟수에 따라 색이 다르다 (꺼졌으면 회색)."""
         try:
             st = self._rep_load()
-            # 실행 버튼 — OFF 슬롯은 **회색 'OFF'** (2026-08-29 사용자 지시)
-            try:
-                _sl = self._island_cfg().get(self.NIGHT_KEY) or []
-                for i, xb in enumerate(getattr(self, "_night_runbtns", []) or []):
-                    if not xb.winfo_exists():
-                        continue
-                    _on = (i < len(_sl) and isinstance(_sl[i], dict)
-                           and _sl[i].get("enabled", True))
-                    _ins = (getattr(self, "_night_inside", None) or {})
-                    if i < len(_sl) and not _on:
-                        xb.config(text="OFF", bg="#7f8c8d")
-                    elif i in _ins:
-                        # 🧭 **지금 던전 안** — 돌고 있다는 뜻이라 초록으로 (2026-11-10).
-                        #    🚫 누르는 것을 막지는 않는다 — 사용자가 고르면 같이 돈다.
-                        xb.config(text="실행중", bg="#1e8449")
-                    else:
-                        xb.config(text="실행", bg="#2471a3")
-            except Exception:
-                pass
+            # 실행 버튼 — 🎨 **공용 함수 한 곳에서** 칠한다 (2026-11-10).
+            #    🚫 여기서 따로 칠하지 말 것 — 대기열 표시('대기n')를 덮어쓴다.
+            self._night_runbtn_paint()
             for i, b in enumerate(self._night_btns or []):
                 if not b.winfo_exists():
                     continue
@@ -17555,8 +17539,22 @@ class App(tk.Tk):
                             f"(대기 {len(self._night_queue)}개)"); return
         self._night_queue.append(slot_idx)
         self._refresh_night_queue()
-        self.status.set(f"🌑 #{slot_idx+1:02d} 대기에 넣음 — "
-                        f"{[i+1 for i in self._night_queue]} 순서로 하나씩 실행")
+        # 🎨 **누른 것이 즉시 보이게** — 바로 아래에서 창을 내리므로,
+        #    그 전에 한 프레임을 그려 '대기n'(주황)이 눈에 띄게 한다.
+        #    (2026-11-10 사용자: "실행 누르면 바로 반응을 안 하고 느리다")
+        try:
+            self.update_idletasks()
+        except Exception:
+            pass
+        # 🕐 **왜 바로 시작하지 않는지** 를 말해준다 — 겹쳐 돌면 클릭이 엉키므로
+        #    앞 작업이 끝날 때까지 기다리는 것이 맞다. 다만 그걸 알려야 한다.
+        if self._is_busy():
+            self.status.set(f"🕐 #{slot_idx+1:02d} 대기에 넣음 — **지금 돌고 있는 작업이 "
+                            f"끝나면** 시작합니다 (한 슬롯 약 4분) · 대기 "
+                            f"{[i+1 for i in self._night_queue]}")
+        else:
+            self.status.set(f"🌑 #{slot_idx+1:02d} 대기에 넣음 — "
+                            f"{[i+1 for i in self._night_queue]} 순서로 하나씩 실행")
         # **대기에 넣은 것도 창을 뒤로 보낸다** (2026-08-29 사용자 지시 —
         # 런처가 앞에 남아 있으면 그 자리 클릭을 먹는다)
         try:
@@ -17594,24 +17592,49 @@ class App(tk.Tk):
         self.status.set(f"🌑 악몽의섬 #{slot_idx+1:02d} 실행 — 지금부터 2시간 다시 셈"
                         + (f" (대기 {left}개 남음)" if left else ""))
 
-    def _refresh_night_queue(self):
-        """대기 중인 슬롯은 [실행] 버튼에 순번을 보여준다."""
+    def _night_runbtn_paint(self):
+        """🎨 슬롯 [실행] 버튼을 **한 곳에서** 칠한다 (2026-11-10 사용자 신고).
+
+        🚨 예전에는 `_refresh_night_queue`(대기열)와 `_refresh_night_btns`(실행중)가
+           **각자 칠해 서로를 덮어썼다.** 누르면 '대기1' 로 바뀌었다가
+           `island_repeat.json` 이 바뀌는 순간 '실행' 으로 되돌아가,
+           사용자 눈에는 **"눌렀는데 아무 일도 안 났다"** 로 보였다
+           (실제로는 대기열에 잘 들어가 있었다).
+        🚫 **버튼을 다른 곳에서 칠하지 말 것** — 반드시 이 함수를 쓴다.
+
+        우선순위 — 위에 있는 것이 이긴다:
+            ① OFF     회색   실행 자체가 안 된다
+            ② 대기n   주황   **누른 것이 보여야 한다**
+            ③ 실행중  초록   그 캐릭이 지금 그 던전 안 (🚫 눌러도 돈다)
+            ④ 실행    파랑
+
+        ⚠ `_island_cfg()` 는 585KB 파싱(실측 8~12ms)이라 **루프 밖에서 한 번만**
+          부른다. 예전엔 루프 안에서 16번 불러 **128ms 를 UI 스레드에서** 썼다."""
         q = getattr(self, "_night_queue", []) or []
+        ins = getattr(self, "_night_inside", None) or {}
+        try:
+            sl = self._island_cfg().get(self.NIGHT_KEY) or []
+        except Exception:
+            sl = []
         for i, b in enumerate(getattr(self, "_night_runbtns", []) or []):
             try:
                 if not b.winfo_exists():
                     continue
-                if i in q:
-                    b.config(text=f"대기{q.index(i)+1}", bg="#e67e22")
-                    continue
-                # OFF 슬롯은 회색 'OFF' — 대기열 갱신이 이걸 덮어쓰지 않게 (2026-08-29)
-                _sl = self._island_cfg().get(self.NIGHT_KEY) or []
-                if i < len(_sl) and isinstance(_sl[i], dict)                         and not _sl[i].get("enabled", True):
-                    b.config(text="OFF", bg="#7f8c8d")
+                if (i < len(sl) and isinstance(sl[i], dict)
+                        and not sl[i].get("enabled", True)):
+                    b.config(text="OFF", bg="#7f8c8d")          # ①
+                elif i in q:
+                    b.config(text=f"대기{q.index(i)+1}", bg="#e67e22")   # ②
+                elif i in ins:
+                    b.config(text="실행중", bg="#1e8449")        # ③
                 else:
-                    b.config(text="실행", bg="#2471a3")
+                    b.config(text="실행", bg="#2471a3")          # ④
             except Exception:
                 pass
+
+    def _refresh_night_queue(self):
+        """대기 중인 슬롯은 [실행] 버튼에 순번을 보여준다 (칠하기는 공용 함수)."""
+        self._night_runbtn_paint()
 
     def _night_rep_restart(self, slot_idx):
         """그 슬롯의 반복을 '지금부터' 다시 시작 (2시간 N회)."""
