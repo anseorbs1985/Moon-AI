@@ -282,7 +282,16 @@ P0_PEND_MAX   = 1800           # 적어둔 것은 30분까지만 유효
 # 마을에 오래 서 있으면 다시 실행 — 악몽의섬만 (2026-10-17 사용자 요청)
 #   "5분 남기고 죽으면 다시 가도 5분만 돌고 1시간 55분 동안 아무것도 안 한다."
 #   ⏰ 2시간 반복은 **그대로 두고** 그 빈 시간만 메운다.
-IDLE_RERUN_KEY  = "토요일_악몽의섬"   # 이 던전만 (사용자: "악몽의섬 쪽만 이야기하는 거야")
+# 🧭 **다시 실행할 때 어느 던전으로 갈까** — 그 캐릭이 있던 던전이 먼저,
+#    모르면 **다른 클라들을 보고 다수결** (2026-11-10 사용자: *"네가 모르겠으면
+#    다른 클라들을 확인하고 **많이 되어 있는 클라**를 실행해줘"*).
+#    16클라가 **같은 던전을 함께 돌기** 때문에 이 다수결이 아주 잘 맞는다.
+#    🚫 예전에는 악몽의섬 고정이라 에카에서 나온 캐릭도 악몽의섬으로 보냈고,
+#       악몽의섬은 칸6 카드가 비어 **좌표로** 누르는데 카드 순서가 날마다
+#       바뀌어 **해적섬 같은 엉뚱한 던전**으로 들어갔다.
+IDLE_RERUN_KEY  = "토요일_악몽의섬"   # 기억도 다수결도 없을 때의 마지막 기본값
+MANY_MIN  = 2    # 다수결 — 같은 던전에 **이만큼은** 있어야 믿는다
+MANY_LEAD = 2    # 2등 던전보다 **이만큼은** 많아야 한다 (비슷하면 안 믿는다)
 # 🧪 **물약이 없어서 나온 것일 때만** 다시 돌린다 (2026-10-17 사용자 재지시):
 #    "죽어서 마을에 있으면 2시간 간격을 그대로 유지해주고, **물약이 없어서** 마을에
 #     갔다가 서 있으면 **5분 후**에 다시 던전을 실행해줄 수 있어? **물약이 있는데
@@ -40887,6 +40896,71 @@ class App(tk.Tk):
             pass
         return None
 
+    def _many_now(self, ancs, keys, skip=None):
+        """🧭 **지금 다른 클라들을 훑어** 다수결 던전을 구한다 → (던전, 설명).
+
+        🚫 재실행을 **결정할 때만** 부른다 — 16클라를 찍으므로 1초쯤 든다.
+           평소 감시에서 부르면 안 된다.
+        ⚠ 한 틱에 한 번만 구해 `self._many_cache` 에 담아 돌려쓴다."""
+        try:
+            c = getattr(self, "_many_cache", None)
+            if c and (time.time() - c[0]) < 20:
+                return c[1], c[2]
+            import lineagem_island as _isl
+            votes = {}
+            for _si, _anc in (ancs or {}).items():
+                if not _anc:
+                    continue
+                try:
+                    sv = _isl.place_scores(keys, _anc)
+                except Exception:
+                    continue
+                if not sv:
+                    continue
+                r = sorted(sv.items(), key=lambda kv: -kv[1])
+                t, v = r[0]
+                v2 = r[1][1] if len(r) > 1 else 0.0
+                rat = (v / v2) if v2 > 0 else 99.0
+                if (t != _isl.TOWN_KEY and v >= _isl.PLACE_MATCH
+                        and rat >= _isl.PLACE_RATIO):
+                    votes[_si] = t
+            got, how = self._many_dungeon(votes, skip)
+            self._many_cache = (time.time(), got, how)
+            return got, how
+        except Exception:
+            return None, ""
+
+    def _many_dungeon(self, votes, skip=None):
+        """🧭 **다른 클라들이 어느 던전에 있나** → 가장 많은 던전 (없으면 None).
+
+        2026-11-10 사용자: *"네가 모르겠으면 다른 클라들을 확인하고 **많이 되어
+        있는 클라를 실행해줘.** 다른 캐릭들이 에카에 있으면 에카에서 나온 거니까"*
+
+        `votes` = {슬롯: 던전키} — **또렷하게 판정된 슬롯만** 담아 넘긴다
+        (1등 ≥ PLACE_MATCH 이고 1등 ÷ 2등 ≥ PLACE_RATIO).
+        🚫 마을은 담지 않는다 — 마을은 던전이 아니다.
+        🚫 `MANY_MIN` 개 미만이거나 2등과 `MANY_LEAD` 미만으로 붙으면
+           **None 을 돌려준다** (애매하면 안 돌리는 쪽이 안전하다)."""
+        try:
+            cnt = {}
+            for _si, _k in (votes or {}).items():
+                if skip is not None and _si == skip:
+                    continue
+                if not _k:
+                    continue
+                cnt[_k] = cnt.get(_k, 0) + 1
+            if not cnt:
+                return None, ""
+            _r = sorted(cnt.items(), key=lambda kv: -kv[1])
+            top, n1 = _r[0]
+            n2 = _r[1][1] if len(_r) > 1 else 0
+            _how = " ".join(f"{k}:{v}" for k, v in _r)
+            if n1 < MANY_MIN or (n1 - n2) < MANY_LEAD:
+                return None, _how + " (애매해서 안 믿는다)"
+            return top, _how
+        except Exception:
+            return None, ""
+
     def _idle_watch_scan(self):
         """악몽의섬 슬롯이 **마을에 오래 서 있으면** 그 슬롯만 다시 실행한다.
 
@@ -40900,7 +40974,11 @@ class App(tk.Tk):
         마을 그림이 없으면 아무 일도 하지 않는다 (등록 안 한 컴퓨터는 그대로).
         ⏰ 2시간 예약은 건드리지 않는다 — 빈 시간을 메울 뿐이다."""
         import lineagem_island as _isl
-        key = IDLE_RERUN_KEY          # 이 함수가 보는 던전 (악몽의섬)
+        key = IDLE_RERUN_KEY          # 슬롯을 순회할 기준 던전 (anchor 를 얻는 용도)
+        # 🧭 **전 던전을 겨룬다** — 마을이 아닌 슬롯이 어느 던전에 있는지 세어
+        #    (다수결) 마을 슬롯을 **그 던전으로** 돌리기 위해서다.
+        #    캡처는 슬롯당 한 번이라 던전을 늘려도 비용이 거의 같다.
+        _DKEYS = [d["key"] for d in _isl.DUNGEONS[:4]]
         now = time.time()
         # 🧭 **그 캐릭이 실제로 어느 던전에서 나왔는지** — 물약 0개를 본 그때
         #    물약감시가 겨뤄서 적어둔 것. 마을에서는 장소 이름이 마을이라
@@ -40911,8 +40989,10 @@ class App(tk.Tk):
             seen = self._idle_since = {}
         if not _isl.place_list(_isl.TOWN_KEY):
             return self._p0_why("마을 그림이 없다 — [마을 등록] 으로 한 번 잘라주세요")
-        if not _isl.place_list(key):
-            return self._p0_why(f"{key} 장소 그림이 없어 던전 안인지 모른다")
+        if not any(_isl.place_list(k) for k in
+                   [d["key"] for d in _isl.DUNGEONS[:4]]):
+            return self._p0_why("던전 장소 그림이 하나도 없어 "
+                                "어디인지 모른다 ([📍 던전이름 등록])")
         try:
             _ic = json.load(io.open(os.path.join(BASE, "island_coords.json"),
                                     encoding="utf-8-sig"))
@@ -40927,14 +41007,17 @@ class App(tk.Tk):
                 if _k.startswith("_") or not isinstance(_v, dict):
                     continue
                 _kk, _, _ii = _k.rpartition("|")
-                if _kk == key and _ii.isdigit():
-                    _rep[int(_ii)] = float(_v.get("next") or 0)
+                # 🧭 **던전마다 따로** 담는다 — 돌릴 던전이 슬롯마다 다르다
+                if _ii.isdigit():
+                    _rep[(_kk, int(_ii))] = float(_v.get("next") or 0)
         except Exception:
             pass
         _seen_at = getattr(self, "_p0_seen_at", None) or {}
-        _cmp = [_isl.TOWN_KEY, key]
+        _cmp = [_isl.TOWN_KEY] + _DKEYS
         _note = []
         _fire = False
+        _votes = {}        # 🧭 또렷하게 던전 안인 슬롯 (다수결 재료)
+        _towns = []        # 마을에 서 있는 슬롯 (2번째 패스에서 판정)
         for si, slot in enumerate(_ic.get(key) or []):
             # 🪟 **확대·축소된 창은 건너뛴다** (2026-11-08)
             if self._win_odd_skip(si, "마을감시"):
@@ -40968,18 +41051,44 @@ class App(tk.Tk):
                 seen.pop(si, None)
                 # 목표 시간도 버린다 — 다음에 마을에 들어오면 4~5분을 새로 뽑는다
                 getattr(self, "_idle_need", {}).pop(si, None)
+                # 🧭 **던전 안이 또렷하면 한 표** (다수결 재료)
+                if (_top != _isl.TOWN_KEY and _tv >= _isl.PLACE_MATCH
+                        and _ratio >= _isl.PLACE_RATIO):
+                    _votes[si] = _top
                 continue
+            _towns.append((si, slot, _tv, _ratio))
+            seen.setdefault(si, now)
+            continue
+        # ── 2패스: 마을 슬롯을 **다수결로 정한 던전**으로 돌린다 ──
+        _many, _how = self._many_dungeon(_votes)
+        if _towns and _how:
+            _note.append(f"🧭 다른 클라 {_how}"
+                         + (f" → 모르는 슬롯은 **{_many}**" if _many else ""))
+        for si, slot, _tv, _ratio in _towns:
             t0 = seen.setdefault(si, now)
-            # 🧭 **그 캐릭이 돌던 던전** — 모르면 돌리지 않는다.
-            #    사용자 지시(2026-10-17)대로 대상은 악몽의섬뿐이다. 다른 던전에서
-            #    나온 캐릭을 악몽의섬으로 보내는 것이 10-27 신고의 원인이었다.
+            # 🧭 **어느 던전으로 돌릴까** (2026-11-10 사용자 지시)
+            #    ① 물약 0개를 본 그때 겨뤄 적어둔 던전 (가장 확실하다)
+            #    ② 없으면 **다른 클라들의 다수결** — 16클라가 같은 던전을 함께 돈다
+            #    ③ 둘 다 없으면 **돌리지 않는다** (엉뚱한 던전보다 안 하는 쪽)
             _from = _seen_key.get(si)
-            if _from != key:
-                _note.append(f"#{si+1:02d} 마을 — "
-                             + (f"{_from} 에서 나왔다 → {key} 만 다시 돌린다"
-                                if _from else "어느 던전이었는지 몰라 안 돌린다"))
+            _why = "물약0개를 봤을 때"
+            if not _from:
+                _from, _why = _many, "다른 클라 다수결"
+            if not _from:
+                _note.append(f"#{si+1:02d} 마을 — 어느 던전이었는지 몰라 안 돌린다"
+                             + (f" ({_how})" if _how else " (다른 클라도 애매)"))
                 continue
-            _ver = "라스타바드" if (slot.get("rasta") or {}) else "악몽의섬"
+            # 🚫 그 던전에서 **그 슬롯이 OFF** 면 돌리지 않는다 (섬 실행기가 거부한다)
+            _fs = (_ic.get(_from) or [])
+            _fslot = _fs[si] if si < len(_fs) else None
+            if not isinstance(_fslot, dict) or not _fslot.get("enabled", True):
+                _note.append(f"#{si+1:02d} 마을 — {_from} 에서 **OFF** 라 안 돌린다")
+                continue
+            if not any(c for c in (_fslot.get("coords") or [])):
+                _note.append(f"#{si+1:02d} 마을 — {_from} 에 좌표가 없어 안 돌린다")
+                continue
+            _ver = ("라스타바드" if (_fslot.get("rasta") or {})
+                    else (_fslot.get("card") or _from.split("_")[-1]))
             _mins = (now - t0) / 60.0
             # 🧪 **물약이 없어서 나온 것인가** — 아니면(= 죽은 것) 그냥 둔다.
             #    사용자: "물약이 있는데 죽어 있으면 그냥 마을에 냅두고 반복만 유지."
@@ -40989,7 +41098,7 @@ class App(tk.Tk):
                              f"(죽은 듯) → 그냥 둔다")
                 continue
             # ⏰ 가 곧 걸리면 예약에 맡긴다 (겹쳐 돌리지 않는다)
-            _nx = _rep.get(si, 0)
+            _nx = _rep.get((_from, si), 0)
             if _nx and (_nx - now) < IDLE_SKIP_SOON:
                 _note.append(f"#{si+1:02d} 마을 {_mins:.0f}분 — ⏰ 가 "
                              f"{(_nx-now)/60:.0f}분 뒤라 예약에 맡긴다")
@@ -41017,15 +41126,16 @@ class App(tk.Tk):
             seen.pop(si, None)
             getattr(self, "_idle_need", {}).pop(si, None)
             _fire = True
-            click_log(f"[마을감시] #{si+1:02d} {_ver} — **물약이 없어서** 마을에 "
-                      f"{_mins:.0f}분째 서 있다 (마을 {_tv:.2f} · {_ratio:.2f}배 · "
-                      f"물약0개를 {_ago/60:.0f}분 전에 봤다) → 그 슬롯만 다시 실행 "
-                      f"(⏰ 예약은 그대로 둔다)")
-            self.after(0, lambda n=si, v=_ver: self.status.set(
-                f"#{n+1:02d} 물약이 없어 마을에 서 있어 — {v} 를 다시 돌립니다"))
+            click_log(f"[마을감시] #{si+1:02d} **{_from}**({_ver}) — 물약이 없어서 "
+                      f"마을에 {_mins:.0f}분째 서 있다 (마을 {_tv:.2f} · {_ratio:.2f}배 · "
+                      f"물약0개를 {_ago/60:.0f}분 전에 봤다 · 던전은 **{_why}**"
+                      + (f" {_how}" if _why.startswith("다른") and _how else "")
+                      + ") → 그 슬롯만 다시 실행 (⏰ 예약은 그대로 둔다)")
+            self.after(0, lambda n=si, v=_ver, k=_from: self.status.set(
+                f"#{n+1:02d} 물약이 없어 마을에 서 있어 — {k}({v}) 를 다시 돌립니다"))
             try:
                 _didx = next(n for n, d in enumerate(_isl.DUNGEONS[:4])
-                             if d["key"] == key)
+                             if d["key"] == _from)
                 subprocess.Popen(
                     ["pythonw", os.path.join(BASE, "lineagem_island.py"),
                      str(_didx), "--run", "--slot", str(si + 1)],
@@ -41182,6 +41292,19 @@ class App(tk.Tk):
                     _ok3 = (_day and _top == _day
                             and _tv >= P0_PLACE_FLOOR
                             and _ratio >= P0_PLACE_RATIO)
+                    _why3 = f"오늘 던전({_day})"
+                    if not _ok3:
+                        # 🧭 **다른 클라들이 같은 던전에 있으면 믿는다** (2026-11-10
+                        #    사용자: *"다른 캐릭들이 에카에 있으면 에카에서 나온 거니까"*).
+                        #    16클라가 같은 던전을 함께 돌기 때문에 아주 잘 맞는다.
+                        _mn, _mh = self._many_now(ancs, [k for _, k in keys], si)
+                        if (_mn and _top == _mn and _tv >= P0_PLACE_FLOOR
+                                and _ratio >= P0_PLACE_RATIO):
+                            _ok3, _why3 = True, f"다른 클라 다수결({_mh})"
+                        elif _mn and _tv < P0_PLACE_FLOOR:
+                            # 1등조차 바닥 미만 — 그래도 다른 클라가 분명하면 그쪽으로
+                            _top = _mn
+                            _ok3, _why3 = True, f"장소를 못 읽어 다수결({_mh})"
                     if not _ok3:
                         click_log(f"[물약감시] #{si+1:02d} 물약 0개인데 "
                                   f"**어디인지 못 읽었다** (1등 {_top} {_tv:.2f} "
@@ -41189,14 +41312,22 @@ class App(tk.Tk):
                                   f"오늘 던전 {_day}) → 안 돌린다")
                         continue
                     click_log(f"[물약감시] #{si+1:02d} 장소가 흐리지만 "
-                              f"**1등이 오늘 던전({_day})이라 돌린다** "
+                              f"**{_why3} 이라 {_top} 을 돌린다** "
                               f"({_tv:.2f} · {_ratio:.2f}배)")
                 if _ratio < P0_PLACE_RATIO:
-                    click_log(f"[물약감시] #{si+1:02d} **어느 던전인지 애매하다** "
-                              f"(1등 {_top} {_tv:.2f} · 2등 {_rank[1][0]} {_2nd:.2f} "
-                              f"= {_ratio:.2f}배 < {P0_PLACE_RATIO}배) "
-                              f"→ 엉뚱한 던전을 돌리느니 **안 돌린다**")
-                    continue
+                    # 🧭 배수가 모자라도 **다른 클라들이 같은 던전이면** 믿는다
+                    _mn, _mh = self._many_now(ancs, [k for _, k in keys], si)
+                    if _mn and _top == _mn:
+                        click_log(f"[물약감시] #{si+1:02d} 배수가 모자라지만"
+                                  f"({_ratio:.2f}배) **다른 클라들도 {_top}**"
+                                  f"({_mh}) 이라 돌린다")
+                    else:
+                        click_log(f"[물약감시] #{si+1:02d} **어느 던전인지 애매하다** "
+                                  f"(1등 {_top} {_tv:.2f} · 2등 {_rank[1][0]} "
+                                  f"{_2nd:.2f} = {_ratio:.2f}배 < {P0_PLACE_RATIO}배"
+                                  + (f" · 다른 클라 {_mh}" if _mh else "")
+                                  + ") → 엉뚱한 던전을 돌리느니 **안 돌린다**")
+                        continue
                 _didx = dict((k, d) for d, k in keys)[_top]
                 # 🧭 **이 캐릭이 어느 던전에서 물약이 떨어졌는지** 적어둔다.
                 #    마을감시는 마을 이름만 보이므로 던전을 알 길이 없다 —
