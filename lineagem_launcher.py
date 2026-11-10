@@ -29422,11 +29422,18 @@ class App(tk.Tk):
                 # 🔎 판정은 **"더 끌어도 안 움직이나"** 다 (= 맨 위에 닿았다).
                 #    🚫 "처음 화면과 같나" 로 보면 안 된다 — **받고 나면 목록이
                 #       바뀌어** 맨 위로 돌아가도 처음과 절대 같아지지 않는다.
+                # 🚫 **한 번만 올릴 때는 확인하지 않는다** (2026-11-11)
+                #    `_ok`(더 끌어도 안 움직이나) 는 **2번 이상 끌어야** 성립한다 —
+                #    1번째는 당연히 움직이므로 **항상 ⚠ 가 붙어 거짓말**이 됐다.
+                #    🚫 거짓 로그는 다음 사람(=나)을 반드시 한 번 더 속인다.
+                _one = (QUEST_BACK_TRIES <= 0)
                 _ok, _n = False, 0
-                _prev = grab_window(cen)
+                _prev = None if _one else grab_window(cen)
                 for _t in range(moved + QUEST_BACK_TRIES):
                     self._quest_drag(l, t, kx, ky, 1)      # + = 아래로 = 되돌리기
                     _n += 1
+                    if _one:
+                        continue          # 사용자 지시 — 한 번만 올리고 끝
                     nap(0.25)
                     _im = grab_window(cen)
                     if _im is None or _prev is None:
@@ -29442,7 +29449,9 @@ class App(tk.Tk):
                           "%d번 올림(y%d→y%d)%s"
                           % (si + 1, moved, QUEST_DRAG_LO, QUEST_DRAG_HI,
                              _n, QUEST_BACK_HI, QUEST_BACK_LO,
-                             " ✔ 맨 위까지" if _ok else " — ⚠ 더 올려야 할 수도"))
+                             " (한 번만 — 사용자 지시)" if _one
+                             else (" ✔ 맨 위까지" if _ok
+                                   else " — ⚠ 더 올려야 할 수도")))
         return got
 
     def _quest_drag(self, l, t, kx, ky, dy):
