@@ -3469,10 +3469,49 @@ class IslandApp(tk.Tk):
         except Exception:
             return None
 
-    def _pop_beside(self, win, host=None):
-        """🧭 팝업을 **그 창 바로 왼쪽**에 붙인다 — 멀리 뜨지 않게 (2026-11-09).
+    # 🧭 메인런처 **세로바 폭** (FOLD_W_FIXED 152 + 창 테두리 16)
+    #    세로바는 창 **오른쪽에 붙어** 있으므로 `창오른쪽 - 이 폭` 이 세로바 왼쪽이다.
+    #    실측 2026-11-10 — 접힘 (2408,0) 168x1392 → 2576-168 = 2408 ✔
+    #    🚫 창 **왼쪽**을 쓰면 안 된다 — 펼치면 767 이라 팝업이 화면 밖으로 간다.
+    MAIN_BAR_W = 168
 
-        사용자: *"좌표창들도 **바로 옆에** 뜨게 해줘 … **멀리 보내지 말고**"*
+    def _main_bar_left(self):
+        """메인런처 **세로바 왼쪽** 화면 x. 못 찾으면 화면 오른쪽 끝에서 역산.
+
+        ⚠ 떼어낸 슬롯판도 제목이 `리니지M 자동 실행` 이다 (`wm manage` 가 루트
+          제목을 물려준다 — 실측 132x37). 그래서 **높이 500 넘는 본체**만 고른다."""
+        try:
+            import ctypes.wintypes as _wt
+            best = [0]
+
+            def _cb(h, _):
+                try:
+                    b = ctypes.create_unicode_buffer(220)
+                    ctypes.windll.user32.GetWindowTextW(h, b, 220)
+                    if "리니지M 자동 실행" in b.value:
+                        r = _wt.RECT()
+                        ctypes.windll.user32.GetWindowRect(h, ctypes.byref(r))
+                        if r.bottom - r.top > 500 and r.right > best[0]:
+                            best[0] = int(r.right)
+                except Exception:
+                    pass
+                return True
+
+            _T = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+            ctypes.windll.user32.EnumWindows(_T(_cb), 0)
+            if best[0] > 300:
+                return best[0] - self.MAIN_BAR_W
+        except Exception:
+            pass
+        return self.winfo_screenwidth() - self.MAIN_BAR_W
+
+    def _pop_beside(self, win, host=None):
+        """🧭 팝업을 **메인런처 세로바 바로 왼쪽**에 붙인다 — 다야 판과 같은 자리.
+
+        🧭 2026-11-10 사용자: *"모든 화면은 용던고고 등등등등등 전부
+           **메인런처 바로 옆**에 열리게 해달라니까 **다야 이것처럼**"*
+        🚫 **2026-11-09 의 '부모 창 왼쪽' 은 폐지했다** — 섬/던전 실행기 창이 이미
+           세로바 옆에 있으므로 그 왼쪽은 화면 가운데가 되어 **"멀리"** 다.
         ⚠ 크기·자리는 **`GetWindowRect`(테두리 포함)** 로만 잰다 —
           `winfo_reqwidth()`·`winfo_rootx()` 는 **안쪽** 기준이라 섞으면 어긋난다.
         ⚠ 띄운 뒤 **실제 자리를 다시 재서** 보이지 않는 테두리만큼 되돌린다."""
@@ -3493,21 +3532,21 @@ class IslandApp(tk.Tk):
                 bot = int(_r.bottom) if int(_r.bottom) > 200 else self.winfo_screenheight()
             except Exception:
                 bot = self.winfo_screenheight()
+            # 🧭 가로 — **메인런처 세로바 왼쪽** (창 왼쪽 끝이라 간격 4px)
+            _bar = self._main_bar_left()
+            x = _bar - ww - 4
+            # 🧭 세로 — 부모 창 top, 모르면 커서 높이
             hr_ = self._pop_rect(host) if (host is not None and host is not win) else None
-            if not hr_:
+            if hr_:
+                y = hr_[1]
+            else:
                 try:
                     import ctypes.wintypes as _wt
                     pt = _wt.POINT()
                     ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-                    cx, cy = pt.x, pt.y
+                    y = pt.y - 40
                 except Exception:
-                    cx, cy = sw // 2, 200
-                x, y = cx - ww - 12, cy - 40
-            else:
-                x = hr_[0] - ww - 8                 # 부모 창 왼쪽
-                if x < 0:                           # 화면 밖이면 오른쪽으로
-                    x = min(hr_[2] + 8, sw - ww)
-                y = hr_[1]
+                    y = 60
             x = max(0, min(int(x), sw - ww))
             y = max(0, min(int(y), bot - hh - 8))
             win.geometry("+%d+%d" % (x, y))
@@ -3518,6 +3557,8 @@ class IslandApp(tk.Tk):
                     dx, dy = f2[0] - x, f2[1] - y
                     if dx or dy:
                         win.geometry("+%d+%d" % (x - dx, y - dy))
+                self._rlog("[창자리] 팝업 (%d,%d) %dx%d · 세로바 %d"
+                           % (x, y, ww, hh, _bar))
             except Exception:
                 pass
         except Exception as _e:

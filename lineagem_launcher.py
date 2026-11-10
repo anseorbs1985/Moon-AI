@@ -1411,6 +1411,24 @@ MONDEX_CLICKS = 8
 #    ⚠ **느릿느릿(SLOW_FKEYS)에 넣지 않았다** — 보통 속도로 돈다.
 #    ⚠ 빈 칸은 애초에 `order` 에 안 들어가므로 **시간을 주지 않고 바로 넘어간다.**
 BADGE_CLICKS  = 11   # 10 → 11 (2026-10-27 사용자: "좌표 하나만 더 11개씩으로")
+# 🔮 **귀환주문서 — 던전이 끝난 뒤 혈귀 귀환주문서(7번)를 하나씩 누른다**
+#    (2026-11-10 사용자: *"던전이 끝나고 그러면 사용할거라서 절전모드가 되어있으면
+#     너가 자동으로 해제 시켜주고 그리고 **랜덤으로 7번을 하나씩** 누를수잇게"*)
+#    칸1 = 😴 절전해제 · 칸2 = 🩸 7번(혈귀)
+#    ⚠ 웨이브 분기를 **일부러 넣지 않았다** → `_run_dgn2` 의 순차 경로로
+#      **하나씩** 돈다 (사용자: "하나씩"). 순서는 랜덤이다
+#      (`KEEP_ORDER_FKEYS` 에 없으므로 `random.shuffle`).
+#    🚫 기존 섬 실행기의 `귀환주문서` 던전(4번 · 좌표 64개)과는 **다른 것**이다.
+RESC_CLICKS   = 2
+RESC_SLOT_GAP = (1.5, 3.0)   # 슬롯 사이 (마지막 슬롯 뒤엔 생략)
+# 😴 **깨어날 때까지** 깨우는 런처 — Z 한 번이 아니라 `_wake_until`
+#    (Z → '절전모드 해제' 글자 클릭, 최대 `SLEEP_WAKE_TRIES` 번).
+#    클릭이 한두 개뿐이고 **던전이 끝난 뒤** 쓰므로 16클라가 전부 자고 있다.
+SLEEP_HARD    = ("resc",)
+# 😴 **깨어 있었으면 칸1(절전해제)을 건너뛴다** (사용자: *"안 되어 있으면 그냥 7번"*)
+#    🚫 이 건너뛰기를 없애지 말 것 — 깨어 있는데 칸1 을 누르면 그 자리는
+#       **게임 화면**이라 엉뚱한 것이 눌린다.
+SLEEP_SKIP1   = ("resc",)
 # ⎋ **그 칸은 좌표를 누르지 않고 ESC 를 누른다** (0부터 센 번호)
 #    2026-10-27 사용자: *"그 **11번에는 esc를 넣어줘**"*
 #    · 좌표를 안 찍어도 된다 — 그 슬롯의 **첫 등록 좌표**로 창을 앞으로 올린 뒤 누른다.
@@ -1438,7 +1456,8 @@ BADGE_SLOT_GAP = (1.0, 6.0)   # 다음 슬롯을 들여보내기까지 — 2026-
 # ⚠ 아래 표는 이름이 SLOW_ 지만 **'빈 칸으로 슬롯을 만든다'** 는 뜻이다
 #   (느린 간격은 SLOW_FKEYS 가 정한다 — 둘을 헷갈리지 말 것).
 SLOW_CLICKS_BY = {"magic_slots": MAGIC_CLICKS, "omanst_slots": OMANST_CLICKS,
-                  "mondex_slots": MONDEX_CLICKS, "badge_slots": BADGE_CLICKS}
+                  "mondex_slots": MONDEX_CLICKS, "badge_slots": BADGE_CLICKS,
+                  "resc_slots": RESC_CLICKS}
 SLOW_FKEYS    = ("magic", "omanst", "mondex")
 SLOW_GAP_MIN  = 2.6        # 클릭 사이 (다른 런처 기본은 1.14~2.62초 — 두 배쯤 느리다)
 SLOW_GAP_MAX  = 5.2
@@ -1501,6 +1520,7 @@ DEFAULT_CFG = {
     "omanst_slots":  None,              # 🗝 오만 지배석 획득! — 16슬롯 × 좌표8 (느릿느릿)
     "mondex_slots":  None,              # 🗂 몬스터도감!! — 16슬롯 × 좌표8 (끝나면 보상 받기)
     "badge_slots":   None,              # 🎖 휘장 제작!! — 16슬롯 × 좌표10 (그냥 클릭만)
+    "resc_slots":    None,              # 🔮 귀환주문서 — 16슬롯 × 좌표2 (칸1 절전해제·칸2 7번)
     "dollchk_slots": None,              # 인형확인용 — 처음 로드 때 변신확인용 복사
     "relic_slots":   None,              # 성물확인용 — 처음 로드 때 변신확인용 복사
     "coupon_slots":  None,              # 쿠폰등록 — 16슬롯 × 좌표9 (변신확인용 방식)
@@ -2836,7 +2856,7 @@ MONDEX_TEMPO   = (0.90, 1.15)
 MAIL_TEMPO     = (0.90, 1.12)    # 클라마다 제 속도 (들어갈 때 한 번 뽑는다)
 MAIL_HOLD      = 0.10            # 10% 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
 MAIL_HOLD_T    = (0.4, 1.0)
-SLEEP_WAKE = ("fix", "jakwi", "dragon", "mondex")
+SLEEP_WAKE = ("fix", "jakwi", "dragon", "mondex", "resc")
 SLEEP_WAKE_KEY = "z"
 SLEEP_MATCH = 0.76      # 절전 화면 판정 기준.
 # 실측 491 창 — 자는 중 0.72~1.00 / 깨어 있을 때 0.39~0.50  → 0.68 이면 넉넉했다.
@@ -4269,7 +4289,7 @@ def quick_items(app):
         ("rec",    "녹화\n교체",  "#16a085", app._rec_win),
     ]
     for fk in ("dragon", "jakwi", "fix", "knight", "magic", "omanst", "mondex",
-               "badge", "dollchk", "relic", "coupon", "market", "eventshop",
+               "badge", "resc", "dollchk", "relic", "coupon", "market", "eventshop",
                "fish", "incoupon", "inmail", "circus", "circus2", "circus3"):
         try:
             _k, t, ic = D(fk)
@@ -10484,6 +10504,18 @@ class App(tk.Tk):
         _dun.pack(anchor="n", pady=(2, 0), padx=1, before=self._warn_toprow)
         if not hasattr(self, "_dun_imgs"):
             self._dun_imgs = {}
+        # 🔮 **귀환주문서 — 던전 상자 맨 위 (오만의탑 위)** (2026-11-10 사용자:
+        #    *"메인런처에 오만의탑 위에 귀환주문서 (실행) 이렇게 만들고"*)
+        #    이름 버튼 = 좌표 창 · ▶실행 = 16클라를 **랜덤 순서로 하나씩**.
+        #    😴 자고 있으면 깨어날 때까지 깨우고, 깨어 있으면 칸1 을 건너뛰고 칸2 만.
+        _rrw = tk.Frame(_dun); _rrw.pack(anchor="n", padx=3, pady=(1, 0))
+        tk.Button(_rrw, text="귀환주문서", font=("맑은 고딕", 9, "bold"),
+                  bg="#6c3483", fg="white", width=7, height=2,
+                  command=self._open_resc_win).pack(side="left")
+        tk.Button(_rrw, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#27ae60", fg="white", activebackground="#1e8449",
+                  width=4, height=2,
+                  command=lambda: self._start_dgn2("resc")).pack(side="left", padx=(2, 0))
         for _i, (_nm, _bg) in enumerate((("오만의탑", "#8e44ad"), ("악몽의섬", "#2471a3"),
                                          ("잊혀진섬", "#16a085"), ("에카", "#d35400"))):
             _rw = tk.Frame(_dun); _rw.pack(anchor="n", padx=3, pady=(1, 0))
@@ -11220,11 +11252,18 @@ class App(tk.Tk):
         return None
 
     def _pop_beside(self, win, host=None):
-        """🧭 팝업을 **그 창 바로 왼쪽**에 붙인다 — 멀리 뜨지 않게 (2026-11-09).
+        """🧭 팝업을 **메인런처 세로바 바로 왼쪽**에 붙인다 — 다야 판과 같은 자리.
 
-        🚫 세로바 기준(`_place_beside`)을 쓰지 않는다 — 부모 창과 겹친다.
+        🧭 2026-11-10 사용자: *"섬던전실행기던 좌표 열리는거 모든 화면은 용던고고
+           등등등등등 전부 **메인런처 바로 옆**에 열리게 해달라니까 **다야 이것처럼**"*
+        🚫 **2026-11-09 의 '부모 창 왼쪽' 은 폐지했다** — 용던고고 창이 이미 세로바
+           옆에 있으므로 그 왼쪽은 화면 가운데가 되어 **"멀리"** 다 (실측 x 1012).
+           부모 창과 겹치지만 팝업이 위에 뜨므로 그대로 쓸 수 있다.
+        ⚠ 가로는 `_place_beside` 와 **똑같이** 세로바(`_dc_host`) 기준이다.
+          메인런처 창 전체로 잡으면 펼친 상태에서 화면 밖으로 밀린다.
+        ⚠ 세로는 **부모 창 top**, 모르면 **커서 높이** (고정값을 쓰면 위로 튄다).
         ⚠ 크기·자리는 **`GetWindowRect`(테두리 포함)** 로만 잰다.
-          `winfo_reqwidth()`·`winfo_rootx()` 는 **안쪽** 기준이라 섞으면 어긋난다.
+          `winfo_reqwidth()` 는 **안쪽** 기준이라 섞으면 어긋난다.
         ⚠ 띄운 뒤 **실제 자리를 다시 재서** 보이지 않는 테두리만큼 되돌린다."""
         try:
             win.update_idletasks()
@@ -11235,27 +11274,36 @@ class App(tk.Tk):
                 ww, hh = win.winfo_reqwidth(), win.winfo_reqheight()
             sw = self.winfo_screenwidth()
             bot = self._work_bottom()
-            hl = ht = hr = None
+            # 🧭 가로 — **세로바 왼쪽** (`_place_beside` 와 같은 기준·같은 간격)
+            left = None
+            try:
+                _h = getattr(self, "_dc_host", None)
+                if _h is not None and _h.winfo_exists():
+                    left = _h.winfo_rootx()
+            except Exception:
+                left = None
+            if not left:
+                try:
+                    left = win32gui.GetWindowRect(int(self.wm_frame(), 16))[0]
+                except Exception:
+                    left = sw
+            x = left - ww - 12      # ⚠ 12px — rootx 는 테두리 **안쪽** 기준이다
+            # 🧭 세로 — 부모 창 top, 모르면 커서 높이
+            ht = None
             if host is not None and host is not win:
                 try:
-                    r = win32gui.GetWindowRect(int(host.wm_frame(), 16))
-                    hl, ht, hr = r[0], r[1], r[2]
+                    ht = win32gui.GetWindowRect(int(host.wm_frame(), 16))[1]
                 except Exception:
-                    hl = ht = hr = None
-            if hl is None:
-                # 부모 창을 모르면 **커서 옆** — 그래도 멀리 가지는 않는다
+                    ht = None
+            if ht is None:
                 try:
-                    cx, cy = win32gui.GetCursorPos()
+                    ht = win32gui.GetCursorPos()[1] - 40
                 except Exception:
-                    cx, cy = sw // 2, 200
-                x, y = cx - ww - 12, cy - 40
-                _why = "커서"
+                    ht = 60
+                _why = "세로바+커서"
             else:
-                x = hl - ww - 8                     # 부모 창 왼쪽
-                if x < 0:                           # 화면 밖이면 오른쪽으로
-                    x = min(hr + 8, sw - ww)
-                y = ht
-                _why = "부모창"
+                _why = "세로바+부모창"
+            y = ht
             x = max(0, min(int(x), sw - ww))
             y = max(0, min(int(y), bot - hh - 8))
             win.geometry("+%d+%d" % (x, y))
@@ -11267,8 +11315,9 @@ class App(tk.Tk):
                     win.geometry("+%d+%d" % (x - dx, y - dy))
             except Exception:
                 dx = dy = 0
-            click_log("[창자리] 팝업 %s → (%d,%d) %dx%d · 기준 %s · 어긋남 %d,%d"
-                      % (win.title()[:24], x, y, ww, hh, _why, dx, dy))
+            click_log("[창자리] 팝업 %s → (%d,%d) %dx%d · 기준 %s(세로바 %s)"
+                      " · 어긋남 %d,%d"
+                      % (win.title()[:24], x, y, ww, hh, _why, left, dx, dy))
         except Exception as _e:
             try:
                 click_log("[창자리] ⚠ 팝업 %s" % _e)
@@ -15789,6 +15838,7 @@ class App(tk.Tk):
         ("omanst_slots",   "🗝 오만 지배석 획득!"),
         ("mondex_slots",   "🗂 몬스터도감!!"),
         ("badge_slots",    "🎖 휘장 제작!!"),
+        ("resc_slots",     "🔮 귀환주문서"),
         ("fish_slots",     "🎣 낚시녹임"),
         ("market_slots",   "🔎 거래소검색"),
         ("coupon_slots",   "🎟 쿠폰등록"),
@@ -19105,6 +19155,7 @@ class App(tk.Tk):
                 "omanst":  ("omanst_slots",  "오만 지배석 획득!", "🗝"),
                 "mondex":  ("mondex_slots",  "몬스터도감!!", "🗂"),
                 "badge":   ("badge_slots",   "휘장 제작!!", "🎖"),
+                "resc":    ("resc_slots",    "귀환주문서",  "🔮"),
                 "dollchk": ("dollchk_slots", "인형확인용", "🧸"),
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
@@ -20284,6 +20335,19 @@ class App(tk.Tk):
         self._open_section_win("_badge_win", "🎖 휘장 제작!!",
                                lambda p: self._build_dgn2("badge", p),
                                w=470, h=560, pinnable=True)
+
+    def _open_resc_win(self):
+        """🔮 귀환주문서 — 좌표 2칸 창 (2026-11-10 사용자 요청).
+
+        칸1 = 😴 절전해제 · 칸2 = 🩸 7번(혈귀 귀환주문서).
+        ⚠ **칸1 은 비워둬도 된다** — 자고 있으면 `_wake_hard` 가 Z/글자로 깨운다
+          (절전 그림은 `SLEEP_IMG_ALT` 폴백으로 `fix_sleep.png` 를 빌려 쓴다).
+          칸1 에 좌표를 찍어두면 **자고 있었을 때만** 그 좌표도 누른다.
+        🚫 깨어 있으면 칸1 을 건너뛰고 칸2 만 누른다 (`SLEEP_SKIP1`).
+        [📋 전체붙임] 으로 한 슬롯을 16슬롯에 퍼뜨릴 수 있다 (창 위치 자동보정)."""
+        self._open_section_win("_resc_win", "🔮 귀환주문서",
+                               lambda p: self._build_dgn2("resc", p),
+                               w=470, h=430, pinnable=True)
 
     def _open_mondex_win(self):
         """🗂 몬스터도감!! — 좌표를 찍는 창. 좌표를 다 누르면 보상을 전부 받는다."""
@@ -24172,7 +24236,13 @@ class App(tk.Tk):
                 _anchor = slot_anchor(slot)
                 # 절전모드면 **Z 를 먼저 눌러 깨운다** (2026-08-29 사용자 지시).
                 # 평소엔 F11 만으로 되는데, 늦게 하면 절전으로 들어가 Z 가 필요하다.
-                if self._wake_once(fkey, _anchor, name, "😴"):
+                # 😴 `SLEEP_HARD` 런처는 **깨어날 때까지** 깨운다 (Z → 글자 클릭).
+                #    깨어 있었으면 `_woke=False` → 아래에서 칸1(절전해제)을 건너뛴다.
+                if fkey in SLEEP_HARD:
+                    _woke = self._wake_hard(fkey, _anchor, name, si + 1)
+                else:
+                    _woke = self._wake_once(fkey, _anchor, name, "😴")
+                if _woke:
                     self._after_wake_fix(_anchor, f"{fkey} 순차")
                 # 슬롯 맨 앞에서 키 한 번 (인사이드 쿠폰등록의 'z')
                 self._press_prekey(fkey, _anchor, name, icon)
@@ -24208,6 +24278,24 @@ class App(tk.Tk):
                                   f"(십자가가 씹힐 수 있다)")
                 order = [j for j in range(nclk)
                          if coords[j] or (has_img(fkey, j) and _anchor)]
+                # 😴 **칸1(절전해제)은 어떤 경우에도 직접 누르지 않는다**
+                #    (2026-11-10 사용자: *"절전이 되어 있으면 너가 해제해주고
+                #     **안 되어 있으면 그냥 7번을 눌러주면 된다**"*)
+                #    🚨 사용자가 찍은 칸1 = **창 안 (503,104)** = '절전모드 해제' 글자
+                #       자리다 (실측 절전 글자 자리 (507,106) 와 4px 차이).
+                #       **깨어 있을 때 그 자리는 게임 화면**이라 누르면 캐릭터가
+                #       걸어가거나 미니맵·HUD 가 열린다. 자고 있을 때도 `_wake_hard`
+                #       가 이미 깨웠으므로 그 뒤엔 역시 게임 화면이다.
+                #    ✅ 깨우는 일은 `_wake_hard` 가 전담한다 — Z → '절전모드 해제'
+                #       글자를 **그림으로 찾아** 클릭, 최대 `SLEEP_WAKE_TRIES` 번.
+                #    🧭 그래도 **칸1 좌표는 반드시 찍어야 한다** — 그 슬롯이 어느
+                #       클라인지 알려주는 기준점(`slot_anchor`)이고, 절전 확인·
+                #       깨우기·창 올리기가 전부 그 좌표로 그 클라를 찾는다.
+                #    🚫 이 건너뛰기를 없애지 말 것.
+                if fkey in SLEEP_SKIP1 and 0 in order:
+                    order.remove(0)
+                    click_log(f"{fkey} [{name}] 😴 칸1(절전해제)은 **누르지 않는다** "
+                              f"({'깨웠다' if _woke else '깨어 있었다'}) — 칸2 만 누른다")
                 # ⎋ ESC 칸은 좌표가 없어도 **반드시** 넣는다 (맨 마지막 칸)
                 _ec = ESC_CELLS.get(fkey)
                 if (_ec is not None and _ec < nclk and _ec not in order
@@ -24309,6 +24397,12 @@ class App(tk.Tk):
                     _sg = random.uniform(*SLOW_SLOT_GAP)
                     click_log(f"[{fkey}] 슬롯 [{name}] 끝 → 다음 슬롯까지 {_sg:.1f}초")
                     self._wait_gap(stop, f"{name} → 다음", -1, _sg)
+                # 🔮 귀환주문서 — **하나씩 천천히** (마지막 슬롯 뒤엔 생략)
+                if (fkey == "resc" and slot_idx is None
+                        and tn < len(targets) - 1 and not getattr(self, stop, False)):
+                    _rg = random.uniform(*RESC_SLOT_GAP)
+                    click_log(f"[resc] 슬롯 [{name}] 끝 → 다음 슬롯까지 {_rg:.1f}초")
+                    self._wait_gap(stop, f"{name} → 다음", -1, _rg)
                 if fkey in self.PASTE_FKEYS:
                     self._coupon_log(f"[{fkey}] 슬롯 [{name}] 끝 (클릭간격 배수 {c_mult:.2f})")
                     # 슬롯 간 간격 — 기본 3초의 +2%~18% 랜덤 (마지막 슬롯 뒤엔 생략)
@@ -25912,6 +26006,40 @@ class App(tk.Tk):
                             f"{SLEEP_WAKE_KEY.upper()} 눌러 깨움")
             return True
         except Exception:
+            return False
+
+    def _wake_hard(self, fkey, anchor, name="", si=None, icon="😴"):
+        """😴 **깨어날 때까지** 깨운다 (Z → '절전모드 해제' 글자) → 깨웠으면 True.
+
+        `_wake_once` 는 Z 를 **한 번만** 누른다. 🔮 귀환주문서처럼 클릭이 한두 개뿐이고
+        **던전이 끝난 뒤** 쓰는 런처는 16클라가 전부 자고 있을 가능성이 높아,
+        Z 를 안 먹는 클라까지 확실히 깨우는 쪽이 맞다 (`_wake_until` — 2026-09-30).
+
+        🚫 **깨어 있으면 아무것도 하지 않고 False** — 그때 부르는 쪽은
+           칸1(절전해제)을 건너뛴다 (`SLEEP_SKIP1`).
+        🚫 **방금 누가 깨운 클라도 건드리지 않는다** (`WAKE_COOL_RUN`) — F11 감시와
+           런처별 깨우기가 서로를 몰라 Z 가 두 번 들어가 엉뚱한 창이 열렸다.
+        ⚠ 절전 그림이 없으면 False. 그림은 `SLEEP_IMG_ALT` 폴백으로
+          `fix_sleep.png` 를 빌려 쓰므로 **따로 등록하지 않아도 된다.**"""
+        try:
+            if not (anchor and has_sleep_img(fkey)):
+                return False
+            if self._wake_recent(anchor, WAKE_COOL_RUN):
+                click_log(f"{fkey} [{name}] 방금(F11 등) 깨운 클라 — 다시 깨우지 않는다"
+                          f" ({WAKE_COOL_RUN:.0f}초 안)")
+                return False
+            _sx, _sy, _ss = find_sleep_img(fkey, anchor)
+            if _sx is None:
+                return False               # 깨어 있다 → 칸1(절전해제)을 건너뛴다
+            click_log(f"{fkey} [{name}] 😴 절전 (일치도 {_ss:.2f}) → "
+                      f"**깨어날 때까지** 깨운다")
+            self.status.set(f"{icon} [{name}] 절전 — 깨우는 중...")
+            if not self._wake_until(anchor, si=si, tag=fkey, fkey=fkey):
+                click_log(f"{fkey} [{name}] ⚠ {SLEEP_WAKE_TRIES}번 깨워도 "
+                          f"안 깨어났다 — 그래도 진행한다")
+            return True
+        except Exception as e:
+            click_log(f"{fkey} [{name}] ⚠ 깨우기 오류 {e}")
             return False
 
     def _wake_until(self, anchor, si=None, tag="fix", fkey="fix"):
@@ -34491,6 +34619,12 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("badge", i),
                             prev=lambda i: self._preview_dgn2("badge", i),
                             delete=lambda i: self._del_dgn2("badge", i)),
+            "resc":    dict(title="귀환주문서", key="resc_slots",
+                            clicks=RESC_CLICKS, color="#6c3483", enable=True, sel=True,
+                            reg=lambda s, c: self._reg_dgn2_click("resc", s, c),
+                            test=lambda i: self._test_dgn2("resc", i),
+                            prev=lambda i: self._preview_dgn2("resc", i),
+                            delete=lambda i: self._del_dgn2("resc", i)),
             "mondex":  dict(title="몬스터도감!!", key="mondex_slots",
                             clicks=MONDEX_CLICKS, color="#16a085", enable=True, sel=True,
                             reg=lambda s, c: self._reg_dgn2_click("mondex", s, c),
@@ -42459,7 +42593,7 @@ class App(tk.Tk):
         #    (2026-09-22 사용자 신고: "왜 작위는 예외냐"). 그래서 **아는 런처를 전부**
         #    훑어 멈춤 플래그를 세운다 — 새 런처가 생겨도 자동으로 포함된다.
         try:
-            for _fk in ("magic", "omanst", "mondex", "badge",
+            for _fk in ("magic", "omanst", "mondex", "badge", "resc",
                         "incoupon", "inmail", "jakwi", "fix", "dollchk", "relic",
                         "dragon", "knight", "sched", "coupon", "market", "tj",
                         "eventshop", "fish", "circus", "circus2", "circus3",
