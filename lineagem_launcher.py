@@ -4762,7 +4762,16 @@ FIX_PAID_MAYBE = ("btn", "free")     # 🔁 오인일 수 있다 — 다시 돌�
 #    *"한 번 해서 다시 다야 뜨면은 하지 마. 내가 할게. **시도를 한 번만 더**"*).
 #    1 = 💎 가 처음 떴을 때만 한 번 더. 두 번째로 💎 면 그만둔다.
 #    🚫 올리지 말 것 — 진짜 다야면 매번 '무료' 확인에서 멈춰 **계속 시도만** 한다.
-FIX_PAID_TRY   = 1
+# 💎 **다야 슬롯을 총 몇 번 시도할까** (2026-11-10 사용자: *"한 세번 시도 하고
+#    안되면 포기해 **목록에서 지우진 말고** 다음날에 내가 따로 복구할게"*)
+#    ⚠ 이름이 '총 횟수' 다 — 3 이면 **1회차 + 2번 더 = 3번**이다.
+#      (2026-11-08 의 `FIX_PAID_TRY`(💎 뒤 몇 번 더)와 뜻이 다르다)
+#    🚫 **진짜 다야(`coin`·`zone`)는 이 횟수와 무관하게 한 번도 안 돌린다**
+#       (`FIX_PAID_REAL`). 3번 도는 것은 **오인일 수 있는 것(`btn`·`free`)뿐**이다.
+#    🔑 횟수는 `fix_paid.json` 에 **저장된다** — 런처를 재시작해도 3번을 넘지 않는다.
+#       손으로 복구해 십자가가 사라지면 비워져 **다시 기회가 생긴다.**
+#    🚫 3번을 다 써도 **목록에서 지우지 않는다** — 사용자가 다음날 손으로 한다.
+FIX_PAID_TRIES = 3
 # 🩹 **복구는 하나씩 — 완전히 끝나야 다음** (2026-11-08 사용자 지시:
 #    *"복구는 웨이브 하지 마. 하나씩 완벽하게 마무리하고 다른 거 하나씩"*).
 #    한 슬롯은 클릭이 끝나도 안 끝난다 — 확인(최대 60초) · 아이템 판 · 2회차가
@@ -24715,17 +24724,43 @@ class App(tk.Tk):
         return os.path.join(LOCAL_DATA, "fix_paid.json")
 
     def _fix_paid_load(self):
+        """💎 표시된 슬롯 — 처음 부를 때 **횟수·이유도 메모리에 채운다**.
+
+        🔑 `_fix_paid_rd` 로 **한 번만** 읽는다. 그 뒤에는 메모리가 최신이므로
+           (`_fix_paid_mark` 가 고치고 바로 저장한다) 다시 읽으면 **덮어쓴다.**
+        ⚠ 그래서 `_fix_paid_mark` 는 **메모리를 고치기 전에** 이 함수를 부른다."""
         try:
             with open(self._fix_paid_path(), encoding="utf-8") as f:
-                return set(int(x) for x in (json.load(f) or {}).get("slots") or [])
+                d = json.load(f) or {}
+            if not getattr(self, "_fix_paid_rd", False):
+                self._fix_paid_rd = True
+                try:
+                    self._fix_paid_n = {int(k): int(v)
+                                        for k, v in (d.get("n") or {}).items()}
+                    self._fix_paid_why = {int(k): str(v)
+                                          for k, v in (d.get("why") or {}).items()}
+                except Exception:
+                    pass
+            return set(int(x) for x in (d.get("slots") or []))
         except Exception:
+            self._fix_paid_rd = True      # 파일이 없어도 한 번만 시도한다
             return set()
 
     def _fix_paid_save(self, sl):
+        """💎 표시를 저장한다 — **횟수(n)와 이유(why)도 함께** (2026-11-10).
+
+        🔑 횟수를 파일에 두지 않으면 런처를 재시작할 때마다 메모리가 비워져
+           **다시 3번씩** 돈다 (하루에 업데이트·워치독으로 여러 번 재시작한다).
+        ⚠ 옛 판({"slots": …})과 호환된다 — `n`·`why` 가 없으면 빈 것으로 읽는다."""
         try:
             os.makedirs(LOCAL_DATA, exist_ok=True)
+            _n = getattr(self, "_fix_paid_n", None) or {}
+            _w = getattr(self, "_fix_paid_why", None) or {}
             with open(self._fix_paid_path(), "w", encoding="utf-8") as f:
-                json.dump({"slots": sorted(int(x) for x in sl)}, f)
+                json.dump({"slots": sorted(int(x) for x in sl),
+                           "n": {str(k): int(v) for k, v in _n.items()},
+                           "why": {str(k): str(v) for k, v in _w.items()}},
+                          f, ensure_ascii=False)
         except Exception:
             pass
 
@@ -24735,6 +24770,9 @@ class App(tk.Tk):
         `why` 는 **왜 세웠나** (2026-11-08) — `coin`·`zone` 은 진짜 다야,
         `btn`·`free` 는 오인일 수 있다. [▶ 전부 복구] 가 한 바퀴 더 돌 때
         **오인만** 다시 돌린다. 🚫 진짜 다야는 절대 다시 돌리지 말 것."""
+        # 🔑 **파일을 먼저 읽는다** — 메모리를 고친 뒤에 읽으면 파일 값이
+        #    방금 센 횟수를 **덮어쓴다** (2026-11-10).
+        cur = self._fix_paid_load()
         try:
             w = getattr(self, "_fix_paid_why", None)
             if w is None:
@@ -24745,14 +24783,13 @@ class App(tk.Tk):
             if on:
                 if why:
                     w[int(si)] = why
-                # 💎 **몇 번째인가** — 1번째면 한 번 더, 2번째면 그만 (2026-11-08)
+                # 💎 **몇 번째 시도인가** — `FIX_PAID_TRIES`(3) 에 닿으면 그만
                 n[int(si)] = int(n.get(int(si), 0)) + 1
             else:
                 w.pop(int(si), None)
                 n.pop(int(si), None)       # 복구됐다 → 다음에 또 뜨면 기회를 준다
         except Exception:
             pass
-        cur = self._fix_paid_load()
         cur.add(int(si)) if on else cur.discard(int(si))
         self._fix_paid_save(cur)
         self._warn_refresh()
@@ -24880,10 +24917,11 @@ class App(tk.Tk):
                 skip.append((si, w))
                 continue
             # 💎 **한 번만 더** (2026-11-08 사용자: *"다시 다야 뜨면은 하지 마"*).
-            #    `_fix_paid_n` = 💎 를 세운 횟수. 1번째면 한 번 더, 2번째면 그만.
+            #    `_fix_paid_n` = 💎 를 세운 횟수 = **지금까지 시도한 횟수**.
+            #    `FIX_PAID_TRIES`(3) 에 닿으면 그만 — 목록은 **그대로 둔다.**
             _n = int((getattr(self, "_fix_paid_n", None) or {}).get(int(si), 1))
-            if _n > FIX_PAID_TRY:
-                skip.append((si, f"{w or '모름'}·{_n}번째"))
+            if _n >= FIX_PAID_TRIES:
+                skip.append((si, f"{w or '모름'}·{_n}번 다 썼다"))
                 continue
             redo.append(si)            # 오인일 수 있다 (btn·free·모름)
         return redo, skip
@@ -25159,10 +25197,17 @@ class App(tk.Tk):
                     # 🪟 **확대·축소된 창은 건너뛴다** (2026-11-08) — 복구 좌표는
                     #    평소 창 크기 기준이라 엉뚱한 자리를 누른다.
                     q = [x for x in q if not self._win_odd_skip(x, "유휴복구")]
-                    _paid = [x for x, _w in _sk]
-                    if _paid:
-                        click_log(f"[유휴복구] 💎 **진짜** 다야 슬롯 {sorted(_paid)} 는 건너뜀 "
+                    # 💎 **왜 건너뛰나**를 갈라 적는다 (2026-11-10) —
+                    #    '진짜 다야' 와 '3번 다 썼다' 는 사용자에게 뜻이 다르다.
+                    _real = [x for x, _w in _sk if _w in FIX_PAID_REAL]
+                    _used = [x for x, _w in _sk if _w not in FIX_PAID_REAL]
+                    if _real:
+                        click_log(f"[유휴복구] 💎 **진짜** 다야 슬롯 {sorted(_real)} 는 건너뜀 "
                                   f"(사람이 직접 써야 한다)")
+                    if _used:
+                        click_log(f"[유휴복구] 💎 다야 슬롯 {sorted(_used)} 는 "
+                                  f"**{FIX_PAID_TRIES}번 다 해봤다** — 더 하지 않는다 "
+                                  f"(목록에 그대로 둔다 · 손으로 해주세요)")
                     if q and not self._is_busy():
                         self._fix_idle_done = True
                         self._fix_idle_at = time.time()
