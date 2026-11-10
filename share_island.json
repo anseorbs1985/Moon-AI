@@ -1,40 +1,18 @@
 {
  "_설명": "🏝 섬/던전 좌표 배포 통로 — **지금 닫혀 있다**. 2026-11-09 잊섬 1회 배포를 끝내고 되돌렸다. 🚫 여는 것은 사용자가 콕 집어 말할 때만, 그 대화 안에서 다시 닫고 py check_share.py 로 확인한다.",
- "keys": [],
- "presets": false,
- "ignore_lock": false,
+ "keys": [
+  "화요일_에카"
+ ],
+ "presets": true,
+ "ignore_lock": true,
  "keep_local": [
   "enabled",
   "repeat_h",
-  "repeat_n",
-  "omanst_floor"
+  "repeat_n"
  ],
- "keep_cells": {
-  "수금_오만의탑": [
-   11,
-   12,
-   22
-  ],
-  "토요일_악몽의섬": [
-   16,
-   17
-  ],
-  "월요일_잊혀진섬": [
-   13,
-   14
-  ],
-  "화요일_에카": [
-   11,
-   12
-  ]
- },
- "keep_preset_cells": {
-  "수금_오만의탑": [
-   11,
-   12,
-   22
-  ]
- },
+ "keep_cells": {},
+ "keep_preset_cells": {},
  "presets_only": [],
- "fill_only": []
+ "fill_only": [],
+ "_이번": "2026-11-10 — **에카만**. 사용자: *\"에카도 바보됐네 … 좌표랑 전부 다 보내줘 · 잠겨 있어도 다 받을 수 있게 · 메인이랑 똑같이 에카만\"* 🔓 ignore_lock 으로 🔒 좌표잠금을 뚫는다. 🚫 로컬이 받으면 **즉시 비울 것**."
 }
