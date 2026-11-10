@@ -1420,6 +1420,18 @@ BADGE_CLICKS  = 11   # 10 → 11 (2026-10-27 사용자: "좌표 하나만 더 11
 #      (`KEEP_ORDER_FKEYS` 에 없으므로 `random.shuffle`).
 #    🚫 기존 섬 실행기의 `귀환주문서` 던전(4번 · 좌표 64개)과는 **다른 것**이다.
 RESC_CLICKS   = 2
+# 📐 **창 기준 좌표 한 벌** — 로컬이 [📐 좌표맞추기] 한 번으로 넣는다.
+#    🚫 **좌표 배포가 아니다** (2026-08-29 절대 규칙 — 좌표는 push 하지 않는다).
+#       코드에 두고 **사용자가 누를 때만** 그 컴퓨터 창 자리에 맞춰 넣는다.
+#    🧭 실측 2026-11-10 — 사용자가 찍은 16슬롯이 **창 기준으로 전부 같았다**
+#       (서로 다른 값 1가지 · 16/16 동일). 그래서 한 벌이면 끝난다.
+#    ⚠ 칸1 (503,104) 은 '절전모드 해제' 글자 자리다 (내 실측 (507,106) 과 4px).
+#       🚫 **누르지는 않는다** — `SLEEP_SKIP1`. 어느 클라인지 알려주는 기준점이다.
+#    새 런처에 더할 때는 여기에 `런처키: (잰 창 가로, 세로, {칸번호: (x, y)})` 한 줄.
+DGN2_REL = {
+    "resc": (546, 307, {0: (503, 104),      # 칸1 😴 절전해제 (기준점 — 안 누른다)
+                        1: (238, 242)}),    # 칸2 🩸 7번(혈귀)
+}
 RESC_SLOT_GAP = (1.5, 3.0)   # 슬롯 사이 (마지막 슬롯 뒤엔 생략)
 # 😴 **깨어날 때까지** 깨우는 런처 — Z 한 번이 아니라 `_wake_until`
 #    (Z → '절전모드 해제' 글자 클릭, 최대 `SLEEP_WAKE_TRIES` 번).
@@ -34800,6 +34812,14 @@ class App(tk.Tk):
         tk.Button(_top, text="📋 전체붙임", font=("맑은 고딕", 8, "bold"),
                   bg="#1a5276", fg="white", activebackground="#154360",
                   command=lambda f=fkey: self._grid_paste_all(f)).pack(side="left", padx=(4, 0))
+        # 📐 **좌표맞추기** — `DGN2_REL` 에 창 기준 한 벌이 있는 런처만 (2026-11-10).
+        #    🚫 좌표 배포가 아니다 — 코드에 둔 한 벌을 **사용자가 누를 때만** 넣는다.
+        #    로컬은 🔄 업데이트 뒤 **이 버튼 한 번**이면 16슬롯이 맞는다.
+        if fkey in DGN2_REL:
+            tk.Button(_top, text="📐 좌표맞추기", font=("맑은 고딕", 8, "bold"),
+                      bg="#6c3483", fg="white", activebackground="#5b2c6f",
+                      command=lambda f=fkey: self._dgn2_rel_apply(f)).pack(
+                          side="left", padx=(4, 0))
         wg = tk.Frame(parent); wg.pack(padx=6, pady=4)
         for idx in range(n_slots):
             r, c = idx % 4, idx // 4
@@ -35372,6 +35392,101 @@ class App(tk.Tk):
                 self.cfg[sp["key"]][idx][_f] = copy.deepcopy(clip[_f])
         save_cfg(self.cfg); self._refresh_ui()
         self.status.set(f"✔ {sp['title']} #{idx+1:02d} 붙여넣기 완료 (간격·붙임 자리 포함){note}")
+
+    def _dgn2_rel_apply(self, fkey):
+        """📐 **그 런처 좌표를 지금 클라 창에 맞춘다** — 16슬롯 한 번에.
+
+        🧭 2026-11-10 사용자: *"귀환주문서 좌표랑 같이 배포햇지?"*
+           좌표는 머신별이라 **push 하지 않는다**(2026-08-29 절대 규칙). 대신
+           `DGN2_REL`(창 기준 한 벌)을 그 컴퓨터의 **각 클라 창 왼쪽위 + 창 크기
+           비율**로 넣는다. **창 크기·격자가 어떻든 맞는다.**
+        🧭 2026-11-08 복구에서 쓴 `FIX_REL` 방식 그대로다 — 거기서 검증됐다.
+        🚫 덮어쓰기라 **한 번 물어본다.** 직전 좌표는 백업한다.
+        🚫 클라 16개를 못 찾으면 **아무것도 하지 않는다** (격자를 못 세운다).
+        """
+        import tkinter.messagebox as mb
+        import shutil as _sh, datetime as _dt
+        try:
+            _spec = DGN2_REL.get(fkey)
+            if not _spec:
+                return
+            _rw, _rh, _rel = _spec
+            # ⚠ `_dgn2_info(fkey)` 는 **인자를 받아** (키, 이름, 아이콘) 을 돌려준다.
+            #    인자 없이 부르면 TypeError 다 (2026-11-10 에 한 번 밟았다).
+            _key, _nm, _ = self._dgn2_info(fkey)
+            _nclk = SLOW_CLICKS_BY.get(_key) or max(_rel) + 1
+            rects = self._client_rects_by_slot()
+            if not rects or len(rects) < 16:
+                mb.showwarning("%s 좌표 맞추기" % _nm,
+                               "리니지M 클라 16개를 찾지 못했습니다.\n"
+                               "클라를 전부 켜고 다시 눌러주세요.")
+                return
+            cur = self.cfg.get(_key) or []
+            _old = sum(1 for _s in cur
+                       for _c in ((_s or {}).get("coords") or []) if _c)
+            if not mb.askyesno(
+                    "%s 좌표 맞추기" % _nm,
+                    "16슬롯의 좌표를 지금 클라 창에 맞춰 넣습니다.\n\n"
+                    + "  지금 등록된 좌표 " + str(_old) + "개 → 새로 "
+                    + str(len(_rel) * 16) + "개\n"
+                    + "  칸 " + " ".join(str(k + 1) for k in sorted(_rel))
+                    + "  (잰 창 " + str(_rw) + "x" + str(_rh) + ")\n\n"
+                    + "직전 좌표는 백업합니다. 계속할까요?"):
+                return
+            _bk = ""
+            try:
+                _bd = os.path.join(os.environ.get("LOCALAPPDATA", BASE),
+                                   "MoonAI", "backups")
+                os.makedirs(_bd, exist_ok=True)
+                _bk = os.path.join(
+                    _bd, _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    + "_before_" + fkey + "rel_coords.json")
+                _sh.copy2(CONFIG_FILE, _bk)
+            except Exception:
+                pass
+            while len(cur) < 16:
+                cur.append({})
+            _lines = []
+            for i in range(16):
+                L, T, R, B = rects[i][0], rects[i][1], rects[i][2], rects[i][3]
+                kx = (R - L) / float(_rw)
+                ky = (B - T) / float(_rh)
+                sl = cur[i] if isinstance(cur[i], dict) else {}
+                cs = list(sl.get("coords") or [])
+                while len(cs) < _nclk:
+                    cs.append(None)
+                for j, rxy in _rel.items():
+                    if j < len(cs):
+                        cs[j] = [int(L + rxy[0] * kx), int(T + rxy[1] * ky)]
+                sl["coords"] = cs[:_nclk]
+                cur[i] = sl
+                _lines.append(
+                    "#" + format(i + 1, "02d") + " " + str(R - L) + "x"
+                    + str(B - T) + " → "
+                    + " ".join("(" + str(cs[j][0]) + "," + str(cs[j][1]) + ")"
+                                for j in sorted(_rel)))
+            self.cfg[_key] = cur
+            save_cfg(self.cfg)
+            click_log("[" + fkey + "좌표] 📐 16슬롯을 지금 클라 창에 맞췄다 (창 기준 "
+                      + " ".join("칸" + str(k + 1) + str(tuple(v))
+                                  for k, v in sorted(_rel.items()))
+                      + " · 잰 창 " + str(_rw) + "x" + str(_rh)
+                      + " · 전 " + str(_old) + "개)")
+            for _l in _lines:
+                click_log("[" + fkey + "좌표]   " + _l)
+            if _bk:
+                click_log("[" + fkey + "좌표] 📦 직전 좌표 백업: " + _bk)
+            self.status.set("📐 %s 좌표를 16슬롯에 맞췄습니다" % _nm)
+            mb.showinfo("%s 좌표 맞추기" % _nm,
+                        "✔ 16슬롯에 넣었습니다.\n\n"
+                        + "\n".join(_lines[:4]) + "\n  …\n" + _lines[-1]
+                        + "\n\n되돌리려면 [♻ 좌표복구] 를 누르세요.")
+        except Exception as e:
+            click_log("[" + fkey + "좌표] ⚠ 오류 " + repr(e))
+            try:
+                mb.showerror("좌표 맞추기", str(e))
+            except Exception:
+                pass
 
     def _grid_paste_all(self, fkey):
         """📋 전체붙임 — 복사한 슬롯을 **16슬롯 전부**에 붙인다 (2026-08-29 사용자 요청).
