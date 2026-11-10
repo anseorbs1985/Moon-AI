@@ -17177,8 +17177,8 @@ class App(tk.Tk):
                   bg="#1e8449", fg="white", bd=0, padx=5, pady=1,
                   command=self._run_night_sel).pack(side="left", padx=(3, 0))
         # 🧭 **지금 어느 슬롯이 돌고 있나** 다시 본다 (약 1초)
-        tk.Button(r1, text="🧭", font=("맑은 고딕", 8, "bold"), bd=0,
-                  bg="#1e8449", fg="white", padx=3,
+        tk.Button(hd, text="🧭", font=("맑은 고딕", 7, "bold"),
+                  bg="#1e8449", fg="white", bd=0, padx=4, pady=1,
                   command=self._night_scan_inside).pack(side="left", padx=(3, 0))
         tk.Button(hd, text="해제", font=("맑은 고딕", 7),
                   bg="#95a5a6", fg="white", bd=0, padx=5, pady=1,
