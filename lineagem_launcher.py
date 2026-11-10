@@ -5208,15 +5208,6 @@ QUEST_REW_CLICK = (272, 103)  # 닫기 — '보 상' 글자 가운데
 QUEST_SEE_N = 12              # 보상 창이 뜰 때까지 보는 횟수 (실측 0.75초에 떴다)
 QUEST_SEE_GAP = (0.20, 0.32)
 QUEST_MAX = 6                 # 한 클라에서 최대 몇 개까지 (무한 방지)
-# 🎁 **받은 뒤에는 목록이 다시 그려진다** (2026-11-11 사용자: *"왜 **한 번 받고
-#    꺼버리냐**"*) — 그 줄이 빠지고 아래 것이 올라오는 데 시간이 걸린다.
-#    🚨 옛 코드는 받자마자 0.35~0.60초 뒤 한 번 보고 **[완료] 가 없으면 끝**냈다.
-#       그 사이 화면이 아직 안 그려져 **둘째·셋째를 통째로 놓쳤다.**
-#    ✅ ① 보상 창이 **사라질 때까지** 기다리고 ② 그래도 안 보이면 **몇 번 더** 본다.
-#       🚫 **처음부터** 없을 때는 다시 보지 않는다 (받은 적이 있을 때만 — 안 느려진다).
-QUEST_GONE_N = 8              # 보상 창이 사라질 때까지 보는 횟수
-QUEST_AGAIN_N = 3             # 받은 뒤 [완료] 가 안 보이면 더 보는 횟수
-QUEST_AGAIN_GAP = (0.35, 0.55)
 QUEST_GAP = (0.35, 0.60)      # 하나 받고 다음까지
 QUEST_SLOT_GAP = (0.5, 0.9)   # 클라 사이
 # ⏱ **1분20초~2분** 안에 끝낸다 (2026-11-09 사용자 지시).
@@ -29336,7 +29327,7 @@ class App(tk.Tk):
             return 0
         kx, ky = ww / float(QUEST_BASE_W), hh / float(QUEST_BASE_H)
         cen = (l + ww // 2, t + hh // 2)
-        got, moved, _again = 0, 0, 0
+        got, moved = 0, 0
         im0 = im_last = None      # 🔙 맨 처음 화면 · 끌기 직전 화면
         # 😴 **자고 있으면 깨우고 받는다** (2026-11-09 사용자 지시:
         #    *"받으려고 하는 클라 절전을 너가 해제시키고 받아야 해"*)
@@ -29368,17 +29359,7 @@ class App(tk.Tk):
                     im_last = im          # 📜 끌기 직전 화면 (바뀌었나 비교용)
                     rows = quest_done_rows(im)
                     if not rows:
-                        # 🎁 **받은 뒤라면** 목록이 다시 그려지는 중일 수 있다
-                        if got and _again < QUEST_AGAIN_N:
-                            _again += 1
-                            nap(random.uniform(*QUEST_AGAIN_GAP))
-                            continue
-                        if got and _again:
-                            click_log("[퀘스트] #%02d 🔎 받은 뒤 %d번 더 봤지만 "
-                                      "[완료] 가 없다 — 이 클라는 끝"
-                                      % (si + 1, _again))
                         break
-                    _again = 0
                     qy, pts = rows[0]
                     cx, cy = int(l + QUEST_CLICK_X * kx), int(t + qy * ky)
                     self._focus_client_at((cx, cy))
@@ -29404,24 +29385,10 @@ class App(tk.Tk):
                     # 🖱 닫기 — **아무 곳이나** ('보 상' 글자 = 창 안이라 확실)
                     click_at(int(l + QUEST_REW_CLICK[0] * kx),
                              int(t + QUEST_REW_CLICK[1] * ky))
-                    # 🎁 **창이 사라질 때까지** 기다린다 (2026-11-11) — 바로 다시 보면
-                    #    아직 보상 창이라 [완료] 를 못 찾고 **끝내버린다.**
-                    _gone = 0
-                    for _g in range(QUEST_GONE_N):
-                        nap(random.uniform(*QUEST_SEE_GAP))
-                        _i2 = grab_window(cen)
-                        if _i2 is None:
-                            continue
-                        _w2, _m2 = quest_reward_seen(_i2)
-                        if not (_w2 >= QUEST_REW_WHITE and _m2 < QUEST_REW_DARK):
-                            _gone = _g + 1
-                            break
                     got += 1
                     click_log("[퀘스트] #%02d 🎁 **보상 받았다** (%d번째) — "
-                              "[완료] 줄 창안y%d (빨강 %d점) · 창 뜸 0.%ds · "
-                              "닫힘 %s"
-                              % (si + 1, got, qy, pts, _k + 1,
-                                 ("%d번째" % _gone) if _gone else "⚠ 안 닫힘"))
+                              "[완료] 줄 창안y%d (빨강 %d점) · 창 뜸 0.%ds"
+                              % (si + 1, got, qy, pts, _k + 1))
                     nap(random.uniform(*QUEST_GAP))
                 if _s >= QUEST_SCROLL_N:
                     break
