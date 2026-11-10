@@ -3358,7 +3358,16 @@ IMG_CLICK_OFFS = {("dragon", 4): [(0, 0), (8, 0), (-6, 0), (4, 0)]}
 #       패널이 마름모를 덮어 +8px 오른쪽을 눌러야 했다) **보정하지 않는다.**
 IMG_PX_BASE_W = 491
 IMG_NEAR_X  = {("dragon", 4): (140, 300)}     # 창내 x 가 이 안이면 '가깝다' (491 기준)
-RECLICK_WAIT_FAR = {"dragon": [3.0, 4.5, 6.0, 8.0]}
+# 🧍 **먼 자리는 한 번 보고 끝낸다** (2026-11-10 사용자: *"멀리 있으면 안
+#    들어가는 거 아니까 상관없어 · **가까운 것은 100%만** 넣어주면 되"*)
+#    🚨 2026-10-21 에는 '걸어갈 시간을 준다' 며 3.0~8.0초 × 4번 = **최대 21.5초**를
+#       썼다. 사용자는 **걸어가서 들어가는 것을 기대하지 않는다** → 통째로 낭비다.
+#       그 시간에 다른 슬롯을 돌리는 것이 낫다 (먼 슬롯 하나당 **약 19초 절약**).
+#    ⚠ 그래도 **첫 클릭은 한다** — 혹시 들어갈 수도 있고, 확인은 2초면 공짜다.
+#    🚫 가까운 쪽(`RECLICK_WAIT_BY` 1.6~2.8초 × `RECLICK_TRIES_BY` 4자리)은
+#       **건드리지 않았다** — 기록상 재클릭이 73/74 성공해 이미 거의 100% 다.
+RECLICK_TRIES_FAR = {"dragon": 1}
+RECLICK_WAIT_FAR = {"dragon": [2.0]}
 DRIFT_MAX  = 40           # 그림이 이만큼(px) 안에서 움직인 건 '같은 것'으로 본다.
                           # 더 멀면 다른 마름모라 겨냥을 옮기지 않는다 (엉뚱한 층 방지)
 
@@ -23656,6 +23665,12 @@ class App(tk.Tk):
             # 로컬에서 '창이 안 뜬다'가 잦아 2회까지, 갈수록 더 길게 누른다.
             if has_img(fkey, j + 1):
                 _rtries = max(RECLICK_TRIES, RECLICK_TRIES_BY.get(fkey, 0))
+                # 🧍 **먼 자리는 한 번 보고 끝낸다** — 어차피 안 들어간다
+                #    (2026-11-10 사용자 지시). 1 이면 첫 바퀴가 곧 마지막 바퀴라
+                #    **재클릭을 한 번도 하지 않고** 그 자리에 둔다.
+                _isfar = bool(locals().get("_far"))
+                if _isfar and RECLICK_TRIES_FAR.get(fkey):
+                    _rtries = RECLICK_TRIES_FAR[fkey]
                 for _try in range(_rtries):
                     # 🧍 멀면 걸어갈 시간을 더 준다 (가까우면 지금 그대로)
                     _ww = ((RECLICK_WAIT_FAR.get(fkey) if locals().get("_far") else None)
@@ -23677,12 +23692,22 @@ class App(tk.Tk):
                     #    띄웠는지 아무도 확인하지 않았다.** 땅이었으면 한 걸음 더
                     #    걸어간 것뿐이다. 확인할 수 없는 클릭은 보내지 않는다.
                     if _try >= _rtries - 1:
-                        click_log(f"{fkey} [{nm}] 좌표{j+1} {_rtries}번 눌러도 창이 "
-                                  f"안 뜸 (좌표{j+2} 최고 {_ws:.2f}) → "
-                                  f"**더 누르지 않고 그 자리에 둔다**")
-                        self.status.set(f"🧍 [{nm}] 좌표{j+1} 창이 안 떠서 "
-                                        f"그 자리에 둡니다 (더 안 누름)")
-                        self._note(fkey, nm, f"좌표{j+1} 창이 안 떠 그 자리에 둠")
+                        if _isfar:
+                            # 🧍 먼 자리 — 사용자가 "멀면 안 들어가는 거 안다" 고
+                            #    했으므로 **빨리 포기**한다 (다른 슬롯은 계속 돈다)
+                            click_log(f"{fkey} [{nm}] 좌표{j+1} 🧍 **멀어서 안 "
+                                      f"들어간다** (좌표{j+2} 최고 {_ws:.2f}) → "
+                                      f"한 번만 보고 포기한다 (다른 슬롯은 계속)")
+                            self.status.set(f"🧍 [{nm}] 좌표{j+1} 멀어서 포기 "
+                                            f"— 다른 슬롯은 계속합니다")
+                            self._note(fkey, nm, f"좌표{j+1} 멀어서 포기 (빨리 끝냄)")
+                        else:
+                            click_log(f"{fkey} [{nm}] 좌표{j+1} {_rtries}번 눌러도 창이 "
+                                      f"안 뜸 (좌표{j+2} 최고 {_ws:.2f}) → "
+                                      f"**더 누르지 않고 그 자리에 둔다**")
+                            self.status.set(f"🧍 [{nm}] 좌표{j+1} 창이 안 떠서 "
+                                            f"그 자리에 둡니다 (더 안 누름)")
+                            self._note(fkey, nm, f"좌표{j+1} 창이 안 떠 그 자리에 둠")
                         break
                     _hold = RECLICK_HOLD[min(_try, len(RECLICK_HOLD) - 1)]
                     click_log(f"{fkey} [{nm}] 좌표{j+1} 눌렀는데 창이 안 뜸 "
