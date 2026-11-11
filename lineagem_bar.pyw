@@ -45,6 +45,11 @@ DAY_DUNGEON = {0: "월요일_잊혀진섬", 1: "화요일_에카",
 ALPHAS = [1.0, 0.85, 0.7, 0.55, 0.4]
 # 🧭 '지금 돌고 있나' 를 다시 훑기까지(초) — 훑는 데 약 1초 든다 (2026-11-10)
 INSIDE_TTL = 40
+# 🧭 '실행중' 을 스스로 다시 훑는 주기(초) — **창을 만진 뒤 `INSIDE_WARM` 초 동안만**
+#    (2026-11-11). 요약런처는 뒤에 오래 떠 있을 수 있어서, 늘 훑으면 헛일이 된다.
+INSIDE_EVERY = 30
+INSIDE_WARM  = 180
+DONE_F = os.path.join(LOCAL, "island_done.json")   # 섬 실행기가 슬롯이 끝날 때마다 쓴다
 
 LEFT_COLORS = {6: "#1e8449", 5: "#27ae60", 4: "#16a085",
                3: "#2980b9", 2: "#8e44ad", 1: "#c0392b"}
@@ -101,7 +106,8 @@ class Bar(tk.Tk):
         self._place()
         self.after(20000, self._tick)
         self.after(1000, self._raise_watch)
-        self._day_seen = datetime.date.today()
+        _n0 = datetime.datetime.now()
+        self._day_seen = (_n0.date(), _n0.weekday() == 2 and _n0.hour >= 5)
         self.after(300000, self._day_tick)     # 5분마다 날짜만 확인
         self.bind("<Button-1>", self._touch, add="+")
         self.bind("<FocusOut>", lambda _e: self._maybe_back(), add="+")
@@ -112,6 +118,13 @@ class Bar(tk.Tk):
         """오늘 요일에 맞는 탭 번호 (못 찾으면 준 값 그대로)."""
         try:
             want = DAY_DUNGEON.get(datetime.datetime.now().weekday())
+            # 📅 그 요일 던전을 이번 주에 **다 돌렸으면** 다음 던전 (2026-11-11 사용자 지시).
+            #    규칙은 섬 실행기의 `dun_today` 한 곳에 있다 — 여기에 베껴 두지 말 것.
+            try:
+                import lineagem_island as _isl
+                want = _isl.dun_today(jload(COORDS), day_map=DAY_DUNGEON) or want
+            except Exception:
+                pass
             for i, (_d, _nm, k, _c) in enumerate(DUNS):
                 if k == want:
                     return i
@@ -123,7 +136,9 @@ class Bar(tk.Tk):
         """날짜가 넘어가면 그 날 던전으로 바꿔준다.
         **사용자가 손으로 고른 탭은 그 날 안에는 건드리지 않는다.**"""
         try:
-            today = datetime.date.today()
+            _n = datetime.datetime.now()
+            #   (날짜, '수요일 05시가 지났나' = 새 주가 시작됐나)
+            today = (_n.date(), _n.weekday() == 2 and _n.hour >= 5)
             if getattr(self, "_day_seen", None) != today:
                 self._day_seen = today
                 self._show(self._day_tab(self.tab))
@@ -245,10 +260,26 @@ class Bar(tk.Tk):
             self.b_2h.pack_forget()
         self._refresh()
         self.after(30, self._place)
+        # 🧭 본 지 오래됐으면 '실행중' 을 다시 훑는다 (약 1초 · 백그라운드)
+        if (time.time() - getattr(self, "inside_at", 0)) > INSIDE_TTL:
+            self.after(300, lambda: self._scan_inside(quiet=True))
+
+    def _in_now(self):
+        """🧭 **지금 탭의 던전 안**인 슬롯 집합 — 훑을 때는 네 던전을 한 번에 본다."""
+        out = set()
+        try:
+            key = self._cur()[2]
+            for i, v in (getattr(self, "inside", None) or {}).items():
+                if v and v[0] == key:
+                    out.add(i)
+        except Exception:
+            pass
+        return out
 
     def _refresh(self):
         key = self._cur()[2]
         slots, st = self._slots(), jload(REPF)
+        _inn = self._in_now()
         live = 0
         for i, (run, rep, plus, mode) in enumerate(self.cells):
             s = slots[i] if i < len(slots) else None
@@ -276,7 +307,7 @@ class Bar(tk.Tk):
             elif not slots[i].get("enabled", True):
                 # OFF 슬롯은 **회색 'OFF'** 로 보여준다 (2026-08-29 사용자 지시)
                 run.config(text=f"{i+1:02d} OFF", bg="#7f8c8d")
-            elif i in (getattr(self, "inside", None) or {}):
+            elif i in _inn:
                 # 🧭 **지금 던전 안** = 돌고 있다 → 초록 (2026-11-10 사용자 요청).
                 #    🚫 누르는 것은 막지 않는다 — 직접 고르면 같이 돈다.
                 run.config(text=f"{i+1:02d} 실행중", bg="#1e8449")
@@ -318,6 +349,41 @@ class Bar(tk.Tk):
                 self._refresh()
             except Exception:
                 pass
+        # 📅 지금 탭의 던전을 **방금 다 돌렸으면** 다음 던전으로 (2026-11-11).
+        #    파일 시각만 본다. 대기열이 남았거나 돌고 있으면 미룬다.
+        try:
+            try:
+                _dm = os.path.getmtime(DONE_F)
+            except Exception:
+                _dm = 0.0
+            if _dm != getattr(self, "_done_m", None):
+                if getattr(self, "_done_m", None) is not None:
+                    self._adv_at = time.time() + 3.0
+                self._done_m = _dm
+            _at = getattr(self, "_adv_at", 0)
+            if _at and time.time() >= _at:
+                self._adv_at = 0
+                if self.queue or (self.proc is not None and self.proc.poll() is None):
+                    self._adv_at = time.time() + 6.0
+                else:
+                    import lineagem_island as _isl
+                    _cfg = jload(COORDS)
+                    if _isl.dun_done(self._cur()[2], _cfg):
+                        _t = self._day_tab(self.tab)
+                        if _t != self.tab:
+                            self._show(_t)
+        except Exception:
+            pass
+        # 🧭 창을 만진 뒤 한동안만 '실행중' 을 스스로 다시 훑는다
+        try:
+            _now = time.time()
+            if (_now - getattr(self, "_warm_at", 0) < INSIDE_WARM
+                    and _now - getattr(self, "inside_at", 0) > INSIDE_EVERY
+                    and not (self.proc is not None and self.proc.poll() is None)):
+                self.inside_at = _now            # 겹쳐 걸리지 않게 먼저 찍어둔다
+                self._scan_inside(quiet=True)
+        except Exception:
+            pass
         self.after(1000, self._tick)
 
     def _place(self):
@@ -360,7 +426,7 @@ class Bar(tk.Tk):
         able = {i for i, s in enumerate(self._slots()[:16])
                 if isinstance(s, dict) and any(s.get("coords") or [])
                 and s.get("enabled", True)}
-        _in = getattr(self, "inside", None) or {}
+        _in = self._in_now()
         able = {i for i in able if i not in _in}
         self.sel = set() if self.sel >= able and able else able
         self._refresh()
@@ -378,9 +444,9 @@ class Bar(tk.Tk):
             got = {}
             try:
                 import lineagem_island as _isl
-                # 🧭 **지금 탭의 던전 안**일 때만 '실행중' (2026-11-10)
-                got = _isl.slots_in_dungeon(self._slots()[:16],
-                                            only=self._cur()[2])
+                # 🧭 네 던전을 한 번에 본다 — 칠할 때 **지금 탭의 던전**만 고른다
+                #    (`_in_now`). 탭을 바꿔도 묵은 값이 다른 탭에 칠해지지 않는다.
+                got = _isl.slots_in_dungeon(_isl.anchor_slots(jload(COORDS)))
             except Exception:
                 pass
             finally:
@@ -527,6 +593,7 @@ class Bar(tk.Tk):
     # ── 실행 ────────────────────────────────────────────────────────
     def _touch(self, _e=None):
         """이 창을 누르면 앞으로 올라온다."""
+        self._warm_at = time.time()          # 🧭 이때부터 한동안 '실행중' 을 다시 훑는다
         try:
             self.lift()
         except Exception:
@@ -545,6 +612,8 @@ class Bar(tk.Tk):
             r = float(jload(CFG).get("raise") or 0)
             if r > float(getattr(self, "_last_raise", 0)):
                 self._last_raise = r
+                self._warm_at = time.time()  # 🧭 다시 띄웠다 → '실행중' 을 새로 본다
+                self.inside_at = 0
                 self.deiconify()
                 self.lift()
                 self.attributes("-topmost", True)

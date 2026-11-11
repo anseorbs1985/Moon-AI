@@ -293,6 +293,13 @@ IDLE_RERUN_KEY  = "토요일_악몽의섬"   # 기억도 다수결도 없을 때
 # 🧭 슬롯판의 '지금 돌고 있나' 를 다시 훑기까지 (초). 훑는 데 약 1초 들므로
 #    이 안이면 방금 본 것을 그대로 쓴다 (2026-11-10).
 NIGHT_INSIDE_TTL = 40
+# 🧭 슬롯판이 **화면에 보이는 동안** '실행중' 을 다시 훑는 주기(ms) (2026-11-11).
+#    사용자: "각 던전 안에 있으면 미니에 실행중으로 해주랬는데 안 되네"
+#    → 판정은 멀쩡했다(16클라 1.000). **런처가 켜질 때 한 번만 훑고 다시 안 봐서**
+#      그 뒤에 던전에 들어간 것이 반영되지 않았다.
+#    16클라를 찍는 데 약 1.2초(백그라운드 스레드) — 30초마다면 한 코어의 4%.
+#    🚫 판이 안 보이거나(접힘·최소화) 작업이 도는 중이면 훑지 않는다 → 평소 부하 0.
+NIGHT_INSIDE_TICK = 30000
 MANY_MIN  = 2    # 다수결 — 같은 던전에 **이만큼은** 있어야 믿는다
 MANY_LEAD = 2    # 2등 던전보다 **이만큼은** 많아야 한다 (비슷하면 안 믿는다)
 # 🧪 **물약이 없어서 나온 것일 때만** 다시 돌린다 (2026-10-17 사용자 재지시):
@@ -17289,6 +17296,14 @@ class App(tk.Tk):
         self._refresh_night_btns()
         self._refresh_night_queue()
         self.status.set(f"슬롯판 — {label} (좌표·설정은 그 던전 창에서)")
+        # 🧭 본 지 오래됐으면 '실행중' 을 다시 훑는다 (훑은 것은 네 던전 전부라
+        #    방금 본 것이면 위 `_refresh_night_btns` 가 이미 이 탭에 맞게 칠했다)
+        try:
+            if ((time.time() - getattr(self, "_night_inside_at", 0)) > NIGHT_INSIDE_TTL
+                    and self._night_panel_seen()):
+                self._night_scan_inside(quiet=True)
+        except Exception:
+            pass
 
     def _build_night_grid(self, parent):
         """악몽의섬 슬롯별 [실행] + [⏰끄기] + [+선택] — 좌표·반복은 섬/던전 실행기에서 관리."""
@@ -17438,6 +17453,8 @@ class App(tk.Tk):
         # 🧭 판이 뜨고 나면 **한 번** 훑어 '실행중' 을 칠해 둔다 (조용히).
         #    🚫 되풀이하지 않는다 — 16클라를 찍는 일이라 비싸다.
         self.after(2600, lambda: self._night_scan_inside(quiet=True))
+        #    🧭 그 뒤로는 **판이 보이는 동안만** 30초마다 (2026-11-11)
+        self.after(NIGHT_INSIDE_TICK, self._night_inside_tick)
         # 켜질 때는 **항상 붙은 채로** 시작한다 (2026-09-30 사용자 지시)
         self.after(1500, self._night_detach_restore)
         # 📤 떼어낸 판을 메인런처 바로 아래·바로 앞에 붙여 두고, 최소화도 같이 따라간다
@@ -17458,6 +17475,43 @@ class App(tk.Tk):
             sel.add(idx)
         self._refresh_night_plus()
 
+    def _night_panel_seen(self):
+        """슬롯판이 지금 **화면에 보이나** (접힘·최소화·붙은 채 가려짐이면 False)."""
+        try:
+            p = getattr(self, "_night_panel", None)
+            return bool(p is not None and p.winfo_exists() and p.winfo_viewable())
+        except Exception:
+            return False
+
+    def _night_in_now(self):
+        """🧭 **지금 탭의 던전 안**인 슬롯(0부터) 집합.
+
+        훑을 때는 네 던전을 한 번에 본다(`{슬롯: (던전, 점수, 배수)}`).
+        그중 **지금 보고 있는 탭의 던전**인 것만 '실행중' 이다 —
+        탭을 바꿔도 다시 훑을 필요가 없고, 묵은 값이 다른 탭에 칠해지지도 않는다."""
+        out = set()
+        try:
+            for i, v in (getattr(self, "_night_inside", None) or {}).items():
+                if v and v[0] == self.NIGHT_KEY:
+                    out.add(i)
+        except Exception:
+            pass
+        return out
+
+    def _night_inside_tick(self):
+        """🧭 슬롯판이 **보이는 동안만** '실행중' 을 다시 훑는다 (30초마다).
+
+        🚫 안 보이면 즉시 빠진다 (부하 0). 작업이 도는 중에도 훑지 않는다.
+        ⚠ 화면을 긁는 일은 `_night_scan_inside` 의 **백그라운드 스레드**가 한다."""
+        try:
+            if (self._night_panel_seen() and not self._is_busy()
+                    and not self._island_running()):
+                self._night_scan_inside(quiet=True)
+        except Exception:
+            pass
+        finally:
+            self.after(NIGHT_INSIDE_TICK, self._night_inside_tick)
+
     def _night_scan_inside(self, quiet=False, then=None):
         """🧭 **지금 어느 슬롯이 던전 안인가** 를 훑어 버튼에 보여준다.
 
@@ -17475,10 +17529,12 @@ class App(tk.Tk):
             got = {}
             try:
                 import lineagem_island as _isl
-                slots = self._island_cfg().get(self.NIGHT_KEY) or []
-                # 🧭 **지금 보고 있는 탭의 던전 안**일 때만 '실행중' —
-                #    마을·다른 사냥터는 '밖' 이다 (2026-11-10 사용자 지시).
-                got = _isl.slots_in_dungeon(slots, only=self.NIGHT_KEY)
+                # 🧭 **네 던전을 한 번에** 본다 (캡처는 클라당 한 번이라 비용이 같다).
+                #    '실행중' 으로 칠하는 것은 **지금 탭의 던전 안**인 것뿐이다
+                #    (`_night_in_now`) — 마을·다른 사냥터는 '밖' (2026-11-10 사용자 지시).
+                #    슬롯마다 좌표가 있는 던전 것을 기준으로 삼는다 — 한 던전 것만
+                #    쓰면 그 던전에서 좌표가 없는 슬롯은 볼 수 없다.
+                got = _isl.slots_in_dungeon(_isl.anchor_slots(self._island_cfg()))
             except Exception as e:
                 try:
                     click_log(f"[슬롯판] 🧭 던전 안 확인 실패: {e}")
@@ -17494,10 +17550,11 @@ class App(tk.Tk):
                     self._refresh_night_btns()
                 except Exception:
                     pass
+                _now = self._night_in_now()
                 if not quiet:
-                    if got:
-                        _t = " ".join(f"#{i+1:02d}" for i in sorted(got))
-                        self.status.set(f"🧭 지금 돌고 있는 슬롯 {len(got)}개 — {_t} "
+                    if _now:
+                        _t = " ".join(f"#{i+1:02d}" for i in sorted(_now))
+                        self.status.set(f"🧭 지금 돌고 있는 슬롯 {len(_now)}개 — {_t} "
                                         f"(전체선택에서 빠집니다 · 직접 고르면 같이 돕니다)")
                     else:
                         self.status.set("🧭 던전 안인 슬롯이 없습니다 "
@@ -17540,7 +17597,7 @@ class App(tk.Tk):
             self.status.set("좌표가 등록된 (켜져 있는) 슬롯이 없습니다"); return
         # 🧭 **지금 돌고 있는(던전 안인) 슬롯은 뺀다** (2026-11-10 사용자 지시).
         #    🚫 직접 [+] 로 고른 것은 막지 않는다 — "내가 선택하면 같이 돌려줘".
-        _in = getattr(self, "_night_inside", None) or {}
+        _in = self._night_in_now()
         _busy = {i for i in able if i in _in}
         able = able - _busy
         if not able:
@@ -17647,6 +17704,23 @@ class App(tk.Tk):
 
     def _night_sync_tick(self):
         """반복 파일이 바뀌었을 때만 슬롯 버튼을 다시 그린다."""
+        # 📅 완료 기록(island_done.json)이 바뀌었으면 — 지금 탭의 던전이 다 끝났나 본다.
+        #    섬 실행기가 슬롯이 끝날 때마다 그 파일을 쓴다. 여기서는 **시각만** 본다.
+        try:
+            try:
+                _dm = os.path.getmtime(os.path.join(LOCAL_DATA, "island_done.json"))
+            except Exception:
+                _dm = 0.0
+            if _dm != getattr(self, "_dun_done_mtime", None):
+                if getattr(self, "_dun_done_mtime", None) is not None:
+                    self._dun_adv_at = time.time() + 3.0
+                self._dun_done_mtime = _dm
+            _at = getattr(self, "_dun_adv_at", 0)
+            if _at and time.time() >= _at:
+                self._dun_adv_at = 0
+                self._dun_auto("방금 끝났다")
+        except Exception:
+            pass
         try:
             _m = os.path.getmtime(os.path.join(LOCAL_DATA, "island_repeat.json"))
         except Exception:
@@ -17759,7 +17833,7 @@ class App(tk.Tk):
         ⚠ `_island_cfg()` 는 585KB 파싱(실측 8~12ms)이라 **루프 밖에서 한 번만**
           부른다. 예전엔 루프 안에서 16번 불러 **128ms 를 UI 스레드에서** 썼다."""
         q = getattr(self, "_night_queue", []) or []
-        ins = getattr(self, "_night_inside", None) or {}
+        ins = self._night_in_now()
         try:
             sl = self._island_cfg().get(self.NIGHT_KEY) or []
         except Exception:
@@ -17911,21 +17985,99 @@ class App(tk.Tk):
             pass
         return 0
 
+    def _dun_auto(self, why="", force=False):
+        """📅 **지금 보여줄 던전**으로 슬롯판 탭을 옮긴다 (2026-11-11 사용자 지시).
+
+        사용자: *"오만의탑을 돌려서 완료가 됐으면 미니는 당연히 **다음 잊혀진섬**으로
+        바꿔줘야 해. 내가 실행이 되면 그 던전은 더 이상 돌리질 않거든"*
+
+        규칙은 섬 실행기의 `dun_today` 한 곳에 있다 (그 요일 던전이 이번 주에 다
+        끝났으면 오만 → 잊섬 → 에카 순서로 안 끝난 첫 던전, 셋 다 끝났으면 악몽의섬).
+        🚫 여기에 규칙을 베껴 두지 말 것.
+
+        `force=True`  날짜·주가 바뀌었을 때 — 무조건 그 던전으로
+        `force=False` 던전이 방금 끝났을 때 — **지금 탭의 던전이 끝난 경우에만** 옮긴다
+                      (사용자가 손으로 고른 다른 탭은 건드리지 않는다)
+        ⚠ 파일을 읽으므로 **백그라운드 스레드**에서 정하고 탭 바꾸기만 UI 로 돌려준다.
+        ⚠ 대기열이 남았거나 섬 실행기가 도는 중이면 **미룬다** — 탭을 바꾸면
+          대기열이 비워진다 (`_dun_switch`)."""
+        if getattr(self, "_dun_auto_busy", False):
+            return
+        self._dun_auto_busy = True
+        cur = self.NIGHT_KEY
+
+        def _work():
+            want, cur_done, seeded = None, False, False
+            try:
+                import lineagem_island as _isl
+                cfg = self._island_cfg()
+                seeded = _isl.done_seed()        # 기록 파일이 없을 때 한 번만
+                dn = _isl.done_load()
+                want = _isl.dun_today(cfg, day_map=DAY_DUNGEON, done=dn)
+                cur_done = _isl.dun_done(cur, cfg, dn)
+            except Exception as e:
+                try:
+                    click_log(f"[슬롯판] 📅 다음 던전 확인 실패: {e}")
+                except Exception:
+                    pass
+            finally:
+                self._dun_auto_busy = False
+
+            def _apply():
+                try:
+                    if seeded:
+                        click_log("[슬롯판] 📅 완료 기록이 없어 이번 주 실행 기록에서 "
+                                  "한 번 채웠다 (island_done.json)")
+                    if not want or want == self.NIGHT_KEY:
+                        return
+                    if self.NIGHT_KEY != cur:
+                        return                   # 그 사이 사용자가 탭을 바꿨다
+                    if not force and not cur_done:
+                        return                   # 지금 탭의 던전은 아직 안 끝났다
+                    if (getattr(self, "_night_queue", None)
+                            or self._island_running()):
+                        self._dun_adv_at = time.time() + 6.0     # 끝나면 다시 본다
+                        return
+                    for i, (_d, _lb, k, _c) in enumerate(self.DUN_TABS):
+                        if k == want:
+                            _old = dict((t[2], t[1]) for t in self.DUN_TABS).get(cur, cur)
+                            self._dun_switch(i)
+                            _m = (f"📅 '{_old}' 을(를) 이번 주에 다 돌렸다 → 슬롯판을 "
+                                  f"**'{_lb}'** (으)로 옮겼다 ({why})" if cur_done else
+                                  f"📅 슬롯판을 '{_lb}' (으)로 열었다 ({why})")
+                            self._rep_log(_m)
+                            click_log("[슬롯판] " + _m)
+                            self.status.set(_m.replace("**", ""))
+                            break
+                except Exception:
+                    pass
+            try:
+                self.after(0, _apply)
+            except Exception:
+                pass
+
+        threading.Thread(target=_work, daemon=True).start()
+
     def _day_tab_tick(self):
-        """날짜가 바뀌면 그 날 던전 탭으로 바꿔준다.
+        """날짜(또는 주)가 바뀌면 **지금 보여줄 던전** 탭으로 바꿔준다.
 
         **사용자가 손으로 바꾼 탭은 그 날 안에는 건드리지 않는다** —
-        요일이 넘어갔을 때만 자동으로 옮긴다."""
+        요일이 넘어갔을 때와 (2026-11-11) **수요일 05:00 에 새 주가 시작될 때**,
+        그리고 지금 탭의 던전을 다 돌렸을 때(`_night_sync_tick`)만 자동으로 옮긴다."""
         try:
             import datetime as _dt
-            today = _dt.date.today()
-            if getattr(self, "_day_tab_day", None) != today:
-                self._day_tab_day = today
+            _n = _dt.datetime.now()
+            #   (날짜, '수요일 05시가 지났나') — 둘 중 하나라도 바뀌면 다시 정한다
+            mark = (_n.date(), _n.weekday() == 2 and _n.hour >= 5)
+            if getattr(self, "_day_tab_day", None) != mark:
+                self._day_tab_day = mark
+                # 먼저 그 요일 던전으로 (예전 그대로 · 즉시), 이어서 완료 여부를 본다
                 i = self._day_tab_index()
                 self._dun_switch(i)
-                _lb = self.DUN_TABS[i][1]
-                self._rep_log(f"📅 {['월','화','수','목','금','토','일'][today.weekday()]}"
-                              f"요일 — 슬롯판을 '{_lb}' 로 열었습니다")
+                self._rep_log(f"📅 {['월','화','수','목','금','토','일'][_n.weekday()]}"
+                              f"요일 — 슬롯판을 '{self.DUN_TABS[i][1]}' 로 열었습니다")
+                self.after(400, lambda: self._dun_auto("그 요일 던전은 이미 다 돌렸다",
+                                                       force=True))
         except Exception:
             pass
         finally:
@@ -18135,6 +18287,8 @@ class App(tk.Tk):
                 self._night_mini_ran = False
                 self._night_detach()
                 self.after(80, self._night_place_beside)
+                # 🧭 열자마자 '실행중' 을 다시 본다 (약 1초 · 백그라운드)
+                self.after(350, lambda: self._night_scan_inside(quiet=True))
                 self.after(200, lambda: self.status.set(
                     "🏝 섬/던전 미니 판을 옆에 열었습니다 "
                     "(다시 누르거나 ✕ 로 닫으면 메인런처로 돌아갑니다)"))

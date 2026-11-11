@@ -201,6 +201,255 @@ WAVE_GAP_MULT  = (1.0, 1.25)
 #    다시 문제가 안 될 것 같으면 다음 걸 클릭하면 되지 않냐"
 WAVE_TAIL_FROM = {"토요일_악몽의섬": 19}
 
+# ── 🧘 차분한 웨이브 — **무거운 칸이 겹치지 않게** (2026-11-11 사용자 지시) ──────
+# 사용자: "오만의탑 순간 부하가 많이 걸리나봐 좀 팅긴다. 2클라씩으로 줄여주고 시간을
+#          좀 여유롭게 줘도 된다. **동시에 눌리는 속도가 많으면 팅기더라**"
+# 📏 실측 11-11 10:41 (16슬롯 · 33분) — **이미 2클라씩**이었다. 문제는 두 클라가
+#    4~17초 차이로 **나란히** 움직인 것이다:
+#        #07 시작 0초  · #08 시작 10초   → 91% 의 시간 동안 둘이 같이 돌았다
+#        귀환(칸2) · 입장(칸7) · 마지막 순간이동이 **10~20초 안에 두 클라에서 연달아**
+#    맵을 불러오는 순간이 겹치는 것이 순간 부하다 (절전이 풀리는 순간도 같다).
+# 고친 것 셋 — 🚫 셋 다 **기다림만 늘린다. 클릭이 빨라지는 일은 없다.**
+#   ① 출발을 엇갈린다 — 둘째 클라는 첫째보다 **30~45초 늦게** 출발한다
+#   ② 무거운 칸(슬롯 첫 클릭 · 등록 간격 하한이 `WAVE_HEAVY_GAP` 이상인 칸 · 슬롯 마지막 좌표)을
+#      한 클라가 누르면, **다른 클라의 무거운 칸은 `WAVE_HEAVY_HOLD` 동안**,
+#      **다른 클라의 어떤 클릭도 `WAVE_HEAVY_QUIET` 동안** 미룬다
+#   ③ 클릭 사이 텀을 늘린다 (서로 다른 클라 클릭 사이 최소 약 2초 → 약 3초)
+# 대상은 흐름이 같은 세 던전이다 (칸2 귀환 10~17초 · 칸7 입장 12~20초).
+# 🚫 악몽의섬은 넣지 않았다 — 칸19 부터 '쭉' 끝내는 길(`_wave_tail`)이 따로 있고
+#    ⏰ 재진입은 원래 하나씩 돈다. 넣으려면 그 길까지 같이 봐야 한다.
+# 끄려면 `WAVE_CALM_KEYS = ()`.
+WAVE_CALM_KEYS   = ("수금_오만의탑", "월요일_잊혀진섬", "화요일_에카")
+WAVE_HEAVY_GAP   = 8.0            # 등록 간격 **하한**이 이 이상이면 '맵을 불러오는 칸'
+WAVE_HEAVY_HOLD  = (16.0, 22.0)   # 그 뒤 다른 클라의 **무거운 칸**을 미루는 시간(초)
+WAVE_HEAVY_QUIET = (5.0, 8.0)     # 그 뒤 다른 클라의 **모든 클릭**을 미루는 시간(초)
+WAVE_CALM_TERM   = (0.9, 1.7)     # 클릭 사이 텀 (평소 0.35~0.7)
+WAVE_STAGGER     = (0.15, 0.22)   # 둘째 클라 출발 = 한 슬롯 예상시간 × 이 비율 (약 30~45초)
+#   📏 흉내(가짜 시계 · 실제 등록 간격 · 16슬롯 8판) — 옛 코드 32.2분이 실측 33.3분과 맞는다:
+#        무거운 칸이 12초 안에 겹친 횟수   옛 21.8회(최대 34) → 새 **0회**
+#        무거운 칸 사이 최소 간격          옛 1.7초          → 새 **16.4초**
+#        서로 다른 클라 클릭 최소 간격      옛 1.6초          → 새 2.1초
+#        전체 시간  오만 32.2 → 37.4분 · 잊섬 27.0 → 31.9분 · 에카 25.0 → 29.9분
+#   ⚠ 겹침을 없애는 것은 ②(잠금)다. ①(엇갈림)은 처음부터 줄줄이 미뤄지는 것을
+#     줄일 뿐이라 **크게 잡을 이유가 없다** — 절반(0.42~0.58)으로 두면 16슬롯은
+#     같은데 2슬롯짜리 실행이 6.8분 → 8.8분으로 늘어난다 (0.15~0.22 면 7.2분).
+
+
+def gap_low(g):
+    """gap_list 값의 **하한**(초) — '10.8~17.2' → 10.8 · 숫자면 그 값 · 비면 0."""
+    try:
+        if g is None or g == "":
+            return 0.0
+        if isinstance(g, (int, float)):
+            return float(g)
+        t = str(g).strip()
+        return float(t.split("~")[0]) if "~" in t else float(t)
+    except Exception:
+        return 0.0
+
+
+def gap_mid(g):
+    """gap_list 값의 가운데(초) — 예상시간 계산용."""
+    try:
+        if g is None or g == "":
+            return CLICK_INTERVAL
+        if isinstance(g, (int, float)):
+            return float(g)
+        t = str(g).strip()
+        if "~" in t:
+            a, b = t.split("~")
+            return (float(a) + float(b)) / 2.0
+        return float(t)
+    except Exception:
+        return CLICK_INTERVAL
+
+
+# ── 📅 던전 완료 기록 · '지금 보여줄 던전' (2026-11-11 사용자 지시) ──────────────
+# 사용자: "오만의탑을 돌려서 완료가 됐으면 미니는 당연히 **다음 잊혀진섬**으로 바꿔줘야 해.
+#          내가 실행이 되면 **그 던전은 더 이상 돌리질 않거든.** 수~금이 오만의탑인데
+#          수요일에 들어가서 완료시켰으면 다음이 잊섬이면 잊섬으로"
+# 📏 실행 기록(repeat_log) 9주치로 확인한 실제 흐름 — **수요일에 시작하는 한 주**에
+#    오만의탑 · 잊혀진섬 · 에카를 **한 번씩** 돈다. 악몽의섬은 주말·남는 날에 여러 번.
+#        10-15 목 오만 → 10-16 금 잊섬 → 10-17 토 악몽 → 10-19 월 에카 → 10-20 화 악몽
+#        10-22 목 오만 → 10-23 금 잊섬 → 10-24 토 악몽 → 10-26 월 에카
+#        10-29 목 오만 → 10-31 토 악몽 → 11-02 월 잊섬 → 11-03 화 에카
+# 규칙 (`dun_today`):
+#   ① 그 요일의 던전이 아직 안 끝났으면 → 그 던전 (예전 그대로)
+#   ② 끝났으면 → `DUN_CYCLE` 순서로 **아직 안 끝난 첫 던전**
+#   ③ 셋 다 끝났으면 → 악몽의섬
+#   악몽의섬 요일(토·일)은 늘 악몽의섬 (여러 번 도는 던전이라 '완료' 가 없다)
+# '완료' = 그 던전의 **ON 이고 좌표가 있는 슬롯 전부**가 이번 주에 끝까지 돌았다.
+#   🚫 중간에 멈춘 슬롯(카드·그림을 못 찾음, 클라 없음, 멈춤)은 세지 않는다 —
+#      그 슬롯을 다시 돌릴 수 있게 탭이 그대로 남는다.
+# 기록은 머신별 파일이다 (`%LOCALAPPDATA%\MoonAI\island_done.json`) — GitHub 와 무관.
+# ⚠ 런처·요약런처는 **이 함수들을 부른다.** 판정을 베껴 두지 말 것.
+DONE_FILE = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
+                         "island_done.json")
+DUN_CYCLE = ("수금_오만의탑", "월요일_잊혀진섬", "화요일_에카")
+DUN_FREE  = "토요일_악몽의섬"
+DUN_DAY   = {0: "월요일_잊혀진섬", 1: "화요일_에카",
+             2: "수금_오만의탑", 3: "수금_오만의탑", 4: "수금_오만의탑",
+             5: "토요일_악몽의섬", 6: "토요일_악몽의섬"}
+DUN_WEEK_START = (2, 5)           # 한 주의 시작 — 수요일 05:00
+
+
+def dun_cycle_start(now=None):
+    """이번 주가 시작된 시각(가장 최근의 수요일 05:00) → epoch 초."""
+    import datetime as _dt
+    t = _dt.datetime.fromtimestamp(now if now is not None else time.time())
+    wd, hh = DUN_WEEK_START
+    d = t.replace(hour=hh, minute=0, second=0, microsecond=0)
+    d -= _dt.timedelta(days=(t.weekday() - wd) % 7)
+    if d > t:
+        d -= _dt.timedelta(days=7)
+    return d.timestamp()
+
+
+def done_load():
+    try:
+        with open(DONE_FILE, encoding="utf-8-sig") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _done_save(d):
+    try:
+        os.makedirs(os.path.dirname(DONE_FILE), exist_ok=True)
+        tmp = DONE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, DONE_FILE)
+        return True
+    except Exception:
+        return False
+
+
+def done_mark(key, si, ts=None):
+    """그 던전의 그 슬롯(0부터)이 **끝까지 돌았다** 고 적는다 (쓰기 직전에 다시 읽는다)."""
+    try:
+        d = done_load()
+        m = d.get(key)
+        if not isinstance(m, dict):
+            m = d[key] = {}
+        m[str(int(si))] = float(ts if ts is not None else time.time())
+        return _done_save(d)
+    except Exception:
+        return False
+
+
+def dun_need(key, cfg):
+    """그 던전에서 **돌려야 하는 슬롯**(0부터) — ON 이고 좌표나 방향이 있는 것."""
+    out = []
+    for si, s_ in enumerate((cfg or {}).get(key) or []):
+        if si >= 16:
+            break
+        if (isinstance(s_, dict) and s_.get("enabled", True)
+                and (any(s_.get("coords") or []) or any(s_.get("dirs") or []))):
+            out.append(si)
+    return out
+
+
+def dun_done(key, cfg=None, done=None, now=None):
+    """그 던전이 **이번 주에 다 끝났나** — 돌려야 하는 슬롯 전부가 끝까지 돌았나."""
+    try:
+        if key not in DUN_CYCLE:
+            return False                 # 악몽의섬 등은 '완료' 가 없다
+        cfg = cfg if cfg is not None else load_cfg()
+        done = done if done is not None else done_load()
+        need = dun_need(key, cfg)
+        if not need:
+            return False
+        t0 = dun_cycle_start(now)
+        m = done.get(key) or {}
+        return all(float(m.get(str(si)) or 0) >= t0 for si in need)
+    except Exception:
+        return False
+
+
+def dun_today(cfg=None, now=None, day_map=None, done=None):
+    """📅 **지금 슬롯판에 보여줄 던전** 키 (위 규칙 ①②③).  모르면 그 요일 던전."""
+    import datetime as _dt
+    ts = now if now is not None else time.time()
+    base = (day_map or DUN_DAY).get(_dt.datetime.fromtimestamp(ts).weekday())
+    try:
+        if base not in DUN_CYCLE:
+            return base
+        cfg = cfg if cfg is not None else load_cfg()
+        done = done if done is not None else done_load()
+        if not dun_done(base, cfg, done, ts):
+            return base
+        for k in DUN_CYCLE:
+            if not dun_done(k, cfg, done, ts):
+                return k
+        return DUN_FREE
+    except Exception:
+        return base
+
+
+def done_seed(now=None):
+    """기록 파일이 **없을 때 한 번** — 이번 주 실행 기록(repeat_log)에서 채운다.
+
+    이 기능을 받기 전에 이미 돌린 던전을 '안 돌렸다' 로 보지 않으려는 것이다.
+    ⚠ 어림이다 — 이번 주에 그 슬롯의 클릭이 `10`번 넘게 찍혔으면 돌린 것으로 본다.
+      그 뒤로는 섬 실행기가 슬롯이 끝날 때마다 정확히 적는다."""
+    if os.path.exists(DONE_FILE):
+        return False
+    d = {}
+    try:
+        import re as _re, datetime as _dt
+        ts = now if now is not None else time.time()
+        t0 = dun_cycle_start(ts)
+        yr = _dt.datetime.fromtimestamp(ts).year
+        p = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
+                         "repeat_log.txt")
+        pat = _re.compile(r"\[(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)\] \[클릭\] (\S+) #(\d+) ")
+        cnt, last = {}, {}
+        with open(p, encoding="utf-8", errors="replace") as f:
+            for ln in f:
+                if "[클릭]" not in ln:
+                    continue
+                m = pat.match(ln)
+                if not m:
+                    continue
+                mo, dd, hh, mi, ss = (int(x) for x in m.groups()[:5])
+                try:
+                    t = _dt.datetime(yr, mo, dd, hh, mi, ss).timestamp()
+                except Exception:
+                    continue
+                if t > ts + 86400:           # 해가 넘어간 기록
+                    continue
+                if t < t0:
+                    continue
+                k = (m.group(6), int(m.group(7)) - 1)
+                cnt[k] = cnt.get(k, 0) + 1
+                last[k] = t
+        for (key, si), n in cnt.items():
+            if key in DUN_CYCLE and n > 10:
+                d.setdefault(key, {})[str(si)] = last[(key, si)]
+    except Exception:
+        pass
+    _done_save(d)
+    return True
+
+
+def anchor_slots(cfg, n=16):
+    """🧭 슬롯마다 **어느 클라인지 알려줄 슬롯 하나** — 네 던전 중 좌표가 있는 첫 것.
+
+    한 던전 것만 쓰면 그 던전에서 좌표가 없는 슬롯(에카는 5개만 쓴다)은 볼 수 없다."""
+    out = []
+    for si in range(n):
+        pick = None
+        for d in DUNGEONS[:4]:
+            sl = (cfg or {}).get(d["key"]) or []
+            if (si < len(sl) and isinstance(sl[si], dict)
+                    and IslandApp._slot_anchor(sl[si])):
+                pick = sl[si]
+                break
+        out.append(pick)
+    return out
+
 CLICK_LABELS = ["클릭1", "클릭2", "추가", "클릭3", "클릭4", "클릭5"]
 
 # 던전별 좌표 개수 (기본 6개, 예외만 지정)
@@ -7978,6 +8227,9 @@ class IslandApp(tk.Tk):
                 self._resync = {}
             _sk = self._slot_resync(key, si, slot, coords, name)
             if _sk < 0:                       # 이미 던전 안 → 이 슬롯 끝
+                if not hasattr(self, "_in_dun"):
+                    self._in_dun = set()
+                self._in_dun.add(si)          # 📅 실패가 아니다 — 완료로 센다
                 return None
             self._resync[si] = _sk
         if j < getattr(self, "_resync", {}).get(si, 0):
@@ -8189,6 +8441,52 @@ class IslandApp(tk.Tk):
         waiting = order[LANES:]
         self._status.set(f"🎲 랜덤 실행 — 동시 {LANES}슬롯씩 (목표 "
                          f"{int(target_sec//60)}분 {int(target_sec%60)}초, 배속 ×{pace:.2f})")
+        # 🧘 차분한 웨이브 — 무거운 칸(맵을 불러오는 칸)이 **겹치지 않게** (2026-11-11)
+        _calm = bool(key in WAVE_CALM_KEYS and LANES >= 2 and len(order) >= 2)
+        _hv = {"until": 0.0, "quiet": 0.0, "si": None, "n": 0, "w": 0.0}
+
+        def _heavy(_st):
+            """그 슬롯이 **다음에 누를 칸**이 무거운가 — 슬롯 첫 클릭(절전 풀림) 이거나
+            등록 간격 하한이 `WAVE_HEAVY_GAP` 이상(귀환·입장처럼 맵을 불러온다)."""
+            _j = _st["j"]
+            if _j == 0:
+                return True
+            # 슬롯의 **마지막 좌표**(던전 안으로 순간이동)도 무겁다 — 한 번만 구해 둔다
+            if "last" not in _st:
+                _cs = _st["slot"].get("coords") or []
+                _st["last"] = max((_i for _i, _c in enumerate(_cs[:total]) if _c),
+                                  default=-1)
+            if _j == _st["last"]:
+                return True
+            _gl = _st["slot"].get("gap_list") or []
+            return gap_low(_gl[_j] if _j < len(_gl) else None) >= WAVE_HEAVY_GAP
+
+        def _hold(_si):
+            _t = time.time()
+            _hv["until"] = _t + random.uniform(*WAVE_HEAVY_HOLD)
+            _hv["quiet"] = _t + random.uniform(*WAVE_HEAVY_QUIET)
+            _hv["si"] = _si
+
+        if _calm:
+            # ① 출발을 엇갈린다 — 둘째부터는 한 슬롯 예상시간을 레인 수로 나눈 만큼씩 늦게
+            try:
+                _s0 = state[active[0]]
+                _cs0 = _s0["slot"].get("coords") or []
+                _gl0 = _s0["slot"].get("gap_list") or []
+                _est = sum(gap_mid(_gl0[_j] if _j < len(_gl0) else None) * CLICK_SLOW
+                           * 1.10 * (sum(WAVE_GAP_MULT) / 2.0) * pace + 2.0
+                           for _j in range(total) if _j < len(_cs0) and _cs0[_j])
+            except Exception:
+                _est = 200.0
+            _est = max(60.0, min(_est, 420.0))
+            state[active[0]]["due"] = time.time() + random.uniform(0.0, 3.0)
+            for _k, _a in enumerate(active[1:], 1):
+                state[_a]["due"] = (time.time() + _est * _k * 2.0 / LANES
+                                    * random.uniform(*WAVE_STAGGER))
+            self._rlog(f"🧘 {key} 차분한 웨이브 — 동시 {LANES}슬롯 · 둘째 클라는 "
+                       f"{state[active[1]]['due'] - time.time():.0f}초 뒤 출발 "
+                       f"(한 슬롯 예상 {_est:.0f}초) · 무거운 칸은 서로 "
+                       f"{WAVE_HEAVY_HOLD[0]:.0f}~{WAVE_HEAVY_HOLD[1]:.0f}초 띄운다")
         done_cnt = 0
         last_si  = None                # 직전에 클릭한 슬롯 (창 전환 여유 판단용)
         while not self._stop_flag:
@@ -8199,6 +8497,12 @@ class IslandApp(tk.Tk):
                 # ⏰ **이 슬롯이 끝났다** → 다음 회차를 '끝난 지금' 기준으로 다시 잡는다
                 #    (2026-10-17 사용자: "끝나는 거에 따라서 맞춰서 해줘야지")
                 self._rep_touch_once(key, si)
+                # 📅 **끝까지 돈 슬롯만** 완료로 적는다 (중간에 멈춘 것은 세지 않는다)
+                if not state[si].get("bad"):
+                    done_mark(key, si)
+                # 🧘 슬롯의 마지막 클릭(던전 안으로 순간이동)도 무거운 순간이다
+                if _calm:
+                    _hold(si)
                 if waiting:
                     nx = (waiting.pop(0) if keep_order
                           else waiting.pop(random.randrange(len(waiting))))
@@ -8215,6 +8519,24 @@ class IslandApp(tk.Tk):
                 break
             now = time.time()
             ready = [si for si in alive if state[si]["due"] <= now]
+            # 🧘 방금 다른 클라가 무거운 칸을 눌렀으면 — 잠깐은 아무 클릭도,
+            #    그 뒤 한동안은 **무거운 칸만** 미룬다 (맵 불러오기가 겹치지 않게)
+            if _calm and ready and _hv["si"] is not None:
+                _r2 = [si for si in ready
+                       if si == _hv["si"]
+                       or not (now < _hv["quiet"]
+                               or (now < _hv["until"] and _heavy(state[si])))]
+                if not _r2:
+                    _w = max(0.1, min((_hv["quiet"] if now < _hv["quiet"]
+                                       else _hv["until"]) - now, 1.0))
+                    _hv["n"] += 1
+                    _hv["w"] += _w
+                    self._status.set(f"🧘 앞 클라가 맵을 불러오는 중 — 겹치지 않게 "
+                                     f"{max(0, _hv['until'] - now):.0f}초 기다립니다 "
+                                     f"(진행 {done_cnt}회)")
+                    time.sleep(_w)
+                    continue
+                ready = _r2
             if not ready:
                 nxt = min(state[si]["due"] for si in alive)
                 w = max(0.05, min(nxt - now, 1.0))
@@ -8261,22 +8583,29 @@ class IslandApp(tk.Tk):
             #    이 슬롯만 끝내고 다음 슬롯으로 넘어간다 (2026-09-19 사용자 요청).
             if not self._client_alive(st["slot"]):
                 st["j"] = total
+                st["bad"] = True
                 self._status.set(f"🚫 #{si+1:02d} 클라가 없어졌습니다 — "
                                  f"{j+1}번째에서 중단하고 다음 슬롯으로")
                 self._rlog(f"🚫 {key} #{si+1:02d} 클라 창 없음(팅김) → 좌표{j+1} "
                            f"이후를 누르지 않고 이 슬롯 중단")
                 continue
+            _hvy = _calm and _heavy(st)
             did = self._do_one_click(key, si, st["slot"], j, labels[j], move_set,
                                      tag=f"  (#{si+1:02d} {j+1}/{total})")
             if did is None:
                 # 🚫 그림/카드를 못 찾았다 → **이 슬롯만** 끝낸다 (다른 슬롯은 계속)
                 st["j"] = total
+                # 📅 '이미 그 던전 안' 이라 끝낸 것은 실패가 아니다 (완료로 센다)
+                if si not in (getattr(self, "_in_dun", None) or ()):
+                    st["bad"] = True
                 self._rlog(f"🚫 {key} #{si+1:02d} 좌표{j+1} 에서 그림/카드를 못 찾아 "
                            f"이 슬롯 중단 (다른 슬롯은 계속)")
                 continue
             st["j"] = j + 1
             if did:
                 done_cnt += 1
+                if _hvy:
+                    _hold(si)          # 🧘 이 클라가 맵을 불러오는 동안 다른 클라를 미룬다
                 gl = st["slot"].get("gap_list") or []
                 g  = gl[j] if j < len(gl) else None
                 # 매 클릭마다 큰 편차(0.7~1.7배) — 슬롯마다 시간이 제각각 흘러
@@ -8286,7 +8615,12 @@ class IslandApp(tk.Tk):
             else:
                 st["due"] = time.time()        # 빈 자리는 기다리지 않고 바로 다음으로
             # 마우스는 하나 — 클릭끼리 최소 간격을 둬서 씹힘 방지
-            time.sleep(random.uniform(0.35, 0.7))   # 클릭 사이 텀 (창 전환 여유)
+            #   🧘 차분한 웨이브는 텀을 늘린다 (연달아 눌리는 속도를 낮춘다)
+            time.sleep(random.uniform(*(WAVE_CALM_TERM if _calm
+                                        else (0.35, 0.7))))
+        if _calm and _hv["n"]:
+            self._rlog(f"🧘 {key} 무거운 칸이 겹칠 뻔해 미룬 것 — "
+                       f"모두 {_hv['w']:.0f}초 ({_hv['n']}번 확인)")
         if not self._stop_flag:
             time.sleep(2)          # (2026-08-09) 마지막 클릭 후 2초 뒤 마무리
         try:                        # 슬롯별로 몇 자리까지 갔는지 기록 (덜 돈 슬롯 찾기용)
@@ -8654,10 +8988,12 @@ class IslandApp(tk.Tk):
                                  f"{j+1}번째에서 중단")
                 self._rlog(f"🚫 {key} #{si+1:02d} 클라 창 없음(팅김) → 좌표{j+1} "
                            f"이후를 누르지 않고 이 슬롯 중단")
+                st["bad"] = True
                 break
             did = self._do_one_click(key, si, slot, j, labels[j], move_set,
                                      tag=f"  (#{si+1:02d} {j+1}/{total} 이어서)")
             if did is None:
+                st["bad"] = True
                 # 🚫 그림/카드를 못 찾았다 → 이 슬롯만 끝낸다 (다른 슬롯은 계속)
                 self._rlog(f"🚫 {key} #{si+1:02d} 좌표{j+1} 에서 그림/카드를 못 찾아 "
                            f"이 슬롯 중단 (이어서 구간, 다른 슬롯은 계속)")
@@ -8765,6 +9101,7 @@ class IslandApp(tk.Tk):
                 _slow_always = key in ("수금_오만의탑", "토요일_악몽의섬")
                 _slow = (random.uniform(1.10, 1.20)
                          if (_slow_always or not any(recs.values())) else 1.0)
+                _fin_ok = False       # 📅 이 슬롯이 **끝까지** 돌았나 (for-else 가 켠다)
                 for j, lbl in enumerate(_labels):
                     if self._stop_flag: break
                     if key == "카매사오기":
@@ -8787,6 +9124,7 @@ class IslandApp(tk.Tk):
                             self._resync = {}
                         _sk = self._slot_resync(key, si, slot, coords, name)
                         if _sk < 0:               # 이미 던전 안 → 이 슬롯 끝
+                            _fin_ok = True        # 📅 실패가 아니다 — 완료로 센다
                             break
                         self._resync[si] = _sk
                     if j < getattr(self, "_resync", {}).get(si, 0):
@@ -8901,7 +9239,12 @@ class IslandApp(tk.Tk):
                         time.sleep(float(g) * _mult)
                     else:
                         self._do_gap_spec(str(g), name)   # 대기 토큰에 10~25% 증가 적용됨
+                else:
+                    _fin_ok = True    # break 없이 마지막 칸까지 갔다
                 self._add_count(si)
+                # 📅 **끝까지 돈 슬롯만** 완료로 적는다 — 웨이브(`fin`)와 한 쌍이다
+                if _fin_ok and not self._stop_flag:
+                    done_mark(key, si)
                 # ⏰ **이 슬롯이 끝났다** → 다음 회차를 '끝난 지금' 기준으로 다시 잡는다
                 #    (2026-10-17 사용자: "5번이 끝날 시간에 맞춰 5번을 돌려줘야지")
                 #    ⚠ 웨이브(`_run_wave` 의 `fin`)와 **한 쌍이다** — 한쪽만 걸면
