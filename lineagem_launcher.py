@@ -386,7 +386,12 @@ ENTER_FAST_STEP   = (2.6, 3.4)    # 바퀴 사이 (화면이 바뀔 틈)
 #    🚫 '캐릭선택을 전부 한꺼번에' 로 되돌리지 말 것.
 #    나누는 것은 **캐릭선택 묶음 하나뿐** — 재접속·로그인 단계는 그대로 전부 한다.
 ENTER_BATCH       = (4, 6)        # 한 묶음에 몇 개 (묶음마다 다시 뽑는다)
-ENTER_BATCH_MAX   = 120.0         # 그 묶음이 **게임에 들어갈 때까지** 최대 기다림(초)
+ENTER_BATCH_MAX   = 45.0          # 그 묶음이 **캐릭선택을 벗어날 때까지** 최대 기다림(초)
+#   📏 2026-11-11 실측 — 누른 뒤 벗어나기까지 **8~21초**. 45초는 그 두 배다.
+#      (120초였을 때는 묶음마다 다 채워 기다렸고, 그 사이 다른 클라에 재접속이 떴다)
+#   🚫 다시 늘리지 말 것 — 여기서 남는 것은 **클릭이 안 먹은 창**뿐이고,
+#      그건 기다려도 안 바뀐다 (다음 바퀴가 다시 누른다).
+ENTER_BATCH_SURE  = 2             # '벗어났다' 를 **연속** 몇 번 봐야 믿나 (한 프레임 흔들림 방지)
 ENTER_BATCH_GAP   = (3.0, 5.0)    # 다 들어간 뒤 다음 묶음까지 여유
 ENTER_BATCH_TICK  = (1.6, 2.4)    # 들어갔는지 몇 초마다 확인하나
 ENTER_ONE_GAP     = (1.0, 1.6)  # 다시 보기까지
@@ -40387,35 +40392,100 @@ class App(tk.Tk):
             nap(random.uniform(*ENTER_CLICK_GAP))
         return n
 
-    def _enter_batch_wait(self, T, want, tag=""):
-        """🎮 **누른 만큼 게임에 들어갈 때까지** 기다린다 (2026-11-04 사용자 지시).
+    def _enter_state(self, hw, T):
+        """그 창 **하나**의 상태 → 'relo' · 'chr' · 'logi' · 'other' · 'gone' · None(못 찍음).
 
-        한 번에 다 누르면 **서버와 접속이 끊어지며 재접속이 뜬다.**
-        '들어갔나' 는 `_enter_scan` 으로 본다 — 재접속·캐릭선택·로그인 **어느 것도
-        아닌 것**이 게임 안이다.
-        ⚠ 창 제목으로 세면 안 된다 — **캐릭터 선택 화면에서도 제목에 캐릭 이름이 있다**
-          (실측 2026-11-04: `리니지M l 불화설` 이 캐릭터 선택 화면이었다).
-        ⚠ 끝내 안 들어가면 **기록을 남기고 그냥 간다** (여기서 멈추면 더 나쁘다)."""
+        `_enter_scan` 과 **같은 순서·같은 기준**으로 본다 (재접속 → 캐릭선택 → 로그인).
+        ⚠ 'other' 는 **게임 안일 수도, 로딩 중일 수도** 있다 — 둘을 가르는 그림은 없다."""
+        try:
+            if not win32gui.IsWindow(hw):
+                return "gone"
+        except Exception:
+            return "gone"
+        (tp, bw, th), (rt, rb, rth), (st, sb, sth) = T
+        big, r = self._enter_grab(hw)
+        if big is None:
+            return None
+        ww = r[2] - r[0]
+        if self._enter_match(big, ww, rt, rb, rth)[0] is not None:
+            return "relo"
+        if self._enter_match(big, ww, tp, bw, th)[0] is not None:
+            return "chr"
+        if self._enter_match(big, ww, st, sb, sth)[0] is not None:
+            return "logi"
+        return "other"
+
+    def _enter_batch_wait(self, T, hws, tag=""):
+        """🎮 **방금 누른 그 창들**이 캐릭선택을 벗어날 때까지 기다린다.
+
+        `hws` = [(번호, 이름, hwnd), …] — 이 묶음에서 [입장하기] 를 누른 창.
+
+        🚨 2026-11-11 — 예전에는 **'게임 안인 창의 전체 수'** 가 `기준 + 누른 수` 가
+           되기를 기다렸다. 그런데 '게임 안' 은 *재접속·캐릭선택·로그인 어느 것도
+           아닌 창* 이라 **로딩 중인 창까지 세었고**, 그 창들이 잠시 뒤 로그인
+           화면이 되면 숫자가 줄어 **목표를 영영 못 채웠다.**
+           ```
+           11-11 07:45  1바퀴 게임안 5 → 2바퀴 게임안 2  (셋은 로딩 중이었다)
+           1묶음 120초를 기다려도 4/6 · 2묶음 … 10/12   → 240초를 그냥 버렸다
+           그 사이 기다리던 클라 6개에 [재접속] 이 떴다
+           최근 접속 3번(11-04 · 11-10 · 11-11) 전부 같은 타임아웃
+           ```
+           → **남의 창은 보지 않는다.** 누른 창만 보므로 기준이 흔들릴 수 없다.
+           덤으로 16개가 아니라 **4~6개만 찍어** 한 번 확인이 훨씬 가볍다.
+        🚫 '전체 숫자' 로 되돌리지 말 것.
+
+        창마다:
+          `chr`   아직 캐릭선택이다          → 기다린다
+          `other` 캐릭선택을 벗어났다        → **연속 `ENTER_BATCH_SURE` 번** 보면 끝
+          `relo`·`logi` 재접속/로그인이 떴다 → 실패. **기다리지 않는다** (다음 바퀴가 치운다)
+          `gone`  창이 사라졌다              → 기다리지 않는다
+          못 찍음                            → 모른다. 기다린다 (상한이 막아준다)
+        ⚠ 끝내 안 벗어나면 **기록을 남기고 그냥 간다** (여기서 멈추면 더 나쁘다).
+        🚫 기다리는 동안 [입장하기] 를 **다시 누르지 않는다** — 그 사이 게임에
+           들어갔으면 그 자리는 **아이템·스킬 칸**이다."""
         t0 = time.time()
-        inside = -1
+        okt, bad, seen = {}, {}, {}
+        wait = list(hws)
         while time.time() - t0 < ENTER_BATCH_MAX:
             if getattr(self, "_stop_flag", False):
                 return False
-            try:
-                relo, chrs, logi, ntot = self._enter_scan(T)
-                inside = ntot - len(relo) - len(chrs) - len(logi)
-            except Exception:
+            wait = []
+            for i, nm, hw in hws:
+                if hw in okt or hw in bad:
+                    continue
+                st = self._enter_state(hw, T)
+                if st in ("relo", "logi", "gone"):
+                    bad[hw] = st
+                elif st == "other":
+                    seen[hw] = seen.get(hw, 0) + 1
+                    if seen[hw] >= ENTER_BATCH_SURE:
+                        okt[hw] = time.time() - t0
+                    else:
+                        wait.append((i, nm, hw))
+                else:                                  # 'chr' 또는 못 찍음
+                    seen[hw] = 0
+                    wait.append((i, nm, hw))
+            if not wait:
                 break
-            if inside >= want:
-                click_log("[입장] 🎮 %s 묶음 접속 완료 — 게임 안 %d/%d (%.0f초)"
-                          % (tag, inside, want, time.time() - t0))
-                break
-            self.status.set("🎮 접속 기다리는 중 — 게임 안 %d/%d (%.0f초)"
-                            % (inside, want, time.time() - t0))
+            self.status.set("🎮 접속 기다리는 중 — %d/%d개 들어감 (%.0f초)"
+                            % (len(okt), len(hws), time.time() - t0))
             nap(random.uniform(*ENTER_BATCH_TICK))
+        _bk = {"relo": "재접속", "logi": "로그인화면", "gone": "창없음"}
+        _txt = " ".join("%s %.0f초" % (nm, okt[hw]) for _i, nm, hw in hws if hw in okt)
+        _btx = " ".join("%s(%s)" % (nm, _bk.get(bad[hw], bad[hw]))
+                        for _i, nm, hw in hws if hw in bad)
+        if not wait:
+            click_log("[입장] 🎮 %s 묶음 접속 완료 — %d/%d개가 캐릭선택을 벗어났다 "
+                      "(%.0f초) · %s%s"
+                      % (tag, len(okt), len(hws), time.time() - t0, _txt or "-",
+                         (" · ⚠ 다음 바퀴로 " + _btx) if _btx else ""))
         else:
-            click_log("[입장] 🎮 ⚠ %s %.0f초를 기다려도 게임 안 %d/%d "
-                      "— 그냥 다음으로 간다" % (tag, ENTER_BATCH_MAX, inside, want))
+            click_log("[입장] 🎮 ⚠ %s %.0f초를 기다려도 **캐릭선택에 남아 있다** %s "
+                      "— 다음 바퀴가 다시 누른다 · 벗어남 %d/%d개 %s%s"
+                      % (tag, ENTER_BATCH_MAX,
+                         " ".join("#%02d %s" % (i, nm) for i, nm, _h in wait),
+                         len(okt), len(hws), _txt,
+                         (" · " + _btx) if _btx else ""))
         nap(random.uniform(*ENTER_BATCH_GAP))
         return True
 
@@ -40500,13 +40570,11 @@ class App(tk.Tk):
             #    묶음 안은 연속으로 누르고, 묶음이 **게임에 들어가면** 다음으로.
             _bn = random.randint(*ENTER_BATCH)      # 이번 묶음 크기 (4~6)
             _bc = 0                                  # 이번 묶음에서 누른 수
-            _bt = 0                                  # 이 바퀴에서 누른 **누적** 수
             _bi = 0                                  # 몇 번째 묶음인가
-            # 🎮 기준 — **누르기 전에 이미 게임 안에 있던** 수.
-            #    위 `_enter_scan` 결과를 그대로 쓴다 (다시 찍지 않는다).
-            #    ⚠ 누른 **뒤에** 재서 거기에 더하면 **이중으로 세어** 목표가
-            #      부풀고 영영 못 채운다 (만들다 한 번 밟았다).
-            _ibase = ntot - len(relo) - len(chrs) - len(logi)
+            # 🎮 **이 묶음에서 누른 창** — 기다릴 때 이 창들만 본다.
+            #    🚫 '게임 안 전체 수' 를 기준으로 삼지 말 것 — 로딩 중인 창까지
+            #       세어져서 기준이 흔들린다 (2026-11-11: 240초를 헛기다렸다).
+            _bh = []
             if chrs:
                 click_log("[입장] 🎮 캐릭선택 %d개를 **%d개씩 나눠** 들여보낸다"
                           % (len(chrs), _bn))
@@ -40523,17 +40591,18 @@ class App(tk.Tk):
                 hover_click(r[0] + ee[0], r[1] + ee[1], ENTER_FAST_HOVER)
                 done += 1
                 _bc += 1
+                _bh.append((i, nm, hw))
                 click_log("[입장] 🎮 #%02d %s — 맨 위 캐릭 → [입장하기] (%.2f)"
                           % (i, nm, ee[2]))
                 # 🎮 묶음이 찼고 **남은 것이 있으면** 들어갈 때까지 기다린다
-                _bt += 1
                 if _bc >= _bn and _k + 1 < len(chrs):
                     _bi += 1
                     if not self._enter_batch_wait(
-                            T, _ibase + _bt, "%d묶음(%d개)" % (_bi, _bc)):
+                            T, _bh, "%d묶음(%d개)" % (_bi, _bc)):
                         break
                     _bn = random.randint(*ENTER_BATCH)   # 다음 묶음 크기 새로 뽑기
                     _bc = 0
+                    _bh = []
                 else:
                     nap(random.uniform(*ENTER_FAST_GAP))
             # ── 🖥 로그인 화면인 것을 **전부** ──
@@ -40551,7 +40620,7 @@ class App(tk.Tk):
         # 🔎 마지막으로 남은 것을 적어둔다
         try:
             relo, chrs, logi, ntot = self._enter_scan(T)
-            left = ["#%02d %s" % (i, nm) for i, nm, _h, _r, _x in relo + chrs]
+            left = ["#%02d %s" % (i, nm) for i, nm, _h, _r, _x in relo + chrs + logi]
         except Exception:
             left = []
         click_log("[입장] %s ✔ %.0f초 · 들여보냄 %d개%s"
