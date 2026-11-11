@@ -2467,6 +2467,23 @@ WARN_TICK_MS = 5000     # F11 뒤 지켜보는 간격(ms) — 전 15초
 #       **거꾸로**였다 — 창이 십자가를 가린 채로 스캔했다.
 #    👉 ESC 닫기(2000) **뒤에** 보고, 뒤늦게 그려지는 클라를 위해 **한 번 더** 본다.
 WARN_AFTER_WAKE = 4500  # 첫 스캔 (ESC 닫기 뒤)
+# ▶ **전부 복구 하나로 끝낸다** (2026-11-11 사용자 지시).
+#    사용자: "전부복구를 내가 누르면 절전이 해제가 안 됐으면 F11 을 누르고 전체 절전을
+#             해제하고 복구를 해주고, 내가 F11 을 누르거나 개인으로 눌러서 복구가
+#             들어오면 그때 그냥 하나씩 복구를 다 해주면 된다. 지금은 F11 을 누른 후
+#             복구가 뜨면 복구하는 시스템인데 … 사용자가 편한 방식으로 오류 없이"
+#    예전에는 F11 → 목록이 뜨기를 기다림 → 전부복구, **세 번 손이 갔다.** 그리고 자는
+#    클라는 절전 화면이 십자가를 가려 **목록에 아예 안 올라와** 복구가 빠졌다.
+#    이제 버튼 하나가 차례로 한다:
+#        ① 자는 클라가 있나 본다 (16클라 약 1초 · 백그라운드)
+#        ② 있으면 **F11 과 똑같은 절전해제**를 끝까지 돌린다 (깨어 있는 클라는 건너뛴다)
+#           없으면 십자가만 지금 화면으로 다시 본다
+#        ③ 십자가 확인이 **두 번 다** 끝나기를 기다린다 (뒤늦게 그려지는 클라까지)
+#        ④ 목록에 뜬 것을 번호 순서대로 하나씩 복구한다 (예전 그대로)
+#    🚫 새 절전해제·새 스캔을 만들지 않았다 — `_run_seq`·`_check_scan` 을 그대로 부른다.
+#    🚫 복구가 이미 돌고 있으면 ①~③을 하지 않는다 (복구 중에 F11 이 끼면 클릭이 엉킨다).
+FIX_ALL_PREP      = True
+FIX_ALL_SCAN_WAIT = 45.0     # ③ 을 기다리는 한도(초) — 넘으면 지금 목록으로 진행한다
 WARN_WAKE_AGAIN = 9500  # 한 번 더 (뒤늦게 그려지는 클라)
 WARN_IDLE_MS = 10000    # 5분이 지난 뒤 **목록에 남은 슬롯만** 다시 보는 간격(ms)
 # 🚨 2026-10-23 사용자: *"내가 F11이든 절전해제든 해서 복구를 하면 너가 복구 표기에서
@@ -10353,10 +10370,12 @@ class App(tk.Tk):
         #   손이 가는 자리가 자연스럽다.
         #   ⚠ `height` 는 **글자 줄 수**라 1.5줄을 못 준다 → `pady` 로 늘린다.
         #   🚫 이 위에 버튼을 더 쌓지 말 것 — 목록이 밀려난다 (2026-10-20 사고).
-        tk.Button(self._warn_box, text="▶ 전부 복구",
-                  font=("맑은 고딕", 8, "bold"), pady=5,
-                  bg="#8e44ad", fg="white", activebackground="#6c3483",
-                  command=self._fix_run_all).pack(fill="x", pady=(1, 1))
+        self._fix_allbtn = tk.Button(
+            self._warn_box, text="▶ 전부 복구",
+            font=("맑은 고딕", 8, "bold"), pady=5,
+            bg="#8e44ad", fg="white", activebackground="#6c3483",
+            command=self._fix_run_all)
+        self._fix_allbtn.pack(fill="x", pady=(1, 1))
         self._warn_rows = tk.Frame(self._warn_box)
         self._warn_rows.pack(fill="x")
         self.after(900, self._warn_refresh)
@@ -25128,16 +25147,130 @@ class App(tk.Tk):
             redo.append(si)            # 오인일 수 있다 (btn·free·모름)
         return redo, skip
 
+    def _fix_allbtn_set(self, txt=None):
+        """[▶ 전부 복구] 버튼 글자 — 준비하는 동안 무엇을 하는지 보여준다 (None = 원래대로)."""
+        try:
+            b = getattr(self, "_fix_allbtn", None)
+            if b is not None and b.winfo_exists():
+                b.config(text=(txt or "▶ 전부 복구"),
+                         bg=("#b9770e" if txt else "#8e44ad"))
+        except Exception:
+            pass
+
     def _fix_run_all(self):
-        """▶ 전부 복구 — 지금 목록에 뜬 슬롯을 **번호 순서대로 하나씩** 복구한다.
+        """▶ 전부 복구 — **버튼 하나로 끝낸다** (2026-11-11 사용자 지시).
+
+        ① 자는 클라가 있나 → ② 있으면 F11 과 같은 절전해제를 끝까지 / 없으면 십자가만
+        다시 확인 → ③ 확인이 끝나면 → ④ 목록에 뜬 것을 하나씩 (`_fix_all_go`).
+
+        🚫 복구가 이미 돌고 있으면(대기열·잠금) 준비 단계를 건너뛴다 — 복구 중에
+           절전해제가 끼면 클릭이 엉킨다. 그때는 예전처럼 목록만 다시 건다.
+        🚫 절전 여부를 알 수 없으면(절전 그림·클라 16개) 예전 동작 그대로다.
+        ⚠ 화면을 긁고 기다리는 일이라 **백그라운드 스레드**에서 한다. 목록을 돌리는
+          것(`_fix_all_go`)만 `self.after(0, …)` 로 UI 에 돌려준다."""
+        if (not FIX_ALL_PREP or getattr(self, "_fix_queue", None)
+                or getattr(self, "_fix_hold", None) is not None):
+            return self._fix_all_go()
+        if getattr(self, "_fix_all_prep", False):
+            self.status.set("▶ 전부 복구 — 이미 준비하는 중입니다 (절전 확인·해제)")
+            return
+        if self._is_busy():
+            self.status.set(f"⚠ '{self._busy_label()}' 실행 중 — 끝난 뒤 다시 눌러주세요")
+            return
+        self._fix_all_prep = True
+        self._fix_allbtn_set("⏳ 절전 확인 중…")
+        self.status.set("▶ 전부 복구 — 자는 클라가 있는지 봅니다…")
+        try:
+            self.update_idletasks()          # ⚡ 누른 것이 바로 보이게
+        except Exception:
+            pass
+        t0 = time.time()
+
+        def _prep():
+            try:
+                aw = self._awake_slots()
+                n = len(self._client_rects_by_slot() or [])
+                if aw is None or not n:
+                    click_log("fix ▶ 전부복구 — 절전 여부를 알 수 없다 (절전 그림 또는 "
+                              "클라 16개) → 지금 목록만 돌린다")
+                    return
+                sl = [i for i in range(1, n + 1) if i not in set(aw)]
+                if sl:
+                    click_log(f"fix ▶ 전부복구 — 자는 클라 {len(sl)}개 {sl} → "
+                              f"**절전해제(F11)** 를 먼저 끝까지 돌린다")
+                    self.after(0, lambda: self._fix_allbtn_set("⏳ 절전 해제 중…"))
+                    self._run_seq()          # 끝나면 스스로 4.5초·9.5초 뒤 십자가를 본다
+                    t1 = time.time()
+                    #   둘째 확인(뒤늦게 그려지는 클라)까지 끝나야 목록이 다 찬다
+                    need = t1 + WARN_WAKE_AGAIN / 1000.0 - 1.0
+                    kick_at = t1 + WARN_WAKE_AGAIN / 1000.0 + 3.0
+                else:
+                    click_log("fix ▶ 전부복구 — 전부 깨어 있다 → 십자가를 지금 화면으로 "
+                              "다시 확인한다")
+                    t1 = time.time()
+                    need = t1
+                    kick_at = t1 + 8.0
+                    self.after(0, lambda: self._check_scan(quiet=True))
+                if _STOP_AT[0] > t0:
+                    return
+                self.after(0, lambda: self._fix_allbtn_set("⏳ 십자가 확인 중…"))
+                kicked = False
+                while time.time() - t1 < FIX_ALL_SCAN_WAIT:
+                    if _STOP_AT[0] > t0:
+                        return
+                    _dn = max(float(getattr(self, "_scan_done_at", 0) or 0),
+                              float(getattr(self, "_scan_none_at", 0) or 0))
+                    _bz = (getattr(self, "_scan_busy", False)
+                           or getattr(self, "_waking", False))
+                    if _dn > need and not _bz:
+                        break
+                    # 절전해제가 아무것도 안 하고 돌아왔으면(좌표 없음 등) 확인이 안
+                    # 걸렸을 수 있다 → 한 번 직접 건다
+                    if not kicked and not _bz and _dn <= t1 and time.time() > kick_at:
+                        kicked = True
+                        self.after(0, lambda: self._check_scan(quiet=True))
+                    nap(0.3)
+                else:
+                    click_log(f"fix ▶ 전부복구 — 십자가 확인을 {FIX_ALL_SCAN_WAIT:.0f}초 "
+                              f"기다려도 안 끝났다 → 지금 목록으로 진행한다")
+            except Exception as _e:
+                try:
+                    click_log(f"fix ▶ 전부복구 준비 중 오류 {_e!r} → 지금 목록으로 진행한다")
+                except Exception:
+                    pass
+            finally:
+                self._fix_all_prep = False
+                _stopped = _STOP_AT[0] > t0
+
+                def _fin():
+                    self._fix_allbtn_set(None)
+                    if _stopped:
+                        self.status.set("▶ 전부 복구 — 멈췄습니다")
+                        click_log("fix ▶ 전부복구 — 준비 중에 [■ 멈춤] → 복구하지 않는다")
+                        return
+                    self._fix_all_go(auto=True)
+                try:
+                    self.after(0, _fin)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_prep, daemon=True).start()
+
+    def _fix_all_go(self, auto=False):
+        """▶ 전부 복구의 몸통 — 지금 목록에 뜬 슬롯을 **번호 순서대로 하나씩** 복구한다.
 
         하나가 끝나야 다음이 시작된다 (겹치면 클릭이 엉킨다).
         각 슬롯은 개별로 누른 것과 **완전히 같은 경로**를 탄다:
         절전이면 Z 로 깨우고 → 십자가 확인 → '무료' 가 아니면 ESC 취소(💎 다야!!).
-        (2026-08-29 사용자 요청)"""
+        (2026-08-29 사용자 요청)   `auto=True` = 준비 단계(절전 확인·십자가 확인)를 거쳐 왔다."""
         q = sorted(self._warn_load())
         if not q:
-            self.status.set("▶ 전부 복구 — 목록이 비어 있습니다 (F11 로 먼저 확인하세요)")
+            if auto:
+                self.status.set("▶ 전부 복구 — 복구할 것이 없습니다 "
+                                "(16클라를 확인했는데 십자가가 뜬 곳이 없다)")
+                click_log("fix ▶ 전부복구 — 확인했는데 십자가가 뜬 곳이 없다 → 할 일 없음")
+            else:
+                self.status.set("▶ 전부 복구 — 목록이 비어 있습니다 (F11 로 먼저 확인하세요)")
             return
         self._fix_queue = q
         self._fix_bulk_ready = False
@@ -29037,6 +29170,7 @@ class App(tk.Tk):
                 self.status.set("⚠ 경고 확인 불가 — " + (" · ".join(_why) or "원인 불명")
                                 + " · [🔆 절전해제] 창에서 [📷 경고영역 지정]을 해주세요")
                 click_log("[경고확인] 불가 — " + (" · ".join(_why) or "원인 불명"))
+            self._scan_none_at = time.time()     # ▶ 전부복구가 이 시각을 본다
             return
         # 마크가 있는 곳은 그대로 두고, 사라진 곳은 자동으로 지운다
         # (내가 ✕ 로 지우지 않아도 다음 F11 때 알아서 정리됨)
@@ -29061,6 +29195,7 @@ class App(tk.Tk):
         # 안 보인다고 바로 지우지 않는다 — 연속 WARN_GONE_N 번 확인 (2026-09-29)
         gone = sorted(self._warn_gone_filter(set(hit), before, _keep))
         self._warn_save(sorted((before - set(gone)) | _add))
+        self._scan_done_at = time.time()     # ▶ 전부복구가 이 시각을 본다 (목록이 갱신됐다)
         # ⚠ **Tk 위젯을 만지므로 UI 스레드로 넘긴다** (여기는 스레드다)
         self.after(0, self._warn_refresh)
         self._fix_bulk_ready = True      # 다음 한 번은 '단체 복구'
