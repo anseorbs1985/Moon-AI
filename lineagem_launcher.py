@@ -3543,6 +3543,7 @@ def cardfix_seen(coord):
 #    그림으로 찾으면 몇 번째에 있든 맞는다.
 #    🚫 **못 찾으면 등록 좌표에 올린다** — 그림을 안 넣은 컴퓨터가 멈추면 안 된다.
 HOVER_IMG_FKEYS = ("past", "sched")   # 이 런처의 '마우스 올림' 칸에 쓴다
+NL = chr(10)      # 줄바꿈 — `_row_probe`·`_hover_probe` 가 쓴다 (2026-11-11: 정의가 없어 NameError 로 결과창이 안 떴다)
 HOVER_MATCH     = 0.70                # 판정 기준
 HOVER_IMG_MAX   = 4                   # 이 컴퓨터 전용 그림 장수
 HOVER_SPAN      = (1.00, 0.92, 1.08)  # 창 크기가 달라도 맞게 조금씩 키워/줄여 본다
@@ -15788,7 +15789,8 @@ class App(tk.Tk):
                 try:
                     out = subprocess.run(
                         ["tasklist", "/FI", f"PID eq {pid}"],
-                        capture_output=True, text=True, timeout=5).stdout
+                        capture_output=True, text=True, timeout=5,
+                        creationflags=0x08000000).stdout
                     if str(pid) in out:
                         # 떠 있으면 새로 띄우지 않고 '앞으로 올려라' 신호만 남긴다
                         try:
@@ -22174,7 +22176,7 @@ class App(tk.Tk):
                 w_.deiconify()
             except Exception:
                 pass
-        self.status.set(f"🩺 진단 끝 — 잡힘 {okn}/{tot}")
+        self.status.set("👁 미리보기를 닫았습니다")
 
     def _reg_dgn2_click(self, fkey, slot_idx, click_idx):
         key, title, _ = self._dgn2_info(fkey)
