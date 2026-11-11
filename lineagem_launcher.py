@@ -7054,6 +7054,123 @@ def itemreg_hit_area():
     return (허용, 제외) if 허용 else None
 
 
+# 🏷 **[판매] 버튼이 뜬 것을 보고 '4' 를 누른다** (2026-11-11 사용자 신고)
+#   사용자: *"클라 화면이 작으면 잘 인식을 안 하는 것 같다 · 금방 봤지 잘 안 눌러지는 거"*
+#   기록 실측(11-11 21:42~21:43 · 작은 창 12번): 🛒 거래소 인식은 12/12(0.868) 였는데
+#   **첫 '4'(판매)가 3번 씹혔다** → `🔁 2번 화면이 안 떴다 (최고 0.24)` 로 1.6초를
+#   기다린 뒤 다시 눌렀고, 그 사이 누른 다른 아이템은 '다른 작업 중' 으로 **건너뛰었다.**
+#   예전에는 클릭 뒤 0.16~0.22초를 **무조건** 쉬고 눌렀다 — 아이템 설명 패널이
+#   아직 안 떴으면 그 키는 허공에 들어간다.
+#   → 패널 아래의 **[검색][판매] 두 버튼**이 보일 때까지 기다렸다가 누른다.
+#   📏 실측(546x307 · 16클라): 패널 열림 1.000 · 그 밖 15개 ≤0.24 (창 전체로 봐도 ≤0.48)
+#      후보 셋을 쟀다 — 판매 버튼만 0.46 · 글자만 0.41 · **두 버튼 0.24** ← 가장 깨끗하다
+#   🚫 **못 봐도 누른다** (ITEMREG_SELL_MAX 뒤) — 그림은 더 잘 누르기 위한 것이지
+#      안 누르기 위한 것이 아니다 (2026-11-08 교훈). 못 본 것은 기록에 남긴다.
+#   🚫 그림을 자른 창 크기와 다르면(확대한 창 등) **판정하지 않는다** — 늘린 그림은
+#      흐려져 점수가 떨어지고, 그러면 매번 한도까지 기다려 **지금보다 느려진다.**
+#      그 크기에서 쓰려면 그 창에서 한 장 더 받아야 한다.
+ITEMREG_SELL_MATCH  = 0.70
+ITEMREG_SELL_MAX    = 0.80           # 이만큼 기다려도 안 보이면 그냥 누른다(초)
+ITEMREG_SELL_PAD    = 12             # 그 자리 둘레로 이만큼 더 본다(px)
+ITEMREG_SELL_NEAR   = 0.06           # 창 높이가 기준과 이 비율 안일 때만 판정한다
+ITEMREG_SELL_SETTLE = (0.05, 0.09)   # **방금 뜬** 버튼은 한 박자 쉬고 누른다
+# 📏 새 코드로 찍힌 실측 (2026-11-11 21:49~21:50 · 작은 창 6번):
+#      패널이 뜨면 [판매] 버튼은 **첫 확인(0.03~0.07초)** 에 1.00 으로 보이고,
+#      '4' 뒤 등록창은 **0.05~0.16초** 에 뜬다.
+#    반대로 버튼이 0.8초 동안 안 보인 두 번은 —
+#      ① 사용자가 손으로 [판매] 를 눌러 **등록창이 이미 뜨는 중**이었다 (창이 버튼을 덮는다 0.10)
+#         → 그 위에 '4' 를 또 눌렀다
+#      ② **패널이 안 뜨는 칸**을 누른 것이었다 (저장된 화면: 칸만 노랗게 골라지고 패널 없음)
+#         → '4' → 1.6초 → 다시 '4' → 1.6초 = **4초 동안 묶였고 그 사이 클릭 3번이 버려졌다**
+ITEMREG_DUD_WAIT    = 0.6            # 버튼을 못 보고 누른 '4' — 등록창을 이만큼만 기다린다 (다시 안 누른다)
+ITEMREG_DLG_MAX     = 0.9            # 버튼을 **보고** 누른 '4' — 이만큼 안 뜨면 씹힌 것 → 다시 누른다
+#   (버튼을 판정하지 못한 창 — 확대한 창 등 — 은 예전처럼 ITEMREG_SEE_MAX 1.6초)
+#   🚫 ITEMREG_DLG_MAX 를 0.5 밑으로 내리지 말 것 — 뜨는 중인 등록창 위에 '4' 가 또 들어간다.
+ITEMREG_PEND_SEC    = 2.0            # 도는 중에 누른 클릭 — 이 안이면 끝난 뒤 이어서 본다
+_ITEMREG_SELL = {"mt": None, "tpl": None, "meta": None}
+
+
+def itemreg_sell_load():
+    """[검색][판매] 그림과 그 자리 → (그림, meta) 또는 (None, None). 파일이 바뀌면 다시 읽는다."""
+    p = os.path.join(IMG_DIR, "itemreg_sell.png")
+    j = os.path.join(IMG_DIR, "itemreg_sell.json")
+    try:
+        mt = (os.path.getmtime(p), os.path.getmtime(j))
+    except Exception:
+        return None, None
+    if _ITEMREG_SELL["mt"] != mt:
+        try:
+            import cv2, numpy as np
+            with open(j, encoding="utf-8") as f:
+                meta = json.load(f) or {}
+            tpl = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            if tpl is None or int(meta.get("w", 0)) <= 0 or int(meta.get("h", 0)) <= 0:
+                tpl, meta = None, None
+        except Exception:
+            tpl, meta = None, None
+        _ITEMREG_SELL.update(mt=mt, tpl=tpl, meta=meta)
+    return _ITEMREG_SELL["tpl"], _ITEMREG_SELL["meta"]
+
+
+def itemreg_sell_seen(coord):
+    """아이템 설명 패널의 [검색][판매] 버튼이 보이나 → (상태, 점수).
+
+    상태 — True 보인다 / False 안 보인다 / **None 판정할 수 없다**
+    (그림이 없다 · 창 크기가 그림을 자른 창과 다르다 · 못 찍었다)."""
+    tpl, meta = itemreg_sell_load()
+    if tpl is None:
+        return None, -1.0
+    try:
+        import cv2
+        big = grab_window(coord)
+        if big is None:
+            return None, -1.0
+        k = big.shape[0] / float(meta["h"])
+        if abs(k - 1.0) > ITEMREG_SELL_NEAR:
+            return None, -1.0
+        t = tpl
+        if abs(k - 1.0) > 0.02:
+            t = cv2.resize(tpl, (max(3, int(round(tpl.shape[1] * k))),
+                                 max(3, int(round(tpl.shape[0] * k)))),
+                           interpolation=cv2.INTER_CUBIC if k > 1 else cv2.INTER_AREA)
+        ox = (big.shape[1] - float(meta["w"]) * k) / 2.0
+        x1 = int(round(ox + float(meta["dx"]) * k)) - ITEMREG_SELL_PAD
+        y1 = int(round(float(meta["dy"]) * k)) - ITEMREG_SELL_PAD
+        x2 = x1 + t.shape[1] + ITEMREG_SELL_PAD * 2
+        y2 = y1 + t.shape[0] + ITEMREG_SELL_PAD * 2
+        sub = big[max(0, y1):min(big.shape[0], y2), max(0, x1):min(big.shape[1], x2)]
+        if t.shape[0] > sub.shape[0] or t.shape[1] > sub.shape[1]:
+            return None, -1.0
+        v = float(cv2.minMaxLoc(cv2.matchTemplate(sub, t, cv2.TM_CCOEFF_NORMED))[1])
+        return (v >= ITEMREG_SELL_MATCH), v
+    except Exception:
+        return None, -1.0
+
+
+def itemreg_keep_shot(coord, tag, keep=8):
+    """🗂 증거 화면을 남긴다 (이 컴퓨터 전용 · 최근 `keep` 장). 실패해도 조용히."""
+    try:
+        import cv2
+        big = grab_window(coord)
+        if big is None:
+            return ""
+        d = os.path.join(IMG_DIR_MINE, "_itemreg")
+        os.makedirs(d, exist_ok=True)
+        fn = os.path.join(d, f"{time.strftime('%m%d_%H%M%S')}_{tag}.png")
+        ok, buf = cv2.imencode(".png", big)
+        if ok:
+            buf.tofile(fn)
+        old = sorted(x for x in os.listdir(d) if x.endswith(f"_{tag}.png"))
+        for x in old[:-keep]:
+            try:
+                os.remove(os.path.join(d, x))
+            except Exception:
+                pass
+        return fn
+    except Exception:
+        return ""
+
+
 def itemreg_shop_seen(coord):
     """지금 그 창이 **거래소 화면인지**. (보임?, 점수)
 
@@ -34205,6 +34322,11 @@ class App(tk.Tk):
                 if self._is_busy() or getattr(self, "_itemreg_busy", False):
                     click_log("[아이템등록] 다른 작업이 도는 중이라 건너뜀 "
                               f"· 클릭 {tuple(xy)}")
+                    # 아이템등록 자신이 도는 중이었으면 끝난 뒤 이어받게 적어둔다
+                    # (다른 런처 작업이 도는 중이면 적지 않는다 — 그건 끼어들면 안 된다).
+                    if (getattr(self, "_itemreg_busy", False)
+                            and not self._is_busy()):
+                        self._itemreg_pend = (tuple(xy), time.time())
                     # 조용히 사라지면 '불안정하다' 고 느낀다 — 건너뛴 것을 보여준다.
                     self.after(0, lambda: self.status.set(
                         "🏷 앞 아이템을 올리는 중 — 이 클릭은 건너뜁니다 (잠깐 뒤 다시)"))
@@ -34220,6 +34342,7 @@ class App(tk.Tk):
         if getattr(self, "_itemreg_busy", False):
             return
         self._itemreg_busy = True
+        _reached = [False]                 # 최저가까지 갔나 (갔으면 이어받지 않는다)
         try:
             rc = client_rect_at(int(xy[0]), int(xy[1]))
             if not rc:
@@ -34308,13 +34431,51 @@ class App(tk.Tk):
             except Exception:
                 _h0 = None
             self._itemreg_last_xy = tuple(xy)   # F7 '확인만' 이 쓸 자리
+            self._itemreg_pend = None           # 여기까지 온 뒤에 누른 것만 이어받는다
             self._itemreg_hold = False
             nap(random.uniform(*ITEMREG_WAIT))   # 화면이 뜨기를 기다린다
             done = []
             _trace = []
+            # 🏷 **[판매] 버튼이 뜬 것을 보고** 누른다 (2026-11-11) — 위 쉼은 '최소' 다.
+            #    처음부터 보이면 예전과 똑같은 박자로 간다(확인 한 번 약 60ms).
+            #    늦게 뜨면 뜰 때까지, 끝내 안 보이면 **그래도 누른다**(예전 동작).
+            #    🧭 버튼이 안 보이는 동안 **등록창이 먼저 뜨는지**도 본다 — 사용자가 손으로
+            #       [판매] 를 눌렀으면 그 창이 버튼을 덮는다. 그때는 '4' 를 건너뛰고
+            #       최저가('5')부터 간다 (떠 있는 등록창에 '4' 를 또 누르지 않는다).
+            _t_s, _sn, _dlg_first = time.time(), 0, False
+            while True:
+                _ss, _sv = itemreg_sell_seen(xy)
+                _sn += 1
+                if _ss is not False:
+                    break
+                try:
+                    _dlg_first = bool(itemreg_img_seen(ITEMREG_PRICE_STEP, xy)[0])
+                except Exception:
+                    _dlg_first = False
+                if _dlg_first or time.time() - _t_s >= ITEMREG_SELL_MAX:
+                    break
+                nap(random.uniform(*ITEMREG_SEE_GAP))
+            _s_el = time.time() - _t_s
+            # 버튼도 등록창도 못 봤다 = 패널이 안 뜨는 칸일 가능성이 크다.
+            # 🚫 그래도 '4' 는 **한 번 눌러본다** (그림이 그 컴퓨터에서 안 맞을 수도 있다 —
+            #    그림은 더 잘 누르기 위한 것이지 안 누르기 위한 것이 아니다). 다만
+            #    오래 붙잡지 않는다: ITEMREG_DUD_WAIT 만 보고, 다시 누르지 않는다.
+            _dud = (_ss is False and not _dlg_first)
+            if _ss:
+                if _sn > 1:
+                    nap(random.uniform(*ITEMREG_SELL_SETTLE))
+                _trace.append(f"판매버튼 {_sv:.2f}@{_s_el:.2f}s")
+            elif _dlg_first:
+                _trace.append(f"등록창이 먼저 떴다@{_s_el:.2f}s → 4 건너뜀")
+            elif _ss is False:
+                _trace.append(f"판매버튼 못봄 {_sv:.2f}@{_s_el:.2f}s")
+            else:
+                _trace.append("판매버튼 판정없음")
             _again = 0                 # 🔁 '앞 키 다시 누르기' 를 쓴 횟수
             for k in order:                        # **적어둔 순서 그대로**
                 st = steps[k]
+                if _dlg_first and k < ITEMREG_PRICE_STEP:
+                    continue                       # 등록창이 이미 떴다 — '4' 는 건너뛴다
                 # 💰 값넣기 모드 — **최저가를 누르기 직전에 멈춘다** (2026-09-27).
                 #    창은 열어둔 채 그대로 두니 수량·가격을 직접 넣을 수 있다.
                 #    다 넣고 F7 을 누르면 확인(y·y)만 눌러 끝낸다.
@@ -34327,10 +34488,15 @@ class App(tk.Tk):
                 #    창은 그대로 열어두므로 값을 보고 고칠 수 있다.
                 #    0원이거나 값이 이상하면 **사용자가 고치고 직접 등록**한다.
                 if self._itemreg_mode() == "manual" and k == ITEMREG_MANUAL_STOP:
+                    _reached[0] = True
+                    if not getattr(self, "_itemreg_dlg_shot", False):
+                        self._itemreg_dlg_shot = True      # 런처를 켠 뒤 한 번만
+                        itemreg_keep_shot(xy, "dlg", keep=2)
                     click_log(f"[아이템등록] 💰 값넣기 — 최저가까지 누르고 "
                               f"{k+1}번({st['key']}) 앞에서 멈춤. "
                               f"누른 키: {' → '.join(done) or '없음'} "
-                              f"(값을 확인하고 F7 을 누르면 등록)")
+                              f"(값을 확인하고 F7 을 누르면 등록)"
+                              f" | {' · '.join(_trace)}")
                     self.after(0, lambda: self.status.set(
                         "💰 최저가까지 눌렀습니다 — 값을 확인하고 F7 을 누르면 등록"))
                     return
@@ -34406,17 +34572,35 @@ class App(tk.Tk):
                     # "딱 딱 딱 해줘야 하는데 불안정해"). 예전엔 0.25~0.45초씩 3번만
                     # 봐서, 창이 일찍 떠도 한 박자씩 늦고 편차가 컸다.
                     _ok, _sc = False, 0.0
-                    _dead = time.time() + ITEMREG_SEE_MAX
+                    _t_k = time.time()
+                    _lim = ITEMREG_SEE_MAX
+                    if k == ITEMREG_PRICE_STEP and not _dlg_first:
+                        if _dud:
+                            _lim = ITEMREG_DUD_WAIT
+                        elif _ss:
+                            _lim = ITEMREG_DLG_MAX
+                    _dead = _t_k + _lim
                     while True:
                         _ok, _sc = itemreg_img_seen(k, xy)
                         if _ok or time.time() >= _dead:
                             break
                         nap(random.uniform(*ITEMREG_SEE_GAP))
-                    _trace.append(f"🖼{k+1}={_sc:.2f}")
+                    _trace.append(f"🖼{k+1}={_sc:.2f}@{time.time() - _t_k:.2f}s")
                     if _ok:
                         # 창이 '보이는' 것과 '키를 받는' 것은 다르다 — 뜨자마자 누르면
                         # 열리는 중이라 씹힌다 (2026-09-16: "최저가를 안 찍고 눌러버린다").
                         nap(random.uniform(*ITEMREG_SETTLE))
+                    if not _ok and _dud and k == ITEMREG_PRICE_STEP:
+                        # 패널도 등록창도 안 떴다 — 아이템이 아닌 칸으로 보고 **바로 놓아준다.**
+                        _shot = itemreg_keep_shot(xy, "dud", keep=4)
+                        click_log(f"[아이템등록] 🫥 [판매] 버튼도 등록창도 안 떴다 "
+                                  f"— 패널이 안 뜨는 칸으로 보고 끝낸다 "
+                                  f"(4 를 한 번 눌러봤다 · {time.time() - _t_s:.1f}초)"
+                                  f" | {' · '.join(_trace)}"
+                                  + (f" · 🗂 {_shot}" if _shot else ""))
+                        self.after(0, lambda: self.status.set(
+                            "🏷 판매 패널이 안 떠서 넘어갑니다 — 아이템을 다시 눌러주세요"))
+                        return
                     if not _ok and done and _again < ITEMREG_RETRY:
                         # 🔁 **앞 키가 씹힌 것일 수 있다 — 다시 눌러본다** (2026-10-28)
                         #    아이템을 고르기 전에 '4' 가 눌리면 등록 창이 안 뜬다
@@ -34427,9 +34611,14 @@ class App(tk.Tk):
                         _pk = done[-1]
                         if len(_pk) == 1 and _pk.isalpha():
                             _pk = _pk.lower()
+                        # 🗂 씹힌 그 순간의 화면을 남긴다 — 패널이 떠 있었는지를
+                        #    이것 없이는 가릴 수 없다 (이 컴퓨터 전용 · 최근 8장).
+                        _shot = itemreg_keep_shot(xy, "miss")
                         click_log(f"[아이템등록] 🔁 {k+1}번 화면이 안 떴다 "
                                   f"(최고 {_sc:.2f}) — 앞 키 '{_pk}' 를 다시 "
-                                  f"눌러본다 ({_again}/{ITEMREG_RETRY})")
+                                  f"눌러본다 ({_again}/{ITEMREG_RETRY})"
+                                  f" | {' · '.join(_trace)}"
+                                  + (f" · 🗂 {_shot}" if _shot else ""))
                         try:
                             pyautogui.keyDown(_pk)
                             nap(random.uniform(0.07, 0.10))
@@ -34476,17 +34665,41 @@ class App(tk.Tk):
                     click_log(f"[아이템등록] {k+1}번 키 '{st['key']}' 실패: {_e!r}")
                     return
                 done.append(st["key"])
-                if st["wait"]:
+                # 💰 값넣기에서는 이 키가 마지막이다 — 그 뒤의 쉼(430ms)은 다음 키(y)가
+                #    기다리던 시간이라 쓸 곳이 없고, 그동안 누른 **다음 아이템이
+                #    '다른 작업 중' 으로 건너뛰어진다** (2026-11-11 실측). 그래서 안 쉰다.
+                _last_m = (self._itemreg_mode() == "manual"
+                           and order.index(k) + 1 < len(order)
+                           and order[order.index(k) + 1] == ITEMREG_MANUAL_STOP)
+                if st["wait"] and not _last_m:
                     nap(st["wait"] / 1000.0 * random.uniform(*ITEMREG_JITTER))
             click_log(f"[아이템등록] 클릭 {tuple(xy)} → 창({rc[0]},{rc[1]}) "
                       f"에서 키 {' → '.join(done)} 누름  |  받은 창: "
                       f"{' · '.join(_trace)}")
+            _reached[0] = True
             self.after(0, lambda: self.status.set(
                 "🏷 최저가로 등록했습니다 (키 " + " → ".join(done) + ")"))
         except Exception as e:
             click_log(f"[아이템등록] 실패: {e!r}")
         finally:
             self._itemreg_busy = False
+            # 🔁 **도는 중에 누른 클릭을 버리지 않는다** (2026-11-11 실측 — 헛클릭 하나에
+            #    묶인 4초 동안 누른 아이템 3개가 전부 '다른 작업 중' 으로 사라졌다).
+            #    이번 판이 최저가까지 **못 갔을 때만**, 가장 마지막에 누른 것 하나를 이어서 본다.
+            #    (갔으면 등록창이 떠 있다 — 거기서는 아무것도 누르지 않는 것이 규칙이다)
+            #    이어받은 판도 처음부터 같은 관문(자리 · 거래소 · 등록창 · [판매] 버튼)을 지난다.
+            try:
+                _pd = getattr(self, "_itemreg_pend", None)
+                self._itemreg_pend = None
+                if (_pd and not _reached[0]
+                        and time.time() - _pd[1] <= ITEMREG_PEND_SEC
+                        and self._itemreg_on() and not self._is_busy()):
+                    click_log(f"[아이템등록] 🔁 도는 중에 누른 클릭 {tuple(_pd[0])} 을 "
+                              f"이어서 본다 ({time.time() - _pd[1]:.1f}초 전)")
+                    threading.Thread(target=self._itemreg_run, args=(_pd[0],),
+                                     daemon=True).start()
+            except Exception:
+                pass
 
     def _dc_hotkey_loop(self):
         """전역 단축키 감시 — ON 상태에서 지정키가 눌리면 일반던전충전 실행."""
