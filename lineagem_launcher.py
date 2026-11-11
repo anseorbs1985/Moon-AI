@@ -17730,14 +17730,14 @@ class App(tk.Tk):
                 _dm = os.path.getmtime(os.path.join(LOCAL_DATA, "island_done.json"))
             except Exception:
                 _dm = 0.0
-            if _dm != getattr(self, "_dun_done_mtime", None):
-                if getattr(self, "_dun_done_mtime", None) is not None:
-                    self._dun_adv_at = time.time() + 3.0
-                self._dun_done_mtime = _dm
+            # 📅 **끝나자마자 옮기지 않는다** — 던전은 하루에 하나씩이다 (2026-11-11
+            #    사용자 정정: "오늘 하면 내일부터 다른 던전을. 오늘 바로 말고").
+            #    여기서는 '날이 바뀌었는데 돌던 것이 있어 미뤄둔 것' 만 이어서 한다.
+            self._dun_done_mtime = _dm
             _at = getattr(self, "_dun_adv_at", 0)
             if _at and time.time() >= _at:
                 self._dun_adv_at = 0
-                self._dun_auto("방금 끝났다")
+                self._dun_auto("날이 바뀌었다 · 돌던 것이 끝나 이제 옮긴다", force=True)
         except Exception:
             pass
         try:
@@ -18010,13 +18010,16 @@ class App(tk.Tk):
         사용자: *"오만의탑을 돌려서 완료가 됐으면 미니는 당연히 **다음 잊혀진섬**으로
         바꿔줘야 해. 내가 실행이 되면 그 던전은 더 이상 돌리질 않거든"*
 
-        규칙은 섬 실행기의 `dun_today` 한 곳에 있다 (그 요일 던전이 이번 주에 다
-        끝났으면 오만 → 잊섬 → 에카 순서로 안 끝난 첫 던전, 셋 다 끝났으면 악몽의섬).
+        📅 **하루에 하나씩** (같은 날 사용자 정정) — *"오만의탑을 **오늘 하면 내일부터**
+        다른 던전을 해달라고. 오늘 바로 말고"*.  끝낸 그 날은 탭이 그대로고,
+        다음 날 05시에 넘어간다.  그래서 이 함수는 **날이 바뀔 때만** 불린다.
+
+        규칙은 섬 실행기의 `dun_today` 한 곳에 있다 (그 요일 던전을 **어제까지** 다
+        끝냈으면 오만 → 잊섬 → 에카 순서로 안 끝난 첫 던전, 셋 다 끝났으면 악몽의섬).
         🚫 여기에 규칙을 베껴 두지 말 것.
 
-        `force=True`  날짜·주가 바뀌었을 때 — 무조건 그 던전으로
-        `force=False` 던전이 방금 끝났을 때 — **지금 탭의 던전이 끝난 경우에만** 옮긴다
-                      (사용자가 손으로 고른 다른 탭은 건드리지 않는다)
+        `force=True`  날이 바뀌었을 때 — 무조건 그 던전으로 (지금은 늘 이것으로 부른다)
+        `force=False` **지금 탭의 던전이 끝난 경우에만** 옮긴다
         ⚠ 파일을 읽으므로 **백그라운드 스레드**에서 정하고 탭 바꾸기만 UI 로 돌려준다.
         ⚠ 대기열이 남았거나 섬 실행기가 도는 중이면 **미룬다** — 탭을 바꾸면
           대기열이 비워진다 (`_dun_switch`)."""
@@ -18039,6 +18042,12 @@ class App(tk.Tk):
                     click_log(f"[슬롯판] 📅 다음 던전 확인 실패: {e}")
                 except Exception:
                     pass
+                if force:                # 날이 바뀌었으면 적어도 그 요일 던전으로는 간다
+                    try:
+                        import datetime as _dt
+                        want = DAY_DUNGEON.get(_dt.datetime.now().weekday())
+                    except Exception:
+                        want = None
             finally:
                 self._dun_auto_busy = False
 
@@ -18078,29 +18087,43 @@ class App(tk.Tk):
         threading.Thread(target=_work, daemon=True).start()
 
     def _day_tab_tick(self):
-        """날짜(또는 주)가 바뀌면 **지금 보여줄 던전** 탭으로 바꿔준다.
+        """📅 **날이 바뀌면** 지금 보여줄 던전 탭으로 바꿔준다.
 
-        **사용자가 손으로 바꾼 탭은 그 날 안에는 건드리지 않는다** —
-        요일이 넘어갔을 때와 (2026-11-11) **수요일 05:00 에 새 주가 시작될 때**,
-        그리고 지금 탭의 던전을 다 돌렸을 때(`_night_sync_tick`)만 자동으로 옮긴다."""
+        하루의 시작은 **05시**다 (섬 실행기의 `DUN_DAY_HOUR`). 자정에도 한 번 본다
+        (요일이 바뀌므로). 던전은 **하루에 하나씩**이라 끝낸 그 날에는 옮기지 않는다
+        (2026-11-11 사용자 정정) — 옮기는 것은 여기 하나뿐이다.
+        **사용자가 손으로 바꾼 탭은 그 날 안에는 건드리지 않는다.**
+        ⚠ 대기열이 남았거나 섬 실행기가 도는 중이면 **끝난 뒤에** 옮긴다 —
+          탭을 바꾸면 대기열이 비워진다 (`_dun_switch`). 1분 뒤 다시 본다."""
+        _again = 300000                                # 5분마다 날짜만 확인
         try:
             import datetime as _dt
             _n = _dt.datetime.now()
-            #   (날짜, '수요일 05시가 지났나') — 둘 중 하나라도 바뀌면 다시 정한다
-            mark = (_n.date(), _n.weekday() == 2 and _n.hour >= 5)
-            if getattr(self, "_day_tab_day", None) != mark:
-                self._day_tab_day = mark
-                # 먼저 그 요일 던전으로 (예전 그대로 · 즉시), 이어서 완료 여부를 본다
-                i = self._day_tab_index()
-                self._dun_switch(i)
-                self._rep_log(f"📅 {['월','화','수','목','금','토','일'][_n.weekday()]}"
-                              f"요일 — 슬롯판을 '{self.DUN_TABS[i][1]}' 로 열었습니다")
-                self.after(400, lambda: self._dun_auto("그 요일 던전은 이미 다 돌렸다",
-                                                       force=True))
+            try:
+                import lineagem_island as _isl
+                _hh = int(getattr(_isl, "DUN_DAY_HOUR", 5))
+            except Exception:
+                _hh = 5
+            mark = (_n.date(), _n.hour >= _hh)
+            _old = getattr(self, "_day_tab_day", None)
+            if _old != mark:
+                if _old is None:
+                    # 런처가 켜졌다 — 먼저 그 요일 던전으로 (즉시), 이어서 완료 여부를 본다
+                    self._day_tab_day = mark
+                    i = self._day_tab_index()
+                    self._dun_switch(i)
+                    self._rep_log(f"📅 {['월','화','수','목','금','토','일'][_n.weekday()]}"
+                                  f"요일 — 슬롯판을 '{self.DUN_TABS[i][1]}' 로 열었습니다")
+                    self.after(400, lambda: self._dun_auto("오늘 보여줄 던전", force=True))
+                elif getattr(self, "_night_queue", None) or self._island_running():
+                    _again = 60000                     # 돌던 것이 끝난 뒤에
+                else:
+                    self._day_tab_day = mark
+                    self._dun_auto("날이 바뀌었다", force=True)
         except Exception:
             pass
         finally:
-            self.after(300000, self._day_tab_tick)     # 5분마다 날짜만 확인
+            self.after(_again, self._day_tab_tick)
 
     # ── 📤 슬롯판 따로 떼기 (2026-09-16 사용자 요청) ──────────────────────
     # "오만의탑/에카 칸을 클릭했을 때 메인런처 전체가 앞으로 나오지 말고

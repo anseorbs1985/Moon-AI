@@ -277,6 +277,11 @@ def gap_mid(g):
 #   ① 그 요일의 던전이 아직 안 끝났으면 → 그 던전 (예전 그대로)
 #   ② 끝났으면 → `DUN_CYCLE` 순서로 **아직 안 끝난 첫 던전**
 #   ③ 셋 다 끝났으면 → 악몽의섬
+# 📅 **하루에 하나씩** (2026-11-11 사용자 정정) — "오만의탑을 **오늘 하면 내일부터**
+#    다른 던전을 해달라고. 오늘 바로 말고. **하루에 하나씩만** 한다"
+#    → 위 ①②③ 의 '끝났다' 는 **오늘이 시작되기 전에** 끝난 것만 센다.
+#      오늘 끝낸 던전은 오늘 하루 그대로 보이고, 다음 날 `DUN_DAY_HOUR`(05시)에 넘어간다.
+#    🚫 '끝나자마자 다음 던전' 으로 되돌리지 말 것.
 #   악몽의섬 요일(토·일)은 늘 악몽의섬 (여러 번 도는 던전이라 '완료' 가 없다)
 # '완료' = 그 던전의 **ON 이고 좌표가 있는 슬롯 전부**가 이번 주에 끝까지 돌았다.
 #   🚫 중간에 멈춘 슬롯(카드·그림을 못 찾음, 클라 없음, 멈춤)은 세지 않는다 —
@@ -291,6 +296,9 @@ DUN_DAY   = {0: "월요일_잊혀진섬", 1: "화요일_에카",
              2: "수금_오만의탑", 3: "수금_오만의탑", 4: "수금_오만의탑",
              5: "토요일_악몽의섬", 6: "토요일_악몽의섬"}
 DUN_WEEK_START = (2, 5)           # 한 주의 시작 — 수요일 05:00
+DUN_DAY_HOUR   = 5                # 하루의 시작 — 05:00 (주 시작·게임 일일 초기화와 같은 시각)
+#   ⚠ 자정이 아니다 — 밤 11시 50분에 돌려 0시 20분에 끝나도 '어제 한 것' 으로 센다.
+#     자정으로 두면 그 던전이 다음 날 하루 종일 그대로 남는다.
 
 
 def dun_cycle_start(now=None):
@@ -302,6 +310,16 @@ def dun_cycle_start(now=None):
     d -= _dt.timedelta(days=(t.weekday() - wd) % 7)
     if d > t:
         d -= _dt.timedelta(days=7)
+    return d.timestamp()
+
+
+def dun_day_start(now=None):
+    """오늘이 시작된 시각(가장 최근의 `DUN_DAY_HOUR` 시) → epoch 초."""
+    import datetime as _dt
+    t = _dt.datetime.fromtimestamp(now if now is not None else time.time())
+    d = t.replace(hour=DUN_DAY_HOUR, minute=0, second=0, microsecond=0)
+    if d > t:
+        d -= _dt.timedelta(days=1)
     return d.timestamp()
 
 
@@ -351,8 +369,11 @@ def dun_need(key, cfg):
     return out
 
 
-def dun_done(key, cfg=None, done=None, now=None):
-    """그 던전이 **이번 주에 다 끝났나** — 돌려야 하는 슬롯 전부가 끝까지 돌았나."""
+def dun_done(key, cfg=None, done=None, now=None, before=None):
+    """그 던전이 **이번 주에 다 끝났나** — 돌려야 하는 슬롯 전부가 끝까지 돌았나.
+
+    `before`(epoch 초)를 주면 **그 시각 전에** 다 끝난 것만 True — 마지막 슬롯이
+    그 뒤에 끝났으면(= 오늘 끝냈으면) False 다 (`dun_today` 가 '하루에 하나씩' 에 쓴다)."""
     try:
         if key not in DUN_CYCLE:
             return False                 # 악몽의섬 등은 '완료' 가 없다
@@ -363,7 +384,10 @@ def dun_done(key, cfg=None, done=None, now=None):
             return False
         t0 = dun_cycle_start(now)
         m = done.get(key) or {}
-        return all(float(m.get(str(si)) or 0) >= t0 for si in need)
+        ts_ = [float(m.get(str(si)) or 0) for si in need]
+        if not all(x >= t0 for x in ts_):
+            return False
+        return before is None or max(ts_) < float(before)
     except Exception:
         return False
 
@@ -378,10 +402,11 @@ def dun_today(cfg=None, now=None, day_map=None, done=None):
             return base
         cfg = cfg if cfg is not None else load_cfg()
         done = done if done is not None else done_load()
-        if not dun_done(base, cfg, done, ts):
+        d0 = dun_day_start(ts)           # 📅 **오늘 끝낸 것은 세지 않는다** (하루에 하나씩)
+        if not dun_done(base, cfg, done, ts, before=d0):
             return base
         for k in DUN_CYCLE:
-            if not dun_done(k, cfg, done, ts):
+            if not dun_done(k, cfg, done, ts, before=d0):
                 return k
         return DUN_FREE
     except Exception:

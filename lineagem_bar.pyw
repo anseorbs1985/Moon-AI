@@ -107,7 +107,7 @@ class Bar(tk.Tk):
         self.after(20000, self._tick)
         self.after(1000, self._raise_watch)
         _n0 = datetime.datetime.now()
-        self._day_seen = (_n0.date(), _n0.weekday() == 2 and _n0.hour >= 5)
+        self._day_seen = (_n0.date(), _n0.hour >= 5)
         self.after(300000, self._day_tick)     # 5분마다 날짜만 확인
         self.bind("<Button-1>", self._touch, add="+")
         self.bind("<FocusOut>", lambda _e: self._maybe_back(), add="+")
@@ -137,11 +137,15 @@ class Bar(tk.Tk):
         **사용자가 손으로 고른 탭은 그 날 안에는 건드리지 않는다.**"""
         try:
             _n = datetime.datetime.now()
-            #   (날짜, '수요일 05시가 지났나' = 새 주가 시작됐나)
-            today = (_n.date(), _n.weekday() == 2 and _n.hour >= 5)
+            #   (날짜, '05시가 지났나') — 📅 던전은 **하루에 하나씩**이라 날이 바뀔 때만
+            #   옮긴다 (2026-11-11 사용자 정정). 하루의 시작은 05시다 (`DUN_DAY_HOUR`).
+            today = (_n.date(), _n.hour >= 5)
             if getattr(self, "_day_seen", None) != today:
-                self._day_seen = today
-                self._show(self._day_tab(self.tab))
+                if self.queue or (self.proc is not None and self.proc.poll() is None):
+                    pass                 # 돌던 것이 끝난 뒤에 (5분 뒤 다시 본다)
+                else:
+                    self._day_seen = today
+                    self._show(self._day_tab(self.tab))
         except Exception:
             pass
         finally:
@@ -349,31 +353,8 @@ class Bar(tk.Tk):
                 self._refresh()
             except Exception:
                 pass
-        # 📅 지금 탭의 던전을 **방금 다 돌렸으면** 다음 던전으로 (2026-11-11).
-        #    파일 시각만 본다. 대기열이 남았거나 돌고 있으면 미룬다.
-        try:
-            try:
-                _dm = os.path.getmtime(DONE_F)
-            except Exception:
-                _dm = 0.0
-            if _dm != getattr(self, "_done_m", None):
-                if getattr(self, "_done_m", None) is not None:
-                    self._adv_at = time.time() + 3.0
-                self._done_m = _dm
-            _at = getattr(self, "_adv_at", 0)
-            if _at and time.time() >= _at:
-                self._adv_at = 0
-                if self.queue or (self.proc is not None and self.proc.poll() is None):
-                    self._adv_at = time.time() + 6.0
-                else:
-                    import lineagem_island as _isl
-                    _cfg = jload(COORDS)
-                    if _isl.dun_done(self._cur()[2], _cfg):
-                        _t = self._day_tab(self.tab)
-                        if _t != self.tab:
-                            self._show(_t)
-        except Exception:
-            pass
+        # 📅 던전을 방금 다 돌려도 **오늘은 탭을 옮기지 않는다** — 하루에 하나씩이다
+        #    (2026-11-11 사용자 정정). 다음 날 05시에 `_day_tick` 이 옮긴다.
         # 🧭 창을 만진 뒤 한동안만 '실행중' 을 스스로 다시 훑는다
         try:
             _now = time.time()
