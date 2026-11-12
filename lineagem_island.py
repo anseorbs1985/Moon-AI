@@ -357,6 +357,62 @@ def done_mark(key, si, ts=None):
         return False
 
 
+# 🧭 **슬롯마다 '마지막으로 실행한 던전'** (2026-11-12 사용자 지시)
+#    사용자: *"그냥 내가 실행했던 던전으로만 다시 실행해주면 되는데 … 잊혀진섬을
+#    실행했으면 그냥 잊섬으로 가고 오만의탑으로 했으면 오만의탑으로"*
+#    물약이 떨어져 다시 돌릴 때 **화면을 읽어 던전을 짐작하지 않는다.** 그 슬롯을
+#    마지막으로 실행한 던전을 여기 적어두고 그것을 그대로 쓴다 (런처 `_p0_last_dun`).
+#    머신별 파일이다 (`%LOCALAPPDATA%\MoonAI\island_slotdun.json`) — GitHub 와 무관.
+#    🚫 물약·마을 재실행(`--rerun`)은 **적지 않는다** — 그건 사용자가 고른 것이 아니다.
+SLOTDUN_FILE = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
+                            "island_slotdun.json")
+
+
+def slot_dun_load():
+    try:
+        with open(SLOTDUN_FILE, encoding="utf-8-sig") as f:
+            d = json.load(f)
+        m = d.get("slots") if isinstance(d, dict) else None
+        return m if isinstance(m, dict) else {}
+    except Exception:
+        return {}
+
+
+def slot_dun_mark(key, sis, ts=None):
+    """그 슬롯들(0부터)을 **이 던전으로 실행했다** 고 적는다 (쓰기 직전에 다시 읽는다)."""
+    try:
+        m = slot_dun_load()
+        t = float(ts if ts is not None else time.time())
+        for si in sis:
+            m[str(int(si))] = {"key": key, "at": t}
+        os.makedirs(os.path.dirname(SLOTDUN_FILE), exist_ok=True)
+        tmp = SLOTDUN_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"slots": m}, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, SLOTDUN_FILE)
+        return True
+    except Exception:
+        return False
+
+
+def slot_dun_get(si, fresh=None, now=None):
+    """그 슬롯(0부터)을 마지막으로 실행한 던전 → (던전키, 지난 초) | None.
+
+    `fresh`(초)를 주면 그보다 오래된 기록은 없는 것으로 본다."""
+    try:
+        e = slot_dun_load().get(str(int(si)))
+        if not isinstance(e, dict) or not e.get("key"):
+            return None
+        age = float(now if now is not None else time.time()) - float(e.get("at") or 0)
+        if age < 0:
+            age = 0.0
+        if fresh is not None and age > float(fresh):
+            return None
+        return e["key"], age
+    except Exception:
+        return None
+
+
 def dun_need(key, cfg):
     """그 던전에서 **돌려야 하는 슬롯**(0부터) — ON 이고 좌표나 방향이 있는 것."""
     out = []
@@ -3040,6 +3096,8 @@ class IslandApp(tk.Tk):
         self._potion_mtime = 0
 
         self._auto_run = len(sys.argv) > 2 and sys.argv[2] == "--run"
+        # 🧭 물약·마을 감시가 다시 돌린 실행 — '마지막으로 실행한 던전' 에 적지 않는다
+        self._rerun = "--rerun" in sys.argv
         # --lanes N : 웨이브에서 동시에 돌릴 슬롯 수 (반복은 2개씩 = 더 안전)
         self._auto_lanes = None
         if "--lanes" in sys.argv:
@@ -9219,6 +9277,19 @@ class IslandApp(tk.Tk):
                     targets.sort(key=lambda t: 1 if t[0] in (1, 2, 3) else 0)
             # 💧 이번에 실제로 돈 슬롯 — 끝난 뒤 '물약 0개' 를 확인할 대상이다
             self._p0_ran = [si for si, _s in targets]
+            # 🧭 이 슬롯들을 **이 던전으로 실행했다** 고 적는다 (2026-11-12).
+            #    물약이 떨어지면 런처가 **이 던전으로만** 다시 돌린다.
+            #    🚫 물약·마을 재실행(--rerun · _p0_retry)은 적지 않는다.
+            try:
+                if (targets and not getattr(self, "_rerun", False)
+                        and not getattr(self, "_p0_retry", False)
+                        and key in [x["key"] for x in DUNGEONS[:4]]):
+                    slot_dun_mark(key, [si for si, _s in targets])
+                    self._rlog(f"🧭 {key} 실행 기록 — 슬롯 "
+                               f"{sorted(si + 1 for si, _s in targets)} "
+                               f"(물약이 떨어지면 이 던전으로 다시 돌린다)")
+            except Exception:
+                pass
             self._rep_touched = set()   # ⏰ 슬롯별 '다음 회차 다시 잡기' 표시 초기화
             d = next(x for x in DUNGEONS if x["key"] == key)
             stop_fn   = lambda: self._stop_flag

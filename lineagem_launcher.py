@@ -311,6 +311,10 @@ MANY_SURE = 0.90
 # 🧭 '물약 0개를 봤을 때 적어둔 던전' 을 믿는 시간 — 그보다 묵은 기억은 버린다
 #    (런처는 며칠씩 켜져 있다. 월요일에 적힌 '에카' 를 목요일에 쓰면 안 된다).
 P0_KEY_FRESH = 3 * 3600
+# 🧭 **'그 슬롯을 마지막으로 실행한 던전'** 을 믿는 시간 (2026-11-12 사용자 지시).
+#    이 안이면 화면을 읽어 짐작하지 않고 **그 던전으로만** 다시 돌린다.
+#    그보다 오래됐으면(기록이 없으면) 예전처럼 화면·다수결·탭으로 고른다.
+P0_LAST_FRESH = 6 * 3600
 MANY_LEAD = 2    # 2등 던전보다 **이만큼은** 많아야 한다 (비슷하면 안 믿는다)
 # 🧪 **물약이 없어서 나온 것일 때만** 다시 돌린다 (2026-10-17 사용자 재지시):
 #    "죽어서 마을에 있으면 2시간 간격을 그대로 유지해주고, **물약이 없어서** 마을에
@@ -26420,7 +26424,14 @@ class App(tk.Tk):
                               f"— 귀환도 실행도 하지 않는다")
                     return False
             # 🧭 깨어난 화면에서 **다시 확인** — 처음 판정은 자는 화면이라 흐리다
-            if key and keys:
+            #    단, **마지막으로 실행한 던전**으로 고른 것이면 화면으로 뒤집지 않는다
+            #    (2026-11-12 — 화면을 잘못 읽어 정상 건을 거부하면 안 된다).
+            _lr = self._p0_last_dun(si, keys) if (key and keys) else None
+            if _lr and _lr[0] == key:
+                nap(random.uniform(*P0_RECHECK_WAIT))
+                click_log(f"[물약감시] 🧭 #{si+1:02d} **마지막으로 실행한 던전({key})** "
+                          f"이라 화면 재확인 없이 진행한다")
+            elif key and keys:
                 try:
                     import lineagem_island as _isl
                     nap(random.uniform(*P0_RECHECK_WAIT))
@@ -26535,7 +26546,7 @@ class App(tk.Tk):
             try:
                 p = subprocess.Popen(
                     ["pythonw", os.path.join(BASE, "lineagem_island.py"),
-                     str(didx), "--run", "--slot", str(si + 1)],
+                     str(didx), "--run", "--slot", str(si + 1), "--rerun"],
                     cwd=BASE,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 p.wait(timeout=P0_RUN_WAIT)      # 하나가 끝나야 다음
@@ -42115,6 +42126,23 @@ class App(tk.Tk):
                            and inf["clock"])
         return rank, inf
 
+    def _p0_last_dun(self, si, klist=None):
+        """🧭 그 슬롯(0부터)을 **마지막으로 실행한 던전** → (던전키, 지난 초) | None.
+
+        2026-11-12 사용자: *"그냥 내가 실행했던 던전으로만 다시 실행해주면 되는데"*
+        섬 실행기가 실행할 때마다 `island_slotdun.json` 에 적는다 (`slot_dun_mark`).
+        `P0_LAST_FRESH` 보다 오래됐거나 `klist` 에 없는 던전이면 None."""
+        try:
+            import lineagem_island as _isl
+            r = _isl.slot_dun_get(si, fresh=P0_LAST_FRESH)
+            if not r:
+                return None
+            if klist is not None and r[0] not in list(klist):
+                return None
+            return r
+        except Exception:
+            return None
+
     def _p0_pick(self, si, rank, ancs, klist, tag="", inf=None):
         """🧭 물약 0개인 슬롯을 **어느 던전으로 다시 돌릴까** → (던전키 | None, 설명).
 
@@ -42139,6 +42167,17 @@ class App(tk.Tk):
         🚫 고르는 규칙을 다른 곳에 베껴 두지 말 것 — 첫 판정과 '적어둔 것 꺼내기' 가
            **같은 함수**를 써야 한다 (다르면 한쪽만 엉뚱한 던전을 고른다)."""
         try:
+            # 🧭 ⓐ **마지막으로 실행한 던전** — 화면을 읽어 짐작하지 않는다 (2026-11-12
+            #    사용자: *"잊혀진섬을 실행했으면 그냥 잊섬으로 가고 오만의탑으로 했으면
+            #    오만의탑으로 … 그냥 내가 실행했던 던전으로만 다시 실행해주면 되는데"*).
+            #    🚫 이 줄을 아래 화면 판정보다 뒤로 보내지 말 것.
+            _lr = self._p0_last_dun(si, klist)
+            if _lr:
+                _t0 = rank[0] if rank else ("-", -1.0)
+                click_log(f"[물약감시] {tag}#{si+1:02d} 🧭 **마지막으로 실행한 던전 = "
+                          f"{_lr[0]}** ({_lr[1] / 60:.0f}분 전) → 그 던전으로 다시 돌린다 "
+                          f"(화면 1등 {_t0[0]} {_t0[1]:.2f} 은 참고만)")
+                return _lr[0], "마지막으로 실행한 던전"
             if not rank:
                 return None, "장소를 못 찍었다"
             inf = inf or {}
@@ -42401,6 +42440,10 @@ class App(tk.Tk):
                 _from = None
             if _tdun:
                 _from, _why = _tdun, "그 마을의 던전"
+            # 🧭 ⓐ **마지막으로 실행한 던전**이 맨 먼저다 (2026-11-12 사용자 지시)
+            _lr = self._p0_last_dun(si, _DKEYS)
+            if _lr:
+                _from, _why = _lr[0], f"마지막으로 실행한 던전({_lr[1] / 60:.0f}분 전)"
             if not _from:
                 _from, _why = _many, "다른 클라 다수결"
             if not _from:
@@ -42471,7 +42514,7 @@ class App(tk.Tk):
                              if d["key"] == _from)
                 subprocess.Popen(
                     ["pythonw", os.path.join(BASE, "lineagem_island.py"),
-                     str(_didx), "--run", "--slot", str(si + 1)],
+                     str(_didx), "--run", "--slot", str(si + 1), "--rerun"],
                     cwd=BASE,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             except Exception as e:
