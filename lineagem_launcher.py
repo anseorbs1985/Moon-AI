@@ -301,6 +301,16 @@ NIGHT_INSIDE_TTL = 40
 #    🚫 판이 안 보이거나(접힘·최소화) 작업이 도는 중이면 훑지 않는다 → 평소 부하 0.
 NIGHT_INSIDE_TICK = 30000
 MANY_MIN  = 2    # 다수결 — 같은 던전에 **이만큼은** 있어야 믿는다
+# 🧭 다수결에 **한 표**로 세는 기준 (2026-11-12). 예전에는 `PLACE_MATCH`(0.75)였는데
+#    **기린 마을이 악몽의섬 0.86** 으로 읽혀 표가 통째로 오염됐다 —
+#    실측 11-10 18:46 `다른 클라 악몽의섬:9 에카:2` 의 9표가 전부 기린 마을에 선 캐릭이었다.
+#    섬 실행기의 `INSIDE_MATCH`(0.90)와 같은 값이다: 등록 안 된 장소 천장 0.857 ·
+#    진짜 던전 안 0.917~1.000.
+#    🚫 0.86 밑으로 내리지 말 것 — 마을에 선 캐릭이 '던전 안' 으로 표를 던진다.
+MANY_SURE = 0.90
+# 🧭 '물약 0개를 봤을 때 적어둔 던전' 을 믿는 시간 — 그보다 묵은 기억은 버린다
+#    (런처는 며칠씩 켜져 있다. 월요일에 적힌 '에카' 를 목요일에 쓰면 안 된다).
+P0_KEY_FRESH = 3 * 3600
 MANY_LEAD = 2    # 2등 던전보다 **이만큼은** 많아야 한다 (비슷하면 안 믿는다)
 # 🧪 **물약이 없어서 나온 것일 때만** 다시 돌린다 (2026-10-17 사용자 재지시):
 #    "죽어서 마을에 있으면 2시간 간격을 그대로 유지해주고, **물약이 없어서** 마을에
@@ -2704,7 +2714,17 @@ WAKE_BUSY_WAIT_MAX = 900.0
 #     엉뚱한 사냥터에 보내는 것보다 안 보내는 게 낫다 (사용자가 직접 돌릴 수 있다).
 #   ⚠ 마을감시·섬 실행기의 `PLACE_MATCH`(0.75)·`PLACE_RATIO`(1.25)는 그대로다.
 #     이 둘을 건드리면 그 기능들이 같이 깐깐해져 안 돌게 된다.
-P0_PLACE_MATCH = 0.85
+# 🚨 2026-11-12 — **0.85 → 0.90.** 사용자: *"왜 자꾸 실행 다시하면 해적섬을 실행하는
+#   거야 … 지금은 잊섬으로 설정되어 있으니까 잊섬만 가야지"*
+#   원인: **기린 마을**(등록 안 된 마을)이 악몽의섬 그림에 **0.86** 으로 읽혀 0.85 를
+#   간신히 넘었다 → 악몽의섬을 다시 돌렸고, 악몽의섬은 칸6 카드가 비어 있어 **좌표로**
+#   눌러 그날 그 자리의 카드(해적섬)로 들어갔다 (실측 11-10 18:47 #12).
+#   📏 양쪽을 쟀다 (click_log 의 재실행 결정 전부):
+#     진짜 재실행 28건  전부 **0.90 이상** (잊섬·에카·오만 1.00 · 티칼 0.93~0.95)
+#     0.85~0.90 로 통과한 것  **1건 = 위 오판**
+#   🚫 0.90 밑으로 내리지 말 것. 못 넘은 것은 아래에서 **오늘 설정된 던전**으로 간다
+#      (안 돌리는 것이 아니다 — `_rerun_today`).
+P0_PLACE_MATCH = 0.90
 P0_PLACE_RATIO = 1.12
 # 🧭 장소를 **못 읽었을 때**(전부 흐림) 그 날 던전이면 돌리는 바닥.
 #    이보다 낮으면 화면을 아예 못 본 것이라 그때는 돌리지 않는다.
@@ -42024,6 +42044,95 @@ class App(tk.Tk):
             pass
         return None
 
+    def _rerun_today(self, keys=None):
+        """🧭 **오늘 설정된 던전** = 슬롯판(섬/던전 미니)에 떠 있는 탭 → 던전 키 (없으면 None).
+
+        2026-11-12 사용자: *"내가 그날 던전 다시 실행해달라니까 **지금은 잊섬으로
+        설정되어 있으니까 잊섬만 가야지**"*
+        그 탭은 날이 바뀔 때 `dun_today` 로 저절로 맞춰지고(오만 → 잊섬 → 에카 · 토일 악몽),
+        사용자가 손으로 바꾸면 그것을 따른다 = **사용자 눈에 보이는 그 던전**이다.
+        🚫 요일표(`DAY_DUNGEON`)로 되돌리지 말 것 — 목요일은 표로는 오만의탑인데
+           오만을 수요일에 끝냈으면 그날 던전은 잊혀진섬이다.
+        `keys` 를 주면 그 안에 있을 때만 돌려준다 (장소그림이 있는 던전 목록)."""
+        try:
+            k = getattr(self, "NIGHT_KEY", None)
+            if not k:
+                return None
+            if keys is not None and k not in list(keys):
+                return None
+            return k
+        except Exception:
+            return None
+
+    def _p0_pick(self, si, rank, ancs, klist, tag=""):
+        """🧭 물약 0개인 슬롯을 **어느 던전으로 다시 돌릴까** → (던전키 | None, 설명).
+
+        `rank` = [(던전키, 점수), …] 점수 내림차순 (그 클라 이름칸을 모든 던전과 겨룬 것).
+
+        ① **또렷하다**(1등 ≥ `P0_PLACE_MATCH` 0.90 · 배수 ≥ `P0_PLACE_RATIO`) → 그 던전
+           (배수만 모자라면 — 다른 클라 다수결이나 오늘 설정된 던전과 같을 때만)
+        ② **또렷하지 않다** = 마을·입구·흐린 화면 → 화면을 믿지 않는다:
+             다른 클라들이 또렷하게(0.90↑) 한 던전에 있으면 그 던전,
+             아니면 **오늘 설정된 던전**(슬롯판 탭 — `_rerun_today`)
+           2026-11-12 사용자: *"지금은 잊섬으로 설정되어 있으니까 잊섬만 가야지"*
+        ③ 바닥(`P0_PLACE_FLOOR` 0.70)도 못 넘고 다수결도 없으면 **안 돌린다** —
+           이름칸에 아무것도 안 보이는 것이다 (일반 사냥터·창에 가림).
+
+        🚫 흐린 1등을 그대로 돌리지 말 것 — 기린 마을이 악몽의섬 0.86 으로 읽혀
+           악몽의섬(→ 칸6 이 좌표라 그날 그 자리 카드 = 해적섬)을 돌린 것이 그 사고다.
+        🚫 고르는 규칙을 다른 곳에 베껴 두지 말 것 — 첫 판정과 '적어둔 것 꺼내기' 가
+           **같은 함수**를 써야 한다 (다르면 한쪽만 엉뚱한 던전을 고른다)."""
+        try:
+            if not rank:
+                return None, "장소를 못 찍었다"
+            top, tv = rank[0]
+            v2 = rank[1][1] if len(rank) > 1 else 0.0
+            ratio = (tv / v2) if v2 > 0 else 99.0
+            today = self._rerun_today(klist)
+            if tv >= P0_PLACE_MATCH:
+                if ratio >= P0_PLACE_RATIO:
+                    return top, f"화면이 또렷하다 ({tv:.2f} · {ratio:.2f}배)"
+                mn, mh = self._many_now(ancs, klist, si)
+                if mn and top == mn:
+                    click_log(f"[물약감시] {tag}#{si+1:02d} 배수가 모자라지만"
+                              f"({ratio:.2f}배) **다른 클라들도 {top}**({mh}) 이라 돌린다")
+                    return top, f"다른 클라들도 {mh}"
+                if today and top == today:
+                    click_log(f"[물약감시] {tag}#{si+1:02d} 배수가 모자라지만"
+                              f"({ratio:.2f}배) **오늘 설정된 던전({top})** 이라 돌린다")
+                    return top, "오늘 설정된 던전"
+                click_log(f"[물약감시] {tag}#{si+1:02d} **어느 던전인지 애매하다** "
+                          f"(1등 {top} {tv:.2f} · 2등 {rank[1][0] if len(rank) > 1 else '-'} "
+                          f"{v2:.2f} = {ratio:.2f}배 < {P0_PLACE_RATIO}배"
+                          + (f" · 다른 클라 {mh}" if mh else "")
+                          + f" · 오늘 설정 {today}) → 엉뚱한 던전을 돌리느니 **안 돌린다**")
+                return None, "애매하다"
+            # ── 또렷하지 않다 ──
+            mn, mh = self._many_now(ancs, klist, si)
+            to, why = None, ""
+            if tv >= P0_PLACE_FLOOR:
+                if mn:
+                    to, why = mn, f"다른 클라들이 또렷하게 {mh}"
+                elif today:
+                    to, why = today, "오늘 설정된 던전(슬롯판 탭)"
+            elif mn:
+                to, why = mn, f"장소를 못 읽어 다른 클라 다수결({mh})"
+            if not to:
+                click_log(f"[물약감시] {tag}#{si+1:02d} 물약 0개인데 "
+                          f"**어디인지 못 읽었다** (1등 {top} {tv:.2f} "
+                          f"< {P0_PLACE_MATCH:.2f} · 바닥 {P0_PLACE_FLOOR:.2f} · "
+                          f"오늘 설정 {today}"
+                          + (f" · 다른 클라 {mh}" if mh else "")
+                          + ") → 안 돌린다")
+                return None, "못 읽었다"
+            click_log(f"[물약감시] {tag}#{si+1:02d} 장소가 또렷하지 않다 "
+                      f"(1등 {top} {tv:.2f} < {P0_PLACE_MATCH:.2f}) → "
+                      f"**{why} = {to}** 을(를) 돌린다")
+            return to, why
+        except Exception as e:
+            click_log(f"[물약감시] {tag}#{si+1:02d} 던전 고르기 오류: {e} → 안 돌린다")
+            return None, "오류"
+
     def _many_now(self, ancs, keys, skip=None):
         """🧭 **지금 다른 클라들을 훑어** 다수결 던전을 구한다 → (던전, 설명).
 
@@ -42049,8 +42158,13 @@ class App(tk.Tk):
                 t, v = r[0]
                 v2 = r[1][1] if len(r) > 1 else 0.0
                 rat = (v / v2) if v2 > 0 else 99.0
-                if (t != _isl.TOWN_KEY and v >= _isl.PLACE_MATCH
-                        and rat >= _isl.PLACE_RATIO):
+                # 🧭 **또렷한 표만** 센다 (`MANY_SURE` 0.90) — 0.75 로 세면
+                #    기린 마을(악몽의섬 0.86)에 선 캐릭이 전부 '악몽의섬' 표가 된다
+                #    배수는 물약 재실행과 같은 `P0_PLACE_RATIO`(1.12) — 점수가 0.90 을
+                #    넘으면 그것이 주 관문이다 (실측: 잊혀진섬 안 0.91~1.00 · 배수 1.15~1.35 라
+                #    1.25 로 두면 진짜 던전 안인 캐릭 절반이 표를 못 던진다)
+                if (t != _isl.TOWN_KEY and v >= max(_isl.PLACE_MATCH, MANY_SURE)
+                        and rat >= P0_PLACE_RATIO):
                     votes[_si] = t
             got, how = self._many_dungeon(votes, skip)
             self._many_cache = (time.time(), got, how)
@@ -42180,8 +42294,10 @@ class App(tk.Tk):
                 # 목표 시간도 버린다 — 다음에 마을에 들어오면 4~5분을 새로 뽑는다
                 getattr(self, "_idle_need", {}).pop(si, None)
                 # 🧭 **던전 안이 또렷하면 한 표** (다수결 재료)
-                if (_top != _isl.TOWN_KEY and _tv >= _isl.PLACE_MATCH
-                        and _ratio >= _isl.PLACE_RATIO):
+                #    ⚠ `MANY_SURE`(0.90) — 기린 마을(악몽의섬 0.86)은 표가 아니다
+                if (_top != _isl.TOWN_KEY
+                        and _tv >= max(_isl.PLACE_MATCH, MANY_SURE)
+                        and _ratio >= P0_PLACE_RATIO):
                     _votes[si] = _top
                 continue
             _towns.append((si, slot, _tv, _ratio))
@@ -42200,8 +42316,16 @@ class App(tk.Tk):
             #    ③ 둘 다 없으면 **돌리지 않는다** (엉뚱한 던전보다 안 하는 쪽)
             _from = _seen_key.get(si)
             _why = "물약0개를 봤을 때"
+            # 묵은 기억은 버린다 (며칠 전 던전을 오늘 돌리면 안 된다)
+            if _from and (now - (getattr(self, "_p0_seen_key_at", None) or {})
+                          .get(si, 0)) > P0_KEY_FRESH:
+                _from = None
             if not _from:
                 _from, _why = _many, "다른 클라 다수결"
+            if not _from:
+                # 🧭 ③ **오늘 설정된 던전**(슬롯판 탭) — 2026-11-12 사용자:
+                #    *"지금은 잊섬으로 설정되어 있으니까 잊섬만 가야지"*
+                _from, _why = self._rerun_today(_DKEYS), "오늘 설정된 던전(슬롯판 탭)"
             if not _from:
                 _note.append(f"#{si+1:02d} 마을 — 어느 던전이었는지 몰라 안 돌린다"
                              + (f" ({_how})" if _how else " (다른 클라도 애매)"))
@@ -42406,56 +42530,11 @@ class App(tk.Tk):
                 _ratio = (_tv / _2nd) if _2nd > 0 else 99.0
                 _dbgp.append("#%02d %s" % (si + 1, " ".join(
                     f"{k.split('_')[-1]}:{x:.2f}" for k, x in _rank)))
-                if _tv < P0_PLACE_MATCH:
-                    # 🧭 **전부 흐리면 '못 읽은 것'이지 '던전 밖'이 아니다.**
-                    #    사용자 2026-11-05: *"던전 이미지도 다 줬는데 왜 막히고,
-                    #    그게 막히면 안 되는 거잖아."* — 2026-10-27 에 `_p0_go_home`
-                    #    재확인에 넣은 '셋으로 가르기' 를 **첫 판정에도** 적용한다:
-                    #      ① 그 던전이 또렷 → 통과 (위에서 이미 처리)
-                    #      ② **다른 던전이 또렷** → 거부 (엉뚱한 던전 방지)
-                    #      ③ 전부 흐리다 → **그 날 던전**이면 돌린다
-                    #    🚫 ③ 에서도 **아무 던전이나** 돌리지 않는다 — 그 슬롯이
-                    #       ON 인지는 아래에서 다시 본다.
-                    _day = DAY_DUNGEON.get(time.localtime().tm_wday)   # 월=0 … 일=6
-                    _ok3 = (_day and _top == _day
-                            and _tv >= P0_PLACE_FLOOR
-                            and _ratio >= P0_PLACE_RATIO)
-                    _why3 = f"오늘 던전({_day})"
-                    if not _ok3:
-                        # 🧭 **다른 클라들이 같은 던전에 있으면 믿는다** (2026-11-10
-                        #    사용자: *"다른 캐릭들이 에카에 있으면 에카에서 나온 거니까"*).
-                        #    16클라가 같은 던전을 함께 돌기 때문에 아주 잘 맞는다.
-                        _mn, _mh = self._many_now(ancs, [k for _, k in keys], si)
-                        if (_mn and _top == _mn and _tv >= P0_PLACE_FLOOR
-                                and _ratio >= P0_PLACE_RATIO):
-                            _ok3, _why3 = True, f"다른 클라 다수결({_mh})"
-                        elif _mn and _tv < P0_PLACE_FLOOR:
-                            # 1등조차 바닥 미만 — 그래도 다른 클라가 분명하면 그쪽으로
-                            _top = _mn
-                            _ok3, _why3 = True, f"장소를 못 읽어 다수결({_mh})"
-                    if not _ok3:
-                        click_log(f"[물약감시] #{si+1:02d} 물약 0개인데 "
-                                  f"**어디인지 못 읽었다** (1등 {_top} {_tv:.2f} "
-                                  f"< {P0_PLACE_MATCH:.2f} · {_ratio:.2f}배 · "
-                                  f"오늘 던전 {_day}) → 안 돌린다")
-                        continue
-                    click_log(f"[물약감시] #{si+1:02d} 장소가 흐리지만 "
-                              f"**{_why3} 이라 {_top} 을 돌린다** "
-                              f"({_tv:.2f} · {_ratio:.2f}배)")
-                if _ratio < P0_PLACE_RATIO:
-                    # 🧭 배수가 모자라도 **다른 클라들이 같은 던전이면** 믿는다
-                    _mn, _mh = self._many_now(ancs, [k for _, k in keys], si)
-                    if _mn and _top == _mn:
-                        click_log(f"[물약감시] #{si+1:02d} 배수가 모자라지만"
-                                  f"({_ratio:.2f}배) **다른 클라들도 {_top}**"
-                                  f"({_mh}) 이라 돌린다")
-                    else:
-                        click_log(f"[물약감시] #{si+1:02d} **어느 던전인지 애매하다** "
-                                  f"(1등 {_top} {_tv:.2f} · 2등 {_rank[1][0]} "
-                                  f"{_2nd:.2f} = {_ratio:.2f}배 < {P0_PLACE_RATIO}배"
-                                  + (f" · 다른 클라 {_mh}" if _mh else "")
-                                  + ") → 엉뚱한 던전을 돌리느니 **안 돌린다**")
-                        continue
+                # 🧭 **어느 던전으로 돌릴까** 는 `_p0_pick` 한 곳에서 정한다 (2026-11-12)
+                _to, _why3 = self._p0_pick(si, _rank, ancs, [k for _, k in keys])
+                if not _to:
+                    continue
+                _top = _to
                 _didx = dict((k, d) for d, k in keys)[_top]
                 # 🧭 **이 캐릭이 어느 던전에서 물약이 떨어졌는지** 적어둔다.
                 #    마을감시는 마을 이름만 보이므로 던전을 알 길이 없다 —
@@ -42465,6 +42544,10 @@ class App(tk.Tk):
                 if _sk is None:
                     _sk = self._p0_seen_key = {}
                 _sk[si] = _top
+                _ska = getattr(self, "_p0_seen_key_at", None)
+                if _ska is None:
+                    _ska = self._p0_seen_key_at = {}
+                _ska[si] = now            # 묵은 기억을 쓰지 않으려고 시각도 적는다
                 # 🚦 **고른 던전에서 그 슬롯이 실제로 돌 수 있나** (2026-10-16).
                 #    기준좌표는 '아무 던전' 에서 모으므로, 잊혀진섬 #03 이 ON 이면
                 #    `ancs[3]` 이 생긴다. 그 캐릭이 에스카로스에 있으면 에카를 고르는데
@@ -42518,14 +42601,16 @@ class App(tk.Tk):
                     _a2 = ancs.get(si)
                     _s2 = _isl.place_scores([k for _, k in keys], _a2) if _a2 else {}
                     _r2 = sorted(_s2.items(), key=lambda kv: -kv[1]) if _s2 else []
-                    _ok = (_r2 and _r2[0][0] == key
-                           and _r2[0][1] >= _isl.PLACE_MATCH
-                           and (_r2[0][1] / _r2[1][1] if len(_r2) > 1 and _r2[1][1] > 0
-                                else 99.0) >= _isl.PLACE_RATIO)
+                    # 🧭 **첫 판정과 같은 함수**로 다시 고른다 — 그때와 같은 던전이
+                    #    나올 때만 돌린다. (예전 `PLACE_MATCH` 0.75 확인은 기린 마을을
+                    #    '악몽의섬 안' 으로 통과시켰다)
+                    _to2 = (self._p0_pick(si, _r2, ancs, [k for _, k in keys],
+                                          tag="🕐 ")[0] if _r2 else None)
+                    _ok = bool(_to2) and _to2 == key
                     _pd.pop(si, None)
                     if not _ok:
-                        click_log(f"[물약감시] 🕐 #{si+1:02d} 적어뒀지만 지금은 "
-                                  f"{key} 안이 아니다 — 돌리지 않는다")
+                        click_log(f"[물약감시] 🕐 #{si+1:02d} 적어뒀지만 지금 다시 "
+                                  f"골라 보니 {key} 가 아니다 ({_to2}) — 돌리지 않는다")
                         continue
                     hits = [(si, key, didx, -1.0, _r2[0][1])]
                     click_log(f"[물약감시] 🕐 #{si+1:02d} 작업이 끝나 "
