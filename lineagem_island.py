@@ -3554,13 +3554,22 @@ class IslandApp(tk.Tk):
                      fg="#555").pack(side="left")
             # 🃏 '내 카드' — 월드던전 목록은 **순서도 내용도 바뀐다** (2026-10-04).
             #    슬롯마다 갈 던전을 적어두면 카드를 그림으로 찾아 누른다.
-            if key in CARD_KEYS:
+            # 📏 머리줄은 칸 폭(약 165px)이 전부다 (2026-11-12 실측 — 잊혀진섬):
+            #      물약 60 + 번호 18 + 🃏 45 + ◀◀ 28 = 이미 꽉 차서
+            #      **ON/OFF 버튼(24px)이 칸 밖으로 밀려 아예 안 보였다.**
+            #      (에카는 ◀◀ 가 없어 보였다 → 사용자: "에카처럼 온오프 만들어줘")
+            #    → '이동' 버튼이 있는 던전은 🃏 를 **아랫줄(복사·붙임 옆)** 로 내린다.
+            #      그 던전은 CARD_DEFAULT 로 갈 카드가 정해져 있어 🃏 를 누를 일이 거의 없다.
+            #    🚫 머리줄에 버튼을 더할 때는 **ON/OFF 가 보이는지** 그 던전 창을 띄워 확인할 것.
+            _has_mv = any((fl or "").strip() == "이동"
+                          for fl, _n in self._preset_layout(key))
+            if key in CARD_KEYS and not _has_mv:
                 cb2 = tk.Button(head, font=("맑은 고딕", 7, "bold"), width=5,
                                 pady=0, command=lambda k=key, x=i: self._pick_card(k, x))
                 cb2.pack(side="left", padx=(2, 0))
                 self._card_btns.setdefault(key, []).append(cb2)
             # ▶▶/◀◀ 방향 — 눌러서 바로 바꾼다 (프리셋 창을 안 거쳐도 됨)
-            if any((fl or "").strip() == "이동" for fl, _n in self._preset_layout(key)):
+            if _has_mv:
                 mb = tk.Button(head, text="이동?", font=("맑은 고딕", 7, "bold"),
                                width=4, pady=0, bg="#7f8c8d", fg="white",
                                command=lambda k=key, x=i: self._cycle_move(k, x))
@@ -3606,6 +3615,11 @@ class IslandApp(tk.Tk):
                       command=lambda k=key, x=i: self._slot_copy(k, x)).pack(side="left", padx=(0, 1))
             tk.Button(r4, text="붙임", font=("맑은 고딕", 7), bg="#8e44ad", fg="white", width=2,
                       command=lambda k=key, x=i: self._slot_paste(k, x)).pack(side="left")
+            if key in CARD_KEYS and _has_mv:       # 🃏 — 머리줄에서 내려온 것 (위 설명)
+                cb2 = tk.Button(r4, font=("맑은 고딕", 7, "bold"), width=5,
+                                pady=0, command=lambda k=key, x=i: self._pick_card(k, x))
+                cb2.pack(side="left", padx=(3, 0))
+                self._card_btns.setdefault(key, []).append(cb2)
             # 반복 타이머 — N시간마다 자동 재실행 + 옆에 반복 횟수(1~8회) 제한
             _rh = self.cfg.get(key, [{}]*SLOTS)[i].get("repeat_h") or 0
             _rn = self.cfg.get(key, [{}]*SLOTS)[i].get("repeat_n") or 8
@@ -5840,11 +5854,28 @@ class IslandApp(tk.Tk):
             f" · 라바설정 {len(_ra)} (간격·방향·이름 포함){note}")
 
     def _toggle_enable(self, key, idx):
-        """슬롯 ON/OFF — OFF 슬롯은 대표(전체) 실행에서 건너뜀 (개별 ▶은 그대로 실행)."""
+        """슬롯 ON/OFF — OFF 슬롯은 **어떤 경로로도** 실행되지 않는다
+        (전체·선택·개별 ▶·⏰ 반복·물약 재실행 — 2026-08-29 사용자 지시).
+        이 컴퓨터에만 저장된다 (배포해도 `enabled` 는 로컬 것을 지킨다)."""
         s = self.cfg[key][idx]
         s["enabled"] = not s.get("enabled", True)
         save_cfg(self.cfg)
         self._refresh(key)
+        try:
+            _off = [i + 1 for i, x in enumerate(self.cfg.get(key) or [])
+                    if isinstance(x, dict) and not x.get("enabled", True)]
+            if s["enabled"]:
+                _m = f"▶ #{idx+1:02d} ON — 다시 돌립니다"
+            else:
+                _m = (f"⏸ #{idx+1:02d} OFF — 전체·선택·개별·⏰·물약 재실행 "
+                      f"전부 건너뜁니다")
+            self._status.set(_m + (f"  (지금 OFF {len(_off)}개: "
+                                   + " ".join(f"{n:02d}" for n in _off) + ")"
+                                   if _off else "  (OFF 없음)"))
+            self._rlog(f"🔘 {key} #{idx+1:02d} {'ON' if s['enabled'] else 'OFF'} (사용자)"
+                  + (f" · 지금 OFF {_off}" if _off else ""))
+        except Exception:
+            pass
 
     def _refresh(self, key):
         slots = self.cfg.get(key, [])

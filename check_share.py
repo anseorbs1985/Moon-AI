@@ -54,6 +54,15 @@ def _kc_txt(kc):
         return str(kc)
 
 
+def _once_n(si):
+    """share_island.json 의 once 묶음이 살아 있으면 그 던전 수."""
+    o = si.get("once")
+    if not isinstance(o, dict) or not str(o.get("id") or "").strip():
+        return 0
+    return (len(o.get("keys") or []) + len(o.get("presets_only") or [])
+            + len(o.get("fill_only") or []))
+
+
 def main():
     sc = load("share_coords.json") or {}
     si = load("share_island.json") or {}
@@ -84,6 +93,14 @@ def main():
          "그 던전 **빈 칸만** 채움 (덮어쓰진 않음)", True),
         ("share_island.json  presets", 1 if si.get("presets") else 0,
          "프리셋 동기화", True),
+        # 🎯 2026-11-12 — **1회 배포(once)**. 컴퓨터마다 한 번만 받으므로
+        #    열려 있어도 다시 덮지는 않는다. 그래도 **새로 세팅하는 컴퓨터**가
+        #    받으면 안 되므로, 받았다는 말을 들으면 once 묶음과 값 파일을 지운다.
+        ("share_island.json  once", _once_n(si),
+         "★ 섬/던전 **1회 배포** — 컴퓨터마다 한 번만 (id %s%s)"
+         % (str((si.get("once") or {}).get("id") or "-"),
+            " · 🔓잠금 무시" if (si.get("once") or {}).get("ignore_lock") else ""),
+         True),
         ("share_times.json   keys", len(st.get("keys") or []),
          "그 던전 간격(gap_list) — 좌표는 아님", True),
         ("share_recs.json    keys", len(sr.get("keys") or {}),

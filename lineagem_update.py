@@ -174,6 +174,9 @@ NEVER_ISLAND = True   # 🔒 island_coords.json 은 **어떤 경로로도 받지
 #       정말 뿌려야 하면: 사용자가 콕 집어 말할 때만, 그 대화 안에서 켜고
 #       **받았다는 확인을 듣는 즉시** 되돌린 뒤 py check_share.py 로 확인한다.
 #       주석에 '나중에 되돌린다' 고 적어두는 것으로 **끝내지 말 것.**
+#    🎯 2026-11-12 — 뿌릴 때는 이것을 끄지 않고 **`once`(1회 배포)** 를 쓴다
+#       (`_island_once`). 컴퓨터마다 한 번만 받으므로 닫는 것을 잊어도
+#       **다시 덮지 않는다.** 그래도 받았다는 말을 들으면 once 묶음을 지운다.
 
 NEVER_COORD_KEYS = {"doll_slots", "char_btns"}
 
@@ -619,7 +622,67 @@ def fill_empty_slot(dst_slot, src_slot, keep=()):
     return out, n_cell, n_rec
 
 
+def _island_once(log):
+    """🎯 섬/던전 **1회 배포** — 이 컴퓨터에 **딱 한 번만** 넣는다 (2026-11-12).
+
+    사용자: *"전체물약이랑 전부 다 변경해놨으니까 전부 다 배포해줘.
+            잠겨 있어도 받을 수 있게 강제로 해줘"*
+
+    ■ 왜 따로 만들었나
+      예전 방식(`keys` + `NEVER_ISLAND = False`)은 **닫는 것을 잊으면** 로컬이
+      🔄 할 때마다 좌표를 다시 덮었다 (2026-09-30 · 10-13 · 10-17 · 11-04 — 네 번).
+      이 통로는 `id` 를 `restore_done.json` 에 적어 **컴퓨터마다 한 번만** 돈다.
+      받은 뒤 로컬에서 고친 것은 다음 업데이트가 건드리지 않는다.
+    ■ 옛 업데이터는 이것을 모른다
+      `share_island.json` 의 맨 위 `keys` 는 **비워둔 채** `once` 묶음에만 적는다.
+      값도 `share_island_data.json` 이 아니라 **따로 둔 파일**(`data`)에서 읽는다.
+      → 옛 코드는 아무것도 하지 않는다 (옛 `fix_omanst_floor_once` 도 볼 것이 없다).
+    ■ `NEVER_ISLAND` 는 **True 그대로** 둔다 — 이 통로만 그것을 지나간다.
+    🚫 그래도 **받았다는 말을 들으면 `once` 묶음과 data 파일을 지울 것** —
+       새로 세팅하는 컴퓨터가 몇 달 뒤에 받으면 안 된다.
+    🚫 `id` 를 바꾸면 **모든 컴퓨터가 다시 받는다.** 사용자가 다시 뿌리라고 할 때만."""
+    try:
+        man = os.path.join(REPO, "share_island.json")
+        if not os.path.exists(man):
+            return
+        with open(man, encoding="utf-8") as f:
+            once = (json.load(f) or {}).get("once")
+        if not isinstance(once, dict):
+            return
+        oid = str(once.get("id") or "").strip()
+        if not oid or not (once.get("keys") or once.get("presets_only")
+                           or once.get("fill_only")):
+            return
+        ldir = os.path.join(os.environ.get("LOCALAPPDATA", DESK), "MoonAI")
+        done_p = os.path.join(ldir, "restore_done.json")
+        tag = "island_once:" + oid
+        _was = load_done(done_p).get(tag)
+        if _was:
+            log(f"   🏝 섬/던전 1회 배포({oid}) — 이 컴퓨터는 **이미 받았습니다** "
+                f"({_was}) · 다시 덮지 않습니다")
+            return
+        data_p = os.path.join(
+            REPO, os.path.basename(str(once.get("data") or "share_island_once.json")))
+        if not os.path.exists(data_p):
+            log(f"   ⚠ 섬/던전 1회 배포({oid}) — 값 파일이 없습니다: "
+                f"{os.path.basename(data_p)}")
+            return
+        log(f"   🏝 섬/던전 **1회 배포** ({oid}) — 이 컴퓨터에 한 번만 넣습니다 "
+            "(직전 좌표는 backups\\…_before_update_island_coords.json)")
+        if _island_apply(log, once, data_p, False):
+            done = load_done(done_p)
+            done[tag] = time.strftime("%Y-%m-%d %H:%M:%S")
+            save_done(done_p, done)
+            log(f"   🏝 1회 배포 끝 ✔ — 다음 업데이트부터는 건드리지 않습니다 ({oid})")
+        else:
+            log("   ⚠ 1회 배포를 넣지 못했습니다 — 다음 업데이트에 다시 시도합니다")
+    except Exception as e:
+        log(f"   ⚠ 섬/던전 1회 배포 실패: {e}")
+
+
 def sync_island_keys(log):
+    # 🎯 1회 배포(once)를 먼저 본다 — 컴퓨터마다 한 번만 (위 _island_once).
+    _island_once(log)
     # 🔒🔒 섬/던전 좌표는 **코드가 막는다** (2026-10-14 사용자 최우선 지시).
     #     share_island.json 에 무엇이 적혀 있든 여기서 끝낸다.
     if NEVER_ISLAND:
@@ -636,14 +699,27 @@ def sync_island_keys(log):
             pass
         return
 
-    """island_coords.json 중 '지정한 던전만' 메인 것을 통째로 받는다
-    (share_island.json 의 keys). 좌표·간격·이름·녹화·프리셋까지 그 던전 것만 교체."""
     try:
         man = os.path.join(REPO, "share_island.json")
         if not os.path.exists(man):
             return
         with open(man, encoding="utf-8") as f:
             cfgm = json.load(f) or {}
+    except Exception as e:
+        log(f"   ⚠ 던전 동기화 실패: {e}")
+        return
+    _island_apply(log, cfgm, os.path.join(REPO, "share_island_data.json"), True)
+
+
+def _island_apply(log, cfgm, data_p, repo_fallback):
+    """island_coords.json 중 '지정한 던전만' 메인 것을 통째로 받는다
+    (`cfgm` 의 keys). 좌표·간격·이름·녹화·프리셋까지 그 던전 것만 교체.
+
+    → True  넣었다 (또는 이미 같다)      False  못 넣었다 (잠금·파일 없음·오류)
+    `repo_fallback` — 값 파일에 없는 키를 저장소의 island_coords.json 에서 읽을까.
+       🚫 1회 배포에서는 **False** 다. 저장소의 그 파일은 08-18 판(491 창 기준)이라
+          섞여 들어가면 좌표가 통째로 어긋난다."""
+    try:
         keys = cfgm.get("keys") or []
         only_p = cfgm.get("presets_only") or []      # 이 던전은 '프리셋만' 받는다
         fill_o = cfgm.get("fill_only") or []         # 이 던전은 '빈 칸만' 채운다
@@ -666,19 +742,18 @@ def sync_island_keys(log):
             keys = [k for k in keys if k not in lock_i]
         with_presets = bool(cfgm.get("presets"))
         if not keys and not only_p and not fill_o:
-            return
+            return False
         # 값은 **전용 파일에서** 먼저 읽는다 (2026-09-19).
         #   island_coords.json 에는 슬롯 이름이 들어 있고, 그 이름이 곧 '고른 물약'이다
         #   (`_potion_of(name)` 이 '빨갱이/주홍이'를 이름에서 뽑는다).
         #   사용자 지시: "절대 물약 선택 올리면 안 돼, 무조건 좌표만."
         #   그래서 보낼 항목만 담은 share_island_data.json 을 쓰고,
         #   그 파일에는 name 이 아예 들어 있지 않다.
-        data_p = os.path.join(REPO, "share_island_data.json")
         src_p  = os.path.join(REPO, "island_coords.json")
         dst_p  = os.path.join(DESK, "island_coords.json")
         if not os.path.exists(dst_p):
             log("   던전 동기화: island_coords.json 이 없어 건너뜁니다")
-            return
+            return False
         src = {}
         if os.path.exists(data_p):
             try:
@@ -686,7 +761,7 @@ def sync_island_keys(log):
                     src = json.load(f) or {}
             except Exception:
                 src = {}
-        if os.path.exists(src_p):                    # 옛 방식 호환 — 전용 파일에 없는 키만
+        if repo_fallback and os.path.exists(src_p):  # 옛 방식 호환 — 전용 파일에 없는 키만
             try:
                 with open(src_p, encoding="utf-8") as f:
                     old = json.load(f) or {}
@@ -710,6 +785,13 @@ def sync_island_keys(log):
         _kc_map = _kc_raw if isinstance(_kc_raw, dict) else None
         keep_cells = ([] if _kc_map else
                       [int(x) for x in _kc_raw])
+        # 🏢 `name_keep_floor` — 이 던전은 슬롯 이름의 **'N층' 은 로컬 것**을 지킨다
+        #    (2026-11-12). 층 칸(오만의탑 칸23)을 로컬 것으로 지키는데 이름만
+        #    메인 것("5층 기본!!")으로 바뀌면 **이름과 실제 누르는 층이 달라져**
+        #    '또 전부 5층으로 배포했냐' 로 보인다 (2026-11-05 사고의 기억).
+        #    로컬 "7층 주홍이 48%" + 메인 "5층 기본!!" → **"7층 기본!!"**
+        _nkf = set(cfgm.get("name_keep_floor") or [])
+        import re as _re_nm
         got = []
         # 🏝 '빈 칸만 채우기' — 로컬이 찍어둔 좌표는 그대로 두고 **비어 있는 칸만**.
         #    덮어쓰지 않으므로 🔒 좌표 잠금에도 걸리지 않는다 (잠금의 뜻은
@@ -748,12 +830,29 @@ def sync_island_keys(log):
                 merged = []
                 for i, s in enumerate(v):
                     old_s = cur[i] if (i < len(cur) and isinstance(cur[i], dict)) else {}
-                    ns = json.loads(json.dumps(old_s, ensure_ascii=False))
+                    # 🎯 `exact` — 그 슬롯을 **메인 것 그대로** 만든다 (1회 배포용).
+                    #    평소(얹기)에는 메인 슬롯에 **없는 키**가 로컬 것으로 남는다 —
+                    #    예: 메인은 악몽의섬인데 로컬 슬롯에 라스타바드 설정(`rasta`)이
+                    #    남으면 좌표는 악몽의섬·설정은 라스타바드인 **반쪽 슬롯**이 된다.
+                    #    exact 면 `keep_local`·`keep_cells` 로 지키는 것 말고는 전부 메인 것.
+                    ns = ({} if cfgm.get("exact")
+                          else json.loads(json.dumps(old_s, ensure_ascii=False)))
                     ns.update(json.loads(json.dumps(s, ensure_ascii=False)))
                     for fld in keep:          # 혹시 섞여 와도 로컬 것으로 되돌린다
                         ns.pop(fld, None)
                         if fld in old_s:
                             ns[fld] = old_s[fld]
+                    if k in _nkf:
+                        try:
+                            _mo = _re_nm.match(r"\s*(\d+)\s*층\s*(.*)$",
+                                               str(old_s.get("name") or ""))
+                            _mn = _re_nm.match(r"\s*(\d+)\s*층\s*(.*)$",
+                                               str(ns.get("name") or ""))
+                            if _mo and _mn:
+                                ns["name"] = (_mo.group(1) + "층 "
+                                              + _mn.group(2)).strip()
+                        except Exception:
+                            pass
                     # 🧪 지킬 칸은 **로컬 값으로 되돌린다** (물약 등 슬롯마다 다른 칸)
                     _cells = ([int(x) for x in (_kc_map.get(k) or [])]
                               if _kc_map else keep_cells)
@@ -821,14 +920,16 @@ def sync_island_keys(log):
                     log(f"   ⚠ {k} 프리셋 — 지킬 칸 처리 실패, 건너뜁니다")
         if not got:
             log("   던전 동기화: 이미 메인과 같습니다")
-            return
+            return True
         tmp = dst_p + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(dst, f, ensure_ascii=False, indent=2)
         os.replace(tmp, dst_p)
         log("   🏝 지정 던전 받음: " + ", ".join(got) + " (다른 던전은 그대로)")
+        return True
     except Exception as e:
         log(f"   ⚠ 던전 동기화 실패: {e}")
+        return False
 
 
 def sync_coord_fix(log):
@@ -1911,7 +2012,12 @@ COORDS_ROLLBACK_ID = ""
 #      사용자가 이미 고쳤으면 값이 달라서 건너뛴다 → 또 돌아도 무해하다.
 #   🚫 칸24(정화 고르는 자리)·물약·이름·ON/OFF·반복은 **건드리지 않는다.**
 #      칸24 는 16슬롯 전부 창안 (328~332,157~159) = 3번째 줄 고정이라 층과 무관하다.
-FLOOR_FIX_ID = "20261105_omanst_floor"
+#   🔚 2026-11-12 — **껐다.** 일주일 동안 할 일을 마쳤고, CLAUDE.md 규칙이
+#      *"되돌리기 지시서는 쓰고 나면 반드시 비운다"* 다. 켜둔 채 섬/던전 값을
+#      다시 뿌리면, 아직 표시가 안 남은 컴퓨터가 '지금 값 = 배포 값' 으로 보고
+#      **옛 백업(491 창 시절일 수 있다)의 칸23 을 되살린다.**
+#      🚫 다시 켜지 말 것. 층은 슬롯 칸의 [🏢 ▾] 로 고른다.
+FLOOR_FIX_ID = ""
 FLOOR_FIX_KEY = "수금_오만의탑"
 FLOOR_FIX_IDX = 22                      # 칸23 (0부터)
 
