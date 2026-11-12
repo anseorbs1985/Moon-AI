@@ -37,5 +37,26 @@
  },
  "presets_only": [],
  "fill_only": [],
- "_이번": "2026-11-10 — 에카 1회 배포 **끝 → 닫았다** (사용자: \"에카 좌표는 닫아도 된다\"). NEVER_ISLAND 도 True 로 되돌렸다."
+ "_이번": "2026-11-12 — 🎯 1회 배포 **열림** (id 20261112_forgot · 월요일_잊혀진섬). 사용자: \"전부 다 배포해줘 잠겨 있어도 받을 수 있게 강제로\". 받았다는 말을 들으면 once 를 지운다.",
+ "once": {
+  "_설명": "🎯 컴퓨터마다 **한 번만** 받는다 (restore_done.json 에 id 를 적는다). 받았다는 확인을 들으면 이 묶음과 share_island_once.json 을 지운다.",
+  "id": "20261112_forgot",
+  "keys": [
+   "월요일_잊혀진섬"
+  ],
+  "presets": true,
+  "exact": true,
+  "ignore_lock": true,
+  "data": "share_island_once.json",
+  "keep_local": [
+   "enabled",
+   "repeat_h",
+   "repeat_n",
+   "omanst_floor",
+   "pasted"
+  ],
+  "keep_cells": {},
+  "keep_preset_cells": {},
+  "name_keep_floor": []
+ }
 }
