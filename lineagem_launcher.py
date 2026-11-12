@@ -2731,6 +2731,15 @@ P0_PLACE_RATIO = 1.12
 #    실측 2026-11-05: 494 그림 시절 0.53~0.78 · 546 그림 1.00 ·
 #    입구(던전 아님) 0.805 — 0.70 이면 "뭔가는 보인다" 수준.
 P0_PLACE_FLOOR = 0.70
+# 🟩 **이름 옆 초록 시계가 있어야 '던전 안이 또렷하다' 고 믿는다** (2026-11-12).
+#    등록 안 된 마을(기린 마을)이 같은 길이의 던전 이름 그림에 0.86 까지 걸린다 —
+#    그날 `P0_PLACE_MATCH` 를 0.90 으로 올려 막았지만 **여유가 0.04 뿐**이라
+#    글자가 조금 다르게 그려지는 컴퓨터에서는 넘을 수 있다 (사용자: *"여전히 해적섬으로
+#    실행이 가버리는 문제"*). 점수 대신 **구조**로 막는다: 시간제 던전 안에서는 이름
+#    옆에 초록 시계가 붙고, 마을에는 없다.
+#    📏 실측(저장 화면 150여 장) — 던전 안 **117~151** · 마을 **0**. 그 사이 30.
+#    🚫 0 으로 내리지 말 것 (= 끄는 것). 못 재면(-1) 막지 않는다.
+P0_CLOCK_MIN = 30
 # 🚨 2026-10-23 — 1.45 였는데 **16/16 전부 막혀** 물약 0개가 떠도 하나도 안 돌았다.
 #   실측(16클라 전부 「잊혀진 섬」):
 #     1등 0.911~1.000 · 2등 0.738~0.795 → 배수 **1.15~1.33** → 1.45 는 아무도 못 넘는다
@@ -26419,23 +26428,30 @@ class App(tk.Tk):
                     for _t in range(P0_RECHECK_TRIES):
                         if _t:
                             nap(random.uniform(*P0_RECHECK_GAP))
-                        _sv = _isl.place_scores(list(keys), anc)
-                        _r = sorted(_sv.items(), key=lambda kv: -kv[1]) if _sv else []
+                        _r, _hi = self._p0_look(anc, list(keys))
                         if not _r:
                             continue
                         _t2 = (_r[0][1] / _r[1][1]) if (len(_r) > 1 and _r[1][1] > 0) else 99.0
-                        _txt = " ".join(f"{k.split('_')[-1]}:{v:.2f}" for k, v in _r)
+                        _txt = (" ".join(f"{k.split('_')[-1]}:{v:.2f}" for k, v in _r)
+                                + f" · 마을 {float(_hi.get('town_v') or -1):.2f}"
+                                + f" · 시계 {_hi.get('green')}")
+                        # 🏘 **그 던전의 마을**이면 바로 통과 (2026-11-12)
+                        if _hi.get("intown") and _hi.get("town") == key:
+                            _res = True
+                            click_log(f"[물약감시] 🧭 #{si+1:02d} 깨우고 확인 ✔ "
+                                      f"**{key} 의 마을**이다 ({_txt})")
+                            break
                         # ✔ 그 던전이 또렷하면 바로 통과
-                        if (_r[0][0] == key and _r[0][1] >= P0_PLACE_MATCH
-                                and _t2 >= P0_PLACE_RATIO):
+                        if _r[0][0] == key and _hi.get("sure"):
                             _res = True
                             click_log(f"[물약감시] 🧭 #{si+1:02d} 깨우고 확인 ✔ "
                                       f"{key} ({_r[0][1]:.2f} · {_t2:.2f}배"
                                       f"{'' if _t == 0 else f' · {_t+1}번째'})")
                             break
                         # 🚫 **다른 던전이 또렷하면** 그 자리에서 거부 (원래 목적)
-                        if (_r[0][0] != key and _r[0][1] >= P0_PLACE_MATCH
-                                and _t2 >= P0_PLACE_RATIO):
+                        #    🟩 '또렷하다' 는 **시계까지** 본 것 (`_p0_look` 의 sure) —
+                        #       등록 안 된 마을이 0.90 을 넘어도 시계가 없으면 던전이 아니다
+                        if _r[0][0] != key and _hi.get("sure"):
                             _res = False
                             click_log(f"[물약감시] 🧭 #{si+1:02d} 깨우고 다시 보니 "
                                       f"**{key} 가 아니라 {_r[0][0]} 다** ({_txt}) "
@@ -42064,32 +42080,85 @@ class App(tk.Tk):
         except Exception:
             return None
 
-    def _p0_pick(self, si, rank, ancs, klist, tag=""):
+    def _p0_look(self, anc, klist):
+        """🧭 그 클라의 이름칸을 **한 번 찍어** 던전·마을·시계를 같이 본다 → (rank, inf).
+
+        `rank` = [(던전키, 점수), …] 내림차순 (**마을은 뺀다**).
+        `inf`  = green(초록 픽셀) · clock(시계가 있나 — 못 재면 True) ·
+                 intown(마을 그림이 1등으로 또렷한가) · town(그 마을의 던전 | None) ·
+                 town_v · town_n · sure(던전 안이 또렷한가 = 점수·배수·**시계**)
+        🚫 판정을 다른 곳에 베껴 두지 말 것 — 물약감시·마을감시·다수결·귀환 재확인이
+           **전부 이 함수**를 쓴다 (한 곳만 다르면 그쪽으로 엉뚱한 던전이 샌다)."""
+        import lineagem_island as _isl
+        inf = {}
+        try:
+            sv = _isl.place_scores(list(klist) + [_isl.TOWN_KEY], anc, inf) or {}
+        except Exception:
+            sv = {}
+        if not sv:
+            return [], inf
+        tvv = float(sv.pop(_isl.TOWN_KEY, -1.0))
+        rank = sorted(sv.items(), key=lambda kv: -kv[1])
+        top, tv = rank[0] if rank else (None, -1.0)
+        v2 = rank[1][1] if len(rank) > 1 else 0.0
+        g = inf.get("green", -1)
+        if g is None:
+            g = -1
+        inf["town_v"] = tvv
+        inf["clock"] = (g < 0) or (g >= P0_CLOCK_MIN)
+        inf["intown"] = bool(tvv >= _isl.PLACE_MATCH
+                             and tvv >= max(tv, 1e-6) * _isl.PLACE_RATIO)
+        if not inf["intown"]:
+            inf["town"] = None
+        inf["sure"] = bool(top and not inf["intown"] and tv >= P0_PLACE_MATCH
+                           and ((tv / v2) if v2 > 0 else 99.0) >= P0_PLACE_RATIO
+                           and inf["clock"])
+        return rank, inf
+
+    def _p0_pick(self, si, rank, ancs, klist, tag="", inf=None):
         """🧭 물약 0개인 슬롯을 **어느 던전으로 다시 돌릴까** → (던전키 | None, 설명).
 
-        `rank` = [(던전키, 점수), …] 점수 내림차순 (그 클라 이름칸을 모든 던전과 겨룬 것).
+        `rank` = [(던전키, 점수), …] 점수 내림차순 · `inf` = `_p0_look` 이 준 것.
 
-        ① **또렷하다**(1등 ≥ `P0_PLACE_MATCH` 0.90 · 배수 ≥ `P0_PLACE_RATIO`) → 그 던전
+        ⓪ 🏘 **그 던전의 마을**에 서 있다 (`place_town.json`) → 그 던전
+           2026-11-12 사용자: *"절반은 잊혀진섬이고 절반은 잊혀진섬 대기 마을이야"*
+        ① **또렷하다**(1등 ≥ `P0_PLACE_MATCH` 0.90 · 배수 ≥ `P0_PLACE_RATIO` ·
+           🟩 **이름 옆에 초록 시계가 있다**) → 그 던전
            (배수만 모자라면 — 다른 클라 다수결이나 오늘 설정된 던전과 같을 때만)
-        ② **또렷하지 않다** = 마을·입구·흐린 화면 → 화면을 믿지 않는다:
-             다른 클라들이 또렷하게(0.90↑) 한 던전에 있으면 그 던전,
+        ② **또렷하지 않다** = 모르는 마을·입구·흐린 화면 → 화면을 믿지 않는다:
+             다른 클라들이 또렷하게 한 던전(이나 그 마을)에 있으면 그 던전,
              아니면 **오늘 설정된 던전**(슬롯판 탭 — `_rerun_today`)
            2026-11-12 사용자: *"지금은 잊섬으로 설정되어 있으니까 잊섬만 가야지"*
         ③ 바닥(`P0_PLACE_FLOOR` 0.70)도 못 넘고 다수결도 없으면 **안 돌린다** —
            이름칸에 아무것도 안 보이는 것이다 (일반 사냥터·창에 가림).
 
         🚫 흐린 1등을 그대로 돌리지 말 것 — 기린 마을이 악몽의섬 0.86 으로 읽혀
-           악몽의섬(→ 칸6 이 좌표라 그날 그 자리 카드 = 해적섬)을 돌린 것이 그 사고다.
+           악몽의섬(→ 그날 열린 카드 = 해적섬)을 돌린 것이 그 사고다.
+        🚫 **시계 확인을 빼지 말 것** — 점수는 컴퓨터마다 조금씩 다르게 나온다.
+           0.90 하나로 막으면 여유가 0.04 뿐이다.
         🚫 고르는 규칙을 다른 곳에 베껴 두지 말 것 — 첫 판정과 '적어둔 것 꺼내기' 가
            **같은 함수**를 써야 한다 (다르면 한쪽만 엉뚱한 던전을 고른다)."""
         try:
             if not rank:
                 return None, "장소를 못 찍었다"
+            inf = inf or {}
             top, tv = rank[0]
             v2 = rank[1][1] if len(rank) > 1 else 0.0
             ratio = (tv / v2) if v2 > 0 else 99.0
             today = self._rerun_today(klist)
-            if tv >= P0_PLACE_MATCH:
+            # ⓪ 🏘 그 던전의 마을
+            _td = inf.get("town") if inf.get("intown") else None
+            _tvv = float(inf.get("town_v") or -1.0)
+            if _td and _td in list(klist):
+                click_log(f"[물약감시] {tag}#{si+1:02d} 🏘 **{_td} 의 마을**에 서 있다 "
+                          f"(마을 그림 {inf.get('town_n')}번 {_tvv:.2f}) → 그 던전을 돌린다")
+                return _td, "그 던전의 마을"
+            _clk = bool(inf.get("clock", True))
+            if tv >= P0_PLACE_MATCH and not _clk:
+                click_log(f"[물약감시] {tag}#{si+1:02d} 🟩 점수는 높지만({top} {tv:.2f}) "
+                          f"**이름 옆에 초록 시계가 없다**(초록 {inf.get('green')}) = "
+                          f"던전 안이 아니다 (등록 안 된 마을일 수 있다) → 화면을 믿지 않는다")
+            if tv >= P0_PLACE_MATCH and _clk:
                 if ratio >= P0_PLACE_RATIO:
                     return top, f"화면이 또렷하다 ({tv:.2f} · {ratio:.2f}배)"
                 mn, mh = self._many_now(ancs, klist, si)
@@ -42110,7 +42179,9 @@ class App(tk.Tk):
             # ── 또렷하지 않다 ──
             mn, mh = self._many_now(ancs, klist, si)
             to, why = None, ""
-            if tv >= P0_PLACE_FLOOR:
+            # 아는 마을(표에 던전이 없는 마을)도 '어딘가에는 있다' 로 친다
+            _seen = max(tv, _tvv) if inf.get("intown") else tv
+            if _seen >= P0_PLACE_FLOOR:
                 if mn:
                     to, why = mn, f"다른 클라들이 또렷하게 {mh}"
                 elif today:
@@ -42120,14 +42191,15 @@ class App(tk.Tk):
             if not to:
                 click_log(f"[물약감시] {tag}#{si+1:02d} 물약 0개인데 "
                           f"**어디인지 못 읽었다** (1등 {top} {tv:.2f} "
-                          f"< {P0_PLACE_MATCH:.2f} · 바닥 {P0_PLACE_FLOOR:.2f} · "
+                          f"· 바닥 {P0_PLACE_FLOOR:.2f} · "
                           f"오늘 설정 {today}"
                           + (f" · 다른 클라 {mh}" if mh else "")
                           + ") → 안 돌린다")
                 return None, "못 읽었다"
-            click_log(f"[물약감시] {tag}#{si+1:02d} 장소가 또렷하지 않다 "
-                      f"(1등 {top} {tv:.2f} < {P0_PLACE_MATCH:.2f}) → "
-                      f"**{why} = {to}** 을(를) 돌린다")
+            click_log(f"[물약감시] {tag}#{si+1:02d} 던전 안이 또렷하지 않다 "
+                      f"(1등 {top} {tv:.2f} · 시계 {'있음' if _clk else '없음'}"
+                      + (f" · 마을 {_tvv:.2f}" if inf.get("intown") else "")
+                      + f") → **{why} = {to}** 을(를) 돌린다")
             return to, why
         except Exception as e:
             click_log(f"[물약감시] {tag}#{si+1:02d} 던전 고르기 오류: {e} → 안 돌린다")
@@ -42148,24 +42220,18 @@ class App(tk.Tk):
             for _si, _anc in (ancs or {}).items():
                 if not _anc:
                     continue
-                try:
-                    sv = _isl.place_scores(keys, _anc)
-                except Exception:
+                r, _vi = self._p0_look(_anc, keys)
+                if not r:
                     continue
-                if not sv:
-                    continue
-                r = sorted(sv.items(), key=lambda kv: -kv[1])
                 t, v = r[0]
-                v2 = r[1][1] if len(r) > 1 else 0.0
-                rat = (v / v2) if v2 > 0 else 99.0
-                # 🧭 **또렷한 표만** 센다 (`MANY_SURE` 0.90) — 0.75 로 세면
-                #    기린 마을(악몽의섬 0.86)에 선 캐릭이 전부 '악몽의섬' 표가 된다
-                #    배수는 물약 재실행과 같은 `P0_PLACE_RATIO`(1.12) — 점수가 0.90 을
-                #    넘으면 그것이 주 관문이다 (실측: 잊혀진섬 안 0.91~1.00 · 배수 1.15~1.35 라
-                #    1.25 로 두면 진짜 던전 안인 캐릭 절반이 표를 못 던진다)
-                if (t != _isl.TOWN_KEY and v >= max(_isl.PLACE_MATCH, MANY_SURE)
-                        and rat >= P0_PLACE_RATIO):
+                # 🧭 **또렷한 표만** 센다 — 점수(`MANY_SURE` 0.90) · 배수
+                #    (`P0_PLACE_RATIO` 1.12) · 🟩 **시계** 를 다 넘은 것 (`_p0_look` 의 sure).
+                #    기린 마을(악몽의섬 0.86 · 시계 없음)에 선 캐릭은 표가 아니다.
+                #    🏘 **그 던전의 마을**에 선 캐릭도 그 던전 한 표다 (2026-11-12).
+                if _vi.get("sure") and v >= MANY_SURE:
                     votes[_si] = t
+                elif _vi.get("intown") and _vi.get("town") in list(keys):
+                    votes[_si] = _vi.get("town")
             got, how = self._many_dungeon(votes, skip)
             self._many_cache = (time.time(), got, how)
             return got, how
@@ -42260,11 +42326,14 @@ class App(tk.Tk):
         _fire = False
         _votes = {}        # 🧭 또렷하게 던전 안인 슬롯 (다수결 재료)
         _towns = []        # 마을에 서 있는 슬롯 (2번째 패스에서 판정)
-        for si, slot in enumerate(_ic.get(key) or []):
+        # 🧭 기준 슬롯은 **네 던전 중 좌표가 있는 첫 것** (`anchor_slots`) — 2026-11-12.
+        #    예전엔 악몽의섬 슬롯만 돌아서, **악몽의섬에서 OFF 인 캐릭**은 잊혀진섬 대기
+        #    마을에 서 있어도 아예 보지 않았다. ON/OFF 는 아래에서 **돌릴 그 던전** 것을 본다.
+        for si, slot in enumerate(_isl.anchor_slots(_ic)):
             # 🪟 **확대·축소된 창은 건너뛴다** (2026-11-08)
             if self._win_odd_skip(si, "마을감시"):
                 continue
-            if not isinstance(slot, dict) or not slot.get("enabled", True):
+            if not isinstance(slot, dict):
                 seen.pop(si, None)
                 continue
             anc = _isl.IslandApp._slot_anchor(slot)
@@ -42277,13 +42346,18 @@ class App(tk.Tk):
                 _idone = self._idle_done = {}
             if now - _idone.get(si, 0) < IDLE_RERUN_COOL:
                 continue
-            sv = _isl.place_scores(_cmp, anc)
+            _inf = {}
+            sv = _isl.place_scores(_cmp, anc, _inf)
             if not sv:
                 continue
             _rank = sorted(sv.items(), key=lambda kv: -kv[1])
             _top, _tv = _rank[0]
             _2nd = _rank[1][1] if len(_rank) > 1 else 0.0
             _ratio = (_tv / _2nd) if _2nd > 0 else 99.0
+            _g = _inf.get("green", -1)
+            _clk = (_g is None) or (_g < 0) or (_g >= P0_CLOCK_MIN)
+            # 🏘 그 마을이 **어느 던전의 마을인지** (`place_town.json` · 모르면 None)
+            _tdun = _inf.get("town") if _inf.get("town") in _DKEYS else None
             # 마을 그림이 **1등으로 확실할 때만** 센다 (던전 겨루기와 같은 규칙)
             intown = (_top == _isl.TOWN_KEY and _tv >= _isl.PLACE_MATCH
                       and _ratio >= _isl.PLACE_RATIO)
@@ -42295,12 +42369,15 @@ class App(tk.Tk):
                 getattr(self, "_idle_need", {}).pop(si, None)
                 # 🧭 **던전 안이 또렷하면 한 표** (다수결 재료)
                 #    ⚠ `MANY_SURE`(0.90) — 기린 마을(악몽의섬 0.86)은 표가 아니다
+                #    🟩 **시계가 있어야** 던전 안이다 (2026-11-12)
                 if (_top != _isl.TOWN_KEY
                         and _tv >= max(_isl.PLACE_MATCH, MANY_SURE)
-                        and _ratio >= P0_PLACE_RATIO):
+                        and _ratio >= P0_PLACE_RATIO and _clk):
                     _votes[si] = _top
                 continue
-            _towns.append((si, slot, _tv, _ratio))
+            _towns.append((si, slot, _tv, _ratio, _tdun))
+            if _tdun:
+                _votes[si] = _tdun      # 🏘 그 던전의 마을 = 그 던전 한 표
             seen.setdefault(si, now)
             continue
         # ── 2패스: 마을 슬롯을 **다수결로 정한 던전**으로 돌린다 ──
@@ -42308,18 +42385,22 @@ class App(tk.Tk):
         if _towns and _how:
             _note.append(f"🧭 다른 클라 {_how}"
                          + (f" → 모르는 슬롯은 **{_many}**" if _many else ""))
-        for si, slot, _tv, _ratio in _towns:
+        for si, slot, _tv, _ratio, _tdun in _towns:
             t0 = seen.setdefault(si, now)
             # 🧭 **어느 던전으로 돌릴까** (2026-11-10 사용자 지시)
             #    ① 물약 0개를 본 그때 겨뤄 적어둔 던전 (가장 확실하다)
             #    ② 없으면 **다른 클라들의 다수결** — 16클라가 같은 던전을 함께 돈다
             #    ③ 둘 다 없으면 **돌리지 않는다** (엉뚱한 던전보다 안 하는 쪽)
+            #    ⓪ 🏘 **그 마을의 던전** (`place_town.json`) — 가장 확실하다 (2026-11-12:
+            #       '잊혀진 섬 대기 마을' 에 서 있으면 잊혀진섬이다)
             _from = _seen_key.get(si)
             _why = "물약0개를 봤을 때"
             # 묵은 기억은 버린다 (며칠 전 던전을 오늘 돌리면 안 된다)
             if _from and (now - (getattr(self, "_p0_seen_key_at", None) or {})
                           .get(si, 0)) > P0_KEY_FRESH:
                 _from = None
+            if _tdun:
+                _from, _why = _tdun, "그 마을의 던전"
             if not _from:
                 _from, _why = _many, "다른 클라 다수결"
             if not _from:
@@ -42520,18 +42601,22 @@ class App(tk.Tk):
                 #    ① 1등 ≥ PLACE_MATCH  ② 1등 ≥ 2등 × PLACE_RATIO  → 둘 다 넘어야 한다.
                 #    애매하면 **아무것도 돌리지 않는다** (엉뚱한 던전보다 낫다).
                 #    ⚠ 절대 점수 하나로 되돌리지 말 것 — 층 겨루기와 같은 규칙이다.
-                _sv = _isl.place_scores([k for _, k in keys], anc)
-                if not _sv:
+                _rank, _pinf = self._p0_look(anc, [k for _, k in keys])
+                if not _rank:
                     _dbgp.append(f"#{si+1:02d} 창 캡처 실패")
                     continue
-                _rank = sorted(_sv.items(), key=lambda kv: -kv[1])
                 _top, _tv = _rank[0]
                 _2nd = _rank[1][1] if len(_rank) > 1 else 0.0
                 _ratio = (_tv / _2nd) if _2nd > 0 else 99.0
-                _dbgp.append("#%02d %s" % (si + 1, " ".join(
-                    f"{k.split('_')[-1]}:{x:.2f}" for k, x in _rank)))
+                _dbgp.append("#%02d %s · 마을 %.2f%s · 시계 %s" % (si + 1, " ".join(
+                    f"{k.split('_')[-1]}:{x:.2f}" for k, x in _rank),
+                    float(_pinf.get("town_v") or -1.0),
+                    ("(" + str(_pinf.get("town")).split("_")[-1] + ")"
+                     if _pinf.get("intown") and _pinf.get("town") else ""),
+                    _pinf.get("green")))
                 # 🧭 **어느 던전으로 돌릴까** 는 `_p0_pick` 한 곳에서 정한다 (2026-11-12)
-                _to, _why3 = self._p0_pick(si, _rank, ancs, [k for _, k in keys])
+                _to, _why3 = self._p0_pick(si, _rank, ancs, [k for _, k in keys],
+                                           inf=_pinf)
                 if not _to:
                     continue
                 _top = _to
@@ -42599,13 +42684,13 @@ class App(tk.Tk):
                     if now - self._p0_watch_done.get(si, 0) < P0_WATCH_COOL:
                         continue
                     _a2 = ancs.get(si)
-                    _s2 = _isl.place_scores([k for _, k in keys], _a2) if _a2 else {}
-                    _r2 = sorted(_s2.items(), key=lambda kv: -kv[1]) if _s2 else []
+                    _r2, _i2 = (self._p0_look(_a2, [k for _, k in keys])
+                                if _a2 else ([], {}))
                     # 🧭 **첫 판정과 같은 함수**로 다시 고른다 — 그때와 같은 던전이
                     #    나올 때만 돌린다. (예전 `PLACE_MATCH` 0.75 확인은 기린 마을을
                     #    '악몽의섬 안' 으로 통과시켰다)
                     _to2 = (self._p0_pick(si, _r2, ancs, [k for _, k in keys],
-                                          tag="🕐 ")[0] if _r2 else None)
+                                          tag="🕐 ", inf=_i2)[0] if _r2 else None)
                     _ok = bool(_to2) and _to2 == key
                     _pd.pop(si, None)
                     if not _ok:

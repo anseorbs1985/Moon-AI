@@ -1562,6 +1562,89 @@ def place_in_dungeon(key, anchor):
 TOWN_KEY = "_마을"
 PLACE_RATIO = 1.25     # 1등이 2등보다 이만큼은 높아야 그 던전으로 인정한다
 
+# 🏘 **마을마다 '어느 던전의 마을인가'** (2026-11-12 사용자: *"절반은 잊혀진섬이고
+#    절반은 잊혀진섬 대기 마을이야 — 이거 저장해"*).
+#    마을에서는 장소 이름이 마을 이름이라 **어느 던전에서 나왔는지 알 길이 없었다.**
+#    그래서 물약 재실행이 화면 점수·다수결·탭으로 짐작했고, 짐작이 틀리면
+#    엉뚱한 던전(악몽의섬 → 그날 열린 카드 = 해적섬)으로 갔다.
+#    `click_templates/place_town.json` = {"dun": {"<마을 그림 번호>": "<던전 키>"}}
+#    그림과 함께 배포된다. 표에 없는 마을은 '모른다' (예전처럼 다수결·탭으로 간다).
+TOWN_MAP_FILE = "place_town.json"
+_TOWN_MAP = {"m": None, "d": {}}
+
+
+def town_dun_map():
+    """🏘 {마을 그림 번호(1부터): 던전 키} — 파일이 바뀌었을 때만 다시 읽는다."""
+    p = os.path.join(IMG_DIR, TOWN_MAP_FILE)
+    try:
+        m = os.path.getmtime(p)
+    except Exception:
+        return {}
+    if _TOWN_MAP["m"] != m:
+        d = {}
+        try:
+            with open(p, encoding="utf-8-sig") as f:
+                raw = (json.load(f) or {}).get("dun") or {}
+            for k, v in raw.items():
+                if str(k).isdigit() and v:
+                    d[int(k)] = str(v)
+        except Exception:
+            d = {}
+        _TOWN_MAP["d"] = d
+        _TOWN_MAP["m"] = m
+    return _TOWN_MAP["d"]
+
+
+def town_dun_set(n, dun):
+    """🏘 마을 그림 `n`(1부터)이 `dun` 던전의 마을이라고 적는다 (dun 이 없으면 지운다)."""
+    p = os.path.join(IMG_DIR, TOWN_MAP_FILE)
+    try:
+        try:
+            with open(p, encoding="utf-8-sig") as f:
+                d = json.load(f) or {}
+        except Exception:
+            d = {}
+        m = d.get("dun") or {}
+        if dun:
+            m[str(int(n))] = str(dun)
+        else:
+            m.pop(str(int(n)), None)
+        d["dun"] = m
+        os.makedirs(IMG_DIR, exist_ok=True)
+        with open(p + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1)
+        os.replace(p + ".tmp", p)
+        return True
+    except Exception:
+        return False
+
+
+# 🟩 **이름 옆 초록 시계** — 시간제 던전 안에서만 붙는다 (2026-10-17 사용자:
+#    *"옆에 시간 있으니까 사냥터야"*). 물약 재실행이 '던전 안이 또렷하다' 고 믿으려면
+#    이것이 있어야 한다 (런처 `P0_CLOCK_MIN`).
+#    📏 실측 2026-11-12 (저장해둔 화면 150여 장):
+#       던전 안(점수 0.8~1.0)  초록 **117~151**   ·  마을(기린·대기 마을 등)  **0**
+#       → 점수가 높은데 시계가 없는 '던전' 은 한 장도 없었다.
+#    ⚠ 긴 이름(테베 피라미드 내부 62px) 뒤에도 붙으므로 **이름칸(75px)보다 넓게** 본다.
+#    🚫 '시계가 없으니 마을이다' 로 쓰지 말 것 — 창이 HUD 를 가려도 0 이다 (2026-10-17).
+#       쓰는 방향은 하나뿐이다: **시계가 없으면 '던전 안' 이라고 믿지 않는다.**
+PLACE_CLOCK_W = 150 / 494
+
+
+def place_clock(big):
+    """🟩 이름 줄의 **초록 픽셀 수** (못 재면 -1). 창 캡처(BGR)를 그대로 받는다."""
+    try:
+        import numpy as np
+        h, w = big.shape[0], big.shape[1]
+        x = int(w * PLACE_BOX[0]); y = int(h * PLACE_BOX[1])
+        cw = max(8, int(w * PLACE_CLOCK_W)); ch = max(6, int(h * PLACE_BOX[3]))
+        cut = big[y:y + ch, x:x + cw]
+        if cut.shape[0] < 3 or cut.shape[1] < 6:
+            return -1
+        return int(np.count_nonzero(green_mask(cut)))
+    except Exception:
+        return -1
+
 
 # 🧭 '실행중' 으로 볼 기준 — **평소(PLACE_MATCH 0.75)보다 엄격하다** (2026-11-10).
 #    등록하지 않은 장소(기린 마을 등)가 같은 길이의 던전 이름 그림에 **0.857** 까지
@@ -1615,8 +1698,13 @@ def slots_in_dungeon(slots, keys=None, only=None, match=None):
     return out
 
 
-def place_scores(keys, anchor):
+def place_scores(keys, anchor, info=None):
     """🧭 **한 캡처로 여러 던전을 겨룬다** → `{던전: 점수}` (못 찍으면 `{}`).
+
+    `info` 에 dict 를 주면 **같은 캡처에서** 덤으로 채운다 (2026-11-12):
+      `green`  이름 줄의 초록 시계 픽셀 수 (`place_clock`)
+      `town`   가장 닮은 마을 그림의 **던전 키** (`town_dun_map` · 모르면 None)
+      `town_n` 그 마을 그림 번호(1부터) · `town_v` 그 점수   (keys 에 TOWN_KEY 가 있을 때)
 
     물약감시가 '어느 던전 안인가' 를 고를 때 쓴다. `place_in_dungeon` 은
     기준을 넘는 순간 빠져나와 **진짜 최고점을 안 돌려주므로** 비교에 쓸 수 없다.
@@ -1632,18 +1720,28 @@ def place_scores(keys, anchor):
         got = grab_window(anchor)
         if not got:
             return {}
+        if info is not None:
+            info["green"] = place_clock(got[0])
         cut = place_nogreen(place_crop(got[0]))
         out = {}
         for key in keys:
-            best = -1.0
-            for p in place_list(key):
+            best, bn = -1.0, -1
+            for n in range(PLACE_MAX):
+                p = place_img_path(key, n)
+                if not os.path.exists(p):
+                    continue
                 t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
                 if (t is None or cut.shape[0] < t.shape[0]
                         or cut.shape[1] < t.shape[1]):
                     continue
-                best = max(best, float(
-                    cv2.matchTemplate(cut, t, cv2.TM_CCOEFF_NORMED).max()))
+                v = float(cv2.matchTemplate(cut, t, cv2.TM_CCOEFF_NORMED).max())
+                if v > best:
+                    best, bn = v, n
             out[key] = best
+            if info is not None and key == TOWN_KEY:
+                info["town_v"] = best
+                info["town_n"] = bn + 1
+                info["town"] = (town_dun_map().get(bn + 1) if bn >= 0 else None)
         return out
     except Exception:
         return {}
@@ -3421,9 +3519,13 @@ class IslandApp(tk.Tk):
         #    같은 틀을 쓰므로 등록·비교·배포가 던전이름과 똑같다.
         #    ⚠ '시계가 없다' 로 마을을 판정하면 **창이 HUD 를 가린 것과 구분이 안 된다**
         #      (실측 #04). 그래서 마을을 **그림으로 등록해 '있을 때'** 잡는다.
-        if key == "토요일_악몽의섬":
+        #    🏘 2026-11-12 — **네 던전 창 전부**에 둔다. 마을을 등록한 그 창의 던전이
+        #       곧 '그 마을의 던전' 으로 적힌다 (`place_town.json`). 악몽의섬 창에만 있으면
+        #       잊혀진섬 대기 마을을 악몽의섬 마을로 적게 된다.
+        if key in [d["key"] for d in DUNGEONS[:4]]:
             _twb = tk.Button(b3, font=("맑은 고딕", 7, "bold"), fg="white",
-                             command=lambda v=_psv: self._place_grab(TOWN_KEY, v))
+                             command=lambda v=_psv, k=key: self._place_grab(
+                                 TOWN_KEY, v, False, k))
             _twb.pack(side="left", padx=(2, 0))
             _twb.bind("<Button-3>", lambda e: self._place_del(TOWN_KEY))
             self._place_btns[TOWN_KEY] = _twb
@@ -8788,7 +8890,7 @@ class IslandApp(tk.Tk):
         except Exception:
             pass
 
-    def _place_grab(self, key, var, drop_tail=False):
+    def _place_grab(self, key, var, drop_tail=False, dun=None):
         """📍 **지금 그 슬롯이 보고 있는 장소 이름**을 그대로 잘라 등록한다.
 
         자리가 고정이라 드래그가 필요 없다 — 그 칸만 잘라 저장한다.
@@ -8825,6 +8927,9 @@ class IslandApp(tk.Tk):
             os.makedirs(IMG_DIR, exist_ok=True)
             p = place_img_path(key, n)
             cv2.imencode(".png", cut)[1].tofile(p)
+            # 🏘 마을이면 **어느 던전의 마을인지** 같이 적는다 (그 창의 던전)
+            if key == TOWN_KEY and dun:
+                town_dun_set(n + 1, dun)
             self._status.set(f"✔ 📍 {key} 던전 이름 {n+1}번째 등록 "
                              f"({cut.shape[1]}×{cut.shape[0]}, #{si+1:02d} 에서) — "
                              f"이제 던전 안일 때만 다시 돌립니다")
@@ -8838,6 +8943,11 @@ class IslandApp(tk.Tk):
         for i in range(PLACE_MAX):
             try:
                 os.remove(place_img_path(key, i)); n += 1
+            except Exception:
+                pass
+        if key == TOWN_KEY:
+            try:
+                os.remove(os.path.join(IMG_DIR, TOWN_MAP_FILE))
             except Exception:
                 pass
         self._status.set(f"🗑 📍 {key} 던전 이름 그림 {n}장을 지웠습니다 — "
