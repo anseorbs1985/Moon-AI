@@ -5267,6 +5267,14 @@ QUEST_CLICK_X = 50            # 누를 자리 — 그 줄의 제목 글자
 QUEST_REW_BOX = (255, 96, 292, 112)   # '보 상' 글자 둘레
 QUEST_REW_WHITE = 20          # 흰 점이 이보다 많고
 QUEST_REW_DARK = 25.0         # 화면이 이보다 어두우면 **보상 창이 떴다**
+# 🌞 **누르기 전보다 이만큼 어두워졌으면** 보상 창이 뜬 것이다 (2026-11-12 실측).
+#    절대 밝기(25)는 **어두운 밤 화면**(평소 33)에서 잰 값이었다. 낮 화면은 평소가
+#    **75~97** 이라 보상 창이 떠도 29 까지만 내려가 '못 봤다' 로 끝났다:
+#       밤  33.4 → 17.0 (0.51배)      낮  92.3 → 29.1 (0.32배)
+#    🚫 흰 점만으로 판정하지 말 것 — 낮 화면은 창이 없어도 그 칸에 흰 글자가 42~67 있다.
+#    🚫 절전 화면은 흰점 19 · 밝기 16 이다 — 흰 점 기준(20)을 내리지 말 것.
+QUEST_REW_DROP = 0.70
+QUEST_SHOT_KEEP = 30          # 못 봤을 때 남기는 화면 — 최근 이만큼만 둔다
 QUEST_REW_CLICK = (272, 103)  # 닫기 — '보 상' 글자 가운데
 QUEST_SEE_N = 12              # 보상 창이 뜰 때까지 보는 횟수 (실측 0.75초에 떴다)
 QUEST_SEE_GAP = (0.20, 0.32)
@@ -5404,6 +5412,20 @@ def quest_moved(a, b):
         return int((d.sum(axis=2) > 60).sum()) >= QUEST_MOVE_MIN
     except Exception:
         return True                # 🚫 모르면 **계속 본다** (놓치지 않는 쪽)
+
+
+def quest_reward_open(wht, mn, m0=None):
+    """🎁 보상 창이 **떴나** — 흰 점이 있고, 화면이 어둡거나 **누르기 전보다 어두워졌다**.
+
+    `m0` = 누르기 직전 화면 밝기 (모르면 절대 기준만 본다)."""
+    try:
+        if wht < QUEST_REW_WHITE:
+            return False
+        if mn < QUEST_REW_DARK:
+            return True
+        return bool(m0 is not None and m0 > 0 and mn <= float(m0) * QUEST_REW_DROP)
+    except Exception:
+        return False
 
 
 def quest_reward_seen(im):
@@ -26673,6 +26695,20 @@ class App(tk.Tk):
             click_log(f"{fkey} [{name}] ⚠ 깨우기 오류 {e}")
             return False
 
+    def _client_is_front(self, anchor):
+        """그 좌표의 리니지M 창이 **지금 맨 앞(키를 받는 창)** 인가.
+
+        True 맨 앞 · False 맨 앞이 아니다 · None 모른다(창을 못 찾음 — 막지 않는다)."""
+        try:
+            import win32gui
+            from precise_click import game_window_at
+            root = game_window_at(int(anchor[0]), int(anchor[1]))
+            if not root:
+                return None
+            return win32gui.GetForegroundWindow() == root
+        except Exception:
+            return None
+
     def _wake_until(self, anchor, si=None, tag="fix", fkey="fix"):
         """절전 화면이 사라질 때까지 깨운다 — **1번째는 Z, 2번째부터는 글자 클릭**.
 
@@ -26689,8 +26725,20 @@ class App(tk.Tk):
                 if w == 0:
                     self._focus_client_at(anchor)
                     nap(random.uniform(0.12, 0.24))    # 랜덤 폭은 유지
-                    press_key(SLEEP_WAKE_KEY)
-                    _how = f"'{SLEEP_WAKE_KEY.upper()}' 키"
+                    if self._client_is_front(anchor) is False:
+                        # 🚫 **키는 맨 앞 창으로 간다** (2026-11-12). 그 클라를 맨 앞으로
+                        #    못 올렸는데 Z 를 누르면 **다른 클라**에 들어간다 — 깨어 있던
+                        #    클라에 Z 가 한 번 더 눌린다. 그럴 때는 Z 대신 **글자를 누른다**
+                        #    (클릭은 그 창을 스스로 앞으로 올린다).
+                        ok, sc = self._sleep_wake_click(anchor, fkey)
+                        click_log(f"[{tag}] {_who}⚠ 그 창을 맨 앞으로 못 올렸다 — "
+                                  f"Z 는 다른 창으로 가므로 누르지 않고 "
+                                  + (f"'절전모드 해제' 글자를 눌렀다 (일치도 {sc:.2f})"
+                                     if ok else "글자도 못 찾았다"))
+                        _how = "'절전모드 해제' 글자 클릭 (창이 맨 앞이 아니라 Z 대신)"
+                    else:
+                        press_key(SLEEP_WAKE_KEY)
+                        _how = f"'{SLEEP_WAKE_KEY.upper()}' 키"
                 else:
                     ok, sc = self._sleep_wake_click(anchor, fkey)
                     if not ok:
@@ -29780,7 +29828,14 @@ class App(tk.Tk):
                 break
             if self._win_odd_skip(si, "퀘스트"):
                 continue
-            n = self._quest_one(si, ws[si])
+            # 🚨 한 클라에서 난 오류가 **실행 전체를 죽이면 안 된다** (2026-11-12 —
+            #    되돌림 기록 줄의 서식 오류로 클라 하나만 하고 조용히 끝나고 있었다).
+            try:
+                n = self._quest_one(si, ws[si])
+            except Exception as e:
+                n = 0
+                click_log("[퀘스트] #%02d ⚠ 오류 %s: %s — 이 클라는 넘어간다"
+                          % (si + 1, type(e).__name__, e))
             seen += 1
             if n:
                 got += n
@@ -29844,6 +29899,7 @@ class App(tk.Tk):
                     if not rows:
                         break
                     qy, pts = rows[0]
+                    m0 = float(im.mean())      # 🌞 누르기 **전** 밝기 (보상 창 판정용)
                     cx, cy = int(l + QUEST_CLICK_X * kx), int(t + qy * ky)
                     self._focus_client_at((cx, cy))
                     nap(random.uniform(0.20, 0.35))
@@ -29851,27 +29907,32 @@ class App(tk.Tk):
                     # 🎁 보상 창이 **뜰 때까지** 본다 (실측 0.75초)
                     wht = mn = -1
                     ok = False
+                    im2 = None
                     for _k in range(QUEST_SEE_N):
                         nap(random.uniform(*QUEST_SEE_GAP))
                         im2 = grab_window(cen)
                         if im2 is None:
                             continue
                         wht, mn = quest_reward_seen(im2)
-                        if wht >= QUEST_REW_WHITE and mn < QUEST_REW_DARK:
+                        if quest_reward_open(wht, mn, m0):
                             ok = True
                             break
                     if not ok:
+                        _shot = self._quest_shot(si, im2, "norew")
                         click_log("[퀘스트] #%02d 🚫 **보상 창을 못 봤다** "
-                                  "(흰점 %s · 밝기 %s) — 더 누르지 않고 이 클라는 끝낸다"
-                                  % (si + 1, wht, ("%.1f" % mn) if mn >= 0 else "?"))
+                                  "(흰점 %s · 밝기 %s · 누르기 전 %.1f) — 더 누르지 않고 "
+                                  "이 클라는 끝낸다%s"
+                                  % (si + 1, wht, ("%.1f" % mn) if mn >= 0 else "?", m0,
+                                     (" · 🗂 " + _shot) if _shot else ""))
                         return got
                     # 🖱 닫기 — **아무 곳이나** ('보 상' 글자 = 창 안이라 확실)
                     click_at(int(l + QUEST_REW_CLICK[0] * kx),
                              int(t + QUEST_REW_CLICK[1] * ky))
                     got += 1
                     click_log("[퀘스트] #%02d 🎁 **보상 받았다** (%d번째) — "
-                              "[완료] 줄 창안y%d (빨강 %d점) · 창 뜸 0.%ds"
-                              % (si + 1, got, qy, pts, _k + 1))
+                              "[완료] 줄 창안y%d (빨강 %d점) · 창 뜸 %d번째 확인 · "
+                              "밝기 %.0f→%.0f"
+                              % (si + 1, got, qy, pts, _k + 1, m0, mn))
                     nap(random.uniform(*QUEST_GAP))
                 if _s >= QUEST_SCROLL_N:
                     break
@@ -29892,7 +29953,8 @@ class App(tk.Tk):
                     break
                 if im3 is not None:
                     wht, mn = quest_reward_seen(im3)
-                    if wht >= QUEST_REW_WHITE and mn < QUEST_REW_DARK:
+                    if quest_reward_open(wht, mn, float(im_last.mean())
+                                         if im_last is not None else None):
                         click_at(int(l + QUEST_REW_CLICK[0] * kx),
                                  int(t + QUEST_REW_CLICK[1] * ky))
                         got += 1
@@ -29935,16 +29997,51 @@ class App(tk.Tk):
                         _ok = True             # 🔎 더 안 움직인다 — **맨 위다. 그만**
                         break
                     _prev = _im
-                click_log("[퀘스트] #%02d 🔙 목록을 되돌렸다 — %d번 내리고(y%d→y%d·"
-                          + str(QUEST_DRAG_LO - QUEST_DRAG_HI) + "px) "
-                          "%d번 올림(y%d→y%d·" + str(QUEST_BACK_LO - QUEST_BACK_HI)
-                          + "px)%s"
-                          % (si + 1, moved, QUEST_DRAG_LO, QUEST_DRAG_HI,
-                             _n, QUEST_BACK_HI, QUEST_BACK_LO,
-                             " (한 번만 — 사용자 지시)" if _one
-                             else (" ✔ 맨 위까지" if _ok
-                                   else " — ⚠ 더 올려야 할 수도")))
+                # 🚨 **서식 문자열을 `+` 로 잇고 끝에만 `%` 를 붙이지 말 것** (2026-11-12 사고).
+                #    `"a%d" + x + "b%s" % (…)` 는 `%` 가 `+` 보다 **먼저** 묶여 TypeError 다.
+                #    이 줄이 `finally` 안이라 **실행 전체가 조용히 죽어**, 목록을 한 번이라도
+                #    끌어내린 첫 클라에서 퀘스트 받기가 끝나고 있었다 (11-11 부터).
+                try:
+                    click_log("[퀘스트] #%02d 🔙 목록을 되돌렸다 — %d번 내리고(y%d→y%d·%dpx) "
+                              "%d번 올림(y%d→y%d·%dpx)%s"
+                              % (si + 1, moved, QUEST_DRAG_LO, QUEST_DRAG_HI,
+                                 QUEST_DRAG_LO - QUEST_DRAG_HI,
+                                 _n, QUEST_BACK_HI, QUEST_BACK_LO,
+                                 QUEST_BACK_LO - QUEST_BACK_HI,
+                                 " (한 번만 — 사용자 지시)" if _one
+                                 else (" ✔ 맨 위까지" if _ok
+                                       else " — ⚠ 더 올려야 할 수도")))
+                except Exception:
+                    pass
         return got
+
+    def _quest_shot(self, si, im, tag):
+        """🗂 못 봤을 때 **그 화면을 남긴다** → 저장한 경로 (못 남기면 "").
+
+        `%LOCALAPPDATA%/MoonAI/click_templates/_quest/` — 이 컴퓨터 전용.
+        최근 `QUEST_SHOT_KEEP` 장만 둔다."""
+        try:
+            if im is None:
+                return ""
+            import cv2 as _cv
+            d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
+                             "click_templates", "_quest")
+            os.makedirs(d, exist_ok=True)
+            p = os.path.join(d, time.strftime("%m%d_%H%M%S")
+                             + "_%02d_%s.png" % (si + 1, tag))
+            ok, buf = _cv.imencode(".png", im)
+            if not ok:
+                return ""
+            buf.tofile(p)                     # 한글 경로에서도 써진다
+            try:
+                fs = sorted(f for f in os.listdir(d) if f.endswith(".png"))
+                for f in fs[:-QUEST_SHOT_KEEP]:
+                    os.remove(os.path.join(d, f))
+            except Exception:
+                pass
+            return p
+        except Exception:
+            return ""
 
     def _quest_drag(self, l, t, kx, ky, dy):
         """📜 퀘스트 목록을 끈다 (dy<0 = 위로 = 아래 것 보기).
@@ -40661,6 +40758,21 @@ class App(tk.Tk):
         nap_clear()               # 새 작업 — 멈춤 깃발을 내린다 (2026-11-03)
         try:
             fn(*args)
+        except Exception as e:
+            # 🐞 **작업 스레드가 오류로 끝나면 반드시 남긴다** (2026-11-12).
+            #    pythonw 라 콘솔이 없어, 예전에는 스레드가 **아무 흔적 없이** 죽었다
+            #    (퀘스트 받기가 클라 하나만 하고 끝나던 것을 그래서 이틀 동안 몰랐다).
+            try:
+                import traceback as _tbm
+                _tb = _tbm.extract_tb(e.__traceback__)
+                _w = ("%s:%d %s" % (os.path.basename(_tb[-1].filename),
+                                     _tb[-1].lineno, _tb[-1].name)) if _tb else ""
+                click_log("[오류] 🐞 '%s' 작업이 오류로 끝났다 — %s: %s (%s)"
+                          % (name, type(e).__name__, e, _w))
+                self.after(0, lambda n=name, x=e: self.status.set(
+                    "🐞 '%s' 가 오류로 끝났습니다 — %s" % (n, x)))
+            except Exception:
+                pass
         finally:
             self._clear_busy(name)
             try:
