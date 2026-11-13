@@ -2529,6 +2529,16 @@ WARN_AFTER_WAKE = 4500  # 첫 스캔 (ESC 닫기 뒤)
 #    🚫 복구가 이미 돌고 있으면 ①~③을 하지 않는다 (복구 중에 F11 이 끼면 클릭이 엉킨다).
 FIX_ALL_PREP      = True
 FIX_ALL_SCAN_WAIT = 45.0     # ③ 을 기다리는 한도(초) — 넘으면 지금 목록으로 진행한다
+# 😴 **깨어 있는 클라에 복구할 것이 있으면 그것들만** 한다 (2026-11-13 사용자 지시:
+#    *"복구해야 할 클라들이 1개라도 절전이 해제되어 있으면 해제된 것들만 복구를 해주고,
+#      전체 다 절전모드면 절전을 해제하고 복구를 해주라"*)
+#      섞여 있다 (깨어 있는 것 + 자는 것) → **아무도 깨우지 않고** 깨어 있는 클라만 본다
+#          · 거기 복구할 것이 있다 → 그것들만 복구 (자는 클라의 것은 목록에 그대로 둔다)
+#          · 하나도 없다          → 예전처럼 F11 로 전부 깨워서 확인·복구
+#      전부 잔다 → F11 → 확인 → 복구 (예전 그대로) · 전부 깨어 있다 → 확인 → 복구 (예전 그대로)
+#    🚫 자는 클라의 복구를 목록에서 **지우지 않는다** — 건드리지 않을 뿐이다.
+#    ⚠ `복구해야함 NN` 을 **직접 누르면** 예전처럼 그 클라를 깨워서 한다 (막지 않는다).
+FIX_ALL_AWAKE_ONLY = True
 WARN_WAKE_AGAIN = 9500  # 한 번 더 (뒤늦게 그려지는 클라)
 WARN_IDLE_MS = 10000    # 5분이 지난 뒤 **목록에 남은 슬롯만** 다시 보는 간격(ms)
 # 🚨 2026-10-23 사용자: *"내가 F11이든 절전해제든 해서 복구를 하면 너가 복구 표기에서
@@ -4811,6 +4821,31 @@ FIX_ITEM_FIRST = True
 #    칸1(십자가)을 다시 눌러 열고 그 탭을 한 번 더 찾는다 (**탭마다** 1번).
 #    🚫 흔적이 있으면 다시 열지 않는다 (창이 두 겹 쌓인다).
 FIX_REOPEN     = 1
+# 🪟 **십자가를 누른 뒤 '복구 창이 열린 것을 보고' 다음을 누른다** (2026-11-13 사용자:
+#    *"십자가 클릭해서 한 번에 복구가 안 되고 … 한 번에 딱딱 제대로 좀"*)
+#    🚨 기록 11-10 14:12 #09 — 십자가를 눌렀는데 창이 **안 열렸다**(탭 0.43). 그런데
+#       `FIX_POS_FALLBACK` 이 "그림이 이 컴퓨터와 다른가 보다" 하고 **게임 화면에**
+#       탭 자리·줄·[모두 복구] 자리·확인을 **세 바퀴 눌렀다.** 복구는 한 건도 안 됐고
+#       1분 뒤 2판에서야 됐다. = 사용자가 본 '한 번에 안 되고 여러 번'.
+#    📏 실측 (메인 `_fixtab` 83장 · 546 창) — 탭 그림 점수
+#          복구 창이 열려 있다 **≥ 0.98** (55장)  ·  닫혀 있다 **≤ 0.51** (28장 · 배율 ±3% 포함)
+#       → `FIX_OPEN_SOFT` 0.65 (양쪽 여유 0.14 / 0.33). 🚫 0.58 밑으로 내리지 말 것.
+#       ⚠ '목록 칸이 어두운가' 로는 못 가린다 (열림 0.84~0.98 · 닫힘 최고 0.86 — 겹친다).
+#    ① 누른 뒤 `FIX_OPEN_WAIT` 초 동안 창이 뜨는지 본다 — **뜨는 즉시** 넘어간다
+#    ② 안 떴으면 십자가가 아직 있나 보고(`_fix_cross_now`) **다시 누른다** (모두 `FIX_OPEN_TRIES` 번)
+#    ③ 끝내 안 뜨면 🚫 **아무것도 더 누르지 않는다** (목록은 그대로 — 다음 판이 다시 한다)
+#    🧭 **이 컴퓨터에서 탭 그림이 맞는다는 것이 확인된 뒤에만** 엄격하게 군다
+#       (`FIX_OPEN_LEARN` 번 맞은 적이 있다 — `%LOCALAPPDATA%\MoonAI\fix_open_ok.json`).
+#       한 번도 맞은 적이 없는 컴퓨터는 **예전 그대로**(고정 자리·예전 좌표 흐름) 돈다 —
+#       그림이 안 맞는 컴퓨터에서 복구가 통째로 죽으면 안 된다 (2026-11-08 교훈).
+#    끄려면 FIX_OPEN_CHECK = False.
+FIX_OPEN_CHECK  = True
+FIX_OPEN_SOFT   = 0.65
+FIX_OPEN_WAIT   = 2.2
+FIX_OPEN_POLL   = (0.18, 0.30)
+FIX_OPEN_TRIES  = 3
+FIX_OPEN_LEARN  = 3
+FIX_OPEN_ALT_PX = 14      # 등록한 칸1 이 창 기준 자리(FIX_REL)와 이만큼 넘게 다르면 알린다
 # 📍 **복구 창 안의 고정 자리** (546x307 창 기준 · 가운데, 폭, 높이).
 #    실측 2026-11-08 — 세 슬롯(#07 #09 #16)에서 **창안 좌표가 완전히 같았다.**
 #    그림은 메인에서 자른 것이라 **로컬에선 안 맞을 수 있다** → 그때 이 자리를 쓴다.
@@ -6307,6 +6342,31 @@ DAY_DUNGEON = {0: "월요일_잊혀진섬", 1: "화요일_에카",
 # "항상 금요일 저녁 11시 50분에 4시간 1회 + 2시간 5회로 맞춰줘."
 # **값만** 되돌린다 — 예약(⏰)은 걸지 않는다 (2026-08-23 절대 규칙 그대로).
 NIGHT_RESET_KEY = "토요일_악몽의섬"
+# ── 🌙 토요일 새벽 악몽의섬 — 한 클라씩 (2026-11-13 사용자 요청) ───────────────
+# *"토요일 새벽 2:30~3시 사이 동안에 랜덤으로 한 클라씩 너가 악몽의섬을 돌려줬으면
+#   좋겠어 (과거섬처럼)"*
+#   · 토요일 02:30 이 되면(런처가 켜져 있어야 한다 — 02:20 에 워치독 예약이 켜준다)
+#     악몽의섬에서 **ON 이고 좌표가 있는 슬롯**을 **순서를 섞어 하나씩** 돌린다
+#     (`--slots <섞은 순서> --lanes 1` — ⏰ 재진입과 같은 '하나씩' 길).
+#     📏 16슬롯 하나씩 = 약 31~34분 (2026-10-17 실측) → 02:30 에 시작해 03:05 쯤 끝난다.
+#   · 다른 작업·섬 실행기가 돌고 있거나 사람이 쓰는 중이면 **끝날 때까지 미룬다**
+#     (`NIGHT_SAT_LATE` 04:30 까지. 그래도 틈이 없으면 그날은 그만둔다).
+#   · 02:30~03:00 에 런처가 꺼져 있었으면 그날은 돌리지 않는다 (과거섬과 같다).
+#   🚫 **⏰ 반복은 걸지 않는다** (`--norep`) — ⏰ 는 사용자가 실행했을 때만 켜진다
+#      (2026-08-23 절대 규칙). 이 실행에도 ⏰ 를 걸려면 NIGHT_SAT_ARM = True.
+#   🚫 OFF 슬롯은 돌리지 않는다. 슬롯 카드는 클로드가 고르지 않는다.
+#   끄는 법: 슬롯판 머리줄 [🌙 토 2:30 ON/OFF] (`coords.json` 의 `night_sat_on`).
+#   ⚠ '실행은 사용자가 시킬 때만'(2026-08-10)의 **사용자가 직접 요청한 예외**다.
+NIGHT_SAT_ON      = True
+NIGHT_SAT_KEY     = "토요일_악몽의섬"
+NIGHT_SAT_DIDX    = 1                # 섬 실행기의 던전 번호 (키로 다시 찾는다)
+NIGHT_SAT_DAY     = 5                # 월=0 … 토=5
+NIGHT_SAT_FROM    = (2, 30)
+NIGHT_SAT_TO      = (3, 0)           # 이 시각 전에 걸려야 한다
+NIGHT_SAT_LATE    = (4, 30)          # 걸렸는데 바빠서 못 돌렸으면 여기까지 기다린다
+NIGHT_SAT_JIT     = (5.0, 90.0)      # 02:30 정각에 딱 시작하지 않는다 (초)
+NIGHT_SAT_ARM     = False            # True 면 이 실행에도 ⏰ 반복을 건다
+NIGHT_SAT_TICK_MS = 20000
 NIGHT_RESET_DAY = 4      # 월=0 … 금=4
 NIGHT_RESET_HH  = 23
 NIGHT_RESET_MM  = 50
@@ -8763,6 +8823,7 @@ class App(tk.Tk):
         self.after(4000, self._sync_prestart_tasks)   # 스케줄 10분 전 자동시작 작업 동기화
         self.after(1000, self._mail_scheduler_tick)
         self.after(1000, self._past_scheduler_tick)
+        self.after(7000, self._night_sat_tick)       # 🌙 토요일 새벽 악몽의섬
         # 📱 폰(텔레그램) 명령 받기 — 1초마다 **파일 시각만** 본다 (부하 0).
         #    켤 때 남아 있던 옛 명령으로 저절로 실행되지 않게,
         #    지금 시각을 먼저 기억해둔다 (`_bot_cmd_m`).
@@ -18010,9 +18071,17 @@ class App(tk.Tk):
                   bg="#196f3d", fg="white", activebackground="#145a32",
                   bd=0, padx=6, pady=1,
                   command=self._night_rearm_pick).pack(side="left")
-        tk.Label(parent,
-                 text=f"값만 바꿉니다 · 금 {NIGHT_RESET_HH}:{NIGHT_RESET_MM:02d} 자동 초기화",
-                 font=("맑은 고딕", 7), fg="#888").pack(pady=(0, 3))
+        _rr3 = tk.Frame(parent); _rr3.pack(pady=(0, 3))
+        tk.Label(_rr3,
+                 text=f"값만 · 금 {NIGHT_RESET_HH}:{NIGHT_RESET_MM:02d} 초기화",
+                 font=("맑은 고딕", 7), fg="#888").pack(side="left")
+        # 🌙 토요일 새벽 악몽의섬 자동 실행 켬/끔 (2026-11-13) — 줄을 늘리지 않으려고
+        #    이 안내 줄 옆에 붙였다 (판이 길어지면 맨 아랫줄 슬롯이 잘린다).
+        self._nsat_btn = tk.Button(_rr3, font=("맑은 고딕", 7, "bold"), fg="white",
+                                   bd=0, padx=5, pady=1,
+                                   command=self._night_sat_toggle)
+        self._nsat_btn.pack(side="left", padx=(6, 0))
+        self._night_sat_btn_paint()
         wg = tk.Frame(parent); wg.pack()
         self._night_btns = []; self._night_plus = []; self._night_runbtns = []
         self._night_firstbtns = []      # 첫 회차 4시간/2시간 선택
@@ -25800,6 +25869,7 @@ class App(tk.Tk):
         except Exception:
             pass
         t0 = time.time()
+        _only = [None]      # 😴 깨어 있는 클라만 복구할 때 그 번호들 (2026-11-13)
 
         def _prep():
             try:
@@ -25810,6 +25880,50 @@ class App(tk.Tk):
                               "클라 16개) → 지금 목록만 돌린다")
                     return
                 sl = [i for i in range(1, n + 1) if i not in set(aw)]
+
+                def _wait_scan(t1, need, kick_at, wake=True):
+                    """십자가 확인이 끝나기를 기다린다 → [■ 멈춤] 이면 False."""
+                    kicked = False
+                    while time.time() - t1 < FIX_ALL_SCAN_WAIT:
+                        if _STOP_AT[0] > t0:
+                            return False
+                        _dn = max(float(getattr(self, "_scan_done_at", 0) or 0),
+                                  float(getattr(self, "_scan_none_at", 0) or 0))
+                        _bz = (getattr(self, "_scan_busy", False)
+                               or getattr(self, "_waking", False))
+                        if _dn > need and not _bz:
+                            return True
+                        # 확인이 안 걸렸으면(다른 확인과 겹쳤다 등) 한 번 직접 건다
+                        if not kicked and not _bz and _dn <= t1 and time.time() > kick_at:
+                            kicked = True
+                            self.after(0, lambda w=wake:
+                                       self._check_scan(quiet=True, wake=w))
+                        nap(0.3)
+                    click_log(f"fix ▶ 전부복구 — 십자가 확인을 {FIX_ALL_SCAN_WAIT:.0f}초 "
+                              f"기다려도 안 끝났다 → 지금 목록으로 진행한다")
+                    return True
+
+                # 😴 **섞여 있으면 아무도 깨우지 않고 깨어 있는 클라만 본다** (2026-11-13)
+                if FIX_ALL_AWAKE_ONLY and sl and aw:
+                    click_log(f"fix ▶ 전부복구 — 깨어 있는 클라 {len(aw)}개 {sorted(aw)} · "
+                              f"자는 클라 {len(sl)}개 {sl} → **아무도 깨우지 않고** "
+                              f"깨어 있는 클라의 십자가만 본다")
+                    self.after(0, lambda: self._fix_allbtn_set("⏳ 십자가 확인 중…"))
+                    _ta = time.time()
+                    self.after(0, lambda: self._check_scan(quiet=True, wake=False))
+                    if not _wait_scan(_ta, _ta, _ta + 6.0, wake=False):
+                        return
+                    _cand = sorted(set(self._warn_load()) & set(aw))
+                    if _cand:
+                        _only[0] = set(aw)
+                        click_log(f"fix ▶ 전부복구 — 깨어 있는 클라에 복구할 것 "
+                                  f"{len(_cand)}개 {_cand} → **그것들만** 복구한다 "
+                                  f"(자는 클라는 깨우지 않는다)")
+                        return
+                    click_log("fix ▶ 전부복구 — 깨어 있는 클라에는 복구할 것이 없다 → "
+                              "예전처럼 전부 깨워서 확인한다")
+                    if _STOP_AT[0] > t0:
+                        return
                 if sl:
                     click_log(f"fix ▶ 전부복구 — 자는 클라 {len(sl)}개 {sl} → "
                               f"**절전해제(F11)** 를 먼저 끝까지 돌린다")
@@ -25829,25 +25943,10 @@ class App(tk.Tk):
                 if _STOP_AT[0] > t0:
                     return
                 self.after(0, lambda: self._fix_allbtn_set("⏳ 십자가 확인 중…"))
-                kicked = False
-                while time.time() - t1 < FIX_ALL_SCAN_WAIT:
-                    if _STOP_AT[0] > t0:
-                        return
-                    _dn = max(float(getattr(self, "_scan_done_at", 0) or 0),
-                              float(getattr(self, "_scan_none_at", 0) or 0))
-                    _bz = (getattr(self, "_scan_busy", False)
-                           or getattr(self, "_waking", False))
-                    if _dn > need and not _bz:
-                        break
-                    # 절전해제가 아무것도 안 하고 돌아왔으면(좌표 없음 등) 확인이 안
-                    # 걸렸을 수 있다 → 한 번 직접 건다
-                    if not kicked and not _bz and _dn <= t1 and time.time() > kick_at:
-                        kicked = True
-                        self.after(0, lambda: self._check_scan(quiet=True))
-                    nap(0.3)
-                else:
-                    click_log(f"fix ▶ 전부복구 — 십자가 확인을 {FIX_ALL_SCAN_WAIT:.0f}초 "
-                              f"기다려도 안 끝났다 → 지금 목록으로 진행한다")
+                # 절전해제가 아무것도 안 하고 돌아왔으면(좌표 없음 등) 확인이 안
+                # 걸렸을 수 있다 → `_wait_scan` 이 한 번 직접 건다
+                if not _wait_scan(t1, need, kick_at):
+                    return
             except Exception as _e:
                 try:
                     click_log(f"fix ▶ 전부복구 준비 중 오류 {_e!r} → 지금 목록으로 진행한다")
@@ -25863,7 +25962,7 @@ class App(tk.Tk):
                         self.status.set("▶ 전부 복구 — 멈췄습니다")
                         click_log("fix ▶ 전부복구 — 준비 중에 [■ 멈춤] → 복구하지 않는다")
                         return
-                    self._fix_all_go(auto=True)
+                    self._fix_all_go(auto=True, only=_only[0])
                 try:
                     self.after(0, _fin)
                 except Exception:
@@ -25871,14 +25970,31 @@ class App(tk.Tk):
 
         threading.Thread(target=_prep, daemon=True).start()
 
-    def _fix_all_go(self, auto=False):
+    def _fix_all_go(self, auto=False, only=None):
         """▶ 전부 복구의 몸통 — 지금 목록에 뜬 슬롯을 **번호 순서대로 하나씩** 복구한다.
 
         하나가 끝나야 다음이 시작된다 (겹치면 클릭이 엉킨다).
         각 슬롯은 개별로 누른 것과 **완전히 같은 경로**를 탄다:
         절전이면 Z 로 깨우고 → 십자가 확인 → '무료' 가 아니면 ESC 취소(💎 다야!!).
-        (2026-08-29 사용자 요청)   `auto=True` = 준비 단계(절전 확인·십자가 확인)를 거쳐 왔다."""
+        (2026-08-29 사용자 요청)   `auto=True` = 준비 단계(절전 확인·십자가 확인)를 거쳐 왔다.
+        `only` = 😴 **이 번호들(깨어 있는 클라)만** 복구한다 — 나머지는 목록에 그대로 둔다."""
         q = sorted(self._warn_load())
+        # 😴 돌던 중에 또 누른 것이면 **범위를 넓히지 않는다** (깨어 있는 것만 하던 판)
+        if only is None and (getattr(self, "_fix_queue", None)
+                             or getattr(self, "_fix_hold", None) is not None):
+            only = getattr(self, "_fix_only", None)
+        _held = []
+        if only:
+            _held = [x for x in q if x not in only]
+            q = [x for x in q if x in only]
+        self._fix_only = set(only) if only else None
+        if not q and _held:
+            self._fix_only = None
+            self.status.set(f"▶ 전부 복구 — 깨어 있는 클라에는 복구할 것이 없습니다 "
+                            f"(😴 자는 클라 {_held} 는 그대로 뒀습니다)")
+            click_log(f"fix ▶ 전부복구 — 깨어 있는 클라에는 복구할 것이 없다 "
+                      f"(자는 클라 {_held} 는 그대로)")
+            return
         if not q:
             if auto:
                 self.status.set("▶ 전부 복구 — 복구할 것이 없습니다 "
@@ -25905,7 +26021,12 @@ class App(tk.Tk):
         for _x in q:
             self._fix_btn_look_set(_x, "wait")
         self.status.set(f"▶ 전부 복구 시작 — {len(q)}개 {q} · 하나씩 순서대로 "
-                        f"(런처 창만 뒤로 보냅니다 — 복구는 그대로 돕니다)")
+                        f"(런처 창만 뒤로 보냅니다 — 복구는 그대로 돕니다)"
+                        + (f" · 😴 자는 클라 {_held} 는 깨우지 않고 그대로 둡니다"
+                           if _held else ""))
+        if only:
+            click_log(f"fix ▶ 전부복구 — 😴 **깨어 있는 클라만** {q} 복구한다"
+                      + (f" · 자는 클라의 {_held} 는 목록에 그대로 둔다" if _held else ""))
         self._fix_run_next()
 
     def _fix_run_next(self):
@@ -25922,6 +26043,14 @@ class App(tk.Tk):
                 _r = int(getattr(self, "_fix_round", 0) or 0)
                 if _r:
                     redo, skip = self._fix_redo_list()
+                    # 😴 깨어 있는 것만 하던 판이면 **다시 돌리는 것도 그 안에서만**
+                    _only = getattr(self, "_fix_only", None)
+                    _hold2 = []
+                    if _only:
+                        _hold2 = [x for x in redo if x not in _only]
+                        redo = [x for x in redo if x in _only]
+                    _slp = (f" · 😴 자는 클라 {_hold2} 는 깨우지 않고 그대로 뒀습니다 "
+                            f"(깨어난 뒤 다시 누르면 합니다)" if _hold2 else "")
                     _bf = int(getattr(self, "_fix_round_before", 0) or 0)
                     _msg = (f"남은 {len(redo)}개 {redo}"
                             + (f" · 🚫 진짜 다야 {[x for x, _ in skip]} 는 건너뜀"
@@ -25929,26 +26058,29 @@ class App(tk.Tk):
                     if not redo:
                         click_log(f"fix 🔁 {_r}바퀴 끝 — 다시 돌릴 것이 없다"
                                   + (f" (🚫 진짜 다야 {[x for x, _ in skip]} 는 "
-                                     f"손으로 해주세요)" if skip else ""))
+                                     f"손으로 해주세요)" if skip else "") + _slp)
                         self.status.set("▶ 전부 복구 완료"
                                         + (f" · 💎 다야 {[x for x, _ in skip]} 는 "
-                                           f"손으로 해주세요" if skip else ""))
+                                           f"손으로 해주세요" if skip else "") + _slp)
                         self._fix_round = 0
+                        self._fix_only = None
                         return
                     if _r >= FIX_ALL_ROUNDS:
                         click_log(f"fix 🔁 {FIX_ALL_ROUNDS}바퀴를 다 돌았다 — "
                                   f"{_msg} · 여기서 멈춘다")
                         self.status.set(f"▶ 전부 복구 — {FIX_ALL_ROUNDS}바퀴 했는데 "
-                                        f"{len(redo)}개가 남았습니다 {redo}")
+                                        f"{len(redo)}개가 남았습니다 {redo}" + _slp)
                         self._fix_round = 0
+                        self._fix_only = None
                         return
                     # 🚫 **한 바퀴에 하나도 줄지 않으면 멈춘다** (무한 고리 방지)
                     if _bf and len(redo) >= _bf:
                         click_log(f"fix 🔁 {_r}바퀴를 돌았는데 줄지 않았다 "
                                   f"({_bf} → {len(redo)}) — 여기서 멈춘다 · {_msg}")
                         self.status.set(f"▶ 전부 복구 — 더 줄지 않아 멈췄습니다 "
-                                        f"({len(redo)}개 남음 {redo})")
+                                        f"({len(redo)}개 남음 {redo})" + _slp)
                         self._fix_round = 0
+                        self._fix_only = None
                         return
                     self._fix_round = _r + 1
                     self._fix_round_before = len(redo)
@@ -26169,6 +26301,7 @@ class App(tk.Tk):
                             f"😴 {int(idle)//60}분째 조용 — 놓친 복구 {len(q)}개 "
                             f"{q} 를 순서대로 돌립니다 (다야는 하지 않습니다)")
                         self._fix_queue = q
+                        self._fix_only = None        # 😴 '깨어 있는 것만' 은 전부복구 버튼만
                         self._fix_bulk_ready = False
                         self._fix_run_next()
         except Exception:
@@ -28106,6 +28239,7 @@ class App(tk.Tk):
                                 f"순서대로 단체 복구합니다")
                 click_log(f"fix F11 이후 첫 실행 → 단체 복구 {_q}")
                 self._fix_queue = _q
+                self._fix_only = None
                 # 🔓 **잠금을 먼저 푼다** (2026-11-08) — 안 풀면 `_fix_run_next` 가
                 #    *"앞 슬롯이 아직 돈다"* 로 보고 **900ms 마다 기다리기만** 한다.
                 #    그게 *"전부복구를 눌러도 안 된다"* 의 정체였다.
@@ -28363,7 +28497,8 @@ class App(tk.Tk):
         #    예전 좌표 흐름으로 간다. 세션 메모리라 런처를 다시 켜면
         #    한 번 더 시도한다 — 그림을 보강하면 저절로 돌아온다.
         if (FIX_TABS and fix_tab_ready()
-                and not getattr(self, "_fix_tab_bad", False)):
+                and (not getattr(self, "_fix_tab_bad", False)
+                     or self._fix_strict())):
             try:
                 self._busy_task = "복구탭"
             except Exception:
@@ -28425,6 +28560,7 @@ class App(tk.Tk):
             if big is not None:
                 tb = fix_tab_find(big, nm)
                 if tb:
+                    self._fix_openok_note()      # 📏 이 컴퓨터에서 탭 그림이 맞는다
                     return big, tb
                 try:
                     _b = fix_tab_find(big, nm, lo=True)
@@ -28438,7 +28574,10 @@ class App(tk.Tk):
         #    로컬에선 안 맞는다. 복구 창 안의 탭 자리는 **창 안에서 고정**이다
         #    (실측 세 슬롯 전부 같다). 탭은 눌러도 돈이 안 들어 안전하다.
         #    🚫 여기서 그만두면 **그 슬롯이 통째로 복구되지 않는다.**
-        if FIX_POS_FALLBACK and big is not None:
+        #    🪟 다만 **복구 창이 안 보이는데** 고정 자리를 누르면 그건 게임 화면이다
+        #       (2026-11-13) → 그림이 맞는 컴퓨터에서는 창이 보일 때만 쓴다.
+        if (FIX_POS_FALLBACK and big is not None
+                and self._fix_pos_ok(big, si, ko)):
             _pb = fix_pos_box(nm, big.shape[1])
             if _pb:
                 click_log(f"fix #{si:02d} 📍 [{ko}] 탭 그림을 못 찾아 "
@@ -28530,7 +28669,8 @@ class App(tk.Tk):
         #       **[복구](다야)** 라서 누르면 돈이 나간다.
         #    ✅ `fix_btn_on`(밝기)으로 **켜졌을 때만** 누르고, 아이템 쪽은
         #       **동전 판정**이 다야를 한 겹 더 막는다.
-        if FIX_POS_FALLBACK and big is not None:
+        if (FIX_POS_FALLBACK and big is not None
+                and self._fix_pos_ok(big, si, ko)):
             for _nm2, _ko2 in names:
                 _pb = fix_pos_box(_nm2, big.shape[1])
                 if not _pb:
@@ -28811,6 +28951,195 @@ class App(tk.Tk):
         except Exception:
             return None
 
+    # ── 🪟 복구 창이 열렸나 (2026-11-13) ───────────────────────────────────
+    @staticmethod
+    def _fix_openok_path():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        try:
+            os.makedirs(d, exist_ok=True)
+        except Exception:
+            pass
+        return os.path.join(d, "fix_open_ok.json")
+
+    def _fix_openok_n(self):
+        """📏 이 컴퓨터에서 **탭 그림이 기준을 넘은 횟수** (파일은 한 번만 읽는다)."""
+        n = getattr(self, "_fix_openok", None)
+        if n is None:
+            try:
+                with io.open(self._fix_openok_path(), encoding="utf-8-sig") as f:
+                    n = int((json.load(f) or {}).get("n") or 0)
+            except Exception:
+                n = 0
+            self._fix_openok = n
+        return n
+
+    def _fix_openok_note(self):
+        """탭 그림이 맞았다 — 센다. 문턱(`FIX_OPEN_LEARN`)을 넘을 때까지만 파일에 쓴다."""
+        try:
+            n = self._fix_openok_n() + 1
+            self._fix_openok = n
+            if n <= FIX_OPEN_LEARN:
+                p = self._fix_openok_path()
+                with io.open(p + ".tmp", "w", encoding="utf-8") as f:
+                    json.dump({"n": n, "at": time.strftime("%Y-%m-%d %H:%M:%S")}, f)
+                os.replace(p + ".tmp", p)
+                if n == FIX_OPEN_LEARN:
+                    click_log(f"fix 📏 이 컴퓨터에서 복구 창 탭 그림이 {n}번 맞았다 → "
+                              f"이제부터 **창이 안 보이면 아무것도 누르지 않는다** "
+                              f"(고정 자리·예전 좌표 흐름으로 게임 화면을 누르지 않는다)")
+        except Exception:
+            pass
+
+    def _fix_strict(self):
+        """🧭 이 컴퓨터에서 탭 그림이 맞는 것이 **확인됐나** — 그때만 엄격하게 군다."""
+        try:
+            return bool(FIX_OPEN_CHECK and self._fix_openok_n() >= FIX_OPEN_LEARN)
+        except Exception:
+            return False
+
+    def _fix_open_seen(self, big):
+        """🪟 그 화면에 **복구 창이 떠 있나** → (떴나, 탭 그림 최고 점수).
+
+        탭 둘(`경험치 복구`·`아이템 복구`) 중 하나라도 `FIX_OPEN_SOFT` 를 넘으면 떠 있다.
+        🚫 이 점수로 **자리를 누르지 말 것** — '떠 있나' 만 본다."""
+        best = 0.0
+        try:
+            if big is None:
+                return False, 0.0
+            for nm in ("tab_exp", "tab_item"):
+                b = fix_tab_find(big, nm, lo=True)
+                if b:
+                    best = max(best, float(b[4]))
+        except Exception:
+            pass
+        return best >= FIX_OPEN_SOFT, best
+
+    def _fix_pos_ok(self, big, si, ko):
+        """📍 고정 자리(`FIX_POS`)를 써도 되나.
+
+        그림이 맞는 컴퓨터(`_fix_strict`)에서는 **복구 창이 보일 때만** 쓴다 —
+        창이 안 보이는데 고정 자리를 누르면 그 자리는 **게임 화면**이다
+        (2026-11-10 #09 — 탭·줄·[모두 복구]·확인을 게임 화면에 세 바퀴 눌렀다).
+        그림이 맞은 적이 없는 컴퓨터는 **예전 그대로**(늘 쓴다)."""
+        try:
+            if not self._fix_strict():
+                return True
+            ok, sc = self._fix_open_seen(big)
+            if not ok:
+                click_log(f"fix #{si:02d} 📍 [{ko}] **고정 자리를 쓰지 않는다** — "
+                          f"복구 창이 안 보인다 (탭 그림 최고 {sc:.2f} · 기준 "
+                          f"{FIX_OPEN_SOFT}) · 그 자리는 게임 화면이다")
+            return ok
+        except Exception:
+            return True
+
+    def _fix_rel_pt(self, c1, cell):
+        """📐 그 클라 창에서 **창 기준 자리**(`FIX_REL`)의 화면 좌표 (없으면 None)."""
+        try:
+            rel = FIX_REL.get(cell)
+            r = client_rect_at(*c1)
+            if not (rel and r):
+                return None
+            w, h = r[2] - r[0], r[3] - r[1]
+            return (int(round(r[0] + rel[0] * w / float(FIX_REL_W))),
+                    int(round(r[1] + rel[1] * h / float(FIX_REL_H))))
+        except Exception:
+            return None
+
+    def _fix_open(self, si, c1, anc, why="연다"):
+        """🪟 칸1(십자가)을 눌러 복구 창을 연다 — **열린 것을 보고** 돌아온다.
+
+        → (True 열렸다 · False **안 열렸다 — 더 누르지 말 것** · None 모른다(예전처럼 진행), 화면)
+
+        ① 누르고 `FIX_OPEN_WAIT` 초 동안 본다 (뜨는 즉시 끝)
+        ② 안 떴고 이 컴퓨터가 엄격(`_fix_strict`)이면: 십자가가 아직 있나 보고 다시 누른다
+        ③ 마지막 시도는 등록 좌표가 창 기준 자리와 다르면 **창 기준 자리**를 눌러본다
+        🚫 십자가가 사라졌으면 다시 누르지 않는다 (그 자리는 게임 화면이다).
+        🚫 그림이 맞은 적이 없는 컴퓨터에서는 한 번만 누르고 None — 예전과 똑같이 돈다."""
+        _tag = "창 연 뒤" if why == "연다" else "다시 연 뒤"
+        if not FIX_OPEN_CHECK:
+            self._focus_client_at(c1)
+            self._fix_nap(*FIX_FOCUS_WAIT)
+            click_at(*c1)
+            click_log(f"fix #{si:02d} 🗂 칸1(십자가) {tuple(c1)} 눌러 복구 창을 {why}")
+            self._fix_nap(*FIX_TAB_GAP)
+            self._fix_quit_clear(si, anc, _tag)
+            return None, None
+        strict = self._fix_strict()
+        n = FIX_OPEN_TRIES if strict else 1
+        best, big = 0.0, None
+        alt = self._fix_rel_pt(c1, 0)
+        _far = 0
+        try:
+            if alt:
+                _far = int(max(abs(alt[0] - c1[0]), abs(alt[1] - c1[1])))
+                if _far > FIX_OPEN_ALT_PX:
+                    _w = getattr(self, "_fix_far_warned", None)
+                    if _w is None:
+                        _w = self._fix_far_warned = set()
+                    if int(si) not in _w:
+                        _w.add(int(si))
+                        click_log(f"fix #{si:02d} 📐 칸1 좌표 {tuple(c1)} 가 창 기준 자리 "
+                                  f"{alt} 와 **{_far}px 다르다** — 복구 창의 "
+                                  f"[📐 좌표맞추기] 로 맞출 수 있습니다")
+        except Exception:
+            _far = 0
+        _ts = time.time()
+        for t in range(n):
+            pt = tuple(c1)
+            if t > 0:
+                if _STOP_AT[0] > _ts:          # [■ 멈춤] — 더 누르지 않는다
+                    return False, big
+                cn = self._fix_cross_now(si)
+                if cn is False:
+                    click_log(f"fix #{si:02d} 🪟 창은 안 보이는데 **십자가도 사라졌다**"
+                              f"{self._warn_score_txt(si)} — 다시 누르지 않는다")
+                    return False, big
+                if t == n - 1 and alt and _far > FIX_OPEN_ALT_PX:
+                    pt = tuple(alt)
+                    click_log(f"fix #{si:02d} 📐 등록 좌표로 안 열려 **창 기준 자리** "
+                              f"{pt} 를 눌러본다")
+            self._focus_client_at(c1)
+            self._fix_nap(*FIX_FOCUS_WAIT)
+            click_at(*pt)
+            click_log(f"fix #{si:02d} 🗂 칸1(십자가) {pt} 눌러 복구 창을 {why}"
+                      + (f" ({t + 1}/{n}번째)" if t else ""))
+            ok, t0 = False, time.time()
+            while time.time() - t0 < FIX_OPEN_WAIT:
+                if _STOP_AT[0] > _ts:
+                    break
+                nap(random.uniform(*FIX_OPEN_POLL))
+                big = grab_window(c1)
+                if big is None:
+                    continue
+                ok, sc = self._fix_open_seen(big)
+                best = max(best, sc)
+                if ok:
+                    break
+            _dt = time.time() - t0
+            self._fix_quit_clear(si, anc, _tag)
+            if ok:
+                if t:
+                    click_log(f"fix #{si:02d} 🪟 **{t + 1}번째에 복구 창이 열렸다** "
+                              f"(탭 그림 {best:.2f} · {_dt:.1f}초)")
+                self._fix_nap(0.12, 0.25)      # 막 뜬 창은 클릭을 씹는다 — 한 박자
+                return True, big
+            if not strict:
+                return None, big               # 예전처럼 진행 (그림이 맞은 적 없는 컴퓨터)
+            click_log(f"fix #{si:02d} 🪟 눌렀는데 **복구 창이 안 열렸다** "
+                      f"(탭 그림 최고 {best:.2f} · 기준 {FIX_OPEN_SOFT} · "
+                      f"{FIX_OPEN_WAIT}초 봤다)"
+                      + (" → 다시 누른다" if t < n - 1 else ""))
+        click_log(f"fix #{si:02d} 🚫 십자가를 {n}번 눌러도 **복구 창이 안 열렸다** → "
+                  f"아무것도 더 누르지 않는다 (목록은 그대로 — 다음 판에 다시 한다)")
+        self._fix_tab_shot(si, big, "noopen")
+        try:
+            self.status.set(f"🩹 복구 #{si:02d} — 십자가를 눌러도 복구 창이 안 열려 "
+                            f"더 누르지 않았습니다 (잠시 뒤 다시 시도합니다)")
+        except Exception:
+            pass
+        return False, big
+
     def _fix_tabs_work(self, si, idx):
         """🗂 **탭 두 개를 돌며 [모두 복구]** — 복구의 새 흐름 (2026-11-06).
 
@@ -28846,13 +29175,12 @@ class App(tk.Tk):
                                 f"아무것도 누르지 않았습니다")
                 self._fix_done(si, "십자가가 없다 — 아무것도 누르지 않았다")
                 return
-            # ① 십자가를 눌러 복구 창을 연다
-            self._focus_client_at(c1)
-            self._fix_nap(*FIX_FOCUS_WAIT)
-            click_at(*c1)
-            click_log(f"fix #{si:02d} 🗂 칸1(십자가) {tuple(c1)} 눌러 복구 창을 연다")
-            self._fix_nap(*FIX_TAB_GAP)
-            self._fix_quit_clear(si, anc, "창 연 뒤")
+            # ① 십자가를 눌러 복구 창을 연다 — **열린 것을 보고** 다음으로 간다
+            #    (2026-11-13). 안 열렸으면 🚫 아무것도 더 누르지 않는다 —
+            #    `finally` 의 확인(`_fix_verify`)이 십자가를 보고 다음 판을 건다.
+            _op, _ = self._fix_open(si, c1, anc)
+            if _op is False:
+                return
             rect = client_rect_at(*c1)
             if not rect:
                 click_log(f"fix #{si:02d} 🗂 ⚠ 그 좌표의 클라 창을 못 찾았다")
@@ -28899,11 +29227,9 @@ class App(tk.Tk):
                             click_log(f"fix #{si:02d} 🔁 [{_ko}] **복구 창이 "
                                       f"닫혀 있다 — 칸1(십자가)을 다시 눌러 연다** "
                                       f"({_reopen}/{FIX_REOPEN})")
-                            self._focus_client_at(c1)
-                            self._fix_nap(*FIX_FOCUS_WAIT)
-                            click_at(*c1)
-                            self._fix_nap(*FIX_TAB_GAP)
-                            self._fix_quit_clear(si, anc, "다시 연 뒤")
+                            _op2, _ = self._fix_open(si, c1, anc, why="다시 연다")
+                            if _op2 is False:
+                                break          # 🚫 안 열렸다 — 더 누르지 않는다
                             big, tb = self._fix_tab_look(c1, _nm, _ko, si)
                     except Exception:
                         pass
@@ -29205,6 +29531,16 @@ class App(tk.Tk):
             #    (= 십자가가 아니라 다른 것을 눌렀다). 그대로 두면 **같은
             #    오탐으로 또 눌러 던전에 들어간다.** → 목록에서 지운다.
             #    🚫 💎 는 붙이지 않는다 (다야가 아니라 오탐이다).
+            # 🪟 **그림이 맞는 컴퓨터에서는 예전 좌표 흐름으로 가지 않는다** (2026-11-13).
+            #    탭이 안 보인 것은 그림 탓이 아니라 **복구 창이 닫혀 있어서**다.
+            #    거기서 예전 흐름(칸1→칸2→칸3…)을 돌리면 한 건씩만 되고, 한 번
+            #    이 길로 빠지면 `_fix_tab_bad` 로 **그 뒤 전부** 예전 흐름이 된다.
+            #    목록은 그대로 둔다 — 확인(`_fix_verify`)이 다음 판을 건다.
+            if _notab and not _did and self._fix_strict():
+                click_log(f"fix #{si:02d} 🪟 복구 창이 안 보여 이번 판은 여기서 끝낸다 "
+                          f"(이 컴퓨터는 탭 그림이 맞는다 → 예전 좌표 흐름으로 가지 않는다 · "
+                          f"목록은 그대로)" + self._warn_score_txt(si))
+                _notab = False
             if _notab and not _did:
                 if FIX_TABS_FALLBACK:
                     # 🚨 **고정 자리로도 안 됐다** (2026-11-08).
@@ -29714,7 +30050,7 @@ class App(tk.Tk):
             self._last_scores = sorted(_keep + _scores)
         return hit
 
-    def _check_scan(self, quiet=False):
+    def _check_scan(self, quiet=False, wake=True):
         """⚠ 경고(십자가) 스캔 — **무거우니 백그라운드 스레드**에서 돌린다.
 
         16클라 캡처가 **0.81초**인데 F11 뒤에 (깨우기 전·후) **두 번** 돌아
@@ -29725,9 +30061,9 @@ class App(tk.Tk):
             return
         self._scan_busy = True
 
-        def _sw(q=quiet):
+        def _sw(q=quiet, w=wake):
             try:
-                self._check_scan_work(q)
+                self._check_scan_work(q, w)
             except Exception as _e:
                 try:
                     click_log(f"[경고확인] ⚠ 오류 {_e}")
@@ -29737,8 +30073,12 @@ class App(tk.Tk):
                 self._scan_busy = False
         threading.Thread(target=_sw, daemon=True).start()
 
-    def _check_scan_work(self, quiet=False):
+    def _check_scan_work(self, quiet=False, wake=True):
         """🐢 `_check_scan` 의 몸통 — **스레드에서** 돈다.
+
+        `wake=False` = 😴 **자는 클라를 깨우지 않는다** (2026-11-13 — [▶ 전부 복구] 가
+        깨어 있는 클라만 볼 때). 자는 클라의 십자가는 못 보지만, 목록에 이미 있던
+        것은 `_keep` 으로 **그대로 남는다** (지우지 않는다).
 
         ⚠ 버튼을 다시 그리는 것(`_warn_refresh`)과 감시 시작(`_check_watch_start`)은
            **Tk 위젯을 만지므로** `self.after(0, …)` 로 UI 에 넘긴다."""
@@ -29761,7 +30101,10 @@ class App(tk.Tk):
         # 깨우는 데 시간이 걸리므로 **백그라운드**로 돌린다 (화면이 멈추지 않게).
         try:
             _sl = sorted(getattr(self, "_last_sleep", set()))
-            if (_sl and has_sleep_img("fix")
+            if _sl and not wake:
+                click_log(f"[경고확인] 😴 자는 클라 {_sl} 는 **깨우지 않고** "
+                          f"깨어 있는 클라만 본다")
+            if (wake and _sl and has_sleep_img("fix")
                     and not getattr(self, "_waking", False)):
                 self._waking = True
                 self.status.set(f"😴 자는 클라 {len(_sl)}개를 깨우는 중… {_sl}")
@@ -37990,7 +38333,10 @@ class App(tk.Tk):
     # ── 스케줄 10분 전 런처 자동 시작 (윈도우 예약 작업으로 등록) ──
     #    켜져 있으면 워치독이 아무 일도 안 하므로 중복 실행 걱정 없음.
     SCHED_TIMES = [("past", 5, 3, True),      # 과거섬 5:03 (항상)
-                   ("mail", 23, 30, "mail")]  # 우편함 23:30 (mail_on 일 때만)
+                   ("mail", 23, 30, "mail"),  # 우편함 23:30 (mail_on 일 때만)
+                   ("nsat", NIGHT_SAT_FROM[0], NIGHT_SAT_FROM[1], "nsat")]
+    #   🌙 nsat = 토요일 새벽 악몽의섬 (켜져 있을 때만). 예약은 매일 02:20 에 워치독을
+    #      돌린다 — 켜져 있으면 아무 일도 안 하므로 다른 요일에도 해가 없다.
 
     def _sync_prestart_tasks(self):
         """켜져 있는 스케줄마다 '시작 10분 전' 자동 시작 작업을 등록/해제한다."""
@@ -38000,7 +38346,12 @@ class App(tk.Tk):
                 exe = _sys.executable.replace("python.exe", "pythonw.exe")
                 wd = os.path.join(BASE, "lineagem_watchdog.py")
                 for tag, hh, mm, cond in self.SCHED_TIMES:
-                    on = bool(self.cfg.get("mail_on")) if cond == "mail" else bool(cond)
+                    if cond == "mail":
+                        on = bool(self.cfg.get("mail_on"))
+                    elif cond == "nsat":
+                        on = self._night_sat_on()
+                    else:
+                        on = bool(cond)
                     name = "LineageM_Pre_" + tag
                     tot = hh * 60 + mm - 10          # 10분 전
                     if tot < 0:
@@ -38045,6 +38396,201 @@ class App(tk.Tk):
                 h, m = divmod(int(diff.total_seconds()) // 60, 60)
                 self.status.set(f"🕘 우편 클릭 대기 중... (약 {h}시간 {m}분 후 23:30~23:50 실행)")
         self.after(10000, self._mail_scheduler_tick)
+
+    # ── 🌙 토요일 새벽 악몽의섬 — 한 클라씩 (2026-11-13) ──────────────────────
+    @staticmethod
+    def _night_sat_path():
+        d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI")
+        try:
+            os.makedirs(d, exist_ok=True)
+        except Exception:
+            pass
+        return os.path.join(d, "night_sat.json")
+
+    def _night_sat_state(self):
+        """{"done": 돌린 날, "pend": 걸린 날, "miss": 놓친 날} — 파일은 한 번만 읽는다."""
+        st = getattr(self, "_nsat_st", None)
+        if st is None:
+            try:
+                with io.open(self._night_sat_path(), encoding="utf-8-sig") as f:
+                    st = json.load(f) or {}
+            except Exception:
+                st = {}
+            if not isinstance(st, dict):
+                st = {}
+            self._nsat_st = st
+        return st
+
+    def _night_sat_save(self):
+        try:
+            p = self._night_sat_path()
+            with io.open(p + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(self._night_sat_state(), f, ensure_ascii=False)
+            os.replace(p + ".tmp", p)
+        except Exception:
+            pass
+
+    def _night_sat_on(self):
+        v = self.cfg.get("night_sat_on")
+        return bool(NIGHT_SAT_ON if v is None else v)
+
+    def _night_sat_btn_paint(self):
+        try:
+            b = getattr(self, "_nsat_btn", None)
+            if b is None or not b.winfo_exists():
+                return
+            on = self._night_sat_on()
+            b.config(text=("🌙 토 %d:%02d ON" % NIGHT_SAT_FROM) if on
+                     else ("🌙 토 %d:%02d OFF" % NIGHT_SAT_FROM),
+                     bg=("#6c3483" if on else "#7f8c8d"),
+                     activebackground=("#5b2c6f" if on else "#707b7c"))
+        except Exception:
+            pass
+
+    def _night_sat_toggle(self):
+        on = not self._night_sat_on()
+        self.cfg["night_sat_on"] = on
+        save_cfg(self.cfg)
+        self._night_sat_btn_paint()
+        _t = "%d:%02d~%d:%02d" % (NIGHT_SAT_FROM + NIGHT_SAT_TO)
+        if on:
+            self.status.set(f"🌙 토요일 새벽 {_t} 악몽의섬 자동 실행 ON — ON 슬롯을 "
+                            f"순서를 섞어 한 클라씩 돌립니다 (⏰ 반복은 걸지 않습니다)")
+        else:
+            self.status.set("🌙 토요일 새벽 악몽의섬 자동 실행 OFF")
+        try:
+            click_log(f"[토요악몽] 🌙 자동 실행 {'ON' if on else 'OFF'} (사용자)")
+        except Exception:
+            pass
+        self._sync_prestart_tasks()
+
+    def _night_sat_tick(self):
+        """20초마다 **시각만** 본다 (화면을 긁지 않는다 — 부하 0)."""
+        try:
+            self._night_sat_check()
+        except Exception as _e:
+            try:
+                if time.time() - getattr(self, "_nsat_err_at", 0) > 600:
+                    self._nsat_err_at = time.time()
+                    click_log(f"[토요악몽] ⚠ 확인 중 오류 {_e!r}")
+            except Exception:
+                pass
+        self.after(NIGHT_SAT_TICK_MS, self._night_sat_tick)
+
+    def _night_sat_check(self, now=None):
+        """지금 돌릴 때인가 → 상태 글자 (시험·기록용).
+
+        off 꺼짐 · day 토요일 아님 · done 오늘 이미 함 · early 아직 · armed 방금 걸림 ·
+        missed 창을 놓침 · late 끝내 틈이 없었다 · wait 시작 전 · busy/human 미룸 ·
+        run 돌렸다 · none 돌릴 슬롯이 없다"""
+        import datetime
+        now = now or datetime.datetime.now()
+        if not self._night_sat_on():
+            return "off"
+        if now.weekday() != NIGHT_SAT_DAY:
+            return "day"
+        today = now.date().isoformat()
+        st = self._night_sat_state()
+        if st.get("done") == today:
+            return "done"
+        mins = now.hour * 60 + now.minute
+        a = NIGHT_SAT_FROM[0] * 60 + NIGHT_SAT_FROM[1]
+        b = NIGHT_SAT_TO[0] * 60 + NIGHT_SAT_TO[1]
+        c = NIGHT_SAT_LATE[0] * 60 + NIGHT_SAT_LATE[1]
+        if mins < a:
+            return "early"
+        if st.get("pend") != today:
+            if mins < b:
+                st["pend"] = today
+                _j = random.uniform(*NIGHT_SAT_JIT)
+                self._nsat_go_at = time.time() + _j
+                self._night_sat_save()
+                click_log(f"[토요악몽] 🌙 토요일 {now:%H:%M} — 악몽의섬을 **한 클라씩** "
+                          f"돌릴 차례다 ({int(_j)}초 뒤 시작)")
+                return "armed"
+            if mins < c and st.get("miss") != today:
+                st["miss"] = today
+                self._night_sat_save()
+                click_log("[토요악몽] %d:%02d~%d:%02d 동안 런처가 꺼져 있었다(또는 꺼둠) → "
+                          "오늘은 돌리지 않는다" % (NIGHT_SAT_FROM + NIGHT_SAT_TO))
+            return "missed"
+        if mins >= c:
+            st["done"] = today
+            st.pop("pend", None)
+            self._night_sat_save()
+            click_log("[토요악몽] %d:%02d 까지 틈이 없어 못 돌렸다 → 오늘은 그만둔다"
+                      % NIGHT_SAT_LATE)
+            return "late"
+        if time.time() < getattr(self, "_nsat_go_at", 0):
+            return "wait"
+        why = ""
+        if self._is_busy():
+            why = f"'{self._busy_label()}' 실행 중"
+        elif self._island_running():
+            why = "섬/던전 실행기가 도는 중"
+        elif (getattr(self, "_task_queue", None) or getattr(self, "_night_queue", None)
+              or getattr(self, "_fix_queue", None)
+              or getattr(self, "_fix_hold", None) is not None):
+            why = "기다리는 작업이 있다"
+        if why:
+            if time.time() - getattr(self, "_nsat_busy_at", 0) > 180:
+                self._nsat_busy_at = time.time()
+                click_log(f"[토요악몽] ⏳ {why} — 끝나면 돌린다 "
+                          + ("(%d:%02d 까지 기다린다)" % NIGHT_SAT_LATE))
+            try:
+                self.status.set(f"🌙 토요일 악몽의섬 — {why}, 끝나면 돌립니다")
+            except Exception:
+                pass
+            return "busy"
+        if self._human_busy():
+            self._human_wait_log("토요악몽")
+            return "human"
+        return self._night_sat_start(today)
+
+    def _night_sat_start(self, today):
+        """악몽의섬 ON 슬롯을 **순서를 섞어 하나씩** 돌린다 (섬 실행기 `--slots … --lanes 1`)."""
+        st = self._night_sat_state()
+        st["done"] = today              # 재시작해도 오늘 또 돌지 않게 **먼저** 적는다
+        st.pop("pend", None)
+        self._night_sat_save()
+        slots = (self._island_cfg().get(NIGHT_SAT_KEY) or [])[:16]
+        order = [i for i, s in enumerate(slots)
+                 if isinstance(s, dict) and s.get("enabled", True)
+                 and (any(s.get("coords") or []) or any(s.get("dirs") or []))]
+        if not order:
+            click_log("[토요악몽] 돌릴 슬롯이 없다 (악몽의섬에 ON 이고 좌표가 있는 슬롯이 없다)")
+            return "none"
+        random.shuffle(order)           # 🎲 한 클라씩 — 순서는 매번 다르다
+        didx = NIGHT_SAT_DIDX
+        try:
+            import lineagem_island as _i
+            for _n, _d in enumerate(_i.DUNGEONS):
+                if _d.get("key") == NIGHT_SAT_KEY:
+                    didx = _n
+                    break
+        except Exception:
+            pass
+        self._island_step_back()
+        cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"), str(didx), "--run"]
+        if len(order) > 1:
+            cmd += ["--slots", ",".join(str(i + 1) for i in order), "--lanes", "1"]
+        else:
+            cmd += ["--slot", str(order[0] + 1)]
+        if not NIGHT_SAT_ARM:
+            cmd.append("--norep")       # 🚫 ⏰ 반복은 걸지 않는다 (사용자가 실행할 때만)
+        proc = subprocess.Popen(cmd)
+        self._island_proc = proc
+        threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
+        _ord = [i + 1 for i in order]
+        click_log(f"[토요악몽] 🌙 ▶ 악몽의섬 {len(order)}슬롯을 **한 클라씩** 돌린다 — "
+                  f"순서 {_ord} · ⏰ 반복은 "
+                  f"{'건다' if NIGHT_SAT_ARM else '걸지 않는다'}")
+        try:
+            self.status.set(f"🌙 토요일 악몽의섬 — {len(order)}슬롯을 한 클라씩 돌립니다 "
+                            f"(순서 {_ord})")
+        except Exception:
+            pass
+        return "run"
 
     def _next_past_run_date(self):
         """다음 과거섬 스케줄 실행 날짜 — 오늘 5:25 전이면 오늘, 지났으면 내일."""

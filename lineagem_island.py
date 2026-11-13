@@ -3098,6 +3098,15 @@ class IslandApp(tk.Tk):
         self._auto_run = len(sys.argv) > 2 and sys.argv[2] == "--run"
         # 🧭 물약·마을 감시가 다시 돌린 실행 — '마지막으로 실행한 던전' 에 적지 않는다
         self._rerun = "--rerun" in sys.argv
+        # ⏰ **이 실행은 ⏰ 반복을 새로 걸지 않는다** (2026-11-13).
+        #    `--norep` = 런처의 예약 실행(토요일 새벽 악몽의섬).
+        #    `--rerun` = 물약·마을 감시가 다시 돌린 것 — 사용자가 누른 실행이 아니다.
+        #    🚨 예전에는 `--slot N --rerun` 도 `_test` → `_rep_restart(user=True)` 를 타서,
+        #       악몽의섬(REPEAT_FIXED)이면 **꺼둔 ⏰ 가 다시 켜지고 `_off` 표시까지 지웠다.**
+        #       ⏰ 는 사용자가 실행했을 때만 켜진다 (2026-08-23 절대 규칙).
+        #    ✅ 이미 걸려 있던 예약은 그대로다 — 슬롯이 끝나면 `_rep_touch` 가 다음
+        #       시각을 뒤로 민다 (없는 예약을 만들지는 않는다).
+        self._no_rep = ("--norep" in sys.argv) or self._rerun
         # --lanes N : 웨이브에서 동시에 돌릴 슬롯 수 (반복은 2개씩 = 더 안전)
         self._auto_lanes = None
         if "--lanes" in sys.argv:
@@ -7004,6 +7013,12 @@ class IslandApp(tk.Tk):
         2026-10-03 사용자: "실행을 시키면 반복을 돌려주라니까 안 해주네."
         기록을 보니 16슬롯 웨이브가 끝까지 돌았는데 반복을 건 줄이 **하나도 없었다** —
         어디서 조용히 빠져나갔는지조차 안 남아 있었다. **이제 항상 남긴다.**"""
+        if getattr(self, "_no_rep", False):
+            self._rlog(f"[반복] {key} — "
+                       + ("물약·마을 재실행" if getattr(self, "_rerun", False)
+                          else "예약 실행(--norep)")
+                       + " 이라 ⏰ 를 **새로 걸지 않는다** (걸려 있던 예약은 그대로)")
+            return
         if getattr(self, "_auto_run", False) and not user:
             self._rlog(f"[반복] {key} — 반복 관리가 돌린 실행이라 다시 걸지 않음")
             return
