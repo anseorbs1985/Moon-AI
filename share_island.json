@@ -7,7 +7,8 @@
   "enabled",
   "repeat_h",
   "repeat_n",
-  "omanst_floor"
+  "omanst_floor",
+  "card_no"
  ],
  "keep_cells": {
   "수금_오만의탑": [

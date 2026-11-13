@@ -381,6 +381,23 @@ def slot_is_rasta(slot):
     return False
 
 
+def card_no(slot):
+    """🚫 그 슬롯(캐릭)이 **안 가는 던전 카드** 이름들 (2026-11-14 사용자 요청).
+
+    사용자: *"들어가고 싶지 않은 던전이 있거든 너무 높은 사냥터가 있어서 … 악몽의섬 하나에
+    들어가다 보니까 계속 들어가는 상황에서 **죽는 경우**가 있어서 … **클라마다 다르게 뺄 수
+    있는** 기능"*
+    `slot["card_no"] = ["아틀란티스", …]` — 슬롯 칸의 [🃏] 메뉴에서 켜고 끈다.
+    🚫 **뺀 던전에는 어떤 경로로도 들어가지 않는다** (우선순위·슬롯 지정·--card·재실행).
+       갈 곳이 없으면 그 슬롯은 **카드 자리에서 멈춘다** (마을에 서 있다 — 죽는 것보다 낫다).
+    ⚠ 캐릭터마다 다른 값이다 — 슬롯 [복사]/[붙임]·프리셋이 옮기지 않는다."""
+    try:
+        return {str(x).strip() for x in ((slot or {}).get("card_no") or [])
+                if str(x).strip()}
+    except Exception:
+        return set()
+
+
 def ran_mark(name, sis, ts=None):
     """📅 그 던전(이름)의 그 슬롯들(0부터)을 **이번에 실행했다** 고 적는다.
 
@@ -501,6 +518,8 @@ def dun_need(key, cfg):
                 and (any(s_.get("coords") or []) or any(s_.get("dirs") or []))):
             if key == DUN_PIRATE and slot_is_rasta(s_):
                 continue
+            if key == DUN_PIRATE and DUN_PIRATE in card_no(s_):
+                continue                 # 🚫 그 캐릭은 해적섬에 안 간다 — 돌릴 대상이 아니다
             out.append(si)
     return out
 
@@ -5886,13 +5905,25 @@ class IslandApp(tk.Tk):
                              "(click_templates/card_*.png)")
             return
         cur = (self.cfg[key][idx].get("card") or "").strip()
+        _ban = card_no(self.cfg[key][idx])
+        _ord = list(CARD_ORDER.get(key) or [])
         mn = tk.Menu(self, tearoff=0)
-        mn.add_command(label="  (없음 — 좌표로 누름)",
+        mn.add_command(label=("  (없음 — 열려 있는 첫 던전으로)" if _ord
+                              else "  (없음 — 좌표로 누름)"),
                        command=lambda: self._set_card(key, idx, ""))
         mn.add_separator()
         for n in names:
             mn.add_command(label=("● " if n == cur else "   ") + n,
                            command=lambda nn=n: self._set_card(key, idx, nn))
+        if _ord:
+            # 🚫 이 캐릭이 **안 가는 던전** — 누를 때마다 켜고 끈다 (2026-11-14)
+            mn.add_separator()
+            mn.add_command(label="🚫 이 캐릭이 안 가는 던전 (누르면 켜짐/꺼짐)",
+                           state="disabled")
+            for n in _ord:
+                mn.add_command(
+                    label=("🚫 " + n + "  — 안 감" if n in _ban else "      " + n),
+                    command=lambda nn=n: self._toggle_card_no(key, idx, nn))
         try:
             b = (self._card_btns.get(key) or [None] * 16)[idx]
             mn.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
@@ -5901,10 +5932,43 @@ class IslandApp(tk.Tk):
         finally:
             mn.grab_release()
 
+    def _toggle_card_no(self, key, idx, name):
+        """🚫 그 슬롯이 **안 가는 던전**을 켜고 끈다 (`card_no`)."""
+        slot = self.cfg[key][idx]
+        ban = card_no(slot)
+        if name in ban:
+            ban.discard(name)
+        else:
+            ban.add(name)
+            if (slot.get("card") or "").strip() == name:
+                slot.pop("card", None)        # 가기로 골라둔 던전을 뺐다 → 고른 것도 지운다
+        _ord = list(CARD_ORDER.get(key) or [])
+        keep = [n for n in _ord if n in ban] + sorted(b for b in ban if b not in _ord)
+        if keep:
+            slot["card_no"] = keep
+        else:
+            slot.pop("card_no", None)
+        save_cfg(self.cfg)
+        self._refresh_card_btns(key)
+        _left = [n for n in _ord if n not in ban]
+        self._status.set(
+            f"🚫 #{idx+1:02d} 안 가는 던전: " + (", ".join(keep) if keep else "없음")
+            + (f"  →  갈 수 있는 곳: {', '.join(_left)}" if _left
+               else "  ⚠ 전부 뺐습니다 — 이 캐릭은 카드 자리에서 멈춥니다"))
+        self._rlog(f"🚫 {key} #{idx+1:02d} 안 가는 던전 = {keep or '없음'} (사용자)")
+
     def _set_card(self, key, idx, name):
         """🃏 그 슬롯의 '내 카드' 를 정한다 (빈 값이면 좌표로 누른다)."""
         if name:
             self.cfg[key][idx]["card"] = name
+            #   🚫 '안 감' 으로 빼둔 던전을 **가기로 골랐다** → 뺀 것을 푼다 (고른 것이 나중이다)
+            _b = card_no(self.cfg[key][idx])
+            if name in _b:
+                _b.discard(name)
+                if _b:
+                    self.cfg[key][idx]["card_no"] = sorted(_b)
+                else:
+                    self.cfg[key][idx].pop("card_no", None)
         else:
             self.cfg[key][idx].pop("card", None)
         save_cfg(self.cfg)
@@ -5920,8 +5984,11 @@ class IslandApp(tk.Tk):
                 if not b.winfo_exists():
                     continue
                 nm = (self.cfg[key][i].get("card") or "").strip()
-                b.config(text=(nm[:4] if nm else "🃏"),
-                         bg=("#117864" if nm else "#95a5a6"), fg="white")
+                _nb = len(card_no(self.cfg[key][i]))
+                #   🚫n = 이 캐릭이 안 가는 던전이 n개 있다 (주황) — 눌러서 확인한다
+                b.config(text=(nm[:4] if nm else (f"🚫{_nb}" if _nb else "🃏")),
+                         bg=("#117864" if nm else ("#ca6f1e" if _nb else "#95a5a6")),
+                         fg="white")
             except Exception:
                 pass
 
@@ -8042,6 +8109,12 @@ class IslandApp(tk.Tk):
         _ver = self._slot_ver(key, slot)
         # 🏴 **카드를 콕 집은 실행(--card)** 이면 그 카드가 먼저다 (프리셋·슬롯 지정보다)
         _cf = (getattr(self, "_card_force", None) or "").strip()
+        _ban = card_no(slot)                 # 🚫 이 캐릭이 안 가는 던전 (2026-11-14)
+        if _cf and _cf in _ban:
+            self._status.set(f"🚫 [{name}] {lbl} — '{_cf}' 는 이 캐릭이 안 가는 던전입니다")
+            self._rlog(u"[카드] %s #%02d 🚫 '%s' 는 **이 캐릭이 안 가는 던전**이다 "
+                       u"→ 들어가지 않고 이 슬롯만 중단" % (key, si + 1, _cf))
+            return False
         if _cf:
             cname, _why_c = _cf, u"실행 지정(--card)"
         _byver = "" if _cf else ((CARD_BY_VER.get(key) or {}).get(_ver) or "")
@@ -8083,8 +8156,19 @@ class IslandApp(tk.Tk):
                         self._status.set(f"🃏 [{name}] {lbl} — '{cname}' 가 잠겨 "
                                          f"이 슬롯은 건너뜁니다")
                         return False
+        if cname and cname in _ban:
+            #   ① 프리셋이 정한 카드(해적섬 프리셋 등)가 '안 감' 이다 → 들어가지 않는다
+            self._status.set(f"🚫 [{name}] {lbl} — '{cname}' 는 이 캐릭이 안 가는 던전입니다")
+            self._rlog(u"[카드] %s #%02d 🚫 '%s'(%s) 는 **이 캐릭이 안 가는 던전**이다 "
+                       u"→ 들어가지 않고 이 슬롯만 중단" % (key, si + 1, cname, _why_c))
+            return False
         if not cname:
             cname = (slot.get("card") or "").strip()          # ② [🃏] 로 콕 집은 것
+            if cname and cname in _ban:
+                self._rlog(u"[카드] %s #%02d 슬롯에 적힌 '%s' 는 🚫 안 가는 던전이라 "
+                           u"쓰지 않는다 (붙여넣기로 들어온 값일 수 있다)"
+                           % (key, si + 1, cname))
+                cname = ""
             if cname:
                 _why_c = u"슬롯 지정"
         if not cname:
@@ -8093,13 +8177,23 @@ class IslandApp(tk.Tk):
                 _why_c = u"던전 기본"
         if not cname and (CARD_ORDER.get(key) and anchor0):
             # ④ 🃏 우선순위 — 잠기지 않은 첫 카드
-            cname, _w4 = card_pick_open(CARD_ORDER[key], anchor0)
+            #   🚫 이 캐릭이 '안 감' 으로 뺀 던전은 **후보에서 뺀다** (2026-11-14)
+            _ord4 = [n4 for n4 in CARD_ORDER[key] if n4 not in _ban]
+            _bn4 = [n4 for n4 in CARD_ORDER[key] if n4 in _ban]
+            _bt4 = (u" · 🚫 뺀 던전: " + u" ".join(_bn4)) if _bn4 else u""
+            if not _ord4:
+                self._status.set(f"🚫 [{name}] {lbl} — 갈 던전을 전부 빼두었습니다")
+                self._rlog(u"[카드] %s #%02d 🚫 갈 던전을 **전부 빼두었다** (%s) → 중단"
+                           % (key, si + 1, u" ".join(_bn4)))
+                return False
+            cname, _w4 = card_pick_open(_ord4, anchor0)
             _why_c = _w4
             if not cname:
-                self._status.set(f"🃏 [{name}] {lbl} — 갈 수 있는 카드가 없습니다")
-                self._rlog(f"[카드] {key} #{si+1:02d} {_w4} → 중단")
+                self._status.set(f"🃏 [{name}] {lbl} — 갈 수 있는 카드가 없습니다"
+                                 + (" (뺀 던전은 안 갑니다)" if _bn4 else ""))
+                self._rlog(f"[카드] {key} #{si+1:02d} {_w4}{_bt4} → 중단")
                 return False
-            self._rlog(u"[카드] %s #%02d %s" % (key, si + 1, _w4))
+            self._rlog(u"[카드] %s #%02d %s%s" % (key, si + 1, _w4, _bt4))
         anchor = anchor0
         if not cname:
             if anchor and j < len(coords) and coords[j]:
@@ -9494,6 +9588,12 @@ class IslandApp(tk.Tk):
                     self._rlog(f"🏴 --card {_cf0} — 라스타바드 프리셋 슬롯 "
                                f"{sorted(x + 1 for x in _rs)} 는 뺀다 (칸26~35 가 라스타바드 "
                                f"전용이라 다른 카드로는 못 돈다)")
+                #   🚫 그 던전을 '안 감' 으로 빼둔 캐릭도 뺀다 (2026-11-14)
+                _bs = [si for si, _s in targets if _cf0 in card_no(_s)]
+                if _bs:
+                    targets = [(si, _s) for si, _s in targets if si not in _bs]
+                    self._rlog(f"🚫 --card {_cf0} — 그 던전을 안 가는 캐릭 "
+                               f"{sorted(x + 1 for x in _bs)} 는 뺀다")
             # 💧 이번에 실제로 돈 슬롯 — 끝난 뒤 '물약 0개' 를 확인할 대상이다
             self._p0_ran = [si for si, _s in targets]
             # 🧭 이 슬롯들을 **이 던전으로 실행했다** 고 적는다 (2026-11-12).
