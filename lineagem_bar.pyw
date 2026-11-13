@@ -123,6 +123,8 @@ class Bar(tk.Tk):
             try:
                 import lineagem_island as _isl
                 want = _isl.dun_today(jload(COORDS), day_map=DAY_DUNGEON) or want
+                #   🏴 '해적섬' 은 던전 키가 아니다 → 그 던전 키(악몽의섬)의 탭으로 (2026-11-13)
+                want = getattr(_isl, "dun_key", lambda x: x)(want)
             except Exception:
                 pass
             for i, (_d, _nm, k, _c) in enumerate(DUNS):

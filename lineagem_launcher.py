@@ -11008,7 +11008,7 @@ class App(tk.Tk):
         tk.Button(_prw, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
                   width=4, height=2,
-                  command=lambda: self._run_island_ver(1, "해적섬")).pack(
+                  command=lambda: self._run_island_card(1, "해적섬")).pack(
                       side="left", padx=(2, 0))
 
         # 🏝 **섬/던전 미니! — 던전 상자 안, 에카 바로 아래** (2026-11-04 사용자:
@@ -17226,6 +17226,29 @@ class App(tk.Tk):
         self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
 
+    def _run_island_card(self, idx, card):
+        """🏴 그 던전의 **ON 슬롯 전부를 그 카드로** 돌린다 (2026-11-13).
+
+        던전 상자의 [🏴 해적섬 ▶실행]. 예전(`--ver`)에는 슬롯마다 해적섬 프리셋을
+        걸어둔 것만 돌아서, 아무 슬롯에도 안 걸려 있으면 **아무것도 안 했다.**
+        이제 악몽의섬 슬롯을 그대로 쓰고 카드만 해적섬으로 집는다.
+        🚫 ⏰ 반복은 걸지 않는다 (`--norep`). 🚫 라스타바드 프리셋 슬롯은 섬 실행기가 뺀다."""
+        if self._is_busy():
+            self._enqueue(f"{card}",
+                          lambda: self._run_island_card(idx, card)); return
+        self._island_step_back()
+        try:
+            click_log(f"[{card}] ▶ 실행 — {DUNGEONS_LABEL.get(idx, idx)} 슬롯을 "
+                      f"'{card}' 카드로 돌린다 (⏰ 반복 없음)")
+        except Exception:
+            pass
+        proc = subprocess.Popen([r"pythonw",
+                                 os.path.join(BASE, "lineagem_island.py"),
+                                 str(idx), "--run", "--card", card, "--norep"])
+        self._island_proc = proc
+        threading.Thread(target=self._watch_island,
+                         args=(proc,), daemon=True).start()
+
     def _run_island_ver(self, idx, ver):
         """🏴 그 던전에서 **그 프리셋(버전)인 슬롯만** 돌린다 (2026-11-07).
 
@@ -17947,12 +17970,48 @@ class App(tk.Tk):
     DUN_TABS = [(1, "악몽의섬", "토요일_악몽의섬", "#8e44ad"),
                 (3, "에카",     "화요일_에카",     "#27ae60"),
                 (2, "잊혀진섬", "월요일_잊혀진섬", "#2980b9"),
-                (0, "오만의탑", "수금_오만의탑",   "#e67e22")]
+                (0, "오만의탑", "수금_오만의탑",   "#e67e22"),
+                (1, "해적섬",   "토요일_악몽의섬", "#16a085")]
+    # 🏴 **해적섬 탭** (2026-11-13 사용자: *"섬/던전 미니 여기에 해적섬도 추가해줘"*)
+    #    던전·슬롯·좌표는 **악몽의섬 그대로**고 들어가는 **카드만 해적섬**이다 —
+    #    이 탭에서 돌리면 섬 실행기에 `--card 해적섬 --norep` 을 붙인다.
+    #    🚫 ⏰ 반복은 걸지 않는다 (2026-11-07 사용자: "이건 반복 없어 넣지 마").
+    #    🚫 라스타바드 프리셋 슬롯은 섬 실행기가 뺀다.
+    #    ⚠ 튜플 모양(4칸)을 바꾸지 말 것 — 여러 곳이 4칸으로 푼다. 카드는 이 표로 본다.
+    #    ⚠ 맨 뒤에 붙였다 — 저장된 `night_tab` 번호가 밀리지 않게.
+    DUN_TAB_CARD = {"해적섬": "해적섬"}        # {탭 이름: 카드}
+    NIGHT_CARD = ""                            # 지금 탭의 카드 ('' = 평소)
+
+    def _night_name(self):
+        """지금 탭의 **던전 이름** — 섬 실행기 `DUN_CYCLE` 의 이름과 같다 (해적섬 탭은 '해적섬')."""
+        return getattr(self, "NIGHT_CARD", "") or self.NIGHT_KEY
+
+    def _night_card_rasta(self, sis):
+        """🏴 카드를 집는 탭(해적섬)에서 **돌릴 수 없는 슬롯**(0부터) — 라스타바드 프리셋.
+
+        칸26~35 가 라스타바드 전용이라 다른 카드로는 못 돈다. 판정은 섬 실행기의
+        `slot_is_rasta` 한 곳에 있다 (🚫 베껴 두지 말 것). 모르면 빈 목록(막지 않는다 —
+        섬 실행기가 어차피 한 번 더 뺀다)."""
+        if not getattr(self, "NIGHT_CARD", ""):
+            return []
+        try:
+            import lineagem_island as _isl
+            sl = (self._island_cfg() or {}).get(self.NIGHT_KEY) or []
+            return [i for i in sis
+                    if 0 <= i < len(sl) and _isl.slot_is_rasta(sl[i])]
+        except Exception:
+            return []
+
+    def _night_card_args(self):
+        """🏴 지금 탭이 카드를 집는 탭이면 섬 실행기에 붙일 인자 (아니면 빈 목록)."""
+        c = getattr(self, "NIGHT_CARD", "")
+        return ["--card", c, "--norep"] if c else []
 
     def _dun_switch(self, tab_i):
         """슬롯판에서 다룰 던전을 바꾼다 (좌표·설정은 각 던전 창 그대로)."""
         didx, label, key, col = self.DUN_TABS[tab_i]
         self.NIGHT_DIDX, self.NIGHT_KEY = didx, key
+        self.NIGHT_CARD = self.DUN_TAB_CARD.get(label, "")     # 🏴 해적섬 탭이면 '해적섬'
         self.cfg["night_tab"] = tab_i
         try: save_cfg(self.cfg)
         except Exception: pass
@@ -17972,7 +18031,9 @@ class App(tk.Tk):
         self._refresh_night_plus()
         self._refresh_night_btns()
         self._refresh_night_queue()
-        self.status.set(f"슬롯판 — {label} (좌표·설정은 그 던전 창에서)")
+        self.status.set(f"슬롯판 — {label} (좌표·설정은 그 던전 창에서)"
+                        + (" · 🏴 악몽의섬 슬롯을 해적섬 카드로 돌립니다 (⏰ 반복 없음)"
+                           if self.NIGHT_CARD else ""))
         # 🧭 본 지 오래됐으면 '실행중' 을 다시 훑는다 (훑은 것은 네 던전 전부라
         #    방금 본 것이면 위 `_refresh_night_btns` 가 이미 이 탭에 맞게 칠했다)
         try:
@@ -18043,11 +18104,13 @@ class App(tk.Tk):
                 except Exception:
                     _im = None
             b_ = tk.Button(tb, text=label, font=("맑은 고딕", 7, "bold"),
-                           bg="#3a4149", fg="#9aa4b0", bd=0, padx=7, pady=2,
+                           bg="#3a4149", fg="#9aa4b0", bd=0, padx=4, pady=2,
                            command=lambda k=i: self._dun_switch(k))
             if _im is not None:
-                b_.config(image=_im, compound="right", padx=4)
-            b_.pack(side="left", padx=(0, 2))
+                b_.config(image=_im, compound="right", padx=1)
+            # 탭이 다섯 개라 여백을 줄였다 (2026-11-13) — 📏 실측 합 244px
+            #   (네 개일 때 246px 와 같다 → 판 폭이 늘지 않는다)
+            b_.pack(side="left", padx=(0, 1))
             self._dun_tabs.append(b_)
 
         # 반복을 16슬롯 전부 '지금부터' 다시 건다 (실행은 하지 않는다) — 제목 아랫줄
@@ -18329,20 +18392,39 @@ class App(tk.Tk):
             self.status.set("🌑 악몽의섬 — 슬롯을 고르세요 ([+] 를 눌러 선택)"); return
         if self._is_busy():
             self._enqueue("악몽의섬 선택실행", self._run_night_sel); return
+        _rs = self._night_card_rasta(sel)       # 🏴 해적섬 탭 — 라스타바드 슬롯은 뺀다
+        if _rs:
+            sel = [i for i in sel if i not in _rs]
+            if not sel:
+                self.status.set(f"🏴 고른 슬롯 {[i+1 for i in _rs]} 은(는) 전부 라스타바드 "
+                                f"프리셋이라 해적섬으로 돌릴 수 없습니다")
+                return
+            try:
+                click_log(f"[해적섬] 라스타바드 프리셋 슬롯 {[i+1 for i in _rs]} 는 빼고 "
+                          f"{[i+1 for i in sel]} 만 돌린다")
+            except Exception:
+                pass
         self._night_mini_mark()       # 🏝 미니 판이면 끝난 뒤 닫는다
         self._island_step_back()
         cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"),
                str(self.NIGHT_DIDX), "--run",
                "--slots", ",".join(str(i + 1) for i in sel), "--lanes", "2"]
+        _cargs = self._night_card_args()        # 🏴 해적섬 탭이면 --card 해적섬 --norep
+        cmd += _cargs
         proc = subprocess.Popen(cmd)
         self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
-        for i in sel:
-            self._night_rep_restart(i)
+        if not _cargs:                          # 🚫 해적섬은 ⏰ 를 걸지 않는다
+            for i in sel:
+                self._night_rep_restart(i)
         self._night_sel = set()          # 실행했으면 + 선택은 풀어준다
         self._refresh_night_plus()
-        self.status.set(f"🌑 악몽의섬 실행 — {[i+1 for i in sel]}번 "
-                        f"(지금부터 2시간 다시 셈 / 선택 해제됨)")
+        if _cargs:
+            self.status.set(f"🏴 해적섬 실행 — {[i+1 for i in sel]}번 "
+                            f"(⏰ 반복 없음 / 선택 해제됨)")
+        else:
+            self.status.set(f"🌑 악몽의섬 실행 — {[i+1 for i in sel]}번 "
+                            f"(지금부터 2시간 다시 셈 / 선택 해제됨)")
 
     # 남은 횟수별 색 — 많이 남았으면 초록, 줄어들수록 파랑→보라→빨강
     REP_LEFT_COLORS = {6: "#1e8449", 5: "#27ae60", 4: "#16a085",
@@ -18487,15 +18569,25 @@ class App(tk.Tk):
 
     def _night_launch(self, slot_idx):
         """실제 실행 — 누른 때부터 2시간 N회를 다시 센다."""
+        if self._night_card_rasta([slot_idx]):  # 🏴 해적섬 탭 — 라스타바드 슬롯은 못 돈다
+            self.status.set(f"🏴 #{slot_idx+1:02d} 는 라스타바드 프리셋이라 해적섬으로 "
+                            f"돌릴 수 없습니다 (악몽의섬 탭에서 돌리세요)")
+            return
         self._night_mini_mark()       # 🏝 미니 판이면 끝난 뒤 닫는다
         self._island_step_back()
         cmd = [r"pythonw", os.path.join(BASE, "lineagem_island.py"),
                str(self.NIGHT_DIDX), "--run", "--slot", str(slot_idx + 1)]
+        _cargs = self._night_card_args()        # 🏴 해적섬 탭이면 --card 해적섬 --norep
+        cmd += _cargs
         proc = subprocess.Popen(cmd)
         self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
-        self._night_rep_restart(slot_idx)
         left = len(getattr(self, "_night_queue", []) or [])
+        if _cargs:                              # 🚫 해적섬은 ⏰ 를 걸지 않는다
+            self.status.set(f"🏴 해적섬 #{slot_idx+1:02d} 실행 (⏰ 반복 없음)"
+                            + (f" (대기 {left}개 남음)" if left else ""))
+            return
+        self._night_rep_restart(slot_idx)
         self.status.set(f"🌑 악몽의섬 #{slot_idx+1:02d} 실행 — 지금부터 2시간 다시 셈"
                         + (f" (대기 {left}개 남음)" if left else ""))
 
@@ -18692,7 +18784,7 @@ class App(tk.Tk):
         if getattr(self, "_dun_auto_busy", False):
             return
         self._dun_auto_busy = True
-        cur = self.NIGHT_KEY
+        cur = self._night_name()          # 🏴 해적섬 탭이면 '해적섬' (던전 키가 아니다)
 
         def _work():
             want, cur_done, seeded = None, False, False
@@ -18722,9 +18814,9 @@ class App(tk.Tk):
                     if seeded:
                         click_log("[슬롯판] 📅 완료 기록이 없어 이번 주 실행 기록에서 "
                                   "한 번 채웠다 (island_done.json)")
-                    if not want or want == self.NIGHT_KEY:
+                    if not want or want == self._night_name():
                         return
-                    if self.NIGHT_KEY != cur:
+                    if self._night_name() != cur:
                         return                   # 그 사이 사용자가 탭을 바꿨다
                     if not force and not cur_done:
                         return                   # 지금 탭의 던전은 아직 안 끝났다
@@ -18733,8 +18825,10 @@ class App(tk.Tk):
                         self._dun_adv_at = time.time() + 6.0     # 끝나면 다시 본다
                         return
                     for i, (_d, _lb, k, _c) in enumerate(self.DUN_TABS):
-                        if k == want:
-                            _old = dict((t[2], t[1]) for t in self.DUN_TABS).get(cur, cur)
+                        #   탭의 이름 = 카드 탭이면 카드(해적섬), 아니면 던전 키
+                        if (self.DUN_TAB_CARD.get(_lb) or k) == want:
+                            _old = dict(((self.DUN_TAB_CARD.get(t[1]) or t[2]), t[1])
+                                        for t in self.DUN_TABS).get(cur, cur)
                             self._dun_switch(i)
                             _m = (f"📅 '{_old}' 을(를) 이번 주에 다 돌렸다 → 슬롯판을 "
                                   f"**'{_lb}'** (으)로 옮겼다 ({why})" if cur_done else
@@ -27126,7 +27220,8 @@ class App(tk.Tk):
             try:
                 p = subprocess.Popen(
                     ["pythonw", os.path.join(BASE, "lineagem_island.py"),
-                     str(didx), "--run", "--slot", str(si + 1), "--rerun"],
+                     str(didx), "--run", "--slot", str(si + 1), "--rerun"]
+                    + self._p0_card_args(si, key),
                     cwd=BASE,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 p.wait(timeout=P0_RUN_WAIT)      # 하나가 끝나야 다음
@@ -43220,6 +43315,22 @@ class App(tk.Tk):
                            and inf["clock"])
         return rank, inf
 
+    def _p0_card_args(self, si, key):
+        """🏴 그 슬롯을 마지막으로 **카드를 집어** 돌렸으면(해적섬 탭) 재실행도 그 카드로.
+
+        안 붙이면 악몽의섬 재실행이 '그날 열린 첫 카드'(테베라스 등)로 가버린다.
+        기록의 던전이 지금 돌리려는 던전과 같고 `P0_LAST_FRESH` 안일 때만."""
+        try:
+            import lineagem_island as _isl
+            r = _isl.slot_dun_card(si, fresh=P0_LAST_FRESH)
+            if r and r[0] == key and r[1]:
+                click_log(f"[물약감시] 🏴 #{si+1:02d} 마지막 실행이 '{r[1]}' 카드였다 → "
+                          f"같은 카드로 다시 돌린다")
+                return ["--card", r[1]]
+        except Exception:
+            pass
+        return []
+
     def _p0_last_dun(self, si, klist=None):
         """🧭 그 슬롯(0부터)을 **마지막으로 실행한 던전** → (던전키, 지난 초) | None.
 
@@ -43608,7 +43719,8 @@ class App(tk.Tk):
                              if d["key"] == _from)
                 subprocess.Popen(
                     ["pythonw", os.path.join(BASE, "lineagem_island.py"),
-                     str(_didx), "--run", "--slot", str(si + 1), "--rerun"],
+                     str(_didx), "--run", "--slot", str(si + 1), "--rerun"]
+                    + self._p0_card_args(si, _from),
                     cwd=BASE,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             except Exception as e:

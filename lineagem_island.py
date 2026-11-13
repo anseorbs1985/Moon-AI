@@ -290,8 +290,25 @@ def gap_mid(g):
 # ⚠ 런처·요약런처는 **이 함수들을 부른다.** 판정을 베껴 두지 말 것.
 DONE_FILE = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
                          "island_done.json")
-DUN_CYCLE = ("수금_오만의탑", "월요일_잊혀진섬", "화요일_에카")
+# 📅 **순서와 '완료' 를 다시 정했다** (2026-11-13 사용자 지시)
+#    *"요일에 대한 배치는 **오만의탑, 잊섬, 에카, 해적섬 순**이고 **토요일은 악몽의섬**이야.
+#      내가 그날에 돌린 던전이 있으면 그 다음 던전을 설정해주면 된다. **전체 실행**에
+#      해당하는 거야 — 전체 실행을 했을 때 그건 완료를 한 거기 때문에 **다음 날** 넘겨주면 된다"*
+#    · 토요일           → 늘 악몽의섬 (`DUN_FIXED`)
+#    · 그 밖의 요일      → 오만 → 잊섬 → 에카 → 해적섬 중 **이번 주에 아직 안 돌린 첫 던전**
+#                         (요일표 `DUN_DAY` 는 더 보지 않는다. 일요일도 이 순서를 따른다)
+#    · 넷 다 돌렸으면    → 악몽의섬
+#    '돌렸다' = 돌려야 하는 슬롯(ON · 좌표 있음) **전부를 이번 주에 한 번씩 실행했다**
+#       — 한 번에 전체 실행했든 나눠서 했든 같다. 슬롯이 중간에 멈췄어도(카드를 못 찾음 등)
+#         **실행한 것으로 센다** (`ran_mark`). [■ 멈춤] 으로 끊은 실행·물약 재실행은 세지 않는다.
+#    · 오늘 돌린 던전은 **오늘 하루 그대로** 보이고 다음 날 05시에 넘어간다 (2026-11-11 그대로).
+#    🏴 해적섬은 던전 키가 악몽의섬이고 **카드만 해적섬**이다 (`--card 해적섬`).
+#       라스타바드 프리셋 슬롯(칸26~35)은 해적섬으로 돌릴 수 없어 **뺀다.**
+DUN_PIRATE = "해적섬"
+DUN_CYCLE = ("수금_오만의탑", "월요일_잊혀진섬", "화요일_에카", DUN_PIRATE)
 DUN_FREE  = "토요일_악몽의섬"
+DUN_FIXED = {5: "토요일_악몽의섬"}                 # 월=0 … 토=5
+DUN_NAME_KEY = {DUN_PIRATE: "토요일_악몽의섬"}     # 이름 → 실제 던전 키
 DUN_DAY   = {0: "월요일_잊혀진섬", 1: "화요일_에카",
              2: "수금_오만의탑", 3: "수금_오만의탑", 4: "수금_오만의탑",
              5: "토요일_악몽의섬", 6: "토요일_악몽의섬"}
@@ -344,6 +361,47 @@ def _done_save(d):
         return False
 
 
+def dun_key(name):
+    """던전 이름(순서표의 이름) → 실제 던전 키. 해적섬 → 악몽의섬 키."""
+    return DUN_NAME_KEY.get(name, name)
+
+
+def slot_is_rasta(slot):
+    """그 슬롯이 **라스타바드 프리셋**인가 (칸26~35 에 그림 설정이 있다) — `_slot_ver` 와 같은 판정."""
+    try:
+        _a, _b = RASTA_RANGE
+        for k3 in ((slot or {}).get("rasta") or {}):
+            try:
+                if _a <= int(k3) + 1 <= _b:
+                    return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return False
+
+
+def ran_mark(name, sis, ts=None):
+    """📅 그 던전(이름)의 그 슬롯들(0부터)을 **이번에 실행했다** 고 적는다.
+
+    `done_mark`(끝까지 돈 슬롯)와 달리 **중간에 멈춘 슬롯도** 적는다 — 사용자:
+    *"전체 실행을 했을 때 그건 완료를 한 거"*. `island_done.json` 의 `_ran` 아래에 둔다."""
+    try:
+        d = done_load()
+        r = d.get("_ran")
+        if not isinstance(r, dict):
+            r = d["_ran"] = {}
+        m = r.get(name)
+        if not isinstance(m, dict):
+            m = r[name] = {}
+        t = float(ts if ts is not None else time.time())
+        for si in sis:
+            m[str(int(si))] = t
+        return _done_save(d)
+    except Exception:
+        return False
+
+
 def done_mark(key, si, ts=None):
     """그 던전의 그 슬롯(0부터)이 **끝까지 돌았다** 고 적는다 (쓰기 직전에 다시 읽는다)."""
     try:
@@ -378,13 +436,17 @@ def slot_dun_load():
         return {}
 
 
-def slot_dun_mark(key, sis, ts=None):
-    """그 슬롯들(0부터)을 **이 던전으로 실행했다** 고 적는다 (쓰기 직전에 다시 읽는다)."""
+def slot_dun_mark(key, sis, ts=None, card=None):
+    """그 슬롯들(0부터)을 **이 던전으로 실행했다** 고 적는다 (쓰기 직전에 다시 읽는다).
+
+    `card` = 🏴 카드를 콕 집어 돌린 실행(`--card 해적섬`)이면 그 카드 — 물약이 떨어져
+    다시 돌릴 때 **같은 카드로** 보낸다 (안 적으면 그날 열린 첫 카드로 가버린다)."""
     try:
         m = slot_dun_load()
         t = float(ts if ts is not None else time.time())
         for si in sis:
-            m[str(int(si))] = {"key": key, "at": t}
+            m[str(int(si))] = ({"key": key, "at": t, "card": card} if card
+                               else {"key": key, "at": t})
         os.makedirs(os.path.dirname(SLOTDUN_FILE), exist_ok=True)
         tmp = SLOTDUN_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -413,14 +475,32 @@ def slot_dun_get(si, fresh=None, now=None):
         return None
 
 
+def slot_dun_card(si, fresh=None, now=None):
+    """그 슬롯(0부터)을 마지막으로 실행했을 때의 (던전키, 카드) — 카드를 안 집었으면 카드는 ''."""
+    try:
+        e = slot_dun_load().get(str(int(si)))
+        if not isinstance(e, dict) or not e.get("key"):
+            return None
+        age = float(now if now is not None else time.time()) - float(e.get("at") or 0)
+        if fresh is not None and age > float(fresh):
+            return None
+        return e["key"], (e.get("card") or "")
+    except Exception:
+        return None
+
+
 def dun_need(key, cfg):
-    """그 던전에서 **돌려야 하는 슬롯**(0부터) — ON 이고 좌표나 방향이 있는 것."""
+    """그 던전에서 **돌려야 하는 슬롯**(0부터) — ON 이고 좌표나 방향이 있는 것.
+
+    🏴 `해적섬` 이면 악몽의섬 슬롯 중 **라스타바드 프리셋이 아닌 것**."""
     out = []
-    for si, s_ in enumerate((cfg or {}).get(key) or []):
+    for si, s_ in enumerate((cfg or {}).get(dun_key(key)) or []):
         if si >= 16:
             break
         if (isinstance(s_, dict) and s_.get("enabled", True)
                 and (any(s_.get("coords") or []) or any(s_.get("dirs") or []))):
+            if key == DUN_PIRATE and slot_is_rasta(s_):
+                continue
             out.append(si)
     return out
 
@@ -440,7 +520,8 @@ def dun_done(key, cfg=None, done=None, now=None, before=None):
             return False
         t0 = dun_cycle_start(now)
         m = done.get(key) or {}
-        ts_ = [float(m.get(str(si)) or 0) for si in need]
+        r = (done.get("_ran") or {}).get(key) or {}     # 📅 실행한 것도 센다 (2026-11-13)
+        ts_ = [max(float(m.get(str(si)) or 0), float(r.get(str(si)) or 0)) for si in need]
         if not all(x >= t0 for x in ts_):
             return False
         return before is None or max(ts_) < float(before)
@@ -452,15 +533,15 @@ def dun_today(cfg=None, now=None, day_map=None, done=None):
     """📅 **지금 슬롯판에 보여줄 던전** 키 (위 규칙 ①②③).  모르면 그 요일 던전."""
     import datetime as _dt
     ts = now if now is not None else time.time()
-    base = (day_map or DUN_DAY).get(_dt.datetime.fromtimestamp(ts).weekday())
+    _wd = _dt.datetime.fromtimestamp(ts).weekday()
+    base = DUN_FIXED.get(_wd) or (day_map or DUN_DAY).get(_wd)
     try:
-        if base not in DUN_CYCLE:
-            return base
+        if DUN_FIXED.get(_wd):
+            return DUN_FIXED[_wd]        # 토요일은 늘 악몽의섬
         cfg = cfg if cfg is not None else load_cfg()
         done = done if done is not None else done_load()
-        d0 = dun_day_start(ts)           # 📅 **오늘 끝낸 것은 세지 않는다** (하루에 하나씩)
-        if not dun_done(base, cfg, done, ts, before=d0):
-            return base
+        d0 = dun_day_start(ts)           # 📅 **오늘 돌린 것은 세지 않는다** (하루에 하나씩)
+        #    요일표는 보지 않는다 — 순서대로 **아직 안 돌린 첫 던전** (2026-11-13)
         for k in DUN_CYCLE:
             if not dun_done(k, cfg, done, ts, before=d0):
                 return k
@@ -3154,6 +3235,16 @@ class IslandApp(tk.Tk):
                     self._ver_none = _vn
             except Exception as _e:
                 self._rlog(f"🏴 --ver 읽기 실패 {_e}")
+        # 🏴 --card <이름> : 이번 실행은 **그 카드로** 들어간다 (2026-11-13 — 슬롯판 해적섬 탭).
+        #    슬롯에 적어둔 카드·프리셋보다 먼저다. 슬롯 자료는 하나도 고치지 않는다.
+        #    🚫 라스타바드 프리셋 슬롯은 이 실행에서 **뺀다** (칸26~35 가 라스타바드 전용이다).
+        self._card_force = None
+        if "--card" in sys.argv:
+            try:
+                self._card_force = (sys.argv[sys.argv.index("--card") + 1].strip()
+                                    or None)
+            except Exception:
+                self._card_force = None
         # --slot N : 그 슬롯 하나만 실행 (진단·테스트용)
         self._auto_slot = None
         if "--slot" in sys.argv:
@@ -7838,7 +7929,7 @@ class IslandApp(tk.Tk):
             anchor0 = next((c for c in coords if c), None)
         # 🔁 **자동으로 바뀌어 있던 슬롯은, 원래 카드가 열렸으면 되돌린다** (2026-11-05).
         _home = (slot.get("auto_home") or "").strip()
-        if _home and anchor0:
+        if _home and anchor0 and not getattr(self, "_card_force", None):
             _hc = (CARD_BY_VER.get(key) or {}).get(
                 "라스타바드" if _home.startswith("라스타바드") else "") or ""
             if _hc:
@@ -7855,7 +7946,11 @@ class IslandApp(tk.Tk):
         cname = ""
         _why_c = u""
         _ver = self._slot_ver(key, slot)
-        _byver = (CARD_BY_VER.get(key) or {}).get(_ver) or ""
+        # 🏴 **카드를 콕 집은 실행(--card)** 이면 그 카드가 먼저다 (프리셋·슬롯 지정보다)
+        _cf = (getattr(self, "_card_force", None) or "").strip()
+        if _cf:
+            cname, _why_c = _cf, u"실행 지정(--card)"
+        _byver = "" if _cf else ((CARD_BY_VER.get(key) or {}).get(_ver) or "")
         if _byver:
             # ① 🗡 라스타바드 프리셋이면 라스타바드 —
             #    칸26~35 가 라스타바드 전용이라 다른 카드로 들어가면 그 뒤가 어긋난다.
@@ -9250,6 +9345,8 @@ class IslandApp(tk.Tk):
 
     def _run(self, key, slot_idx=None, sel_list=None):
         self._slot_running = True
+        targets = []
+        _run_err = False
         try:
             self._status.set("2초 후 실행 시작...")
             time.sleep(2)
@@ -9290,6 +9387,15 @@ class IslandApp(tk.Tk):
                     # (2026-08-09) 카매사오기는 02~04 슬롯이 항상 마지막에 실행돼야 한다.
                     # (앞 슬롯들이 먼저 끝나야 이 슬롯들이 할 일이 생김)
                     targets.sort(key=lambda t: 1 if t[0] in (1, 2, 3) else 0)
+            # 🏴 카드를 콕 집은 실행이면 **라스타바드 프리셋 슬롯은 뺀다** (2026-11-13)
+            _cf0 = getattr(self, "_card_force", None)
+            if _cf0 and key == RASTA_KEY:
+                _rs = [si for si, _s in targets if slot_is_rasta(_s)]
+                if _rs:
+                    targets = [(si, _s) for si, _s in targets if si not in _rs]
+                    self._rlog(f"🏴 --card {_cf0} — 라스타바드 프리셋 슬롯 "
+                               f"{sorted(x + 1 for x in _rs)} 는 뺀다 (칸26~35 가 라스타바드 "
+                               f"전용이라 다른 카드로는 못 돈다)")
             # 💧 이번에 실제로 돈 슬롯 — 끝난 뒤 '물약 0개' 를 확인할 대상이다
             self._p0_ran = [si for si, _s in targets]
             # 🧭 이 슬롯들을 **이 던전으로 실행했다** 고 적는다 (2026-11-12).
@@ -9299,7 +9405,8 @@ class IslandApp(tk.Tk):
                 if (targets and not getattr(self, "_rerun", False)
                         and not getattr(self, "_p0_retry", False)
                         and key in [x["key"] for x in DUNGEONS[:4]]):
-                    slot_dun_mark(key, [si for si, _s in targets])
+                    slot_dun_mark(key, [si for si, _s in targets],
+                                  card=getattr(self, "_card_force", None))
                     self._rlog(f"🧭 {key} 실행 기록 — 슬롯 "
                                f"{sorted(si + 1 for si, _s in targets)} "
                                f"(물약이 떨어지면 이 던전으로 다시 돌린다)")
@@ -9509,6 +9616,7 @@ class IslandApp(tk.Tk):
                 time.sleep(2)
             self._status.set("✔ 실행 완료!")
         except Exception as e:
+            _run_err = True
             # 🚫 **조용히 실패하지 않는다** (2026-11-05).
             #    `--run` 모드는 창을 숨기므로 상태줄은 아무도 못 본다 —
             #    예외가 나면 슬롯이 그냥 멈춘 것처럼 보였다. 기록에 남긴다.
@@ -9522,6 +9630,25 @@ class IslandApp(tk.Tk):
                 pass
             self._status.set(f"오류: {e}")
         finally:
+            # 📅 **이번에 실행한 슬롯을 적는다** — 그 던전의 슬롯을 전부 한 번씩 실행했으면
+            #    '이번 주에 돌린 던전' 이 되어 **다음 날** 슬롯판이 다음 던전으로 넘어간다
+            #    (2026-11-13 사용자: *"전체 실행을 했을 때 그건 완료를 한 거"*).
+            #    🚫 [■ 멈춤] 으로 끊은 실행 · 오류 · 물약/마을 재실행은 적지 않는다.
+            try:
+                if (targets and not _run_err and not self._stop_flag
+                        and not getattr(self, "_rerun", False)
+                        and not getattr(self, "_p0_retry", False)):
+                    _dn = getattr(self, "_card_force", None) or key
+                    if _dn in DUN_CYCLE:
+                        ran_mark(_dn, [si for si, _s in targets])
+                        if dun_done(_dn, self.cfg):
+                            self._rlog(f"📅 {_dn} — 이번 주에 **전부 실행했다** → 내일부터 "
+                                       f"슬롯판이 다음 던전으로 넘어간다")
+            except Exception as _e3:
+                try:
+                    self._rlog(f"📅 실행 기록 실패: {_e3!r}")
+                except Exception:
+                    pass
             self._slot_running = False
             self._repeat_busy = False
             for btn in self._stop_btns.values():
