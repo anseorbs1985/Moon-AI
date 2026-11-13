@@ -6352,8 +6352,13 @@ NIGHT_RESET_KEY = "토요일_악몽의섬"
 #   · 다른 작업·섬 실행기가 돌고 있거나 사람이 쓰는 중이면 **끝날 때까지 미룬다**
 #     (`NIGHT_SAT_LATE` 04:30 까지. 그래도 틈이 없으면 그날은 그만둔다).
 #   · 02:30~03:00 에 런처가 꺼져 있었으면 그날은 돌리지 않는다 (과거섬과 같다).
-#   🚫 **⏰ 반복은 걸지 않는다** (`--norep`) — ⏰ 는 사용자가 실행했을 때만 켜진다
-#      (2026-08-23 절대 규칙). 이 실행에도 ⏰ 를 걸려면 NIGHT_SAT_ARM = True.
+#   ⏰ **이 실행에도 ⏰ 반복을 건다** (2026-11-13 사용자 지시: *"반복해줘. 새벽에 켜도
+#      어차피 내가 새벽 6시에 일어나서 확인하니까 괜찮아. 계속 반복으로 돌려줘"*).
+#      사람이 [실행] 을 누른 것과 똑같이 걸린다 (악몽의섬 2시간 6회 · 라스타바드 4h+2h ·
+#      해적섬 프리셋은 안 건다 — 섬 실행기 `_rep_restart` 규칙 그대로).
+#      '⏰ 는 사용자가 실행했을 때만'(2026-08-23)의 **사용자가 직접 요청한 예외**다 —
+#      🚫 다른 자동 실행(물약·마을 재실행 등)에 ⏰ 를 걸지 말 것.
+#      끄려면 NIGHT_SAT_ARM = False (`--norep` 로 돌린다).
 #   🚫 OFF 슬롯은 돌리지 않는다. 슬롯 카드는 클로드가 고르지 않는다.
 #   끄는 법: 슬롯판 머리줄 [🌙 토 2:30 ON/OFF] (`coords.json` 의 `night_sat_on`).
 #   ⚠ '실행은 사용자가 시킬 때만'(2026-08-10)의 **사용자가 직접 요청한 예외**다.
@@ -6365,7 +6370,7 @@ NIGHT_SAT_FROM    = (2, 30)
 NIGHT_SAT_TO      = (3, 0)           # 이 시각 전에 걸려야 한다
 NIGHT_SAT_LATE    = (4, 30)          # 걸렸는데 바빠서 못 돌렸으면 여기까지 기다린다
 NIGHT_SAT_JIT     = (5.0, 90.0)      # 02:30 정각에 딱 시작하지 않는다 (초)
-NIGHT_SAT_ARM     = False            # True 면 이 실행에도 ⏰ 반복을 건다
+NIGHT_SAT_ARM     = True             # ⏰ 반복도 건다 (False 면 --norep)
 NIGHT_SAT_TICK_MS = 20000
 NIGHT_RESET_DAY = 4      # 월=0 … 금=4
 NIGHT_RESET_HH  = 23
@@ -38455,7 +38460,8 @@ class App(tk.Tk):
         _t = "%d:%02d~%d:%02d" % (NIGHT_SAT_FROM + NIGHT_SAT_TO)
         if on:
             self.status.set(f"🌙 토요일 새벽 {_t} 악몽의섬 자동 실행 ON — ON 슬롯을 "
-                            f"순서를 섞어 한 클라씩 돌립니다 (⏰ 반복은 걸지 않습니다)")
+                            f"순서를 섞어 한 클라씩 돌립니다 (⏰ 반복"
+                            + ("도 겁니다)" if NIGHT_SAT_ARM else "은 걸지 않습니다)"))
         else:
             self.status.set("🌙 토요일 새벽 악몽의섬 자동 실행 OFF")
         try:
@@ -38577,7 +38583,7 @@ class App(tk.Tk):
         else:
             cmd += ["--slot", str(order[0] + 1)]
         if not NIGHT_SAT_ARM:
-            cmd.append("--norep")       # 🚫 ⏰ 반복은 걸지 않는다 (사용자가 실행할 때만)
+            cmd.append("--norep")       # ⏰ 반복을 걸지 않는 설정일 때만
         proc = subprocess.Popen(cmd)
         self._island_proc = proc
         threading.Thread(target=self._watch_island, args=(proc,), daemon=True).start()
