@@ -1138,6 +1138,37 @@ SUHO_PEEK_ON     = True              # 🔎 싸게 엿보기를 쓸까
 SUHO_PEEK_MS     = 400               # 엿보는 주기(ms)
 SUHO_PEEK_DOWN   = 0.5               # 띠를 이만큼 줄여 대조한다 (4배 싸다)
 SUHO_PEEK_MATCH  = 0.70              # 엿보기 기준 — **느슨하게** (정식은 0.85)
+# ⚡ **[활성화] 가 뜨면 스스로 돌린다** (2026-11-13 사용자 지시)
+#   사용자: *"수호성 개편 좀 해줘 인식률이 너무 떨어져. 그리고 자동으로 좀 해주면 안 돼?
+#   **확대하면은 너가 활성화버튼이 뜨면 알아서 해주고 화면 바뀌면 바로 꺼지고**"*
+#   ⚠ 2026-11-06 의 *'각성처럼 창만 띄우고 ▶ 를 누를 때 돈다'* 는 **이 지시로 바뀌었다.**
+#     ('실행은 사용자가 시킬 때만'(2026-08-10)의 **사용자가 직접 요청한 예외**다 —
+#      다른 작업에 같은 자동 실행을 붙이지 말 것.)
+#   🚨 **엿보기가 한 번도 성공한 적이 없었다** (click_log 실측) —
+#      창이 뜬 기록은 전부 `[활성화] 가 뜬 진입창`(= 사람이 클라를 **클릭했을 때**)이고,
+#      엿보기 길(`👀 진입창 을(를) 봤다`)은 **0건**이다. 엿보기는 '수호성 찾기' 제목 자리
+#      (`SUHO_TITLE_BAND` — 위 16%)만 봤는데 **진입창 제목이 거기 있는지 잰 적이 없다**
+#      (11-06 에 '아닌 화면에서 안 걸린다' 만 재고 '진짜에서 걸린다' 는 안 쟀다).
+#      그래서 클릭한 뒤 0.7초 안에 창이 안 뜨면 **영영 못 봤다** = '인식률이 떨어진다'.
+#   👉 자리를 가정하지 않는다:
+#      ① **배운 자리** — 한 번 정식으로 본 제목 자리 둘레만 화면에서 읽는다 (수 ms)
+#      ② **창 전체를 줄여서** — `SUHO_WIDE_SEC` 마다 (실측 2504x1352 · 읽기 80ms +
+#         0.4배 대조 38ms). 붙여넣기 시험 36/36 — 진짜 ≥0.879 · 가짜 ≤0.592.
+#      걸리면 PrintWindow 로 **정식 확인**(0.85 + [취소]·[활성화] 버튼 짝)한 뒤에만 돈다.
+SUHO_RUN_AUTO    = True              # 끄면 예전처럼 창만 띄운다 (coords.json 의 suho_run_auto 도 본다)
+SUHO_WIDE_SEC    = 1.2               # 창 전체를 줄여서 엿보는 주기(초)
+SUHO_WIDE_DOWN   = 0.4               # 그때 줄이는 배율
+SUHO_WIDE_MATCH  = 0.70              # 줄인 화면에서의 기준 (진짜 ≥0.879 · 가짜 ≤0.592)
+SUHO_ROI_PAD     = 48                # 배운 자리 둘레 이만큼(px)까지 읽는다
+SUHO_C2F_DOWN    = 0.4               # 🔎 정식 확인의 '창 전체' — 줄여서 거르고
+SUHO_C2F_SLACK   = 0.20              #    (기준 − 이 값) 을 넘은 자리만 원래 크기로 본다
+SUHO_C2F_PAD     = 10                #    그 자리 둘레(px)
+SUHO_LATCH_SEE   = 2.5               # 걸쇠가 걸린 동안 '진입창이 사라졌나' 를 보는 주기(초)
+SUHO_SHORT_HOLD  = 90.0              # 💎 수호석 부족·활성화가 안 먹음 → 그 화면에서 이만큼은 다시 안 건다
+SUHO_ACT_MAX     = 3                 # [활성화] 를 눌러도 진입창이 그대로인 것이 이만큼이면 그만둔다
+SUHO_DIAG_SEC    = 60.0              # 확대 창을 보고 있다는 기록 간격(초)
+SUHO_NOBTN_LOG   = 6.0               # '버튼을 못 찾았다' 를 다시 적기까지(초)
+SUHO_SHOT_PER_TAG = 2                # 🗂 단계별 화면을 종류마다 이만큼 남긴다 (한 장 ~2MB)
 #    ⚠ 느슨해도 안전하다 — 걸리면 **PrintWindow 로 정식 확인**을 거친다.
 #    📏 비용: BitBlt 17 + 줄인 대조 ~10 = **~27 ms** → 0.4초 주기면 한 코어의 7%.
 #       그것도 **1200px 넘는 창이 있을 때만**이다 (없으면 창 목록 1ms 뿐).
@@ -12784,11 +12815,12 @@ class App(tk.Tk):
            전체창 420ms → 윗 22% 84ms).
         🛟 **띠에서 못 찾으면 창 전체로 한 번 더 본다** — 놓치는 일이 없다.
         🚫 기준(`SUHO_SEEN_MATCH`)은 건드리지 않는다."""
-        if band:
-            if self._suho_tpl_seen_in(img, lst, band):
-                return True
-            return self._suho_tpl_seen_in(img, lst, None)
-        return self._suho_tpl_seen_in(img, lst, None)
+        #   ⚡ 2026-11-13 — 폴백을 **줄여서 거르기**(`_suho_c2f`)로 바꿨다.
+        #      원래 크기로 창 전체를 훑으면 그림 한 장에 ~700ms 다 (2504x1352 실측).
+        #      진입창 제목은 띠 안에 있다는 보장이 없어 **매번 그 길**을 탔다.
+        if band and self._suho_tpl_seen_in(img, lst, band):
+            return True
+        return self._suho_c2f(img, lst)[0]
 
     def _suho_tpl_seen_in(self, img, lst, band):
         try:
@@ -12814,12 +12846,224 @@ class App(tk.Tk):
                     continue
                 if t.shape[0] > sub.shape[0] or t.shape[1] > sub.shape[1]:
                     continue
-                if float(cv2.matchTemplate(sub, t,
-                                           cv2.TM_CCOEFF_NORMED).max()) >= SUHO_SEEN_MATCH:
+                _mn, _mx, _ml, _loc = cv2.minMaxLoc(
+                    cv2.matchTemplate(sub, t, cv2.TM_CCOEFF_NORMED))
+                if float(_mx) >= SUHO_SEEN_MATCH:
+                    _ox, _oy = (x0, y0) if band else (0, 0)
+                    self._suho_pos_note(p, _ox + _loc[0], _oy + _loc[1],
+                                        t.shape[1], t.shape[0],
+                                        img.shape[1], img.shape[0])
                     return True
         except Exception:
             pass
         return False
+
+    def _suho_c2f(self, img, lst):
+        """🔎 **줄여서 거르고, 걸린 자리 둘레만 원래 크기로** 본다 → (봤나, 점수, 자리).
+
+        창 전체를 원래 크기로 훑으면 그림 한 장에 ~700ms 다. 0.4배로 줄이면
+        ~40ms 이고, 걸린 자리 둘레(그림 크기 + `SUHO_C2F_PAD`)만 원래 크기로
+        다시 보면 **판정은 원래 기준(`SUHO_SEEN_MATCH`) 그대로**다.
+        📏 붙여넣기 시험(2504x1352 화면 6장 × 6자리) — 0.4배에서 진짜 ≥0.879 ·
+           가짜 ≤0.592. 거르는 기준은 `기준 − SUHO_C2F_SLACK`(0.65)이라 진짜를 안 놓친다.
+        🚫 줄인 점수만으로 '봤다' 고 하지 말 것 — 마지막 판정은 늘 원래 크기다.
+        점수는 **기록용**이다 (거를 때 떨어지면 줄인 점수가 그대로 온다)."""
+        best, pos = 0.0, None
+        try:
+            import cv2
+            d = SUHO_C2F_DOWN
+            H, W = img.shape[0], img.shape[1]
+            c = getattr(self, "_suho_c2f_c", None)
+            if c is not None and c[0] is img:
+                small = c[1]
+            else:
+                small = cv2.resize(img, None, fx=d, fy=d,
+                                   interpolation=cv2.INTER_AREA)
+                self._suho_c2f_c = (img, small)
+            for p, bw in lst:
+                got = self._suho_tpl(p, bw, W)
+                if not got:
+                    continue
+                t, k = got
+                if k < SUHO_MIN_K:
+                    continue
+                th, tw = t.shape[0], t.shape[1]
+                if th > H or tw > W:
+                    continue
+                gs = self._suho_tpl(p, bw, W, d)
+                ts = gs[0] if gs else None
+                if (ts is None or ts.shape[0] < 8 or ts.shape[1] < 8
+                        or ts.shape[0] > small.shape[0]
+                        or ts.shape[1] > small.shape[1]):
+                    #   너무 작아 줄여 볼 수 없다 → 원래 크기로 전체를 본다
+                    _a, v, _b, loc = cv2.minMaxLoc(
+                        cv2.matchTemplate(img, t, cv2.TM_CCOEFF_NORMED))
+                else:
+                    _a, cv_, _b, cl = cv2.minMaxLoc(
+                        cv2.matchTemplate(small, ts, cv2.TM_CCOEFF_NORMED))
+                    if cv_ < SUHO_SEEN_MATCH - SUHO_C2F_SLACK:
+                        if cv_ > best:
+                            best = float(cv_)
+                        continue
+                    x0 = max(0, int(cl[0] / d) - SUHO_C2F_PAD)
+                    y0 = max(0, int(cl[1] / d) - SUHO_C2F_PAD)
+                    x1 = min(W, x0 + tw + 2 * SUHO_C2F_PAD)
+                    y1 = min(H, y0 + th + 2 * SUHO_C2F_PAD)
+                    roi = img[y0:y1, x0:x1]
+                    if roi.shape[0] < th or roi.shape[1] < tw:
+                        continue
+                    _a, v, _b, loc = cv2.minMaxLoc(
+                        cv2.matchTemplate(roi, t, cv2.TM_CCOEFF_NORMED))
+                    loc = (x0 + loc[0], y0 + loc[1])
+                v = float(v)
+                if v > best:
+                    best, pos = v, (loc[0], loc[1], tw, th)
+                if v >= SUHO_SEEN_MATCH:
+                    self._suho_pos_note(p, loc[0], loc[1], tw, th, W, H)
+                    return True, v, (loc[0], loc[1], tw, th)
+        except Exception as e:
+            try:
+                click_log(f"[수호성] ⚠ 화면 대조 오류 {type(e).__name__}: {e}")
+            except Exception:
+                pass
+        return False, best, pos
+
+    def _suho_pos_note(self, p, x, y, tw, th, W, H):
+        """그 그림을 **어디서 봤는지** 잠깐 적어둔다 (배운 자리용)."""
+        try:
+            d = getattr(self, "_suho_lastpos", None)
+            if d is None:
+                d = self._suho_lastpos = {}
+            d[os.path.basename(p)] = (int(x), int(y), int(tw), int(th),
+                                      int(W), int(H), time.time())
+        except Exception:
+            pass
+
+    def _suho_pos_get(self):
+        """📍 배워둔 **진입창 제목 자리** → (가로 비율, 세로 비율) 또는 None.
+
+        `%LOCALAPPDATA%/MoonAI/suho_pos.json` — 이 컴퓨터 전용(스스로 배운다)."""
+        p = getattr(self, "_suho_pos", None)
+        if p is None:
+            p = {}
+            try:
+                with open(os.path.join(LOCAL_DATA, "suho_pos.json"),
+                          encoding="utf-8-sig") as f:
+                    p = json.load(f) or {}
+            except Exception:
+                p = {}
+            if not isinstance(p, dict):
+                p = {}
+            self._suho_pos = p
+        try:
+            v = p.get("info")
+            if v and 0.0 <= float(v[0]) < 1.0 and 0.0 <= float(v[1]) < 1.0:
+                return float(v[0]), float(v[1])
+        except Exception:
+            pass
+        return None
+
+    def _suho_pos_learn(self, W, H):
+        """📍 방금 정식으로 본 진입창 제목 자리를 **기억한다** (바뀌었을 때만 쓴다)."""
+        try:
+            lp = getattr(self, "_suho_lastpos", None) or {}
+            v = None
+            for p, _bw in suho_info_list():
+                q = lp.get(os.path.basename(p))
+                if q and q[4] == W and q[5] == H and time.time() - q[6] < 5.0:
+                    v = q
+                    break
+            if not v or W <= 0 or H <= 0:
+                return
+            rx, ry = v[0] / float(W), v[1] / float(H)
+            old = self._suho_pos_get()
+            if old and abs(old[0] - rx) < 0.004 and abs(old[1] - ry) < 0.004:
+                return
+            self._suho_pos["info"] = [round(rx, 5), round(ry, 5), int(W), int(H)]
+            os.makedirs(LOCAL_DATA, exist_ok=True)
+            fp = os.path.join(LOCAL_DATA, "suho_pos.json")
+            with open(fp + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(self._suho_pos, f, ensure_ascii=False)
+            os.replace(fp + ".tmp", fp)
+            click_log("[수호성] 📍 진입창 제목 자리를 기억했다 — 창 안 (%d,%d) / "
+                      "%dx%d · 다음부터는 그 둘레만 엿본다 (더 빠르다)"
+                      % (v[0], v[1], W, H))
+        except Exception:
+            pass
+
+    def _suho_shot(self, img, tag):
+        """🗂 **그 단계의 화면을 남긴다** — 종류마다 최근 `SUHO_SHOT_PER_TAG` 장.
+
+        `%LOCALAPPDATA%/MoonAI/click_templates/_suho/<시각>_<종류>.png`
+        🚫 지우지 말 것 — 인식이 왜 떨어지는지 **짚을 자료가 하나도 없었다**
+           (2026-11-13: 큰 창에서 못 봤을 때 기록이 한 줄도 안 남았다).
+        ⚠ 저장(PNG ~0.2초)은 **따로 띄운 스레드**에서 한다 — 도는 것을 늦추지 않는다."""
+        if img is None:
+            return
+
+        def _w(im=img, tg=str(tag)):
+            try:
+                import cv2 as _cv
+                d = os.path.join(LOCAL_DATA, "click_templates", "_suho")
+                os.makedirs(d, exist_ok=True)
+                ok, buf = _cv.imencode(".png", im)
+                if not ok:
+                    return
+                buf.tofile(os.path.join(
+                    d, time.strftime("%m%d_%H%M%S") + "_" + tg + ".png"))
+                fs = sorted(f for f in os.listdir(d)
+                            if f.endswith("_" + tg + ".png"))
+                for f in fs[:-SUHO_SHOT_PER_TAG]:
+                    os.remove(os.path.join(d, f))
+            except Exception:
+                pass
+        try:
+            threading.Thread(target=_w, daemon=True).start()
+        except Exception:
+            pass
+
+    def _suho_go(self, rect, img, why, key):
+        """⚡ 진입창을 **정식으로** 봤다 → 스스로 돌린다 (2026-11-13 사용자 지시).
+
+        조건 — 셋 다 넘어야 한다:
+          ① 진입창 제목(정식 기준 0.85) — 부르는 쪽에서 이미 봤다
+          ② **[취소](빨강)·[활성화](파랑) 버튼 짝**이 실제로 보인다 (`_suho_btn`)
+          ③ 그 창에 걸쇠가 안 걸려 있다 (■ 멈춤·수호석 부족 뒤에는 걸려 있다)
+        🚫 ②를 빼지 말 것 — 버튼이 없는 진입창에서 시작하면 아무것도 못 하고 끝난 뒤
+           **또 시작한다** (2026-11-06 '트리 판에서 끝없이 반복' 과 같은 고리).
+        `SUHO_RUN_AUTO`·`suho_run_auto` 가 꺼져 있으면 예전처럼 **창만 띄운다.**"""
+        if getattr(self, "_suho_latch", None) == key:
+            return
+        if not (SUHO_RUN_AUTO and self.cfg.get("suho_run_auto", True)):
+            self._suho_latch = key
+            self._suho_show_win(why)
+            return
+        if img is None:
+            img = self._suho_grab(rect)
+        if img is None:
+            return
+        btn = self._suho_btn(img, blue=True)
+        if not btn:
+            if time.time() - getattr(self, "_suho_nobtn_at", 0.0) >= SUHO_NOBTN_LOG:
+                self._suho_nobtn_at = time.time()
+                click_log("[수호성] 🔎 진입창은 보이는데 **[활성화] 버튼"
+                          "(파랑 + 왼쪽 빨강 짝)을 못 찾았다** — 누르지 않는다 "
+                          "(버튼이 보이면 바로 시작한다)")
+                self._suho_shot(img, "nobtn")
+            return
+        self._suho_latch = key
+        self._suho_latch_until = 0.0
+        self._suho_shot(img, "info")
+        self._suho_pos_learn(img.shape[1], img.shape[0])
+        click_log("[수호성] ⚡ %s — **[활성화] 가 떴다 → 스스로 돌린다** "
+                  "(%s %dx%d · 멈추려면 ■ 멈춤 · 끄려면 [자동 끔])"
+                  % (why, rect[5], rect[3], rect[4]))
+        try:
+            self.after(0, lambda: self.status.set(
+                "🌙 [활성화] 가 떴다 — 수호성을 스스로 돌립니다"))
+        except Exception:
+            pass
+        self._run_suho(src="자동 — [활성화] 가 떴다")
 
     def _suho_focus(self, rect):
         """🚦 그 창을 **앞으로 올린다**.
@@ -12841,7 +13085,10 @@ class App(tk.Tk):
             if att:
                 ctypes.windll.user32.AttachThreadInput(t1, t2, True)
             try:
-                win32gui.ShowWindow(h, 9)          # SW_RESTORE
+                #   ⚠ `SW_RESTORE` 는 **최대화도 푼다** — 내려가 있을 때만 쓴다
+                #     (확대해 둔 창이 줄어들면 수호성이 통째로 멈춘다)
+                if win32gui.IsIconic(h):
+                    win32gui.ShowWindow(h, 9)      # SW_RESTORE
                 win32gui.SetForegroundWindow(h)
                 win32gui.BringWindowToTop(h)
             except Exception:
@@ -13105,8 +13352,17 @@ class App(tk.Tk):
             #    **크기가 같아** `_suho_rect` 가 회차마다 다른 창을 골랐기 때문이다.
             #    🚫 이 자물쇠를 풀지 말 것 — 풀면 돌던 중에 **엉뚱한 클라를 누른다.**
             self._suho_lock = None
+            self._suho_end = ""           # 왜 끝났나 (short·act·changed·nocard)
             done = 0
+            _act = 0                      # [활성화] 를 연달아 누른 횟수
+            _shots = set()
             _saved = None
+
+            def _once(tg, im):
+                """🗂 이 판에서 그 단계의 화면을 **처음 한 번만** 남긴다."""
+                if tg not in _shots:
+                    _shots.add(tg)
+                    self._suho_shot(im, tg)
             try:
                 nap_clear()
                 self._minimize_claude()
@@ -13140,6 +13396,13 @@ class App(tk.Tk):
                     rect = self._suho_rect()
                     if not rect:
                         click_log(f"[수호성] {n}회째 — 리니지M 창을 못 찾았다 → 끝낸다")
+                        self._suho_end = "changed"
+                        break
+                    if self._suho_lock and rect[0] != self._suho_lock:
+                        #   🔒 돌던 창이 없어졌거나 **축소됐다** — 다른 창으로 옮겨 누르지 않는다
+                        click_log(f"[수호성] 🚦 {n}회째 — **돌던 창이 없어졌거나 "
+                                  f"축소됐다** → 아무것도 누르지 않고 멈춘다")
+                        self._suho_end = "changed"
                         break
                     self._suho_focus(rect)
                     #   ⚡ 방금(0.35초 안에) 같은 창을 찍어뒀으면 **그것을 쓴다**
@@ -13162,6 +13425,8 @@ class App(tk.Tk):
                     if not self._suho_here(img0):
                         click_log(f"[수호성] 🚦 {n}회째 — **화면이 바뀌었다** → "
                                   f"아무것도 누르지 않고 멈춘다")
+                        self._suho_end = "changed"
+                        self._suho_shot(img0, "changed")
                         break
                     v = 1.0
                     if n == 1:
@@ -13182,7 +13447,21 @@ class App(tk.Tk):
                         _info = self._suho_tpl_seen(img, suho_info_list(), band=SUHO_TITLE_BAND)
                         # 💎 수호석이 모자라면 **누르지 않고 끝낸다**
                         _sh, _np_ = self._suho_short(img)
+                        if _info:
+                            _act += 1
+                        else:
+                            _act = 0
+                            _once("confirm", img)
+                        if _info and _act > SUHO_ACT_MAX and not _sh:
+                            #   [활성화] 를 눌러도 진입창이 그대로다 — 헛누르지 않는다
+                            click_log(f"[수호성] ⚠ [활성화] 를 {SUHO_ACT_MAX}번 눌러도 "
+                                      f"진입창이 그대로다 → 더 누르지 않고 끝낸다")
+                            self._suho_end = "act"
+                            self._suho_shot(img, "act")
+                            break
                         if _sh:
+                            self._suho_end = "short"
+                            self._suho_shot(img, "short")
                             click_log(f"[수호성] 💎 **수호석이 모자랍니다** "
                                       f"(빨간 숫자 {_np_}픽셀) → 누르지 않고 "
                                       f"ESC 로 나간다")
@@ -13191,6 +13470,10 @@ class App(tk.Tk):
                                 "🌙 수호성 💎 수호석 부족 — ESC 로 나감"))
                             break
                         bx, by = L + btn[0], T + btn[1]
+                        if self._suho_stop:
+                            #   ■ 멈춤 을 눌렀으면 **이 버튼도 누르지 않는다**
+                            click_log(f"[수호성] ■ 멈춤 — 누르지 않고 끝낸다 ({done}회 했다)")
+                            break
                         pyautogui.click(bx, by)
                         click_log(f"[수호성] {n}/{times}회 "
                                   f"{'⓪ **[활성화]**' if _info else '② **[확인]**'} "
@@ -13228,6 +13511,8 @@ class App(tk.Tk):
                         continue
                     if line:
                         # ③ 카드를 **쭉** 아래로
+                        _act = 0
+                        _once("line", img)
                         okd, x, y0, dy = self._suho_drag_big(rect)
                         if not okd:
                             break
@@ -13261,6 +13546,7 @@ class App(tk.Tk):
                         self._suho_nap(*SUHO_GAP)
                         continue
                     if self._suho_close_seen(img):
+                        _once("close", img)
                         # 💧 **실패** — 아무 곳이나 클릭하면 카드 화면으로 돌아간다.
                         #    🚦 성공보다 **먼저** 본다 — 실패 글자는 성공 화면에서
                         #       0.169 라 섞일 일이 없다 (실측).
@@ -13271,6 +13557,7 @@ class App(tk.Tk):
                         self._suho_nap(*SUHO_CLICK_WAIT)
                         continue
                     if self._suho_done_seen(img):
+                        _once("done", img)
                         # 🎉 **성공** — [나가기] 를 눌러 끝낸다 (2026-11-05 사용자:
                         #    *"성공했으면 … 나가기 눌르던지 하라고"*).
                         #    🚫 성공 화면은 **아무 데나 클릭해도 안 닫힌다** (실측) —
@@ -13332,8 +13619,12 @@ class App(tk.Tk):
                         #    **실제로 봤을 때만** 닫는다 — 그 길은 위에 따로 있다.
                         click_log(f"[수호성] {n}회째 — 카드도 버튼도 결과창도 없다 → "
                                   f"**아무것도 누르지 않고 끝낸다** ({done}회 뽑았다)")
+                        self._suho_end = "nocard"
+                        self._suho_shot(img, "nocard")
                         break
                     blind = 0
+                    _act = 0
+                    _once("cards", img)
                     i = random.randrange(len(cards))    # 전부 랜덤 (사용자 지시)
                     okc, x, y = self._suho_pick(cards[i])
                     if not okc:
@@ -13347,8 +13638,11 @@ class App(tk.Tk):
                     if bt:
                         _im2 = self._suho_grab(rect)
                         if _im2 is not None:
+                            _once("confirm", _im2)
                             _sh, _np_ = self._suho_short(_im2)
                             if _sh:
+                                self._suho_end = "short"
+                                self._suho_shot(_im2, "short")
                                 click_log(f"[수호성] 💎 **수호석이 모자랍니다** "
                                           f"(빨간 숫자 {_np_}픽셀) → 누르지 않고 "
                                           f"ESC 로 나간다")
@@ -13418,8 +13712,20 @@ class App(tk.Tk):
                         self._suho_hold()
                     except Exception:
                         pass
+                elif getattr(self, "_suho_end", "") in ("short", "act"):
+                    #   💎 수호석 부족·[활성화] 가 안 먹음 — 진입창이 그대로 남아 있으면
+                    #      **또 시작해 같은 일을 되풀이한다.** 그 화면에서는 잠깐 안 건다
+                    #      (진입창이 사라지면 `_suho_peek` 이 바로 푼다).
+                    try:
+                        self._suho_hold()
+                        self._suho_latch_until = time.time() + SUHO_SHORT_HOLD
+                        click_log(f"[수호성] ⏸ 이 화면에서는 {SUHO_SHORT_HOLD:.0f}초 동안 "
+                                  f"다시 걸지 않는다 (진입창이 사라지면 바로 풀린다)")
+                    except Exception:
+                        pass
                 else:
                     self._suho_latch = None  # 정상 종료 — 다시 뜨면 또 돈다
+                    self._suho_latch_until = 0.0
                 self._suho_lock = None
                 self._suho_done_at = time.time()
                 if _saved is not None:       # 숨긴 창을 원래대로 되돌린다
@@ -13880,16 +14186,21 @@ class App(tk.Tk):
                           "(사용자가 ▶ 를 눌러 시작한 작업)" % why)
                 self._run_suho(src="다음 창 이어서")
                 return
-            if getattr(self, "_suho_latch", None) == key:
-                return
-            self._suho_latch = key
-            #   🌙 **돌리지 않는다 — 창만 띄운다** (2026-11-06 사용자 지시)
-            self._suho_show_win(why)
-        except Exception:
-            pass
+            #   ⚡ **[활성화] 가 떴으면 스스로 돌린다** (2026-11-13 사용자 지시).
+            #      스윕으로 창이 바뀌었으면 `img` 는 옛 창 것이라 다시 찍게 None 을 준다.
+            self._suho_go(rect, (None if "스윕" in why else img), why, key)
+        except Exception as e:
+            try:
+                click_log(f"[수호성] ⚠ 정식 확인 오류 {type(e).__name__}: {e}")
+            except Exception:
+                pass
 
     def _suho_auto(self, xy):
-        """사람이 클라를 클릭했을 때 — **수호성 화면이면 창을 띄운다.**
+        """사람이 클라를 클릭했을 때 — **[활성화] 가 떠 있으면 스스로 돌린다.**
+
+        ⚡ 2026-11-13 사용자 지시로 바뀌었다 — 아래 '창만 띄운다' 는 옛 설명이고,
+          지금은 `_suho_go` 가 (버튼 짝을 확인한 뒤) **바로 돌린다.**
+          평소에는 엿보기(`_suho_peek`)가 먼저 잡으므로 이 길은 보험이다.
 
         🌙 **각성과 같다** (2026-11-06 사용자 지시 — *"각성처럼 해두고 …
           내가 시작 누르면 … 화면이 다른 화면이면 각성처럼 꺼두고 어때"*).
@@ -13937,13 +14248,13 @@ class App(tk.Tk):
                 self._suho_latch = None
                 return
             key = (rect[0], rect[3], rect[4])
-            if getattr(self, "_suho_latch", None) == key:
-                return
-            self._suho_latch = key
-            #   🌙 **돌리지 않는다 — 창만 띄운다** (2026-11-06 사용자 지시)
-            self._suho_show_win("[활성화] 가 뜬 진입창")
-        except Exception:
-            pass
+            #   ⚡ 2026-11-13 — 스스로 돌린다 (`_suho_go` 가 버튼 짝·걸쇠를 본다)
+            self._suho_go(rect, img, "[활성화] 가 뜬 진입창 (클릭)", key)
+        except Exception as e:
+            try:
+                click_log(f"[수호성] ⚠ 클릭 확인 오류 {type(e).__name__}: {e}")
+            except Exception:
+                pass
 
     def _suho_show_win(self, why="수호성 화면"):
         """🌙 수호성 화면이 뜨면 **창만 띄운다. 돌리지 않는다.**
@@ -14054,18 +14365,13 @@ class App(tk.Tk):
             return None
 
     def _suho_peek_tick(self):
-        """🔎 **[활성화] 가 뜨면 창이 바로 뜨게** — 싸게 엿본다 (2026-11-06).
+        """🔎 **확대한 창에 [활성화] 가 뜨면 바로 알아챈다** — 싸게 엿본다.
 
-        사용자: *"활성화 띄워놨는데 수호성 찾기가 너무 늦게 뜬다니까"*.
-        폴링이 렉 때문에 꺼져 있어 **사람이 클릭할 때만** 창이 떴다.
-
-        **두 단계로 싸게 한다:**
-          ① 창 목록으로 **1200px 넘는 창**을 찾는다 (~1ms · 없으면 여기서 끝)
-          ② 그 창의 **제목 띠만 화면에서 BitBlt**(17ms) → 줄여서 대조(~10ms)
-          ③ 걸리면 **`_suho_poll`**(PrintWindow 정식 확인)로 넘긴다
-        🚫 ②만으로 창을 띄우지 않는다 — 화면 BitBlt 는 덮이면 틀린 픽셀을 읽는다.
-        🚫 수호성 창이 **이미 보이면** 아무것도 안 한다 (`_suho_watch_tick` 이 맡는다).
-        🚫 돌고 있으면 안 한다."""
+        ① 창 목록으로 **`SUHO_MIN_W` 넘는 창**을 찾는다 (~1ms · 없으면 여기서 끝 = 평소 부하 0)
+        ② 화면에서 읽어 본다 (`_suho_peek` — 배운 자리 수 ms · 창 전체는 1.2초마다)
+        ③ 걸리면 **`_suho_poll`**(PrintWindow 정식 확인) → `_suho_go` 가 돌린다
+        🚫 ②만으로 돌리지 않는다 — 화면에서 읽은 것은 덮이면 틀린 픽셀이다.
+        🚫 돌고 있으면 안 한다 · 다른 작업 중이면 안 한다."""
         try:
             self.after(SUHO_PEEK_MS, self._suho_peek_tick)
         except Exception:
@@ -14077,16 +14383,10 @@ class App(tk.Tk):
                 return
             if getattr(self, "_suho_busy", False) or getattr(self, "_suho_peeking", False):
                 return
-            w = getattr(self, "_suho_win", None)
-            try:
-                if w is not None and w.winfo_exists() and w.winfo_viewable():
-                    return                  # 이미 떠 있다
-            except Exception:
-                pass
-            if self._is_busy():
-                return
             big = self._suho_big_win()      # ~1ms
             if not big:
+                return
+            if self._is_busy():
                 return
             self._suho_peeking = True
             threading.Thread(target=self._suho_peek, args=(big,),
@@ -14095,39 +14395,112 @@ class App(tk.Tk):
             self._suho_peeking = False
 
     def _suho_peek(self, big):
-        """🔎 제목 띠만 싸게 보고, 걸리면 **정식 확인**으로 넘긴다 (백그라운드)."""
+        """🔎 화면에서 싸게 읽어 보고, 걸리면 **정식 확인**으로 넘긴다 (백그라운드).
+
+        🚨 **자리를 가정하지 않는다** (2026-11-13) — 예전에는 '수호성 찾기' 제목 띠만
+           봤는데 진입창 제목이 거기 있다는 보장이 없어 **한 번도 안 걸렸다.**
+             ① 📍 배운 자리 둘레만 (원래 크기 · 수 ms) — 매 틱
+             ② 창 전체를 `SUHO_WIDE_DOWN` 으로 줄여서 — `SUHO_WIDE_SEC` 마다
+        🔒 그 창에 걸쇠가 걸려 있으면 엿보지 않고, **진입창이 사라졌나만**
+           `SUHO_LATCH_SEE` 마다 정식으로(PrintWindow) 본다 — 사라지면 걸쇠를 푼다."""
         try:
             import cv2
             h, L, T, W, H = big[0], big[1], big[2], big[3], big[4]
-            b = SUHO_TITLE_BAND
-            y0, y1 = int(H * b[0]), int(H * b[1])
-            x0, x1 = (int(W * b[2]), int(W * b[3])) if len(b) >= 4 else (0, W)
-            sub = self._suho_screen_rect(L + x0, T + y0, x1 - x0, y1 - y0)
-            if sub is None:
+            now = time.time()
+            lk = getattr(self, "_suho_latch", None)
+            if lk and lk[0] == h:
+                until = float(getattr(self, "_suho_latch_until", 0.0) or 0.0)
+                if until and now >= until:
+                    self._suho_latch = None
+                    self._suho_latch_until = 0.0
+                    click_log("[수호성] 🔓 걸쇠 시효가 지났다 — 진입창이 보이면 다시 돈다")
+                elif now - getattr(self, "_suho_latch_see", 0.0) >= SUHO_LATCH_SEE:
+                    self._suho_latch_see = now
+                    img = self._suho_grab(big)
+                    if img is not None and not self._suho_tpl_seen(
+                            img, suho_info_list(), band=SUHO_TITLE_BAND):
+                        self._suho_latch = None
+                        self._suho_latch_until = 0.0
+                        self._suho_close_auto("[활성화] 가 없는 화면이다")
                 return
-            d = SUHO_PEEK_DOWN
-            if d and 0.2 < d < 1.0 and min(sub.shape[:2]) * d > 40:
-                sub = cv2.resize(sub, None, fx=d, fy=d,
-                                 interpolation=cv2.INTER_AREA)
-            else:
-                d = 1.0
-            hit = False
-            for p, bw in suho_info_list():
-                got = self._suho_tpl(p, bw, W, d)
-                if not got:
-                    continue
-                t, k = got
-                if t.shape[0] > sub.shape[0] or t.shape[1] > sub.shape[1]:
-                    continue
-                if float(cv2.matchTemplate(sub, t,
-                                           cv2.TM_CCOEFF_NORMED).max()) >= SUHO_PEEK_MATCH:
+            if now < getattr(self, "_suho_poll_hold", 0.0):
+                return
+            infos = [(p, bw) for p, bw in suho_info_list()
+                     if (W / float(bw or SUHO_BASE_W)) >= SUHO_MIN_K]
+            if not infos:
+                return
+            hit, sc_roi, sc_wide = False, None, None
+            # ── ① 배운 자리 둘레만 (원래 크기) ──
+            pos = self._suho_pos_get()
+            if pos:
+                for p, bw in infos:
+                    got = self._suho_tpl(p, bw, W)
+                    if not got:
+                        continue
+                    t = got[0]
+                    th, tw = t.shape[0], t.shape[1]
+                    x0 = max(0, int(pos[0] * W) - SUHO_ROI_PAD)
+                    y0 = max(0, int(pos[1] * H) - SUHO_ROI_PAD)
+                    w2 = min(W - x0, tw + 2 * SUHO_ROI_PAD)
+                    h2 = min(H - y0, th + 2 * SUHO_ROI_PAD)
+                    if w2 < tw or h2 < th:
+                        continue
+                    sub = self._suho_screen_rect(L + x0, T + y0, w2, h2)
+                    if sub is None:
+                        continue
+                    v = float(cv2.matchTemplate(sub, t,
+                                                cv2.TM_CCOEFF_NORMED).max())
+                    sc_roi = v if sc_roi is None else max(sc_roi, v)
+                if sc_roi is not None and sc_roi >= SUHO_PEEK_MATCH:
                     hit = True
-                    break
+            # ── ② 창 전체를 줄여서 (자리를 몰라도 · 자리가 바뀌어도 잡는다) ──
+            if not hit and now - getattr(self, "_suho_wide_at", 0.0) >= SUHO_WIDE_SEC:
+                self._suho_wide_at = now
+                full = self._suho_screen_rect(L, T, W, H)
+                if full is not None:
+                    d = SUHO_WIDE_DOWN
+                    small = cv2.resize(full, None, fx=d, fy=d,
+                                       interpolation=cv2.INTER_AREA)
+                    for p, bw in infos:
+                        got = self._suho_tpl(p, bw, W, d)
+                        if not got:
+                            continue
+                        t = got[0]
+                        if (t.shape[0] < 8 or t.shape[1] < 8
+                                or t.shape[0] > small.shape[0]
+                                or t.shape[1] > small.shape[1]):
+                            continue
+                        v = float(cv2.matchTemplate(small, t,
+                                                    cv2.TM_CCOEFF_NORMED).max())
+                        sc_wide = v if sc_wide is None else max(sc_wide, v)
+                    if sc_wide is not None and sc_wide >= SUHO_WIDE_MATCH:
+                        hit = True
             if hit:
-                #   🚦 **정식 확인** — PrintWindow + 정식 기준(0.85) 을 거쳐야 뜬다
+                #   🚦 **정식 확인** — PrintWindow + 정식 기준(0.85) + 버튼 짝을 거쳐야 돈다.
+                #      아니라고 나오면 1초 쉰다 (PrintWindow 를 0.4초마다 하지 않게).
+                self._suho_poll_hold = now + 1.0
+                self._suho_hwnd = h
+                self._suho_peek_hit = (now, sc_roi, sc_wide)
                 self._suho_poll()
-        except Exception:
-            pass
+                return
+            # 🗒 **보고는 있다**는 것을 남긴다 — 조용하면 '왜 안 되지' 를 짚을 수 없다
+            if sc_wide is not None:
+                last = getattr(self, "_suho_diag", None)
+                if (last is None or (now - last[0] >= SUHO_DIAG_SEC
+                                     and abs(sc_wide - last[1]) >= 0.05)):
+                    self._suho_diag = (now, sc_wide)
+                    click_log("[수호성] 🔎 확대 창 %s %dx%d 을 보고 있다 — 진입창"
+                              "([활성화]) 점수 %.2f (기준 %.2f%s) · 아직 아니다"
+                              % (big[5], W, H, sc_wide, SUHO_WIDE_MATCH,
+                                 (" · 배운 자리 %.2f" % sc_roi)
+                                 if sc_roi is not None else ""))
+        except Exception as e:
+            try:
+                if time.time() - getattr(self, "_suho_peek_err", 0.0) > 30:
+                    self._suho_peek_err = time.time()
+                    click_log(f"[수호성] ⚠ 엿보기 오류 {type(e).__name__}: {e}")
+            except Exception:
+                pass
         finally:
             self._suho_peeking = False
 
@@ -14301,11 +14674,9 @@ class App(tk.Tk):
             self._suho_latch = None
         if new != cur:
             click_log("[수호성] 🌙 자동 **" + ("켰다" if new else "껐다") + "** — "
-                      + ("수호성 화면이 뜨면 **창을 띄운다** "
-                         "(실행은 [▶ 지금 돌리기])"
+                      + ("확대한 창에 [활성화] 가 뜨면 **스스로 돌린다**"
                          if new else "화면을 보지도 않는다 (비용 0)"))
-        msg = ("🌙 수호성 자동 **켬** — 화면이 뜨면 창을 띄웁니다 "
-               "(실행은 [▶ 지금 돌리기])"
+        msg = ("🌙 수호성 자동 **켬** — 확대한 창에 [활성화] 가 뜨면 스스로 돌립니다"
                if new else "🌙 수호성 자동 **끔** — 화면을 보지 않습니다")
         #   ⚠ 스레드에서도 불린다 → 화면 손질은 `after(0, …)` 로 넘긴다
         try:
@@ -14387,7 +14758,7 @@ class App(tk.Tk):
             except Exception:
                 return
             on = bool(self.cfg.get("suho_auto_on", True))
-            v_on.set("🌙 화면이 뜨면 이 창 띄우기 — "
+            v_on.set("🌙 [활성화] 가 뜨면 스스로 돌리기 — "
                      + ("켬 ✔" if on else "끔 ✘  (지금은 화면을 보지도 않습니다)"))
             try:
                 b_on.configure(bg="#27ae60" if on else "#c0392b",
@@ -14398,8 +14769,8 @@ class App(tk.Tk):
         _sync()
         b_on.pack(pady=(6, 2))
         tk.Label(win, font=("맑은 고딕", 8),
-                 text="카드 6장 중 무작위로 하나를 눌러 아래로 끌어내립니다 "
-                      "(사용자 지시 — 전부 랜덤)").pack()
+                 text="확대한 창에 [활성화] 가 뜨면 스스로 시작하고, 화면이 바뀌면 "
+                      "바로 멈춥니다 (카드는 전부 랜덤)").pack()
         try:
             apply_dark(win, self.cfg.get("dark_ui", True))
         except Exception:
