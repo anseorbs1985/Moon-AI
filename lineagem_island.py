@@ -750,6 +750,26 @@ RASTA_MATCH   = 0.60   # 그림 기준 (칸마다 `rasta_<번호>_thr.json` 으�
 RASTA_TRIES   = 3      # 못 찾으면 몇 번까지 다시 보나
 RASTA_GAP     = (0.9, 1.4)   # 다시 볼 때까지
 RASTA_AFTER   = (0.45, 0.80)  # 그림을 누른 뒤 화면이 바뀌기를 기다리는 시간
+# 👁 **'확인만' 은 보일 때까지 기다린다** (2026-11-14).
+#    칸33(입구) 을 누른 뒤 캐릭터가 **걸어 들어가는 데 10초쯤** 걸린다. 예전에는 그
+#    기다림이 **슬롯의 간격(gap_list)** 에만 있어서, 슬롯을 붙여넣거나 프리셋을 새로
+#    걸면 사라졌다 → 도착하기 전에 3번 보고 '못 찾음' 으로 끝났다.
+#    확인만은 **아무것도 누르지 않으므로** 오래 봐도 안전하다. 보이면 즉시 넘어간다.
+RASTA_SEE_MAX = 25.0
+# 🅰 **라스타바드의 마지막 [AUTO]** — 슬롯에 그 칸 좌표가 없으면 이 자리를 누른다 (2026-11-14).
+#    사용자: *"라바로 해놨을 때 라바로 하면 라바에 들어가서 **아무것도 안 해버리고**"*
+#    🔎 프리셋(칸27~34)에는 **오토 칸(35)이 없다.** 그 좌표는 슬롯에만 있었는데
+#       슬롯을 악몽의섬 것으로 붙여넣으면서 16슬롯 전부 사라졌다 → 지하 통제실까지
+#       들어가도 **오토를 안 눌러 서 있기만** 했다.
+#    📏 자리 = 창 안 (423,229) @546x307 — 악몽의섬 칸28(오토)와 같은 HUD 버튼이다
+#       (2026-11-07 지하 통제실 화면 `p04_auto.png` 로 확인 · 16슬롯 칸28 이 전부 이 자리).
+#    🚫 **라스타바드 슬롯에서만**, 그 칸에 좌표·방향·녹화·그림이 **없을 때만** 쓴다.
+#       슬롯에 좌표를 적어 넣지 않는다 — 적어두면 악몽의섬으로 바꿨을 때 오토를
+#       **한 번 더 눌러 꺼버린다** (오토는 토글이다).
+#    🚫 앞 칸(👁 지하 통제실 확인)을 통과해야만 여기까지 온다 — 못 보면 슬롯이 멈춘다.
+RASTA_AUTO_CELL = 35
+RASTA_AUTO_REL  = (423, 229)
+RASTA_AUTO_BASE = (546, 307)
 
 # ⌨ **'앞으로 이동' 은 새로 만들지 않는다** — 섬 실행기에 이미 있는 **방향 기능**을 쓴다.
 #    `_hold_arrow` 가 **WASD 스캔코드를 SendInput** 으로 꾹 누른다 (대각선도 두 키 동시).
@@ -5395,6 +5415,22 @@ class IslandApp(tk.Tk):
         out = []
         dx = dy = 0
         try:
+            # 🔎 **녹화가 실제로 찍힌 클라를 좌표로 알아낸다** (2026-11-14).
+            #    '기본!!' 프리셋은 `src=1` 인데 칸30 녹화는 **5번 클라 좌표**(991,117)다
+            #    (기본 → 48%/82% 로 맞추는 동기화가 녹화만 옮기고 src 는 안 옮긴다).
+            #    적힌 src 를 믿으면 **옆 클라를 누른다.** 첫 마우스 좌표가 들어 있는
+            #    클라가 진짜 기준이다. 못 찾으면 적힌 src 그대로.
+            _m0 = next((e for e in (ev or [])
+                        if len(e) >= 4 and str(e[1]) in ("md", "mu", "mm")), None)
+            if rects and _m0 is not None:
+                _mx, _my = int(_m0[2]), int(_m0[3])
+                if not (0 <= src < len(rects)
+                        and rects[src][0] <= _mx < rects[src][2]
+                        and rects[src][1] <= _my < rects[src][3]):
+                    for _k, _r in enumerate(rects):
+                        if _r[0] <= _mx < _r[2] and _r[1] <= _my < _r[3]:
+                            src = _k
+                            break
             if rects and 0 <= src < len(rects) and 0 <= idx < len(rects):
                 dx = rects[idx][0] - rects[src][0]
                 dy = rects[idx][1] - rects[src][1]
@@ -7862,7 +7898,9 @@ class IslandApp(tk.Tk):
             self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번 그림 없음 → 중단")
             return False
         best = -1.0
-        for t in range(RASTA_TRIES):
+        _t_see = time.time()
+        t = 0
+        while True:
             if self._stop_flag:
                 return False
             x, y, v = rasta_find(j, anchor, pick=pick)
@@ -7872,7 +7910,8 @@ class IslandApp(tk.Tk):
                     self._status.set(f"🗡 [{name}] {lbl} 확인됨 (일치도 {v:.2f}) "
                                      f"— 누르지 않고 통과")
                     self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) "
-                               f"확인만 — 보임 {v:.2f}")
+                               f"확인만 — 보임 {v:.2f} "
+                               f"({time.time() - _t_see:.0f}초 기다림)")
                     return True
                 # 그 클라를 먼저 앞으로 — 비활성 창의 첫 클릭은 '창 띄우기'로만
                 # 먹히고 사라진다 (2026-08-24 교훈)
@@ -7898,15 +7937,70 @@ class IslandApp(tk.Tk):
                               f"{_off[0]:+d},{_off[1]:+d}" if any(_off) else ""))
                 time.sleep(random.uniform(*RASTA_AFTER))
                 return True
-            if t < RASTA_TRIES - 1:
-                self._status.set(f"🗡 [{name}] {lbl} 그림 찾는 중… "
-                                 f"({t+1}/{RASTA_TRIES} · 최고 {best:.2f})")
-                time.sleep(random.uniform(*RASTA_GAP))
+            # 👁 확인만은 **보일 때까지** 본다 (누르는 것이 없어 안전하다 — RASTA_SEE_MAX)
+            _waited = time.time() - _t_see
+            _more = (mode == RASTA_SEE and _waited < RASTA_SEE_MAX)
+            if t >= RASTA_TRIES - 1 and not _more:
+                break
+            self._status.set(f"🗡 [{name}] {lbl} 그림 찾는 중… "
+                             + (f"({_waited:.0f}/{RASTA_SEE_MAX:.0f}초"
+                                if mode == RASTA_SEE else f"({t+1}/{RASTA_TRIES}")
+                             + f" · 최고 {best:.2f})")
+            time.sleep(random.uniform(*RASTA_GAP))
+            t += 1
         self._status.set(f"🚫 [{name}] {lbl} 그림을 못 찾아 이 슬롯 중단 "
                          f"(최고 {best:.2f} · 기준 {rasta_thr(j):.2f})")
         self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) 그림 못 찾음 "
-                   f"(최고 {best:.2f} · 기준 {rasta_thr(j):.2f}) → 이 슬롯 중단")
+                   f"(최고 {best:.2f} · 기준 {rasta_thr(j):.2f}"
+                   + (f" · {time.time() - _t_see:.0f}초 봤다" if mode == RASTA_SEE else "")
+                   + ") → 이 슬롯 중단")
         return False
+
+    def _rasta_auto_xy(self, key, si, slot, j):
+        """🅰 라스타바드 슬롯의 **마지막 [AUTO] 자리** — 슬롯에 그 칸이 비어 있을 때만.
+
+        돌려주는 값: (화면x, 화면y) 또는 None(쓸 일이 아니다).
+        🚫 라스타바드 슬롯(`_slot_ver`)이 아니면 None — 악몽의섬·해적섬은 건드리지 않는다.
+        🚫 그 칸에 좌표·방향·녹화·그림 설정이 **하나라도 있으면** None (사용자 것이 먼저).
+        🧭 자리는 그 슬롯의 **첫 좌표가 있는 클라 창** 기준으로 비율 계산한다
+           (창 크기가 달라도 맞는다). 창을 못 찾으면 None — 모르면 누르지 않는다."""
+        try:
+            if key != RASTA_KEY or j != RASTA_AUTO_CELL - 1:
+                return None
+            if self._slot_ver(key, slot) != "라스타바드":
+                return None
+            co = slot.get("coords") or []
+            if j < len(co) and co[j]:
+                return None
+            ds = slot.get("dirs") or []
+            if j < len(ds) and ds[j]:
+                return None
+            if (slot.get("recs") or {}).get(str(j)):
+                return None
+            if cell_mode(key, slot, j):
+                return None
+            anc = next((c for c in co if c), None)
+            if not anc:
+                return None
+            got = grab_window(anc)
+            if not got:
+                self._rlog(f"[라스타] {key} #{si+1:02d} 🅰 오토 — 클라 창을 못 찾아 "
+                           f"누르지 않았다")
+                return None
+            big, (ox, oy) = got
+            w, h = big.shape[1], big.shape[0]
+            x = int(ox + round(RASTA_AUTO_REL[0] * w / float(RASTA_AUTO_BASE[0])))
+            y = int(oy + round(RASTA_AUTO_REL[1] * h / float(RASTA_AUTO_BASE[1])))
+            self._rlog(f"[라스타] {key} #{si+1:02d} 🅰 {j+1}번 좌표가 비어 있어 "
+                       f"**[AUTO] 기본 자리** ({x},{y}) 를 누른다 "
+                       f"(창 {w}x{h} · 창 안 {x-ox},{y-oy})")
+            return (x, y)
+        except Exception as e:
+            try:
+                self._rlog(f"[라스타] 🅰 오토 자리 계산 실패: {type(e).__name__}: {e}")
+            except Exception:
+                pass
+            return None
 
     def _card_do(self, key, j, si, slot, coords, name, lbl):
         """🃏 이 슬롯이 갈 **카드**를 찾아 누른다. 돌려주는 값: 계속해도 되나.
@@ -8543,6 +8637,10 @@ class IslandApp(tk.Tk):
         c = coords[j] if j < len(coords) else None
         rec = recs.get(str(j))
         did = False
+        # 🅰 라스타바드 마지막 [AUTO] — 슬롯에 그 칸이 비어 있으면 코드 기본 자리 (2026-11-14).
+        #    ⚠ 순차(`_run`)의 같은 처리와 **한 쌍이다.**
+        if not c and not d_ and not rec:
+            c = self._rasta_auto_xy(key, si, slot, j)
         # 😴 **좌표1 은 '절전모드 해제' 버튼** — 깨어 있으면 누르지 않는다.
         #    ⚠ 순차(`_run`)의 같은 자리와 **한 쌍이다** — 한쪽만 고치면
         #      '개별은 되는데 전체실행은 안 된다' 가 또 생긴다.
@@ -9473,6 +9571,11 @@ class IslandApp(tk.Tk):
                     rec = recs.get(str(j))
                     did = False
                     _skip1 = False        # 😴 좌표1(절전해제)을 건너뛰었나 — 로그용
+                    # 🅰 라스타바드 마지막 [AUTO] — 슬롯에 그 칸이 비어 있으면 코드
+                    #    기본 자리 (2026-11-14). ⚠ 웨이브(`_do_one_click`)와 **한 쌍.**
+                    _ax = None
+                    if not coords[j] and not d_ and not rec:
+                        _ax = self._rasta_auto_xy(key, si, slot, j)
                     # 🔄 **슬롯을 시작할 때 지금 화면에 맞는 칸부터** (2026-11-05).
                     #    ⚠ **칸 루프 맨 앞**이어야 한다 — 아래 `elif coords[j]`
                     #      분기 안에 두면 **카드·그림 칸(RASTA_FIRST)에는 적용되지
@@ -9558,6 +9661,18 @@ class IslandApp(tk.Tk):
                                 self._last_focus = si
                             click_at(*coords[j])
                         did = True
+                    elif _ax:
+                        # 🅰 라스타바드 [AUTO] 기본 자리 — 그 클라를 먼저 앞으로
+                        self._status.set(f"🅰 [{name}] {lbl} — AUTO")
+                        if self._last_focus != si:
+                            try:
+                                self._focus_client(si, _ax)
+                                time.sleep(random.uniform(0.25, 0.45))
+                            except Exception:
+                                pass
+                            self._last_focus = si
+                        click_at(*_ax)
+                        did = True
                     if rec and not self._stop_flag:
                         # 녹화는 클릭과 별개 — 이 자리 동작 후 녹화 재생
                         # (키보드 입력이라 그 클라가 앞에 있어야 들어간다)
@@ -9573,7 +9688,7 @@ class IslandApp(tk.Tk):
                     #    😴 깨어 있어 좌표1 을 건너뛴 때도 좌표를 찍어
                     #       **'눌렀다' 로 보였다** (2026-11-09 — 이 거짓 로그에
                     #       클로드가 속아 엉뚱한 곳을 팠다). 건너뛴 것은 그렇게 적는다.
-                    _cj = (coords[j] if j < len(coords) else None)                         if (_rm not in RASTA_FIRST and not _skip1) else None
+                    _cj = ((coords[j] if j < len(coords) else None) or _ax)                         if (_rm not in RASTA_FIRST and not _skip1) else None
                     _xy = (f" ({_cj[0]},{_cj[1]})" if _cj else
                            (f" [{_rm}]" if _rm in RASTA_FIRST else "")) + (" +녹화" if rec else "")
                     _act = "😴 깨어있어 좌표1 건너뜀" if _skip1 else f"실행{_xy}"
