@@ -523,7 +523,7 @@ try:
         pass
     _has = [(k, (k in _isrc2)) for k in ("_rec_here", "_rec_settle", "rasta_short",
                                          "rasta_find_pair", "_rasta_auto_xy",
-                                         "_preset_ship_overlay")]
+                                         "_preset_ship_overlay", "_rasta_align")]
     print("   코드: " + " · ".join("%s %s" % (k, "✔" if v else "🚫없음") for k, v in _has))
     # 🚢 프리셋 배포판 (2026-11-14) — 로컬은 칸6·27~34 를 이 파일 것으로 맞춘다
     _ship = None
@@ -625,7 +625,8 @@ try:
             if _sr:
                 print("        " + ("✔ 배포판과 같은 구성" if not _df else
                                     "🚨 **옛 프리셋 구성이다** " + " ".join(_df)
-                                    + " → 이 슬롯에서 프리셋 [라스타바드 …] 를 **다시 한 번** 누르세요"))
+                                    + " → `_rasta_align` 이 ✔ 면 **실행할 때 스스로 맞춘다**"
+                                      " (🚫없음 이면 🔄 업데이트부터)"))
         except Exception:
             pass
     if not _rs:

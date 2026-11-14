@@ -782,6 +782,13 @@ PRESET_SHIP_ON    = True
 PRESET_SHIP_FILE  = os.path.join(IMG_DIR, "rasta_preset.json")
 PRESET_SHIP_CELLS = (5,) + tuple(range(26, 34))      # 0부터 — 칸6 · 칸27~34
 _SHIP_CACHE = {"mt": None, "d": None}
+# 🚢 **라바 슬롯은 돌리기 전에 스스로 배포판으로 맞춘다** (2026-11-14 사용자:
+#    "여전히 로컬에서 라바가 안 되는데 … 프리셋 설정을 다시 해야 해?").
+#    프리셋 '정의' 만 배포판으로 맞춰서는 부족했다 — **이미 옛 프리셋으로 걸어둔 슬롯**은
+#    옛 구성 그대로라 프리셋을 슬롯마다 다시 눌러야 했고, 다시 눌러도 칸33 의
+#    **옛 녹화(지도를 여는 것)** 가 남아 입구를 누른 뒤 지도가 열렸다.
+#    🚫 메인에서는 하지 않는다 (메인 슬롯이 원본이다). 악몽의섬 슬롯은 건드리지 않는다.
+RASTA_ALIGN_ON = True
 _MAIN_CACHE = {"v": None}
 
 
@@ -5960,6 +5967,13 @@ class IslandApp(tk.Tk):
                 if it.get("off"):
                     _r1["off"] = list(it["off"])
                 slot.setdefault("rasta", {})[str(j)] = _r1
+                # ⏺ **그림 칸에 남아 있는 녹화는 숨긴다** (2026-11-14).
+                #    옛 라스타바드 프리셋은 칸33 이 ⏺ 녹화(지도를 여는 것)였다. 지금은 🖼 그림이다.
+                #    그 슬롯에 새 프리셋을 눌러도 옛 녹화가 **켜진 채** 남아, 입구를 누른 뒤
+                #    그 녹화가 재생됐다 (그림 칸은 '누른 뒤 녹화 재생' 을 한다).
+                #    🚫 지우지 않는다 — `recs_off` 로 숨긴다 (2026-08-10 규칙).
+                if it.get("act") in ("img", "see") and rc.get(str(j)):
+                    slot.setdefault("recs_off", {})[str(j)] = rc.pop(str(j))
                 # 🃏 프리셋이 **갈 카드**를 적어두면 슬롯에 옮긴다 (2026-11-07).
                 #    해적섬 프리셋이 이것으로 '해적섬' 을 적는다.
                 #    카드가 안 적힌 프리셋이면 **그 슬롯의 카드를 지운다** —
@@ -6015,10 +6029,14 @@ class IslandApp(tk.Tk):
                 #       숨긴 것은 그 칸을 ⏺ 로 쓰는 프리셋이 다시 넣어준다.
                 if rc.get(str(j)):
                     slot.setdefault("recs_off", {})[str(j)] = rc.pop(str(j))
-                else:
+                elif not (key == RASTA_KEY
+                          and RASTA_RANGE[0] <= j + 1 <= RASTA_RANGE[1]):
                     _b = (slot.get("recs_off") or {}).pop(str(j), None)
                     if _b:
                         rc[str(j)] = _b        # 숨겨둔 녹화 복원 (예전 그대로)
+                #   🚫 악몽의섬 칸26~35 에서는 되살리지 않는다 (2026-11-14) — 거기 숨겨진 것은
+                #      **라스타바드 녹화**다. 악몽의섬 프리셋을 두 번 누르면 그것이 되살아나
+                #      좌표를 누른 뒤 라스타바드 녹화가 재생됐다.
                 movs.append(j + 1)
         # 어떤 프리셋을 적용했는지 슬롯 이름에 남긴다 (미등록 → 프리셋 이름)
         nm = self._preset_full(key, pi)
@@ -9415,6 +9433,10 @@ class IslandApp(tk.Tk):
                 if it.get("off"):
                     _r1["off"] = list(it["off"])
                 ra[str(j)] = _r1
+                if act in ("img", "see") and rc.get(str(j)):     # ⏺ 옛 녹화는 숨긴다 (2026-11-14)
+                    slot.setdefault("recs_off", {})[str(j)] = rc.pop(str(j))
+                    done.append(u"%d🖼(옛 녹화 숨김)" % (j + 1))
+                    continue
                 done.append(u"%d%s" % (j + 1, u"🖼"))
                 continue
             ra.pop(str(j), None)              # 좌표/녹화 칸이면 그림 설정은 지운다
@@ -9465,6 +9487,110 @@ class IslandApp(tk.Tk):
         self._rlog(u"[전환] %s #%02d → '%s' 의 칸%d~%d 적용: %s"
                    % (key, si + 1, pname, lo, hi, u" ".join(done) or u"바뀐 칸 없음"))
         return True
+
+    @staticmethod
+    def _rec_sig(ev):
+        """녹화의 '모양' — 시각·종류·키 (마우스 좌표는 클라마다 달라서 뺀다)."""
+        out = []
+        for e in (ev or []):
+            try:
+                t = str(e[1])
+                out.append((round(float(e[0]), 2), t,
+                            e[2] if t in ("kd", "ku") else None))
+            except Exception:
+                out.append(None)
+        return out
+
+    def _rasta_diff(self, slot, ship):
+        """🚢 이 슬롯의 칸27~34 가 배포판(라스타바드)과 **다른 곳** — 같으면 빈 목록."""
+        out = []
+        ra = slot.get("rasta") or {}
+        rc = slot.get("recs") or {}
+        cs = slot.get("coords") or []
+        lo, hi = CARD_SWAP_CELLS
+        for j in range(lo - 1, hi):
+            k = str(j)
+            it = (ship or {}).get(k)
+            if not it:
+                continue
+            act = it.get("act")
+            if act in ("img", "see"):
+                r = ra.get(k) or {}
+                if r.get("mode") != act:
+                    out.append(u"칸%d(%s 아님)" % (j + 1, u"그림" if act == "img" else u"확인"))
+                elif ((r.get("pick") or "top") != (it.get("pick") or "top")
+                      or [int(x) for x in (r.get("off") or [0, 0])]
+                      != [int(x) for x in (it.get("off") or [0, 0])]):
+                    out.append(u"칸%d(📍 다름)" % (j + 1))
+                elif rc.get(k):
+                    out.append(u"칸%d(옛 녹화)" % (j + 1))
+            elif act == "rec":
+                if ra.get(k):
+                    out.append(u"칸%d(그림 설정이 남음)" % (j + 1))
+                elif not rc.get(k):
+                    out.append(u"칸%d(녹화 없음)" % (j + 1))
+                elif self._rec_sig(rc.get(k)) != self._rec_sig(it.get("ev")):
+                    out.append(u"칸%d(녹화 다름)" % (j + 1))
+            elif act == "del":
+                if ra.get(k) or rc.get(k) or (j < len(cs) and cs[j]):
+                    out.append(u"칸%d(비어야 한다)" % (j + 1))
+        return out
+
+    def _rasta_align(self, key, targets):
+        """🚢 로컬 — 이번에 돌 **라스타바드 슬롯**이 배포판과 다르면 돌리기 전에 맞춘다 → 맞춘 수.
+
+        프리셋을 슬롯마다 다시 누를 필요가 없다. 칸27~34 만 바꾼다 (`_swap_cells`) —
+        이름·앞 칸·물약·⏰·ON/OFF 는 그대로. 녹화는 지우지 않고 `recs_off` 로 숨긴다.
+        🚫 메인에서는 하지 않는다. 🚫 악몽의섬·해적섬 슬롯은 건드리지 않는다.
+        🚫 잠겨서 악몽의섬으로 바꿔 타는 중인 슬롯(`auto_home`)은 건드리지 않는다 —
+           되돌아올 때 `_swap_cells` 가 배포판 프리셋으로 넣는다."""
+        n = 0
+        try:
+            if not (RASTA_ALIGN_ON and PRESET_SHIP_ON) or key != RASTA_KEY or is_main_pc():
+                return 0
+            d = preset_ship_load()
+            if not d or d.get("key") != key:
+                return 0
+            ship = (d.get("floors") or {}).get("라스타바드")
+            if not ship:
+                return 0
+            lo, hi = CARD_SWAP_CELLS
+            for si, slot in targets:
+                try:
+                    if not slot_is_rasta(slot) or (slot.get("auto_home") or "").strip():
+                        continue
+                    df = self._rasta_diff(slot, ship)
+                    if not df:
+                        continue
+                    #   그 슬롯 이름의 프리셋 — 없으면 라스타바드 층의 첫 프리셋 (칸27~34 는 층이 같으면 같다)
+                    pname = (slot.get("name") or "").strip()
+                    _pi, _pr = self._preset_by_name(key, pname)
+                    if _pr is None or (_pr.get("floor") or "").strip() != "라스타바드":
+                        pname = ""
+                        for _i2, _p2 in enumerate(self._presets(key)):
+                            if (_p2.get("floor") or "").strip() == "라스타바드":
+                                pname = self._preset_full(key, _i2)
+                                break
+                    if not pname:
+                        self._rlog(u"[프리셋] ⚠ %s #%02d 라스타바드 프리셋을 못 찾아 맞추지 못했다 (%s)"
+                                   % (key, si + 1, u" ".join(df)))
+                        continue
+                    self._rlog(u"[프리셋] 🚢 %s #%02d 라스타바드 슬롯이 **옛 구성**이다 (%s) "
+                               u"→ 배포판(%s)으로 맞춘다" % (key, si + 1, u" ".join(df), d.get("ver")))
+                    if self._swap_cells(key, si, slot, pname, lo, hi):
+                        n += 1
+                        left = self._rasta_diff(slot, ship)
+                        if left:
+                            self._rlog(u"[프리셋] ⚠ %s #%02d 맞춘 뒤에도 다르다: %s"
+                                       % (key, si + 1, u" ".join(left)))
+                except Exception as e:
+                    self._rlog(u"[프리셋] ⚠ %s #%02d 맞추다 오류: %s" % (key, si + 1, str(e)[:80]))
+        except Exception as e:
+            try:
+                self._rlog(u"[프리셋] ⚠ 라스타바드 슬롯 맞추기 오류: %s" % str(e)[:80])
+            except Exception:
+                pass
+        return n
 
     def _omanst_floor_click(self, key, si, slot, j):
         """🏢 오만의탑 칸23 — 슬롯이 고른 **갈 층** 줄을 눌렀으면 True.
@@ -10564,6 +10690,8 @@ class IslandApp(tk.Tk):
                     targets = [(si, _s) for si, _s in targets if si not in _bs]
                     self._rlog(f"🚫 --card {_cf0} — 그 던전을 안 가는 캐릭 "
                                f"{sorted(x + 1 for x in _bs)} 는 뺀다")
+            # 🚢 로컬 — 라스타바드 슬롯이 옛 구성이면 **돌리기 전에** 배포판으로 맞춘다 (2026-11-14)
+            self._rasta_align(key, targets)
             # 💧 이번에 실제로 돈 슬롯 — 끝난 뒤 '물약 0개' 를 확인할 대상이다
             self._p0_ran = [si for si, _s in targets]
             # 🧭 이 슬롯들을 **이 던전으로 실행했다** 고 적는다 (2026-11-12).
