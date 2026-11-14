@@ -8195,6 +8195,38 @@ class IslandApp(tk.Tk):
         except Exception:
             return 999.0
 
+    def _rec_here(self, key, si, slot, j, rec):
+        """🩹 이 칸의 녹화가 **다른 클라 좌표**면 이 클라로 옮긴다 → 틀 녹화.
+
+        라스타바드 슬롯의 칸26~35 만 본다. 첫 마우스 좌표가 이 슬롯 클라 창 안이면
+        그대로다. **다른 클라 창 안**이면 그 차이만큼 옮기고, 슬롯에도 고쳐 적는다.
+        🚫 클라 16개를 못 찾거나 어느 클라 것도 아니면 건드리지 않는다."""
+        try:
+            if not rec or key != RASTA_KEY:
+                return rec
+            if not (RASTA_RANGE[0] <= j + 1 <= RASTA_RANGE[1]):
+                return rec
+            if self._slot_ver(key, slot) != "라스타바드":
+                return rec
+            rects = self._client_rects_by_slot()
+            if not rects or not (0 <= si < len(rects)):
+                return rec
+            fixed = self._rec_to_slot(rec, rects, si, si)
+            if [list(e) for e in fixed] == [list(e) for e in rec]:
+                return rec
+            _m0 = next((e for e in rec if len(e) >= 4 and str(e[1]) in ("md", "mu", "mm")), None)
+            _m1 = next((e for e in fixed if len(e) >= 4 and str(e[1]) in ("md", "mu", "mm")), None)
+            self._rlog(f"[녹화] 🩹 {key} #{si+1:02d} {j+1}번 녹화가 **다른 클라 좌표**였다 "
+                       f"({_m0[2]},{_m0[3]}) → 이 클라로 옮겨서 튼다 ({_m1[2]},{_m1[3]})")
+            try:
+                slot.setdefault("recs", {})[str(j)] = fixed
+                save_cfg(self.cfg)
+            except Exception:
+                pass
+            return fixed
+        except Exception:
+            return rec
+
     def _rec_settle_anchor(self, key, slot, j):
         """🧭 이 칸의 녹화는 '도착을 보고 방향키' 로 트나 → 볼 자리(anchor) 또는 None.
 
@@ -9134,7 +9166,14 @@ class IslandApp(tk.Tk):
             if act == "rec":
                 cs[j] = None
                 ds[j] = None
-                rc[str(j)] = list(it.get("ev") or [])
+                # 🚨 **그 슬롯 클라로 옮긴다** (2026-11-14). 프리셋 녹화는 기준슬롯(src)에서
+                #    찍은 절대좌표다. 그대로 넣으면 **늘 그 기준 클라를 누른다** —
+                #    라스타바드가 잠겨 악몽의섬으로 바뀌었다가 **되돌아온 슬롯**은
+                #    칸27 의 [확인] 을 다른 클라에 눌러 그 뒤가 전부 어긋났다
+                #    (라스타바드는 토 07시에 열린다 → 그 전에 돈 라바 슬롯이 전부 이 길을 탔다).
+                #    `_apply_preset` 은 11-07 에 고쳤는데 여기만 빠져 있었다.
+                rc[str(j)] = self._rec_to_slot(
+                    it.get("ev"), rects, max(0, int(pr.get("src", 1)) - 1), si)
                 (slot.get("recs_off") or {}).pop(str(j), None)
                 done.append(u"%d⏺%d" % (j + 1, len(rc[str(j)])))
             elif act == "del":
@@ -9387,7 +9426,7 @@ class IslandApp(tk.Tk):
         if d_ and d_[0] == "⏺":
             d_ = None
         c = coords[j] if j < len(coords) else None
-        rec = recs.get(str(j))
+        rec = self._rec_here(key, si, slot, j, recs.get(str(j)))
         did = False
         # 🅰 라스타바드 마지막 [AUTO] — 슬롯에 그 칸이 비어 있으면 코드 기본 자리 (2026-11-14).
         #    ⚠ 순차(`_run`)의 같은 처리와 **한 쌍이다.**
@@ -10330,7 +10369,7 @@ class IslandApp(tk.Tk):
                     d_ = dirs[j] if j < len(dirs) else None
                     if d_ and d_[0] == "⏺":   # 구버전 데이터 호환 — 이제 녹화는 별도 버튼
                         d_ = None
-                    rec = recs.get(str(j))
+                    rec = self._rec_here(key, si, slot, j, recs.get(str(j)))
                     did = False
                     _skip1 = False        # 😴 좌표1(절전해제)을 건너뛰었나 — 로그용
                     # 🅰 라스타바드 마지막 [AUTO] — 슬롯에 그 칸이 비어 있으면 코드

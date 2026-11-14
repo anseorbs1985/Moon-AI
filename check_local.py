@@ -497,6 +497,123 @@ try:
 except Exception:
     print("   🗒 repeat_log.txt (없다 — 섬/던전을 한 번도 안 돌렸다)")
 
+# ── ⑨-2 🗡 라스타바드 (2026-11-14) ─────────────────────────────────
+# 사용자: *"여기에서 라바는 잘되는데 로컬에서 안되는 상황임"*
+# 메인에서는 로컬 화면도 기록도 볼 수 없다 — 원인이 갈리는 것을 한 화면에 모은다.
+print("\n⑨-2 🗡 라스타바드 — 슬롯 설정 · 그림 · 최근 기록")
+_RK = "토요일_악몽의섬"
+try:
+    _ct = os.path.join(DESK, "click_templates")
+    _need = ["rasta_28.png", "rasta_28_meta.json", "rasta_29.png", "rasta_31.png",
+             "rasta_31_meta.json", "rasta_32.png", "rasta_33.png", "rasta_33_meta.json",
+             "rasta_34.png", "rasta_36.png", "rasta_36_thr.json", "card_라스타바드.png"]
+    _miss = [n for n in _need if not os.path.exists(os.path.join(_ct, n))]
+    print("   그림: " + ("✔ 필요한 것이 다 있다" if not _miss
+                         else "🚫 **없는 것** " + ", ".join(_miss) + "  → 🔄 업데이트"))
+    for _n in ("rasta_28_meta.json", "rasta_33_meta.json"):
+        try:
+            print("     %s = %s" % (_n, json.dumps(json.load(io.open(
+                os.path.join(_ct, _n), encoding="utf-8")), ensure_ascii=False)))
+        except Exception:
+            pass
+    _isrc2 = ""
+    try:
+        _isrc2 = io.open(os.path.join(DESK, "lineagem_island.py"), encoding="utf-8").read()
+    except Exception:
+        pass
+    _has = [(k, (k in _isrc2)) for k in ("_rec_here", "_rec_settle", "rasta_short",
+                                         "rasta_find_pair", "_rasta_auto_xy")]
+    print("   코드: " + " · ".join("%s %s" % (k, "✔" if v else "🚫없음") for k, v in _has))
+    # 지금 리니지M 창 격자 (녹화 좌표가 자기 클라 안인지 보려고)
+    _gr = []
+    try:
+        import ctypes
+        from ctypes import wintypes
+        _u = ctypes.windll.user32
+        _ws = []
+        def _cb(h, _l):
+            if _u.IsWindowVisible(h):
+                b = ctypes.create_unicode_buffer(200); _u.GetWindowTextW(h, b, 200)
+                c = ctypes.create_unicode_buffer(60); _u.GetClassNameW(h, c, 60)
+                if b.value.startswith(u"리니지M l") and c.value == "GLFW30":
+                    r = wintypes.RECT(); _u.GetWindowRect(h, ctypes.byref(r))
+                    if r.right - r.left > 100:
+                        _ws.append((r.left, r.top, r.right, r.bottom))
+            return True
+        _u.EnumWindows(ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)(_cb), 0)
+        _xs = sorted(set(w[0] for w in _ws))
+        _cols = []
+        for x in _xs:
+            if not _cols or x - _cols[-1][-1] > 200:
+                _cols.append([x])
+            else:
+                _cols[-1].append(x)
+        for col in _cols[:4]:
+            _gr += sorted([w for w in _ws if w[0] in col], key=lambda w: w[1])[:4]
+        print("   리니지M 창 %d개 · 격자 %d개 · 크기 %s" % (
+            len(_ws), len(_gr), sorted(set("%dx%d" % (w[2] - w[0], w[3] - w[1]) for w in _ws))))
+    except Exception as _e:
+        print("   (창을 못 읽었다 %s)" % str(_e)[:40])
+    _sl = _id.get(_RK) or []
+    _rs = []
+    for _i, _s in enumerate(_sl):
+        if not isinstance(_s, dict):
+            continue
+        _ra = _s.get("rasta") or {}
+        if not any(str(k).isdigit() and 26 <= int(k) + 1 <= 35 for k in _ra):
+            if _s.get("auto_home"):
+                print("   #%02d 🔁 **악몽의섬으로 바뀌어 있다** (원래 '%s' — 라스타바드가 열리면 되돌아온다)"
+                      % (_i + 1, _s.get("auto_home")))
+            continue
+        _rs.append(_i)
+        _rc = _s.get("recs") or {}
+        _bad = []
+        for _k, _ev in sorted(_rc.items(), key=lambda kv: int(kv[0])):
+            if not (26 <= int(_k) + 1 <= 35):
+                continue
+            _m = [(e[2], e[3]) for e in _ev if len(e) >= 4 and e[1] in ("md", "mu", "mm")]
+            if _m and len(_gr) == 16:
+                _r = _gr[_i]
+                if not (_r[0] <= _m[0][0] < _r[2] and _r[1] <= _m[0][1] < _r[3]):
+                    _wh = next((n + 1 for n, q in enumerate(_gr)
+                                if q[0] <= _m[0][0] < q[2] and q[1] <= _m[0][1] < q[3]), 0)
+                    _bad.append("칸%d→#%02d" % (int(_k) + 1, _wh))
+        _co = _s.get("coords") or []
+        print("   #%02d %-16s %s · 그림칸 %s · 녹화칸 %s · 칸29~35 좌표 %s%s%s" % (
+            _i + 1, (_s.get("name") or "")[:16],
+            ("ON" if _s.get("enabled", True) else "OFF"),
+            ",".join(str(int(k) + 1) for k in sorted(_ra, key=int)),
+            ",".join(str(int(k) + 1) for k in sorted(_rc, key=int)) or "없음",
+            [j + 1 for j in range(28, 35) if j < len(_co) and _co[j]] or "없음",
+            (" · 🗡첫 포털만" if _s.get("rasta_to") == 1 else ""),
+            (("  🚨 **녹화가 다른 클라 좌표** " + " ".join(_bad)
+              + " (새 코드는 틀 때 스스로 고친다)") if _bad else "")))
+    if not _rs:
+        print("   ⚠ 라스타바드 프리셋이 걸린 슬롯이 **없다** — 그 슬롯에서 프리셋 [라스타바드 …] 를 눌러야 한다")
+    _pp = (_id.get("_presets") or {}).get(_RK) or []
+    for _pi, _p in enumerate(_pp):
+        if isinstance(_p, dict) and (_p.get("floor") or "") == u"라스타바드":
+            _it = _p.get("items") or {}
+            print("   🧪 프리셋 '%s' src %s · 칸 %s" % (
+                _p.get("name"), _p.get("src"),
+                " ".join("%d%s" % (int(k) + 1, {"img": "🖼", "see": "👁", "rec": "⏺", "del": "✖",
+                                                "card": "🃏"}.get((_it[k] or {}).get("act"), "↗"))
+                         for k in sorted(_it, key=int)) or "(비어 있다)"))
+    _rl2 = os.path.join(LA, "repeat_log.txt")
+    _ls2 = [l.rstrip() for l in io.open(_rl2, encoding="utf-8", errors="replace").read().split("\n")
+            if (u"[라스타]" in l or u"[전환]" in l or u"[녹화]" in l or u"[중단]" in l
+                or (u"[카드]" in l and _RK in l) or u"[시작맞춤]" in l)]
+    print("   🗒 라스타바드·카드·전환 기록 마지막 24줄 (어느 칸에서 멈췄는지가 여기 있다):")
+    for l in _ls2[-24:]:
+        print("     " + l[:150])
+    _sd = os.path.join(LA, "click_templates", "_rasta")
+    _fs = sorted(glob.glob(os.path.join(_sd, "*.png")), key=os.path.getmtime)
+    print("   🗂 멈춘 화면 %d장 (%s)" % (len(_fs), _sd))
+    for _p in _fs[-8:]:
+        print("     " + os.path.basename(_p))
+except Exception as _e:
+    print("   (라스타바드 항목 오류: %s)" % str(_e)[:80])
+
 # ── ⑩ 업데이트 기록 ────────────────────────────────────────────────
 ul = os.path.join(LA, "update_log.txt")
 print("\n⑩ 업데이트 기록 마지막 40줄  (%s)" % ul)
