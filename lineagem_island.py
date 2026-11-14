@@ -762,6 +762,155 @@ def cell_mode(key, slot, j):
         return CARD_MODE
     return m
 RASTA_MODES = (RASTA_CLICK, RASTA_SEE, CARD_MODE)
+
+# ── 🚢 프리셋 배포판 (2026-11-14 사용자 지시) ─────────────────────────
+#    사용자: *"내가 원하는 건 **프리셋 수정**이야. 그래야지 **다른 로컬에도 적용**할 수 있잖아.
+#    다른 컴퓨터에 라바를 해도 적용이 안 되는 상황이고 개판이야"*
+#    🚨 프리셋(어느 칸이 그림/확인/녹화인가 · 녹화 내용)은 `island_coords.json` 의
+#       `_presets` 에 있다 = **컴퓨터마다 따로**다. 코드와 그림은 🔄 로 가는데
+#       프리셋은 안 간다. 실측(git) — 11-04 에 뿌려진 라스타바드 프리셋은
+#       **칸33 ⏺(지도를 여는 녹화) · 칸34 좌표** 인 옛 구성이고, 지금 구성(칸33 🖼 입구 ·
+#       칸34 👁 지하 통제실)은 11-09 에 **5분** 열렸을 때만 갔다.
+#       → 로컬에서 프리셋을 눌러도 옛 구성이 걸려 라바가 안 됐다.
+#    ✅ 그래서 **던전을 가르는 칸(칸6 카드 · 칸27~34)** 만 파일로 배포한다.
+#       `click_templates/rasta_preset.json` — 메인이 프리셋을 저장할 때 스스로 만든다.
+#       로컬은 `_presets()` 가 그 칸을 이 파일 것으로 맞춘다 (물약 칸 등 나머지는 로컬 것).
+#       좌표는 전부 **창 안 상대좌표 + 기준 창 크기**라 어느 클라에 눌러도 맞는다.
+#    🚫 메인에서는 덮지 않는다 — 메인 프리셋이 원본이다.
+#    🚫 다른 칸(물약 17·18 등)·다른 던전은 건드리지 않는다.
+PRESET_SHIP_ON    = True
+PRESET_SHIP_FILE  = os.path.join(IMG_DIR, "rasta_preset.json")
+PRESET_SHIP_CELLS = (5,) + tuple(range(26, 34))      # 0부터 — 칸6 · 칸27~34
+_SHIP_CACHE = {"mt": None, "d": None}
+_MAIN_CACHE = {"v": None}
+
+
+def is_main_pc():
+    """이 컴퓨터가 메인인가 (`local_config.json` 의 `is_main`). 못 읽으면 False."""
+    if _MAIN_CACHE["v"] is None:
+        v = False
+        try:
+            with open(os.path.join(BASE, "local_config.json"), encoding="utf-8-sig") as f:
+                v = bool((json.load(f) or {}).get("is_main"))
+        except Exception:
+            v = False
+        _MAIN_CACHE["v"] = v
+    return _MAIN_CACHE["v"]
+
+
+def preset_ship_load():
+    """배포판을 읽는다 (파일 시각이 바뀔 때만 다시). 없거나 깨졌으면 None."""
+    try:
+        mt = os.path.getmtime(PRESET_SHIP_FILE)
+    except Exception:
+        return None
+    if _SHIP_CACHE["mt"] != mt:
+        d = None
+        try:
+            with open(PRESET_SHIP_FILE, encoding="utf-8-sig") as f:
+                d = json.load(f)
+            if not (isinstance(d, dict) and isinstance(d.get("floors"), dict)
+                    and d.get("key")):
+                d = None
+        except Exception:
+            d = None
+        _SHIP_CACHE["mt"] = mt
+        _SHIP_CACHE["d"] = d
+    return _SHIP_CACHE["d"]
+
+
+def preset_ship_build(key, presets, rects):
+    """메인 프리셋 → 배포판 dict. 못 만들면 (None, 이유).
+
+    층(악몽의섬·라스타바드·해적섬)마다 **그 층의 첫 프리셋**에서 칸6·27~34 를 떠온다.
+    🧭 녹화의 마우스 좌표는 **찍힌 클라 창 안 상대좌표**로 바꾼다 (`evrel` = 그 창 크기).
+       좌표 칸(`mov`)에는 기준 창 크기(`bw`/`bh`)를 같이 적는다."""
+    if not rects:
+        return None, u"리니지M 창 16개를 못 찾았다"
+    floors = {}
+    for pr in (presets or []):
+        fl = (pr.get("floor") or "").strip()
+        if not fl or fl in floors:
+            continue
+        its = pr.get("items") or {}
+        out = {}
+        for j in PRESET_SHIP_CELLS:
+            it = its.get(str(j))
+            if not it:
+                continue
+            act = it.get("act")
+            if act == "rec":
+                ev = [list(e) for e in (it.get("ev") or [])]
+                if it.get("evrel"):
+                    out[str(j)] = {"act": "rec", "ev": ev, "evrel": list(it["evrel"])}
+                    continue
+                m0 = next((e for e in ev if len(e) >= 4 and str(e[1]) in ("md", "mu", "mm")), None)
+                r = None
+                if m0 is not None:
+                    r = next((q for q in rects if q[0] <= int(m0[2]) < q[2]
+                              and q[1] <= int(m0[3]) < q[3]), None)
+                    if r is None:
+                        return None, u"'%s %s' 칸%d 녹화가 어느 클라 것인지 모른다" % (
+                            fl, pr.get("name"), j + 1)
+                    for e in ev:
+                        if len(e) >= 4 and str(e[1]) in ("md", "mu", "mm"):
+                            e[2] = int(e[2]) - r[0]
+                            e[3] = int(e[3]) - r[1]
+                _w = (r[2] - r[0]) if r else (rects[0][2] - rects[0][0])
+                _h = (r[3] - r[1]) if r else (rects[0][3] - rects[0][1])
+                out[str(j)] = {"act": "rec", "ev": ev, "evrel": [int(_w), int(_h)]}
+            elif act in RASTA_MODES:
+                o = {"act": act, "pick": it.get("pick") or "top"}
+                if it.get("off"):
+                    o["off"] = list(it["off"])
+                if act == CARD_MODE and (it.get("card") or "").strip():
+                    o["card"] = it["card"].strip()
+                out[str(j)] = o
+            elif act == "del":
+                out[str(j)] = {"act": "del"}
+            else:
+                if pr.get("abs"):
+                    return None, u"'%s %s' 는 절대좌표 프리셋이라 못 옮긴다" % (fl, pr.get("name"))
+                _si = max(0, int(pr.get("src", 1)) - 1)
+                _r = rects[_si] if _si < len(rects) else rects[0]
+                out[str(j)] = {"act": "mov", "rel": list(it.get("rel") or [0, 0]),
+                               "bw": int(it.get("bw") or pr.get("bw") or (_r[2] - _r[0])),
+                               "bh": int(it.get("bh") or pr.get("bh") or (_r[3] - _r[1]))}
+        if out:
+            floors[fl] = out
+    if not floors:
+        return None, u"떠올 칸이 없다"
+    return {"key": key, "cells": list(PRESET_SHIP_CELLS), "floors": floors}, ""
+
+
+def preset_ship_write(d):
+    """배포판을 쓴다 — 내용이 같으면 안 쓴다. 저장소 폴더(Moon-AI)가 있으면 거기도.
+    (메인에서 🔄 를 누르면 저장소 것이 바탕화면을 덮으므로 둘을 같이 맞춘다.)"""
+    body = dict(d)
+    wrote = []
+    for p in (PRESET_SHIP_FILE,
+              os.path.join(BASE, "Moon-AI", "click_templates", "rasta_preset.json")):
+        try:
+            if not os.path.isdir(os.path.dirname(p)):
+                continue
+            old = None
+            try:
+                with open(p, encoding="utf-8-sig") as f:
+                    old = json.load(f)
+            except Exception:
+                old = None
+            if isinstance(old, dict) and {k: v for k, v in old.items() if k != "ver"} == \
+                    {k: v for k, v in body.items() if k != "ver"}:
+                continue
+            body["ver"] = time.strftime("%Y%m%d_%H%M%S")
+            tmp = p + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(body, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, p)
+            wrote.append(p)
+        except Exception:
+            pass
+    return wrote
 # 좌표 **대신 먼저** 처리하는 모드 (지금은 그림 자리가 전부 여기에 든다)
 RASTA_FIRST = RASTA_MODES      # 전부 좌표 **대신** 처리한다
 
@@ -4618,7 +4767,95 @@ class IslandApp(tk.Tk):
                 for k2, rel in (pr.get("mods") or {}).items():
                     items[str(k2)] = {"act": "mov", "rel": list(rel)}
                 pr["items"] = items
+        self._preset_ship_overlay(key, lst)
         return lst
+
+    def _preset_ship_overlay(self, key, lst):
+        """🚢 로컬 — 던전을 가르는 칸(칸6·27~34)을 **배포판**으로 맞춘다 (2026-11-14).
+
+        메인에서는 아무것도 하지 않는다 (메인 프리셋이 원본). 파일이 없거나 던전이
+        다르면 아무것도 하지 않는다. 물약 칸 등 **다른 칸은 로컬 것 그대로**다."""
+        try:
+            if not PRESET_SHIP_ON or is_main_pc():
+                return 0
+            d = preset_ship_load()
+            if not d or d.get("key") != key:
+                return 0
+            n = 0
+            for pr in lst:
+                fl = (pr.get("floor") or "").strip()
+                ship = (d.get("floors") or {}).get(fl)
+                if not ship:
+                    continue
+                its = pr.setdefault("items", {})
+                for j in (d.get("cells") or PRESET_SHIP_CELLS):
+                    k = str(j)
+                    new = ship.get(k)
+                    if new is None:
+                        if k in its:
+                            its.pop(k, None)
+                            n += 1
+                    elif its.get(k) != new:
+                        its[k] = json.loads(json.dumps(new))
+                        n += 1
+            if n and getattr(self, "_ship_logged", None) != d.get("ver"):
+                self._ship_logged = d.get("ver")
+                self._rlog(u"[프리셋] 🚢 %s 프리셋의 칸6·27~34 를 **배포판(%s)** 으로 맞췄다 "
+                           u"(%d칸 · 물약 칸 등 나머지는 이 컴퓨터 것 그대로)"
+                           % (key, d.get("ver"), n))
+            return n
+        except Exception as e:
+            try:
+                self._rlog(u"[프리셋] ⚠ 배포판을 못 맞췄다: %s" % str(e)[:80])
+            except Exception:
+                pass
+            return 0
+
+    def _preset_ship_export(self, key):
+        """🚢 메인 — 프리셋을 저장하면 배포판 파일을 스스로 다시 만든다."""
+        try:
+            if not PRESET_SHIP_ON or key != RASTA_KEY or not is_main_pc():
+                return ""
+            d, why = preset_ship_build(key, self.cfg.get("_presets", {}).get(key) or [],
+                                       self._client_rects_by_slot())
+            if d is None:
+                self._rlog(u"[프리셋] ⚠ 배포판을 못 만들었다 — %s" % why)
+                return u"   ⚠ 배포판을 못 만들었다 (%s)" % why
+            w = preset_ship_write(d)
+            if w:
+                self._rlog(u"[프리셋] 🚢 배포판을 새로 썼다 (%d곳) — 로컬은 🔄 업데이트로 받는다 "
+                           u"(올려야 간다)" % len(w))
+                return u"   🚢 배포판 갱신 (올려야 로컬에 간다)"
+            return ""
+        except Exception as e:
+            try:
+                self._rlog(u"[프리셋] ⚠ 배포판 오류: %s" % str(e)[:80])
+            except Exception:
+                pass
+            return ""
+
+    def _rec_item_ev(self, it, pr, rects, idx):
+        """프리셋의 ⏺ 녹화를 **그 슬롯 클라 좌표**로 → (이벤트, 됐나).
+
+        `evrel`(창 안 상대좌표 · 배포판)이면 그 클라 창 크기 비율로 옮긴다.
+        아니면 예전처럼 기준슬롯(src) 절대좌표에서 옮긴다 (`_rec_to_slot`)."""
+        ev = it.get("ev") or []
+        wr = it.get("evrel")
+        if not wr:
+            return self._rec_to_slot(ev, rects, max(0, int(pr.get("src", 1)) - 1), idx), True
+        if not rects or not (0 <= idx < len(rects)):
+            return None, False
+        L, T, R, B = rects[idx][0], rects[idx][1], rects[idx][2], rects[idx][3]
+        kx = (R - L) / float(wr[0] or 1)
+        ky = (B - T) / float(wr[1] or 1)
+        out = []
+        for e in ev:
+            e = list(e)
+            if len(e) >= 4 and str(e[1]) in ("md", "mu", "mm"):
+                e[2] = int(round(float(e[2]) * kx)) + L
+                e[3] = int(round(float(e[3]) * ky)) + T
+            out.append(e)
+        return out, True
 
     def _preset_short(self, key, pi):
         """버튼용 이름 (없으면 P번호)."""
@@ -5597,6 +5834,15 @@ class IslandApp(tk.Tk):
                        + " 좌표는 각자 것 그대로)" if _kp else ""))
         elif base_warn:
             msg += "   " + base_warn
+        # 🚢 던전을 가르는 칸(칸6·27~34)은 배포판을 따른다 (2026-11-14)
+        try:
+            if key == RASTA_KEY and PRESET_SHIP_ON:
+                if is_main_pc():
+                    msg += self._preset_ship_export(key)
+                elif preset_ship_load():
+                    msg += "   🚢 칸6·27~34 는 **메인 배포판**을 따릅니다 (여기서 고쳐도 되돌아갑니다)"
+        except Exception:
+            pass
         self._status.set(msg)
 
     def _refresh_preset_btns(self, key):
@@ -5692,6 +5938,7 @@ class IslandApp(tk.Tk):
         rc = slot.setdefault("recs", {})
         rects = self._client_rects_by_slot()
         dels, movs = [], []
+        _norect = False
         for k2, it in items.items():
             j = int(k2)
             if j >= nclk: continue
@@ -5727,13 +5974,17 @@ class IslandApp(tk.Tk):
                 continue
             elif it.get("act") == "rec":
                 # 이 번호는 좌표 대신 '동영상(녹화)'을 쓴다
-                cs[j] = None
-                if j < len(ds): ds[j] = None
                 #   🚨 **그 슬롯 클라로 옮긴다** (2026-11-07) — 안 하면 늘
                 #      기준슬롯(src) 클라를 누른다. `mov` 와 같은 규칙.
-                rc[str(j)] = self._rec_to_slot(
-                    it.get("ev"), rects,
-                    max(0, int(pr.get("src", 1)) - 1), idx)
+                #   🚢 배포판 녹화(`evrel`)는 창 안 상대좌표라 **클라 창을 알아야** 한다.
+                #      못 찾으면 그 칸은 **건드리지 않고** 알린다 (엉뚱한 곳을 누르게 두지 않는다).
+                _ev1, _ok1 = self._rec_item_ev(it, pr, rects, idx)
+                if not _ok1:
+                    _norect = True
+                    continue
+                cs[j] = None
+                if j < len(ds): ds[j] = None
+                rc[str(j)] = _ev1
                 (slot.get("recs_off") or {}).pop(str(j), None)
                 movs.append(j + 1)
             else:
@@ -5746,7 +5997,8 @@ class IslandApp(tk.Tk):
                     #    🚫 `bw`/`bh`(찍을 때의 창 크기) 가 **없으면 보정하지 않는다** —
                     #       옛 프리셋이 몇 기준인지 알 수 없으므로 예전 그대로 둔다.
                     _L, _T, _R, _B = rects[idx][0], rects[idx][1],                         rects[idx][2], rects[idx][3]
-                    _bw, _bh = pr.get("bw"), pr.get("bh")
+                    _bw = it.get("bw") or pr.get("bw")     # 🚢 배포판 칸은 칸마다 기준 창이 적혀 있다
+                    _bh = it.get("bh") or pr.get("bh")
                     if _bw and _bh:
                         cs[j] = [int(round(rel[0] * (_R - _L) / float(_bw))) + _L,
                                  int(round(rel[1] * (_B - _T) / float(_bh))) + _T]
@@ -5814,6 +6066,9 @@ class IslandApp(tk.Tk):
                                    % (idx + 1, nm, _fl2))
             except Exception:
                 pass
+        if _norect:
+            self._rlog(u"[프리셋] ⚠ %s #%02d '%s' — 리니지M 창 16개를 못 찾아 **녹화 칸을 못 넣었다**. "
+                       u"클라를 띄운 뒤 프리셋을 다시 눌러주세요" % (key, idx + 1, nm))
         self._paste_ts = time.time()      # 늦게 오는 이름칸 저장이 덮어쓰지 않게
         slot["name"] = nm
         try:
@@ -9172,8 +9427,12 @@ class IslandApp(tk.Tk):
                 #    칸27 의 [확인] 을 다른 클라에 눌러 그 뒤가 전부 어긋났다
                 #    (라스타바드는 토 07시에 열린다 → 그 전에 돈 라바 슬롯이 전부 이 길을 탔다).
                 #    `_apply_preset` 은 11-07 에 고쳤는데 여기만 빠져 있었다.
-                rc[str(j)] = self._rec_to_slot(
-                    it.get("ev"), rects, max(0, int(pr.get("src", 1)) - 1), si)
+                _ev1, _ok1 = self._rec_item_ev(it, pr, rects, si)
+                if not _ok1:
+                    self._rlog(u"[전환] %s #%02d 칸%d 녹화를 못 옮겼다 (창을 못 찾음)"
+                               % (key, si + 1, j + 1))
+                    return False
+                rc[str(j)] = _ev1
                 (slot.get("recs_off") or {}).pop(str(j), None)
                 done.append(u"%d⏺%d" % (j + 1, len(rc[str(j)])))
             elif act == "del":
@@ -9184,8 +9443,18 @@ class IslandApp(tk.Tk):
                 done.append(u"%d✖" % (j + 1))
             else:                             # mov — 좌표 클릭
                 rel = it.get("rel") or [0, 0]
-                cs[j] = ([rel[0] + rects[si][0], rel[1] + rects[si][1]]
-                         if (rects and not pr.get("abs")) else [rel[0], rel[1]])
+                if rects and not pr.get("abs"):
+                    # 📐 기준 창 크기가 적혀 있으면 비율로 맞춘다 (`_apply_preset` 과 같은 규칙)
+                    _L, _T, _R, _B = rects[si][0], rects[si][1], rects[si][2], rects[si][3]
+                    _bw = it.get("bw") or pr.get("bw")
+                    _bh = it.get("bh") or pr.get("bh")
+                    if _bw and _bh:
+                        cs[j] = [int(round(rel[0] * (_R - _L) / float(_bw))) + _L,
+                                 int(round(rel[1] * (_B - _T) / float(_bh))) + _T]
+                    else:
+                        cs[j] = [rel[0] + _L, rel[1] + _T]
+                else:
+                    cs[j] = [rel[0], rel[1]]
                 ds[j] = None
                 if rc.get(str(j)):            # 다른 프리셋이 넣어둔 녹화는 숨긴다
                     slot.setdefault("recs_off", {})[str(j)] = rc.pop(str(j))

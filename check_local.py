@@ -522,8 +522,21 @@ try:
     except Exception:
         pass
     _has = [(k, (k in _isrc2)) for k in ("_rec_here", "_rec_settle", "rasta_short",
-                                         "rasta_find_pair", "_rasta_auto_xy")]
+                                         "rasta_find_pair", "_rasta_auto_xy",
+                                         "_preset_ship_overlay")]
     print("   코드: " + " · ".join("%s %s" % (k, "✔" if v else "🚫없음") for k, v in _has))
+    # 🚢 프리셋 배포판 (2026-11-14) — 로컬은 칸6·27~34 를 이 파일 것으로 맞춘다
+    _ship = None
+    try:
+        _ship = json.load(io.open(os.path.join(_ct, "rasta_preset.json"), encoding="utf-8-sig"))
+        _sf = (_ship.get("floors") or {})
+        print("   🚢 프리셋 배포판: ✔ ver %s · %s" % (_ship.get("ver"), " / ".join(
+            "%s %s" % (f, " ".join("%d%s" % (int(k) + 1, {"img": "🖼", "see": "👁", "rec": "⏺", "del": "✖",
+                                                          "card": "🃏"}.get(v.get("act"), "↗"))
+                                   for k, v in sorted(_sf[f].items(), key=lambda kv: int(kv[0]))))
+            for f in _sf)))
+    except Exception:
+        print("   🚢 프리셋 배포판: 🚫 **없다** (click_templates\\rasta_preset.json) → 🔄 업데이트")
     # 지금 리니지M 창 격자 (녹화 좌표가 자기 클라 안인지 보려고)
     _gr = []
     try:
@@ -588,6 +601,33 @@ try:
             (" · 🗡첫 포털만" if _s.get("rasta_to") == 1 else ""),
             (("  🚨 **녹화가 다른 클라 좌표** " + " ".join(_bad)
               + " (새 코드는 틀 때 스스로 고친다)") if _bad else "")))
+        # 🚢 이 슬롯이 배포판과 같은 구성인가 — 다르면 옛 프리셋으로 걸린 슬롯이다
+        try:
+            _sr = ((_ship or {}).get("floors") or {}).get(u"라스타바드") or {}
+            _df = []
+            for _k, _v in _sr.items():
+                if int(_k) < 26:
+                    continue
+                _a = _v.get("act")
+                if _a in ("img", "see"):
+                    if ((_ra.get(_k) or {}).get("mode")) != _a:
+                        _df.append("칸%d(그림 아님)" % (int(_k) + 1))
+                    elif list((_ra.get(_k) or {}).get("off") or []) != list(_v.get("off") or []):
+                        _df.append("칸%d(📍 다름)" % (int(_k) + 1))
+                elif _a == "rec":
+                    if not _rc.get(_k):
+                        _df.append("칸%d(녹화 없음)" % (int(_k) + 1))
+                    elif len(_rc.get(_k)) != len(_v.get("ev") or []):
+                        _df.append("칸%d(녹화 다름)" % (int(_k) + 1))
+            for _k in _rc:
+                if 26 <= int(_k) < 34 and (_sr.get(_k) or {}).get("act") != "rec":
+                    _df.append("칸%d(옛 녹화)" % (int(_k) + 1))
+            if _sr:
+                print("        " + ("✔ 배포판과 같은 구성" if not _df else
+                                    "🚨 **옛 프리셋 구성이다** " + " ".join(_df)
+                                    + " → 이 슬롯에서 프리셋 [라스타바드 …] 를 **다시 한 번** 누르세요"))
+        except Exception:
+            pass
     if not _rs:
         print("   ⚠ 라스타바드 프리셋이 걸린 슬롯이 **없다** — 그 슬롯에서 프리셋 [라스타바드 …] 를 눌러야 한다")
     _pp = (_id.get("_presets") or {}).get(_RK) or []
