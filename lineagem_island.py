@@ -5604,6 +5604,7 @@ class IslandApp(tk.Tk):
         _empty = not items
         nclk = clicks_for(key)
         slot = self.cfg[key][idx]
+        _ver0 = self._slot_ver(key, slot)      # 바꾸기 전 버전 (⏰ 간격 맞추기용)
         # 🗡 이 프리셋에서 '그림 자리' 가 아닌 번호는 **묵은 그림 설정을 지운다** —
         #    악몽의섬 프리셋으로 바꿔 끼웠을 때 라스타바드 설정이 남아 있으면
         #    좌표만 바뀌고 그림을 계속 찾아 슬롯이 멈춘다.
@@ -5746,6 +5747,31 @@ class IslandApp(tk.Tk):
         slot["name"] = nm
         try:
             self._cell_name_vars[key][idx].set(nm)
+        except Exception:
+            pass
+        # ⏰ **버전이 바뀌면 간격도 그 버전 것으로** (2026-11-14).
+        #    라바(4시간)로 돌던 슬롯을 악몽의섬 프리셋으로 바꿔도 `repeat_h` 는 4 로
+        #    남아, 악몽의섬을 **4시간마다** 돌았다 (던전은 2시간짜리다 — 2시간을 버린다).
+        #    반대로 악몽의섬(2시간)에서 라바로 바꾸면 다음 [실행] 전까지 2시간으로 돌았다.
+        #    🚫 ⏰ 가 꺼진 슬롯(repeat_h 0)은 건드리지 않는다 — 여기서 켜지 않는다.
+        try:
+            _ver1 = self._slot_ver(key, slot)
+            _fx = self.REPEAT_FIXED.get(key)
+            if _ver0 != _ver1 and int(slot.get("repeat_h") or 0):
+                _h1 = 0
+                if _ver1 == "라스타바드":
+                    _h1 = self._rasta_h(slot)
+                elif _ver0 == "라스타바드" and _fx:
+                    _h1 = int(_fx[0])
+                if _h1 and _h1 != int(slot.get("repeat_h") or 0):
+                    self._rlog(f"[반복] {key} #{idx+1:02d} 프리셋이 {_ver0} → {_ver1} 로 "
+                               f"바뀌어 ⏰ 간격을 {slot.get('repeat_h')}시간 → {_h1}시간 "
+                               f"으로 맞췄다 (걸려 있는 예약의 시각·횟수는 그대로)")
+                    slot["repeat_h"] = _h1
+                    try:
+                        self._rep_vars[key][idx].set(f"⏰{_h1}h")
+                    except Exception:
+                        pass
         except Exception:
             pass
         save_cfg(self.cfg)
@@ -6929,7 +6955,16 @@ class IslandApp(tk.Tk):
         """슬롯 반복 타이머 설정 — ⏰없음/1h/2h/3h/4h (매 실행 랜덤 여유분)."""
         h = {"⏰없음": 0, "⏰1h": 1, "⏰2h": 2, "⏰3h": 3, "⏰4h": 4}.get(val, 0)
         self.cfg[key][idx]["repeat_h"] = h
+        _rasta_msg = ""
+        try:
+            if h and self._slot_ver(key, self.cfg[key][idx]) == "라스타바드":
+                _rasta_msg = self._rasta_h_set(key, idx, h)
+        except Exception as _e:
+            self._rlog(f"[반복] ⚠ 라바 간격 저장 실패: {type(_e).__name__}: {_e}")
         save_cfg(self.cfg)
+        if _rasta_msg:
+            self._status.set(_rasta_msg)
+            return
         if not hasattr(self, "_repeat_next"):
             self._repeat_next = {}
         if h:
@@ -6941,6 +6976,45 @@ class IslandApp(tk.Tk):
             self._repeat_next.pop((key, idx), None)
             self._repeat_left.pop((key, idx), None)
             self._status.set(f"#{idx+1}: 반복 끔")
+
+    def _rasta_h_set(self, key, idx, h):
+        """🗡 라스타바드 슬롯의 ⏰ 간격을 **h 시간**으로 정한다 → 상태줄에 띄울 글.
+
+        · `slot["rasta_h"]` 에 적어둔다 → 다음에 [실행] 해도 이 간격으로 걸린다.
+        · ⏰ 가 **이미 걸려 있으면** 그 예약의 간격을 바꾸고, 다음 시각도 그 차이만큼
+          옮긴다 (4시간→2시간이면 2시간 당긴다 · 이미 지났으면 2~4분 뒤).
+          남은 횟수·회차는 그대로다.
+        · 🚫 걸려 있지 않으면 **걸지 않는다** — ⏰ 는 사용자가 실행했을 때만 켜진다."""
+        slot = self.cfg[key][idx]
+        old = self._rasta_h(slot)
+        slot["rasta_h"] = int(h)
+        st = self._rep_state()
+        k = f"{key}|{idx}"
+        e = st.get(k)
+        when = ""
+        if isinstance(e, dict):
+            try:
+                _oh = float(e.get("h") or old)
+                _nx = float(e.get("next") or 0) + (h - _oh) * 3600
+                _nx = max(_nx, time.time() + random.uniform(120, 240))
+                e["h"] = int(h)
+                e["next"] = _nx
+                st[k] = e
+                self._rep_write(st)
+                when = time.strftime("%H:%M", time.localtime(_nx))
+            except Exception:
+                pass
+        self._rlog(f"[반복] 🗡 {key} #{idx+1:02d} 라스타바드 간격 {old}시간 → **{h}시간** "
+                   + (f"(걸려 있던 예약의 다음 실행 {when} · 남은 횟수 그대로)" if when
+                      else "(예약은 걸려 있지 않다 — [실행] 하면 이 간격으로 걸린다)")
+                   + " (사용자)")
+        try:
+            self._refresh_rep_btns()
+        except Exception:
+            pass
+        return (f"🗡 #{idx+1:02d} 라스타바드 ⏰ **{h}시간 간격** — "
+                + (f"다음 실행 {when} (남은 횟수 그대로)" if when
+                   else "[실행] 하면 이 간격으로 걸립니다"))
 
     def _set_repeat_n(self, key, idx, val):
         """슬롯 반복 횟수 제한 — 1~8회 (다 채우면 반복 자동 종료)."""
@@ -7098,6 +7172,23 @@ class IslandApp(tk.Tk):
     #    전: 라바 4시간 1회 + 2시간 5회 → 후: **라바 4시간씩 6회**
     #    🚫 악몽의섬은 넣지 않는다 — REPEAT_FIXED(2,6) 그대로 2시간씩이다.
     REPEAT_H_VER = {"라스타바드": 4}
+    # 🗡 **라바 간격은 슬롯마다 고른다** (2026-11-14 사용자: *"라바는 선택을 두시간 간격
+    #    네시간 간격 선택할수잇게해줄수잇나"*).
+    #    슬롯 칸의 ⏰ 드롭다운에서 고른 값을 `slot["rasta_h"]` 에 따로 적어둔다.
+    #    🚫 `repeat_h` 로 판단하지 말 것 — 그 값은 악몽의섬으로 돌 때의 2시간이
+    #       그대로 남아 있을 수 있어 '사용자가 고른 것' 인지 알 수 없다.
+    #    안 골랐으면 `REPEAT_H_VER`(4시간) 그대로다 — 안 쓰는 컴퓨터는 예전과 같다.
+    RASTA_H_OK = (1, 2, 3, 4)
+
+    def _rasta_h(self, slot):
+        """🗡 그 라스타바드 슬롯의 ⏰ 간격(시간) — 고른 값이 없으면 4시간."""
+        try:
+            v = int((slot or {}).get("rasta_h") or 0)
+        except Exception:
+            v = 0
+        if v in self.RASTA_H_OK:
+            return v
+        return int(self.REPEAT_H_VER.get("라스타바드", 4))
     # ⏱ 반복 간격에 **더 주는 여유(분)** — 같은 악몽의섬이라도 프리셋마다 다르다.
     #    (2026-10-03 사용자: "라바는 들어가고 이동하는 시간이 좀 많기 때문에
     #     마무리되고 4분을 좀 더, 악몽의섬도 한 3분만 더 줬으면 좋겠어")
@@ -7156,6 +7247,9 @@ class IslandApp(tk.Tk):
             except Exception:
                 _sl = {}
             _v = self._slot_ver(key, _sl if isinstance(_sl, dict) else {})
+            if (_v == "라스타바드" and isinstance(_sl, dict)
+                    and int(_sl.get("rasta_h") or 0) in self.RASTA_H_OK):
+                return h              # 🗡 간격을 직접 골랐다 → 첫 회차도 그 간격
             if _v in self.REPEAT_FIRST_VER:
                 f = int(self.REPEAT_FIRST_VER[_v] or h) or h
         if f == h or idx is None:
@@ -7183,6 +7277,9 @@ class IslandApp(tk.Tk):
         #    옛 2시간이 남아 있어도 4시간으로 간다.
         try:
             _v = self._slot_ver(key, slot or {})
+            if _v == "라스타바드":
+                #   🗡 슬롯에서 고른 간격(2시간/4시간) — 없으면 4시간
+                return self._rasta_h(slot), (n or (fx[1] if fx else 8))
             if _v in self.REPEAT_H_VER:
                 return int(self.REPEAT_H_VER[_v]), (n or (fx[1] if fx else 8))
         except Exception:

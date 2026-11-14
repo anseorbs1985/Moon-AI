@@ -12050,6 +12050,8 @@ class App(tk.Tk):
     #      라스타바드 = 4시간 1회 + 2시간 5회 = 6회
     #    `0` = 첫 회차도 평소 주기. 여기 있는 프리셋은 `REPEAT_FIRST`(던전 전체)보다 이긴다.
     REPEAT_FIRST_VER = {"라스타바드": 4, "악몽의섬": 0}
+    # ⏰ 프리셋별 주기(시간) — 섬 실행기의 `REPEAT_H_VER` 와 **같은 값**을 둘 것.
+    REPEAT_H_VER = {"라스타바드": 4}
 
     def _rep_first_h(self, key, h, idx=None):
         # 🧭 첫 회차 4시간은 **라스타바드 슬롯만** — 악몽의섬은 그냥 2시간 6회
@@ -12094,6 +12096,21 @@ class App(tk.Tk):
         except Exception:
             pass
         fx = self.REPEAT_FIXED.get(key)
+        # 🗡 **라스타바드 슬롯은 슬롯에서 고른 간격**(`rasta_h` — 없으면 4시간).
+        #    섬 실행기 `_rep_hn` 과 **한 쌍**이다 (2026-11-14 사용자: *"라바는 선택을
+        #    두시간 간격 네시간 간격 선택할수잇게"*). 한쪽만 고치면 런처가 건 값과
+        #    섬 실행기가 건 값이 달라진다.
+        try:
+            if key == "토요일_악몽의섬" and isinstance(slot, dict):
+                _a, _b = self.RASTA_RANGE
+                if any(_a <= int(k3) + 1 <= _b
+                       for k3 in (slot.get("rasta") or {}) if str(k3).isdigit()):
+                    _rh = int(slot.get("rasta_h") or 0)
+                    if _rh not in (1, 2, 3, 4):
+                        _rh = int(self.REPEAT_H_VER.get("라스타바드", 4))
+                    return _rh, (n or (fx[1] if fx else 8))
+        except Exception:
+            pass
         if fx:
             return (h or fx[0]), (n or fx[1])
         return (h or 2), (n or 8)
