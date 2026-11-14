@@ -2671,6 +2671,130 @@ def rasta_find_all(j, anchor):
         return [], 0.0
 
 
+# 🗡 **똑같이 생긴 포털 둘 — '짝의 위치' 로 위쪽(암살군왕)을 가린다** (2026-11-14 사고).
+#    사용자: *"너 처음부터 암살군왕 포털을 안 찍었어 … **포털 두 개 중에 아래 걸 찍었어**"*
+#    예전에는 기준을 넘는 것 중 '맨 위' 를 골랐다. 그런데 위쪽(암살군왕)이 이펙트에
+#    가려 **하나만** 잡히면 그 하나(= 아래 마수군왕)를 눌렀다 → 야수 조련실로 들어갔다.
+#    📏 두 포털의 간격은 늘 같다 — 546 창에서 마수군왕 = 암살군왕 + **(+49, +24)**
+#       (11-07 화면 둘: (174,72)↔(223,96) · (354,145)↔(403,170)).
+#    그래서 강하게 잡힌 것 C 의 **왼쪽위 짝 자리**와 **오른쪽아래 짝 자리**를 본다:
+#       오른쪽아래에 짝이 있다 → C 가 위(암살군왕)        → C 를 누른다
+#       왼쪽위에 짝이 있다     → C 가 아래(마수군왕)      → **왼쪽위 짝**을 누른다
+#       어느 쪽도 안 보인다    → 모른다 → 누르지 않고 다시 본다 (끝내 모르면 슬롯 중단)
+#    짝은 자리를 알고 보므로 낮은 점수(`RASTA_PAIR_SOFT`)로도 알아본다 — 가려져 흐려도 잡힌다.
+#    설정은 `rasta_NN_meta.json` 의 `"pair": [49, 24]` (그 그림을 자른 창 기준).
+#    🚫 '하나만 보이면 그것을 누른다' 로 되돌리지 말 것 — 엉뚱한 사냥터로 들어간다.
+RASTA_PAIR_SOFT   = 0.45     # 짝 자리의 점수가 이보다 높으면 '짝이 있다'
+RASTA_PAIR_MARGIN = 0.08     # 한쪽이 다른 쪽보다 이만큼 높아야 인정
+RASTA_PAIR_TOL    = 7        # 짝 자리 둘레 몇 px 을 보나 (546 창 기준)
+RASTA_PAIR_TRIES  = 8        # 모르겠으면 이만큼까지 다시 본다 (이펙트가 걷히기를)
+
+
+# 🚶 **포털이 멀면 눌러도 바로 안 들어간다 — 걸어간 뒤에 확인창이 뜬다** (2026-11-14 실측).
+#    #04: 위쪽 포털(암살군왕)을 **맞게 눌렀는데** 캐릭터가 걸어가는 중이었고(8초 뒤 화면에서
+#    포털이 228px 가까워져 있었다), 다음 칸(확인창)이 4초만 보고 '못 찾음' 으로 끝났다.
+#    그래서 `rasta_NN_meta.json` 에 `"next": true` 가 있는 칸은, 누른 뒤
+#       **다음 칸의 그림(확인창)이 보일 때까지** 기다리고 (`RASTA_NEXT_WAIT` 초씩)
+#       안 보이면 **포털을 다시 찾아 다시 누른다** (가까워졌으니 이번엔 먹는다 · `RASTA_NEXT_CLICKS` 번)
+#    확인창이 보이면 즉시 넘어간다. 다음 칸은 평소대로 그 확인창을 찾아 누른다.
+#    🚫 다시 누를 때도 **짝 판정을 다시 한다** — 못 가리면 누르지 않고 더 기다린다.
+RASTA_NEXT_WAIT   = (4.5, 6.0)
+RASTA_NEXT_CLICKS = 4
+RASTA_NEXT_POLL   = (0.5, 0.8)
+
+
+def rasta_next_wait(j):
+    """그 칸을 누른 뒤 **다음 칸 그림이 뜰 때까지 기다리나** (`meta.next`)."""
+    try:
+        p = os.path.join(IMG_DIR, f"rasta_{j+1:02d}_meta.json")
+        with open(p, encoding="utf-8") as f:
+            return bool((json.load(f) or {}).get("next"))
+    except Exception:
+        return False
+
+
+def rasta_pair(j):
+    """그 칸의 '짝 간격' (dx, dy) — 없으면 None."""
+    try:
+        p = os.path.join(IMG_DIR, f"rasta_{j+1:02d}_meta.json")
+        with open(p, encoding="utf-8") as f:
+            pr = (json.load(f) or {}).get("pair")
+        if pr and len(pr) >= 2 and (pr[0] or pr[1]):
+            return float(pr[0]), float(pr[1])
+    except Exception:
+        pass
+    return None
+
+
+def rasta_find_pair(j, anchor, pair):
+    """🗡 짝 간격으로 **위쪽 포털**을 찾는다 → (화면x, 화면y, 점수, 설명).
+
+    못 가리면 (None, None, 최고점수, 이유). 누를지 말지는 부르는 쪽이 정한다."""
+    try:
+        import cv2, numpy as np
+        got = grab_window(anchor)
+        if not got:
+            return None, None, 0.0, u"창을 못 찍었다"
+        big, (ox, oy) = got
+        _w0 = big.shape[1]
+        _k = rasta_k(_w0, j)
+        big, _cx, _cy = rasta_crop(j, big)
+        ox += _cx; oy += _cy
+        res, tpl = rasta_best_res(j, big, _k)
+        if res is None:
+            return None, None, 0.0, u"그림을 못 댔다"
+        thr = rasta_thr(j)
+        mx = float(res.max())
+        th, tw = tpl.shape[0], tpl.shape[1]
+        ks = _w0 / float(rasta_base_w(j) or _w0)
+        px, py = pair[0] * ks, pair[1] * ks
+        tol = max(3, int(round(RASTA_PAIR_TOL * ks)))
+        H, W = res.shape[:2]
+
+        def peak(cx, cy):
+            x0, x1 = int(round(cx)) - tol, int(round(cx)) + tol + 1
+            y0, y1 = int(round(cy)) - tol, int(round(cy)) + tol + 1
+            x0, y0 = max(0, x0), max(0, y0)
+            x1, y1 = min(W, x1), min(H, y1)
+            if x1 <= x0 or y1 <= y0:
+                return -1.0, None
+            sub = res[y0:y1, x0:x1]
+            _i = int(sub.argmax())
+            yy, xx = divmod(_i, sub.shape[1])
+            return float(sub[yy, xx]), (x0 + xx, y0 + yy)
+
+        ys, xs = np.where(res >= thr)
+        if len(xs) == 0:
+            return None, None, mx, u"기준을 넘는 포털이 없다"
+        cand, _used = [], []
+        for _x, _y in sorted(zip(xs, ys), key=lambda c: -float(res[c[1], c[0]])):
+            _x, _y = int(_x), int(_y)
+            if any(abs(_x - u[0]) < tw and abs(_y - u[1]) < th for u in _used):
+                continue
+            _used.append((_x, _y))
+            cand.append((_x, _y, float(res[_y, _x])))
+        notes = []
+        for (cx, cy, cv) in cand:
+            uv, up = peak(cx - px, cy - py)          # 왼쪽위 짝 자리
+            dv, dp = peak(cx + px, cy + py)          # 오른쪽아래 짝 자리
+            notes.append(u"(%d,%d) %.2f ↖%.2f ↘%.2f" % (cx, cy, cv, uv, dv))
+            if dv >= RASTA_PAIR_SOFT and dv >= uv + RASTA_PAIR_MARGIN:
+                return (ox + cx + tw // 2, oy + cy + th // 2, cv,
+                        u"위쪽이다 — 오른쪽아래에 짝이 있다 · " + notes[-1])
+            if uv >= RASTA_PAIR_SOFT and uv >= dv + RASTA_PAIR_MARGIN:
+                #   C 는 아래쪽이다 → 위쪽 짝을 누른다. 짝이 또렷하면 그 자리,
+                #   흐리면(가려짐) 간격으로 계산한 자리.
+                if uv >= thr and up:
+                    tx, ty = up
+                else:
+                    tx, ty = int(round(cx - px)), int(round(cy - py))
+                return (ox + tx + tw // 2, oy + ty + th // 2, uv,
+                        u"아래쪽이 잡혔다 → **왼쪽위 짝(위쪽 포털)** 을 누른다 · " + notes[-1])
+        return None, None, mx, u"짝을 못 봤다(어느 쪽인지 모른다) · " + u" / ".join(notes[:3])
+    except Exception as e:
+        return None, None, 0.0, u"오류 %s" % e
+
+
 def rasta_find(j, anchor, pick="top"):
     """칸 j 의 그림을 그 클라 창 안에서 찾는다 → (화면x, 화면y, 점수).
 
@@ -7970,7 +8094,13 @@ class IslandApp(tk.Tk):
         while True:
             if self._stop_flag:
                 return False
-            x, y, v = rasta_find(j, anchor, pick=pick)
+            _pr = rasta_pair(j) if mode != RASTA_SEE else None
+            _pw = u""
+            if _pr:
+                #   🗡 똑같은 포털 둘 — 짝의 위치로 **위쪽**을 가린다 (못 가리면 누르지 않는다)
+                x, y, v, _pw = rasta_find_pair(j, anchor, _pr)
+            else:
+                x, y, v = rasta_find(j, anchor, pick=pick)
             best = max(best, v)
             if x is not None:
                 if mode == RASTA_SEE:
@@ -7993,6 +8123,9 @@ class IslandApp(tk.Tk):
                 #    똑같이 생긴 큐브가 둘 떠 있어도 틀린 것을 누르지 않는다 (2026-10-03).
                 _off = st.get("off") or [0, 0]
                 _cx, _cy = int(x) + int(_off[0]), int(y) + int(_off[1])
+                #   🗂 누르기 **직전** 화면 — 노랑 = 찾은 그림 · 빨강 = 누를 자리
+                self._rasta_shot(anchor, si, j, "hit",
+                                 [((x, y), (0, 255, 255)), ((_cx, _cy), (0, 0, 255))])
                 self._status.set(f"🗡 [{name}] {lbl} 그림 찾음 ({pick}) "
                                  f"일치도 {v:.2f} → 누름"
                                  + (f" (그림에서 {_off[0]:+d},{_off[1]:+d})"
@@ -8001,13 +8134,64 @@ class IslandApp(tk.Tk):
                 self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) "
                            f"그림 눌렀다 ({pick} · {v:.2f}) 그림자리 ({x},{y})"
                            + (f" → 누른자리 ({_cx},{_cy}) 떨어짐 "
-                              f"{_off[0]:+d},{_off[1]:+d}" if any(_off) else ""))
+                              f"{_off[0]:+d},{_off[1]:+d}" if any(_off) else "")
+                           + (f" · 🗡 {_pw}" if _pw else ""))
                 time.sleep(random.uniform(*RASTA_AFTER))
+                # 🚶 멀면 걸어간 뒤에 확인창이 뜬다 → **뜰 때까지 기다리고, 안 뜨면 다시 누른다**
+                if (rasta_next_wait(j) and os.path.exists(rasta_img_path(j + 1))
+                        and cell_mode(key, slot, j + 1) == RASTA_CLICK):
+                    _nc = 1
+                    _t_nx = time.time()
+                    while not self._stop_flag:
+                        _seen_nx = False
+                        _t_w = time.time()
+                        _w_max = random.uniform(*RASTA_NEXT_WAIT)
+                        while time.time() - _t_w < _w_max and not self._stop_flag:
+                            _nx, _ny, _nv = rasta_find(j + 1, anchor)
+                            if _nx is not None:
+                                _seen_nx = True
+                                break
+                            time.sleep(random.uniform(*RASTA_NEXT_POLL))
+                        if _seen_nx:
+                            self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번 — 확인창이 떴다 "
+                                       f"({time.time() - _t_nx:.0f}초 · {_nc}번 눌렀다)")
+                            break
+                        if _nc >= RASTA_NEXT_CLICKS:
+                            self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번 — {_nc}번 눌러도 "
+                                       f"확인창이 안 떴다 ({time.time() - _t_nx:.0f}초)")
+                            break
+                        #   다시 찾아 다시 누른다 (걸어가서 가까워졌다). 못 가리면 누르지 않는다.
+                        if _pr:
+                            _rx, _ry, _rv, _rw = rasta_find_pair(j, anchor, _pr)
+                        else:
+                            _rx, _ry, _rv = rasta_find(j, anchor, pick=pick)
+                            _rw = u""
+                        if _rx is None:
+                            self._status.set(f"🗡 [{name}] {lbl} — 확인창을 기다리는 중…")
+                            _nc += 0          # 못 찾았다 → 누르지 않고 한 번 더 기다린다
+                            if time.time() - _t_nx > RASTA_NEXT_WAIT[1] * RASTA_NEXT_CLICKS:
+                                self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번 — 포털도 확인창도 "
+                                           f"안 보인다 ({time.time() - _t_nx:.0f}초)")
+                                break
+                            continue
+                        _cx2, _cy2 = int(_rx) + int(_off[0]), int(_ry) + int(_off[1])
+                        self._rasta_shot(anchor, si, j, "re",
+                                         [((_rx, _ry), (0, 255, 255)), ((_cx2, _cy2), (0, 0, 255))])
+                        try:
+                            self._focus_client(si, (_cx2, _cy2))
+                        except Exception:
+                            pass
+                        click_at(_cx2, _cy2)
+                        _nc += 1
+                        self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) 확인창이 안 떠 "
+                                   f"**다시 눌렀다** ({_nc}/{RASTA_NEXT_CLICKS}) ({_cx2},{_cy2}) "
+                                   f"{_rv:.2f}" + (f" · 🗡 {_rw}" if _rw else ""))
+                        time.sleep(random.uniform(*RASTA_AFTER))
                 return True
             # 👁 확인만은 **보일 때까지** 본다 (누르는 것이 없어 안전하다 — RASTA_SEE_MAX)
             _waited = time.time() - _t_see
             _more = (mode == RASTA_SEE and _waited < RASTA_SEE_MAX)
-            if t >= RASTA_TRIES - 1 and not _more:
+            if t >= (RASTA_PAIR_TRIES if _pr else RASTA_TRIES) - 1 and not _more:
                 break
             self._status.set(f"🗡 [{name}] {lbl} 그림 찾는 중… "
                              + (f"({_waited:.0f}/{RASTA_SEE_MAX:.0f}초"
@@ -8015,13 +8199,49 @@ class IslandApp(tk.Tk):
                              + f" · 최고 {best:.2f})")
             time.sleep(random.uniform(*RASTA_GAP))
             t += 1
+        self._rasta_shot(anchor, si, j, "miss")      # 🗂 못 찾은 그 화면
         self._status.set(f"🚫 [{name}] {lbl} 그림을 못 찾아 이 슬롯 중단 "
                          f"(최고 {best:.2f} · 기준 {rasta_thr(j):.2f})")
         self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) 그림 못 찾음 "
                    f"(최고 {best:.2f} · 기준 {rasta_thr(j):.2f}"
                    + (f" · {time.time() - _t_see:.0f}초 봤다" if mode == RASTA_SEE else "")
+                   + (f" · 🗡 {_pw}" if _pw else "")
                    + ") → 이 슬롯 중단")
         return False
+
+    def _rasta_shot(self, anchor, si, j, tag, mark=None):
+        """🗂 라스타바드 그림 칸의 **그때 화면**을 남긴다 (2026-11-14).
+
+        11-14 실행에서 #04 가 지하 결투장이 아니라 **야수 조련실**로 들어갔는데,
+        어느 큐브를 눌렀는지 볼 자료가 없었다. 누르기 **직전** 화면에 누를 자리를 표시해
+        `%LOCALAPPDATA%/MoonAI/click_templates/_rasta/` 에 남긴다 (최근 60장).
+        🚫 실패해도 조용히 넘어간다 — 기록 때문에 실행이 멈추면 안 된다."""
+        try:
+            import cv2, glob
+            got = grab_window(anchor)
+            if not got:
+                return
+            big, (ox, oy) = got
+            img = big.copy()
+            if mark:
+                for (mx, my), col in mark:
+                    cv2.circle(img, (int(mx - ox), int(my - oy)), 9, col, 1)
+            d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
+                             "click_templates", "_rasta")
+            os.makedirs(d, exist_ok=True)
+            p = os.path.join(d, time.strftime("%m%d_%H%M%S")
+                             + f"_s{si+1:02d}_c{j+1:02d}_{tag}.png")
+            ok, buf = cv2.imencode(".png", img)
+            if ok:
+                buf.tofile(p)
+            fs = sorted(glob.glob(os.path.join(d, "*.png")), key=os.path.getmtime)
+            for q in fs[:-60]:
+                try:
+                    os.remove(q)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _rasta_auto_xy(self, key, si, slot, j):
         """🅰 라스타바드 슬롯의 **마지막 [AUTO] 자리** — 슬롯에 그 칸이 비어 있을 때만.
@@ -8648,8 +8868,38 @@ class IslandApp(tk.Tk):
             #       → 0.75 로 보면 15슬롯이 전부 '던전 안' 으로 오판했다.
             #    그래서 ① 점수 ≥ RESYNC_IN_MATCH ② 2등의 RESYNC_IN_RATIO 배 이상
             #    ③ 1등이 그 던전 — 셋을 다 넘어야 인정한다.
+            # 🗡 **라스타바드 슬롯은 따로 본다** (2026-11-14 실측).
+            #    사용자가 #04 를 라스타바드 프리셋으로 바꿔 실행했는데, 그 캐릭이 **티칼사원**
+            #    에서 사냥 중이라 '이미 (악몽의섬) 던전 안' 으로 보고 **통째로 건너뛰었다**
+            #    (= "라바로 하면 아무것도 안 해버리고"). 악몽의섬 장소그림(테베·티칼·아틀란티스·
+            #    악몽의 섬·해적섬)은 라스타바드 슬롯의 **목적지가 아니다.**
+            #    라스타바드 슬롯의 '이미 안' 은 👁 확인 칸(지하 통제실)이 보일 때뿐이다.
+            #    못 보면 평소대로 칸1부터 — 흐름이 귀환으로 시작하므로 어디에 있든 안전하다.
+            _rv = False
             try:
-                if place_list(key):
+                _rv = (key == RASTA_KEY
+                       and self._slot_ver(key, slot) == "라스타바드")
+            except Exception:
+                _rv = False
+            if _rv:
+                try:
+                    for _k3, _v3 in sorted((slot.get("rasta") or {}).items(),
+                                           key=lambda kv: int(kv[0])):
+                        if (_v3 or {}).get("mode") != RASTA_SEE:
+                            continue
+                        _j3 = int(_k3)
+                        if not os.path.exists(rasta_img_path(_j3)):
+                            continue
+                        _x3, _y3, _s3 = rasta_find(_j3, anc)
+                        if _x3 is not None:
+                            self._rlog(u"[시작맞춤] %s #%02d 🗡 **이미 라스타바드 안**이다 "
+                                       u"(%d번 칸 그림 %.2f) → 이 슬롯은 건너뛴다"
+                                       % (key, si + 1, _j3 + 1, _s3))
+                            return -1
+                except Exception:
+                    pass
+            try:
+                if place_list(key) and not _rv:
                     sc = place_scores(DUN_KEYS, anc) or {}
                     v = sc.get(key, -1.0)
                     others = sorted((x for k2, x in sc.items() if k2 != key),
