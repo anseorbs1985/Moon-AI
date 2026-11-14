@@ -787,6 +787,41 @@ RASTA_SEE_MAX = 25.0
 #       **한 번 더 눌러 꺼버린다** (오토는 토글이다).
 #    🚫 앞 칸(👁 지하 통제실 확인)을 통과해야만 여기까지 온다 — 못 보면 슬롯이 멈춘다.
 RASTA_AUTO_CELL = 35
+# 🗡 **라스타바드는 두 버전이다** (2026-11-14 사용자: *"끝까지 가서 오토를 누르는 것과
+#    첫번째 포털만 한번 해서 오토 누르는 거 두가지 버전으로 … 고를 수 있게"*).
+#      끝까지      칸28·29(첫 포털) → 칸30~33 → 👁 지하 통제실 → AUTO      (기본)
+#      첫 포털만   칸28·29(첫 포털) → 👁 **지하 결투장** → AUTO
+#    슬롯마다 `slot["rasta_to"] = 1` 이면 '첫 포털만' 이다 ([🃏] 메뉴에서 고른다).
+#    🚫 클로드가 어느 캐릭이 어느 버전인지 정하지 않는다.
+RASTA_SHORT_SKIP = (30, 33)   # '첫 포털만' 이면 이 칸들은 건너뛴다 (1부터 · 녹화도 안 튼다)
+RASTA_SHORT_SEE  = 34         # 이 칸의 👁 는 지하 통제실 대신 '지하 결투장' 을 본다
+RASTA_DUEL_IMG   = 36         # click_templates/rasta_36.png = '지하 결투장' 이름
+#    📏 2026-11-14 실측(#04·#12 · 이틀치 화면): 지하 결투장 0.974~0.988 ·
+#       지하 통제실 0.59~0.60 · 그 밖 ≤0.49 → 기준 0.78 (rasta_36_thr.json)
+# 🧭 **녹화 — '확인 클릭 → 방향키' 는 도착한 것을 보고 방향키를 시작한다** (2026-11-14).
+#    칸27 녹화 = [확인] 클릭(이동) 0.55초 뒤부터 A·W·D·W. 그런데 이동(로딩)이 그보다
+#    오래 걸리면 **앞쪽 방향키가 통째로 먹힌다** → 포털에서 164px 떨어진 곳에 서서
+#    포털이 왼쪽 퀘스트 판 뒤에 가려졌다 (11:13 #04 — 칸28 '포털이 없다' 0.47).
+#    → 미니맵이 **바뀌고 멈춘 것**을 본 뒤에 방향키를 시작한다 (키 사이 간격은 그대로).
+#    📏 미니맵 칸은 서 있으면 연속 차이 **0.00**, 자리가 바뀌면 **32~45** (실측).
+#    🚫 고정 대기로 바꾸지 말 것 — 로딩 시간은 그때그때 다르다.
+REC_SETTLE_ON     = True
+REC_SETTLE_BOX    = (458 / 546.0, 78 / 307.0, 530 / 546.0, 118 / 307.0)   # 미니맵
+REC_HUD_BOX       = (30 / 546.0, 14 / 307.0, 145 / 546.0, 32 / 307.0)     # HP 막대
+REC_HUD_RED       = 30       # HP 막대의 빨간 점이 이만큼 있으면 'HUD 가 보인다'
+#    📏 게임 화면 147~347 · 확인창이 떠 어두울 때 0 (로딩 화면에도 HUD 가 없다)
+REC_SETTLE_DIFF   = 6.0      # 미니맵이 이만큼 다르면 '자리가 바뀌었다'
+REC_SETTLE_SAME   = 1.0      # 연속 두 장이 이 안이면 '멈췄다'
+REC_SETTLE_CHANGE = 3.5      # 바뀌기를 이만큼 기다린다 (안 바뀌면 그대로 진행)
+REC_SETTLE_MAX    = 10.0     # 다 합쳐 이만큼까지만
+REC_SETTLE_POLL   = (0.12, 0.18)
+REC_SETTLE_AFTER  = (0.35, 0.60)   # 멈춘 것을 본 뒤 방향키까지
+# 🚶 **그림을 못 찾으면 살짝 걸어가 다시 본다** — `rasta_NN_meta.json` 의
+#    `"nudge": [방향, 최소초, 최대초, 횟수]`.
+#    칸33(지하 통제실 입구 마름모): 도착 자리에 따라 마름모가 **버프 아이콘 줄 뒤**
+#    (창 안 y≈43)에 가려 0.43~0.45 로 못 봤다 (11:17 #04). 위(북)로 조금 걸으면
+#    화면에서 아래로 내려와 보인다.
+RASTA_NUDGE_GAP   = (0.45, 0.75)   # 걸은 뒤 다시 보기까지
 RASTA_AUTO_REL  = (423, 229)
 RASTA_AUTO_BASE = (546, 307)
 
@@ -2701,6 +2736,42 @@ RASTA_PAIR_TRIES  = 8        # 모르겠으면 이만큼까지 다시 본다 (�
 RASTA_NEXT_WAIT   = (4.5, 6.0)
 RASTA_NEXT_CLICKS = 4
 RASTA_NEXT_POLL   = (0.5, 0.8)
+
+
+def rasta_short(key, slot, j):
+    """🗡 '첫 포털만' 버전에서 그 칸을 어떻게 하나 → "" | "skip" | "see" (j 는 0부터).
+
+    라스타바드 슬롯(칸26~35 에 그림 설정)이고 `rasta_to == 1` 일 때만 값이 있다."""
+    try:
+        if key != RASTA_KEY or int((slot or {}).get("rasta_to") or 0) != 1:
+            return ""
+        a, b = RASTA_RANGE
+        if not any(a <= int(k) + 1 <= b
+                   for k in ((slot or {}).get("rasta") or {}) if str(k).isdigit()):
+            return ""
+        n = j + 1
+        if RASTA_SHORT_SKIP[0] <= n <= RASTA_SHORT_SKIP[1]:
+            return "skip"
+        if n == RASTA_SHORT_SEE:
+            return "see"
+    except Exception:
+        pass
+    return ""
+
+
+def rasta_nudge(j):
+    """그 칸의 '못 찾으면 걸어가기' (방향, 최소초, 최대초, 횟수) — 없으면 None."""
+    try:
+        p = os.path.join(IMG_DIR, f"rasta_{j+1:02d}_meta.json")
+        with open(p, encoding="utf-8") as f:
+            ng = (json.load(f) or {}).get("nudge")
+        if ng and len(ng) >= 4 and ng[0] in ("↑", "↓", "←", "→", "↖", "↗", "↙", "↘"):
+            lo, hi, n = float(ng[1]), float(ng[2]), int(ng[3])
+            if 0 < lo <= hi <= 1.5 and 0 < n <= 6:
+                return ng[0], lo, hi, n
+    except Exception:
+        pass
+    return None
 
 
 def rasta_next_wait(j):
@@ -6074,6 +6145,21 @@ class IslandApp(tk.Tk):
                 mn.add_command(
                     label=("🚫 " + n + "  — 안 감" if n in _ban else "      " + n),
                     command=lambda nn=n: self._toggle_card_no(key, idx, nn))
+        # 🗡 라스타바드 슬롯 — **어디까지 가서 오토를 누를까** (2026-11-14)
+        try:
+            if key == RASTA_KEY and self._slot_ver(key, self.cfg[key][idx]) == "라스타바드":
+                _to = int(self.cfg[key][idx].get("rasta_to") or 0)
+                mn.add_separator()
+                mn.add_command(label="🗡 라스타바드 — 어디까지 가서 오토를 누를까",
+                               state="disabled")
+                mn.add_command(label=("● " if _to != 1 else "   ")
+                               + "끝까지 (지하 통제실에서 오토)",
+                               command=lambda: self._set_rasta_to(key, idx, 0))
+                mn.add_command(label=("● " if _to == 1 else "   ")
+                               + "첫 포털만 (지하 결투장에서 오토)",
+                               command=lambda: self._set_rasta_to(key, idx, 1))
+        except Exception:
+            pass
         try:
             b = (self._card_btns.get(key) or [None] * 16)[idx]
             mn.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
@@ -6081,6 +6167,20 @@ class IslandApp(tk.Tk):
             mn.tk_popup(self.winfo_pointerx(), self.winfo_pointery())
         finally:
             mn.grab_release()
+
+    def _set_rasta_to(self, key, idx, v):
+        """🗡 그 라스타바드 슬롯이 **어디까지 가나** — 0 끝까지(지하 통제실) · 1 첫 포털만(지하 결투장)."""
+        slot = self.cfg[key][idx]
+        if int(v) == 1:
+            slot["rasta_to"] = 1
+        else:
+            slot.pop("rasta_to", None)
+        save_cfg(self.cfg)
+        self._refresh_card_btns(key)
+        _t = ("첫 포털만 — 지하 결투장에서 오토" if int(v) == 1
+              else "끝까지 — 지하 통제실에서 오토")
+        self._status.set(f"🗡 #{idx+1:02d} 라스타바드: {_t}")
+        self._rlog(f"🗡 {key} #{idx+1:02d} 라스타바드 = {_t} (사용자)")
 
     def _toggle_card_no(self, key, idx, name):
         """🚫 그 슬롯이 **안 가는 던전**을 켜고 끈다 (`card_no`)."""
@@ -6135,6 +6235,19 @@ class IslandApp(tk.Tk):
                     continue
                 nm = (self.cfg[key][i].get("card") or "").strip()
                 _nb = len(card_no(self.cfg[key][i]))
+                #   🗡 라스타바드 슬롯은 버전을 보여준다 — 🗡끝 = 지하 통제실까지 · 🗡1 = 첫 포털만
+                _rv = ""
+                try:
+                    if (key == RASTA_KEY
+                            and self._slot_ver(key, self.cfg[key][i]) == "라스타바드"):
+                        _rv = ("🗡1" if int(self.cfg[key][i].get("rasta_to") or 0) == 1
+                               else "🗡끝")
+                except Exception:
+                    _rv = ""
+                if _rv:
+                    b.config(text=_rv, bg=("#6c3483" if _rv == "🗡1" else "#1a5276"),
+                             fg="white")
+                    continue
                 #   🚫n = 이 캐릭이 안 가는 던전이 n개 있다 (주황) — 눌러서 확인한다
                 b.config(text=(nm[:4] if nm else (f"🚫{_nb}" if _nb else "🃏")),
                          bg=("#117864" if nm else ("#ca6f1e" if _nb else "#95a5a6")),
@@ -6691,7 +6804,8 @@ class IslandApp(tk.Tk):
                 if (d_ and d_[0] != "⇩") or rec:
                     self._focus_client_for_slot(idx)
                 if rec and not (d_ or c):
-                    self._play_events(rec, name)
+                    self._play_events(rec, name,
+                                      settle=self._rec_settle_anchor(key, slot, ci))
                     self._status.set(f"✔ [{name}] {lbl} 녹화 재생 완료"); return
                 if d_ and d_[0] == "⇩":
                     if not c:
@@ -8053,16 +8167,142 @@ class IslandApp(tk.Tk):
         except Exception:
             return False
 
-    def _play_events(self, events, name):
-        """녹화 재생 — 저장된 타이밍 그대로 마우스/이동키(WASD·방향키) 입력."""
+    def _rec_frame(self, anchor):
+        """🧭 그 클라의 (미니맵 조각, HP 막대 빨간 점 수) — 못 찍으면 None."""
+        try:
+            import numpy as np
+            got = grab_window(anchor)
+            if not got:
+                return None
+            big = got[0]
+            h, w = big.shape[0], big.shape[1]
+            b = REC_SETTLE_BOX
+            mini = big[int(h * b[1]):int(h * b[3]), int(w * b[0]):int(w * b[2])].astype("int16")
+            hb = REC_HUD_BOX
+            r = big[int(h * hb[1]):int(h * hb[3]), int(w * hb[0]):int(w * hb[2])].astype("int16")
+            red = int(((r[:, :, 2] > 150) & (r[:, :, 1] < 80) & (r[:, :, 0] < 80)).sum())
+            return mini, red
+        except Exception:
+            return None
+
+    @staticmethod
+    def _rec_diff(a, b):
+        try:
+            import numpy as np
+            if a is None or b is None or a.shape != b.shape:
+                return 999.0
+            return float(np.abs(a - b).mean())
+        except Exception:
+            return 999.0
+
+    def _rec_settle_anchor(self, key, slot, j):
+        """🧭 이 칸의 녹화는 '도착을 보고 방향키' 로 트나 → 볼 자리(anchor) 또는 None.
+
+        라스타바드 슬롯의 칸26~35 녹화만. 그 밖은 None = 예전 그대로 튼다."""
+        try:
+            if not REC_SETTLE_ON or key != RASTA_KEY:
+                return None
+            if not (RASTA_RANGE[0] <= j + 1 <= RASTA_RANGE[1]):
+                return None
+            if self._slot_ver(key, slot) != "라스타바드":
+                return None
+            return self._slot_anchor(slot)
+        except Exception:
+            return None
+
+    def _rec_settle(self, anchor, f0, name, left):
+        """🧭 [확인] 클릭 뒤 **도착해서 멈춘 것**을 본다 → 방향키를 더 늦출 초(0 이상).
+
+        f0 = 클릭 **전** 화면 (미니맵, 빨간 점). left = 원래 녹화대로면 첫 키까지 남은 초.
+        ① HUD 가 보이는 화면을 기준으로 잡는다 (확인창이 떠 있으면 화면이 어둡다 —
+           창이 닫힌 것을 '자리가 바뀌었다' 로 보면 안 된다)
+        ② 미니맵이 그 기준과 달라지기를 기다린다 (= 도착) — 안 바뀌면 그대로 진행
+        ③ HUD 가 보이고 연속 두 장이 같으면 멈춘 것 → 한 박자 쉬고 방향키
+        🚫 모르면(못 찍음·시간 초과) **막지 않고** 진행한다 — 예전보다 나빠지지 않는다."""
+        t_s = time.time()
+        ref = None            # 기준 미니맵 (HUD 가 보이는, 아직 옛 자리)
+        loading = False       # HUD 가 사라진 화면(로딩)을 봤나
+        changed = False
+        t_ref = None
+        prev = None
+        same = 0
+        why = "시간 초과"
+        try:
+            m0, r0 = (f0 if f0 else (None, 0))
+            if m0 is not None and r0 >= REC_HUD_RED:
+                ref = m0; t_ref = t_s                 # 클릭 전부터 HUD 가 보였다
+            while time.time() - t_s < REC_SETTLE_MAX and not self._stop_flag:
+                f = self._rec_frame(anchor)
+                if not f:
+                    time.sleep(random.uniform(*REC_SETTLE_POLL)); continue
+                mini, red = f
+                hud = red >= REC_HUD_RED
+                if not changed:
+                    if not hud:
+                        #   확인창(어두운 옛 화면)과 다르면 로딩 화면이다
+                        if m0 is not None and self._rec_diff(mini, m0) > REC_SETTLE_DIFF:
+                            loading = True
+                    elif ref is None:
+                        if loading:
+                            changed = True            # 로딩을 지나 HUD 가 돌아왔다 = 도착
+                        else:
+                            ref = mini; t_ref = time.time()
+                    elif loading or self._rec_diff(mini, ref) > REC_SETTLE_DIFF:
+                        changed = True
+                    elif time.time() - t_ref > REC_SETTLE_CHANGE:
+                        why = "자리가 안 바뀌었다"
+                        break
+                    if changed:
+                        prev = mini; same = 0
+                elif hud:
+                    if self._rec_diff(mini, prev) < REC_SETTLE_SAME:
+                        same += 1
+                        if same >= 2:
+                            why = "도착"
+                            break
+                    else:
+                        same = 0
+                    prev = mini
+                time.sleep(random.uniform(*REC_SETTLE_POLL))
+            if changed:
+                time.sleep(random.uniform(*REC_SETTLE_AFTER))
+        except Exception as e:
+            why = f"오류 {type(e).__name__}"
+        spent = time.time() - t_s
+        extra = max(0.0, spent - max(0.0, left))
+        try:
+            self._rlog(f"[녹화] 🧭 [{name}] 클릭 뒤 {spent:.1f}초 봤다 — {why}"
+                       + (" (로딩 화면을 지났다)" if loading else "")
+                       + f" → 방향키를 {extra:.1f}초 늦춘다")
+        except Exception:
+            pass
+        return extra
+
+    def _play_events(self, events, name, settle=None):
+        """녹화 재생 — 저장된 타이밍 그대로 마우스/이동키(WASD·방향키) 입력.
+
+        `settle`(볼 자리)을 주면, '마우스 클릭 → 방향키' 로 이어지는 녹화에서
+        **첫 방향키 앞에서 도착한 것을 본다** (`_rec_settle`). 키 사이 간격은 그대로다."""
         SCAN = {0x26: 0x48, 0x28: 0x50, 0x25: 0x4B, 0x27: 0x4D,
                 0x57: 0x11, 0x41: 0x1E, 0x53: 0x1F, 0x44: 0x20}
         self._status.set(f"▶ [{name}] 녹화 재생 중... ({(events[-1][0] if events else 0):.1f}초)")
+        _hold_i, _f0 = -1, None
+        if settle:
+            try:
+                _ki = next((i for i, e in enumerate(events) if e[1] == "kd"), -1)
+                if _ki > 0 and any(e[1] in ("md", "mu") for e in events[:_ki]):
+                    _f0 = self._rec_frame(settle)
+                    if _f0:
+                        _hold_i = _ki
+            except Exception:
+                _hold_i = -1
         t0 = time.time()
         held = set()
         try:
-            for ev in events:
+            for _ei, ev in enumerate(events):
                 if self._stop_flag: break
+                if _ei == _hold_i:
+                    t0 += self._rec_settle(settle, _f0, name, ev[0] - (time.time() - t0))
                 while time.time() - t0 < ev[0]:
                     if self._stop_flag: break
                     time.sleep(0.005)
@@ -8173,6 +8413,13 @@ class IslandApp(tk.Tk):
         pick = st.get("pick") or "top"
         if mode == CARD_MODE:
             return self._card_do(key, j, si, slot, coords, name, lbl)
+        # 🗡 '첫 포털만' 버전 — 이 칸의 👁 는 **지하 결투장** 을 본다 (그림 번호만 바꾼다)
+        ij = j
+        _short = rasta_short(key, slot, j) == "see"
+        if _short:
+            mode = RASTA_SEE
+            ij = RASTA_DUEL_IMG - 1
+        _nudged = 0
         anchor = coords[j] if (j < len(coords) and coords[j]) else None
         if not anchor:                       # 그 칸에 좌표가 없으면 슬롯의 첫 좌표로
             anchor = next((c for c in coords if c), None)
@@ -8181,9 +8428,10 @@ class IslandApp(tk.Tk):
                              f"어느 클라인지 알 수 없습니다")
             self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번 좌표 없음 → 중단")
             return False
-        if not os.path.exists(rasta_img_path(j)):
+        if not os.path.exists(rasta_img_path(ij)):
             self._status.set(f"🗡 [{name}] {lbl} — 그림이 등록되지 않았습니다")
-            self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번 그림 없음 → 중단")
+            self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번 그림 없음 "
+                       f"({os.path.basename(rasta_img_path(ij))}) → 중단")
             return False
         best = -1.0
         _t_see = time.time()
@@ -8197,7 +8445,7 @@ class IslandApp(tk.Tk):
                 #   🗡 똑같은 포털 둘 — 짝의 위치로 **위쪽**을 가린다 (못 가리면 누르지 않는다)
                 x, y, v, _pw = rasta_find_pair(j, anchor, _pr)
             else:
-                x, y, v = rasta_find(j, anchor, pick=pick)
+                x, y, v = rasta_find(ij, anchor, pick=pick)
             best = max(best, v)
             if x is not None:
                 if mode == RASTA_SEE:
@@ -8205,7 +8453,8 @@ class IslandApp(tk.Tk):
                                      f"— 누르지 않고 통과")
                     self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) "
                                f"확인만 — 보임 {v:.2f} "
-                               f"({time.time() - _t_see:.0f}초 기다림)")
+                               f"({time.time() - _t_see:.0f}초 기다림)"
+                               + (" · 🗡 첫 포털 버전 — **지하 결투장** 도착" if _short else ""))
                     return True
                 # 그 클라를 먼저 앞으로 — 비활성 창의 첫 클릭은 '창 띄우기'로만
                 # 먹히고 사라진다 (2026-08-24 교훈)
@@ -8289,6 +8538,43 @@ class IslandApp(tk.Tk):
             _waited = time.time() - _t_see
             _more = (mode == RASTA_SEE and _waited < RASTA_SEE_MAX)
             if t >= (RASTA_PAIR_TRIES if _pr else RASTA_TRIES) - 1 and not _more:
+                if mode == RASTA_CLICK:
+                    # ✅ **이미 다음 화면**이면 통과한다 — 다음 칸이 👁 확인이고 그것이 보인다.
+                    #    (걸어가다 입구에 닿아 들어간 경우. 그 👁 칸이 어차피 다시 확인한다 —
+                    #     여기서 통과시켜도 확인을 건너뛰는 것이 아니다.)
+                    try:
+                        if (cell_mode(key, slot, j + 1) == RASTA_SEE
+                                and not rasta_short(key, slot, j + 1)
+                                and os.path.exists(rasta_img_path(j + 1))):
+                            _sx, _sy, _sv = rasta_find(j + 1, anchor)
+                            if _sx is not None:
+                                self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) 그림은 "
+                                           f"없지만 **이미 다음 화면**이다 ({j+2}번 👁 {_sv:.2f}) "
+                                           f"→ 누르지 않고 통과")
+                                return True
+                    except Exception:
+                        pass
+                    # 🚶 살짝 걸어가 다시 본다 (meta.nudge) — HUD 뒤에 가린 것을 꺼낸다
+                    _ng = rasta_nudge(j)
+                    if _ng and _nudged < _ng[3] and not self._stop_flag:
+                        _nudged += 1
+                        _sec = random.uniform(_ng[1], _ng[2])
+                        self._rasta_shot(anchor, si, j, "nudge")
+                        try:
+                            self._focus_client(si, anchor)
+                            time.sleep(random.uniform(0.25, 0.45))
+                        except Exception:
+                            pass
+                        self._last_focus = si
+                        self._status.set(f"🚶 [{name}] {lbl} 그림이 안 보여 {_ng[0]} 로 "
+                                         f"조금 걸어가 다시 봅니다 ({_nudged}/{_ng[3]})")
+                        self._tap_dir(_ng[0], _sec)
+                        self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) 그림이 안 보여 "
+                                   f"(최고 {best:.2f}) 🚶 {_ng[0]} {_sec:.2f}초 걸어가 다시 본다 "
+                                   f"({_nudged}/{_ng[3]})")
+                        time.sleep(random.uniform(*RASTA_NUDGE_GAP))
+                        t = 0
+                        continue
                 break
             self._status.set(f"🗡 [{name}] {lbl} 그림 찾는 중… "
                              + (f"({_waited:.0f}/{RASTA_SEE_MAX:.0f}초"
@@ -8298,13 +8584,33 @@ class IslandApp(tk.Tk):
             t += 1
         self._rasta_shot(anchor, si, j, "miss")      # 🗂 못 찾은 그 화면
         self._status.set(f"🚫 [{name}] {lbl} 그림을 못 찾아 이 슬롯 중단 "
-                         f"(최고 {best:.2f} · 기준 {rasta_thr(j):.2f})")
+                         f"(최고 {best:.2f} · 기준 {rasta_thr(ij):.2f})")
         self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번({lbl}) 그림 못 찾음 "
-                   f"(최고 {best:.2f} · 기준 {rasta_thr(j):.2f}"
+                   f"(최고 {best:.2f} · 기준 {rasta_thr(ij):.2f}"
+                   + (" · 🗡 첫 포털 버전 — 지하 결투장 이름" if _short else "")
+                   + (f" · 🚶 {_nudged}번 걸어가 봤다" if _nudged else "")
                    + (f" · {time.time() - _t_see:.0f}초 봤다" if mode == RASTA_SEE else "")
                    + (f" · 🗡 {_pw}" if _pw else "")
                    + ") → 이 슬롯 중단")
         return False
+
+    def _tap_dir(self, word, sec):
+        """🚶 방향키를 **짧게** 누른다 (WASD 스캔코드). `_hold_arrow` 는 0.4초 단위라
+        0.2~0.3초 같은 짧은 걸음에는 못 쓴다."""
+        W, A, S, D = 0x11, 0x1E, 0x1F, 0x20
+        scs = {"↑": [W], "↓": [S], "←": [A], "→": [D],
+               "↖": [W, A], "↗": [W, D], "↙": [S, A], "↘": [S, D]}.get(word)
+        if not scs or sec <= 0:
+            return False
+        _send_scan_key(scs, True)
+        try:
+            t0 = time.time()
+            while time.time() - t0 < sec and not self._stop_flag:
+                time.sleep(0.01)
+        finally:
+            _send_scan_key(scs, False)
+        time.sleep(0.12)
+        return True
 
     def _rasta_shot(self, anchor, si, j, tag, mark=None):
         """🗂 라스타바드 그림 칸의 **그때 화면**을 남긴다 (2026-11-14).
@@ -8985,6 +9291,11 @@ class IslandApp(tk.Tk):
                         if (_v3 or {}).get("mode") != RASTA_SEE:
                             continue
                         _j3 = int(_k3)
+                        _rs3 = rasta_short(key, slot, _j3)
+                        if _rs3 == "skip":
+                            continue
+                        if _rs3 == "see":             # 🗡 첫 포털만 → 지하 결투장 이름
+                            _j3 = RASTA_DUEL_IMG - 1
                         if not os.path.exists(rasta_img_path(_j3)):
                             continue
                         _x3, _y3, _s3 = rasta_find(_j3, anc)
@@ -9099,6 +9410,10 @@ class IslandApp(tk.Tk):
             self._resync[si] = _sk
         if j < getattr(self, "_resync", {}).get(si, 0):
             return True                       # 그 칸은 이미 지난 자리 — 건너뛴다
+        # 🗡 '첫 포털만' 버전 — 칸30~33 은 건너뛴다 (녹화도 안 튼다 · 기다리지도 않는다).
+        #    ⚠ 순차(`_run`)의 같은 처리와 **한 쌍이다.**
+        if rasta_short(key, slot, j) == "skip":
+            return False
         if j == 0 and self._wake_skip1(si, slot, name):
             try:
                 self._esc_close(si, self._slot_anchor(slot), name)
@@ -9126,7 +9441,7 @@ class IslandApp(tk.Tk):
             self._last_focus = si      # 🖼 처리가 그 클라를 앞으로 올려뒀다
             if rec and not self._stop_flag:
                 self._focus_client(si, c)
-                self._play_events(rec, name)
+                self._play_events(rec, name, settle=self._rec_settle_anchor(key, slot, j))
             # 🗒 그림·카드 자리도 기록을 남긴다. 여기서 바로 return 하는 바람에
             #    아래 기록 줄을 건너뛰어서, 2026-10-10 에 #01 칸6 을 안 누른 것처럼
             #    보여 한참 헤맸다 (실제로는 카드 이름이 비어 좌표로 눌렸다).
@@ -9173,7 +9488,7 @@ class IslandApp(tk.Tk):
             # 녹화는 키보드 입력이라 '앞에 있는 창'으로만 들어간다 → 이 클라를 먼저 앞으로
             self._focus_client(si, c)
             self._last_focus = si        # 방금 올렸으니 다음 클릭은 또 올리지 않는다
-            self._play_events(rec, name)
+            self._play_events(rec, name, settle=self._rec_settle_anchor(key, slot, j))
             did = True
         if did:
             # 📍 **누른 좌표를 남긴다** (2026-11-03) — "다른 곳으로 간다" 는 신고를
@@ -10038,6 +10353,10 @@ class IslandApp(tk.Tk):
                         self._resync[si] = _sk
                     if j < getattr(self, "_resync", {}).get(si, 0):
                         continue                  # 이미 지난 자리 — 건너뛴다
+                    # 🗡 '첫 포털만' 버전 — 칸30~33 은 건너뛴다 (녹화도 안 튼다).
+                    #    ⚠ 웨이브(`_do_one_click`)의 같은 처리와 **한 쌍이다.**
+                    if rasta_short(key, slot, j) == "skip":
+                        continue
                     # 🗡 라스타바드 — 이 칸이 '그림' 자리면 그림으로 처리한다.
                     #    설정은 **그 슬롯**에 있다 (라스타바드 프리셋을 적용하면 적힌다).
                     #    악몽의섬 프리셋을 적용하면 지워지므로 이 블록을 안 탄다.
@@ -10124,7 +10443,8 @@ class IslandApp(tk.Tk):
                         # 녹화는 클릭과 별개 — 이 자리 동작 후 녹화 재생
                         # (키보드 입력이라 그 클라가 앞에 있어야 들어간다)
                         self._focus_client(si, coords[j] if j < len(coords) else None)
-                        self._play_events(rec, name)
+                        self._play_events(rec, name,
+                                          settle=self._rec_settle_anchor(key, slot, j))
                         did = True
                     if not did:
                         continue
