@@ -2676,6 +2676,17 @@ FOLD_W_FIXED = 152
 WRAP_LINES = {"front": 2, "btn": 2}
 FRONT_TWO_ROWS = True
 
+# 🧹 **펼친 화면 왼쪽을 줄 맞춰 놓는다** (2026-11-15 사용자: *"열기했을 때 메인런처
+#    좌측편이 개판이야 정리 좀 해줘. 아래에 잘리는 것들도 있고"*).
+#    예전에는 줄을 '폭 절반' 으로 저절로 잘라 쌓아서(`_wrap_row`) 칸들이 제각각
+#    가운데·오른쪽에 붙었고, 맨 아래 확인용 열(13줄)이 화면 밖으로 잘렸다.
+#    이제 `_tidy_left` 가 **자리를 정해서** 놓는다 (왼쪽 맞춤 · 위 맞춤).
+#    켜져 있으면 `_wrap_row`(두 줄 쌓기)는 돌지 않는다. 끄면 예전 배치로 돌아간다.
+TIDY_LEFT = True
+TIDY_GAP = 8            # 칸 사이 가로 간격(px)
+TIDY_STATUS_CH = 54     # 맨 윗줄 상태 글 칸 폭(글자 수) — **고정**이라 글이 바뀌어도 창이 안 움직인다
+CHK_ROWS = 5            # 확인용 열 — 한 줄에 몇 개씩 세로로 (13개 → 5·5·3 세 줄)
+
 # 💬 실행 멘트(상태줄) 글 너비 — 클라 오른쪽 빈 자리에 맞춘다 (2026-11-03).
 #    넓히면 왼쪽이 클라 뒤로 들어가 안 보이고, 좁히면 줄이 많아져 길어진다.
 STATUS_WRAP = 168
@@ -10125,6 +10136,16 @@ class App(tk.Tk):
         # ╚══════════════════════════════════════╝
         self._dc_host = tk.Frame(self)
         self._dc_host.pack(side="right", fill="y")
+        # 🧱 **세로바는 접으나 펴나 같은 폭** (2026-11-15) — 안의 메모 글씨(20pt)가
+        #    폭을 380px 까지 요구해서, 펼치면 세로바가 2.5배로 벌어지고 창도 그만큼
+        #    넓어졌다 (2026-11-04 사용자: *"변화 없이 펼쳐지게 해줘야 해"*).
+        #    접힌 폭(`FOLD_W_FIXED`)에서 오른쪽 여백 2px 를 뺀 값으로 못 박는다.
+        if TIDY_LEFT and FOLD_W_FIXED:
+            try:
+                self._dc_host.config(width=max(60, int(FOLD_W_FIXED) - 2), height=10)
+                self._dc_host.pack_propagate(False)
+            except Exception:
+                pass
         # ── 상단 배너: 다크+골드 그라데이션 (리니지M 느낌) ──
         self._build_banner()
 
@@ -10222,6 +10243,7 @@ class App(tk.Tk):
         self.acc_count = tk.IntVar(value=2)
         tk.Spinbox(row_acc, from_=1, to=16, textvariable=self.acc_count,
                    width=4, font=("맑은 고딕", 9), state="normal").pack(side="left", padx=4)
+        self._tl_top = (_ur, top_row, back_row, row_acc, home_c)   # 🧹 `_tidy_left` 용
 
         # 실행 / 멈춤
         # 가운데정렬이면 창을 넓힐 때마다 버튼이 오른쪽으로 밀린다 → 왼쪽 고정
@@ -10484,6 +10506,8 @@ class App(tk.Tk):
         # TJ성공!! 좌측 끝 정렬용 가변 여백 (행이 가운데 정렬이라 오른쪽을 늘려 왼쪽으로 밀기)
         self._btnrow_pad = tk.Frame(btn_row, width=0, height=1)
         self._btnrow_pad.pack(side="left")
+        self._tl_btn = dict(cl=cl_col, upd=upd_col, isl=_isl_col, popup=popup_box,
+                            eg=eg, ig=ig, sv=sv)                    # 🧹 `_tidy_left` 용
 
         # 🧭 **클로드 열과 업데이트를 맨 오른쪽으로** (2026-11-03 사용자 지시).
         #    이 줄(btn_row)이 가장 넓어서, 줄을 오른쪽에 붙여도 안쪽 열은
@@ -11076,7 +11100,10 @@ class App(tk.Tk):
 
         # 확인용 3종 묶음: 변신확인용 / 인형확인용 / 성물확인용 (세로로 한 곳에)
         chk_col = tk.Frame(front_row); chk_col.pack(side="left", padx=(4,8), anchor="n")
-        for _t, _bg, _open, _run in (
+        # 🧹 **13줄을 한 줄로 세우면 화면 밖으로 잘린다** (2026-11-15 실측 — 휘장 제작·
+        #    영웅템체크 좌표! 가 안 보였다). `CHK_ROWS` 개씩 세로로 채워 옆으로 넘긴다.
+        #    글자가 잘리던 버튼(이벤트퀘스트·마력의기운·오만 지배석)도 폭을 9 → 12 로.
+        for _ci, (_t, _bg, _open, _run) in enumerate((
                 # 🎟 인사이드 쿠폰등록!! — 인사이드 우편함 **위**에 (2026-09-13 사용자 지시)
                 ("🎟 인사이드" + chr(10) + "쿠폰등록!!", "#117a8b", self._open_incoupon_win,
                  lambda: self._start_dgn2("incoupon")),
@@ -11103,15 +11130,21 @@ class App(tk.Tk):
                 #    *"좌표 넣는 거는 안 보이는 곳에 배치해줘. 화면 열기에 영웅템체크 좌표!"*)
                 #    ▶실행 = 세로바의 것과 같다 (점이 켜진 클라만).
                 ("🟣 영웅템체크" + chr(10) + "좌표!", "#6c3483", self._open_herox_win,
-                 self._herox_run)):
-            rr = tk.Frame(chk_col); rr.pack(anchor="n", pady=(0,4))
+                 self._herox_run))):
+            rr = tk.Frame(chk_col)
+            if TIDY_LEFT:
+                rr.grid(row=_ci % CHK_ROWS, column=_ci // CHK_ROWS, sticky="nw",
+                        padx=(0, 8), pady=(0, 4))
+            else:
+                rr.pack(anchor="n", pady=(0,4))
             tk.Button(rr, text=_t, font=("맑은 고딕", 9, "bold"), bg=_bg, fg="white",
-                      width=9, height=2, command=_open).pack(side="left")
+                      width=(12 if TIDY_LEFT else 9), height=2, command=_open).pack(side="left")
             tk.Button(rr, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
                       bg="#27ae60", fg="white", activebackground="#1e8449",
                       width=4, height=2, command=_run).pack(side="left", padx=(2,0))
 
         winmgmt = tk.Frame(front_row); winmgmt.pack(side="left", padx=(4,10), anchor="n")
+        self._chk_col, self._winmgmt = chk_col, winmgmt             # 🧹 `_tidy_left` 용
         # 🪟 재배치는 **그대로 두고**, 🟣 영웅 판을 그 **바로 아래**에 붙인다
         #    (2026-10-13 사용자: "재배치는 그대로 냅두고 그 아래에 새로 만들어주라는
         #     거야, 재배치 하는 런처 밑으로"). 그래서 재배치 쪽 코드는 손대지 않았다.
@@ -11127,7 +11160,7 @@ class App(tk.Tk):
         # 💰 **다야 수량 판** — `_build_daya_full` 한 곳에서 만든다 (2026-11-07).
         #    세로바 [💰 다야] 로 펼치는 판과 **똑같은 것**이다.
         #    🚫 여기서 따로 만들지 말 것 (사진·재측정·수정이 빠진다).
-        self._build_daya_full(front_row)
+        self._daya_main = self._build_daya_full(front_row)
 
         # 다야 수량 우측: 귀환주문서 슬롯별 실행 그리드 (좌표는 섬/던전 실행기에서 관리)
         # 안 쓰는 런처는 **아예 만들지 않는다** — 위젯을 안 만드는 만큼 그대로 빨라진다
@@ -11194,9 +11227,165 @@ class App(tk.Tk):
         for _n in ("_boost_btn", "_dup_upd", "_dup_save", "_dup_rest"):
             try: getattr(self, _n).pack_forget()
             except Exception: pass
+        # 🧹 **찍어두기 전에** 왼쪽을 정리한다 — `_fold_snap` 이 정리된 자리를 기억한다
+        self._tidy_left()
         self._fold_snap()
         self.after(120, lambda: self._fold_apply(bool(self.cfg.get("fold_main"))))
         self._refresh_ui()
+
+    def _tidy_left(self):
+        """🧹 펼친 화면 **왼쪽**을 줄 맞춰 놓는다 — 만든 뒤 **한 번만** (접기 전에).
+
+        2026-11-15 사용자: *"열기했을 때 메인런처 좌측편이 개판이야 정리 좀 해줘.
+        아래에 잘리는 것들도 있고 완전 개판이야"*.
+
+        ```
+        ① 맨 윗줄   📍제자리 · 🔎거래소검색 · ■멈춤 · ⬇맨뒤로 · [업데이트 n회 / 상태 글]
+        ② 버튼 1줄  TJ성공 · [전체 자동실행/계정 수/23:30/계정관리] · 클로드 열 ·
+                    섬/던전 열 · 좌표 열 · 런처재시작               (전부 **위 맞춤**)
+        ③ 버튼 2줄  패스권 · 오림의 일기장 · 이벤트상점 · 아이템등록 · 쿠폰등록 · 퍼플 팝업
+        ④ 섹션행    (그대로 — 왼쪽 맞춤만)
+        ⑤ 아래      왼 기둥: 배열창 재배치 → 슬롯판   ·   오른 기둥: 다야 수량 → 확인용(5·5·3)
+        ```
+        🧭 위젯을 **새로 만들거나 부모를 바꾸지 않는다** — `pack(in_=틀)` 로 자리만
+           옮긴다 (틀은 그 위젯의 부모 안에 만든다 — Tk 규칙).
+        ⚠ 틀은 칸보다 **나중에** 만들어져 위에 그려진다 → 반드시 `lower()` 한다
+           (안 내리면 칸을 덮어 빈 상자만 보인다 — 2026-11-04 실측).
+        ⚠ `row_acc`(계정 수)는 `btn_row` 의 **형제**라 그 안에 넣으면 `btn_row` 뒤에
+           가린다 → `lift()` 로 올린다.
+        🚫 버튼의 크기·기능·만드는 자리는 건드리지 않는다. 끄려면 `TIDY_LEFT = False`."""
+        if not TIDY_LEFT:
+            return
+        _step = "시작"
+        try:
+            tw, br, fr = self._topwrap, self._btn_row, self._front_row
+            _ur, top_row, back_row, row_acc, home_c = self._tl_top
+            B = self._tl_btn
+            G = int(TIDY_GAP)
+            LM = (12, 8)
+            for w in (tw, self._sec_row, fr):
+                w.pack_configure(anchor="w", padx=LM)
+
+            # ① 맨 윗줄 — 네 줄로 쌓여 있던 것을 한 줄로
+            _step = "맨 윗줄"
+            sl = self.status_label_widget
+            for w in (_ur, top_row, back_row, row_acc, br, sl):
+                w.pack_forget()
+            strip, info = tk.Frame(tw), tk.Frame(tw)
+            strip.pack(side="top", anchor="w", pady=(4, 4))
+            home_c.pack_configure(padx=(0, 0))
+            self._stop_wide.pack_configure(padx=(12, 0))
+            top_row.pack(in_=strip, side="left")
+            back_row.pack(in_=strip, side="left")
+            info.pack(in_=strip, side="left", padx=(16, 0))
+            for c in _ur.winfo_children():
+                try: c.pack_configure(padx=(0, 0), pady=(0, 0))
+                except Exception: pass
+            _ur.pack(in_=info, side="top", anchor="w")
+            #   상태 글 — **칸 크기를 고정**한다 (글이 길어져도 창·줄이 안 움직인다)
+            _ch = int(TIDY_STATUS_CH)
+            sl.config(width=_ch, height=2, anchor="w", justify="left",
+                      wraplength=_ch * 6)
+            sl.pack(in_=info, side="top", anchor="w")
+            info.lower(); strip.lower()
+
+            # ②③ 버튼 줄 — 두 줄, 전부 위 맞춤
+            _step = "버튼 줄"
+            cells = list(br.pack_slaves())
+            for w in cells:
+                w.pack_forget()
+
+            def _find(key):
+                for w in br.winfo_children():
+                    try:
+                        if w.winfo_class() == "Button" and key in str(w.cget("text")):
+                            return w
+                    except Exception:
+                        pass
+                return None
+            acc, pas, orim = _find("계정"), _find("패스권"), _find("오림")
+            L1, L2, rc = tk.Frame(br), tk.Frame(br), tk.Frame(br)
+            br.pack(side="top", anchor="w")
+            L1.pack(side="top", anchor="w")
+            L2.pack(side="top", anchor="w", pady=(8, 0))
+            done = []
+
+            def put(w, into, **kw):
+                if w is None:
+                    return
+                o = dict(side="left", anchor="n", padx=(0, G))
+                o.update(kw)
+                w.pack(in_=into, **o)
+                done.append(w)
+            put(self._tjcol, L1)
+            put(rc, L1)
+            self.btn_start.pack(in_=rc, side="top", fill="x"); done.append(self.btn_start)
+            row_acc.pack(in_=rc, side="top", anchor="w", pady=(3, 3))
+            self.btn_mail.pack(in_=rc, side="top", fill="x"); done.append(self.btn_mail)
+            if acc is not None:
+                acc.pack(in_=rc, side="top", fill="x", pady=(3, 0)); done.append(acc)
+            put(B["cl"], L1); put(B["isl"], L1); put(B["sv"], L1); put(B["upd"], L1)
+            #   클로드 열 — 안의 줄들을 **왼쪽 끝에 맞춘다** (가운데 정렬이라 들쭉날쭉했다)
+            for c in B["cl"].pack_slaves():
+                try: c.pack_configure(anchor="w")
+                except Exception: pass
+            put(pas, L2); put(orim, L2); put(B["eg"], L2); put(B["ig"], L2)
+            put(self._coupon_group, L2); put(B["popup"], L2)
+            #   🛟 빠뜨린 칸이 있으면 둘째 줄 끝에 붙인다 (빈 여백 칸은 버린다)
+            for w in cells:
+                if w in done:
+                    continue
+                try:
+                    if w.winfo_class() == "Frame" and not w.winfo_children():
+                        continue
+                except Exception:
+                    pass
+                put(w, L2)
+            for h in (rc, L2, L1):
+                h.lower()
+            row_acc.lift()
+
+            # ⑤ 아래 — 두 기둥
+            _step = "아래 기둥"
+            for w in fr.pack_slaves():
+                w.pack_forget()
+            cA, cB = tk.Frame(fr), tk.Frame(fr)
+            sp = tk.Frame(fr, width=2, bg="#bbb")
+            cA.pack(side="left", anchor="n")
+            sp.pack(side="left", fill="y", padx=(10, 10))
+            cB.pack(side="left", anchor="n")
+            self._winmgmt.pack(in_=cA, side="top", anchor="w")
+            self._night_col.pack(in_=cA, side="top", anchor="w", pady=(10, 0))
+            self._daya_main.pack(in_=cB, side="top", anchor="w")
+            self._chk_col.pack(in_=cB, side="top", anchor="w", pady=(12, 0))
+            cB.lower(); cA.lower()
+            self.after(2500, self._tidy_report)
+        except Exception as e:
+            try:
+                click_log("[화면] ⚠ 왼쪽 정리 실패 (%s 에서) — %s: %s"
+                          % (_step, type(e).__name__, e))
+            except Exception:
+                pass
+
+    def _tidy_report(self):
+        """🧹 정리된 왼쪽이 **화면 안에 다 들어가는지** 기록에 남긴다 (한 번).
+
+        화면이 더 낮은 컴퓨터에서 아래가 잘리면 이 줄로 바로 보인다."""
+        try:
+            self.update_idletasks()
+            need = sum(w.winfo_reqheight() for w in self.pack_slaves()
+                       if w is not self._dc_host and w.winfo_manager() == "pack")
+            _, have, _, _ = self._target_geometry()
+            ws = []
+            for nm, w in (("윗줄+버튼", self._topwrap), ("섹션행", self._sec_row),
+                          ("아래", self._front_row)):
+                ws.append("%s %dx%d" % (nm, w.winfo_reqwidth(), w.winfo_reqheight()))
+            click_log("[화면] 🧹 왼쪽 정리 — 필요 높이 약 %dpx / 쓸 수 있는 높이 %dpx%s · %s"
+                      % (need, have, ("" if need <= have else "  🚨 **아래가 잘린다**"),
+                         " · ".join(ws)))
+        except Exception as e:
+            try: click_log("[화면] ⚠ 왼쪽 정리 확인 실패 — %s" % e)
+            except Exception: pass
 
     def _dc_fill(self, col):
         """오른쪽 열을 **가로로 꽉** 채우고 버튼을 한 칸 키운다 (2026-11-04 사용자:
@@ -11391,7 +11580,7 @@ class App(tk.Tk):
            그대로 2020px 이었다. 이제 둘 다 쌓는다.
         🚫 여기에 줄을 더할 때는 `WRAP_LINES` 에 태그를 적고 **접을 때
            `on=False` 로 되돌아가는지** 확인할 것."""
-        if not FRONT_TWO_ROWS:
+        if not FRONT_TWO_ROWS or TIDY_LEFT:      # 🧹 정리된 배치는 자리가 정해져 있다
             return
         self._wrap_row(getattr(self, "_front_row", None), "front", on)
         self._wrap_row(getattr(self, "_btn_row", None), "btn", on)
@@ -11563,7 +11752,7 @@ class App(tk.Tk):
             # 🧱 세로바는 **접으나 펴나 창 전체 높이** — 그래서 여닫다
             #    펴도 **위아래가 전혀 움직이지 않는다.**
             self._dc_host.pack_configure(side="right", fill="y",
-                                         padx=((0, 2) if fold else (0, 0)))
+                                         padx=((0, 2) if (fold or TIDY_LEFT) else (0, 0)))
             dc.pack_configure(fill="both", expand=True)
             # [▶ 접기] 를 **맨 먼저** 아래에 붙여 자리를 잡고, 나머지를 순서대로.
             for _w, _i in getattr(self, "_fold_dc", ()):
@@ -15152,6 +15341,7 @@ class App(tk.Tk):
         self._awaken_stop = False
         self._awaken_busy = True
         nap_clear()      # ⏹ 새 작업 — 멈춤 깃발 내리기 (2026-11-03)
+        self._stop_flag = False      # ⏹ 예전에 누른 ■ 멈춤이 남아 있지 않게 (2026-11-15)
         self._awaken_gone = 0           # 연속 미달 센 것을 비우고 시작한다
         # 🔙 **런처를 맨 뒤로** (2026-10-20 사용자 지시 — 절대 규칙).
         #   사용자: *"각성할 때 가끔 메인런처가 앞으로 튀어나오는 현상이 있더라.
@@ -15734,6 +15924,7 @@ class App(tk.Tk):
             except Exception:
                 pass
             return
+        self._cardfix_t0 = time.time()      # ⏹ 이 뒤에 누른 ■ 멈춤만 본다 (2026-11-15)
         try:
             rels = [r for s in self._cardfix_sets() for r in s["rels"] if r]
             if not rels:
@@ -15765,7 +15956,7 @@ class App(tk.Tk):
                 click_log("[변신확정] 남은 카드교체 화면 %d개 — %s 순서로 돈다 (%s)"
                           % (len(rest), [a[0] + 1 for a in rest], why))
                 for _i, got in enumerate(rest, 1):
-                    if getattr(self, "_stop_flag", False):
+                    if _STOP_AT[0] > getattr(self, "_cardfix_t0", time.time()):
                         break
                     # ✋ **클라를 넘어갈 때마다** 사람이 만지는지 본다
                     #    (2026-10-21). 여러 클라를 도는 동안 사용자가 손을 대면
@@ -15823,7 +16014,7 @@ class App(tk.Tk):
                 self._focus_client_at(_coord)
                 nap(random.uniform(*CARDFIX_FOCUS))
             for k, (dx, dy) in enumerate(rels, 1):
-                if getattr(self, "_stop_flag", False):
+                if _STOP_AT[0] > getattr(self, "_cardfix_t0", time.time()):
                     break
                 self.after(0, lambda a=ai, n=an, b=k, m=len(rels): self.status.set(
                     "🃏 변신확정 클라 %d/%d · 좌표 %d/%d..." % (a, n, b, m)))
@@ -16012,7 +16203,7 @@ class App(tk.Tk):
                 return True                 # 그 기능이 없는 판이면 막지 않는다
             t0 = time.time()
             while True:
-                if getattr(self, "_cardfix_stop", False) or self._stop_flag:
+                if getattr(self, "_cardfix_stop", False) or _STOP_AT[0] > t0:
                     return False
                 idle = float(_f())
                 if idle >= CARDFIX_QUIET:
@@ -26807,6 +26998,7 @@ class App(tk.Tk):
             self.status.set("🗂 다른 작업이 도는 중입니다")
             return
         nap_clear()      # ⏹ 새 작업 — 멈춤 깃발 내리기 (2026-11-03)
+        self._stop_flag = False      # ⏹ 예전에 누른 ■ 멈춤이 남아 있지 않게 (2026-11-15)
         # ✋ 사람이 쓰는 중이면 끼어들지 않는다 (2026-10-21 사용자 지시)
         if self._human_busy():
             self._human_wait_log("도감")
@@ -27132,6 +27324,7 @@ class App(tk.Tk):
             self.status.set("📬 다른 작업이 도는 중입니다")
             return
         nap_clear()      # ⏹ 새 작업 — 멈춤 깃발 내리기 (2026-11-03)
+        self._stop_flag = False      # ⏹ 예전에 누른 ■ 멈춤이 남아 있지 않게 (2026-11-15)
         self.status.set("📬 받을 곳을 찾는 중...")
         # 🔙 **런처를 맨 뒤로** — 앞에 있으면 그 자리 클릭을 런처가 먹는다
         #   (2026-10-20 사용자 지시 · 도감과 같은 이유)
@@ -27262,6 +27455,10 @@ class App(tk.Tk):
         if not self._try_busy("물약귀환"):
             click_log("[물약감시] 🏠 다른 작업이 도는 중이라 미룬다")
             return
+        # ⏹ ■ 멈춤은 **이 귀환을 시작한 뒤에 누른 것만** 본다 (2026-11-15).
+        #    `_stop_flag` 를 그대로 보면 예전에 누른 멈춤이 남아, 그 뒤 물약 재실행이
+        #    전부 "귀환된 슬롯이 없다" 로 끝난다 (F11·전체 자동실행을 하기 전까지).
+        _t0s = time.time()
         try:
             # ① 전부 귀환 — 죽지 않게 먼저 빼낸다
             try:
@@ -27275,7 +27472,7 @@ class App(tk.Tk):
                 _allk = []
             ok = []
             for i, (si, key, didx, v, pv) in enumerate(hits):
-                if getattr(self, "_stop_flag", False):
+                if _STOP_AT[0] > _t0s:
                     break
                 anc = ancs.get(si)
                 if not anc:
@@ -27296,7 +27493,7 @@ class App(tk.Tk):
             self._clear_busy("물약귀환")
         # ② 귀환한 것만 하나씩 — 하나가 끝나야 다음
         for si, key, didx, v, pv in ok:
-            if getattr(self, "_stop_flag", False):
+            if _STOP_AT[0] > _t0s:
                 break
             click_log(f"[물약감시] 💧 #{si+1:02d} 물약 0개 ({v:.2f}) · "
                       f"{key} ({pv:.2f}) → 귀환 뒤 다시 실행")
@@ -32062,7 +32259,7 @@ class App(tk.Tk):
             w = self.winfo_width() or 1047
         # 🗂 접었을 때는 **빈 공간에 딱 맞게** (2026-11-04 사용자:
         #    "크기는 빈공간에 딱 맞게 좌우를 맞춰줘"). 펼쳤을 때만 여백을 준다.
-        if not getattr(self, "_fold_on", False):
+        if not getattr(self, "_fold_on", False) and not TIDY_LEFT:
             w += 76   # 좌우 약 1cm씩(≈38px) 여유 — 내용이 가운데라 양옆에 균등 여백
         # 🖥 화면이 더 좁은 컴퓨터에서도 창이 밖으로 나가지 않게 가로를 잘라준다
         #    (자리를 코드에 고정했으므로 — 2026-11-03). 세로는 위에서 이미 잘랐다.
@@ -32132,6 +32329,10 @@ class App(tk.Tk):
                 pass
             # 3) ★ 과거섬 패스 ← 일반던전충전 좌측 라인 (맞을 때까지 반복)
             try:
+                # 🧹 정리된 배치에서는 쓰지 않는다 — `_dc_open_btn` 은 이제 **세로바**에
+                #    있어서, 이 맞춤이 섹션행 왼쪽에 빈칸을 600px 까지 밀어 넣는다.
+                if TIDY_LEFT:
+                    raise RuntimeError("정리된 배치 — 왼쪽 맞춤 안 씀")
                 _left = getattr(self, "_stop_col", None) or self._past_skip_btn
                 dx2 = self._dc_open_btn.winfo_rootx() - _left.winfo_rootx()
                 if 2 < abs(dx2) < 900:
@@ -41924,6 +42125,11 @@ class App(tk.Tk):
           만들어도 자동으로 적용된다 (`_stop()` 을 '아는 런처 전부' 로 바꾼 것과
           같은 이유 — 손으로 나열하면 반드시 빠진다)."""
         nap_clear()               # 새 작업 — 멈춤 깃발을 내린다 (2026-11-03)
+        # ⏹ **`_stop_flag` 도 여기서 내린다** (2026-11-15). ■ 멈춤이 세운 이 깃발은
+        #    [전체 자동실행]·F11 만 내렸다 → 그 전까지 `_stop_flag` 를 보는 작업
+        #    (퀘스트 받기 등)이 **시작하자마자 '멈춤' 으로 끝났다.**
+        #    멈춤은 **그때 돌던 것**에만 해당한다 — 새로 시작한 작업은 새로 돈다.
+        self._stop_flag = False
         try:
             fn(*args)
         except Exception as e:
