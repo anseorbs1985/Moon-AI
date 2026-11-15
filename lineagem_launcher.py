@@ -252,23 +252,6 @@ HERO_R     = 8                 # 점 반지름(px) — 지름 16
 HERO_GAP   = 6                 # 점 사이 틈
 HERO_CV_W  = HERO_DOTS * (HERO_R * 2 + HERO_GAP) + 2
 HERO_CV_H  = HERO_R * 2 + 6
-# 🛒 **영웅템이 등록된(점이 켜진) 클라만 거래소를 연다** (2026-11-15 사용자 요청:
-#    "영웅템이 등록되어 있는 클라들만 거래소를 열어줄 수 있을까 … 재등록을 해야 하고
-#     아니면 다시 등록을 빼거나 해야 하는데 일일이 찾는 게 힘들어서").
-#    좌표는 **한 클라에서만** 찍는다 — 창 왼쪽위 기준으로 저장해 16클라 공용으로 쓴다.
-#    🚫 여는 것까지만 한다 — 등록·취소·재등록은 누르지 않는다 (사용자가 직접).
-HEROX_CLICKS    = 6             # 거래소를 여는 클릭 칸 수 (빈 칸은 건너뛴다)
-HEROX_BASE_WH   = (546, 307)    # 좌표를 찍은 창 크기를 모를 때의 기준
-HEROX_RELS      = []            # 코드 기본값(창 기준) — 비어 있으면 그 컴퓨터가 찍은 것만 쓴다
-HEROX_GAP       = (0.9, 1.7)    # 클릭 사이 (메뉴가 뜨는 시간 — 사람처럼 범위 랜덤)
-HEROX_PAUSE_P   = 0.12          # 이 확률로 한 박자 더 쉰다
-HEROX_PAUSE     = (0.4, 1.1)
-HEROX_SLOT_GAP  = (1.6, 3.2)    # 클라 사이
-HEROX_WAKE_WAIT = (0.7, 1.2)    # 깨운 뒤 화면이 자리잡을 틈
-HEROX_FOCUS     = (0.30, 0.50)  # 창을 올린 뒤 첫 클릭까지 (비활성 창의 첫 클릭은 씹힌다)
-HEROX_SEE_WAIT  = (1.2, 1.8)    # 마지막 클릭 뒤 화면을 확인하기까지
-HEROX_ESC_TRIES = 2             # 열려 있는 창(인벤토리·상점)을 ESC 로 닫아보는 횟수
-HEROX_SHUFFLE   = True          # 🎲 클라 순서를 섞는다
 # 💧 물약 0개 **상시 감시** (2026-10-13 사용자 요청: "멘트가 나와도 가만히 있어서
 #    죽는데"). 실행 끝 직후에만 보면 늦는다 — 물약은 사냥 도중에 떨어진다.
 # 물약 문구를 얼마나 자주 보나. **2026-10-17 사용자 지시로 2분 → 1분.**
@@ -1503,6 +1486,14 @@ BADGE_CLICKS  = 11   # 10 → 11 (2026-10-27 사용자: "좌표 하나만 더 11
 #      (`KEEP_ORDER_FKEYS` 에 없으므로 `random.shuffle`).
 #    🚫 기존 섬 실행기의 `귀환주문서` 던전(4번 · 좌표 64개)과는 **다른 것**이다.
 RESC_CLICKS   = 2
+# 🟣 **영웅템체크 좌표! — 영웅템이 등록된(점이 켜진) 클라만 거래소를 연다**
+#    (2026-11-15 사용자: *"영웅템이 등록되어 있는 클라들만 거래소를 열어줄 수 있을까 …
+#     일일이 찾는 게 힘들어서"* → *"각 클라마다 전부 좌표를 입력할 수 있게 … 좌표가 다
+#     다르잖아 … 버튼 7개 … 첫 번째는 절전해제 … 과거섬이나 용던고고처럼"*)
+#    칸1 = 😴 절전해제(기준점 — 누르지 않는다) · 칸2~7 = 거래소를 여는 순서
+#    🚫 여는 것까지만 한다 — 등록·취소·재등록은 사용자가 찍어둔 좌표가 하는 만큼만.
+HEROX_CLICKS   = 7
+HEROX_SLOT_GAP = (1.6, 3.2)  # 슬롯 사이 (마지막 슬롯 뒤엔 생략)
 # 📐 **창 기준 좌표 한 벌** — 로컬이 [📐 좌표맞추기] 한 번으로 넣는다.
 #    🚫 **좌표 배포가 아니다** (2026-08-29 절대 규칙 — 좌표는 push 하지 않는다).
 #       코드에 두고 **사용자가 누를 때만** 그 컴퓨터 창 자리에 맞춰 넣는다.
@@ -1519,11 +1510,11 @@ RESC_SLOT_GAP = (1.5, 3.0)   # 슬롯 사이 (마지막 슬롯 뒤엔 생략)
 # 😴 **깨어날 때까지** 깨우는 런처 — Z 한 번이 아니라 `_wake_until`
 #    (Z → '절전모드 해제' 글자 클릭, 최대 `SLEEP_WAKE_TRIES` 번).
 #    클릭이 한두 개뿐이고 **던전이 끝난 뒤** 쓰므로 16클라가 전부 자고 있다.
-SLEEP_HARD    = ("resc",)
+SLEEP_HARD    = ("resc", "herox")
 # 😴 **깨어 있었으면 칸1(절전해제)을 건너뛴다** (사용자: *"안 되어 있으면 그냥 7번"*)
 #    🚫 이 건너뛰기를 없애지 말 것 — 깨어 있는데 칸1 을 누르면 그 자리는
 #       **게임 화면**이라 엉뚱한 것이 눌린다.
-SLEEP_SKIP1   = ("resc",)
+SLEEP_SKIP1   = ("resc", "herox")
 # ⎋ **그 칸은 좌표를 누르지 않고 ESC 를 누른다** (0부터 센 번호)
 #    2026-10-27 사용자: *"그 **11번에는 esc를 넣어줘**"*
 #    · 좌표를 안 찍어도 된다 — 그 슬롯의 **첫 등록 좌표**로 창을 앞으로 올린 뒤 누른다.
@@ -1552,7 +1543,7 @@ BADGE_SLOT_GAP = (1.0, 6.0)   # 다음 슬롯을 들여보내기까지 — 2026-
 #   (느린 간격은 SLOW_FKEYS 가 정한다 — 둘을 헷갈리지 말 것).
 SLOW_CLICKS_BY = {"magic_slots": MAGIC_CLICKS, "omanst_slots": OMANST_CLICKS,
                   "mondex_slots": MONDEX_CLICKS, "badge_slots": BADGE_CLICKS,
-                  "resc_slots": RESC_CLICKS}
+                  "resc_slots": RESC_CLICKS, "herox_slots": HEROX_CLICKS}
 SLOW_FKEYS    = ("magic", "omanst", "mondex")
 SLOW_GAP_MIN  = 2.6        # 클릭 사이 (다른 런처 기본은 1.14~2.62초 — 두 배쯤 느리다)
 SLOW_GAP_MAX  = 5.2
@@ -1616,6 +1607,7 @@ DEFAULT_CFG = {
     "mondex_slots":  None,              # 🗂 몬스터도감!! — 16슬롯 × 좌표8 (끝나면 보상 받기)
     "badge_slots":   None,              # 🎖 휘장 제작!! — 16슬롯 × 좌표10 (그냥 클릭만)
     "resc_slots":    None,              # 🔮 귀환주문서 — 16슬롯 × 좌표2 (칸1 절전해제·칸2 7번)
+    "herox_slots":   None,              # 🟣 영웅템체크 좌표! — 16슬롯 × 좌표7 (칸1 절전해제·칸2~ 거래소 열기)
     "dollchk_slots": None,              # 인형확인용 — 처음 로드 때 변신확인용 복사
     "relic_slots":   None,              # 성물확인용 — 처음 로드 때 변신확인용 복사
     "coupon_slots":  None,              # 쿠폰등록 — 16슬롯 × 좌표9 (변신확인용 방식)
@@ -2997,7 +2989,7 @@ MONDEX_TEMPO   = (0.90, 1.15)
 MAIL_TEMPO     = (0.90, 1.12)    # 클라마다 제 속도 (들어갈 때 한 번 뽑는다)
 MAIL_HOLD      = 0.10            # 10% 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
 MAIL_HOLD_T    = (0.4, 1.0)
-SLEEP_WAKE = ("fix", "jakwi", "dragon", "mondex", "resc")
+SLEEP_WAKE = ("fix", "jakwi", "dragon", "mondex", "resc", "herox")
 SLEEP_WAKE_KEY = "z"
 SLEEP_MATCH = 0.76      # 절전 화면 판정 기준.
 # 실측 491 창 — 자는 중 0.72~1.00 / 깨어 있을 때 0.39~0.50  → 0.68 이면 넉넉했다.
@@ -10894,7 +10886,7 @@ class App(tk.Tk):
         #       `self._hero_cv` 가 두 벌이 되어 한쪽만 칠해진다.
         # 🛒 그 옆 **[▶실행]** — 점이 켜진 클라만 거래소를 연다 (2026-11-15 사용자:
         #    *"영웅템체크 옆에 실행버튼을 만들어주면 좋을 것 같은데"*).
-        #    좌표는 판 안(🛒 거래소 여는 좌표)에서 한 클라에서만 찍는다.
+        #    좌표는 [◀ 열기] 화면의 [🟣 영웅템체크 좌표!] 에서 슬롯마다 찍는다.
         _hr = tk.Frame(_k2)
         _hr.pack(side="top", fill="x", pady=(3, 0))
         self._hero_btn = tk.Button(_hr, text="🟣 영웅템 체크 ◀",
@@ -11106,7 +11098,12 @@ class App(tk.Tk):
                 ("🗂 몬스터\n도감!!", "#16a085", self._open_mondex_win,
                  lambda: self._start_dgn2("mondex")),
                 ("🎖 휘장" + chr(10) + "제작!!", "#b03a2e", self._open_badge_win,
-                 lambda: self._start_dgn2("badge"))):
+                 lambda: self._start_dgn2("badge")),
+                # 🟣 영웅템체크 좌표! — **펼친 화면에만** 둔다 (2026-11-15 사용자:
+                #    *"좌표 넣는 거는 안 보이는 곳에 배치해줘. 화면 열기에 영웅템체크 좌표!"*)
+                #    ▶실행 = 세로바의 것과 같다 (점이 켜진 클라만).
+                ("🟣 영웅템체크" + chr(10) + "좌표!", "#6c3483", self._open_herox_win,
+                 self._herox_run)):
             rr = tk.Frame(chk_col); rr.pack(anchor="n", pady=(0,4))
             tk.Button(rr, text=_t, font=("맑은 고딕", 9, "bold"), bg=_bg, fg="white",
                       width=9, height=2, command=_open).pack(side="left")
@@ -16685,6 +16682,7 @@ class App(tk.Tk):
         ("mondex_slots",   "🗂 몬스터도감!!"),
         ("badge_slots",    "🎖 휘장 제작!!"),
         ("resc_slots",     "🔮 귀환주문서"),
+        ("herox_slots",    "🟣 영웅템체크 좌표!"),
         ("fish_slots",     "🎣 낚시녹임"),
         ("market_slots",   "🔎 거래소검색"),
         ("coupon_slots",   "🎟 쿠폰등록"),
@@ -17896,11 +17894,10 @@ class App(tk.Tk):
         except Exception as e:
             tk.Label(body, text=f"판을 못 만들었다: {e}",
                      fg="#e74c3c").pack(padx=10, pady=10)
-        try:
-            self._build_herox(body)     # 🛒 거래소 여는 좌표 + ▶
-        except Exception as e:
-            tk.Label(body, text=f"거래소 칸을 못 만들었다: {e}",
-                     fg="#e74c3c").pack(padx=10, pady=4)
+        tk.Label(body, justify="left", font=("맑은 고딕", 8), fg="#af601a",
+                 text="🛒 [▶실행] = 점이 켜진 클라만 거래소를 엽니다\n"
+                      "   좌표는 [◀ 열기] 화면의 [🟣 영웅템체크 좌표!] (슬롯마다 7칸)"
+                 ).pack(anchor="w", pady=(4, 0))
         # 🧭 **그 버튼 바로 옆**에 붙인다 — 다른 창과 **같은 도우미**를 쓴다
         self._place_beside(w, getattr(self, "_hero_btn", None))
         w.protocol("WM_DELETE_WINDOW", self._hero_win)
@@ -17909,7 +17906,6 @@ class App(tk.Tk):
         except Exception:
             pass
         self._hero_paint()              # 🎨 어두운 화면을 입힌 뒤 다시 칠한다
-        self._herox_paint()             # 🛒 좌표·대상 표시 (색을 다시 입힌다)
         try: self._hero_btn.config(text="🟣 영웅템 체크 ▶")
         except Exception: pass
 
@@ -20280,6 +20276,7 @@ class App(tk.Tk):
                 "mondex":  ("mondex_slots",  "몬스터도감!!", "🗂"),
                 "badge":   ("badge_slots",   "휘장 제작!!", "🎖"),
                 "resc":    ("resc_slots",    "귀환주문서",  "🔮"),
+                "herox":   ("herox_slots",   "영웅템체크 좌표!", "🟣"),
                 "dollchk": ("dollchk_slots", "인형확인용", "🧸"),
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
@@ -21472,6 +21469,19 @@ class App(tk.Tk):
         self._open_section_win("_resc_win", "🔮 귀환주문서",
                                lambda p: self._build_dgn2("resc", p),
                                w=470, h=430, pinnable=True)
+
+    def _open_herox_win(self):
+        """🟣 영웅템체크 좌표! — 슬롯마다 좌표 7칸 (2026-11-15 사용자 요청).
+
+        칸1 = 😴 절전해제 자리 · 칸2~7 = 거래소를 여는 순서 (안 쓰는 칸은 비워둔다).
+        🚫 칸1 은 **누르지 않는다** (`SLEEP_SKIP1`) — 자고 있으면 `_wake_hard` 가 깨우고,
+           깨어 있으면 그대로 칸2 부터 누른다. 그래도 칸1 은 찍어두는 것이 좋다
+           (그 슬롯이 어느 클라인지 알려주는 기준점이다).
+        ▶ 전체 실행은 **🟣 점이 켜진 슬롯만** 돈다 (`_herox_run`).
+        [📋 전체붙임] 으로 한 슬롯을 16슬롯에 퍼뜨릴 수 있다 (창 위치 자동보정)."""
+        self._open_section_win("_herox_win", "🟣 영웅템체크 좌표!",
+                               lambda p: self._build_dgn2("herox", p),
+                               w=470, h=540, pinnable=True)
 
     def _open_mondex_win(self):
         """🗂 몬스터도감!! — 좌표를 찍는 창. 좌표를 다 누르면 보상을 전부 받는다."""
@@ -23468,6 +23478,10 @@ class App(tk.Tk):
         #    (2026-11-04 사용자: *"실행을 누르면 왜 한참 생각하고 실행하느냐.
         #    1~2초 뒤에 바로 해줘"*). 어디서 시간을 쓰는지 숫자로 보여야 고친다.
         self._btn_t0 = time.time()
+        # 🟣 영웅템체크 — **전체 실행은 점이 켜진 슬롯만** 돈다 (2026-11-15).
+        #    (선택실행·개별 ▶ 는 `sel_list`/다른 길이라 그대로 그 슬롯을 돈다)
+        if fkey == "herox" and sel_list is None:
+            return self._herox_run()
         key, title, _ = self._dgn2_info(fkey)
         # 👑 작위는 [🔁 연속] 이 따로 돈다. 그게 도는 중에 여기로 또 시작하면
         #    아래 `_jakwi_stop = False` 가 **멈춤을 취소해버려** 계속 돌았다 (2026-09-19).
@@ -25442,7 +25456,7 @@ class App(tk.Tk):
                 if fkey in SLEEP_SKIP1 and 0 in order:
                     order.remove(0)
                     click_log(f"{fkey} [{name}] 😴 칸1(절전해제)은 **누르지 않는다** "
-                              f"({'깨웠다' if _woke else '깨어 있었다'}) — 칸2 만 누른다")
+                              f"({'깨웠다' if _woke else '깨어 있었다'}) — 그 뒤 칸만 누른다")
                 # ⎋ ESC 칸은 좌표가 없어도 **반드시** 넣는다 (맨 마지막 칸)
                 _ec = ESC_CELLS.get(fkey)
                 if (_ec is not None and _ec < nclk and _ec not in order
@@ -25545,10 +25559,11 @@ class App(tk.Tk):
                     click_log(f"[{fkey}] 슬롯 [{name}] 끝 → 다음 슬롯까지 {_sg:.1f}초")
                     self._wait_gap(stop, f"{name} → 다음", -1, _sg)
                 # 🔮 귀환주문서 — **하나씩 천천히** (마지막 슬롯 뒤엔 생략)
-                if (fkey == "resc" and slot_idx is None
+                if (fkey in ("resc", "herox") and slot_idx is None
                         and tn < len(targets) - 1 and not getattr(self, stop, False)):
-                    _rg = random.uniform(*RESC_SLOT_GAP)
-                    click_log(f"[resc] 슬롯 [{name}] 끝 → 다음 슬롯까지 {_rg:.1f}초")
+                    _rg = random.uniform(*(HEROX_SLOT_GAP if fkey == "herox"
+                                           else RESC_SLOT_GAP))
+                    click_log(f"[{fkey}] 슬롯 [{name}] 끝 → 다음 슬롯까지 {_rg:.1f}초")
                     self._wait_gap(stop, f"{name} → 다음", -1, _rg)
                 if fkey in self.PASTE_FKEYS:
                     self._coupon_log(f"[{fkey}] 슬롯 [{name}] 끝 (클릭간격 배수 {c_mult:.2f})")
@@ -36422,6 +36437,12 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("resc", i),
                             prev=lambda i: self._preview_dgn2("resc", i),
                             delete=lambda i: self._del_dgn2("resc", i)),
+            "herox":   dict(title="영웅템체크 좌표!", key="herox_slots",
+                            clicks=HEROX_CLICKS, color="#6c3483", enable=True, sel=True,
+                            reg=lambda s, c: self._reg_dgn2_click("herox", s, c),
+                            test=lambda i: self._test_dgn2("herox", i),
+                            prev=lambda i: self._preview_dgn2("herox", i),
+                            delete=lambda i: self._del_dgn2("herox", i)),
             "mondex":  dict(title="몬스터도감!!", key="mondex_slots",
                             clicks=MONDEX_CLICKS, color="#16a085", enable=True, sel=True,
                             reg=lambda s, c: self._reg_dgn2_click("mondex", s, c),
@@ -43159,7 +43180,6 @@ class App(tk.Tk):
                 d.pop(k, None)           # 다 끄면 줄을 아예 지운다
             self._hero_save(d)
             self._hero_paint()
-            self._herox_paint()
             _on = sum(st)
             self.status.set(f"🟣 영웅 #{k} — {_on}개 있음" if _on
                             else f"✔ 영웅 #{k} — 전부 팔림")
@@ -43193,25 +43213,6 @@ class App(tk.Tk):
             pass
 
     # ── 🛒 영웅템이 등록된 클라만 거래소를 연다 (2026-11-15) ─────────────
-    def _herox_rels(self):
-        """거래소 여는 좌표 → (rels, 기준가로, 기준세로). rels = [[dx,dy]|None] × 칸수.
-
-        **이 컴퓨터가 찍어둔 것이 먼저**다. 하나도 없으면 코드 기본값(`HEROX_RELS`)."""
-        r = list(self.cfg.get("herox_rels") or [])[:HEROX_CLICKS]
-        try:
-            w = int(self.cfg.get("herox_w") or 0)
-            h = int(self.cfg.get("herox_h") or 0)
-        except Exception:
-            w = h = 0
-        if not any(r):
-            r = [list(x) if x else None for x in HEROX_RELS][:HEROX_CLICKS]
-            w, h = HEROX_BASE_WH
-        if w <= 0 or h <= 0:
-            w, h = HEROX_BASE_WH
-        while len(r) < HEROX_CLICKS:
-            r.append(None)
-        return r, w, h
-
     def _herox_slots(self):
         """🟣 점이 **하나라도 켜진** 슬롯 번호(1부터) — 거래소를 열 대상."""
         out = []
@@ -43227,322 +43228,72 @@ class App(tk.Tk):
             pass
         return sorted(out)
 
-    def _build_herox(self, parent):
-        """🛒 영웅 판 아래 — 거래소 여는 좌표 칸과 ▶."""
-        box = tk.LabelFrame(parent, text=" 🛒 거래소 열기 — 점이 켜진 클라만 ",
-                            font=("맑은 고딕", 8, "bold"), fg="#af601a",
-                            bd=2, relief="groove")
-        box.pack(anchor="w", pady=(6, 0), padx=1, fill="x")
-        tk.Label(box, justify="left", font=("맑은 고딕", 8), fg="#888",
-                 text="거래소를 여는 순서대로 누를 자리를 📍 로 찍습니다.\n"
-                      "한 클라에서만 찍으면 16클라 공용 · 빈 칸은 건너뜁니다."
-                 ).pack(anchor="w", padx=4, pady=(2, 2))
-        g = tk.Frame(box); g.pack(anchor="w", padx=4)
-        self._herox_lbs = []
-        for j in range(HEROX_CLICKS):
-            tk.Label(g, text="%d" % (j + 1), width=2,
-                     font=("맑은 고딕", 8, "bold")).grid(row=j, column=0, pady=1)
-            lb = tk.Label(g, text="— 없음", width=11, anchor="w",
-                          font=("맑은 고딕", 8), fg="#888")
-            lb._keep_fg = True
-            lb.grid(row=j, column=1, padx=(2, 4))
-            self._herox_lbs.append(lb)
-            tk.Button(g, text="📍 찍기", font=("맑은 고딕", 8), pady=0,
-                      command=lambda x=j: self._reg_herox_coord(x)
-                      ).grid(row=j, column=2, padx=1)
-            tk.Button(g, text="✖", font=("맑은 고딕", 8), pady=0, width=2,
-                      command=lambda x=j: self._herox_clear(x)
-                      ).grid(row=j, column=3, padx=1)
-        self._herox_tgt = tk.Label(box, text="", font=("맑은 고딕", 8, "bold"),
-                                   fg="#af601a", justify="left", anchor="w")
-        self._herox_tgt._keep_fg = True
-        self._herox_tgt.pack(anchor="w", padx=4, pady=(4, 0))
-        tk.Button(box, text="▶ 점 켜진 클라 거래소 열기",
-                  font=("맑은 고딕", 9, "bold"), bg="#af601a", fg="white",
-                  activebackground="#935116", pady=2,
-                  command=self._herox_run).pack(fill="x", padx=4, pady=(3, 4))
-        self._herox_paint()
-
-    def _herox_paint(self):
-        """등록된 좌표와 지금 대상을 보여준다 — 됐는지 눈으로 보이게 (2026-09-16 규칙)."""
-        try:
-            rels, bw, bh = self._herox_rels()
-            for j, lb in enumerate(getattr(self, "_herox_lbs", None) or []):
-                if not lb.winfo_exists():
-                    continue
-                r = rels[j] if j < len(rels) else None
-                if r:
-                    lb.config(text="＋%d,%d" % (int(r[0]), int(r[1])), fg="#27ae60",
-                              font=("맑은 고딕", 8, "bold"))
-                else:
-                    lb.config(text="— 없음", fg="#888", font=("맑은 고딕", 8))
-            tl = getattr(self, "_herox_tgt", None)
-            if tl is not None and tl.winfo_exists():
-                sl = self._herox_slots()
-                n = len([r for r in rels if r])
-                tl.config(text=("지금 대상 %d개: %s" % (len(sl), " ".join("#%02d" % x for x in sl))
-                                if sl else "지금 대상 없음 — 위에서 점을 켜주세요")
-                               + "\n좌표 %d칸 등록 (기준 창 %dx%d)" % (n, bw, bh))
-        except Exception:
-            pass
-
-    def _herox_clear(self, j):
-        """✖ 그 칸의 좌표를 지운다."""
-        try:
-            rels, bw, bh = self._herox_rels()
-            if not (0 <= j < len(rels)) or not rels[j]:
-                return
-            rels[j] = None
-            self.cfg["herox_rels"] = rels
-            self.cfg["herox_w"], self.cfg["herox_h"] = bw, bh
-            save_cfg(self.cfg)
-            self.status.set("🛒 거래소 좌표 %d 을 지웠습니다" % (j + 1))
-            self._herox_paint()
-        except Exception as e:
-            click_log("[거래소] ⚠ 좌표 지우기 오류: %s" % e)
-
-    def _reg_herox_coord(self, j):
-        """📍 거래소 여는 좌표 j 를 찍는다 — **클릭한 자리가 어느 클라 창인지** 보고 저장.
-
-        ⚠ 영웅 판은 `-topmost` 라 클라를 덮는다 → 찍는 동안 `_wins_hide()` 로 숨겼다가
-          되돌린다 (변신확정 `_reg_cardfix_coord` 와 같은 패턴)."""
-        self._herox_reg_j = j
-        self.status.set("3초 후 거래소 [좌표%d] 위치를 클릭하세요! "
-                        "(리니지M 창 안 — 그 클라 기준으로 저장됩니다)" % (j + 1))
-
-        def _go():
-            try:
-                self._herox_saved_wins = self._wins_hide()
-            except Exception:
-                self._herox_saved_wins = None
-            self.withdraw()
-            nap(0.2)
-            CoordOverlay(self, mode="herox")
-        self.after(3000, _go)
-
-    def on_herox_coord(self, x, y):
-        """클릭한 자리가 **어느 클라 창 안인지** 보고 그 창 기준(dx,dy)으로 저장."""
-        j = int(getattr(self, "_herox_reg_j", 0) or 0)
-        si = L = T = None
-        nw = nh = 0
-        try:
-            for i, (l, t, r, b) in enumerate(self._client_rects_by_slot() or []):
-                if l <= x < r and t <= y < b:
-                    si, L, T = i, l, t
-                    nw, nh = int(r - l), int(b - t)
-                    break
-        except Exception:
-            pass
-        try:
-            self._wins_show(getattr(self, "_herox_saved_wins", None))
-        except Exception:
-            pass
-        self.deiconify()
-        if L is None or nw < 100 or nh < 100:
-            self.status.set("📍 그 자리는 리니지M 창 밖입니다 — 창 안을 클릭하세요 "
-                            "(좌표 %d 은 그대로)" % (j + 1))
-            return
-        rels = list(self.cfg.get("herox_rels") or [])[:HEROX_CLICKS]
-        while len(rels) < HEROX_CLICKS:
-            rels.append(None)
-        try:
-            bw = int(self.cfg.get("herox_w") or 0)
-            bh = int(self.cfg.get("herox_h") or 0)
-        except Exception:
-            bw = bh = 0
-        if not any(rels) or bw <= 0 or bh <= 0:
-            bw, bh = nw, nh                 # 첫 좌표 — 이 창 크기가 기준이 된다
-        #   다른 크기의 창에서 찍었으면 **기준 창 크기로 환산해** 한 벌로 둔다
-        rels[j] = [int(round((int(x) - L) * bw / float(nw))),
-                   int(round((int(y) - T) * bh / float(nh)))]
-        self.cfg["herox_rels"] = rels
-        self.cfg["herox_w"], self.cfg["herox_h"] = bw, bh
-        save_cfg(self.cfg)
-        self.status.set("✔ 거래소 좌표 %d 등록 — 창 %dx%d 기준 (%d,%d) · #%02d 에서 찍음"
-                        % (j + 1, bw, bh, rels[j][0], rels[j][1], si + 1))
-        click_log("[거래소] 📍 좌표 %d 등록 — 창 기준 (%d,%d) @%dx%d · #%02d 에서"
-                  % (j + 1, rels[j][0], rels[j][1], bw, bh, si + 1))
-        self._herox_paint()
-
     def _herox_run(self):
-        """▶ 🟣 점이 켜진 클라만 돌며 거래소를 연다 (사용자가 누를 때만)."""
+        """▶ 🟣 점이 켜진 클라만 돌며 거래소를 연다 (사용자가 누를 때만).
+
+        좌표는 `herox_slots` (슬롯마다 7칸 · [🟣 영웅템체크 좌표!] 창). 실행은 다른
+        dgn2 런처와 **같은 길**(`_start_dgn2` — 순차·랜덤 순서)을 탄다:
+        😴 자고 있으면 깨어날 때까지 깨우고, 칸1(절전해제)은 누르지 않고 칸2 부터.
+        🚫 OFF 슬롯·좌표가 없는 슬롯은 돌지 않는다 (무엇이 빠졌는지 알려준다)."""
         slots = self._herox_slots()
         if not slots:
             self.status.set("🟣 영웅템이 등록된 클라가 없습니다 — [🟣 영웅템 체크] 에서 "
                             "점을 먼저 켜주세요")
             return
-        rels, _bw, _bh = self._herox_rels()
-        if not any(rels):
-            self.status.set("🛒 거래소 여는 좌표가 없습니다 — [🟣 영웅템 체크] 판 아래 "
-                            "📍 로 한 클라에서 찍어주세요")
-            try:
-                w = getattr(self, "_herowin", None)
-                if w is None or not w.winfo_exists():
-                    self._hero_win()        # 좌표 칸이 있는 판을 열어준다
-            except Exception:
-                pass
+        sl = self.cfg.get("herox_slots") or []
+        have, nocoord, off = [], [], []
+        for n in slots:
+            s0 = sl[n - 1] if n - 1 < len(sl) else None
+            if not (s0 and any(s0.get("coords") or [])):
+                nocoord.append(n)
+            elif not s0.get("enabled", True):
+                off.append(n)
+            else:
+                have.append(n)
+        _f = lambda a: " ".join("#%02d" % x for x in a)
+        if not have:
+            self.status.set("🛒 %s 의 거래소 좌표가 없습니다 — [◀ 열기] 화면의 "
+                            "[🟣 영웅템체크 좌표!] 에서 찍어주세요" % _f(slots))
+            click_log("[거래소] 실행 안 함 — 점 켜진 %s · 좌표 없음 %s · OFF %s"
+                      % (_f(slots), _f(nocoord) or "-", _f(off) or "-"))
             return
-        if not self._try_busy_or_queue("거래소 열기", self._herox_run):
-            return
-        self._herox_t0 = time.time()        # ■ 멈춤은 '이 뒤에 누른 것' 만 본다
-        self.status.set("🛒 영웅템 클라 %d개 거래소 열기 — %s"
-                        % (len(slots), " ".join("#%02d" % x for x in slots)))
-        self._minimize_claude()             # 클로드는 항상 위라 클릭을 가린다
+        _note = ""
+        if nocoord:
+            _note += " · ⚠ 좌표 없음 %s" % _f(nocoord)
+        if off:
+            _note += " · ⏸ OFF %s" % _f(off)
+        click_log("[거래소] ▶ 영웅템 클라 %d개 %s 의 거래소를 연다%s"
+                  % (len(have), _f(have), _note))
+        self.status.set("🛒 영웅템 클라 %d개 거래소 열기 — %s%s" % (len(have), _f(have), _note))
+        # 🙈 영웅 판은 `-topmost` 라 클라를 덮는다 (`_section_wins` 에도 없다) →
+        #    도는 동안 숨겼다가 끝나면 되돌린다.
         try:
-            saved = self._wins_hide()       # 🙈 영웅 판 등 내 창을 치운다 (+ 런처 맨 뒤로)
+            w = getattr(self, "_herowin", None)
+            if w is not None and w.winfo_exists() and w.state() != "withdrawn":
+                w.withdraw()
+                self._herox_hid = True
+                self.after(4000, self._herox_back_tick)
         except Exception:
-            saved = None
-        self._stay_back(90)
-        threading.Thread(target=self._run_task,
-                         args=("거래소 열기", self._herox_work, slots, saved),
-                         daemon=True).start()
+            pass
+        self._start_dgn2("herox", sel_list=[n - 1 for n in have])
 
-    def _herox_stopped(self):
-        """[■ 멈춤] 을 **이번 실행을 시작한 뒤에** 눌렀나.
-
-        ⚠ `_stop_flag` 로 보면 안 된다 — 예전에 누른 멈춤이 그대로 남아 있을 수 있다
-          (그 깃발은 전체 자동실행·F11 만 내린다)."""
+    def _herox_back_tick(self):
+        """숨겨둔 영웅 판을 **작업이 끝난 뒤** 되돌린다 (도는 동안만 1초마다 본다)."""
         try:
-            return _STOP_AT[0] > float(getattr(self, "_herox_t0", 0) or 0)
-        except Exception:
-            return False
-
-    def _herox_work(self, slots, saved=None):
-        t0 = time.time()
-        ok, bad, skip = [], [], []
-        try:
-            ws = self._client_hwnds_by_slot()
-            if not ws:
-                self.status.set("⚠ 리니지M 클라 16개가 보이지 않습니다")
-                click_log("[거래소] 🚫 리니지M 창 16개를 못 찾았다 — 아무것도 하지 않는다")
+            if not getattr(self, "_herox_hid", False):
                 return
-            rels, bw, bh = self._herox_rels()
-            order = list(slots)
-            if HEROX_SHUFFLE:
-                random.shuffle(order)
-            click_log("[거래소] ▶ 영웅템 클라 %d개 %s · 좌표 %d칸 (기준 창 %dx%d) · 순서 %s"
-                      % (len(order), " ".join("#%02d" % x for x in order),
-                         len([r for r in rels if r]), bw, bh,
-                         "🎲섞음" if HEROX_SHUFFLE else "번호순"))
-            for n, s1 in enumerate(order):
-                if self._herox_stopped():
-                    click_log("[거래소] ■ 멈춤")
-                    break
-                si = s1 - 1
-                if si < 0 or si >= len(ws):
-                    continue
-                if self._win_odd_skip(s1, "거래소"):
-                    skip.append(s1)
-                    continue
-                self.status.set("🛒 거래소 여는 중 %d/%d — #%02d" % (n + 1, len(order), s1))
-                try:
-                    r = self._herox_one(si, ws[si], rels, bw, bh)
-                except Exception as e:
-                    r = False
-                    click_log("[거래소] #%02d ⚠ 오류 %s: %s — 이 클라는 넘어간다"
-                              % (s1, type(e).__name__, e))
-                (ok if r else bad).append(s1)
-                if n < len(order) - 1 and not self._herox_stopped():
-                    nap(random.uniform(*HEROX_SLOT_GAP))
-            el = time.time() - t0
-            _f = lambda a: " ".join("#%02d" % x for x in sorted(a))
-            msg = "🛒 거래소 열기 — 연 것 %d개 %s" % (len(ok), _f(ok))
-            if bad:
-                msg += " · ⚠ 못 연 것 %s" % _f(bad)
-            if skip:
-                msg += " · 🪟 창 크기가 달라 건너뜀 %s" % _f(skip)
-            self.status.set("%s (%.0f초)" % (msg, el))
-            click_log("[거래소] %s · ⏱ %.0f초" % (msg, el))
-        finally:
-            try:
-                self.after(0, lambda s=saved: self._wins_show(s))
-            except Exception:
-                pass
-
-    def _herox_one(self, si, rect, rels, bw, bh):
-        """한 클라에서 거래소를 연다. 좌표를 눌렀으면(또는 이미 열려 있으면) True.
-
-        🚫 **여는 것까지만** — 등록·취소·재등록은 누르지 않는다.
-        🚫 좌표가 그 클라 창 밖으로 나가면 누르지 않는다."""
-        l, t, r, b = rect[0], rect[1], rect[2], rect[3]
-        ww, hh = r - l, b - t
-        if ww < 100 or hh < 100:
-            return False
-        cen = (l + ww // 2, t + hh // 2)
-        kx, ky = ww / float(bw), hh / float(bh)
-        # 😴 자고 있으면 깨운다 — 깨우기는 `_wake_until` **하나**를 쓴다
-        try:
-            if find_sleep_img("fix", cen)[0] is not None:
-                okw = self._wake_until(cen, si + 1, tag="거래소", fkey="fix")
-                click_log("[거래소] #%02d 😴 절전이라 깨웠다%s"
-                          % (si + 1, "" if okw else " — ⚠ 안 깨어났다, 그래도 진행한다"))
-                nap(random.uniform(*HEROX_WAKE_WAIT))
-        except Exception as e:
-            click_log("[거래소] #%02d 😴 깨우기 중 오류 %s — 그래도 진행한다" % (si + 1, e))
-        if self._herox_stopped():
-            return False
-        # 🛒 이미 거래소 화면이면 누르지 않는다 (그림이 있을 때만 알 수 있다)
-        try:
-            seen, v = itemreg_shop_seen(cen)
+            if self._is_busy():
+                self.after(1000, self._herox_back_tick)
+                return
+            self._herox_hid = False
+            w = getattr(self, "_herowin", None)
+            if w is not None and w.winfo_exists():
+                w.deiconify()
+                try: w.attributes("-topmost", True)
+                except Exception: pass
+                self._hero_paint()
         except Exception:
-            seen, v = False, -1.0
-        if seen:
-            click_log("[거래소] #%02d 🛒 이미 거래소 화면이다 (%.2f) — 누르지 않는다" % (si + 1, v))
-            return True
-        # 🚪 인벤토리·상점이 열려 있으면 ESC 로 닫는다 — 🚫 등록 그림이 **보일 때만**
-        try:
-            import lineagem_island as _isl0
-            if _isl0.esc_list():
-                for _et in range(HEROX_ESC_TRIES):
-                    _op, _es, _ew = _isl0.esc_win_open(cen)
-                    if not _op:
-                        break
-                    click_log("[거래소] #%02d 창이 열려 있다 (%s %.2f) → ESC 로 닫는다 (%d/%d)"
-                              % (si + 1, str(_ew).replace(".png", ""), _es,
-                                 _et + 1, HEROX_ESC_TRIES))
-                    self._focus_client_at(cen)
-                    nap(random.uniform(0.12, 0.22))
-                    press_esc(1)
-                    nap(random.uniform(0.30, 0.55))
-        except Exception as e:
-            click_log("[거래소] #%02d 🚪 창 닫기 확인 중 오류 %s — 그래도 진행한다" % (si + 1, e))
-        pts = [p for p in rels if p]
-        if not pts:
-            return False
-        # 🪟 그 창을 먼저 앞으로 — 비활성 창의 첫 클릭은 '창 띄우기' 로만 먹힌다
-        self._focus_client_at(cen)
-        nap(random.uniform(*HEROX_FOCUS))
-        done = []
-        for k, p in enumerate(pts):
-            if self._herox_stopped():
-                return False
-            x = l + int(round(p[0] * kx))
-            y = t + int(round(p[1] * ky))
-            if not (l <= x < r and t <= y < b):
-                click_log("[거래소] #%02d 🚫 좌표 %d (%d,%d) 가 그 창 밖이다 — 누르지 않고 끝낸다"
-                          % (si + 1, k + 1, x, y))
-                return False
-            click_at(x, y)
-            done.append("(%d,%d)" % (x - l, y - t))
-            if k < len(pts) - 1:
-                g = random.uniform(*HEROX_GAP)
-                if random.random() < HEROX_PAUSE_P:
-                    g += random.uniform(*HEROX_PAUSE)
-                nap(g)
-        nap(random.uniform(*HEROX_SEE_WAIT))
-        try:
-            seen, v = itemreg_shop_seen(cen)
-        except Exception:
-            seen, v = False, -1.0
-        if v < 0:
-            _vv = "화면 확인 그림 없음"
-        elif seen:
-            _vv = "🛒 거래소 화면 확인 %.2f" % v
-        else:
-            _vv = "거래소 그림 %.2f (다른 탭이면 낮게 나온다)" % v
-        click_log("[거래소] #%02d ✅ 좌표 %d개 눌렀다 — 창 안 %s · %s"
-                  % (si + 1, len(done), " ".join(done), _vv))
-        return True
+            self._herox_hid = False
 
     # ── 💧 물약 0개 상시 감시 — 그 슬롯만 다시 돌린다 ─────────────────────
     def _human_busy(self, sec=None):
@@ -45312,7 +45063,7 @@ class App(tk.Tk):
         #    (2026-09-22 사용자 신고: "왜 작위는 예외냐"). 그래서 **아는 런처를 전부**
         #    훑어 멈춤 플래그를 세운다 — 새 런처가 생겨도 자동으로 포함된다.
         try:
-            for _fk in ("magic", "omanst", "mondex", "badge", "resc",
+            for _fk in ("magic", "omanst", "mondex", "badge", "resc", "herox",
                         "incoupon", "inmail", "jakwi", "fix", "dollchk", "relic",
                         "dragon", "knight", "sched", "coupon", "market", "tj",
                         "eventshop", "fish", "circus", "circus2", "circus3",
@@ -47254,8 +47005,6 @@ class CoordOverlay(tk.Toplevel):
             label = f"작위 {getattr(app, '_reg_jakwi_end_j', 0)+1}번 — 어디까지 내릴지 (놓을 자리)"
         elif mode == "cardfix":
             label = f"🃏 변신확정 [좌표{getattr(app, '_cardfix_reg_j', 0)+1}] 위치"
-        elif mode == "herox":
-            label = f"🛒 거래소 열기 [좌표{getattr(app, '_herox_reg_j', 0)+1}] 위치"
         else:
             label = LABELS.get(app._reg_target, "버튼")
 
@@ -47286,7 +47035,6 @@ class CoordOverlay(tk.Toplevel):
         elif self.mode == "item":      self.app.on_item_coord(x, y)
         elif self.mode == "tj":        self.app.on_tj_coord(x, y)
         elif self.mode == "cardfix":   self.app.on_cardfix_coord(x, y)
-        elif self.mode == "herox":     self.app.on_herox_coord(x, y)
         elif self.mode == "seq":       self.app.on_seq_coord(x, y)
         elif self.mode == "slp":       self.app.on_slp_coord(x, y)
         elif self.mode == "dc":        self.app.on_dc_coord(x, y)
