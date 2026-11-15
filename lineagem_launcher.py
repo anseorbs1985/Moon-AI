@@ -1494,6 +1494,66 @@ RESC_CLICKS   = 2
 #    🚫 여는 것까지만 한다 — 등록·취소·재등록은 사용자가 찍어둔 좌표가 하는 만큼만.
 HEROX_CLICKS   = 7
 HEROX_SLOT_GAP = (1.6, 3.2)  # 슬롯 사이 (마지막 슬롯 뒤엔 생략)
+# 🛒 **칸 사이는 '시간' 이 아니라 '화면' 을 보고 넘어간다** (2026-11-16 사용자:
+#    *"영웅템 이거 시간이 좀 걸려 … 버퍼링이 좀 있거든 열리는 시간이"*)
+#    📏 실측 2026-11-16 #01 (546x307 · 자던 클라를 깨워서) — 누른 뒤 화면이 바뀌기까지 / 다 뜨기까지
+#       칸2 메뉴          0.2초 / 0.3초
+#       칸3 거래소        1.1초(그동안 클라가 멈춘다) / **3.7초** — '정보를 불러오고 있습니다' 가 떠 있다
+#       칸4 월드 거래소   0.2초 / 1.3초 (같은 글자)
+#       칸5 판매 등록     1.0초(멈춤) / 1.2초 (같은 글자)
+#    고정 간격(1.1~2.6초)이면 칸4 가 **불러오는 중**에 눌려 씹힌다. 그래서
+#      ① 누른 뒤 화면이 **바뀔 때까지**  ② 조금 쉬고
+#      ③ '정보를 불러오고 있습니다' 가 **사라질 때까지**  ④ 자리잡기
+#    순서로 기다린다. 빨리 뜨면 빨리, 버벅이면 그만큼 기다린다.
+HEROX_FOCUS    = (0.35, 0.60)   # 첫 칸을 누르기 전 — 그 클라를 앞으로 올린 뒤
+HEROX_POLL     = (0.18, 0.30)   # 화면을 다시 보는 간격
+HEROX_CHG_MIN  = 6.0            # 누르기 전 화면과 이만큼(밝기 평균차) 달라지면 '바뀌었다'
+#                                 📏 실측 — 바뀌면 18~96 · 가만히 있는 거래소 화면은 0.1~0.3
+HEROX_CHG_MAX  = 2.5            # 이만큼 기다려도 안 바뀌면 **한 번만** 다시 누른다
+#                                 📏 실측 — 눌린 클릭은 0.2~1.4초 안에 화면이 바뀐다 (21번).
+#                                 클라가 버벅이면 화면 찍기(PrintWindow)가 그동안 같이 멈추므로
+#                                 이 시간은 '클라가 멀쩡히 응답하는데도 안 바뀐' 시간이다.
+HEROX_CHG_AGAIN = 1.2           # 다시 누른 뒤에는 이만큼만 본다
+#                                 🧭 **거래소는 마지막에 보던 탭으로 열린다** — 이미 월드 거래소면
+#                                 '월드 거래소' 칸을 눌러도 화면이 그대로다 (2026-11-16 실측 6클라 중 3).
+#                                 그건 실패가 아니다. 오래 기다리지 않고 다음 칸으로 간다
+#                                 (5초+5초로 두었더니 그 클라마다 12초를 헛기다렸다).
+HEROX_GAP      = (0.50, 0.90)   # ② 바뀐 뒤 쉼 (글자는 화면이 바뀌고 0.1~0.2초 뒤에 뜬다)
+HEROX_LOAD_IMG = "herox_loading"   # click_templates/herox_loading.png — '정보를 불러오고 있습니다…'
+HEROX_LOAD_W   = 546            # 그 그림을 자른 창 가로
+HEROX_LOAD_MATCH = 0.70         # 📏 실측 — 떠 있으면 1.00 · 없으면 0.31 이하 (48장)
+HEROX_LOAD_MAX = 20.0           # 그래도 안 사라지면 넘어간다
+HEROX_SETTLE   = (0.45, 0.85)   # ④ 다 뜬 뒤 자리잡기
+HEROX_LOAD_EXTRA = (0.9, 1.3)   # ④-2 **불러오기가 있었으면 이만큼 더** 쉰다 (2026-11-16 사용자:
+#                                 *"거래소 열릴 때 시간이 좀 필요하니까 약간 여유롭게 줘 1초 정도는 더"*)
+
+
+def herox_loading_seen(coord):
+    """🛒 그 클라에 '정보를 불러오고 있습니다' 가 떠 있나 → 점수(0~1) · 못 보면 None.
+
+    창을 직접 찍어서(PrintWindow) 가운데 띠(세로 30~62%)만 본다 — 글자는 늘 그 자리다."""
+    try:
+        p = os.path.join(IMG_DIR, HEROX_LOAD_IMG + ".png")
+        if not os.path.exists(p):
+            return None
+        import cv2, numpy as np
+        big = grab_window(coord)
+        if big is None:
+            return None
+        tpl = cv2.imdecode(np.fromfile(p, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if tpl is None:
+            return None
+        k = big.shape[1] / float(HEROX_LOAD_W)
+        if abs(k - 1.0) > 0.02:
+            tpl = cv2.resize(tpl, None, fx=k, fy=k,
+                             interpolation=(cv2.INTER_AREA if k < 1 else cv2.INTER_LINEAR))
+        hh = big.shape[0]
+        band = big[int(hh * 0.30):int(hh * 0.62)]
+        if band.shape[0] < tpl.shape[0] or band.shape[1] < tpl.shape[1]:
+            return None
+        return float(cv2.matchTemplate(band, tpl, cv2.TM_CCOEFF_NORMED).max())
+    except Exception:
+        return None
 # 📐 **창 기준 좌표 한 벌** — 로컬이 [📐 좌표맞추기] 한 번으로 넣는다.
 #    🚫 **좌표 배포가 아니다** (2026-08-29 절대 규칙 — 좌표는 push 하지 않는다).
 #       코드에 두고 **사용자가 누를 때만** 그 컴퓨터 창 자리에 맞춰 넣는다.
@@ -1505,6 +1565,15 @@ HEROX_SLOT_GAP = (1.6, 3.2)  # 슬롯 사이 (마지막 슬롯 뒤엔 생략)
 DGN2_REL = {
     "resc": (546, 307, {0: (503, 104),      # 칸1 😴 절전해제 (기준점 — 안 누른다)
                         1: (238, 242)}),    # 칸2 🩸 7번(혈귀)
+    # 🛒 영웅템체크 좌표! (2026-11-16 사용자: *"이거는 좌표까지 전부 다 배포해줘"*)
+    #    사용자가 찍은 16슬롯이 창 기준으로 **전부 같았다** (1가지 · 창 546x307).
+    #    로컬은 좌표가 비어 있으면 [▶실행] 을 누를 때 **스스로 채운다**
+    #    (`_herox_autofill` — 빈 슬롯만 · 찍어둔 좌표는 건드리지 않는다).
+    "herox": (546, 307, {0: (500, 106),     # 칸1 😴 절전해제 (기준점 — 안 누른다)
+                         1: (528, 20),      # 칸2 메뉴(≡)
+                         2: (428, 48),      # 칸3 거래소
+                         3: (475, 18),      # 칸4 월드 거래소 탭
+                         4: (131, 44)}),    # 칸5 판매 등록 탭
 }
 RESC_SLOT_GAP = (1.5, 3.0)   # 슬롯 사이 (마지막 슬롯 뒤엔 생략)
 # 😴 **깨어날 때까지** 깨우는 런처 — Z 한 번이 아니라 `_wake_until`
@@ -25648,6 +25717,15 @@ class App(tk.Tk):
                     order.remove(0)
                     click_log(f"{fkey} [{name}] 😴 칸1(절전해제)은 **누르지 않는다** "
                               f"({'깨웠다' if _woke else '깨어 있었다'}) — 그 뒤 칸만 누른다")
+                # 🛒 거래소 열기 — **첫 칸을 누르기 전에 그 클라를 앞으로 올린다**.
+                #    깨어 있던 클라는 `_wake_hard` 가 아무것도 안 하므로, 뒤에 있는
+                #    창의 첫 클릭이 '창 띄우기' 로만 먹히고 메뉴가 안 열린다.
+                if fkey == "herox" and _anchor and order:
+                    try:
+                        self._focus_client_at(_anchor)
+                    except Exception:
+                        pass
+                    nap(random.uniform(*HEROX_FOCUS))
                 # ⎋ ESC 칸은 좌표가 없어도 **반드시** 넣는다 (맨 마지막 칸)
                 _ec = ESC_CELLS.get(fkey)
                 if (_ec is not None and _ec < nclk and _ec not in order
@@ -25674,6 +25752,9 @@ class App(tk.Tk):
                             self._incoupon_mark(_t.strip(), si)
                         self.status.set(f"{icon} 슬롯{si+1} 붙여넣기 완료 (클릭{j+1} 다음)")
                     else:
+                        # 🛒 누르기 **전** 화면을 찍어둔다 — 눌린 뒤 바뀌었는지 보려고
+                        _hx_pre = (grab_window(coords[j] or _anchor)
+                                   if fkey == "herox" else None)
                         _act = self._do_click_or_wheel(
                             fkey, j, coords[j] or _anchor, slot)
                         if _act == "이미지없음":
@@ -25714,6 +25795,10 @@ class App(tk.Tk):
                         if fkey == "eventshop" and j == 0:
                             # 이벤트상점: 클릭1 → 4초 × 1.15~1.30 랜덤 증가 후 클릭2
                             nap(4.0 * random.uniform(1.15, 1.30))
+                        elif fkey == "herox":
+                            # 🛒 시간이 아니라 **화면을 보고** 넘어간다
+                            self._herox_gap(stop, name, j, coords[j] or _anchor,
+                                            locals().get("_hx_pre"))
                         elif fkey in SLOW_FKEYS:
                             # 🐢 느릿느릿 — 사람이 보고 누르는 속도 (2026-10-06 사용자:
                             #    "급한 게 아니라서 사람이 클릭했겠다 싶을 정도로 느릿느릿")
@@ -43446,6 +43531,7 @@ class App(tk.Tk):
             self.status.set("🟣 영웅템이 등록된 클라가 없습니다 — [🟣 영웅템 체크] 에서 "
                             "점을 먼저 켜주세요")
             return
+        self._herox_autofill(slots)      # 🛒 좌표가 비어 있는 슬롯은 창 기준 한 벌로 채운다
         sl = self.cfg.get("herox_slots") or []
         have, nocoord, off = [], [], []
         for n in slots:
@@ -43482,6 +43568,127 @@ class App(tk.Tk):
         except Exception:
             pass
         self._start_dgn2("herox", sel_list=[n - 1 for n in have])
+
+    def _herox_autofill(self, slots):
+        """🛒 점이 켜진 슬롯 중 **좌표가 하나도 없는 것**을 `DGN2_REL["herox"]` 로 채운다.
+
+        2026-11-16 사용자: *"이거는 좌표까지 전부 다 배포해줘"*. 좌표 파일을 보내지 않고
+        **창 기준 한 벌(코드)** 을 그 컴퓨터의 클라 창 자리·크기에 맞춰 넣는다.
+        🚫 **찍어둔 좌표가 하나라도 있는 슬롯은 건드리지 않는다.**
+        🚫 클라 16개를 못 찾으면 아무것도 하지 않는다. 다 바꾸려면 창의 [📐 좌표맞추기]."""
+        try:
+            spec = DGN2_REL.get("herox")
+            if not spec:
+                return []
+            rw, rh, rel = spec
+            sl = self.cfg.get("herox_slots") or []
+            need = [n for n in slots if 1 <= n <= len(sl) and isinstance(sl[n - 1], dict)
+                    and not any(sl[n - 1].get("coords") or [])]
+            if not need:
+                return []
+            rects = self._client_rects_by_slot()
+            if not rects or len(rects) < 16:
+                click_log("[거래소] 🛒 좌표가 빈 슬롯 %s 을 채우려 했지만 리니지M 클라 16개를 "
+                          "못 찾았다 — 그대로 둔다" % " ".join("#%02d" % n for n in need))
+                return []
+            for n in need:
+                L, T, R, B = rects[n - 1][0], rects[n - 1][1], rects[n - 1][2], rects[n - 1][3]
+                kx, ky = (R - L) / float(rw), (B - T) / float(rh)
+                cs = list(sl[n - 1].get("coords") or [])
+                while len(cs) < HEROX_CLICKS:
+                    cs.append(None)
+                for j, (rx, ry) in rel.items():
+                    if j < len(cs):
+                        cs[j] = [int(L + rx * kx), int(T + ry * ky)]
+                sl[n - 1]["coords"] = cs[:HEROX_CLICKS]
+            self.cfg["herox_slots"] = sl
+            save_cfg(self.cfg)
+            click_log("[거래소] 🛒 좌표가 비어 있던 슬롯 %s 을 창 기준 한 벌로 채웠다 "
+                      "(찍어둔 슬롯은 그대로)" % " ".join("#%02d" % n for n in need))
+            return need
+        except Exception as e:
+            try: click_log("[거래소] ⚠ 좌표 채우기 오류 — %s: %s" % (type(e).__name__, e))
+            except Exception: pass
+            return []
+
+    def _herox_gap(self, stop, name, j, xy, pre):
+        """🛒 다음 칸을 누르기 전에 **화면이 따라올 때까지** 기다린다 (2026-11-16).
+
+        ① 누르기 전 화면(`pre`)과 달라질 때까지 — `HEROX_CHG_MAX` 초를 기다려도
+           그대로면 **한 번만** 다시 누른다 (클릭이 씹힌 것이다)
+        ② `HEROX_GAP` 쉼   ③ '정보를 불러오고 있습니다' 가 **두 번 연속** 안 보일 때까지
+        ④ `HEROX_SETTLE` 자리잡기
+        🚫 화면을 못 찍거나 그림이 없으면 **막지 않고** 쉬기만 한다 (②④ ≈ 1~1.7초)."""
+        t0 = time.time()
+        chg, load, again, _ld = None, 0.0, False, False
+
+        def _diff(a):
+            try:
+                if a is None or pre is None or a.shape != pre.shape:
+                    return None
+                import numpy as np
+                return float(np.abs(a[::2, ::2].astype(np.int16)
+                                    - pre[::2, ::2].astype(np.int16)).mean())
+            except Exception:
+                return None
+        try:
+            # ① 화면이 바뀔 때까지
+            if pre is not None:
+                t1 = time.time()
+                while not getattr(self, stop, False):
+                    nap(random.uniform(*HEROX_POLL))
+                    d = _diff(grab_window(xy))
+                    if d is None:
+                        break                       # 못 쟀다 — 막지 않는다
+                    if d >= HEROX_CHG_MIN:
+                        chg = time.time() - t1
+                        break
+                    if time.time() - t1 > (HEROX_CHG_AGAIN if again else HEROX_CHG_MAX):
+                        if not again:
+                            again = True
+                            click_at(int(xy[0]), int(xy[1]))
+                            t1 = time.time()
+                            continue
+                        click_log(f"[거래소] [{name}] 칸{j+1} 을 두 번 눌러도 화면이 그대로다 "
+                                  f"(차이 {d:.1f}) — **이미 그 화면**인 듯하다. 다음 칸으로 간다")
+                        break
+            # ② 조금 쉰다
+            nap(random.uniform(*HEROX_GAP))
+            # ③ 불러오는 중이면 끝날 때까지 (두 번 연속 안 보여야 끝)
+            t2, clear, v = time.time(), 0, None
+            while not getattr(self, stop, False) and time.time() - t2 < HEROX_LOAD_MAX:
+                v = herox_loading_seen(xy)
+                if v is None:
+                    break                           # 그림이 없거나 못 찍었다
+                if v >= HEROX_LOAD_MATCH:
+                    clear = 0
+                    _ld = True
+                    load = time.time() - t2
+                    self.status.set(f"🛒 [{name}] 불러오는 중… ({load:.0f}초)")
+                else:
+                    clear += 1
+                    if clear >= 2:
+                        break
+                nap(random.uniform(*HEROX_POLL))
+            else:
+                if time.time() - t2 >= HEROX_LOAD_MAX:
+                    click_log(f"[거래소] [{name}] ⚠ 칸{j+1} 뒤 {HEROX_LOAD_MAX:.0f}초가 지나도 "
+                              f"불러오는 중이다 — 그대로 다음 칸으로 간다")
+            # ④ 자리잡기 — 불러오기가 있었으면(거래소·탭이 새로 떴다) 1초쯤 더
+            nap(random.uniform(*HEROX_SETTLE))
+            if _ld and not getattr(self, stop, False):
+                nap(random.uniform(*HEROX_LOAD_EXTRA))
+        except Exception as e:
+            click_log(f"[거래소] [{name}] ⚠ 칸{j+1} 뒤 기다리기 오류 — {type(e).__name__}: {e}")
+            nap(random.uniform(1.2, 2.0))
+        try:
+            click_log("[거래소] [%s] 칸%d 뒤 %.1f초 기다렸다 — 화면 바뀜 %s · 불러오는 중 %s%s"
+                      % (name, j + 1, time.time() - t0,
+                         ("%.1f초" % chg) if chg is not None else "못 봄",
+                         ("%.1f초" % load) if load else "없음",
+                         " · 다시 누름" if again else ""))
+        except Exception:
+            pass
 
     def _herox_back_tick(self):
         """숨겨둔 영웅 판을 **작업이 끝난 뒤** 되돌린다 (도는 동안만 1초마다 본다)."""
