@@ -36323,6 +36323,24 @@ class App(tk.Tk):
             self.cfg["_doll_presets"] = lst
         return lst
 
+    # 📐 (2026-11-16) 프리셋 rel 은 **찍을 때의 창 크기** 기준이다. 11-03 에 창을 491x276 →
+    #    546x307 로 키웠는데 프리셋은 그대로라 적용하면 1.11배 어긋났다 (사용자: "프리셋이 전혀 안 맞는데").
+    #    칸마다 bw/bh(찍을 때의 창 크기)를 적어두고, 없으면 옛 프리셋이라 491x276 으로 본다
+    #    (저장소의 옛 coords.json 에 있던 그 프리셋 그대로다 — 11-16 확인).
+    DOLL_PRESET_BASE = (491, 276)
+
+    def _doll_rel_xy(self, rel, it, pr, rect):
+        try:
+            bw = float(it.get("bw") or pr.get("bw") or self.DOLL_PRESET_BASE[0])
+            bh = float(it.get("bh") or pr.get("bh") or self.DOLL_PRESET_BASE[1])
+            l, t, r, b = rect[:4]
+            kx, ky = (r - l) / bw, (b - t) / bh
+            if not (0.5 < kx < 8 and 0.5 < ky < 8):
+                kx = ky = 1.0
+        except Exception:
+            l, t = rect[0], rect[1]; kx = ky = 1.0
+        return [int(round(l + rel[0] * kx)), int(round(t + rel[1] * ky))]
+
     def _doll_preset_color(self, pi):
         return ("#1e8449", "#2471a3", "#b9770e", "#7d3c98")[pi % 4]
 
@@ -36346,7 +36364,7 @@ class App(tk.Tk):
             else:
                 rel = it.get("rel") or [0, 0]
                 if rects and not pr.get("abs"):
-                    cs[j] = [rel[0] + rects[idx][0], rel[1] + rects[idx][1]]
+                    cs[j] = self._doll_rel_xy(rel, it, pr, rects[idx])
                 else:
                     cs[j] = [rel[0], rel[1]]
                 movs.append(j + 1)
@@ -36483,7 +36501,7 @@ class App(tk.Tk):
         rects = self._client_rects_by_slot()
         if it and it.get("act") == "mov":
             rel = it.get("rel") or [0, 0]
-            pos = ([rel[0] + rects[base][0], rel[1] + rects[base][1]]
+            pos = (self._doll_rel_xy(rel, it, {}, rects[base])
                    if (rects and not pw.get("abs")) else list(rel))
             note = "프리셋 지정 위치"
         else:
@@ -36534,7 +36552,11 @@ class App(tk.Tk):
         else:
             rel = [x, y]
             self._doll_pw["abs"] = True
-        self._doll_pw["items"][str(jx)] = {"act": "mov", "rel": rel}
+        _it = {"act": "mov", "rel": rel}
+        if rects:
+            _l, _t, _r, _b = rects[base][:4]
+            _it["bw"], _it["bh"] = int(_r - _l), int(_b - _t)
+        self._doll_pw["items"][str(jx)] = _it
         self._doll_preset_refresh()
         try:
             w = getattr(self, "_doll_pw_win", None)
