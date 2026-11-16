@@ -1128,7 +1128,8 @@ SUHO_CARD_DOWN   = 0.5               # 🃏 카드는 **반으로 줄인 그림*
 #       지금보다 못 찾는 일은 없다. 카드를 고르는 것은 **전부 랜덤**이라
 #       한두 장 덜 잡혀도 해가 없고, **돈이 드는 판정에는 쓰이지 않는다.**
 #    🚫 `0` 으로 두면 예전처럼 원래 크기로만 찾는다.
-SUHO_TITLE_BAND  = (0.0, 0.16, 0.30, 0.70)
+SUHO_TITLE_BAND  = (0.0, 0.22, 0.30, 0.70)   # 2026-11-16: 0.16 → 0.22 (진입창 제목이 15~18% 에 걸쳐 있어
+#   매번 창 전체로 다시 봤다 — 364ms. 띠를 넓히니 ~60ms)
 #    📌 제목 그림은 **(위, 아래, 왼쪽, 오른쪽)** 비율 안에서만 본다.
 #    📏 제목 자리는 `SUHO_TITLE_BOX` 로 **세로 2.6~8.5% · 가로 42.7~56.0%** 다 —
 #       세로 0~16% · 가로 30~70% 는 넉넉하다.
@@ -1217,9 +1218,25 @@ SUHO_WATCH_SEE   = 0.8               # 🖼 화면까지 보는 주기(초)
 #       → 한 번에 ~143ms. **0.8초 주기면 한 코어의 18%**, 그것도
 #         **수호성 창이 떠 있는 동안만**이다 (평소 부하 0).
 #    🚫 0.5초 밑으로 내리지 말 것 — 창을 열어둔 동안 30%를 넘어간다.
+# 💎 수호석이 모자랄 때 ESC 는 **한 번만** (2026-11-16 사용자: *"수호석 없으면 뒤로 가는 거
+#    내가 할게 그냥 esc 한번만"*) — 확인창만 닫고 수호성 화면은 그대로 둔다.
+SUHO_ESC_SHORT   = 1
+# ⬛ [활성화] 를 누르면 **까만 화면**을 한 번 지난다 (2026-11-16 실측 22:28:52 · 평균 밝기 6.4).
+#    그 순간을 '화면이 바뀌었다' 로 보고 멈춘 뒤 ESC 로 나가버렸다. 까만 화면이면 기다린다.
+SUHO_DARK        = 20.0              # 화면 평균 밝기가 이보다 낮으면 넘어가는 중이다
+SUHO_DARK_MAX    = 5.0               # 이만큼 기다려도 까마면 그때 '바뀌었다' 로 본다
 SUHO_INFO_GONE   = 2.5               # ⓪ [활성화] 뒤 **진입창이 사라지기를** 기다리는 한도(초)
 #    🚨 고정 대기만 두면 아직 진입창인 화면을 또 찍어 **[활성화] 를 두 번 누른다**
 #       (실측 2026-11-06 20:44:17·18 — 1초 안에 두 번). 🚫 고정 대기로 되돌리지 말 것.
+# 🃏 (2026-11-16 사용자: "반응이 느려") — 카드가 **다 깔리기 전에** 누르면 게임이 무시한다.
+#    실측 22:23:28 [활성화] 1초 뒤 누른 카드 · 22:23:34 끌기 직후 누른 카드 — 둘 다 확인창이 안 떠
+#    SUHO_STEP_WAIT(2초)를 기다린 뒤 다시 눌렀다 (한 번에 4초씩 버렸다).
+#    👉 누르기 전에 카드 자리 화면이 **멈췄는지**(두 장 차이) 본다. 멈춰 있으면 바로 누른다.
+SUHO_STEADY_ON   = True
+SUHO_STEADY_GAP  = (0.10, 0.16)     # 두 장 사이
+SUHO_STEADY_DIFF = 3.0              # 카드 자리 밝기 평균차가 이보다 작으면 멈춘 것
+SUHO_STEADY_MAX  = 1.2              # 이만큼 기다려도 안 멈추면 그냥 누른다
+SUHO_BTN_WAIT    = 1.3              # 카드를 누른 뒤 확인창을 기다리는 시간 (전 2.0)
 SUHO_REUSE_SEC   = 0.35              # 📸 이 안에 찍어둔 캡처는 **돌려쓴다**
 #    ⚠ 화면이 바뀌면 안 되므로 **짧게** 둔다. 끌고 난 뒤 → 다음 회차처럼
 #      **그 사이에 아무것도 누르지 않은** 자리에서만 쓴다.
@@ -13121,6 +13138,49 @@ class App(tk.Tk):
         except Exception:
             return False, 0
 
+    def _suho_steady(self, rect, img, cards):
+        """🃏 카드 자리 화면이 **멈췄을 때** 돌려준다 → (img, cards, 기다린 초, 마지막 차이).
+
+        깔리는 중(뒤집힘·흐려짐)에 누르면 게임이 무시한다. 자리는 이미 맞게 잡혀도
+        그림이 변하는 중일 수 있어 **두 장의 차이**로 본다. 한도를 넘기면 그대로 넘긴다."""
+        import cv2, numpy as np
+        if not SUHO_STEADY_ON or img is None or not cards:
+            return img, cards, 0.0, -1.0
+
+        def _box(im):
+            H, W = im.shape[:2]
+            xs = [c[0] - rect[1] for c in cards]; ys = [c[1] - rect[2] for c in cards]
+            pad = int(0.06 * H)
+            x0, x1 = max(0, min(xs) - pad), min(W, max(xs) + pad)
+            y0, y1 = max(0, min(ys) - int(0.12 * H)), min(H, max(ys) + int(0.12 * H))
+            g = cv2.cvtColor(im[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY)
+            return cv2.resize(g, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA).astype(np.float32)
+
+        t0 = time.time(); d = -1.0
+        try:
+            prev = _box(img)
+            while time.time() - t0 < SUHO_STEADY_MAX:
+                if getattr(self, "_suho_stop", False):
+                    break
+                nap(random.uniform(*SUHO_STEADY_GAP))
+                im = self._suho_grab(rect)
+                if im is None:
+                    break
+                cur = _box(im)
+                if cur.shape != prev.shape:
+                    prev = cur; img = im; continue
+                d = float(np.mean(np.abs(cur - prev)))
+                img = im
+                if d < SUHO_STEADY_DIFF:
+                    cs = self._suho_cards(rect, im)
+                    if cs:
+                        cards = cs
+                    break
+                prev = cur
+        except Exception as e:
+            click_log(f"[수호성] ⚠ 카드 멈춤 확인 오류 {e} — 그대로 누른다")
+        return img, cards, time.time() - t0, d
+
     def _suho_here(self, img):
         """🚦 **지금 수호성 화면인가** — 제목(수호성 찾기) 또는 진입창(수호성 정보)
         또는 결과(실패/성공). 누르기 전마다 본다. 🚫 빼지 말 것.
@@ -13824,6 +13884,19 @@ class App(tk.Tk):
                     #    뺐었는데 **그게 틀렸다** — 다른 화면에도 파랑+빨강 버튼 짝이
                     #    있을 수 있다. 🚫 다시 빼지 말 것.
                     #    대조하는 것은 제목 두 장뿐이라 ~0.1초다.
+                    if float(img0.mean()) < SUHO_DARK:
+                        _t0 = time.time(); _dk = img0
+                        while (time.time() - _t0 < SUHO_DARK_MAX
+                               and not getattr(self, "_suho_stop", False)):
+                            nap(random.uniform(0.12, 0.20))
+                            _i4 = self._suho_grab(rect)
+                            if _i4 is not None:
+                                _dk = _i4
+                                if float(_i4.mean()) >= SUHO_DARK:
+                                    break
+                        click_log(f"[수호성] {n}회째 ⬛ 넘어가는 까만 화면 — "
+                                  f"{time.time() - _t0:.1f}초 기다렸다 (밝기 {float(_dk.mean()):.0f})")
+                        img0 = _dk
                     if not self._suho_here(img0):
                         click_log(f"[수호성] 🚦 {n}회째 — **화면이 바뀌었다** → "
                                   f"아무것도 누르지 않고 멈춘다")
@@ -13867,9 +13940,9 @@ class App(tk.Tk):
                             click_log(f"[수호성] 💎 **수호석이 모자랍니다** "
                                       f"(빨간 숫자 {_np_}픽셀) → 누르지 않고 "
                                       f"ESC 로 나간다")
-                            self._suho_esc_out(rect, "수호석 부족")
+                            self._suho_esc_out(rect, "수호석 부족", SUHO_ESC_SHORT)
                             self.after(0, lambda: self.status.set(
-                                "🌙 수호성 💎 수호석 부족 — ESC 로 나감"))
+                                "🌙 수호성 💎 수호석 부족 — ESC 한 번 (확인창만 닫았다)"))
                             break
                         bx, by = L + btn[0], T + btn[1]
                         if self._suho_stop:
@@ -13898,8 +13971,9 @@ class App(tk.Tk):
                                 if not self._suho_tpl_seen(
                                         _i3, suho_info_list(),
                                         band=SUHO_TITLE_BAND):
-                                    #   ⚡ 방금 찍은 것을 다음 회차가 돌려쓴다
-                                    self._suho_reuse = (time.time(), rect[0], _i3)
+                                    #   ⚡ 방금 찍은 것을 다음 회차가 돌려쓴다 (까만 화면은 빼고)
+                                    if float(_i3.mean()) >= SUHO_DARK:
+                                        self._suho_reuse = (time.time(), rect[0], _i3)
                                     break
                             continue
                         # ② 확인 뒤에는 ③ 끌기가 바로 온다 — **이어서** 한다
@@ -14030,6 +14104,12 @@ class App(tk.Tk):
                     blind = 0
                     _act = 0
                     _once("cards", img)
+                    img, cards, _sw, _sd = self._suho_steady(rect, img, cards)
+                    if _sw > 0.5:
+                        click_log(f"[수호성] {n}/{times}회 🃏 카드가 깔리는 중이라 "
+                                  f"{_sw:.1f}초 기다렸다 (차이 {_sd:.1f} · 기준 {SUHO_STEADY_DIFF})")
+                    if not cards:
+                        continue
                     i = random.randrange(len(cards))    # 전부 랜덤 (사용자 지시)
                     okc, x, y = self._suho_pick(cards[i])
                     if not okc:
@@ -14039,7 +14119,10 @@ class App(tk.Tk):
                     self.after(0, lambda n=n, i=i, c=len(cards): self.status.set(
                         f"🌙 수호성 {n}회 — {c}장 중 {i+1}번째"))
                     # ⚡ ② 확인창이 **뜨자마자** 누른다 (고정 대기 없음)
-                    bt = self._suho_wait_stage(rect, "btn")
+                    bt = self._suho_wait_stage(rect, "btn", SUHO_BTN_WAIT)
+                    if not bt:
+                        click_log(f"[수호성] {n}/{times}회 ⚠ 카드를 눌렀는데 확인창이 "
+                                  f"{SUHO_BTN_WAIT}초 안에 안 떴다 → 다시 본다")
                     if bt:
                         _im2 = self._suho_grab(rect)
                         if _im2 is not None:
@@ -14051,9 +14134,9 @@ class App(tk.Tk):
                                 click_log(f"[수호성] 💎 **수호석이 모자랍니다** "
                                           f"(빨간 숫자 {_np_}픽셀) → 누르지 않고 "
                                           f"ESC 로 나간다")
-                                self._suho_esc_out(rect, "수호석 부족")
+                                self._suho_esc_out(rect, "수호석 부족", SUHO_ESC_SHORT)
                                 self.after(0, lambda: self.status.set(
-                                    "🌙 수호성 💎 수호석 부족 — ESC 로 나감"))
+                                    "🌙 수호성 💎 수호석 부족 — ESC 한 번 (확인창만 닫았다)"))
                                 break
                         pyautogui.click(L + bt[0], T + bt[1])
                         click_log(f"[수호성] {n}/{times}회 ② **[확인]** 눌렀다 "
@@ -14254,7 +14337,7 @@ class App(tk.Tk):
         except Exception:
             pass
 
-    def _suho_esc_out(self, rect, why=""):
+    def _suho_esc_out(self, rect, why="", times=None):
         """⎋ **ESC 를 눌러 수호성 화면에서 나간다** (수호석이 모자랄 때).
 
         ⚠ 반드시 **그 창을 앞으로 올린 뒤** 보낸다 — 키는 맨 앞 창이 받는다."""
@@ -14268,7 +14351,7 @@ class App(tk.Tk):
             #    2번 수호성 화면 · 3번째는 메뉴만 열렸다).
             gone = False
             used = 0
-            for i in range(SUHO_ESC_TIMES):
+            for i in range(SUHO_ESC_TIMES if times is None else int(times)):
                 pyautogui.press("esc")
                 used = i + 1
                 self._suho_nap(*SUHO_ESC_GAP)
@@ -14281,7 +14364,7 @@ class App(tk.Tk):
                     break
             _gap = f"{SUHO_ESC_GAP[0]:.1f}~{SUHO_ESC_GAP[1]:.1f}초 간격"
             click_log(f"[수호성] ⎋ ESC {used}번 눌렀다 ({_gap} · {why}) — "
-                      f"{'수호성 화면이 닫혔다 ✔' if gone else '⚠ 아직 화면이 남아 있다'}")
+                      f"{'수호성 화면이 닫혔다 ✔' if gone else ('확인창만 닫았다 (수호성 화면은 그대로 · 사용자 지시)' if times else '⚠ 아직 화면이 남아 있다')}")
             #   🕐 **방금 ESC 를 썼다**는 것을 남긴다 — `_suho_leave` 가 뒤이어
             #      또 4번 누르면 다 닫힌 뒤라 **게임 메뉴판이 열린다**(실측).
             self._suho_esc_at = time.time()
