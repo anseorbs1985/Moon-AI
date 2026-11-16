@@ -279,6 +279,33 @@ P0_WATCH_COOL = 1200           # 같은 슬롯은 20분에 한 번만 다시 돌
 # 🕐 작업 중에 '물약 0개' 를 봤으면 적어뒀다가 작업이 끝난 뒤 돌린다.
 #    이만큼 지나면 버린다 — 그 사이 창고에서 채웠을 수 있다.
 P0_PEND_MAX   = 1800           # 적어둔 것은 30분까지만 유효
+# 🧪 **물약이 떨어지기 전에 미리 보낸다** (2026-11-16 사용자: *"미리 네가 파악이 가능하면
+#    20~60개일 때 해줄래? 그러면 다른 거 떨어질 동안에 알아서 하지 않을까"*)
+#    문구("체력 회복제가 10개 남았습니다")는 10개가 되는 순간 떠서 **약 20초 뒤 사라진다**
+#    (실측 2026-11-16 #06) → 30초마다 보는 감시가 3번에 1번은 놓쳤다.
+#    절전 화면의 **물약 칸 숫자는 늘 떠 있다** → 그 자릿수를 본다 (`lineagem_island.potion_digits`).
+#      두 자리(10~99개)  → **미리** 보낸다 — 한 번에 **하나씩** (나머지는 그동안 계속 사냥한다)
+#      한 자리(0~9개)    → **급하다** — 문구가 뜬 것과 같이 전부 먼저 귀환시킨다
+#    📏 쓰는 속도 실측 7~17개/분 → 99개는 약 6~14분 여유.
+#    🔢 '20~60' 을 정확히 읽지 않는 이유: 숫자 글씨가 **2x5 픽셀**이라 자릿수만 100% 가린다.
+#    🚫 못 읽으면(깨어 있는 화면·창 크기가 다름·그림 없음) 예전처럼 **문구로만** 본다.
+P0_CNT_ON      = True
+P0_CNT_AGAIN   = (0.5, 0.8)    # 적다고 읽히면 이만큼 뒤 **한 번 더** 읽어 같을 때만 믿는다
+P0_CNT_FAIL    = 600           # 숫자를 보고 다시 돌린 뒤 이 안에 또 적으면 **물약을 못 산 것**
+#                                → 그 슬롯은 숫자로 보내지 않는다 (20분마다 헛도는 것을 막는다).
+#                                  100개 이상으로 읽히면 저절로 풀린다.
+P0_EARLY_LOG   = 300           # '미룬다' 기록은 슬롯마다 이만큼에 한 번
+# 🏰 **숫자로 미리 보내는 것은 이 던전만** (2026-11-16 사용자: *"에스카로스를 이렇게 하면
+#    좋을 것 같아. 다른 건 여전히 물약 없다고 멘트가 올라오면 해주면 좋을 것 같고"*)
+#    다른 던전은 예전 그대로 **문구가 떴을 때만** 보낸다. 늘리려면 여기에 던전 키를 더한다.
+P0_CNT_KEYS    = ("화요일_에카",)
+P0_CNT_SKIP    = 300           # 그 던전이 아니라고 본 슬롯은 이만큼 동안 숫자를 보지 않는다
+# 🎲 **보내는 때를 그때그때 다르게** (2026-11-16 사용자: *"너무 일률적으로 20~60개라고 말했는데
+#    랜덤으로 해줘. 어떤 건 30개 어떤 건 40개 어떨 땐 20대 — 항상 사람인 것처럼"*)
+#    100개 밑으로 내려온 것을 **처음 본 때부터** 슬롯마다 이만큼(초)을 새로 뽑아 기다렸다 보낸다.
+#    📏 쓰는 속도 7~17개/분 → 2~5분 뒤면 대략 **15~85개** 사이, 매번 다르다.
+#    그 사이 한 자리(10개 밑)가 되거나 문구가 뜨면 **기다리지 않고 바로** 보낸다.
+P0_EARLY_WAIT  = (120.0, 300.0)
 # 마을에 오래 서 있으면 다시 실행 — 악몽의섬만 (2026-10-17 사용자 요청)
 #   "5분 남기고 죽으면 다시 가도 5분만 돌고 1시간 55분 동안 아무것도 안 한다."
 #   ⏰ 2시간 반복은 **그대로 두고** 그 빈 시간만 메운다.
@@ -27540,6 +27567,65 @@ class App(tk.Tk):
         if not self._try_busy("물약귀환"):
             click_log("[물약감시] 🏠 다른 작업이 도는 중이라 미룬다")
             return
+        self._p0_running = True          # 🧪 끝까지 — 스캔이 그 사이에 끼어들지 않게
+        try:
+            self._p0_home_then_run_body(hits, ancs)
+        finally:
+            self._p0_running = False
+
+    def _p0_lab(self, si):
+        """🧪 그 슬롯을 **왜** 보내는가 → 기록에 쓸 글."""
+        k = (getattr(self, "_p0_hit_kind", None) or {}).get(si, "문구")
+        return "#%02d(%s)" % (si + 1, {"문구": "물약 문구", "한자리": "물약 10개 밑",
+                                       "두자리": "물약 100개 밑"}.get(k, k))
+
+    def _p0_low(self, si, dg, now):
+        """🧪 물약 자릿수 `dg` → 0 아님 · 1 미리(두 자리) · 2 급함(한 자리).
+
+        🚫 숫자를 보고 다시 돌렸는데 `P0_CNT_FAIL` 초 안에 **또 적으면** 물약을 못 산 것이다
+           (돈·무게). 그 슬롯은 숫자로 보내지 않는다 — 안 그러면 20분마다 헛돈다.
+           100개 이상으로 읽히면 저절로 풀린다."""
+        try:
+            if not P0_CNT_ON or dg is None:
+                return 0
+            off = getattr(self, "_p0_cnt_off", None)
+            if off is None:
+                off = self._p0_cnt_off = {}
+            if dg == 3:
+                (getattr(self, "_p0_early_due", None) or {}).pop(si, None)   # 🎲 다음엔 새로 뽑는다
+                if off.pop(si, None) is not None:
+                    click_log(f"[물약감시] 🧪 #{si+1:02d} 물약이 100개 이상으로 돌아왔다 "
+                              f"— 다시 숫자로 본다")
+                return 0
+            if dg not in (1, 2):
+                return 0
+            if si in off:
+                return 0
+            if now - (getattr(self, "_p0_cnt_skip", None) or {}).get(si, 0) < P0_CNT_SKIP:
+                return 0            # 🏰 방금 '숫자로 보내는 던전이 아니다' 로 본 슬롯
+            done = (getattr(self, "_p0_cnt_done", None) or {}).get(si, 0)
+            if done and now - done < P0_CNT_FAIL:
+                off[si] = now
+                click_log(f"[물약감시] 🧪 #{si+1:02d} 숫자를 보고 다시 돌렸는데 "
+                          f"{(now-done)/60:.0f}분 만에 **또 100개 밑**이다 — 물약을 못 산 듯 "
+                          f"(돈·무게). 이 슬롯은 숫자로 보내지 않는다 (문구로만 본다)")
+                return 0
+            if dg == 1:
+                return 2                    # 한 자리 — 기다리지 않는다
+            # 🎲 두 자리 — 처음 본 때부터 슬롯마다 **다른 시간**을 기다렸다 보낸다
+            due = getattr(self, "_p0_early_due", None)
+            if due is None:
+                due = self._p0_early_due = {}
+            if si not in due:
+                w = random.uniform(*P0_EARLY_WAIT)
+                due[si] = now + w
+                click_log(f"[물약감시] 🧪 #{si+1:02d} 물약이 **100개 밑**으로 내려왔다 — "
+                          f"약 {w/60:.1f}분 뒤에 보낸다 (그때그때 다르게 · 10개 밑이 되면 바로)")
+            return 1 if now >= due[si] else 0
+        except Exception:
+            return 0
+
+    def _p0_home_then_run_body(self, hits, ancs):
         # ⏹ ■ 멈춤은 **이 귀환을 시작한 뒤에 누른 것만** 본다 (2026-11-15).
         #    `_stop_flag` 를 그대로 보면 예전에 누른 멈춤이 남아, 그 뒤 물약 재실행이
         #    전부 "귀환된 슬롯이 없다" 로 끝난다 (F11·전체 자동실행을 하기 전까지).
@@ -27580,7 +27666,7 @@ class App(tk.Tk):
         for si, key, didx, v, pv in ok:
             if _STOP_AT[0] > _t0s:
                 break
-            click_log(f"[물약감시] 💧 #{si+1:02d} 물약 0개 ({v:.2f}) · "
+            click_log(f"[물약감시] 💧 {self._p0_lab(si)} · "
                       f"{key} ({pv:.2f}) → 귀환 뒤 다시 실행")
             self.after(0, lambda n=si, k=key: self.status.set(
                 f"💧 #{n+1:02d} 귀환 완료 — {k} 다시 돌립니다"))
@@ -27594,6 +27680,12 @@ class App(tk.Tk):
                 p.wait(timeout=P0_RUN_WAIT)      # 하나가 끝나야 다음
             except Exception as e:
                 click_log(f"[물약감시] #{si+1:02d} 실행 오류: {e}")
+            # 🧪 숫자를 보고 보낸 것이면 **끝난 시각**을 적는다 — 곧바로 또 적으면 못 산 것이다
+            if (getattr(self, "_p0_hit_kind", None) or {}).get(si) in ("한자리", "두자리"):
+                _cd = getattr(self, "_p0_cnt_done", None)
+                if _cd is None:
+                    _cd = self._p0_cnt_done = {}
+                _cd[si] = time.time()
 
     def _wake_key(self, anchor):
         """그 좌표의 리니지M 창 손잡이 — '누구를 깨웠나' 를 기억하는 열쇠.
@@ -44338,6 +44430,9 @@ class App(tk.Tk):
             _human = self._human_busy()
             if _human:
                 self._human_wait_log("물약감시")
+            # 🏠 귀환 → 재실행이 도는 중이면 건드리지 않는다 (슬롯과 슬롯 사이 틈에도)
+            if getattr(self, "_p0_running", False):
+                return
             if not os.path.exists(_isl.potion0_img_path()):
                 return self._p0_why("물약 0개 그림이 없음")
             # 섬 실행기가 이미 돌고 있으면 건드리지 않는다
@@ -44414,10 +44509,45 @@ class App(tk.Tk):
             hits = []
             _sc = []
             _dbgp = []      # 🗒 슬롯마다 **던전별 점수** — 왜 그걸 골랐는지 남긴다
+            _nread = 0      # 🧪 물약 숫자를 읽은 클라 수 (0 이면 그 컴퓨터는 문구로만 본다)
+            _kind = self._p0_hit_kind = {}       # 슬롯 → "문구" | "한자리" | "두자리"
             for si in sorted(ancs):
                 anc = ancs[si]
-                ok, v = _isl.potion0_seen(anc)
-                _sc.append(f"{si+1:02d}:{v:.2f}")
+                # 🧪 **한 번 찍어서** 문구와 물약 자릿수를 같이 본다 (2026-11-16)
+                _dg = None
+                try:
+                    ok, v, _dg, _dw = _isl.potion_look(anc)
+                except AttributeError:           # 섬 실행기가 옛 판 — 문구만
+                    ok, v = _isl.potion0_seen(anc)
+                if _dg is not None:
+                    _nread += 1
+                # 🏰 마지막으로 실행한 던전이 **숫자로 보내는 던전이 아니면** 숫자를 보지 않는다
+                _dgx = _dg
+                if _dg in (1, 2):
+                    _lr0 = self._p0_last_dun(si)
+                    if _lr0 and _lr0[0] not in P0_CNT_KEYS:
+                        _dgx = None
+                _low = self._p0_low(si, _dgx, now)
+                if _low and not ok:
+                    # 한 번 더 — 조금 뒤에도 '적다' 여야 믿는다 (번쩍이는 순간·화면 전환 대비)
+                    nap(random.uniform(*P0_CNT_AGAIN))
+                    try:
+                        _ok2, _v2, _dg2, _ = _isl.potion_look(anc)
+                    except Exception:
+                        _ok2, _v2, _dg2 = False, 0.0, None
+                    if _dg2 not in (1, 2):
+                        _low = 0
+                    else:
+                        _low = max(_low, 2 if _dg2 == 1 else _low)
+                        if _ok2:
+                            ok, v = True, _v2
+                _sc.append(f"{si+1:02d}:{v:.2f}" + ("·한자리" if _dg == 1
+                                                     else "·두자리" if _dg == 2 else ""))
+                if ok:
+                    _kind[si] = "문구"
+                elif _low:
+                    _kind[si] = "한자리" if _low >= 2 else "두자리"
+                    ok = True
                 if ok:
                     # 🧪 **본 시각을 적어둔다** — 마을감시가 '물약 때문에 나온 건가'
                     #    를 가릴 때 쓴다 (2026-10-17). 던전 안에서든 밖에서든 적는다.
@@ -44454,6 +44584,20 @@ class App(tk.Tk):
                 _to, _why3 = self._p0_pick(si, _rank, ancs, [k for _, k in keys],
                                            inf=_pinf)
                 if not _to:
+                    continue
+                # 🏰 **숫자로 미리 보내는 것은 `P0_CNT_KEYS` 던전만** — 다른 던전은 문구가 떴을 때만
+                if _kind.get(si) in ("한자리", "두자리") and _to not in P0_CNT_KEYS:
+                    _kind.pop(si, None)
+                    (getattr(self, "_p0_early_due", None) or {}).pop(si, None)
+                    _cs = getattr(self, "_p0_cnt_skip", None)
+                    if _cs is None:
+                        _cs = self._p0_cnt_skip = {}
+                    _cs[si] = now
+                    _sa2 = getattr(self, "_p0_seen_at", None) or {}
+                    if _sa2.get(si) == now:
+                        _sa2.pop(si, None)      # 마을감시가 '물약 때문' 으로 보지 않게
+                    _dbgp.append(f"#{si+1:02d} 물약이 적지만 {_to.split('_')[-1]} 는 "
+                                 f"숫자로 보내는 던전이 아니다 (문구를 기다린다)")
                     continue
                 _top = _to
                 _didx = dict((k, d) for d, k in keys)[_top]
@@ -44499,7 +44643,19 @@ class App(tk.Tk):
             if hits or getattr(self, "_p0_watch_n", 0) % P0_LOG_EVERY == 1:
                 click_log(f"[물약감시] {len(_sc)}클라 확인 "
                           f"(기준 {_isl.potion0_thr():.2f}) " + " ".join(_sc)
-                          + (f" → 0개 {[h[0]+1 for h in hits]}" if hits else " → 없음"))
+                          + (" → " + " ".join(self._p0_lab(h[0]) for h in hits)
+                             if hits else " → 없음")
+                          + f" · 🧪 물약 숫자 읽힘 {_nread}/{len(_sc)}")
+            # 🧪 **급한 것 먼저** — 문구가 떴거나 한 자리면 전부 같이 귀환시킨다.
+            #    두 자리(미리 보내는 것)뿐이면 **하나만** — 나머지는 그동안 계속 사냥하고
+            #    다음 바퀴에 차례가 온다 (숫자는 사라지지 않으므로 놓치지 않는다).
+            _urg = [h for h in hits if _kind.get(h[0]) != "두자리"]
+            if _urg:
+                hits = _urg
+            elif len(hits) > 1:
+                click_log("[물약감시] 🧪 100개 밑 %s — **하나씩** 보낸다 (이번엔 #%02d · "
+                          "나머지는 계속 사냥)" % ([h[0] + 1 for h in hits], hits[0][0] + 1))
+                hits = hits[:1]
             # 🗒 **어느 던전으로 봤는지** 점수를 그대로 남긴다 — 엉뚱한 던전을
             #    골랐다는 신고가 오면 이 줄 하나로 짚인다 (예전엔 고른 것만 남아
             #    **왜 그걸 골랐는지 알 수 없었다**).
@@ -44547,8 +44703,19 @@ class App(tk.Tk):
                     _pd = self._p0_pend = {}
                 _why = "사람이 쓰는 중이라" if _human else "다른 작업이 도는 중이라"
                 for si, key, didx, v, pv in hits:
+                    if _kind.get(si) in ("두자리", "한자리"):
+                        # 🧪 숫자는 **사라지지 않는다** — 적어둘 필요 없이 다음 바퀴에 또 보인다.
+                        #    (적어두면 그 사이 손으로 채웠어도 나중에 돌려버린다)
+                        _el = getattr(self, "_p0_early_log", None)
+                        if _el is None:
+                            _el = self._p0_early_log = {}
+                        if now - _el.get(si, 0) > P0_EARLY_LOG:
+                            _el[si] = now
+                            click_log(f"[물약감시] 🕐 {self._p0_lab(si)} · {key} — "
+                                      f"{_why} 미룬다 (끝나면 바로 보낸다)")
+                        continue
                     if si not in _pd:
-                        click_log(f"[물약감시] 🕐 #{si+1:02d} 물약 0개 ({v:.2f}) · "
+                        click_log(f"[물약감시] 🕐 #{si+1:02d} 물약 문구 ({v:.2f}) · "
                                   f"{key} 안 — {_why} "
                                   f"**적어두고 끝나면 돌린다**")
                     _pd[si] = (key, didx, now)
@@ -44558,8 +44725,9 @@ class App(tk.Tk):
             for si, key, didx, v, pv in hits:
                 self._p0_watch_done[si] = now
                 getattr(self, "_p0_pend", {}).pop(si, None)
-            click_log(f"[물약감시] 🏠 물약 0개 {len(hits)}개 "
-                      f"{[h[0]+1 for h in hits]} — 먼저 전부 귀환시킨다")
+            click_log(f"[물약감시] 🏠 {len(hits)}개 "
+                      + " ".join(self._p0_lab(h[0]) for h in hits)
+                      + " — 먼저 전부 귀환시킨다")
             threading.Thread(target=self._p0_home_then_run,
                              args=(list(hits), dict(ancs)), daemon=True).start()
             return

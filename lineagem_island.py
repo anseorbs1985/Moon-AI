@@ -2167,6 +2167,117 @@ def sleep_seen(anchor):
         return True, -1.0
 
 
+# ── 🧪 HUD 물약 개수 — **문구가 뜨기 전에** 안다 (2026-11-16) ─────────────────
+#  사용자: *"미리 네가 파악이 가능하면 20~60개일 때 해줄래? 그러면 다른 거 떨어질
+#           동안에 알아서 하지 않을까 … 넌 미리 해두면 좋지 뭐"*
+#  📏 실측 2026-11-16 #06 (0.35초마다 9분 기록)
+#     문구는 **"체력 회복제가 10개 남았습니다"** — 10개가 되는 순간 떠서 **약 20초 뒤 사라진다**
+#     (9개일 때는 이미 없었다). 30초마다 보는 감시는 그것을 **3번에 1번은 놓친다.**
+#     반면 절전 화면 왼쪽 위 HP 막대 옆 **물약 칸의 남은 개수는 늘 떠 있다.**
+#  🔢 숫자 글씨가 **2x5 픽셀**이라 '몇 개' 까지 읽지 않고 **자릿수**만 본다:
+#       3 = 100개 이상 · 2 = 10~99개 · 1 = 0~9개 · None = 못 읽음
+#     백의 자리는 물약 그림과 겹친다 → **숫자가 없을 때의 그 자리 그림**(potion_hud_ref.png)과
+#     달라진 픽셀 수로 본다. 📏 100 이상 7~19 (1xx 가 가장 적어 7) · 99 이하 **0** (기준 4)
+#     ⚠ 금색 픽셀 수로 보면 안 된다 — '172' 의 '1' 이 금색 2픽셀뿐이라 '두 자리' 로 읽혔다(실측 #14).
+#     십·일의 자리는 검은 바탕이라 밝은 픽셀(>60) 수로 본다 ('11' 의 가는 1 도 5픽셀).
+#  ✨ 물약을 먹는 순간 칸이 **번쩍인다** → 아이콘 일치도(0.97)·칸 바탕 밝기(40)로 그 프레임을 버린다.
+#     📏 평소 아이콘 0.996~1.000 · 바탕 0~39 / 번쩍 0.82~0.989 · 바탕 83~228 / 깨어 있는 화면 0.09~0.29
+#  🚫 창 가로가 546 이 아니면 읽지 않는다(None) — 2픽셀 글씨는 늘이거나 줄이면 깨진다.
+#     그때는 예전처럼 문구로만 본다.
+POTION_HUD_ON    = True
+POTION_HUD_W     = 546
+POTION_HUD_XY    = (122, 14)        # 물약 그림 윗부분(14x16)의 자리
+POTION_HUD_MATCH = 0.97
+POTION_HUD_BG    = (119, 122, 15, 26, 40)   # 칸 바탕 (x0, x1, y0, y1, 이보다 밝으면 번쩍)
+POTION_NUM_Y     = (31, 36)         # 숫자 줄
+POTION_Z_BIG     = (128, 135)       # 백·천의 자리 (= potion_hud_ref.png 의 자리)
+POTION_Z_TEN     = (135, 138)
+POTION_Z_ONE     = (138, 141)        # 141 부터는 옆 칸의 빛이 번진다(실측 30~95)
+POTION_BIG_DIFF  = 60               # ref 와 이만큼 다르면 '다른 픽셀'
+POTION_BIG_MIN   = 4                # 다른 픽셀이 이만큼이면 100개 이상
+POTION_INK_V     = 60                # 가는 '1' 은 83~117 로 어둡다 · 바탕은 33 이하 (실측)
+POTION_INK_MIN   = 3
+_POTION_HUD_TPL  = {}
+
+
+def potion_hud_tpl():
+    """(물약 그림, 숫자 없는 자리 그림) — 한 번만 읽는다. 없으면 (None, None)."""
+    try:
+        if "t" not in _POTION_HUD_TPL:
+            import cv2, numpy as np
+            a = b = None
+            p1 = os.path.join(IMG_DIR, "potion_hud.png")
+            p2 = os.path.join(IMG_DIR, "potion_hud_ref.png")
+            if os.path.exists(p1) and os.path.exists(p2):
+                a = cv2.imdecode(np.fromfile(p1, np.uint8), cv2.IMREAD_COLOR)
+                b = cv2.imdecode(np.fromfile(p2, np.uint8), cv2.IMREAD_COLOR)
+            _POTION_HUD_TPL["t"] = (a, b)
+        return _POTION_HUD_TPL["t"]
+    except Exception:
+        return None, None
+
+
+def potion_digits(big, win_w=None):
+    """🧪 물약 칸의 **자릿수** → (3 | 2 | 1 | None, 이유).
+
+    3 = 100개 이상 · 2 = 10~99개 · 1 = 0~9개 · None = 못 읽음(이유에 적는다).
+    🚫 모르면 None — '적다' 로 단정하지 않는다."""
+    try:
+        if not POTION_HUD_ON:
+            return None, "꺼짐"
+        icon, ref = potion_hud_tpl()
+        if icon is None or ref is None:
+            return None, "그림 없음"
+        w = int(win_w if win_w is not None else big.shape[1])
+        if abs(w - POTION_HUD_W) > 2:
+            return None, "창 %dpx" % w
+        import cv2, numpy as np
+        x0, y0 = POTION_HUD_XY
+        reg = big[y0 - 3:y0 + icon.shape[0] + 3, x0 - 3:x0 + icon.shape[1] + 3]
+        if reg.shape[0] < icon.shape[0] or reg.shape[1] < icon.shape[1]:
+            return None, "창이 작다"
+        _, mx, _, loc = cv2.minMaxLoc(cv2.matchTemplate(reg, icon, cv2.TM_CCOEFF_NORMED))
+        if mx < POTION_HUD_MATCH:
+            return None, "물약칸 %.2f" % mx
+        dx, dy = loc[0] - 3, loc[1] - 3
+        bx0, bx1, by0, by1, bmax = POTION_HUD_BG
+        if float(big[by0 + dy:by1 + dy, bx0 + dx:bx1 + dx].max(axis=2).mean()) > bmax:
+            return None, "번쩍"
+        row = big[POTION_NUM_Y[0] + dy:POTION_NUM_Y[1] + dy]
+        zb = row[:, POTION_Z_BIG[0] + dx:POTION_Z_BIG[1] + dx]
+        if zb.shape != ref.shape:
+            return None, "자리 어긋남"
+        nb = int((np.abs(zb.astype(np.int16) - ref.astype(np.int16)).max(axis=2)
+                  > POTION_BIG_DIFF).sum())
+        v = row.max(axis=2) > POTION_INK_V
+        nt = int(v[:, POTION_Z_TEN[0] + dx:POTION_Z_TEN[1] + dx].sum())
+        no = int(v[:, POTION_Z_ONE[0] + dx:POTION_Z_ONE[1] + dx].sum())
+        tag = "백%d 십%d 일%d" % (nb, nt, no)
+        if nb >= POTION_BIG_MIN:
+            return 3, tag
+        if nb == 0 and nt >= POTION_INK_MIN and no >= POTION_INK_MIN:
+            return 2, tag
+        if nb == 0 and nt == 0 and no >= POTION_INK_MIN:
+            return 1, tag
+        return None, tag
+    except Exception as e:
+        return None, "오류 %s" % type(e).__name__
+
+
+def potion_look(anchor):
+    """💧 한 번 찍어서 **문구와 물약 자릿수를 같이** 본다 → (문구 보임?, 점수, 자릿수, 이유)."""
+    try:
+        got = grab_window(anchor) if anchor else None
+        if not got:
+            return False, 0.0, None, "못 찍음"
+        big = got[0]
+        ok, v = _potion0_score(big)
+        d, why = potion_digits(big)
+        return ok, v, d, why
+    except Exception as e:
+        return False, 0.0, None, "오류 %s" % type(e).__name__
+
+
 def potion0_seen(anchor):
     """그 클라 창에서 '체력 회복제가 0개' 문구를 찾는다 → (보임?, 점수).
 
@@ -2180,15 +2291,24 @@ def potion0_seen(anchor):
       0.80~1.25배 보정을 넣었다 — 여기만 빠져 있었다.
       ① 창 가로 비율로 **한 번** 맞춰보고 ② 그래도 모자라면 작은 범위를 훑는다.
       클로드는 이 보정을 빼지 말 것."""
-    q = potion0_img_path()
-    if not os.path.exists(q) or not anchor:
+    if not os.path.exists(potion0_img_path()) or not anchor:
         return False, -1.0
     try:
-        import cv2, numpy as np
         got = grab_window(anchor)
         if not got:
             return False, 0.0
-        big, _ = got
+        return _potion0_score(got[0])
+    except Exception:
+        return False, 0.0
+
+
+def _potion0_score(big):
+    """찍어둔 화면 `big` 에서 물약 문구 점수 → (보임?, 점수). (`potion0_seen` 의 몸통)"""
+    q = potion0_img_path()
+    if not os.path.exists(q):
+        return False, -1.0
+    try:
+        import cv2, numpy as np
         thr = potion0_thr()
         _qs = potion0_img_list() or [q]
 
