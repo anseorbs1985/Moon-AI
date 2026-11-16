@@ -18423,18 +18423,21 @@ class App(tk.Tk):
         return getattr(self, "NIGHT_CARD", "") or self.NIGHT_KEY
 
     def _night_card_rasta(self, sis):
-        """🏴 카드를 집는 탭(해적섬)에서 **돌릴 수 없는 슬롯**(0부터) — 라스타바드 프리셋.
+        """🏴 카드를 집는 탭(해적섬)에서 **돌릴 수 없는 슬롯**(0부터).
 
-        칸26~35 가 라스타바드 전용이라 다른 카드로는 못 돈다. 판정은 섬 실행기의
-        `slot_is_rasta` 한 곳에 있다 (🚫 베껴 두지 말 것). 모르면 빈 목록(막지 않는다 —
-        섬 실행기가 어차피 한 번 더 뺀다)."""
+        🗡 라스타바드 프리셋 슬롯도 이제 **같이 돈다** (2026-11-17 사용자: "라바로 되어
+        있는 건 해적섬을 안 가는데") — 섬 실행기가 그 판만 짝 악몽의섬 프리셋으로 바꿔
+        태우고 다음 평소 실행에서 되돌린다. 그래서 여기서 빼는 것은 **바꿔 탈 짝이 없는**
+        슬롯(이름이 프리셋 이름이 아니다)뿐이다. 판정은 섬 실행기의 `slot_rasta_stuck`
+        한 곳에 있다 (🚫 베껴 두지 말 것). 모르면 빈 목록(막지 않는다)."""
         if not getattr(self, "NIGHT_CARD", ""):
             return []
         try:
             import lineagem_island as _isl
             sl = (self._island_cfg() or {}).get(self.NIGHT_KEY) or []
+            _fn = getattr(_isl, "slot_rasta_stuck", None) or _isl.slot_is_rasta
             return [i for i in sis
-                    if 0 <= i < len(sl) and _isl.slot_is_rasta(sl[i])]
+                    if 0 <= i < len(sl) and _fn(sl[i])]
         except Exception:
             return []
 
@@ -18828,16 +18831,17 @@ class App(tk.Tk):
             self.status.set("🌑 악몽의섬 — 슬롯을 고르세요 ([+] 를 눌러 선택)"); return
         if self._is_busy():
             self._enqueue("악몽의섬 선택실행", self._run_night_sel); return
-        _rs = self._night_card_rasta(sel)       # 🏴 해적섬 탭 — 라스타바드 슬롯은 뺀다
+        _rs = self._night_card_rasta(sel)       # 🏴 해적섬 탭 — 바꿔 탈 짝이 없는 라바 슬롯만 뺀다
         if _rs:
             sel = [i for i in sel if i not in _rs]
             if not sel:
-                self.status.set(f"🏴 고른 슬롯 {[i+1 for i in _rs]} 은(는) 전부 라스타바드 "
-                                f"프리셋이라 해적섬으로 돌릴 수 없습니다")
+                self.status.set(f"🏴 고른 슬롯 {[i+1 for i in _rs]} 은(는) 라스타바드인데 슬롯 "
+                                f"이름이 프리셋 이름이 아니라 해적섬으로 바꿔 태울 수 없습니다 "
+                                f"(프리셋을 한 번 다시 눌러주세요)")
                 return
             try:
-                click_log(f"[해적섬] 라스타바드 프리셋 슬롯 {[i+1 for i in _rs]} 는 빼고 "
-                          f"{[i+1 for i in sel]} 만 돌린다")
+                click_log(f"[해적섬] 라스타바드 슬롯 {[i+1 for i in _rs]} 는 바꿔 탈 짝 "
+                          f"프리셋이 없어 빼고 {[i+1 for i in sel]} 만 돌린다")
             except Exception:
                 pass
         self._night_mini_mark()       # 🏝 미니 판이면 끝난 뒤 닫는다
@@ -19005,9 +19009,10 @@ class App(tk.Tk):
 
     def _night_launch(self, slot_idx):
         """실제 실행 — 누른 때부터 2시간 N회를 다시 센다."""
-        if self._night_card_rasta([slot_idx]):  # 🏴 해적섬 탭 — 라스타바드 슬롯은 못 돈다
-            self.status.set(f"🏴 #{slot_idx+1:02d} 는 라스타바드 프리셋이라 해적섬으로 "
-                            f"돌릴 수 없습니다 (악몽의섬 탭에서 돌리세요)")
+        if self._night_card_rasta([slot_idx]):  # 🏴 해적섬 탭 — 바꿔 탈 짝이 없는 라바 슬롯
+            self.status.set(f"🏴 #{slot_idx+1:02d} 는 라스타바드인데 슬롯 이름이 프리셋 "
+                            f"이름이 아니라 해적섬으로 바꿔 태울 수 없습니다 "
+                            f"(프리셋을 한 번 다시 눌러주세요)")
             return
         self._night_mini_mark()       # 🏝 미니 판이면 끝난 뒤 닫는다
         self._island_step_back()

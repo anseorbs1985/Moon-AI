@@ -219,7 +219,12 @@ WAVE_TAIL_FROM = {"토요일_악몽의섬": 19}
 # 🚫 악몽의섬은 넣지 않았다 — 칸19 부터 '쭉' 끝내는 길(`_wave_tail`)이 따로 있고
 #    ⏰ 재진입은 원래 하나씩 돈다. 넣으려면 그 길까지 같이 봐야 한다.
 # 끄려면 `WAVE_CALM_KEYS = ()`.
-WAVE_CALM_KEYS   = ("수금_오만의탑", "월요일_잊혀진섬", "화요일_에카")
+WAVE_CALM_KEYS   = ("수금_오만의탑", "월요일_잊혀진섬", "화요일_에카", "토요일_악몽의섬")
+# 🧘 악몽의섬(해적섬 포함)도 (2026-11-17 사용자: "2개 웨이브가 너무 부하가 많이 걸리는 건가 팅기는데").
+#    📏 11-17 07:32 해적섬 15슬롯 — 맵을 불러오는 칸이 다른 클라와 12초 안에 **16번** 겹쳤다
+#       (#08 칸2·#05 칸2 4초 · #08 칸7·#05 칸7 3초 — 둘이 같이 귀환·같이 입장).
+#    악몽의섬은 귀환(칸2 6~9초)·입장(칸7 7~10초)의 간격 하한이 8초보다 짧아 따로 정한다.
+WAVE_HEAVY_GAP_BY = {"토요일_악몽의섬": 6.0}
 WAVE_HEAVY_GAP   = 8.0            # 등록 간격 **하한**이 이 이상이면 '맵을 불러오는 칸'
 WAVE_HEAVY_HOLD  = (16.0, 22.0)   # 그 뒤 다른 클라의 **무거운 칸**을 미루는 시간(초)
 WAVE_HEAVY_QUIET = (5.0, 8.0)     # 그 뒤 다른 클라의 **모든 클릭**을 미루는 시간(초)
@@ -381,6 +386,20 @@ def slot_is_rasta(slot):
     return False
 
 
+def slot_rasta_stuck(slot, key=None):
+    """🏴 카드를 집는 실행(해적섬)에서 **정말 못 도는** 슬롯인가 (2026-11-17).
+
+    라스타바드 프리셋 슬롯은 그 판만 짝 악몽의섬 프리셋(`CARD_SWAP`)으로 바꿔 돌린다.
+    **짝이 없는 이름**(손으로 고친 이름 등)일 때만 못 돈다 → True."""
+    try:
+        if not slot_is_rasta(slot):
+            return False
+        _k = key or RASTA_KEY
+        return not (CARD_SWAP.get(_k) or {}).get(((slot or {}).get("name") or "").strip())
+    except Exception:
+        return False
+
+
 def card_no(slot):
     """🚫 그 슬롯(캐릭)이 **안 가는 던전 카드** 이름들 (2026-11-14 사용자 요청).
 
@@ -516,8 +535,8 @@ def dun_need(key, cfg):
             break
         if (isinstance(s_, dict) and s_.get("enabled", True)
                 and (any(s_.get("coords") or []) or any(s_.get("dirs") or []))):
-            if key == DUN_PIRATE and slot_is_rasta(s_):
-                continue
+            if key == DUN_PIRATE and slot_rasta_stuck(s_):
+                continue                 # 🗡 라바 슬롯은 짝 악몽의섬으로 바꿔 돈다 — 짝이 없을 때만 뺀다
             if key == DUN_PIRATE and DUN_PIRATE in card_no(s_):
                 continue                 # 🚫 그 캐릭은 해적섬에 안 간다 — 돌릴 대상이 아니다
             out.append(si)
@@ -2021,6 +2040,14 @@ def place_clock(big):
 INSIDE_MATCH = 0.90
 
 
+# 🟩 '실행중' 은 이름 옆 **초록 시계**가 있을 때만 (2026-11-17).
+#    사냥터에 들어가면 시계가 붙고 마을에는 없다 (2026-10-17 사용자 규칙).
+#    등록 안 된 마을(기린 마을 등)이 비슷한 길이의 던전 그림에 붙어 '실행중' 으로
+#    보이는 것을 막는다. 📏 11-17 해적섬 15클라 시계 128~152 · 마을 0.
+#    ⚠ 못 재면(-1) 막지 않는다.
+INSIDE_CLOCK_MIN = 30
+
+
 def slots_in_dungeon(slots, keys=None, only=None, match=None):
     """🧭 지금 **어느 슬롯이 던전 안인가** → {슬롯(0부터): (던전키, 점수, 배수)}.
 
@@ -2048,9 +2075,13 @@ def slots_in_dungeon(slots, keys=None, only=None, match=None):
             anc = IslandApp._slot_anchor(slot)
             if not anc:
                 continue
-            sv = place_scores(keys, anc)
+            _inf = {}
+            sv = place_scores(keys, anc, _inf)
             if not sv:
                 continue
+            _g = _inf.get("green", -1)
+            if _g is not None and 0 <= _g < INSIDE_CLOCK_MIN:
+                continue                 # 🟩 시계가 없다 = 사냥터가 아니다 (마을·가림)
             r = sorted(sv.items(), key=lambda kv: -kv[1])
             t, v = r[0]
             v2 = r[1][1] if len(r) > 1 else 0.0
@@ -10193,7 +10224,8 @@ class IslandApp(tk.Tk):
             if _j == _st["last"]:
                 return True
             _gl = _st["slot"].get("gap_list") or []
-            return gap_low(_gl[_j] if _j < len(_gl) else None) >= WAVE_HEAVY_GAP
+            return (gap_low(_gl[_j] if _j < len(_gl) else None)
+                    >= WAVE_HEAVY_GAP_BY.get(key, WAVE_HEAVY_GAP))
 
         def _hold(_si):
             _t = time.time()
@@ -10795,21 +10827,45 @@ class IslandApp(tk.Tk):
                     # (2026-08-09) 카매사오기는 02~04 슬롯이 항상 마지막에 실행돼야 한다.
                     # (앞 슬롯들이 먼저 끝나야 이 슬롯들이 할 일이 생김)
                     targets.sort(key=lambda t: 1 if t[0] in (1, 2, 3) else 0)
-            # 🏴 카드를 콕 집은 실행이면 **라스타바드 프리셋 슬롯은 뺀다** (2026-11-13)
+            # 🏴 카드를 콕 집은 실행(해적섬)
             _cf0 = getattr(self, "_card_force", None)
             if _cf0 and key == RASTA_KEY:
-                _rs = [si for si, _s in targets if slot_is_rasta(_s)]
-                if _rs:
-                    targets = [(si, _s) for si, _s in targets if si not in _rs]
-                    self._rlog(f"🏴 --card {_cf0} — 라스타바드 프리셋 슬롯 "
-                               f"{sorted(x + 1 for x in _rs)} 는 뺀다 (칸26~35 가 라스타바드 "
-                               f"전용이라 다른 카드로는 못 돈다)")
-                #   🚫 그 던전을 '안 감' 으로 빼둔 캐릭도 뺀다 (2026-11-14)
+                #   🚫 그 던전을 '안 감' 으로 빼둔 캐릭은 뺀다 (2026-11-14)
                 _bs = [si for si, _s in targets if _cf0 in card_no(_s)]
                 if _bs:
                     targets = [(si, _s) for si, _s in targets if si not in _bs]
                     self._rlog(f"🚫 --card {_cf0} — 그 던전을 안 가는 캐릭 "
                                f"{sorted(x + 1 for x in _bs)} 는 뺀다")
+                # 🗡 **라스타바드 프리셋 슬롯도 같이 간다** (2026-11-17 사용자: "라바로 되어
+                #    있는 건 해적섬을 안 가는데 어떻게 해결해야 해").
+                #    칸27~34 만 짝 악몽의섬 프리셋으로 바꿔 끼우고 `auto_home` 에 원래 이름을
+                #    적는다 — 라스타바드가 잠겼을 때 바꿔 타는 것(`_card_do`)과 **같은 길**이다.
+                #    다음 평소 실행에서 라스타바드 카드가 열려 있으면 저절로 되돌아온다.
+                #    🚫 짝이 없거나(이름) 창을 못 찾으면 예전처럼 뺀다.
+                _rs = [(si, _s) for si, _s in targets if slot_is_rasta(_s)]
+                if _rs:
+                    _pairs = CARD_SWAP.get(key) or {}
+                    _lo, _hi = CARD_SWAP_CELLS
+                    _sw, _stuck = [], []
+                    for si, _s in _rs:
+                        _nm = (_s.get("name") or "").strip()
+                        _pair = _pairs.get(_nm)
+                        if _pair and self._swap_cells(key, si, _s, _pair, _lo, _hi):
+                            _s["auto_home"] = _nm
+                            _sw.append(si)
+                        else:
+                            _stuck.append(si)
+                    if _sw:
+                        save_cfg(self.cfg)
+                        self._rlog(f"🏴 --card {_cf0} — 라스타바드 슬롯 "
+                                   f"{sorted(x + 1 for x in _sw)} 는 **이번만 악몽의섬으로 "
+                                   f"바꿔** 같이 돈다 (칸{_lo}~{_hi} · 다음 평소 실행에서 "
+                                   f"라스타바드가 열려 있으면 되돌아온다)")
+                    if _stuck:
+                        targets = [(si, _s) for si, _s in targets if si not in _stuck]
+                        self._rlog(f"🏴 --card {_cf0} — 라스타바드 슬롯 "
+                                   f"{sorted(x + 1 for x in _stuck)} 는 뺀다 (바꿔 탈 짝 "
+                                   f"악몽의섬 프리셋이 없다 — 슬롯 이름이 프리셋 이름이 아니다)")
             # 🚢 로컬 — 라스타바드 슬롯이 옛 구성이면 **돌리기 전에** 배포판으로 맞춘다 (2026-11-14)
             self._rasta_align(key, targets)
             # 💧 이번에 실제로 돈 슬롯 — 끝난 뒤 '물약 0개' 를 확인할 대상이다
