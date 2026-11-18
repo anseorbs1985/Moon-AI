@@ -264,84 +264,14 @@ for g in (_zs[:4] if _zs else zs[:4]):
                 break
 print("   ⭐ 즐겨찾기 로그가 바뀐 때: %s" % (" | ".join(fv) or "(못 찾음)"))
 
-# ── ⑦ 🌙 수호성 ──────────────────────────────────
-#    🚨 안 돼요 신고가 오면 **여기부터** 본다.
-#       수호성은 ① 그림 ② 자동 켬/끔 ③ **확대한 창(1200px 넘음)**
-#       셋이 다 맞아야 돌아간다. 하나라도 안 맞으면 **조용히** 지나간다.
+# ── 공용 — 그림 폴더 · 최근 click_log (⑧ 이 쓴다) ──────────────
+#    🌙 수호성 점검(⑦)은 2026-11-18 수호성 코드를 걷어내며 뺐다.
 _IMGD = os.path.join(DESK, "click_templates")
 try:
     LOG = io.open(os.path.join(LA, "click_log.txt"), encoding="utf-8",
                   errors="replace").read().split(chr(10))[-4000:]
 except Exception:
     LOG = []
-print("\n⑦ 🌙 수호성")
-_sw = []
-try:
-    for f in sorted(os.listdir(_IMGD)):
-        if f.startswith("suho_") and f.lower().endswith(".png"):
-            _sw.append(f)
-except Exception:
-    pass
-_need = ("suho_screen", "suho_info", "suho_card", "suho_ok")
-_miss = [n for n in _need if not any(f.startswith(n) for f in _sw)]
-print("   그림 %d장  %s" % (len(_sw), ", ".join(_sw[:10]) or "(없다)"))
-if _miss:
-    print("   ⚠ **없는 그림: %s** → 🔄 업데이트를 한 번 더 눌러주세요"
-          % ", ".join(_miss))
-else:
-    print("   ✔ 필요한 그림은 다 있다")
-_cf = jload(os.path.join(DESK, "coords.json")) or {}
-_on = _cf.get("suho_auto_on", True)
-print("   자동 띄우기: %s" % ("✔ 켬" if _on else
-      "⚠ **꿈** — 각성 옆 [🌙 수호성] 옆 버튼으로 켜주세요"))
-
-#    🖥 지금 리니지M 창 크기 — **1200px 넘는 창이 없으면 수호성은 안 돌다**
-_wins = []
-try:
-    import ctypes
-    from ctypes import wintypes
-    u = ctypes.windll.user32
-    CB = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-
-    def _cb(h, _):
-        try:
-            if not u.IsWindowVisible(h) or u.IsIconic(h):
-                return True
-            n = u.GetWindowTextLengthW(h)
-            b = ctypes.create_unicode_buffer(n + 1)
-            u.GetWindowTextW(h, b, n + 1)
-            t = b.value or ""
-            if not t.startswith("\ub9ac\ub2c8\uc9c0M") or t.startswith("\ub9ac\ub2c8\uc9c0M \uc790\ub3d9 \uc2e4\ud589"):
-                return True
-            r = wintypes.RECT()
-            u.GetWindowRect(h, ctypes.byref(r))
-            _wins.append((t, r.right - r.left, r.bottom - r.top))
-        except Exception:
-            pass
-        return True
-    u.EnumWindows(CB(_cb), 0)
-except Exception as e:
-    print("   (창 목록을 못 읽었다 %s)" % str(e)[:40])
-if _wins:
-    _big = [w for w in _wins if w[1] >= 1200]
-    print("   리니지M 창 %d개 · 가로: %s"
-          % (len(_wins), ", ".join(str(w[1]) for w in _wins[:8])))
-    if _big:
-        print("   ✔ 1200px 넘는 창 %d개 — 수호성을 할 수 있다 (%s %dx%d)"
-              % (len(_big), _big[0][0][:20], _big[0][1], _big[0][2]))
-    else:
-        print("   ⚠ **전부 작은 창이다** — 수호성은 🔍 **확대한 창(1200px 이상)에서만** 한다.")
-        print("     작은 창에서는 카드 장수·수호석 판정이 흔들려 돈을 써버릴 수 있어 막아두었다")
-else:
-    print("   (리니지M 창이 안 켜져 있다)")
-
-_sl = [l for l in LOG if "[수호성]" in l]
-print("   최근 기록 %d줄 중 마지막 8줄:" % len(_sl))
-for l in _sl[-8:]:
-    print("     " + l.strip()[:150])
-if not _sl:
-    print("     ⚠ **기록이 한 줄도 없다** — 감지가 한 번도 안 돌았다는 뜻이다.")
-    print("       코드가 올지 않았거나(① 확인) 그림이 없거나 자동이 꺼져 있다")
 
 # ── ⑧ 🩹 복구 ──────────────────────────────────────
 #    🗂 복구는 **탭이 둘**이다 — 경험치 복구 · 아이템(장비) 복구.
