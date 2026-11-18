@@ -2170,6 +2170,17 @@ FIX_ALL_AWAKE_ONLY = True
 #    🚫 다른 작업·섬 실행기가 돌거나 사람이 쓰는 중이면 **기다린다** (늦으면 그날은 건너뛴다)
 #    끄려면 FIX_DAWN_ON = False — 그러면 과거섬도 예전처럼 5:03 에 돈다.
 FIX_DAWN_ON = True
+# 🗂 **펼친 런처는 스스로 다시 접는다** (2026-11-18 사용자 지시:
+#    *"메인런처를 열기를 해서 뭔가 작업을 하고 난 후에도, 재시작을 하든 그 작업이
+#      끝났든 하면 다시 열기를 닫아줄 수 있어? 일일이 닫기가 귀찮은데"*)
+#    · 런처가 켜질 때는 **늘 접힌 채** 연다 (예전엔 마지막 상태를 기억했다)
+#    · 펼쳐져 있는 동안 작업(런처 작업·복구·각성·도감·우편·섬/던전 실행기)이 **돌다가 끝나면** 접는다
+#    🚫 런처를 만진 지 FOLD_AUTO_QUIET 초 안이면 미룬다 — 손으로 고치는 중에 접히지 않게
+#    🚫 펼쳐 놓기만 하고 아무 작업도 안 돌렸으면 **그대로 둔다**
+#    끄려면 FOLD_AUTO_CLOSE = False (마지막 상태를 기억하는 예전 동작)
+FOLD_AUTO_CLOSE = True
+FOLD_AUTO_QUIET = 15.0
+FOLD_AUTO_TICK_MS = 1000
 FIX_DAWN_RUNS = (("d4", (4, 0), (4, 5), (4, 45)),      # (이름, 부터, 까지(랜덤), 늦어도)
                  ("d5", (5, 2), (5, 7), (5, 40)))
 FIX_DAWN_PAST_GAP = 360          # 5시 복구가 끝나고 과거섬까지 (초) — 6분
@@ -10818,7 +10829,11 @@ class App(tk.Tk):
         # 🧹 **찍어두기 전에** 왼쪽을 정리한다 — `_fold_snap` 이 정리된 자리를 기억한다
         self._tidy_left()
         self._fold_snap()
-        self.after(120, lambda: self._fold_apply(bool(self.cfg.get("fold_main"))))
+        self.after(120, lambda: self._fold_apply(
+            True if FOLD_AUTO_CLOSE else bool(self.cfg.get("fold_main"))))
+        if FOLD_AUTO_CLOSE:
+            self.cfg["fold_main"] = True       # 🗂 켤 때는 늘 접힌 채 (2026-11-18)
+            self.after(3000, self._fold_auto_tick)
         self._refresh_ui()
 
     def _tidy_left(self):
@@ -11375,6 +11390,39 @@ class App(tk.Tk):
         # 창을 내용에 맞게 다시 맞춘다 (접으면 좁아지고, 펼치면 넓어진다)
         for _ms in (120, 500, 1300):
             self.after(_ms, self._fit_main_height)
+
+    def _fold_busy_now(self):
+        """🗂 지금 무언가 돌고 있나 (펼쳐져 있을 때만 본다 — 평소 부하 0)."""
+        try:
+            if self._is_busy():
+                return True
+            if (getattr(self, "_fix_all_prep", False) or getattr(self, "_fix_queue", None)
+                    or getattr(self, "_fix_hold", None) is not None
+                    or getattr(self, "_awaken_busy", False)):
+                return True
+            return bool(self._island_running())
+        except Exception:
+            return False
+
+    def _fold_auto_tick(self):
+        """🗂 펼쳐져 있는 동안 '돌던 작업이 끝났나' 를 본다 → 끝났으면 다시 접는다."""
+        try:
+            if FOLD_AUTO_CLOSE and not getattr(self, "_fold_on", True):
+                busy = self._fold_busy_now()
+                if busy:
+                    self._fold_was_busy = True
+                elif getattr(self, "_fold_was_busy", False):
+                    _idle = time.time() - float(getattr(self, "_last_activity", 0) or 0)
+                    if _idle >= FOLD_AUTO_QUIET:
+                        self._fold_was_busy = False
+                        self._fold_apply(True)
+                        self.cfg["fold_main"] = True
+                        click_log("[화면] 🗂 작업이 끝나 펼친 런처를 다시 접었다")
+            else:
+                self._fold_was_busy = False
+        except Exception:
+            pass
+        self.after(FOLD_AUTO_TICK_MS, self._fold_auto_tick)
 
     def _fold_toggle(self):
         self._fold_apply(not getattr(self, "_fold_on", False))
