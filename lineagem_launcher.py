@@ -1160,7 +1160,20 @@ SUBC_REL = {"wake": (507, 106),     # 😴 '절전모드 해제' 글자 (기준�
             "ret": (530, 273),      # 🩸 빠른칸 7번(혈귀) — 누르신 자리
             "menu": (528, 20),      # ≡
             "relog": (523, 205),    # [재접속]
-            "chsel": (273, 251)}    # 확인창 **가운데** [캐릭터 선택]
+            "chsel": (273, 251),    # 확인창 **가운데** [캐릭터 선택]
+            "moveok": (320, 251)}   # 퀘스트 이동 확인창 [확인] (오른쪽 파란 버튼)
+# 🧭 **퀘스트를 누르면 "퀘스트 지역으로 이동하시겠습니까? 지불 아데나 10,000" 이 뜬다**
+#    (2026-11-18 사용자: *"퀘스트 눌렀으면 확인을 눌러야지"*). 그 창이 보이면 [확인].
+#    📏 그림 16클라 — 그 창 1.00 · 다른 화면 0.23 이하.
+#    🚫 동전이 **파란색(다야)** 이면 누르지 않고 ESC — 지금은 아데나(금색 · 파란 점 0)다.
+SUBC_MOVE_IMG   = "subc_move"
+SUBC_MOVE_MATCH = 0.80
+SUBC_MOVE_WAIT  = 8.0
+SUBC_COIN_BOX   = (278, 203, 293, 218)   # 지불 금액 동전 (546x307 기준)
+SUBC_COIN_BLUE  = 10
+# 🐢 **단계마다 1~3초 더 쉰다** (2026-11-18 사용자: *"엄청나게 빠르다 1~3 버퍼링에 관해서
+#    좀 해줘봐 여유 있게 … 이러면 부하가 많이 걸린다고"*). 클릭 하나 누를 때마다.
+SUBC_EXTRA      = (1.0, 3.0)
 #    캐릭터 선택 화면 — 줄(아이콘 가운데) · 📏 줄 간격 42px · 6번째부터는 아래 막대에 가린다
 SUBC_ROW_X = 50
 SUBC_ROW_Y = {1: 56, 2: 97, 3: 141, 4: 183, 5: 225}
@@ -1223,6 +1236,39 @@ def subc_quest_find(big):
         return x0 + loc[0] + t.shape[1] // 2, y0 + loc[1] + t.shape[0] // 2, best
     except Exception:
         return None, None, -1.0
+
+
+def subc_move_seen(big):
+    """🎪 '퀘스트 지역으로 이동하시겠습니까?' 창 → 점수 (-1 = 못 봄)."""
+    try:
+        import cv2
+        t = subc_tpl(SUBC_MOVE_IMG)
+        if big is None or t is None:
+            return -1.0
+        H, W = big.shape[:2]
+        k = W / float(SUBC_BASE_W)
+        if abs(k - 1) > 0.02:
+            t = cv2.resize(t, (max(4, int(t.shape[1] * k)), max(4, int(t.shape[0] * k))))
+        band = big[int(H * 0.40):int(H * 0.80), int(W * 0.18):int(W * 0.82)]
+        if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
+            return -1.0
+        return float(cv2.matchTemplate(band, t, cv2.TM_CCOEFF_NORMED).max())
+    except Exception:
+        return -1.0
+
+
+def subc_coin_blue(big):
+    """🎪 이동 확인창 지불 동전의 파란 점 수 (다야면 많다) · 못 재면 -1."""
+    try:
+        import numpy as np
+        H, W = big.shape[:2]
+        x0, y0, x1, y1 = SUBC_COIN_BOX
+        kx, ky = W / float(SUBC_BASE_W), H / float(SUBC_BASE_H)
+        c = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
+        b, r = c[..., 0], c[..., 2]
+        return int(((b > r + 20) & (b > 90)).sum())
+    except Exception:
+        return -1
 
 
 def subc_place_score(big):
@@ -19380,6 +19426,14 @@ class App(tk.Tk):
         """한 클라를 다음 캐릭으로 바꾼다 (r < 보조 수 → 보조 r+1 · r == 보조 수 → 메인)."""
         self._subc_stop = False
         tag = f"#{si + 1:02d}"
+
+        def _ck(x, y):                    # 🐢 누르고 1~3초 더 쉰다
+            click_at(x, y)
+            nap(random.uniform(*SUBC_EXTRA))
+
+        def _hk(x, y, w=(0.35, 0.65)):
+            hover_click(x, y, w)
+            nap(random.uniform(*SUBC_EXTRA))
         slots = self.cfg.get("subc_slots") or []
         slot = slots[si] if si < len(slots) and isinstance(slots[si], dict) else {}
         cs = list(slot.get("coords") or [])
@@ -19417,6 +19471,14 @@ class App(tk.Tk):
         click_log(f"[보조서커스] ▶ {tag} [{name}] → **{what}** 로 바꾼다")
         Tp = self._enter_tpl("login_enter")
         at_sel = Tp[0] is not None and self._enter_find(hw, *Tp)[0] is not None
+        if not at_sel and subc_move_seen(grab_window(anc)) >= SUBC_MOVE_MATCH:
+            try:
+                self._focus_client_at(anc)
+            except Exception:
+                pass
+            press_esc(1)
+            click_log(f"[보조서커스] {tag} 지난번 퀘스트 이동 확인창이 남아 있어 ESC 로 닫았다")
+            nap(random.uniform(1.0, 2.0))
         if not at_sel:
             self._wake_hard("subc", anc, name, si + 1)
             try:
@@ -19425,7 +19487,7 @@ class App(tk.Tk):
                 pass
             nap(random.uniform(0.6, 1.0))
             if r == 0:                         # 메인 → 보조1 : 먼저 혈귀로 마을에
-                click_at(*cs[1])
+                _ck(*cs[1])
                 click_log(f"[보조서커스] {tag} 🩸 혈귀 (7번) — 마을로")
                 nap(random.uniform(4.5, 6.5))
             for k, lb in ((2, "≡ 메뉴"), (3, "재접속")):
@@ -19434,7 +19496,7 @@ class App(tk.Tk):
                 if not cs[k]:
                     click_log(f"[보조서커스] 🚫 {tag} 칸{k + 1}({lb}) 좌표가 없다")
                     return False
-                click_at(*cs[k])
+                _ck(*cs[k])
                 nap(random.uniform(1.1, 1.8))
             c4 = cs[4]
             if not c4:
@@ -19446,14 +19508,14 @@ class App(tk.Tk):
                           f"[퍼플PC로 접속 전환] 일 수 있어 누르지 않는다")
                 press_esc(1)
                 return False
-            hover_click(*c4)
+            _hk(*c4)
             ok = self._subc_until(lambda: self._enter_find(hw, *Tp)[0] is not None,
                                   SUBC_CHSEL_WAIT)
             if not ok:
                 click_log(f"[보조서커스] ✘ {tag} 캐릭터 선택 화면이 {SUBC_CHSEL_WAIT:.0f}초 안에 안 떴다")
                 return False
         nap(random.uniform(0.8, 1.4))
-        click_at(*tgt)
+        _ck(*tgt)
         click_log(f"[보조서커스] {tag} 캐릭터 선택 — {what} 줄 {tuple(tgt)}")
         nap(random.uniform(*ENTER_PICK_GAP))
         entered = False
@@ -19466,7 +19528,7 @@ class App(tk.Tk):
                     entered = True
                     break
                 ex, ey = L + f[0], T + f[1]
-            hover_click(ex, ey, ENTER_HOVER)
+            _hk(ex, ey, ENTER_HOVER)
             if self._subc_until(lambda: self._enter_find(hw, *Tp)[0] is None, 12.0):
                 entered = True
                 break
@@ -19494,18 +19556,29 @@ class App(tk.Tk):
             pass
         nap(random.uniform(0.4, 0.7))
         if q:
-            click_at(L + q[0], T + q[1])
+            _ck(L + q[0], T + q[1])
             click_log(f"[보조서커스] {tag} 퀘스트 [일일] 신비한 서커스 유랑단 (일치도 {q[2]:.2f}) 눌렀다")
         elif cs[12]:
-            click_at(*cs[12])
+            _ck(*cs[12])
             click_log(f"[보조서커스] ⚠ {tag} 퀘스트 그림을 못 찾아 칸13 좌표를 눌렀다")
         else:
             click_log(f"[보조서커스] ✘ {tag} 서커스 퀘스트를 못 찾았다 (칸13 좌표도 없다)")
             return False
-        if cs[13]:
-            nap(random.uniform(1.5, 2.4))
-            hover_click(*cs[13])
-            click_log(f"[보조서커스] {tag} 이동 확인 눌렀다")
+        # 🧭 "퀘스트 지역으로 이동하시겠습니까?" → [확인]
+        _mv = self._subc_until(lambda: (lambda v: v if v >= SUBC_MOVE_MATCH else None)(
+            subc_move_seen(grab_window(anc))), SUBC_MOVE_WAIT, poll=(0.5, 0.9))
+        if _mv:
+            _bl = subc_coin_blue(grab_window(anc))
+            if _bl > SUBC_COIN_BLUE:
+                press_esc(1)
+                click_log(f"[보조서커스] 🚫 {tag} 이동 비용이 **다야** 다 (파란 점 {_bl}) — "
+                          f"누르지 않고 ESC")
+                return False
+            nap(random.uniform(0.8, 1.5))
+            _hk(*(cs[13] or _P(SUBC_REL["moveok"])))
+            click_log(f"[보조서커스] {tag} 퀘스트 이동 확인창 (일치도 {_mv:.2f} · 아데나) → [확인]")
+        else:
+            click_log(f"[보조서커스] {tag} 이동 확인창이 {SUBC_MOVE_WAIT:.0f}초 안에 안 떴다 — 그대로 간다")
         pv = self._subc_until(lambda: (lambda v: v if v >= SUBC_PLACE_MATCH else None)(
             subc_place_score(grab_window(anc))), SUBC_PLACE_WAIT, poll=(2.0, 3.0))
         if pv:
@@ -19524,7 +19597,7 @@ class App(tk.Tk):
         else:
             ax = L + int(SUBC_AUTO_REL[0] * W / SUBC_BASE_W)
             ay = T + int(SUBC_AUTO_REL[1] * H / SUBC_BASE_H)
-        click_at(ax, ay)
+        _ck(ax, ay)
         click_log(f"[보조서커스] ✔ {tag} {what} 서커스 AUTO 눌렀다 ({ax},{ay})")
         return True
 
