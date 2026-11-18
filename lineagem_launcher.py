@@ -25357,7 +25357,8 @@ class App(tk.Tk):
         return done
 
     def _run_dgn2_wave(self, fkey, targets, nclk, icon, stop, lanes=4, gap=(2.0, 4.0),
-                       slow=(1.0, 1.0), slot_gap=(0.5, 3.0), keep_order=False):
+                       slow=(1.0, 1.0), slot_gap=(0.5, 3.0), keep_order=False,
+                       early=True):
         """번갈아(웨이브) 실행 — 동시 lanes개 슬롯을 섞어가며 클릭 하나씩.
         각 좌표 사이 간격은 slot마다 따로 흐르고 gap 범위에서 랜덤."""
         _t_now = time.time()
@@ -25411,7 +25412,8 @@ class App(tk.Tk):
             # 끝나가는 슬롯이 있으면 **다음 슬롯을 미리 준비**해 겹쳐 들여보낸다.
             # 하나가 완전히 끝나야 다음이 들어오면 그 사이가 뚝 끊겨 기계 같다.
             _almost = sum(1 for x in active if state[x]["j"] >= nclk - EARLY_IN)
-            _room = lanes + (1 if _almost else 0) - len(active)
+            # early=False 면 겹쳐 들여보내지 않는다 — 진짜 **한 슬롯씩** (서커스 등록)
+            _room = lanes + (1 if (_almost and early) else 0) - len(active)
             while waiting and _room > 0:
                 nx = waiting.pop(0)
                 state[nx]["due"] = (time.time() + random.uniform(*slot_gap)
@@ -25642,9 +25644,12 @@ class App(tk.Tk):
                                     slot_gap=BADGE_SLOT_GAP)
                 return
             if fkey == "circus" and slot_idx is None and len(targets) > 1:
-                # 서커스 이벤트등록: 동시 2슬롯, 간격·슬롯투입 모두 10~20% 할증
-                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=2,
-                                    slow=(1.10, 1.20), slot_gap=(3.0, 5.0))
+                # 서커스 이벤트등록: **한 슬롯씩** (2026-11-18 사용자 지시 —
+                #   "두 개씩 하니까 계속 씹힌다"). 끝나기 전에 다음 슬롯을 미리
+                #   넣지도 않는다(early=False). 간격·슬롯투입 10~20% 할증은 그대로.
+                self._run_dgn2_wave(fkey, targets, nclk, icon, stop, lanes=1,
+                                    slow=(1.10, 1.20), slot_gap=(3.0, 5.0),
+                                    early=False)
                 return
             if fkey == "market" and slot_idx is None and len(targets) > 1:
                 # 거래소검색: 동시 2슬롯 번갈아 (간격은 칸에 적어둔 값 우선)
