@@ -1174,6 +1174,19 @@ SUBC_COIN_BLUE  = 10
 # 🐢 **단계마다 1~3초 더 쉰다** (2026-11-18 사용자: *"엄청나게 빠르다 1~3 버퍼링에 관해서
 #    좀 해줘봐 여유 있게 … 이러면 부하가 많이 걸린다고"*). 클릭 하나 누를 때마다.
 SUBC_EXTRA      = (1.0, 3.0)
+# ✋ **클릭 직전마다 사람이 마우스에서 손을 뗄 때까지 기다린다** (2026-11-18 사용자: *"내가 컴퓨터를
+#    못 쓰는 건가?"* → *"응 해줘"*). 판정은 `precise_click.human_idle_seconds()` —
+#    우리 표식만 빼므로 원격 데스크톱에서도 사람 움직임을 잡는다 (idle_seconds 는 원격에서 늘 유휴).
+#    ⚠ 마우스만 본다 (키보드는 우리가 보내는 ESC 와 못 가린다).
+SUBC_HAND_QUIET = 2.0      # 사람이 마우스를 만진 뒤 이만큼 조용해야 누른다
+SUBC_HAND_MAX   = 300.0    # 그래도 계속 만지면 이만큼까지만 기다리고 진행한다 (기록을 남긴다)
+# 🎁 **보조에서 나가기 전에 [완료] 된 서커스 퀘스트를 눌러 보상을 받는다** (2026-11-18 사용자:
+#    *"그 퀘스트가 완료가 되면 퀘스트받기처럼 색이 변하거든 그러면 그것만 좀 받아죠"*).
+#    [완료] 줄(빨간 라벨 — 퀘스트받기와 같은 `quest_done_rows`) 중 **서커스 제목**인 줄만 누른다.
+#    📏 제목 점수(흑백·색·초록 중 큰 쪽) — 서커스 줄 0.86 · 다른 퀘스트 줄 0.26~0.33 (기준 0.45).
+#    🚫 서커스가 아닌 [완료] 는 누르지 않는다 · 보상 창을 못 보면 닫기를 누르지 않는다.
+SUBC_DONE_ON    = True
+SUBC_DONE_MATCH = 0.45
 #    캐릭터 선택 화면 — 줄(아이콘 가운데) · 📏 줄 간격 42px · 6번째부터는 아래 막대에 가린다
 SUBC_ROW_X = 50
 SUBC_ROW_Y = {1: 56, 2: 97, 3: 141, 4: 183, 5: 225}
@@ -1236,6 +1249,35 @@ def subc_quest_find(big):
         return x0 + loc[0] + t.shape[1] // 2, y0 + loc[1] + t.shape[0] // 2, best
     except Exception:
         return None, None, -1.0
+
+
+def subc_done_score(big, y):
+    """🎪 퀘스트 줄(창 안 546 기준 y)이 **서커스 제목**인가 → 점수 (-1 = 못 봄).
+
+    완료되면 글자 색이 바뀔 수 있어 **흑백 모양**으로도 보고 색·초록 가면과 큰 쪽을 쓴다."""
+    try:
+        import cv2
+        t = subc_tpl(SUBC_QUEST_IMG)
+        if big is None or t is None:
+            return -1.0
+        H, W = big.shape[:2]
+        k, ky = W / float(SUBC_BASE_W), H / float(SUBC_BASE_H)
+        if abs(k - 1) > 0.02:
+            t = cv2.resize(t, (max(4, int(t.shape[1] * k)), max(4, int(t.shape[0] * k))))
+        y0, y1 = max(0, int((y - 11) * ky)), min(H, int((y + 11) * ky))
+        band = big[y0:y1, 0:int(W * 0.40)]
+        if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
+            return -1.0
+        best = -1.0
+        prs = [(cv2.cvtColor(band, cv2.COLOR_BGR2GRAY), cv2.cvtColor(t, cv2.COLOR_BGR2GRAY)),
+               (band, t), (_subc_green(band), _subc_green(t))]
+        for a, b in prs:
+            if b.max() == 0:
+                continue
+            best = max(best, float(cv2.matchTemplate(a, b, cv2.TM_CCOEFF_NORMED).max()))
+        return best
+    except Exception:
+        return -1.0
 
 
 def subc_move_seen(big):
@@ -19408,6 +19450,84 @@ class App(tk.Tk):
                 self._subc_st = st
             self.after(0, self._subc_btn_paint)
 
+    def _subc_hand_wait(self, tag):
+        """✋ 사람이 마우스를 만지는 중이면 손을 뗄 때까지 기다린다 → 멈춤이면 False."""
+        try:
+            import precise_click as _pc
+            f = getattr(_pc, "human_idle_seconds", None)
+        except Exception:
+            f = None
+        if f is None:
+            return not getattr(self, "_subc_stop", False)
+        t0 = time.time()
+        shown = False
+        while True:
+            if getattr(self, "_subc_stop", False):
+                return False
+            try:
+                idle = float(f())
+            except Exception:
+                return True
+            if idle >= SUBC_HAND_QUIET:
+                if shown:
+                    click_log(f"[보조서커스] ✋ {tag} 손을 떼서 이어서 누른다 ({time.time() - t0:.0f}초 기다렸다)")
+                    self.after(0, lambda: self.status.set("🎪 손을 떼서 이어서 바꿉니다"))
+                return True
+            if not shown:
+                shown = True
+                self.after(0, lambda: self.status.set(
+                    "🎪 ✋ 마우스를 쓰는 중 — 손을 떼면 이어서 캐릭을 바꿉니다"))
+            if time.time() - t0 > SUBC_HAND_MAX:
+                click_log(f"[보조서커스] ⚠ {tag} {SUBC_HAND_MAX:.0f}초 동안 마우스를 계속 써서 그대로 누른다")
+                return True
+            nap(0.15)
+
+    def _subc_reward(self, si, anc, L, T, W, H, tag, _ck):
+        """🎁 지금 보조의 [완료] 서커스 퀘스트를 눌러 보상을 받는다 → 받았으면 True."""
+        big = grab_window(anc)
+        if big is None:
+            click_log(f"[보조서커스] 🎁 {tag} 화면을 못 찍어 보상 확인을 건너뛴다")
+            return False
+        rows = quest_done_rows(big)
+        if not rows:
+            _f = subc_quest_find(big)
+            click_log(f"[보조서커스] 🎁 {tag} [완료] 줄이 없다 — "
+                      + ("서커스가 아직 안 끝났다" if _f[0] is not None else "서커스 줄도 안 보인다")
+                      + " (그대로 넘어간다)")
+            return False
+        sc = sorted(((subc_done_score(big, y), y, n) for y, n in rows), reverse=True)
+        v, y, n = sc[0]
+        txt = " · ".join(f"y{yy}:{vv:.2f}" for vv, yy, _n in sc)
+        if v < SUBC_DONE_MATCH:
+            click_log(f"[보조서커스] 🎁 {tag} [완료] 줄이 있지만 서커스가 아니다 ({txt} · 기준 "
+                      f"{SUBC_DONE_MATCH}) — 누르지 않는다")
+            return False
+        kx, ky = W / float(QUEST_BASE_W), H / float(QUEST_BASE_H)
+        m0 = float(big.mean())
+        try:
+            self._focus_client_at(anc)
+        except Exception:
+            pass
+        nap(random.uniform(0.3, 0.6))
+        _ck(L + int(QUEST_CLICK_X * kx), T + int(y * ky))
+        seen = False
+        for _ in range(QUEST_SEE_N):
+            if getattr(self, "_subc_stop", False):
+                return False
+            wht, mn = quest_reward_seen(grab_window(anc))
+            if quest_reward_open(wht, mn, m0):
+                seen = True
+                break
+            nap(random.uniform(*QUEST_SEE_GAP))
+        if not seen:
+            click_log(f"[보조서커스] 🎁 {tag} 서커스 [완료] 줄(y{y} · {v:.2f})을 눌렀는데 보상 창을 못 봤다 "
+                      f"— 닫기를 누르지 않는다")
+            return False
+        nap(random.uniform(0.4, 0.8))
+        _ck(L + int(QUEST_REW_CLICK[0] * kx), T + int(QUEST_REW_CLICK[1] * ky))
+        click_log(f"[보조서커스] 🎁 ✔ {tag} 서커스 퀘스트 **보상 받았다** (y{y} · 제목 {v:.2f} · 빨간 점 {n})")
+        return True
+
     def _subc_until(self, fn, secs, poll=(0.8, 1.4)):
         t0 = time.time()
         while time.time() - t0 < secs:
@@ -19427,11 +19547,15 @@ class App(tk.Tk):
         self._subc_stop = False
         tag = f"#{si + 1:02d}"
 
-        def _ck(x, y):                    # 🐢 누르고 1~3초 더 쉰다
+        def _ck(x, y):                    # ✋ 손 뗄 때까지 → 누르고 1~3초 더 쉰다
+            if not self._subc_hand_wait(tag):
+                return
             click_at(x, y)
             nap(random.uniform(*SUBC_EXTRA))
 
         def _hk(x, y, w=(0.35, 0.65)):
+            if not self._subc_hand_wait(tag):
+                return
             hover_click(x, y, w)
             nap(random.uniform(*SUBC_EXTRA))
         slots = self.cfg.get("subc_slots") or []
@@ -19480,12 +19604,20 @@ class App(tk.Tk):
             click_log(f"[보조서커스] {tag} 지난번 퀘스트 이동 확인창이 남아 있어 ESC 로 닫았다")
             nap(random.uniform(1.0, 2.0))
         if not at_sel:
+            self._subc_hand_wait(tag)
             self._wake_hard("subc", anc, name, si + 1)
             try:
                 self._focus_client_at(anc)
             except Exception:
                 pass
             nap(random.uniform(0.6, 1.0))
+            if r >= 1 and SUBC_DONE_ON:        # 지금 보조다 → 나가기 전에 서커스 보상
+                try:
+                    self._subc_reward(si, anc, L, T, W, H, tag, _ck)
+                except Exception as e:
+                    click_log(f"[보조서커스] ⚠ {tag} 보상 받기 오류 — {type(e).__name__}: {e} (그대로 넘어간다)")
+                if getattr(self, "_subc_stop", False):
+                    return False
             if r == 0:                         # 메인 → 보조1 : 먼저 혈귀로 마을에
                 _ck(*cs[1])
                 click_log(f"[보조서커스] {tag} 🩸 혈귀 (7번) — 마을로")
