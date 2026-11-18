@@ -2158,6 +2158,25 @@ FIX_ALL_SCAN_WAIT = 45.0     # ③ 을 기다리는 한도(초) — 넘으면 �
 #    🚫 자는 클라의 복구를 목록에서 **지우지 않는다** — 건드리지 않을 뿐이다.
 #    ⚠ `복구해야함 NN` 을 **직접 누르면** 예전처럼 그 클라를 깨워서 한다 (막지 않는다).
 FIX_ALL_AWAKE_ONLY = True
+# 🌅 **새벽 복구 두 번** (2026-11-18 사용자 지시):
+#    *"복구를 새벽 4시에 한번 해주고, 다야복구나 그런 거 그대로 냅두고,
+#      5시 넘어서 과거섬 실행하기 전에 한 번 더 … 5:02~7분 사이에 복구를 한번 돌고,
+#      마지막 복구까지 시행하면 6분 뒤에 과거섬을 돌아줘"*
+#    · 4:00~4:05 (매일)  ·  5:02~5:07 (과거섬을 도는 날만 — 수·토·건너뛰기 날은 안 한다)
+#    · [▶ 전부 복구] 와 **같은 길**이다 — 자는 클라는 F11 로 **전부** 깨워서 본다
+#      (`wake_all`) · 💎 진짜 다야(coin·zone)·다 써버린 다야는 **건드리지 않는다** (`skip_paid`)
+#    · 5시 복구가 **완전히 끝난 뒤 6분**이 지나야 과거섬이 시작한다 (`_dawn_past_gate`).
+#      과거섬은 그때부터 22분 동안 슬롯을 흩어 돈다 (예전 5:03 기준을 그 시각으로 옮긴다)
+#    🚫 다른 작업·섬 실행기가 돌거나 사람이 쓰는 중이면 **기다린다** (늦으면 그날은 건너뛴다)
+#    끄려면 FIX_DAWN_ON = False — 그러면 과거섬도 예전처럼 5:03 에 돈다.
+FIX_DAWN_ON = True
+FIX_DAWN_RUNS = (("d4", (4, 0), (4, 5), (4, 45)),      # (이름, 부터, 까지(랜덤), 늦어도)
+                 ("d5", (5, 2), (5, 7), (5, 40)))
+FIX_DAWN_PAST_GAP = 360          # 5시 복구가 끝나고 과거섬까지 (초) — 6분
+FIX_DAWN_MAX = 30 * 60           # 복구가 이보다 오래 걸리면 끝난 것으로 보고 넘어간다
+FIX_DAWN_QUIET = 6.0             # 복구 확인이 멈춘 뒤 이만큼 조용해야 '끝' 으로 본다
+PAST_LATE = (6, 30)              # 과거섬은 이 시각까지만 시작한다
+FIX_DAWN_TICK_MS = 20000
 WARN_WAKE_AGAIN = 9500  # 한 번 더 (뒤늦게 그려지는 클라)
 WARN_IDLE_MS = 10000    # 5분이 지난 뒤 **목록에 남은 슬롯만** 다시 보는 간격(ms)
 # 🚨 2026-10-23 사용자: *"내가 F11이든 절전해제든 해서 복구를 하면 너가 복구 표기에서
@@ -8458,6 +8477,7 @@ class App(tk.Tk):
         self.after(4000, self._sync_prestart_tasks)   # 스케줄 10분 전 자동시작 작업 동기화
         self.after(1000, self._mail_scheduler_tick)
         self.after(1000, self._past_scheduler_tick)
+        self.after(4000, self._dawn_tick)          # 🌅 새벽 복구 (2026-11-18)
         self.after(7000, self._night_sat_tick)       # 🌙 토요일 새벽 악몽의섬
         # 📱 폰(텔레그램) 명령 받기 — 1초마다 **파일 시각만** 본다 (부하 0).
         #    켤 때 남아 있던 옛 명령으로 저절로 실행되지 않게,
@@ -23461,8 +23481,11 @@ class App(tk.Tk):
         except Exception:
             pass
 
-    def _fix_run_all(self):
+    def _fix_run_all(self, wake_all=False, skip_paid=False):
         """▶ 전부 복구 — **버튼 하나로 끝낸다** (2026-11-11 사용자 지시).
+
+        `wake_all`  = 🌅 새벽 복구 — 섞여 있어도 **자는 클라까지 전부** 깨워서 본다.
+        `skip_paid` = 💎 진짜 다야·다 써버린 다야는 **처음부터** 넣지 않는다.
 
         ① 자는 클라가 있나 → ② 있으면 F11 과 같은 절전해제를 끝까지 / 없으면 십자가만
         다시 확인 → ③ 확인이 끝나면 → ④ 목록에 뜬 것을 하나씩 (`_fix_all_go`).
@@ -23474,7 +23497,7 @@ class App(tk.Tk):
           것(`_fix_all_go`)만 `self.after(0, …)` 로 UI 에 돌려준다."""
         if (not FIX_ALL_PREP or getattr(self, "_fix_queue", None)
                 or getattr(self, "_fix_hold", None) is not None):
-            return self._fix_all_go()
+            return self._fix_all_go(skip_paid=skip_paid)
         if getattr(self, "_fix_all_prep", False):
             self.status.set("▶ 전부 복구 — 이미 준비하는 중입니다 (절전 확인·해제)")
             return
@@ -23524,7 +23547,7 @@ class App(tk.Tk):
                     return True
 
                 # 😴 **섞여 있으면 아무도 깨우지 않고 깨어 있는 클라만 본다** (2026-11-13)
-                if FIX_ALL_AWAKE_ONLY and sl and aw:
+                if FIX_ALL_AWAKE_ONLY and sl and aw and not wake_all:
                     click_log(f"fix ▶ 전부복구 — 깨어 있는 클라 {len(aw)}개 {sorted(aw)} · "
                               f"자는 클라 {len(sl)}개 {sl} → **아무도 깨우지 않고** "
                               f"깨어 있는 클라의 십자가만 본다")
@@ -23582,7 +23605,8 @@ class App(tk.Tk):
                         self.status.set("▶ 전부 복구 — 멈췄습니다")
                         click_log("fix ▶ 전부복구 — 준비 중에 [■ 멈춤] → 복구하지 않는다")
                         return
-                    self._fix_all_go(auto=True, only=_only[0])
+                    self._fix_all_go(auto=True, only=_only[0],
+                                     skip_paid=skip_paid)
                 try:
                     self.after(0, _fin)
                 except Exception:
@@ -23590,7 +23614,7 @@ class App(tk.Tk):
 
         threading.Thread(target=_prep, daemon=True).start()
 
-    def _fix_all_go(self, auto=False, only=None):
+    def _fix_all_go(self, auto=False, only=None, skip_paid=False):
         """▶ 전부 복구의 몸통 — 지금 목록에 뜬 슬롯을 **번호 순서대로 하나씩** 복구한다.
 
         하나가 끝나야 다음이 시작된다 (겹치면 클릭이 엉킨다).
@@ -23599,6 +23623,21 @@ class App(tk.Tk):
         (2026-08-29 사용자 요청)   `auto=True` = 준비 단계(절전 확인·십자가 확인)를 거쳐 왔다.
         `only` = 😴 **이 번호들(깨어 있는 클라)만** 복구한다 — 나머지는 목록에 그대로 둔다."""
         q = sorted(self._warn_load())
+        # 💎 새벽 복구 — 진짜 다야·다 써버린 다야는 **처음부터 넣지 않는다** (2026-11-18)
+        if skip_paid and q:
+            try:
+                _rd, _sk = self._fix_redo_list()
+                _ok = set(int(x) for x in _rd)
+                _out = [x for x in q if int(x) not in _ok]
+                q = [x for x in q if int(x) in _ok]
+                if _out:
+                    click_log(f"fix 🌅 💎 다야 슬롯 {_out} 는 건드리지 않는다 "
+                              f"(진짜 다야이거나 {FIX_PAID_TRIES}번 다 해봤다)")
+                if not q:
+                    self.status.set(f"🌅 새벽 복구 — 💎 다야 {_out} 만 남아 할 것이 없습니다")
+                    return
+            except Exception as _e:
+                click_log(f"fix 🌅 다야 거르기 오류 {_e!r} → 목록 그대로")
         # 😴 돌던 중에 또 누른 것이면 **범위를 넓히지 않는다** (깨어 있는 것만 하던 판)
         if only is None and (getattr(self, "_fix_queue", None)
                              or getattr(self, "_fix_hold", None) is not None):
@@ -36050,7 +36089,9 @@ class App(tk.Tk):
     #    켜져 있으면 워치독이 아무 일도 안 하므로 중복 실행 걱정 없음.
     SCHED_TIMES = [("past", 5, 3, True),      # 과거섬 5:03 (항상)
                    ("mail", 23, 30, "mail"),  # 우편함 23:30 (mail_on 일 때만)
-                   ("nsat", NIGHT_SAT_FROM[0], NIGHT_SAT_FROM[1], "nsat")]
+                   ("nsat", NIGHT_SAT_FROM[0], NIGHT_SAT_FROM[1], "nsat"),
+                   ("fix4", FIX_DAWN_RUNS[0][1][0], FIX_DAWN_RUNS[0][1][1], "fixdawn")]
+    #   🌅 fix4 = 새벽 4시 복구 — 3:50 에 런처를 켜둔다 (켜져 있으면 아무 일도 안 한다)
     #   🌙 nsat = 토요일 새벽 악몽의섬 (켜져 있을 때만). 예약은 매일 02:20 에 워치독을
     #      돌린다 — 켜져 있으면 아무 일도 안 하므로 다른 요일에도 해가 없다.
 
@@ -36066,6 +36107,8 @@ class App(tk.Tk):
                         on = bool(self.cfg.get("mail_on"))
                     elif cond == "nsat":
                         on = self._night_sat_on()
+                    elif cond == "fixdawn":
+                        on = bool(FIX_DAWN_ON)
                     else:
                         on = bool(cond)
                     name = "LineageM_Pre_" + tag
@@ -36371,6 +36414,184 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    # ══ 🌅 새벽 복구 (2026-11-18 사용자 지시) ═════════════════════════════
+    def _dawn_path(self):
+        return os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI",
+                            "fix_dawn.json")
+
+    def _dawn_load(self):
+        if getattr(self, "_dawn", None) is None:
+            try:
+                self._dawn = json.load(io.open(self._dawn_path(),
+                                               encoding="utf-8-sig")) or {}
+            except Exception:
+                self._dawn = {}
+        return self._dawn
+
+    def _dawn_save(self):
+        try:
+            p = self._dawn_path()
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            tmp = p + ".tmp"
+            with io.open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self._dawn or {}, f, ensure_ascii=False)
+            os.replace(tmp, p)
+        except Exception:
+            pass
+
+    def _dawn_get(self, tag, day):
+        st = (self._dawn_load() or {}).get(tag)
+        if isinstance(st, dict) and st.get("date") == day.isoformat():
+            return st
+        return None
+
+    def _past_day_ok(self, now):
+        """오늘 과거섬을 도는 날인가 (수·토·사용자 건너뛰기 날이 아니고 아직 안 돌았다)."""
+        if now.weekday() in (2, 5):
+            return False
+        if str(self.cfg.get("past_skip_date") or "") == now.strftime("%Y-%m-%d"):
+            return False
+        return self._past_triggered_date != now.date()
+
+    def _dawn_gate_on(self, now):
+        """과거섬이 5시 복구를 기다려야 하는 때인가."""
+        if not FIX_DAWN_ON or now.hour < 5:
+            return False
+        if (now.hour, now.minute) >= PAST_LATE:
+            return False
+        return self._past_day_ok(now)
+
+    def _dawn_past_gate(self, now):
+        """→ (지금 과거섬을 시작해도 되나, 상태줄 글)."""
+        import datetime
+        st = self._dawn_get("d5", now.date())
+        late = now.replace(hour=FIX_DAWN_RUNS[1][3][0], minute=FIX_DAWN_RUNS[1][3][1],
+                           second=0, microsecond=0)
+        if st is None:
+            if now < late:
+                return False, "🏝 과거섬 대기 — 🌅 5:02~5:07 복구를 먼저 하고 6분 뒤에 시작"
+            self._past_base = now
+            return True, ""
+        if st.get("st") in ("pick", "run"):
+            return False, ("🏝 과거섬 대기 — 🌅 5시 복구 중 (끝나고 6분 뒤 시작)"
+                           if st.get("st") == "run" else
+                           "🏝 과거섬 대기 — 🌅 5시 복구 차례를 기다리는 중")
+        rel = float(st.get("done") or time.time())
+        if st.get("st") == "done":
+            rel += FIX_DAWN_PAST_GAP
+        if time.time() < rel:
+            _l = int(rel - time.time())
+            return False, (f"🏝 과거섬 대기 — 🌅 5시 복구 끝 · "
+                           f"{_l // 60}분 {_l % 60}초 뒤 시작")
+        self._past_base = datetime.datetime.fromtimestamp(rel)
+        return True, ""
+
+    def _dawn_busy(self):
+        """새벽 복구를 지금 시작하면 안 되는 이유 (없으면 "")."""
+        if self._is_busy():
+            return f"'{self._busy_label()}' 실행 중"
+        if self._island_running():
+            return "섬/던전 실행기가 돌고 있다"
+        if (getattr(self, "_fix_all_prep", False) or getattr(self, "_fix_queue", None)
+                or getattr(self, "_fix_hold", None) is not None):
+            return "복구가 이미 돌고 있다"
+        try:
+            if self._human_busy():
+                return "사람이 컴퓨터를 쓰는 중"
+        except Exception:
+            pass
+        return ""
+
+    def _dawn_fix_idle(self):
+        """복구 사슬이 전부 끝났나 — 준비·대기열·잠금·바퀴·확인이 전부 멈췄다."""
+        if (getattr(self, "_fix_all_prep", False) or getattr(self, "_fix_queue", None)
+                or getattr(self, "_fix_hold", None) is not None):
+            return False
+        if int(getattr(self, "_fix_round", 0) or 0):
+            return False
+        if self._is_busy() or getattr(self, "_waking", False) \
+                or getattr(self, "_scan_busy", False):
+            return False
+        return time.time() - float(getattr(self, "_fix_last_act", 0) or 0) > FIX_DAWN_QUIET
+
+    def _dawn_tick(self):
+        import datetime, random
+        nxt = FIX_DAWN_TICK_MS
+        try:
+            if FIX_DAWN_ON:
+                now = datetime.datetime.now()
+                day = now.date()
+                for tag, a, b, late in FIX_DAWN_RUNS:
+                    if tag == "d5" and not self._past_day_ok(now):
+                        continue
+                    t_a = now.replace(hour=a[0], minute=a[1], second=0, microsecond=0)
+                    t_b = now.replace(hour=b[0], minute=b[1], second=0, microsecond=0)
+                    t_l = now.replace(hour=late[0], minute=late[1], second=0, microsecond=0)
+                    st = self._dawn_get(tag, day)
+                    if st is None:
+                        if not (t_a <= now < t_l):
+                            continue
+                        lo = max(now, t_a).timestamp()
+                        hi = max(lo, t_b.timestamp())
+                        at = random.uniform(lo, hi)
+                        st = {"date": day.isoformat(), "st": "pick", "at": at}
+                        self._dawn_load()[tag] = st
+                        self._dawn_save()
+                        click_log(f"[새벽복구] 🌅 {tag} — "
+                                  f"{datetime.datetime.fromtimestamp(at):%H:%M:%S} 에 복구한다")
+                    s_ = st.get("st")
+                    if s_ == "pick":
+                        if time.time() < float(st.get("at") or 0):
+                            continue
+                        why = self._dawn_busy()
+                        if why:
+                            if now >= t_l:
+                                st["st"] = "miss"
+                                st["done"] = time.time()
+                                self._dawn_save()
+                                click_log(f"[새벽복구] 🌅 {tag} — {late[0]}:{late[1]:02d} "
+                                          f"까지 기다렸는데 못 했다 ({why}) → 오늘은 건너뛴다")
+                            elif st.get("why") != why:
+                                st["why"] = why
+                                click_log(f"[새벽복구] 🌅 {tag} — {why} → 끝나면 한다")
+                            continue
+                        st["st"] = "run"
+                        st["t0"] = time.time()
+                        st["idle"] = 0
+                        self._dawn_save()
+                        click_log(f"[새벽복구] 🌅 {tag} — 시작 (자는 클라는 전부 깨운다 · "
+                                  f"💎 다야는 건드리지 않는다)")
+                        self.status.set("🌅 새벽 복구 시작 — 자는 클라를 깨워 십자가를 봅니다")
+                        self._fix_run_all(wake_all=True, skip_paid=True)
+                        nxt = 3000
+                    elif s_ == "run":
+                        nxt = 3000
+                        el = time.time() - float(st.get("t0") or time.time())
+                        if el < 10:
+                            continue
+                        if self._dawn_fix_idle():
+                            st["idle"] = int(st.get("idle") or 0) + 1
+                        else:
+                            st["idle"] = 0
+                        if st["idle"] >= 2 or el > FIX_DAWN_MAX:
+                            st["st"] = "done"
+                            st["done"] = time.time()
+                            self._dawn_save()
+                            _m = (f"[새벽복구] 🌅 {tag} — 끝 ({int(el)}초)"
+                                  + (" · ⚠ 너무 오래 걸려 끝난 것으로 본다"
+                                     if el > FIX_DAWN_MAX else ""))
+                            if tag == "d5":
+                                _rt = datetime.datetime.fromtimestamp(
+                                    st["done"] + FIX_DAWN_PAST_GAP)
+                                _m += f" → 과거섬은 {_rt:%H:%M:%S} 부터"
+                            click_log(_m)
+        except Exception as e:
+            try:
+                click_log(f"[새벽복구] ⚠ 오류 {e!r}")
+            except Exception:
+                pass
+        self.after(nxt, self._dawn_tick)
+
     def _past_scheduler_tick(self):
         import datetime
         now = datetime.datetime.now()
@@ -36384,6 +36605,17 @@ class App(tk.Tk):
             else:
                 _dname = "수요일" if now.weekday() == 2 else "토요일"
                 self.status.set(f"🏝 과거섬: {_dname}은 스케줄 실행 안 함 (건너뜀)")
+        elif self._past_triggered_date != today and self._dawn_gate_on(now):
+            # 🌅 **5시 복구가 끝나고 6분 뒤** (2026-11-18 사용자 지시)
+            _go, _msg = self._dawn_past_gate(now)
+            if _go:
+                if self._is_busy():
+                    self._enqueue_front("과거섬(스케줄)", self._start_past_scheduled)
+                    self.status.set("🏝 과거섬 스케줄 — 현재 작업 끝나는 즉시 최우선 실행")
+                else:
+                    self._start_past_scheduled()
+            else:
+                self.status.set(_msg)
         elif now.hour == 5 and 3 <= now.minute <= 25 and self._past_triggered_date != today:
             if self._is_busy():
                 # 최우선: 대기열 맨 앞에 넣어 현재 작업이 끝나는 즉시 실행 (창이 지나도 실행)
@@ -36670,6 +36902,12 @@ class App(tk.Tk):
 
         # 각 슬롯마다 5:03~5:25 사이 무작위 시각 배정
         base = datetime.datetime.now().replace(hour=5, minute=3, second=0, microsecond=0)
+        # 🌅 5시 복구가 끝나고 6분 뒤에 시작했으면 **그 시각부터** 22분 (2026-11-18)
+        _pb = getattr(self, "_past_base", None)
+        if _pb is not None and _pb.date() == base.date() and _pb > base:
+            base = _pb.replace(microsecond=0)
+            click_log(f"[과거섬] 🌅 5시 복구가 끝난 뒤라 {base:%H:%M:%S} 부터 22분 동안 "
+                      f"{len(active)}개 슬롯을 흩어 돈다")
         window = 22 * 60  # 22분
         schedule = sorted([(random.uniform(0, window), i, s) for i, s in active])
 
