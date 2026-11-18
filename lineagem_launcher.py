@@ -1128,6 +1128,109 @@ DGN2_REL = {
                          4: (131, 44)}),    # 칸5 판매 등록 탭
 }
 RESC_SLOT_GAP = (1.5, 3.0)   # 슬롯 사이 (마지막 슬롯 뒤엔 생략)
+# 🎪 **보조 캐릭 서커스** (2026-11-18 사용자 요청)
+#    *"보조가 있는 케릭들은 서커스를 돌려야 하거든 … 좌측 퀘스트에 일일 신비한
+#      서커스 유랑단에 들어가서 오토만 눌러주면 되거든. 1시간 뒤에 완료인데
+#      1시간 5분 후에 또 다른 거 들어가고 이걸 반복하고 최종적으로 메인 케릭에
+#      접속해서 메인 사냥만 돌려주면 되긴 하거든"*
+#    *"절전을 해제하고 들어가서 7번(혈귀)을 눌러 그리고 오른쪽 맨 위에 세 줄을 눌러
+#      그리고 맨 아래 재접속을 눌러 그러면 캐릭터 선택창이 나와 … 두 번째부터"*
+#    한 번 바꿀 때:  절전해제 → (메인일 때만) 7번 혈귀 → ≡ → [재접속] →
+#                   가운데 [캐릭터 선택] → 그 줄 → [입장하기] →
+#                   (보조) 퀘스트 [일일] 신비한 서커스 유랑단 → (이동 확인) → AUTO
+#                   (메인) 사냥 보내기
+#    🚫 **보조 줄 좌표를 하나도 안 찍은 슬롯은 건드리지 않는다** — 찍은 줄 수가 곧 보조 수.
+#    🚫 확인창의 **오른쪽 [퍼플PC로 접속 전환] 은 누르지 않는다** — 칸5 가 창 가운데
+#       (SUBC_CHSEL_X)가 아니면 그 슬롯을 멈춘다.
+SUBC_CLICKS   = 15
+SUBC_ROWS     = (5, 6, 7, 8, 9)        # 칸6~10 = 보조 1~5 줄 (0부터 센 번호)
+SUBC_LABELS   = ("절전해제", "7번혈귀", "≡ 메뉴", "재접속", "캐릭선택", "보조1", "보조2",
+                 "보조3", "보조4", "보조5", "메인줄", "입장하기", "서커스퀘", "이동확인", "AUTO")
+SUBC_CYCLE    = (65 * 60, 68 * 60)     # 서커스(1시간) → 다음 캐릭까지
+SUBC_TICK_MS  = 15000
+SUBC_SWITCH_GAP = (25.0, 60.0)         # 한 클라를 바꾼 뒤 다음 클라를 바꾸기까지 (부하 흩기)
+SUBC_RETRY    = (180, 300)             # 바꾸다 실패하면 다시 해보기까지
+SUBC_FAIL_MAX = 3                      # 이만큼 실패하면 그 슬롯은 그만둔다 (기록을 남긴다)
+SUBC_HUNT     = True                   # 보조를 다 돌면 메인으로 들어가 사냥을 보낸다
+SUBC_BASE_W, SUBC_BASE_H = 546, 307
+SUBC_AUTO_REL = (423, 229)             # AUTO 버튼 (546x307 기준) — 칸15 를 안 찍었을 때
+SUBC_CHSEL_X  = (0.38, 0.62)           # [캐릭터 선택] 은 확인창 **가운데** 버튼 (창 가로 비율)
+SUBC_QUEST_IMG = "subc_quest"          # [일일] 신비한 서커스 유랑단 (글자 · 546 창에서 잘랐다)
+SUBC_PLACE_IMG = "subc_place"          # 서커스 광장 (미니맵 아래 지역 이름)
+SUBC_QUEST_MATCH = 0.75                # 📏 실측 — 색 0.49~1.00 · 초록 가면 0.87~1.00 (둘 중 큰 쪽)
+SUBC_PLACE_MATCH = 0.80                # 📏 실측 — 서커스 광장 1.00 · 다른 곳 0.17~0.35
+SUBC_CHSEL_WAIT = 40.0                 # 캐릭터 선택 화면이 뜰 때까지
+SUBC_LOAD_WAIT  = 90.0                 # 입장 뒤 게임 화면(퀘스트 목록)이 뜰 때까지
+SUBC_PLACE_WAIT = 90.0                 # 퀘스트를 누른 뒤 서커스 광장에 닿을 때까지
+
+
+def subc_tpl(name):
+    try:
+        import cv2, numpy as np
+        p = os.path.join(IMG_DIR, name + ".png")
+        if not os.path.exists(p):
+            return None
+        return cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+    except Exception:
+        return None
+
+
+def _subc_green(img):
+    import numpy as np
+    i = img.astype(int)
+    b, g, r = i[..., 0], i[..., 1], i[..., 2]
+    return (((g - np.maximum(r, b)) >= 40) & (g >= 110)).astype(np.uint8) * 255
+
+
+def subc_quest_find(big):
+    """🎪 왼쪽 퀘스트 목록에서 '[일일] 신비한 서커스 유랑단' → (창 안 x, y, 점수) / (None, None, 최고).
+
+    배경이 밝으면 색 대조가 0.49 까지 떨어진다 → **초록 글자 가면**으로도 본다(0.87~)."""
+    try:
+        import cv2
+        t = subc_tpl(SUBC_QUEST_IMG)
+        if big is None or t is None:
+            return None, None, -1.0
+        H, W = big.shape[:2]
+        k = W / float(SUBC_BASE_W)
+        if abs(k - 1) > 0.02:
+            t = cv2.resize(t, (max(4, int(t.shape[1] * k)), max(4, int(t.shape[0] * k))))
+        x0, y0, x1, y1 = 0, int(H * 0.22), int(W * 0.40), int(H * 0.62)
+        band = big[y0:y1, x0:x1]
+        if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
+            return None, None, -1.0
+        best, loc = -1.0, None
+        for a, b in ((band, t), (_subc_green(band), _subc_green(t))):
+            if b.max() == 0:
+                continue
+            r = cv2.matchTemplate(a, b, cv2.TM_CCOEFF_NORMED)
+            _mn, mx, _ml, ml = cv2.minMaxLoc(r)
+            if mx > best:
+                best, loc = float(mx), ml
+        if best < SUBC_QUEST_MATCH or loc is None:
+            return None, None, best
+        return x0 + loc[0] + t.shape[1] // 2, y0 + loc[1] + t.shape[0] // 2, best
+    except Exception:
+        return None, None, -1.0
+
+
+def subc_place_score(big):
+    """🎪 미니맵 아래 지역 이름이 '서커스 광장' 인가 → 점수 (-1 = 못 봄)."""
+    try:
+        import cv2
+        t = subc_tpl(SUBC_PLACE_IMG)
+        if big is None or t is None:
+            return -1.0
+        H, W = big.shape[:2]
+        k = W / float(SUBC_BASE_W)
+        if abs(k - 1) > 0.02:
+            t = cv2.resize(t, (max(4, int(t.shape[1] * k)), max(4, int(t.shape[0] * k))))
+        band = big[int(H * 0.28):int(H * 0.55), int(W * 0.70):W]
+        if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
+            return -1.0
+        return float(cv2.matchTemplate(band, t, cv2.TM_CCOEFF_NORMED).max())
+    except Exception:
+        return -1.0
 # 😴 **깨어날 때까지** 깨우는 런처 — Z 한 번이 아니라 `_wake_until`
 #    (Z → '절전모드 해제' 글자 클릭, 최대 `SLEEP_WAKE_TRIES` 번).
 #    클릭이 한두 개뿐이고 **던전이 끝난 뒤** 쓰므로 16클라가 전부 자고 있다.
@@ -1164,7 +1267,8 @@ BADGE_SLOT_GAP = (1.0, 6.0)   # 다음 슬롯을 들여보내기까지 — 2026-
 #   (느린 간격은 SLOW_FKEYS 가 정한다 — 둘을 헷갈리지 말 것).
 SLOW_CLICKS_BY = {"magic_slots": MAGIC_CLICKS, "omanst_slots": OMANST_CLICKS,
                   "mondex_slots": MONDEX_CLICKS, "badge_slots": BADGE_CLICKS,
-                  "resc_slots": RESC_CLICKS, "herox_slots": HEROX_CLICKS}
+                  "resc_slots": RESC_CLICKS, "herox_slots": HEROX_CLICKS,
+                  "subc_slots": SUBC_CLICKS}
 SLOW_FKEYS    = ("magic", "omanst", "mondex")
 SLOW_GAP_MIN  = 2.6        # 클릭 사이 (다른 런처 기본은 1.14~2.62초 — 두 배쯤 느리다)
 SLOW_GAP_MAX  = 5.2
@@ -1228,6 +1332,7 @@ DEFAULT_CFG = {
     "mondex_slots":  None,              # 🗂 몬스터도감!! — 16슬롯 × 좌표8 (끝나면 보상 받기)
     "badge_slots":   None,              # 🎖 휘장 제작!! — 16슬롯 × 좌표10 (그냥 클릭만)
     "resc_slots":    None,              # 🔮 귀환주문서 — 16슬롯 × 좌표2 (칸1 절전해제·칸2 7번)
+    "subc_slots":    None,              # 🎪 보조 서커스 — 16슬롯 × 좌표15 (보조 줄 찍은 슬롯만)
     "herox_slots":   None,              # 🟣 영웅템체크 좌표! — 16슬롯 × 좌표7 (칸1 절전해제·칸2~ 거래소 열기)
     "dollchk_slots": None,              # 인형확인용 — 처음 로드 때 변신확인용 복사
     "relic_slots":   None,              # 성물확인용 — 처음 로드 때 변신확인용 복사
@@ -10592,6 +10697,21 @@ class App(tk.Tk):
         except Exception:
             pass
 
+        # 🎪 **보조 서커스 — 다야 밑 · 던전 위** (2026-11-18 사용자: *"이거 위치는 다야 밑
+        #    던전 위에 넣어주고 … 영웅템 체크 크기로 만들어줘. 자주 쓸 건 아니라서"*)
+        #    이름 버튼 = 좌표 창(슬롯마다) · ▶실행 = 켜기 / 켜져 있으면 끄기.
+        _sc = tk.Frame(dc_col)
+        _sc.pack(anchor="n", pady=(2, 0), before=self._warn_toprow)
+        tk.Button(_sc, text="🎪 보조서커스", font=("맑은 고딕", 8, "bold"),
+                  bg="#7d3c98", fg="white", activebackground="#5b2c6f",
+                  width=10, height=1, pady=2,
+                  command=self._open_subc_win).pack(side="left")
+        self._subc_btn = tk.Button(_sc, text="▶실행", font=("맑은 고딕", 8, "bold"),
+                                   bg="#af601a", fg="white", activebackground="#935116",
+                                   width=4, height=1, pady=2, command=self._subc_toggle)
+        self._subc_btn.pack(side="left", padx=(2, 0))
+        self.after(2500, self._subc_boot)
+
         _dun = tk.LabelFrame(dc_col, text=" 던전 ", font=("맑은 고딕", 9, "bold"),
                              fg="#a04000", bd=2, relief="groove")
         _dun.pack(anchor="n", pady=(2, 0), padx=1, before=self._warn_toprow)
@@ -14161,6 +14281,7 @@ class App(tk.Tk):
         ("badge_slots",    "🎖 휘장 제작!!"),
         ("resc_slots",     "🔮 귀환주문서"),
         ("herox_slots",    "🟣 영웅템체크 좌표!"),
+        ("subc_slots",     "🎪 보조 서커스"),
         ("fish_slots",     "🎣 낚시녹임"),
         ("market_slots",   "🔎 거래소검색"),
         ("coupon_slots",   "🎟 쿠폰등록"),
@@ -17760,6 +17881,7 @@ class App(tk.Tk):
                 "badge":   ("badge_slots",   "휘장 제작!!", "🎖"),
                 "resc":    ("resc_slots",    "귀환주문서",  "🔮"),
                 "herox":   ("herox_slots",   "영웅템체크 좌표!", "🟣"),
+                "subc":    ("subc_slots",    "보조 서커스", "🎪"),
                 "dollchk": ("dollchk_slots", "인형확인용", "🧸"),
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
@@ -18965,6 +19087,365 @@ class App(tk.Tk):
         self._open_section_win("_herox_win", "🟣 영웅템체크 좌표!",
                                lambda p: self._build_dgn2("herox", p),
                                w=470, h=540, pinnable=True)
+
+    def _open_subc_win(self):
+        """🎪 보조 서커스 — 슬롯마다 좌표 15칸 (2026-11-18 사용자 요청).
+
+        칸1 절전해제(기준점 — 안 누른다) · 칸2 7번 혈귀(비우면 키 '7') · 칸3 ≡ ·
+        칸4 [재접속] · 칸5 가운데 [캐릭터 선택] · 칸6~10 보조 1~5 줄 ·
+        칸11 메인 줄 · 칸12 [입장하기] · 칸13 서커스 퀘스트(그림으로 찾는다 · 못 찾으면
+        이 좌표) · 칸14 이동 확인(있으면) · 칸15 AUTO(비우면 기본 자리).
+        보조 줄을 찍은 슬롯만 돈다. [📋 전체붙임] 으로 한 슬롯을 16슬롯에 퍼뜨린다."""
+        self._open_section_win("_subc_win", "🎪 보조 서커스",
+                               lambda p: self._build_dgn2("subc", p),
+                               w=520, h=620, pinnable=True)
+
+    # ═══════════ 🎪 보조 캐릭 서커스 (2026-11-18) ═══════════
+    def _subc_path(self):
+        return os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI", "subc.json")
+
+    def _subc_load(self):
+        try:
+            d = json.load(io.open(self._subc_path(), encoding="utf-8-sig"))
+            if isinstance(d, dict):
+                d.setdefault("slots", {})
+                return d
+        except Exception:
+            pass
+        return {"on": False, "slots": {}}
+
+    def _subc_save(self, st):
+        self._subc_st = st
+        try:
+            p = self._subc_path()
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            tmp = p + ".tmp"
+            io.open(tmp, "w", encoding="utf-8").write(json.dumps(st, ensure_ascii=False))
+            os.replace(tmp, p)
+        except Exception as e:
+            click_log(f"[보조서커스] ⚠ 상태 저장 실패 — {e}")
+
+    def _subc_rows(self, slot):
+        cs = list((slot or {}).get("coords") or [])
+        return [cs[k] for k in SUBC_ROWS if k < len(cs) and cs[k]]
+
+    def _subc_holds(self, si0):
+        """🎪 그 슬롯(0부터)이 지금 보조 서커스 중인가 — 다른 자동 작업이 건드리지 않게."""
+        try:
+            st = getattr(self, "_subc_st", None)
+            if not st or not st.get("on"):
+                return False
+            if getattr(self, "_subc_cur", None) == int(si0):
+                return True
+            v = (st.get("slots") or {}).get(str(int(si0)))
+            return bool(v) and int(v.get("r", 0)) >= 1
+        except Exception:
+            return False
+
+    def _subc_btn_paint(self):
+        try:
+            st = getattr(self, "_subc_st", None) or {}
+            on = bool(st.get("on"))
+            n = len(st.get("slots") or {})
+            self._subc_btn.config(text=("■끄기" if on else "▶실행"),
+                                  bg=("#c0392b" if on else "#af601a"))
+            if on:
+                self._subc_btn.config(text="■끄기")
+        except Exception:
+            pass
+
+    def _subc_boot(self):
+        self._subc_st = self._subc_load()
+        self._subc_btn_paint()
+        if self._subc_st.get("on"):
+            click_log(f"[보조서커스] 🔁 켜져 있던 차례를 이어서 본다 — 슬롯 "
+                      f"{sorted(int(k) + 1 for k in self._subc_st.get('slots', {}))}")
+            self.after(SUBC_TICK_MS, self._subc_tick)
+
+    def _subc_toggle(self):
+        st = getattr(self, "_subc_st", None) or self._subc_load()
+        if st.get("on"):
+            left = sorted(int(k) + 1 for k in (st.get("slots") or {}))
+            self._subc_save({"on": False, "slots": {}})
+            self._subc_stop = True
+            self._subc_btn_paint()
+            click_log(f"[보조서커스] ■ 끔 (사용자) — 남아 있던 슬롯 {left} 는 그대로 둔다")
+            self.status.set(f"🎪 보조 서커스를 껐습니다 — 남은 슬롯 {left} 는 지금 캐릭 그대로입니다")
+            return
+        self._subc_start(None)
+
+    def _subc_start(self, only=None):
+        """▶ — 보조 줄을 찍은 슬롯을 차례에 올린다 (`only` = 그 슬롯들만, 0부터)."""
+        slots = self.cfg.get("subc_slots") or []
+        pick = list(only) if only else list(range(len(slots)))
+        tg, no_row = [], []
+        for si in pick:
+            if si >= len(slots) or not isinstance(slots[si], dict):
+                continue
+            sl = slots[si]
+            if not sl.get("enabled", True):
+                continue
+            if not self._subc_rows(sl):
+                no_row.append(si + 1)
+                continue
+            tg.append(si)
+        if not tg:
+            self.status.set("🎪 보조 줄(칸6~10) 좌표를 찍은 슬롯이 없습니다 — "
+                            "[🎪 보조서커스] 에서 슬롯마다 찍어주세요")
+            return
+        random.shuffle(tg)
+        st = getattr(self, "_subc_st", None) or self._subc_load()
+        if not st.get("on"):
+            st = {"on": True, "slots": {}}
+        now = time.time()
+        for si in tg:
+            st["slots"][str(si)] = {"r": 0, "n": len(self._subc_rows(slots[si])),
+                                    "next": now, "fail": 0}
+        self._subc_save(st)
+        self._subc_btn_paint()
+        click_log(f"[보조서커스] ▶ 켬 — 슬롯 {[x + 1 for x in tg]} (순서 섞음 · 하나씩 바꾼다)"
+                  + (f" · 보조 줄이 없어 뺀 슬롯 {no_row}" if no_row and only else ""))
+        self.status.set(f"🎪 보조 서커스 시작 — {len(tg)}개 클라를 하나씩 보조1 로 바꿉니다 "
+                        f"(1시간 5분마다 다음 보조 · 끝나면 메인 사냥)")
+        if not getattr(self, "_subc_ticking", False):
+            self.after(1500, self._subc_tick)
+
+    def _subc_tick(self):
+        self._subc_ticking = False
+        st = getattr(self, "_subc_st", None)
+        if not st or not st.get("on"):
+            return
+        self._subc_ticking = True
+        try:
+            sl = st.get("slots") or {}
+            if not sl:
+                self._subc_save({"on": False, "slots": {}})
+                self._subc_btn_paint()
+                click_log("[보조서커스] ✔ 전부 끝났다 — 꺼둔다")
+                self.status.set("🎪 보조 서커스 — 전부 끝났습니다")
+                self._subc_ticking = False
+                return
+            now = time.time()
+            if (now >= float(st.get("gap_until", 0))
+                    and not self._is_busy() and not self._human_busy()):
+                due = sorted((float(v.get("next", 0)), int(k)) for k, v in sl.items()
+                             if float(v.get("next", 0)) <= now)
+                if due:
+                    si = due[0][1]
+                    self._busy_task = "보조서커스"
+                    self._subc_cur = si
+                    threading.Thread(target=self._run_task,
+                                     args=("보조서커스", self._subc_job, si),
+                                     daemon=True).start()
+        except Exception as e:
+            click_log(f"[보조서커스] ⚠ 차례 확인 오류 — {e}")
+        self.after(SUBC_TICK_MS, self._subc_tick)
+
+    def _subc_job(self, si):
+        st0 = self._subc_load()
+        v = (st0.get("slots") or {}).get(str(si))
+        if not v:
+            self._subc_cur = None
+            return
+        r = int(v.get("r", 0))
+        ok = False
+        try:
+            self._start_pause("subc")
+            ok = self._subc_switch(si, r)
+        finally:
+            self._subc_cur = None
+            st = self._subc_load()                 # 도는 동안 껐을 수 있다
+            if st.get("on") and str(si) in st.get("slots", {}):
+                vv = st["slots"][str(si)]
+                n = int(vv.get("n", 0))
+                if ok:
+                    if r >= n:
+                        st["slots"].pop(str(si), None)
+                        click_log(f"[보조서커스] ✔ #{si + 1:02d} 보조를 다 돌고 메인으로 돌아왔다")
+                    else:
+                        _c = random.uniform(*SUBC_CYCLE)
+                        vv.update(r=r + 1, fail=0, next=time.time() + _c)
+                        click_log(f"[보조서커스] 🕐 #{si + 1:02d} 다음 차례 "
+                                  f"{time.strftime('%H:%M', time.localtime(time.time() + _c))} "
+                                  f"→ {'메인' if r + 1 >= n else f'보조{r + 2}'}")
+                else:
+                    vv["fail"] = int(vv.get("fail", 0)) + 1
+                    if vv["fail"] >= SUBC_FAIL_MAX:
+                        st["slots"].pop(str(si), None)
+                        click_log(f"[보조서커스] 🚫 #{si + 1:02d} {SUBC_FAIL_MAX}번 실패 — 이 슬롯은 "
+                                  f"그만둔다 (지금 화면 그대로 · 손으로 봐주세요)")
+                    else:
+                        vv["next"] = time.time() + random.uniform(*SUBC_RETRY)
+                        click_log(f"[보조서커스] 🔁 #{si + 1:02d} 실패 {vv['fail']}/{SUBC_FAIL_MAX} — "
+                                  f"몇 분 뒤 다시 해본다")
+                st["gap_until"] = time.time() + random.uniform(*SUBC_SWITCH_GAP)
+                self._subc_save(st)
+            else:
+                self._subc_st = st
+            self.after(0, self._subc_btn_paint)
+
+    def _subc_until(self, fn, secs, poll=(0.8, 1.4)):
+        t0 = time.time()
+        while time.time() - t0 < secs:
+            if getattr(self, "_subc_stop", False):
+                return None
+            try:
+                v = fn()
+                if v:
+                    return v
+            except Exception:
+                pass
+            nap(random.uniform(*poll))
+        return None
+
+    def _subc_switch(self, si, r):
+        """한 클라를 다음 캐릭으로 바꾼다 (r < 보조 수 → 보조 r+1 · r == 보조 수 → 메인)."""
+        self._subc_stop = False
+        tag = f"#{si + 1:02d}"
+        slots = self.cfg.get("subc_slots") or []
+        if si >= len(slots):
+            return False
+        slot = slots[si]
+        cs = list(slot.get("coords") or [])
+        while len(cs) < SUBC_CLICKS:
+            cs.append(None)
+        rows = self._subc_rows(slot)
+        n = len(rows)
+        main = r >= n
+        tgt = cs[10] if main else rows[r]
+        what = "메인" if main else f"보조{r + 1}"
+        if not tgt:
+            click_log(f"[보조서커스] 🚫 {tag} {what} 줄 좌표가 없다 (칸{11 if main else 6 + r})")
+            return False
+        hw = None
+        try:
+            hw = (self._client_hwnds_by_slot() or [])[si][4]
+        except Exception:
+            hw = None
+        if not hw:
+            click_log(f"[보조서커스] 🚫 {tag} 클라 창을 못 찾았다")
+            return False
+        L, T, R, B = win32gui.GetWindowRect(hw)
+        W, H = R - L, B - T
+        anc = slot_anchor(slot) or (L + W // 2, T + H // 2)
+        name = win32gui.GetWindowText(hw) or tag
+        self.after(0, lambda: self.status.set(f"🎪 {tag} {name} → {what} 로 바꾸는 중..."))
+        click_log(f"[보조서커스] ▶ {tag} [{name}] → **{what}** 로 바꾼다")
+        Tp = self._enter_tpl("login_enter")
+        at_sel = Tp[0] is not None and self._enter_find(hw, *Tp)[0] is not None
+        if not at_sel:
+            self._wake_hard("subc", anc, name, si + 1)
+            try:
+                self._focus_client_at(anc)
+            except Exception:
+                pass
+            nap(random.uniform(0.6, 1.0))
+            if r == 0:                         # 메인 → 보조1 : 먼저 혈귀로 마을에
+                if cs[1]:
+                    click_at(*cs[1])
+                else:
+                    press_key("7")
+                click_log(f"[보조서커스] {tag} 🩸 혈귀 (7번) — 마을로")
+                nap(random.uniform(4.5, 6.5))
+            for k, lb in ((2, "≡ 메뉴"), (3, "재접속")):
+                if getattr(self, "_subc_stop", False):
+                    return False
+                if not cs[k]:
+                    click_log(f"[보조서커스] 🚫 {tag} 칸{k + 1}({lb}) 좌표가 없다")
+                    return False
+                click_at(*cs[k])
+                nap(random.uniform(1.1, 1.8))
+            c4 = cs[4]
+            if not c4:
+                click_log(f"[보조서커스] 🚫 {tag} 칸5([캐릭터 선택]) 좌표가 없다")
+                return False
+            fx = (c4[0] - L) / float(max(W, 1))
+            if not (SUBC_CHSEL_X[0] <= fx <= SUBC_CHSEL_X[1]):
+                click_log(f"[보조서커스] 🚫 {tag} 칸5 가 확인창 가운데가 아니다 (가로 {fx:.2f}) — "
+                          f"[퍼플PC로 접속 전환] 일 수 있어 누르지 않는다")
+                press_esc(1)
+                return False
+            hover_click(*c4)
+            ok = self._subc_until(lambda: self._enter_find(hw, *Tp)[0] is not None,
+                                  SUBC_CHSEL_WAIT)
+            if not ok:
+                click_log(f"[보조서커스] ✘ {tag} 캐릭터 선택 화면이 {SUBC_CHSEL_WAIT:.0f}초 안에 안 떴다")
+                return False
+        nap(random.uniform(0.8, 1.4))
+        click_at(*tgt)
+        click_log(f"[보조서커스] {tag} 캐릭터 선택 — {what} 줄 {tuple(tgt)}")
+        nap(random.uniform(*ENTER_PICK_GAP))
+        entered = False
+        for _t in range(ENTER_PUSH_TRIES):
+            if cs[11]:
+                ex, ey = cs[11]
+            else:
+                f = self._enter_find(hw, *Tp)
+                if f[0] is None:
+                    entered = True
+                    break
+                ex, ey = L + f[0], T + f[1]
+            hover_click(ex, ey, ENTER_HOVER)
+            if self._subc_until(lambda: self._enter_find(hw, *Tp)[0] is None, 12.0):
+                entered = True
+                break
+            click_log(f"[보조서커스] ⚠ {tag} [입장하기] 를 눌렀는데 아직 캐릭터 선택이다 → 다시")
+        if not entered:
+            click_log(f"[보조서커스] ✘ {tag} {ENTER_PUSH_TRIES}번 눌러도 안 들어갔다")
+            return False
+        if main:
+            nap(random.uniform(12.0, 18.0))
+            click_log(f"[보조서커스] ✔ {tag} 메인으로 들어갔다")
+            if SUBC_HUNT:
+                try:
+                    self._run_hunt(only=si)
+                    click_log(f"[보조서커스] 🏹 {tag} 메인 사냥 보냄")
+                except Exception as e:
+                    click_log(f"[보조서커스] ⚠ {tag} 사냥 보내기 실패 — {e}")
+            return True
+        # 보조 — 게임 화면(퀘스트 목록)이 뜰 때까지
+        q = self._subc_until(lambda: (lambda b: (lambda f: f if f[0] is not None else None)(
+            subc_quest_find(b)))(grab_window(anc)), SUBC_LOAD_WAIT, poll=(1.8, 2.6))
+        nap(random.uniform(1.0, 1.8))
+        try:
+            self._focus_client_at(anc)
+        except Exception:
+            pass
+        nap(random.uniform(0.4, 0.7))
+        if q:
+            click_at(L + q[0], T + q[1])
+            click_log(f"[보조서커스] {tag} 퀘스트 [일일] 신비한 서커스 유랑단 (일치도 {q[2]:.2f}) 눌렀다")
+        elif cs[12]:
+            click_at(*cs[12])
+            click_log(f"[보조서커스] ⚠ {tag} 퀘스트 그림을 못 찾아 칸13 좌표를 눌렀다")
+        else:
+            click_log(f"[보조서커스] ✘ {tag} 서커스 퀘스트를 못 찾았다 (칸13 좌표도 없다)")
+            return False
+        if cs[13]:
+            nap(random.uniform(1.5, 2.4))
+            hover_click(*cs[13])
+            click_log(f"[보조서커스] {tag} 이동 확인 눌렀다")
+        pv = self._subc_until(lambda: (lambda v: v if v >= SUBC_PLACE_MATCH else None)(
+            subc_place_score(grab_window(anc))), SUBC_PLACE_WAIT, poll=(2.0, 3.0))
+        if pv:
+            click_log(f"[보조서커스] {tag} 서커스 광장 도착 (일치도 {pv:.2f})")
+        else:
+            click_log(f"[보조서커스] ⚠ {tag} {SUBC_PLACE_WAIT:.0f}초 안에 서커스 광장을 못 봤다 — "
+                      f"그래도 AUTO 를 누른다")
+        nap(random.uniform(1.0, 2.0))
+        try:
+            self._focus_client_at(anc)
+        except Exception:
+            pass
+        nap(random.uniform(0.3, 0.6))
+        if cs[14]:
+            ax, ay = cs[14]
+        else:
+            ax = L + int(SUBC_AUTO_REL[0] * W / SUBC_BASE_W)
+            ay = T + int(SUBC_AUTO_REL[1] * H / SUBC_BASE_H)
+        click_at(ax, ay)
+        click_log(f"[보조서커스] ✔ {tag} {what} 서커스 AUTO 눌렀다 ({ax},{ay})")
+        return True
 
     def _open_mondex_win(self):
         """🗂 몬스터도감!! — 좌표를 찍는 창. 좌표를 다 누르면 보상을 전부 받는다."""
@@ -20965,6 +21446,9 @@ class App(tk.Tk):
         #    (선택실행·개별 ▶ 는 `sel_list`/다른 길이라 그대로 그 슬롯을 돈다)
         if fkey == "herox" and sel_list is None:
             return self._herox_run()
+        # 🎪 보조 서커스 — 한 번에 다 누르는 런처가 아니다 (몇 시간짜리 차례 돌리기)
+        if fkey == "subc":
+            return self._subc_start(sel_list)
         key, title, _ = self._dgn2_info(fkey)
         # 👑 작위는 [🔁 연속] 이 따로 돈다. 그게 도는 중에 여기로 또 시작하면
         #    아래 `_jakwi_stop = False` 가 **멈춤을 취소해버려** 계속 돌았다 (2026-09-19).
@@ -23986,6 +24470,7 @@ class App(tk.Tk):
                     # 🪟 **확대·축소된 창은 건너뛴다** (2026-11-08) — 복구 좌표는
                     #    평소 창 크기 기준이라 엉뚱한 자리를 누른다.
                     q = [x for x in q if not self._win_odd_skip(x, "유휴복구")]
+                    q = [x for x in q if not self._subc_holds(int(x) - 1)]   # 🎪
                     # 💎 **왜 건너뛰나**를 갈라 적는다 (2026-11-10) —
                     #    '진짜 다야' 와 '3번 다 썼다' 는 사용자에게 뜻이 다르다.
                     _real = [x for x, _w in _sk if _w in FIX_PAID_REAL]
@@ -34049,6 +34534,13 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("resc", i),
                             prev=lambda i: self._preview_dgn2("resc", i),
                             delete=lambda i: self._del_dgn2("resc", i)),
+            "subc":    dict(title="보조 서커스", key="subc_slots",
+                            clicks=SUBC_CLICKS, color="#7d3c98", enable=True, sel=False,
+                            labels=SUBC_LABELS,
+                            reg=lambda s, c: self._reg_dgn2_click("subc", s, c),
+                            test=lambda i: self._subc_start([i]),
+                            prev=lambda i: self._preview_dgn2("subc", i),
+                            delete=lambda i: self._del_dgn2("subc", i)),
             "herox":   dict(title="영웅템체크 좌표!", key="herox_slots",
                             clicks=HEROX_CLICKS, color="#6c3483", enable=True, sel=True,
                             reg=lambda s, c: self._reg_dgn2_click("herox", s, c),
@@ -34280,7 +34772,9 @@ class App(tk.Tk):
         for j in range(sp["clicks"]):
             cc = tk.Frame(grid); cc.grid(row=j // 6, column=j % 6, padx=4, pady=4)
             lk = j in locked
-            tk.Label(cc, text=(f"{j+1}🔒" if lk else f"{j+1}"), font=("맑은 고딕", 7),
+            _lbs = sp.get("labels") or ()
+            tk.Label(cc, text=(f"{j+1}🔒" if lk else f"{j+1}")
+                     + (f" {_lbs[j]}" if j < len(_lbs) else ""), font=("맑은 고딕", 7),
                      fg="#c0392b" if lk else "#555").pack()
             on = j < len(coords) and coords[j]
             cv = tk.StringVar(value="✔" if on else "✗")
@@ -41689,6 +42183,8 @@ class App(tk.Tk):
             # 🪟 **확대·축소된 창은 건너뛴다** (2026-11-08)
             if self._win_odd_skip(si, "마을감시"):
                 continue
+            if self._subc_holds(si):           # 🎪 보조 서커스 중 — 건드리지 않는다
+                continue
             if not isinstance(slot, dict):
                 seen.pop(si, None)
                 continue
@@ -41935,6 +42431,8 @@ class App(tk.Tk):
                     # 🪟 **확대·축소된 창은 건너뛴다** (2026-11-08) — 섬 실행기가
                     #    평소 크기 기준 좌표를 그 창에 그대로 누르면 엉뚱한 자리다.
                     if self._win_odd_skip(si, "물약감시"):
+                        continue
+                    if self._subc_holds(si):   # 🎪 보조 서커스 중 — 던전으로 보내지 않는다
                         continue
                     a0 = _isl.IslandApp._slot_anchor(slot)
                     if a0:
@@ -43069,7 +43567,7 @@ class App(tk.Tk):
         #    (2026-09-22 사용자 신고: "왜 작위는 예외냐"). 그래서 **아는 런처를 전부**
         #    훑어 멈춤 플래그를 세운다 — 새 런처가 생겨도 자동으로 포함된다.
         try:
-            for _fk in ("magic", "omanst", "mondex", "badge", "resc", "herox",
+            for _fk in ("magic", "omanst", "mondex", "badge", "resc", "herox", "subc",
                         "incoupon", "inmail", "jakwi", "fix", "dollchk", "relic",
                         "dragon", "knight", "sched", "coupon", "market", "tj",
                         "eventshop", "fish", "circus", "circus2", "circus3",
