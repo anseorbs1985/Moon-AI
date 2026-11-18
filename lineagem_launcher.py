@@ -1154,6 +1154,17 @@ SUBC_FAIL_MAX = 3                      # 이만큼 실패하면 그 슬롯은 �
 SUBC_HUNT     = True                   # 보조를 다 돌면 메인으로 들어가 사냥을 보낸다
 SUBC_BASE_W, SUBC_BASE_H = 546, 307
 SUBC_AUTO_REL = (423, 229)             # AUTO 버튼 (546x307 기준) — 칸15 를 안 찍었을 때
+# 📐 **창 기준 자리 한 벌** (546x307 · 2026-11-18 2번 클라에서 실측) — 16클라 공용.
+#    슬롯 좌표 칸을 찍어두면 그 좌표가 우선이다 (특별한 클라만 따로 맞출 때).
+SUBC_REL = {"wake": (507, 106),     # 😴 '절전모드 해제' 글자 (기준점 — 누르지 않는다)
+            "ret": (530, 273),      # 🩸 빠른칸 7번(혈귀) — 누르신 자리
+            "menu": (528, 20),      # ≡
+            "relog": (523, 205),    # [재접속]
+            "chsel": (273, 251)}    # 확인창 **가운데** [캐릭터 선택]
+#    캐릭터 선택 화면 — 줄(아이콘 가운데) · 📏 줄 간격 42px · 6번째부터는 아래 막대에 가린다
+SUBC_ROW_X = 50
+SUBC_ROW_Y = {1: 56, 2: 97, 3: 141, 4: 183, 5: 225}
+SUBC_PICKABLE = (2, 3, 4, 5)        # 보조로 고를 수 있는 줄 (1번째 = 메인)
 SUBC_CHSEL_X  = (0.38, 0.62)           # [캐릭터 선택] 은 확인창 **가운데** 버튼 (창 가로 비율)
 SUBC_QUEST_IMG = "subc_quest"          # [일일] 신비한 서커스 유랑단 (글자 · 546 창에서 잘랐다)
 SUBC_PLACE_IMG = "subc_place"          # 서커스 광장 (미니맵 아래 지역 이름)
@@ -1332,6 +1343,7 @@ DEFAULT_CFG = {
     "mondex_slots":  None,              # 🗂 몬스터도감!! — 16슬롯 × 좌표8 (끝나면 보상 받기)
     "badge_slots":   None,              # 🎖 휘장 제작!! — 16슬롯 × 좌표10 (그냥 클릭만)
     "resc_slots":    None,              # 🔮 귀환주문서 — 16슬롯 × 좌표2 (칸1 절전해제·칸2 7번)
+    "subc_pick":     {},                # 🎪 보조 서커스 — 슬롯마다 고른 보조 줄 {"1": [2, 3]}
     "subc_slots":    None,              # 🎪 보조 서커스 — 16슬롯 × 좌표15 (보조 줄 찍은 슬롯만)
     "herox_slots":   None,              # 🟣 영웅템체크 좌표! — 16슬롯 × 좌표7 (칸1 절전해제·칸2~ 거래소 열기)
     "dollchk_slots": None,              # 인형확인용 — 처음 로드 때 변신확인용 복사
@@ -19089,16 +19101,88 @@ class App(tk.Tk):
                                w=470, h=540, pinnable=True)
 
     def _open_subc_win(self):
-        """🎪 보조 서커스 — 슬롯마다 좌표 15칸 (2026-11-18 사용자 요청).
+        """🎪 보조 서커스 — 슬롯마다 **서커스를 돌릴 보조 줄**을 고른다 (2026-11-18 사용자:
+        *"프리셋으로 해주면 안 댈까? 선택만 하면 되는 거잖아"*).
 
-        칸1 절전해제(기준점 — 안 누른다) · 칸2 7번 혈귀(비우면 키 '7') · 칸3 ≡ ·
-        칸4 [재접속] · 칸5 가운데 [캐릭터 선택] · 칸6~10 보조 1~5 줄 ·
-        칸11 메인 줄 · 칸12 [입장하기] · 칸13 서커스 퀘스트(그림으로 찾는다 · 못 찾으면
-        이 좌표) · 칸14 이동 확인(있으면) · 칸15 AUTO(비우면 기본 자리).
-        보조 줄을 찍은 슬롯만 돈다. [📋 전체붙임] 으로 한 슬롯을 16슬롯에 퍼뜨린다."""
+        캐릭터 선택 화면에서 **위에서 몇 번째 줄**인지 — 1번째는 메인이라 2~5 만 고른다.
+        레벨 80 이상만 고르면 된다 (사용자 지시). 잠긴 줄은 고르지 말 것.
+        자리는 코드에 한 벌(창 546x307 기준)이라 좌표를 찍을 필요가 없다."""
         self._open_section_win("_subc_win", "🎪 보조 서커스",
-                               lambda p: self._build_dgn2("subc", p),
-                               w=520, h=620, pinnable=True)
+                               self._build_subc_pick, w=630, h=340, pinnable=True)
+
+    def _build_subc_pick(self, p):
+        tk.Label(p, text="슬롯마다 서커스를 돌릴 보조 캐릭 줄을 누르세요 "
+                          "(캐릭터 선택 화면 위에서 몇 번째 · 1번째는 메인)",
+                 font=("맑은 고딕", 9, "bold")).pack(anchor="w", padx=8, pady=(6, 0))
+        tk.Label(p, text="고른 줄을 위에서부터 차례로 1시간 5분씩 돌리고, 끝나면 메인으로 들어가 "
+                          "사냥을 보냅니다 · 잠긴 줄은 고르지 마세요",
+                 font=("맑은 고딕", 8), fg="#888").pack(anchor="w", padx=8)
+        try:
+            hw = self._client_hwnds_by_slot() or []
+        except Exception:
+            hw = []
+        g = tk.Frame(p)
+        g.pack(padx=6, pady=6)
+        self._subc_pbtn = {}
+        for si in range(16):
+            c = tk.Frame(g, bd=1, relief="groove")
+            c.grid(row=si % 4, column=si // 4, padx=3, pady=3, sticky="nw")
+            nm = ""
+            try:
+                nm = win32gui.GetWindowText(hw[si][4]).replace("리니지M l ", "")[:7]
+            except Exception:
+                pass
+            top = tk.Frame(c)
+            top.pack(fill="x")
+            tk.Label(top, text=f"#{si + 1:02d} {nm}", font=("맑은 고딕", 8, "bold"),
+                     width=11, anchor="w").pack(side="left")
+            tk.Button(top, text="▶", font=("맑은 고딕", 7, "bold"), bg="#1e8449",
+                      fg="white", width=2, pady=0,
+                      command=lambda x=si: self._subc_start([x])).pack(side="right")
+            row = tk.Frame(c)
+            row.pack(padx=2, pady=(0, 2))
+            for k in SUBC_PICKABLE:
+                b = tk.Button(row, text=str(k), font=("맑은 고딕", 8, "bold"), width=2,
+                              pady=0, fg="white",
+                              command=lambda x=si, kk=k: self._subc_pick_toggle(x, kk))
+                b.pack(side="left", padx=1)
+                self._subc_pbtn[(si, k)] = b
+        bot = tk.Frame(p)
+        bot.pack(fill="x", padx=8, pady=(0, 6))
+        tk.Button(bot, text="▶ 고른 클라 전부 시작 / ■ 끄기", font=("맑은 고딕", 9, "bold"),
+                  bg="#7d3c98", fg="white", command=self._subc_toggle).pack(side="left")
+        tk.Button(bot, text="고른 것 전부 지우기", font=("맑은 고딕", 8),
+                  command=self._subc_pick_clear).pack(side="right")
+        self._subc_pick_paint()
+
+    def _subc_pick_paint(self):
+        for (si, k), b in list(getattr(self, "_subc_pbtn", {}).items()):
+            try:
+                on = k in self._subc_rows(si)
+                b.config(bg=("#27ae60" if on else "#7f8c8d"),
+                         activebackground=("#1e8449" if on else "#616a6b"))
+            except Exception:
+                pass
+
+    def _subc_pick_toggle(self, si, k):
+        pk = dict(self.cfg.get("subc_pick") or {})
+        cur = set(self._subc_rows(si))
+        cur ^= {int(k)}
+        if cur:
+            pk[str(si)] = sorted(cur)
+        else:
+            pk.pop(str(si), None)
+        self.cfg["subc_pick"] = pk
+        save_cfg(self.cfg)
+        self._subc_pick_paint()
+        self.status.set(f"🎪 #{si + 1:02d} 보조 줄 {sorted(cur) or '없음'}")
+
+    def _subc_pick_clear(self):
+        if not messagebox.askyesno("보조 서커스", "고른 보조 줄을 전부 지울까요?", default="no"):
+            return
+        self.cfg["subc_pick"] = {}
+        save_cfg(self.cfg)
+        self._subc_pick_paint()
 
     # ═══════════ 🎪 보조 캐릭 서커스 (2026-11-18) ═══════════
     def _subc_path(self):
@@ -19125,9 +19209,13 @@ class App(tk.Tk):
         except Exception as e:
             click_log(f"[보조서커스] ⚠ 상태 저장 실패 — {e}")
 
-    def _subc_rows(self, slot):
-        cs = list((slot or {}).get("coords") or [])
-        return [cs[k] for k in SUBC_ROWS if k < len(cs) and cs[k]]
+    def _subc_rows(self, si):
+        """🎪 그 슬롯(0부터)에서 서커스를 돌릴 **보조 줄 번호** (2~5) — 위에서부터 차례로."""
+        try:
+            v = (self.cfg.get("subc_pick") or {}).get(str(int(si))) or []
+            return sorted({int(x) for x in v if int(x) in SUBC_PICKABLE})
+        except Exception:
+            return []
 
     def _subc_holds(self, si0):
         """🎪 그 슬롯(0부터)이 지금 보조 서커스 중인가 — 다른 자동 작업이 건드리지 않게."""
@@ -19175,23 +19263,12 @@ class App(tk.Tk):
         self._subc_start(None)
 
     def _subc_start(self, only=None):
-        """▶ — 보조 줄을 찍은 슬롯을 차례에 올린다 (`only` = 그 슬롯들만, 0부터)."""
-        slots = self.cfg.get("subc_slots") or []
-        pick = list(only) if only else list(range(len(slots)))
-        tg, no_row = [], []
-        for si in pick:
-            if si >= len(slots) or not isinstance(slots[si], dict):
-                continue
-            sl = slots[si]
-            if not sl.get("enabled", True):
-                continue
-            if not self._subc_rows(sl):
-                no_row.append(si + 1)
-                continue
-            tg.append(si)
+        """▶ — 보조 줄을 고른 슬롯을 차례에 올린다 (`only` = 그 슬롯들만, 0부터)."""
+        pick = list(only) if only else list(range(16))
+        tg = [si for si in pick if self._subc_rows(si)]
         if not tg:
-            self.status.set("🎪 보조 줄(칸6~10) 좌표를 찍은 슬롯이 없습니다 — "
-                            "[🎪 보조서커스] 에서 슬롯마다 찍어주세요")
+            self.status.set("🎪 보조 줄을 고른 슬롯이 없습니다 — [🎪 보조서커스] 에서 "
+                            "슬롯마다 2·3·4·5 를 눌러 고르세요")
             return
         random.shuffle(tg)
         st = getattr(self, "_subc_st", None) or self._subc_load()
@@ -19199,13 +19276,14 @@ class App(tk.Tk):
             st = {"on": True, "slots": {}}
         now = time.time()
         for si in tg:
-            st["slots"][str(si)] = {"r": 0, "n": len(self._subc_rows(slots[si])),
-                                    "next": now, "fail": 0}
+            st["slots"][str(si)] = {"r": 0, "n": len(self._subc_rows(si)),
+                                    "rows": self._subc_rows(si), "next": now, "fail": 0}
         self._subc_save(st)
         self._subc_btn_paint()
-        click_log(f"[보조서커스] ▶ 켬 — 슬롯 {[x + 1 for x in tg]} (순서 섞음 · 하나씩 바꾼다)"
-                  + (f" · 보조 줄이 없어 뺀 슬롯 {no_row}" if no_row and only else ""))
-        self.status.set(f"🎪 보조 서커스 시작 — {len(tg)}개 클라를 하나씩 보조1 로 바꿉니다 "
+        click_log(f"[보조서커스] ▶ 켬 — " + " · ".join(
+            f"#{si + 1:02d} 줄{self._subc_rows(si)}" for si in sorted(tg))
+            + " (순서 섞음 · 하나씩 바꾼다)")
+        self.status.set(f"🎪 보조 서커스 시작 — {len(tg)}개 클라를 하나씩 첫 보조로 바꿉니다 "
                         f"(1시간 5분마다 다음 보조 · 끝나면 메인 사냥)")
         if not getattr(self, "_subc_ticking", False):
             self.after(1500, self._subc_tick)
@@ -19303,20 +19381,16 @@ class App(tk.Tk):
         self._subc_stop = False
         tag = f"#{si + 1:02d}"
         slots = self.cfg.get("subc_slots") or []
-        if si >= len(slots):
-            return False
-        slot = slots[si]
+        slot = slots[si] if si < len(slots) and isinstance(slots[si], dict) else {}
         cs = list(slot.get("coords") or [])
         while len(cs) < SUBC_CLICKS:
             cs.append(None)
-        rows = self._subc_rows(slot)
+        _sv = ((getattr(self, "_subc_st", None) or {}).get("slots") or {}).get(str(si)) or {}
+        rows = list(_sv.get("rows") or self._subc_rows(si))
         n = len(rows)
         main = r >= n
-        tgt = cs[10] if main else rows[r]
-        what = "메인" if main else f"보조{r + 1}"
-        if not tgt:
-            click_log(f"[보조서커스] 🚫 {tag} {what} 줄 좌표가 없다 (칸{11 if main else 6 + r})")
-            return False
+        row_no = 1 if main else int(rows[r])
+        what = "메인" if main else f"보조({row_no}번째 줄)"
         hw = None
         try:
             hw = (self._client_hwnds_by_slot() or [])[si][4]
@@ -19327,7 +19401,17 @@ class App(tk.Tk):
             return False
         L, T, R, B = win32gui.GetWindowRect(hw)
         W, H = R - L, B - T
-        anc = slot_anchor(slot) or (L + W // 2, T + H // 2)
+
+        def _P(rel):
+            return (L + int(rel[0] * W / float(SUBC_BASE_W)),
+                    T + int(rel[1] * H / float(SUBC_BASE_H)))
+        # 칸을 찍어두었으면 그 좌표 · 아니면 창 기준 한 벌
+        for _k, _nm in ((0, "wake"), (1, "ret"), (2, "menu"), (3, "relog"), (4, "chsel")):
+            if not cs[_k]:
+                cs[_k] = _P(SUBC_REL[_nm])
+        _rk = 10 if main else SUBC_ROWS[row_no - 2]
+        tgt = cs[_rk] or _P((SUBC_ROW_X, SUBC_ROW_Y[row_no]))
+        anc = (L + W // 2, T + H // 2)
         name = win32gui.GetWindowText(hw) or tag
         self.after(0, lambda: self.status.set(f"🎪 {tag} {name} → {what} 로 바꾸는 중..."))
         click_log(f"[보조서커스] ▶ {tag} [{name}] → **{what}** 로 바꾼다")
@@ -19341,10 +19425,7 @@ class App(tk.Tk):
                 pass
             nap(random.uniform(0.6, 1.0))
             if r == 0:                         # 메인 → 보조1 : 먼저 혈귀로 마을에
-                if cs[1]:
-                    click_at(*cs[1])
-                else:
-                    press_key("7")
+                click_at(*cs[1])
                 click_log(f"[보조서커스] {tag} 🩸 혈귀 (7번) — 마을로")
                 nap(random.uniform(4.5, 6.5))
             for k, lb in ((2, "≡ 메뉴"), (3, "재접속")):
