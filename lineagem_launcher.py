@@ -543,6 +543,45 @@ TJ_MAX             = 1.51
 TJ_SLOT_MIN        = 0.7   # TJ성공!! 슬롯 간 간격(초) — 0.7~2.3 랜덤
 TJ_SLOT_MAX        = 2.3
 ITEM_SWIPE_COUNT   = 1     # 같은 자리에서 쓸어올리기 반복 횟수
+# 🎴 **아이템정리 = 가방을 열어 카드·상자를 까기** (2026-11-19 사용자 지시)
+#    *"인벤토리가 항상 차버린다 … 카드 모양으로 된 거 전부 까주고"* ·
+#    *"휠로 천천히 아래로 내려가면서 확인 … 아이템 있는 거까지만"* ·
+#    *"아이템 정리 < 이게 필요없어서 여기에 넣을려고 하거든"*
+#    가방(오른쪽 위 왼쪽에서 두 번째)을 열고 → 맨 위로 → 보이는 칸에서 **등록한 그림**
+#    (`click_templates/inv_<종류>_<n>.png` · `inv_meta.json` 의 groups)을 찾아 **두 번 누른다**
+#    → 「뽑기 결과」면 ✕ · 「아이템 수량 선택」이면 [모두 확인] · 창이 없으면(상자 1개) 그대로
+#    → 다시 찍는다 (깐 칸이 비어 아이템이 당겨진다) → 이 화면에 없으면 휠 한 칸 아래로.
+#    끝 = 맨 아랫줄이 전부 빈칸이거나, 휠을 굴려도 화면이 안 바뀔 때.
+#    📏 2026-11-19 #04 실측: 휠 한 칸 = 목록 30px (한 줄 35px — 줄을 건너뛰지 않는다)
+#       등록 그림 — 고른 칸 0.91~1.00 · 모양이 같은 다른 색 카드는 0.97 까지 나오지만
+#       **평균 색 차이**가 31~96 (고른 칸은 0~3.6) → 두 가지를 둘 다 넘어야 누른다.
+#    🚫 모르는 창이 뜨면 아무것도 누르지 않고 그 클라를 멈춘다 (화면을 남긴다).
+#    🚫 휴지통·정렬·[취소]·[+1]·[Max] 는 누르지 않는다.
+INV_OPEN_ON   = True              # False 면 예전 아이템정리(좌표 클릭 + 쓸어올리기)
+INV_BASE_W, INV_BASE_H = 546, 307 # 아래 자리의 기준 창 크기
+INV_BAG       = (428, 17)         # 가방 버튼 (오른쪽 위 왼쪽에서 두 번째 — 예전 아이템정리 클릭2 자리)
+INV_CLOSE     = (523, 48)         # 가방 창 ✕
+INV_LIST      = (388, 64, 528, 214)   # 가방 목록 칸 (x0, y0, x1, y1)
+INV_COLS      = (406, 440, 474, 509)  # 칸 가로 중심
+INV_TAB_BOX   = (380, 34, 522, 64)    # 가방 탭 줄을 찾는 자리 (열려 있나)
+INV_RES_BOX   = (150, 0, 400, 80)     # 「뽑기 결과」 글자를 찾는 자리
+INV_QTY_BOX   = (140, 175, 245, 210)  # 「아이템 수량 선택」
+INV_OK_BOX    = (255, 215, 370, 255)  # [모두 확인] 을 찾는 자리
+INV_MATCH     = 0.80              # 아이템 그림 (📏 고른 칸이 화면마다 0.80~1.00 · 걸러내는 것은 색 차이)
+INV_COLOR_MAX = 12.0              # 평균 색 차이 (📏 고른 칸 ≤3.6 · 다른 색 같은 모양 ≥30.7)
+INV_WIN_MATCH = 0.85              # 가방 탭·결과·수량 창 (📏 그 창 1.00 · 아닐 때 ≤0.61)
+INV_OK_MATCH  = 0.80              # [모두 확인] (📏 그 창 1.00 · 아닐 때 0.61)
+INV_EMPTY_V   = 8.0               # 빈칸 = 평균 밝기 < 8 이고 밝은 점이 거의 없다 (📏 빈칸 2.5 · 아이템 ≥20.9)
+INV_DBL_GAP   = (0.08, 0.14)      # 두 번 누를 때 사이
+INV_DLG_WAIT  = 3.5               # 누른 뒤 창이 뜨기를 기다리는 시간
+INV_GAP       = (0.7, 1.3)        # 하나 깐 뒤 다음까지
+INV_WHEEL_GAP = (0.75, 1.05)      # 휠 한 칸 뒤 (목록이 멈추기를)
+INV_TOP_MAX   = 80                # 맨 위로 올릴 때 최대 휠 칸
+INV_DOWN_MAX  = 80                # 내려갈 때 최대 휠 칸
+INV_OPEN_MAX  = 150               # 한 클라에서 최대 몇 번 까나
+INV_SLOT_GAP  = (2.0, 4.0)        # 클라 사이
+INV_HAND_QUIET = 2.0              # 사람이 마우스를 만진 뒤 이만큼 조용해야 누른다
+INV_HAND_MAX   = 300.0
 # ── 끌기(드래그) — '클릭한 채로 밀어서 내리기' ──────────────────────────
 # 휠이 안 먹는 목록은 **누른 채 끌어야** 내려간다 (2026-09-02 사용자 지시:
 # "클릭을 하면서 밑으로 내려야 하거든"). 아이템정리의 쓸어올리기와 같은 방식이고,
@@ -4534,6 +4573,189 @@ def sleep_img_read(fkey):
     except Exception:
         pass
     return None
+
+
+_INV_TPL = {}
+
+
+def inv_meta():
+    try:
+        return json.load(io.open(os.path.join(IMG_DIR, "inv_meta.json"), encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def inv_tpl(name):
+    """click_templates/<name>.png → BGR (없으면 None) · 파일 시각으로 다시 읽는다."""
+    import cv2
+    import numpy as np
+    p = os.path.join(IMG_DIR, name + ".png")
+    try:
+        m = os.path.getmtime(p)
+    except Exception:
+        return None
+    c = _INV_TPL.get(name)
+    if c and c[0] == m:
+        return c[1]
+    try:
+        t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+    except Exception:
+        t = None
+    _INV_TPL[name] = (m, t)
+    return t
+
+
+def inv_items():
+    """등록한 아이템 그림 → [(종류, 그림)]."""
+    out = []
+    for g, ns in (inv_meta().get("groups") or {}).items():
+        for i in range(1, len(ns) + 1):
+            t = inv_tpl(f"inv_{g}_{i}")
+            if t is not None:
+                out.append((g, t))
+    return out
+
+
+def _inv_k(big):
+    H, W = big.shape[:2]
+    return W / float(INV_BASE_W), H / float(INV_BASE_H)
+
+
+def _inv_fit(t, kx, ky):
+    import cv2
+    if abs(kx - 1) > 0.02 or abs(ky - 1) > 0.02:
+        t = cv2.resize(t, (max(4, int(round(t.shape[1] * kx))), max(4, int(round(t.shape[0] * ky)))))
+    return t
+
+
+def inv_win_score(big, name, box):
+    """그 자리에서 그 창 그림의 점수 (-1 = 못 봄)."""
+    import cv2
+    try:
+        t = inv_tpl(name)
+        if big is None or t is None:
+            return -1.0
+        kx, ky = _inv_k(big)
+        t = _inv_fit(t, kx, ky)
+        x0, y0, x1, y1 = box
+        a = big[max(0, int(y0 * ky)):int(y1 * ky), max(0, int(x0 * kx)):int(x1 * kx)]
+        if a.shape[0] < t.shape[0] or a.shape[1] < t.shape[1]:
+            return -1.0
+        return float(cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED).max())
+    except Exception:
+        return -1.0
+
+
+def inv_ok_find(big):
+    """[모두 확인] 자리 (창 안 픽셀) → (x, y, 점수) · 없으면 (None, None, 점수)."""
+    import cv2
+    try:
+        t = inv_tpl("inv_okall")
+        if big is None or t is None:
+            return None, None, -1.0
+        kx, ky = _inv_k(big)
+        t = _inv_fit(t, kx, ky)
+        x0, y0, x1, y1 = INV_OK_BOX
+        X0, Y0 = int(x0 * kx), int(y0 * ky)
+        a = big[Y0:int(y1 * ky), X0:int(x1 * kx)]
+        r = cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED)
+        _, v, _, (x, y) = cv2.minMaxLoc(r)
+        if v < INV_OK_MATCH:
+            return None, None, float(v)
+        return X0 + x + t.shape[1] // 2, Y0 + y + t.shape[0] // 2, float(v)
+    except Exception:
+        return None, None, -1.0
+
+
+def inv_list(big):
+    """가방 목록 칸만 잘라 흑백 (휠이 움직였나 비교용)."""
+    import cv2
+    import numpy as np
+    kx, ky = _inv_k(big)
+    x0, y0, x1, y1 = INV_LIST
+    a = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)]
+    return cv2.cvtColor(a, cv2.COLOR_BGR2GRAY).astype(np.float32)
+
+
+def inv_find(big, skip=()):
+    """보이는 칸에서 등록한 아이템 → [(y, x, 종류, 점수, 색차)] 위에서부터 (창 안 픽셀 · 칸 가운데)."""
+    import cv2
+    import numpy as np
+    out = []
+    try:
+        kx, ky = _inv_k(big)
+        x0, y0, x1, y1 = INV_LIST
+        X0, Y0 = int(x0 * kx), int(y0 * ky)
+        a = big[Y0:int(y1 * ky), X0:int(x1 * kx)]
+        for g, t0 in inv_items():
+            if g in skip:
+                continue
+            t = _inv_fit(t0, kx, ky)
+            if a.shape[0] < t.shape[0] or a.shape[1] < t.shape[1]:
+                continue
+            r = cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED)
+            ys, xs = np.where(r >= INV_MATCH)
+            tm = t.astype(np.float32).mean((0, 1))
+            for y, x in sorted(zip(ys.tolist(), xs.tolist()), key=lambda p: -r[p[0], p[1]]):
+                # 그림 = 칸 가운데 기준 (x-12..x+12, y-12..y+4) → 칸 가운데
+                cx, cy = X0 + x + int(12 * kx), Y0 + y + int(12 * ky)
+                if any(abs(cx - o[1]) < 14 * kx and abs(cy - o[0]) < 14 * ky for o in out):
+                    continue
+                # 칸이 목록 안에 다 들어와 있어야 한다 (반쯤 잘린 칸은 다음 화면에서)
+                if cy - 15 * ky < Y0 or cy + 15 * ky > Y0 + a.shape[0]:
+                    continue
+                p = a[y:y + t.shape[0], x:x + t.shape[1]].astype(np.float32)
+                col = float(np.abs(p.mean((0, 1)) - tm).max())
+                if col > INV_COLOR_MAX:
+                    continue
+                out.append((cy, cx, g, float(r[y, x]), col))
+    except Exception:
+        return out
+    return sorted(out)
+
+
+def inv_bottom_empty(big):
+    """보이는 맨 아랫줄(다 들어온 줄)이 **전부 빈칸**이면 True."""
+    import cv2
+    import numpy as np
+    try:
+        kx, ky = _inv_k(big)
+        x0, y0, x1, y1 = INV_LIST
+        g = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        h = int(13 * ky)
+        w = int(13 * kx)
+        # 아래에서부터 올라가며 칸 4개가 다 들어오는 첫 줄을 본다
+        for yc in range(int(y1 * ky) - h - 1, int((y0 + 40) * ky), -2):
+            cells = []
+            for xc in INV_COLS:
+                X = int(xc * kx)
+                p = g[yc - h:yc + h, X - w:X + w]
+                cells.append((float(p.mean()), float((p > 60).mean())))
+            if all(m < INV_EMPTY_V and b < 0.01 for m, b in cells):
+                return True
+            if all(m >= INV_EMPTY_V for m, b in cells):
+                return False            # 맨 아랫줄에 아이템이 다 차 있다
+        return False
+    except Exception:
+        return False
+
+
+def wheel_at(x, y, notches):
+    """그 자리로 커서를 옮기고 휠을 굴린다 (+ 위 · - 아래) — 우리 표식을 찍어 사람 입력과 가린다."""
+    import precise_click as _pc
+    u = ctypes.windll.user32
+    nx, ny = _pc._abs_xy(int(x), int(y))
+    arr = (_pc._INPUT * 2)()
+    arr[0].type = 0
+    arr[0].mi.dx, arr[0].mi.dy = nx, ny
+    arr[0].mi.dwFlags = _pc._MOVE | _pc._ABS | _pc._VDESK
+    arr[0].mi.dwExtraInfo = _pc._OURS
+    arr[1].type = 0
+    arr[1].mi.dx, arr[1].mi.dy = nx, ny
+    arr[1].mi.mouseData = ctypes.c_uint32((120 * int(notches)) & 0xFFFFFFFF).value
+    arr[1].mi.dwFlags = 0x0800 | _pc._MOVE | _pc._ABS | _pc._VDESK
+    arr[1].mi.dwExtraInfo = _pc._OURS
+    return u.SendInput(2, ctypes.byref(arr), ctypes.sizeof(_pc._INPUT)) == 2
 
 
 def has_sleep_img(fkey):
@@ -31150,12 +31372,293 @@ class App(tk.Tk):
         self._minimize_all()
         self.after(60, lambda: threading.Thread(target=self._run_task, args=("아이템정리", self._run_item), daemon=True).start())
 
+    def _inv_hand_wait(self, tag):
+        """✋ 사람이 마우스를 만지는 중이면 손을 뗄 때까지 → 멈춤이면 False."""
+        try:
+            import precise_click as _pc
+            f = getattr(_pc, "human_idle_seconds", None)
+        except Exception:
+            f = None
+        t0 = time.time()
+        shown = False
+        while True:
+            if getattr(self, "_item_stop", False):
+                return False
+            if f is None:
+                return True
+            try:
+                idle = float(f())
+            except Exception:
+                return True
+            if idle >= INV_HAND_QUIET:
+                if shown:
+                    click_log(f"[아이템정리] ✋ {tag} 손을 떼서 이어서 한다 ({time.time() - t0:.0f}초 기다렸다)")
+                return True
+            if not shown:
+                shown = True
+                self.after(0, lambda: self.status.set("🎴 ✋ 마우스를 쓰는 중 — 손을 떼면 이어서 깝니다"))
+            if time.time() - t0 > INV_HAND_MAX:
+                click_log(f"[아이템정리] ⚠ {tag} {INV_HAND_MAX:.0f}초 동안 마우스를 계속 써서 그대로 한다")
+                return True
+            nap(0.15)
+
+    def _inv_shot(self, big, tag, why):
+        try:
+            import cv2
+            d = os.path.join(BASE, "click_templates", "_inv")
+            os.makedirs(d, exist_ok=True)
+            p = os.path.join(d, time.strftime("%m%d_%H%M%S") + f"_{tag.strip('#')}_{why}.png")
+            cv2.imencode(".png", big)[1].tofile(p)
+            fs = sorted(os.listdir(d))
+            for old in fs[:-40]:
+                try:
+                    os.remove(os.path.join(d, old))
+                except Exception:
+                    pass
+            return p
+        except Exception:
+            return ""
+
+    def _inv_run(self, slot_idx=None):
+        """🎴 가방을 열어 등록한 카드·상자를 깐다 (아이템정리 슬롯 = 그 클라)."""
+        slots = self.cfg.get("item_slots", [])
+        if slot_idx is not None:
+            targets = [slot_idx]
+        else:
+            targets = [i for i, s in enumerate(slots) if any((s or {}).get("coords", []))]
+            random.shuffle(targets)
+        click_log(f"[아이템정리] 🎴 시작 — 클라 {[t + 1 for t in targets]} (등록 그림 {len(inv_items())}장)")
+        tot = 0
+        for n, si in enumerate(targets):
+            if self._item_stop:
+                break
+            try:
+                tot += self._inv_slot(si)
+            except Exception as e:
+                click_log(f"[아이템정리] ⚠ #{si + 1:02d} 오류 — {type(e).__name__}: {e} (이 클라는 넘어간다)")
+            if n < len(targets) - 1 and not self._item_stop:
+                nap(random.uniform(*INV_SLOT_GAP))
+        click_log(f"[아이템정리] 🎴 끝 — 모두 {tot}번 깠다" + (" (■ 멈춤)" if self._item_stop else ""))
+        self.status.set(f"✔ 아이템정리 끝 — {tot}번 깠습니다")
+
+    def _inv_slot(self, si):
+        """한 클라 → 깐 횟수."""
+        tag = f"#{si + 1:02d}"
+        try:
+            hw = (self._client_hwnds_by_slot() or [])[si][4]
+        except Exception:
+            hw = None
+        if not hw:
+            click_log(f"[아이템정리] 🚫 {tag} 클라 창을 못 찾았다")
+            return 0
+        if self._win_odd_skip(si, "아이템정리"):
+            return 0
+        L, T, R, B = win32gui.GetWindowRect(hw)
+        W, H = R - L, B - T
+        kx, ky = W / float(INV_BASE_W), H / float(INV_BASE_H)
+
+        def P(rel):
+            return L + int(rel[0] * kx), T + int(rel[1] * ky)
+        anc = (L + W // 2, T + H // 2)
+        name = win32gui.GetWindowText(hw) or tag
+        self.status.set(f"🎴 {tag} {name} 가방 정리 중...")
+        click_log(f"[아이템정리] ▶ {tag} [{name}]")
+
+        def grab():
+            return grab_window(anc)
+
+        def tab_open(b):
+            return inv_win_score(b, "inv_open", INV_TAB_BOX) >= INV_WIN_MATCH
+        self._inv_hand_wait(tag)
+        self._wake_hard("item", anc, name, si + 1, icon="🎴")
+        try:
+            self._focus_client_at(anc)
+        except Exception:
+            pass
+        nap(random.uniform(0.6, 1.0))
+        big = grab()
+        if big is None:
+            click_log(f"[아이템정리] 🚫 {tag} 화면을 못 찍었다")
+            return 0
+        if not tab_open(big):
+            if not self._inv_hand_wait(tag):
+                return 0
+            click_at(*P(INV_BAG))
+            ok = False
+            t0 = time.time()
+            while time.time() - t0 < 4.0:
+                nap(0.4)
+                big = grab()
+                if big is not None and tab_open(big):
+                    ok = True
+                    break
+            if not ok:
+                p = self._inv_shot(big, tag, "nobag") if big is not None else ""
+                click_log(f"[아이템정리] 🚫 {tag} 가방을 눌렀는데 가방 창이 안 보인다 (탭 "
+                          f"{inv_win_score(big, 'inv_open', INV_TAB_BOX):.2f}) — 이 클라는 넘어간다 · 화면 {p}")
+                return 0
+            click_log(f"[아이템정리] {tag} 🎒 가방을 열었다")
+        lx, ly = P(((INV_LIST[0] + INV_LIST[2]) // 2, (INV_LIST[1] + INV_LIST[3]) // 2))
+        # ① 맨 위로
+        prev = inv_list(big)
+        up = 0
+        for _ in range(INV_TOP_MAX):
+            if self._item_stop:
+                return 0
+            if not self._inv_hand_wait(tag):
+                return 0
+            wheel_at(lx, ly, 3)
+            nap(random.uniform(0.45, 0.7))
+            b = grab()
+            if b is None:
+                break
+            cur = inv_list(b)
+            up += 1
+            if float(abs(cur - prev).mean()) < 1.5:
+                big = b
+                break
+            prev, big = cur, b
+        click_log(f"[아이템정리] {tag} ⬆ 맨 위로 (휠 {up}번)")
+        # ② 보이는 칸을 까고 → 휠 한 칸 아래로
+        done = 0
+        downs = 0
+        skip = set()
+        fails = {}
+        while not self._item_stop and done < INV_OPEN_MAX:
+            big = grab()
+            if big is None:
+                break
+            if not tab_open(big):
+                p = self._inv_shot(big, tag, "noinv")
+                click_log(f"[아이템정리] 🚫 {tag} 가방 창이 안 보인다 — 아무것도 누르지 않고 멈춘다 · 화면 {p}")
+                return done
+            hits = inv_find(big, skip)
+            if hits:
+                cy, cx, g, v, col = hits[0]
+                if not self._inv_hand_wait(tag):
+                    break
+                before = big
+                x, y = L + cx, T + cy
+                click_at(x, y)
+                nap(random.uniform(*INV_DBL_GAP))
+                click_at(x, y)
+                r = self._inv_after(anc, tag, P, before, cx, cy)
+                if r == "stop":
+                    return done
+                if r == "same":
+                    fails[g] = fails.get(g, 0) + 1
+                    click_log(f"[아이템정리] {tag} ⚠ {g} 를 두 번 눌렀는데 아무 변화가 없다 ({fails[g]}번째)")
+                    if fails[g] >= 2:
+                        skip.add(g)
+                        click_log(f"[아이템정리] {tag} ⏭ {g} 는 이 클라에서 더 누르지 않는다")
+                else:
+                    done += 1
+                    click_log(f"[아이템정리] {tag} ✅ {g} 깠다 ({r} · 일치도 {v:.2f} · 색차 {col:.1f})")
+                    self.status.set(f"🎴 {tag} {done}번째 — {g}")
+                nap(random.uniform(*INV_GAP))
+                continue
+            if inv_bottom_empty(big):
+                click_log(f"[아이템정리] {tag} 맨 아랫줄이 빈칸 — 아이템 끝 (휠 {downs}번 내렸다)")
+                break
+            if downs >= INV_DOWN_MAX:
+                break
+            if not self._inv_hand_wait(tag):
+                break
+            prev = inv_list(big)
+            wheel_at(lx, ly, -1)
+            downs += 1
+            nap(random.uniform(*INV_WHEEL_GAP))
+            b = grab()
+            if b is None:
+                break
+            if float(abs(inv_list(b) - prev).mean()) < 1.5:
+                click_log(f"[아이템정리] {tag} 휠을 굴려도 안 움직인다 — 맨 아래 (휠 {downs}번)")
+                break
+        # ③ 가방 닫기 (가방 창이 보일 때만)
+        b = grab()
+        if b is not None and tab_open(b) and not self._item_stop:
+            if self._inv_hand_wait(tag):
+                click_at(*P(INV_CLOSE))
+        click_log(f"[아이템정리] ✔ {tag} 끝 — {done}번 깠다" + (f" · 건너뛴 것 {sorted(skip)}" if skip else ""))
+        return done
+
+    def _inv_after(self, anc, tag, P, before, cx, cy):
+        """두 번 누른 뒤 → 'result' · 'qty' · 'open' · 'same' · 'stop'."""
+        import numpy as np
+        kind = None
+        for _round in range(4):
+            t0 = time.time()
+            seen = None
+            b = None
+            while time.time() - t0 < INV_DLG_WAIT:
+                if self._item_stop:
+                    return "stop"
+                nap(0.25)
+                b = grab_window(anc)
+                if b is None:
+                    continue
+                if inv_win_score(b, "inv_result", INV_RES_BOX) >= INV_WIN_MATCH:
+                    seen = "result"
+                    break
+                if inv_win_score(b, "inv_qty", INV_QTY_BOX) >= INV_WIN_MATCH:
+                    seen = "qty"
+                    break
+                if inv_win_score(b, "inv_open", INV_TAB_BOX) >= INV_WIN_MATCH:
+                    seen = "inv"
+                    if _round > 0 or time.time() - t0 > 1.6:
+                        break
+            if seen == "result":
+                kind = kind or "result"
+                nap(random.uniform(0.5, 0.9))
+                if not self._inv_hand_wait(tag):
+                    return "stop"
+                m = inv_meta().get("result") or {}
+                click_at(*P(tuple(m.get("close") or (526, 19))))
+                nap(random.uniform(0.6, 1.0))
+                continue
+            if seen == "qty":
+                kind = kind or "qty"
+                x, y, v = inv_ok_find(b)
+                if x is None:
+                    p = self._inv_shot(b, tag, "noqok")
+                    click_log(f"[아이템정리] 🚫 {tag} 수량 창인데 [모두 확인] 을 못 찾았다 ({v:.2f}) — "
+                              f"아무것도 누르지 않고 멈춘다 · 화면 {p}")
+                    return "stop"
+                nap(random.uniform(0.4, 0.8))
+                if not self._inv_hand_wait(tag):
+                    return "stop"
+                L, T = P((0, 0))
+                click_at(L + x, T + y)
+                nap(random.uniform(0.8, 1.2))
+                continue
+            if seen == "inv":
+                if kind:
+                    return kind
+                # 창이 안 떴다 → 그 칸이 바뀌었나 (상자 1개는 바로 열린다)
+                try:
+                    kx = b.shape[1] / float(INV_BASE_W)
+                    h = int(14 * kx)
+                    a1 = before[cy - h:cy + h, cx - h:cx + h].astype(np.float32)
+                    a2 = b[cy - h:cy + h, cx - h:cx + h].astype(np.float32)
+                    d = float(np.abs(a1 - a2).mean())
+                except Exception:
+                    d = 99.0
+                return "open" if d >= 6.0 else "same"
+            # 아무것도 못 봤다 = 모르는 창
+            p = self._inv_shot(b, tag, "unknown") if b is not None else ""
+            click_log(f"[아이템정리] 🚫 {tag} **모르는 창**이 떴다 — 아무것도 누르지 않고 멈춘다 · 화면 {p}")
+            return "stop"
+        return kind or "open"
+
     def _run_item(self, slot_idx=None):
         self._start_pause()
         try:
             self.status.set("2초 후 아이템정리 실행...")
             self.after(0, self._send_to_back)
             nap(2)
+            if INV_OPEN_ON and inv_items():
+                self._inv_run(slot_idx)
+                return
             slots = self.cfg.get("item_slots", [])
             if slot_idx is not None:
                 targets = [(slot_idx, slots[slot_idx])] if slot_idx < len(slots) else []

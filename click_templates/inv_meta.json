@@ -1,0 +1,101 @@
+{
+  "w": 546,
+  "h": 307,
+  "groups": {
+    "chest_silver": [
+      4,
+      5
+    ],
+    "gem_pink": [
+      6,
+      17
+    ],
+    "card_blue": [
+      8,
+      19
+    ],
+    "chest_green": [
+      9,
+      20
+    ],
+    "card_face": [
+      13,
+      25
+    ],
+    "jewel_box": [
+      14
+    ],
+    "card_person": [
+      15,
+      24
+    ],
+    "bead_gold": [
+      16
+    ],
+    "bead_red": [
+      18
+    ],
+    "card_red": [
+      26
+    ],
+    "gift_box": [
+      27
+    ],
+    "gem_pink2": [
+      123
+    ],
+    "gem_silver": [
+      124
+    ],
+    "box_coin": [
+      125
+    ],
+    "box_paper": [
+      126
+    ],
+    "bead_red2": [
+      127
+    ],
+    "bead_gold2": [
+      128
+    ],
+    "box_pile": [
+      130
+    ],
+    "card_dark": [
+      131
+    ],
+    "chest_white": [
+      132
+    ],
+    "pend_green": [
+      134
+    ],
+    "pend_red": [
+      135
+    ],
+    "pend_gold": [
+      136
+    ]
+  },
+  "from": "#04 aaoo / #03 고주파 2026-11-19",
+  "result": {
+    "img": "inv_result.png",
+    "close": [
+      526,
+      19
+    ]
+  },
+  "qty": {
+    "img": "inv_qty.png",
+    "ok": "inv_okall.png",
+    "ok_xy": [
+      312,
+      234
+    ],
+    "cancel_xy": [
+      232,
+      234
+    ]
+  }
+}
