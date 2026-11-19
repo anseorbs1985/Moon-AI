@@ -1319,7 +1319,12 @@ SUBC_PICKABLE = (2, 3, 4, 5)        # 보조로 고를 수 있는 줄 (1번째 =
 SUBC_CHSEL_X  = (0.38, 0.62)           # [캐릭터 선택] 은 확인창 **가운데** 버튼 (창 가로 비율)
 SUBC_QUEST_IMG = "subc_quest"          # [일일] 신비한 서커스 유랑단 (글자 · 546 창에서 잘랐다)
 SUBC_PLACE_IMG = "subc_place"          # 서커스 광장 (미니맵 아래 지역 이름)
-SUBC_QUEST_MATCH = 0.75                # 📏 실측 — 색 0.49~1.00 · 초록 가면 0.87~1.00 (둘 중 큰 쪽)
+SUBC_QUEST_MATCH = 0.50   # 퀘스트 목록에서 서커스 제목 (전 0.75)
+#   📏 2026-11-19 화면 453장 — 서커스 줄 있음 0.85~0.96(평소) · **0.73~0.75(서커스 광장의 밝은 바닥)** ·
+#      0.54~0.62(창이 위를 덮어 어두움) / 서커스 줄 없음 최고 0.347 · 다른 퀘스트 줄 최고 0.353.
+#      0.75 로는 메인이 이미 광장에 서 있을 때(#02 0.73) 서커스를 못 찾아 건너뛰었다.
+#   🧭 **줄 번호로 누르지 않는다** — 목록 어디에 있든(메인퀘스트를 다 깬 캐릭은 맨 위) 그 제목을 찾아 누른다.
+#   🚫 0.40 밑으로 내리지 말 것 (다른 줄·다른 화면이 0.35 까지 나온다).
 SUBC_PLACE_MATCH = 0.80                # 📏 실측 — 서커스 광장 1.00 · 다른 곳 0.17~0.35
 SUBC_CHSEL_WAIT = 40.0                 # 캐릭터 선택 화면이 뜰 때까지
 SUBC_LOAD_WAIT  = 90.0                 # 입장 뒤 게임 화면(퀘스트 목록)이 뜰 때까지
@@ -1434,6 +1439,47 @@ def subc_coin_blue(big):
         c = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
         b, r = c[..., 0], c[..., 2]
         return int(((b > r + 20) & (b > 90)).sum())
+    except Exception:
+        return -1
+
+
+# 🟢 **AUTO 가 켜져 있나** (2026-11-19 사용자: *"오토가 켜져서 들어가서 바로 사냥이 가능한 상태인데
+#    왜 오토를 꺼버리는 거야 … 오토중이면 오토를 누름 안 되지 꺼져 있음 눌러야지!"*)
+#    AUTO 는 **누를 때마다 켜짐/꺼짐이 바뀐다** → 이미 켜져 있는데 누르면 꺼진다.
+#    📏 2026-11-19 #02(켜짐)·#03(꺼짐) 실측 — 켜지면 버튼 둘레가 **주황(때로 보라) 빛으로 깜빡인다**:
+#       켜짐 #02 10장  382·249·23·171·391·260·34·160·362·304   (어두운 박자 23~34) · 보라 빛 한 장 82
+#       꺼짐 #03 10장  전부 0          꺼짐 예전 화면 18장(라스타바드)  최고 11
+#    깜빡이므로 **AUTO_GLOW_N(6)장을 2초 동안** 보고, 기준(AUTO_GLOW_MIN 60)을 넘는 장이
+#    AUTO_GLOW_HITS(2)장 이상이면 켜짐. 한 장짜리 불꽃 효과에 속지 않으려고 2장이다.
+AUTO_GLOW_C    = (423, 233)        # AUTO 버튼 가운데 (546x307 창 기준)
+AUTO_GLOW_R    = (8, 15)           # 둘레 고리 (안쪽·바깥 반지름)
+AUTO_GLOW_MIN  = 60
+AUTO_GLOW_HITS = 2
+AUTO_GLOW_N    = 6
+AUTO_GLOW_GAP  = (0.28, 0.40)
+
+
+def auto_glow(big):
+    """AUTO 버튼 둘레의 빛나는 점 수 (주황 + 보라) · 못 재면 -1."""
+    import numpy as np
+    try:
+        H, W = big.shape[:2]
+        if W < 200 or H < 120:
+            return -1
+        k = W / 546.0
+        cx, cy = int(AUTO_GLOW_C[0] * k), int(AUTO_GLOW_C[1] * H / 307.0)
+        r0, r1 = AUTO_GLOW_R[0] * k, AUTO_GLOW_R[1] * k
+        R = int(r1) + 1
+        c = big[cy - R:cy + R + 1, cx - R:cx + R + 1].astype(int)
+        if c.shape[0] != 2 * R + 1 or c.shape[1] != 2 * R + 1:
+            return -1
+        yy, xx = np.mgrid[-R:R + 1, -R:R + 1]
+        d = np.hypot(xx, yy)
+        m = (d >= r0) & (d <= r1)
+        b, g, r = c[..., 0], c[..., 1], c[..., 2]
+        org = (r > 200) & (r - b > 90) & (g > 90)
+        pur = (r > 120) & (b > 140) & (g < np.minimum(r, b) - 50)
+        return int(((org | pur) & m).sum())
     except Exception:
         return -1
 
@@ -20206,9 +20252,41 @@ class App(tk.Tk):
         else:
             ax = L + int(SUBC_AUTO_REL[0] * W / SUBC_BASE_W)
             ay = T + int(SUBC_AUTO_REL[1] * H / SUBC_BASE_H)
-        _ck(ax, ay)
-        click_log(f"[보조서커스] ✔ {tag} {what} 서커스 AUTO 눌렀다 ({ax},{ay})")
+        _on, _cn = self._auto_on(anc)
+        if _on:
+            click_log(f"[보조서커스] 🟢 {tag} {what} **이미 AUTO 중이다** (빛 {_cn}) — 누르지 않는다 "
+                      f"(누르면 꺼진다)")
+            return True
+        for _t in range(2):
+            _ck(ax, ay)
+            nap(random.uniform(1.2, 1.8))
+            _on2, _cn2 = self._auto_on(anc)
+            if _on2 or _on2 is None:
+                break
+            if _t == 0:
+                click_log(f"[보조서커스] 🔁 {tag} AUTO 를 눌렀는데 **아직 꺼져 있다** (빛 {_cn2}) — 한 번 더 누른다")
+        click_log(f"[보조서커스] ✔ {tag} {what} 서커스 AUTO 눌렀다 ({ax},{ay}) · 누르기 전 빛 {_cn} → "
+                  + ("**켜졌다** ✔" if _on2 else "⚠ 켜졌는지 모르겠다" if _on2 is None else "⚠ 아직 꺼져 보인다")
+                  + f" (빛 {_cn2})")
         return True
+
+    def _auto_on(self, anc):
+        """🟢 AUTO 가 켜져 있나 → (True/False/None, 장마다 빛) · 2초 동안 6장을 본다 (깜빡이므로).
+        None = 화면을 못 찍었다 (모를 때는 예전처럼 누른다)."""
+        cn = []
+        for i in range(AUTO_GLOW_N):
+            try:
+                b = grab_window(anc)
+            except Exception:
+                b = None
+            cn.append(auto_glow(b) if b is not None else -1)
+            if sum(1 for v in cn if v >= AUTO_GLOW_MIN) >= AUTO_GLOW_HITS:
+                return True, cn            # 켜졌다 — 더 볼 필요가 없다
+            if i < AUTO_GLOW_N - 1:
+                nap(random.uniform(*AUTO_GLOW_GAP))
+        if all(v < 0 for v in cn):
+            return None, cn
+        return False, cn
 
     def _open_mondex_win(self):
         """🗂 몬스터도감!! — 좌표를 찍는 창. 좌표를 다 누르면 보상을 전부 받는다."""
