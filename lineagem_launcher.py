@@ -557,6 +557,16 @@ ITEM_SWIPE_COUNT   = 1     # 같은 자리에서 쓸어올리기 반복 횟수
 #       **평균 색 차이**가 31~96 (고른 칸은 0~3.6) → 두 가지를 둘 다 넘어야 누른다.
 #    🚫 모르는 창이 뜨면 아무것도 누르지 않고 그 클라를 멈춘다 (화면을 남긴다).
 #    🚫 휴지통·정렬·[취소]·[+1]·[Max] 는 누르지 않는다.
+# 🟧 실행 버튼 — 누른 버튼의 작업이 도는 동안 **그 버튼만** 이 색, 끝나면 원래 색 (2026-11-19 사용자:
+#    *"어떤 게 실행 중인지를 모르겠어 모든 실행 버튼은 실행 중이면 그 버튼만 다른 색상으로 변경해줘"*)
+#    글자에 RUNBTN_KEYS 가 있는 tk 버튼 전부 · 누른 뒤 RUNBTN_WINDOW 초 안에 작업이 시작돼야 칠한다
+#    (다른 작업 중이라 거절된 버튼은 안 칠한다). 끝 = `_is_busy()` 도 섬 실행기도 아닐 때.
+RUNBTN_KEYS   = ("▶", "실행")
+RUNBTN_SKIP   = ("■", "멈춤", "중지")
+RUNBTN_BG     = "#ff9f1a"         # 돌고 있다 (주황)
+RUNBTN_BG2    = "#e84393"         # 원래 주황인 버튼은 이 색
+RUNBTN_FG     = "black"
+RUNBTN_WINDOW = 4.0
 INV_OPEN_ON   = True              # False 면 예전 아이템정리(좌표 클릭 + 쓸어올리기)
 INV_BASE_W, INV_BASE_H = 546, 307 # 아래 자리의 기준 창 크기
 INV_BAG       = (428, 17)         # 가방 버튼 (오른쪽 위 왼쪽에서 두 번째 — 예전 아이템정리 클릭2 자리)
@@ -580,6 +590,12 @@ INV_UP_N      = 4                 # 끝에 닿은 뒤 위로 한 칸씩 이만�
 INV_DOWN_MAX  = 80                # 내려갈 때 최대 휠 칸
 INV_OPEN_MAX  = 150               # 한 클라에서 최대 몇 번 까나
 INV_SLOT_GAP  = (2.0, 4.0)        # 클라 사이
+INV_DIM_BOX   = (0, 230, 180, 300) # 가방 밖 게임 화면 (왼쪽 아래) — 창이 덮으면 어두워진다
+INV_DIM_RATIO = 0.55              # 처음 밝기의 이만큼 밑이면 '무언가 화면을 덮었다'
+#   📏 실측 — 평소 90~102 · 수량 창이 덮으면 24.7 (0.25배). 가방 목록은 빈칸이 있으면 33 까지
+#      어두워지므로 목록이 아니라 **가방 밖** 게임 화면을 본다.
+#   🚨 2026-11-19 실기 — 흰 상자를 깐 뒤 화면을 덮는 창이 떠, 어두워진 목록을 '빈칸' 으로 보고
+#      그 위에서 휠만 굴리다 끝냈다(등록한 게 화면에 있는데 하나도 못 깠다).
 INV_HAND_QUIET = 2.0              # 사람이 마우스를 만진 뒤 이만큼 조용해야 누른다
 INV_HAND_MAX   = 300.0
 # ── 끌기(드래그) — '클릭한 채로 밀어서 내리기' ──────────────────────────
@@ -4713,6 +4729,16 @@ def inv_find(big, skip=()):
     except Exception:
         return out
     return sorted(out)
+
+
+def inv_dim(big):
+    """가방 밖 게임 화면 밝기 (-1 = 못 봄)."""
+    try:
+        kx, ky = _inv_k(big)
+        x0, y0, x1, y1 = INV_DIM_BOX
+        return float(big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].mean())
+    except Exception:
+        return -1.0
 
 
 def inv_bottom_empty(big):
@@ -8939,6 +8965,11 @@ class App(tk.Tk):
         self.after(4000, self._bot_start_watcher)
         self.after(30000, self._subwin_autoclose_tick)   # 서브창 3분 무조작 자동닫기
         self.after(2000, self._queue_tick)               # 실행 대기열 순차 처리
+        # 🟧 실행 버튼을 누르면 **돌고 있는 동안 그 버튼만** 다른 색 (2026-11-19 사용자 지시)
+        try:
+            self.bind_class("Button", "<ButtonPress-1>", self._runbtn_press, add="+")
+        except Exception:
+            pass
         self.after(3000, self._auto_back_tick)           # 다른 창을 클릭하면 런처를 바로 맨 뒤로
         # 퍼플 광고창('소식')은 마우스 없이 창만 닫는다 (픽셀 감지 방식은 폐기)
         self.after(4000, self._purple_ad_tick)
@@ -31500,6 +31531,12 @@ class App(tk.Tk):
                 return 0
             click_log(f"[아이템정리] {tag} 🎒 가방을 열었다")
         lx, ly = P(((INV_LIST[0] + INV_LIST[2]) // 2, (INV_LIST[1] + INV_LIST[3]) // 2))
+        self._inv_base = inv_dim(big)
+
+        def dimmed(b):
+            bs = getattr(self, "_inv_base", -1)
+            v = inv_dim(b)
+            return bs > 20 and 0 <= v < bs * INV_DIM_RATIO, v, bs
         # ② 지금 자리에서 → 아래로 내려가며 끝까지 까고 → 끝에 닿으면 위로 한 칸씩 INV_UP_N 번
         #    (2026-11-19 사용자: *"아이템창이 밑에 있으면 위로 조금씩 4번만 올려서 확인하고 …
         #     위에 있으면 내리고 … 완전 위에 있으면 아래로 내려가면서 등록되어 있는 거 다 까주고"*)
@@ -31517,6 +31554,12 @@ class App(tk.Tk):
             if not tab_open(big):
                 p = self._inv_shot(big, tag, "noinv")
                 click_log(f"[아이템정리] 🚫 {tag} 가방 창이 안 보인다 — 아무것도 누르지 않고 멈춘다 · 화면 {p}")
+                return done
+            _dm, _dv, _db = dimmed(big)
+            if _dm:
+                p = self._inv_shot(big, tag, "dim")
+                click_log(f"[아이템정리] 🚫 {tag} **무언가 화면을 덮었다** (밝기 {_dv:.0f} · 처음 {_db:.0f}) — "
+                          f"모르는 창이라 아무것도 누르지 않고 멈춘다 · 화면 {p}")
                 return done
             hits = inv_find(big, skip)
             if hits:
@@ -31627,6 +31670,13 @@ class App(tk.Tk):
                 nap(random.uniform(0.8, 1.2))
                 continue
             if seen == "inv":
+                _bs = getattr(self, "_inv_base", -1)
+                _v = inv_dim(b)
+                if _bs > 20 and 0 <= _v < _bs * INV_DIM_RATIO:
+                    p = self._inv_shot(b, tag, "dim")
+                    click_log(f"[아이템정리] 🚫 {tag} 두 번 누른 뒤 **화면을 덮는 창**이 떴다 (밝기 {_v:.0f} · "
+                              f"처음 {_bs:.0f}) — 모르는 창이라 아무것도 누르지 않고 멈춘다 · 화면 {p}")
+                    return "stop"
                 if kind:
                     return kind
                 # 창이 안 떴다 → 그 칸이 바뀌었나 (상자 1개는 바로 열린다)
@@ -40933,6 +40983,55 @@ class App(tk.Tk):
         self.after(0, lambda: self.status.set(
             f"⚠ '{self._busy_label()}' 실행 중 — '{label}'은(는) 실행 안 함 (끝난 뒤 다시 눌러주세요)"))
 
+    def _runbtn_press(self, e):
+        """🟧 실행 버튼을 누른 순간 — 원래 색을 적어둔다 (칠하는 것은 작업이 시작된 걸 본 뒤)."""
+        try:
+            w = e.widget
+            t = str(w.cget("text"))
+            if not any(k in t for k in RUNBTN_KEYS) or any(k in t for k in RUNBTN_SKIP):
+                return
+            if w in getattr(self, "_runbtn_on", {}):
+                return
+            self._runbtn_cand = (w, w.cget("bg"), w.cget("fg"), w.cget("activebackground"), time.time())
+            self.after(700, self._runbtn_check)
+            self.after(2500, self._runbtn_check)
+        except Exception:
+            pass
+
+    def _runbtn_busy(self):
+        try:
+            return bool(self._is_busy() or self._island_running())
+        except Exception:
+            return False
+
+    def _runbtn_check(self):
+        """누른 버튼의 작업이 돌기 시작했으면 칠하고, 다 끝났으면 원래 색으로."""
+        on = getattr(self, "_runbtn_on", None)
+        if on is None:
+            on = self._runbtn_on = {}
+        busy = self._runbtn_busy()
+        c = getattr(self, "_runbtn_cand", None)
+        if c and busy and time.time() - c[4] < RUNBTN_WINDOW:
+            w = c[0]
+            try:
+                if w.winfo_exists():
+                    col = RUNBTN_BG if str(c[1]).lower() != RUNBTN_BG else RUNBTN_BG2
+                    w.config(bg=col, fg=RUNBTN_FG, activebackground=col)
+                    on[w] = c[1:4]
+            except Exception:
+                pass
+            self._runbtn_cand = None
+        elif c and time.time() - c[4] >= RUNBTN_WINDOW:
+            self._runbtn_cand = None
+        if on and not busy:
+            for w, (bg, fg, abg) in list(on.items()):
+                try:
+                    if w.winfo_exists():
+                        w.config(bg=bg, fg=fg, activebackground=abg)
+                except Exception:
+                    pass
+            on.clear()
+
     def _queue_tick(self):
         """1.5초마다 확인 — 스케줄(과거섬 등 자동 예약)만 한가해질 때 이어서 실행한다.
         사용자가 누른 실행은 대기열에 쌓지 않으므로 여기서 처리할 것이 없다.
@@ -40940,6 +41039,10 @@ class App(tk.Tk):
         try:
             self._refresh_stop_btn()
             self._refresh_rep_btn()
+        except Exception:
+            pass
+        try:
+            self._runbtn_check()
         except Exception:
             pass
         try:
