@@ -585,6 +585,46 @@ try:
 except Exception as _e:
     print("   (라스타바드 항목 오류: %s)" % str(_e)[:80])
 
+# ── ⑨-3 🎴 아이템정리 (2026-11-19) ─────────────────────────────
+print("\n⑨-3 🎴 아이템정리 — 그림 · 새 코드 · 최근 기록")
+try:
+    _ct = os.path.join(DESK, "click_templates")
+    _im = jload(os.path.join(_ct, "inv_meta.json"))
+    _gr = (_im or {}).get("groups") or {}
+    _need = ["inv_%s_%d.png" % (g, i) for g, ns in _gr.items() for i in range(1, len(ns) + 1)]
+    _need += ["inv_open.png", "inv_result.png", "inv_qty.png", "inv_okall.png"]
+    _miss = [f for f in _need if not os.path.exists(os.path.join(_ct, f))]
+    print("   그림: inv_meta.json %s · 종류 %d · 필요한 그림 %d장 중 없는 것 %d장%s" % (
+        "✔" if _im else "🚨 없다/못 읽음", len(_gr), len(_need), len(_miss),
+        ("  " + " ".join(_miss[:6])) if _miss else ""))
+    if (not _im) or _miss:
+        print("   🚨 그림이 모자라다 → 🔄 업데이트를 한 번 더 (그림이 0장이면 아이템정리는 아무것도 안 누른다)")
+    _src = io.open(os.path.join(DESK, "lineagem_launcher.py"), encoding="utf-8", errors="replace").read()
+    for _nm in ("def _inv_run", "def _inv_slot", "def _inv_dbl", "옛 좌표 방식은 돌리지 않는다",
+                "좌표가 하나도 없는 컴퓨터다"):
+        print("   코드: %-28s %s" % (_nm, "✔" if _nm in _src else "🚨 없다 (옛 코드 — 🔄 업데이트)"))
+    _cj = jload(os.path.join(DESK, "coords.json")) or {}
+    _is = _cj.get("item_slots") or []
+    print("   item_slots 좌표가 있는 슬롯: %s  (하나도 없으면 16클라 전부를 본다)" % (
+        [i + 1 for i, s_ in enumerate(_is) if isinstance(s_, dict) and any(s_.get("coords") or [])] or "없음"))
+    _cl = os.path.join(LA, "click_log.txt")
+    _f = io.open(_cl, "rb")
+    _f.seek(max(0, os.path.getsize(_cl) - 600000))
+    _tx = _f.read().decode("utf-8", "replace").split("\n")
+    _f.close()
+    _li = [l.rstrip() for l in _tx if u"[아이템정리]" in l]
+    _st = [l for l in _li if u"🎴 시작" in l or u"🎴 끝" in l or u"▶ #" in l or u"🚫" in l]
+    print("   🗒 시작·끝·클라 넘어감·멈춤 마지막 30줄 — **한 클라씩 도는지**가 여기 보인다")
+    print("      (▶ #NN 줄 사이에 다른 클라 번호가 섞이면 겹친 것이다. `🎴 시작` 줄이 아예 없으면 옛 방식으로 돈 것이다)")
+    for l in _st[-30:]:
+        print("     " + l[:170])
+    print("   🗒 마지막 실행의 줄 전부 (최대 60줄)")
+    _k = max([i for i, l in enumerate(_li) if u"🎴 시작" in l] or [0])
+    for l in _li[_k:][-60:]:
+        print("     " + l[:170])
+except Exception as _e:
+    print("   (아이템정리 항목 오류: %s)" % str(_e)[:80])
+
 # ── ⑩ 업데이트 기록 ────────────────────────────────────────────────
 ul = os.path.join(LA, "update_log.txt")
 print("\n⑩ 업데이트 기록 마지막 40줄  (%s)" % ul)

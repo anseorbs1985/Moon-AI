@@ -32064,8 +32064,20 @@ class App(tk.Tk):
             self.status.set("2초 후 아이템정리 실행...")
             self.after(0, self._send_to_back)
             nap(2)
-            if INV_OPEN_ON and inv_items():
-                self._inv_run(slot_idx)
+            if INV_OPEN_ON:
+                _n = len(inv_items())
+                if _n:
+                    self._inv_run(slot_idx)
+                    return
+                # 🚫 그림이 없다고 **옛 좌표 방식**(클릭1·2 + 쓸어올리기)으로 떨어지지 않는다.
+                #    그 좌표는 창을 키우기 전(491) 것일 수 있고, 클라마다 5초씩 훑고 지나가
+                #    '웨이브처럼 한 클라도 안 끝낸다' 로 보인다 (2026-11-19 사용자 신고 — 로컬).
+                _mp = os.path.join(IMG_DIR, "inv_meta.json")
+                _why = ("inv_meta.json 이 없다" if not os.path.exists(_mp)
+                        else f"inv_meta.json 은 있는데 그림을 못 읽었다 (종류 {len(inv_meta().get('groups') or {})})")
+                click_log(f"[아이템정리] 🚫 가방 그림이 0장이다 — {_why} ({IMG_DIR}) → **아무것도 누르지 않는다** "
+                          f"(옛 좌표 방식은 돌리지 않는다 · 🔄 업데이트로 그림을 받으세요)")
+                self.status.set("🚫 아이템정리 — 가방 그림(click_templates\\inv_*.png)이 없습니다. 🔄 업데이트를 눌러 받으세요")
                 return
             slots = self.cfg.get("item_slots", [])
             if slot_idx is not None:
