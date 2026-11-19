@@ -622,6 +622,13 @@ try:
     _k = max([i for i, l in enumerate(_li) if u"🎴 시작" in l] or [0])
     for l in _li[_k:][-60:]:
         print("     " + l[:170])
+    _sd = os.path.join(DESK, "click_templates", "_inv")
+    _fs = sorted(glob.glob(os.path.join(_sd, "*.png")), key=os.path.getmtime)
+    print("   🗂 멈춘 화면 %d장 (%s) — 이름 끝이 이유다 (unknown·dim·noinv·nobag·qsel…)" % (len(_fs), _sd))
+    for _p in _fs[-10:]:
+        print("     " + os.path.basename(_p))
+    _hw = [l for l in _li if u"✋" in l or u"계속 써서" in l]
+    print("   ✋ 마우스를 쓰는 중이라 기다린 줄 %d개 (많으면 원격으로 보며 마우스를 움직인 것이다)" % len(_hw))
 except Exception as _e:
     print("   (아이템정리 항목 오류: %s)" % str(_e)[:80])
 

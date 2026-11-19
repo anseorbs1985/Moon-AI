@@ -582,14 +582,19 @@ INV_COLOR_MAX = 12.0              # 평균 색 차이 (📏 고른 칸 ≤3.6 ·
 INV_WIN_MATCH = 0.85              # 가방 탭·결과·수량 창 (📏 그 창 1.00 · 아닐 때 ≤0.61)
 INV_OK_MATCH  = 0.80              # [모두 확인] (📏 그 창 1.00 · 아닐 때 0.61)
 INV_EMPTY_V   = 8.0               # 빈칸 = 평균 밝기 < 8 이고 밝은 점이 거의 없다 (📏 빈칸 2.5 · 아이템 ≥20.9)
-INV_DBL_GAP   = (0.10, 0.17)      # 두 번 누를 때 사이 (뗀 뒤 다음 누름까지)
-INV_DBL_HOLD  = (0.05, 0.09)      # 누르고 있다 떼는 시간 (사람 손 — 2026-11-19 실측 72ms)
+INV_DBL_GAP   = (0.06, 0.10)      # 두 번 누를 때 사이 (뗀 뒤 다음 누름까지) — "따닥" (전 0.10~0.17)
+INV_DBL_HOLD  = (0.04, 0.06)      # 누르고 있다 떼는 시간 (전 0.05~0.09 · 🚫 0 으로 만들지 말 것 — 순간 클릭은 안 먹는다)
+INV_DBL_PRE   = (0.02, 0.04)      # 커서를 올린 뒤 첫 누름까지
+#   🚨 2026-11-19 — `pyautogui.mouseDown()`/`mouseUp()` 을 **좌표 없이** 부르면 precise_click 이 바꿔둔
+#      길(우리 표식 `_OURS`)을 안 타고 원래 pyautogui 로 나간다 → `human_idle_seconds` 가 그것을
+#      **사람 손**으로 센다 → 카드를 깔 때마다 `✋ 손을 떼서 이어서 한다` 로 1~2초씩 헛기다렸다
+#      (13시 기록 — 109장 중 70번). 🚫 반드시 **좌표를 넣어** 부를 것: mouseDown(x, y) · mouseUp(x, y).
 #   🚨 2026-11-19 #15 깃발 초록 카드 — 순간 클릭(누름·뗌 동시) 두 번에는 **고른 표시조차 안 생겼다.**
 #      사용자는 손으로 두 번 눌러 바로 열었다. 그래서 누름을 사람처럼 잠깐 유지한다.
 INV_DLG_WAIT  = 3.5               # 누른 뒤 창이 뜨기를 기다리는 시간
-INV_GAP       = (0.25, 0.55)      # 하나 깐 뒤 다음까지 (2026-11-19 사용자: "속도가 너무 늦어 카드 빨리 좀 까고")
+INV_GAP       = (0.12, 0.28)      # 하나 깐 뒤 다음까지 (2026-11-19 사용자: "속도가 너무 늦어 카드 빨리 좀 까고")
 INV_POLL      = 0.12              # 누른 뒤 창이 떴나 보는 간격
-INV_SEE_NAP   = (0.22, 0.42)      # 결과·보상 창을 본 뒤 닫기까지
+INV_SEE_NAP   = (0.14, 0.26)      # 결과·보상 창을 본 뒤 닫기까지
 INV_SHUT_NAP  = (0.30, 0.50)      # 닫은 뒤
 INV_CNT_DIFF  = 6.0               # 칸 오른쪽 아래 '개수 숫자' 가 이만큼 바뀌면 먹은 것 (겹친 물약은 숫자만 바뀐다)
 #   ⏱ 한 장 약 4초 → 약 2초. 줄인 것은 **기다림뿐** — 창 확인·모르는 창 멈춤·어두워짐 확인은 그대로다.
@@ -642,8 +647,11 @@ INV_DIM_RATIO = 0.55              # 처음 밝기의 이만큼 밑이면 '무언
 #      어두워지므로 목록이 아니라 **가방 밖** 게임 화면을 본다.
 #   🚨 2026-11-19 실기 — 흰 상자를 깐 뒤 화면을 덮는 창이 떠, 어두워진 목록을 '빈칸' 으로 보고
 #      그 위에서 휠만 굴리다 끝냈다(등록한 게 화면에 있는데 하나도 못 깠다).
-INV_HAND_QUIET = 2.0              # 사람이 마우스를 만진 뒤 이만큼 조용해야 누른다
-INV_HAND_MAX   = 300.0
+INV_HAND_QUIET = 0.8              # 사람이 마우스를 만진 뒤 이만큼 조용해야 누른다 (전 2.0)
+INV_HAND_MAX   = 12.0             # 그래도 계속 만지면 이만큼 뒤에는 그대로 한다 (전 300초)
+#   2026-11-19 사용자(로컬): "카드나 상자를 까다가 멈춰버리고 다음으로 안 넘어간다"
+#   원격으로 그 컴퓨터를 보며 마우스를 움직이면 그것도 '사람 손' 이라 최대 5분을 서 있었다.
+#   사용자가 직접 [실행] 을 누른 작업이므로 오래 붙잡지 않는다.
 # ── 끌기(드래그) — '클릭한 채로 밀어서 내리기' ──────────────────────────
 # 휠이 안 먹는 목록은 **누른 채 끌어야** 내려간다 (2026-09-02 사용자 지시:
 # "클릭을 하면서 밑으로 내려야 하거든"). 아이템정리의 쓸어올리기와 같은 방식이고,
@@ -4846,6 +4854,31 @@ def inv_bottom_empty(big):
                 return True
             if all(m >= INV_EMPTY_V for m, b in cells):
                 return False            # 맨 아랫줄에 아이템이 다 차 있다
+        return False
+    except Exception:
+        return False
+
+
+def inv_tail_seen(big):
+    """가방 **끝이 이 화면에 보이나** — 맨 오른쪽 열에 빈칸이 하나라도 다 들어와 있으면 True.
+
+    아이템은 앞에서부터 빈틈없이 찬다 → 넷째 열이 빈칸인 줄이 보이면 그 뒤로는 아이템이 없다.
+    (2026-11-19 사용자: *"계속 내리지 말고 14번처럼 딱 저 정도까지만 … 아래에 아이템이 없는 빈칸이면 그만 내려"*)
+    예전 `inv_bottom_empty` 는 '맨 아랫줄 **넷 다** 빈칸' 이라, 마지막 줄이 덜 찼거나 빈 줄이
+    아직 반만 보일 때 한두 번 더 내렸다."""
+    import cv2
+    import numpy as np
+    try:
+        kx, ky = _inv_k(big)
+        x0, y0, x1, y1 = INV_LIST
+        g = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        h = int(13 * ky)
+        w = int(13 * kx)
+        X = int(INV_COLS[-1] * kx)
+        for yc in range(int(y1 * ky) - h - 1, int(y0 * ky) + h, -2):
+            p = g[yc - h:yc + h, X - w:X + w]
+            if float(p.mean()) < INV_EMPTY_V and float((p > 60).mean()) < 0.01:
+                return True
         return False
     except Exception:
         return False
@@ -31684,9 +31717,9 @@ class App(tk.Tk):
         sdir = -1                    # -1 = 아래로 · +1 = 위로
         since = 0                    # 마지막으로 깔 것을 본 뒤 굴린 칸 수
         moved_any = False            # 한 번이라도 목록이 움직였나
-        if inv_bottom_empty(big):
+        if inv_tail_seen(big):
             sdir = 1
-            click_log(f"[아이템정리] {tag} 🧭 가방이 **맨 아래**에서 열렸다 — 여기서 위로 훑는다 "
+            click_log(f"[아이템정리] {tag} 🧭 가방이 **끝(빈칸이 보이는 자리)**에서 열렸다 — 여기서 위로 훑는다 "
                       f"(깔 것이 {INV_UP_IDLE}칸째 안 나오면 끝)")
         else:
             click_log(f"[아이템정리] {tag} 🧭 열린 자리에서 **아래로** 끝까지 훑는다")
@@ -31731,7 +31764,7 @@ class App(tk.Tk):
                 # (더 앞선 차례가 있을 수 있다)까지 보인다. 되돌아 올라가지 않으려고.
                 _ky = big.shape[0] / float(INV_BASE_H)
                 _bot = (INV_LIST[3] - 70) * _ky        # 바로 아랫줄이 통째로 보여야 고른다
-                if sdir < 0 and _pr and not inv_bottom_empty(big) and all(h[0] > _bot for h in _pr):
+                if sdir < 0 and _pr and not inv_tail_seen(big) and all(h[0] > _bot for h in _pr):
                     _pr = []
                     deferred = True
                     hits = [h for h in hits if h[2] not in rank]
@@ -31800,8 +31833,8 @@ class App(tk.Tk):
                     self.status.set(f"🎴 {tag} {done}번째 — {g}")
                 nap(random.uniform(*INV_GAP))
                 continue
-            if sdir < 0 and inv_bottom_empty(big):
-                click_log(f"[아이템정리] {tag} 맨 아랫줄이 빈칸 — 아이템 끝 (휠 {downs}번 내렸다)")
+            if sdir < 0 and inv_tail_seen(big):
+                click_log(f"[아이템정리] {tag} 빈칸이 보인다 — 아이템 끝, 더 내리지 않는다 (휠 {downs}번 내렸다)")
                 break
             if sdir > 0 and since >= INV_UP_IDLE:
                 click_log(f"[아이템정리] {tag} 위로 {since}칸 동안 깔 것이 없다 — 끝 (휠 {downs}번 올렸다)")
@@ -31863,16 +31896,18 @@ class App(tk.Tk):
         return done
 
     def _inv_dbl(self, x, y):
-        """🖱 두 번 누르기 — 사람 손처럼 (누르고 50~90ms 있다 떼고, 100~170ms 뒤 다시)."""
+        """🖱 두 번 누르기 — 따닥 (누르고 40~60ms 있다 떼고, 60~100ms 뒤 다시).
+        🚫 mouseDown/mouseUp 에 **좌표를 꼭 넣는다** — 안 넣으면 우리 표식 없이 나가 사람 손으로 세어진다."""
         down = False
+        x, y = int(x), int(y)
         try:
             pyautogui.moveTo(x, y)
-            nap(random.uniform(0.04, 0.08))
+            nap(random.uniform(*INV_DBL_PRE))
             for i in range(2):
-                pyautogui.mouseDown()
+                pyautogui.mouseDown(x, y)
                 down = True
                 nap(random.uniform(*INV_DBL_HOLD))
-                pyautogui.mouseUp()
+                pyautogui.mouseUp(x, y)
                 down = False
                 if i == 0:
                     nap(random.uniform(*INV_DBL_GAP))
@@ -31883,7 +31918,7 @@ class App(tk.Tk):
         finally:
             if down:
                 try:
-                    pyautogui.mouseUp()
+                    pyautogui.mouseUp(x, y)
                 except Exception:
                     pass
 
@@ -31933,21 +31968,23 @@ class App(tk.Tk):
             n = random.randint(14, 20)
             pyautogui.moveTo(x0, y0)
             nap(random.uniform(0.06, 0.10))
-            pyautogui.mouseDown()
+            pyautogui.mouseDown(x0, y0)          # 좌표를 넣어야 우리 표식이 찍힌다
             down = True
+            _lx, _ly = x0, y0
             nap(random.uniform(0.03, 0.06))
             for i in range(1, n + 1):
-                pyautogui.moveTo(x0 + random.choice((0, 0, -1)), int(y0 + (y1 - y0) * i / float(n)))
+                _lx, _ly = x0 + random.choice((0, 0, -1)), int(y0 + (y1 - y0) * i / float(n))
+                pyautogui.moveTo(_lx, _ly)
                 nap(random.uniform(0.009, 0.014))
             nap(random.uniform(0.02, 0.04))
-            pyautogui.mouseUp()
+            pyautogui.mouseUp(_lx, _ly)
             down = False
         except Exception as e:
             click_log(f"[아이템정리] ⚠ {tag} 🧺 빠른 칸 끌기 오류 — {type(e).__name__}: {e}")
         finally:
             if down:
                 try:
-                    pyautogui.mouseUp()
+                    pyautogui.mouseUp(qx, qy)
                 except Exception:
                     pass
         if not do_check:
