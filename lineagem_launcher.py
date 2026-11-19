@@ -586,7 +586,12 @@ INV_DBL_GAP   = (0.08, 0.14)      # 두 번 누를 때 사이
 INV_DLG_WAIT  = 3.5               # 누른 뒤 창이 뜨기를 기다리는 시간
 INV_GAP       = (0.7, 1.3)        # 하나 깐 뒤 다음까지
 INV_WHEEL_GAP = (0.75, 1.05)      # 휠 한 칸 뒤 (목록이 멈추기를)
-INV_UP_N      = 4                 # 끝에 닿은 뒤 위로 한 칸씩 이만큼 더 확인한다 (사용자 지시)
+INV_UP_N      = 4                 # (안 쓴다 — 2026-11-19 '위아래 왔다갔다 하지 마')
+INV_TOP_GAP   = (0.30, 0.50)      # 맨 위로 올라갈 때 휠 한 칸 뒤 (누르지 않고 올라가기만)
+#   🧭 2026-11-19 사용자: *"뭐 이리 왔다 갔다 하냐 그냥 한번 훑어서 클릭할 거만 클릭하고 끝내"*
+#      → 가방을 열면 맨 위로 올라간 뒤 **위에서 아래로 한 번만** 훑는다. 끝에 닿으면 ✕.
+#   🥇 먼저 쓸 것(`first` — 물병·다이아몬드)은 **한 번 실행에 한 가지만** —
+#      목록 차례대로 처음 보이는 것 하나를 골라 다 누른다. 나머지 먼저 쓸 것은 다음 실행에.
 INV_DOWN_MAX  = 80                # 내려갈 때 최대 휠 칸
 INV_OPEN_MAX  = 150               # 한 클라에서 최대 몇 번 까나
 INV_SLOT_GAP  = (2.0, 4.0)        # 클라 사이
@@ -18131,8 +18136,10 @@ class App(tk.Tk):
         self.deiconify()
 
     def _test_tj(self, idx):
+        if self._is_busy():
+            return self._test_go("TJ성공", None, None)
         self._minimize_all()
-        threading.Thread(target=self._run_tj, args=(idx,), daemon=True).start()
+        self._test_go(f"TJ성공 #{idx + 1:02d}", "_tj_stop", self._run_tj, idx)
 
     def _del_tj(self, idx):
         if not messagebox.askyesno("슬롯 삭제", f"TJ성공!! #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
@@ -21743,12 +21750,15 @@ class App(tk.Tk):
         self.deiconify()
 
     def _test_dgn2(self, fkey, idx):
+        _t = self._dgn2_info(fkey)[1]
+        if self._is_busy():
+            return self._test_go(_t, None, None)
         # 복구 등은 최소화하지 않고 맨 뒤로만 (2026-08-29 사용자 지시)
         if fkey in BACK_NOT_MIN:
             self._send_behind_only()
         else:
             self._minimize_all()
-        threading.Thread(target=self._run_dgn2, args=(fkey, idx), daemon=True).start()
+        self._test_go(f"{_t} #{idx + 1:02d}", f"_{fkey}_stop", self._run_dgn2, fkey, idx)
 
     def _del_dgn2(self, fkey, idx):
         key, title, _ = self._dgn2_info(fkey)
@@ -31117,8 +31127,10 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_pass(self, idx):
+        if self._is_busy():
+            return self._test_go("패스권", None, None)
         self._minimize_all()
-        threading.Thread(target=self._run_pass, args=(idx,), daemon=True).start()
+        self._test_go(f"패스권 #{idx + 1:02d}", "_pass_stop", self._run_pass, idx)
 
     def _del_pass(self, idx):
         if not messagebox.askyesno("슬롯 삭제", f"패스권 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
@@ -31392,9 +31404,26 @@ class App(tk.Tk):
         save_cfg(self.cfg); self._refresh_ui()
         self.status.set("✔ #01 좌표를 전체 슬롯에 복사 완료")
 
+    def _test_go(self, name, stop_attr, fn, *args):
+        """▶ 슬롯 **개별 실행**도 작업으로 잡는다 (2026-11-19 사용자 지시).
+        예전엔 스레드만 띄워 `_busy_task` 가 비어 있었다 → 실행 버튼 색이 안 바뀌고,
+        메인 ■ 멈춤이 회색(멈출 것 없음)으로 보였다. 겹쳐 돌 수도 있었다."""
+        if self._is_busy():
+            msg = f"⚠ '{self._busy_label()}' 실행 중 — '{name}' 는 실행 안 함 (끝난 뒤 다시 눌러주세요)"
+            self.status.set(msg)
+            click_log(f"[개별실행] {msg}")
+            return False
+        self._busy_task = name
+        if stop_attr:
+            setattr(self, stop_attr, False)
+        threading.Thread(target=self._run_task, args=(name, fn) + tuple(args), daemon=True).start()
+        return True
+
     def _test_item(self, idx):
+        if self._is_busy():
+            return self._test_go("아이템정리", None, None)
         self._minimize_all()
-        threading.Thread(target=self._run_item, args=(idx,), daemon=True).start()
+        self._test_go(f"아이템정리 #{idx + 1:02d}", "_item_stop", self._run_item, idx)
 
     def _start_item(self):
         if not self._try_busy_or_queue("아이템정리", self._start_item): return
@@ -31537,38 +31566,38 @@ class App(tk.Tk):
             bs = getattr(self, "_inv_base", -1)
             v = inv_dim(b)
             return bs > 20 and 0 <= v < bs * INV_DIM_RATIO, v, bs
-        # ② 지금 자리에서 → 아래로 내려가며 끝까지 까고 → 끝에 닿으면 위로 한 칸씩 INV_UP_N 번
-        #    (2026-11-19 사용자: *"아이템창이 밑에 있으면 위로 조금씩 4번만 올려서 확인하고 …
-        #     위에 있으면 내리고 … 완전 위에 있으면 아래로 내려가면서 등록되어 있는 거 다 까주고"*)
+        # ② 맨 위로 올라간 뒤 → 위에서 아래로 **한 번만** 훑는다 (2026-11-19 사용자 지시)
         #    ⚠ 휠은 **한 칸씩**만 보낸다 — 여러 칸을 한 번에 보내면 게임이 무시한다 (실측)
         done = 0
         downs = 0
-        ups = 0
-        phase = "down"
         skip = set()
         fails = {}
-        # 🥇 **먼저 쓸 것** — `inv_meta.json` 의 "first" (단계별 목록). 1판은 그것만 찾고,
-        #    2판에서 나머지를 깐다 (2026-11-19 사용자: *"10번 11번 먼저이고 그 다음이 7번 8번 순"*
-        #    — 빨강·노랑 물병 → 주황·푸른 드래곤의 다이아몬드. 99999 가 차면 안 눌린다 →
-        #    두 번 보고 건너뛴다(`skip`) — *"다음번에 실행할 때 눌러주면 돼"*)
-        rank = {}
-        for _i, _gs in enumerate(inv_meta().get("first") or []):
+        oks = {}
+        # 🥇 먼저 쓸 것 — `first` 를 펼친 차례 (빨강 물병 → 노랑 물병 → … → 다이아몬드)
+        order = []
+        for _gs in (inv_meta().get("first") or []):
             for _g in (_gs if isinstance(_gs, list) else [_gs]):
-                rank[_g] = _i
-        nlev = (max(rank.values()) + 1) if rank else 0
-        stage = 0                     # 0 ~ nlev-1 = 그 단계 것만 · nlev = 나머지 전부
-        up_lim = INV_UP_N
-
-        def _next_stage():
-            nonlocal stage, phase, downs, ups, up_lim
-            if stage < nlev:
-                # 다음 판은 앞 판이 지나온 자리를 다시 다 본다 — 끝까지 내렸다가, 내려온 만큼 + 4칸 위로
-                up_lim = max(up_lim, downs + INV_UP_N)
-                stage, phase, downs, ups = stage + 1, "down", 0, 0
-                click_log(f"[아이템정리] {tag} 🥇 {stage}단계 끝 → "
-                          + (f"{stage + 1}단계" if stage < nlev else "나머지") + " 를 깐다")
-                return True
-            return False
+                if _g not in order:
+                    order.append(_g)
+        rank = {g: i for i, g in enumerate(order)}
+        pick = None                  # 이번 실행에서 쓸 '먼저 쓸 것' 한 가지
+        ups = 0
+        while not self._item_stop and ups < INV_DOWN_MAX:
+            if not self._inv_hand_wait(tag):
+                break
+            prev = inv_list(big)
+            wheel_at(lx, ly, 1)
+            ups += 1
+            nap(random.uniform(*INV_TOP_GAP))
+            b2 = grab()
+            if b2 is None:
+                break
+            big = b2
+            if float(abs(inv_list(big) - prev).mean()) < 1.5:
+                break
+        if ups > 1:
+            click_log(f"[아이템정리] {tag} ⬆ 맨 위로 올라왔다 (휠 {ups - 1}칸) — 여기서부터 아래로 한 번 훑는다")
+            nap(random.uniform(0.3, 0.6))
         while not self._item_stop and done < INV_OPEN_MAX:
             big = grab()
             if big is None:
@@ -31584,9 +31613,22 @@ class App(tk.Tk):
                           f"모르는 창이라 아무것도 누르지 않고 멈춘다 · 화면 {p}")
                 return done
             hits = inv_find(big, skip)
-            if stage < nlev:
-                hits = [h for h in hits if rank.get(h[2]) == stage]
-            hits.sort(key=lambda h: (rank.get(h[2], 99), h[0], h[1]))
+            # 🥇 먼저 쓸 것은 한 가지만 — 처음 보일 때 차례가 가장 앞선 것을 고른다
+            if pick is None:
+                _pr = [h for h in hits if h[2] in rank]
+                # 아래 두 줄 안에만 보이면 아직 고르지 않는다 — 한 칸 내리면 바로 아랫줄
+                # (더 앞선 차례가 있을 수 있다)까지 보인다. 되돌아 올라가지 않으려고.
+                _ky = big.shape[0] / float(INV_BASE_H)
+                _bot = (INV_LIST[3] - 70) * _ky        # 바로 아랫줄이 통째로 보여야 고른다
+                if _pr and not inv_bottom_empty(big) and all(h[0] > _bot for h in _pr):
+                    _pr = []
+                    hits = [h for h in hits if h[2] not in rank]
+                if _pr:
+                    pick = min(_pr, key=lambda h: rank[h[2]])[2]
+                    click_log(f"[아이템정리] {tag} 🥇 이번에는 **{pick}** 한 가지만 쓴다 "
+                              f"(나머지 먼저 쓸 것은 다음 실행에)")
+            hits = [h for h in hits if h[2] not in rank or h[2] == pick]
+            hits.sort(key=lambda h: (h[0], h[1]))       # 화면 위 → 아래
             if hits:
                 cy, cx, g, v, col = hits[0]
                 if not self._inv_hand_wait(tag):
@@ -31605,42 +31647,33 @@ class App(tk.Tk):
                     if fails[g] >= 2:
                         skip.add(g)
                         click_log(f"[아이템정리] {tag} ⏭ {g} 는 이 클라에서 더 누르지 않는다")
+                        # 먼저 쓸 것이 **한 번도 안 눌렸으면**(99999 가 찼다) 다음 차례를 고른다
+                        if g == pick and not oks.get(g):
+                            pick = None
                 else:
                     done += 1
+                    oks[g] = oks.get(g, 0) + 1
                     click_log(f"[아이템정리] {tag} ✅ {g} 깠다 ({r} · 일치도 {v:.2f} · 색차 {col:.1f})")
                     self.status.set(f"🎴 {tag} {done}번째 — {g}")
                 nap(random.uniform(*INV_GAP))
                 continue
-            if phase == "down" and inv_bottom_empty(big):
-                click_log(f"[아이템정리] {tag} 맨 아랫줄이 빈칸 — 아이템 끝 (휠 {downs}번 내렸다) → 위로 {INV_UP_N}칸 확인")
-                phase = "up"
-            if phase == "up" and ups >= up_lim:
-                if _next_stage():
-                    continue
+            if inv_bottom_empty(big):
+                click_log(f"[아이템정리] {tag} 맨 아랫줄이 빈칸 — 아이템 끝 (휠 {downs}번 내렸다)")
                 break
             if downs >= INV_DOWN_MAX:
                 break
             if not self._inv_hand_wait(tag):
                 break
             prev = inv_list(big)
-            wheel_at(lx, ly, -1 if phase == "down" else 1)
-            if phase == "down":
-                downs += 1
-            else:
-                ups += 1
+            wheel_at(lx, ly, -1)
+            downs += 1
             nap(random.uniform(*INV_WHEEL_GAP))
-            b = grab()
-            if b is None:
+            b2 = grab()
+            if b2 is None:
                 break
-            if float(abs(inv_list(b) - prev).mean()) < 1.5:
-                if phase == "down":
-                    click_log(f"[아이템정리] {tag} 휠을 굴려도 안 움직인다 — 맨 아래 (휠 {downs}번) → 위로 {INV_UP_N}칸 확인")
-                    phase = "up"
-                else:
-                    click_log(f"[아이템정리] {tag} 위로 굴려도 안 움직인다 — 맨 위")
-                    if _next_stage():
-                        continue
-                    break
+            if float(abs(inv_list(b2) - prev).mean()) < 1.5:
+                click_log(f"[아이템정리] {tag} 휠을 굴려도 안 움직인다 — 맨 아래 (휠 {downs}번)")
+                break
         # ③ 다 깠으면 가방 ✕ (사용자: *"전부 다 깠다고 판단되면 x를 한번 눌러줘 그게 마무리"*)
         b = grab()
         if b is not None and tab_open(b) and not self._item_stop:
@@ -38496,8 +38529,10 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_mail(self, idx):
+        if self._is_busy():
+            return self._test_go("우편함", None, None)
         self._minimize_all()
-        threading.Thread(target=self._run_mail, args=(idx,), daemon=True).start()
+        self._test_go(f"우편함 #{idx + 1:02d}", "_mail_stop", self._run_mail, idx)
 
     def _del_mail(self, idx):
         if not messagebox.askyesno("슬롯 삭제", f"우편함 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
@@ -38616,8 +38651,10 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_dungeon(self, idx):
+        if self._is_busy():
+            return self._test_go("주말던전", None, None)
         self._minimize_all()
-        threading.Thread(target=self._run_dungeon, args=(idx,), daemon=True).start()
+        self._test_go(f"주말던전 #{idx + 1:02d}", "_dungeon_stop", self._run_dungeon, idx)
 
     def _del_dungeon(self, idx):
         if not messagebox.askyesno("슬롯 삭제", f"던전 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
@@ -38786,8 +38823,10 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_past(self, idx):
+        if self._is_busy():
+            return self._test_go("과거섬", None, None)
         self._minimize_all()
-        threading.Thread(target=self._run_past, args=(idx,), daemon=True).start()
+        self._test_go(f"과거섬 #{idx + 1:02d}", "_past_stop", self._run_past, idx)
 
     def _del_past(self, idx):
         if not messagebox.askyesno("슬롯 삭제", f"과거의섬 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
@@ -39545,8 +39584,10 @@ class App(tk.Tk):
         save_cfg(self.cfg)
 
     def _test_sched(self, idx):
+        if self._is_busy():
+            return self._test_go("스케줄", None, None)
         self._minimize_all()
-        threading.Thread(target=self._run_sched, args=(idx,), daemon=True).start()
+        self._test_go(f"스케줄 #{idx + 1:02d}", "_sched_stop", self._run_sched, idx)
 
     def _del_sched(self, idx):
         if not messagebox.askyesno("슬롯 삭제", f"스케줄 #{idx+1} 슬롯 전체 좌표를 삭제하시겠습니까?", default="no"):
