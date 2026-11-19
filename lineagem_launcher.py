@@ -576,7 +576,7 @@ INV_DBL_GAP   = (0.08, 0.14)      # 두 번 누를 때 사이
 INV_DLG_WAIT  = 3.5               # 누른 뒤 창이 뜨기를 기다리는 시간
 INV_GAP       = (0.7, 1.3)        # 하나 깐 뒤 다음까지
 INV_WHEEL_GAP = (0.75, 1.05)      # 휠 한 칸 뒤 (목록이 멈추기를)
-INV_TOP_MAX   = 80                # 맨 위로 올릴 때 최대 휠 칸
+INV_UP_N      = 4                 # 끝에 닿은 뒤 위로 한 칸씩 이만큼 더 확인한다 (사용자 지시)
 INV_DOWN_MAX  = 80                # 내려갈 때 최대 휠 칸
 INV_OPEN_MAX  = 150               # 한 클라에서 최대 몇 번 까나
 INV_SLOT_GAP  = (2.0, 4.0)        # 클라 사이
@@ -4687,6 +4687,7 @@ def inv_find(big, skip=()):
         x0, y0, x1, y1 = INV_LIST
         X0, Y0 = int(x0 * kx), int(y0 * ky)
         a = big[Y0:int(y1 * ky), X0:int(x1 * kx)]
+        _mins = inv_meta().get("min") or {}      # 종류별 더 높은 기준 (은색 상자 ↔ 은색 카드)
         for g, t0 in inv_items():
             if g in skip:
                 continue
@@ -4694,7 +4695,7 @@ def inv_find(big, skip=()):
             if a.shape[0] < t.shape[0] or a.shape[1] < t.shape[1]:
                 continue
             r = cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED)
-            ys, xs = np.where(r >= INV_MATCH)
+            ys, xs = np.where(r >= max(INV_MATCH, float(_mins.get(g, 0))))
             tm = t.astype(np.float32).mean((0, 1))
             for y, x in sorted(zip(ys.tolist(), xs.tolist()), key=lambda p: -r[p[0], p[1]]):
                 # 그림 = 칸 가운데 기준 (x-12..x+12, y-12..y+4) → 칸 가운데
@@ -31499,29 +31500,14 @@ class App(tk.Tk):
                 return 0
             click_log(f"[아이템정리] {tag} 🎒 가방을 열었다")
         lx, ly = P(((INV_LIST[0] + INV_LIST[2]) // 2, (INV_LIST[1] + INV_LIST[3]) // 2))
-        # ① 맨 위로
-        prev = inv_list(big)
-        up = 0
-        for _ in range(INV_TOP_MAX):
-            if self._item_stop:
-                return 0
-            if not self._inv_hand_wait(tag):
-                return 0
-            wheel_at(lx, ly, 3)
-            nap(random.uniform(0.45, 0.7))
-            b = grab()
-            if b is None:
-                break
-            cur = inv_list(b)
-            up += 1
-            if float(abs(cur - prev).mean()) < 1.5:
-                big = b
-                break
-            prev, big = cur, b
-        click_log(f"[아이템정리] {tag} ⬆ 맨 위로 (휠 {up}번)")
-        # ② 보이는 칸을 까고 → 휠 한 칸 아래로
+        # ② 지금 자리에서 → 아래로 내려가며 끝까지 까고 → 끝에 닿으면 위로 한 칸씩 INV_UP_N 번
+        #    (2026-11-19 사용자: *"아이템창이 밑에 있으면 위로 조금씩 4번만 올려서 확인하고 …
+        #     위에 있으면 내리고 … 완전 위에 있으면 아래로 내려가면서 등록되어 있는 거 다 까주고"*)
+        #    ⚠ 휠은 **한 칸씩**만 보낸다 — 여러 칸을 한 번에 보내면 게임이 무시한다 (실측)
         done = 0
         downs = 0
+        ups = 0
+        phase = "down"
         skip = set()
         fails = {}
         while not self._item_stop and done < INV_OPEN_MAX:
@@ -31557,24 +31543,33 @@ class App(tk.Tk):
                     self.status.set(f"🎴 {tag} {done}번째 — {g}")
                 nap(random.uniform(*INV_GAP))
                 continue
-            if inv_bottom_empty(big):
-                click_log(f"[아이템정리] {tag} 맨 아랫줄이 빈칸 — 아이템 끝 (휠 {downs}번 내렸다)")
+            if phase == "down" and inv_bottom_empty(big):
+                click_log(f"[아이템정리] {tag} 맨 아랫줄이 빈칸 — 아이템 끝 (휠 {downs}번 내렸다) → 위로 {INV_UP_N}칸 확인")
+                phase = "up"
+            if phase == "up" and ups >= INV_UP_N:
                 break
             if downs >= INV_DOWN_MAX:
                 break
             if not self._inv_hand_wait(tag):
                 break
             prev = inv_list(big)
-            wheel_at(lx, ly, -1)
-            downs += 1
+            wheel_at(lx, ly, -1 if phase == "down" else 1)
+            if phase == "down":
+                downs += 1
+            else:
+                ups += 1
             nap(random.uniform(*INV_WHEEL_GAP))
             b = grab()
             if b is None:
                 break
             if float(abs(inv_list(b) - prev).mean()) < 1.5:
-                click_log(f"[아이템정리] {tag} 휠을 굴려도 안 움직인다 — 맨 아래 (휠 {downs}번)")
-                break
-        # ③ 가방 닫기 (가방 창이 보일 때만)
+                if phase == "down":
+                    click_log(f"[아이템정리] {tag} 휠을 굴려도 안 움직인다 — 맨 아래 (휠 {downs}번) → 위로 {INV_UP_N}칸 확인")
+                    phase = "up"
+                else:
+                    click_log(f"[아이템정리] {tag} 위로 굴려도 안 움직인다 — 맨 위")
+                    break
+        # ③ 다 깠으면 가방 ✕ (사용자: *"전부 다 깠다고 판단되면 x를 한번 눌러줘 그게 마무리"*)
         b = grab()
         if b is not None and tab_open(b) and not self._item_stop:
             if self._inv_hand_wait(tag):
