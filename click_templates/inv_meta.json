@@ -59,7 +59,8 @@
       16,
       "v",
       "v",
-      "now04"
+      "now04",
+      "v8"
     ],
     "bead_red": [
       18
@@ -68,7 +69,8 @@
       26,
       "v",
       "v",
-      "v"
+      "v",
+      "v8"
     ],
     "gift_box": [
       27
@@ -147,7 +149,9 @@
     ],
     "card_green": [
       "v",
-      "v"
+      "v",
+      "v8",
+      "v8"
     ]
   },
   "from": "#04 aaoo / #03 고주파 2026-11-19",
@@ -176,11 +180,16 @@
   "first": [
     [
       "bead_red2",
-      "bead_red",
-      "bead_gold2"
+      "bead_red"
     ],
     [
-      "gem_pink2",
+      "bead_gold2",
+      "bead_gold"
+    ],
+    [
+      "gem_pink2"
+    ],
+    [
       "gem_silver"
     ]
   ]

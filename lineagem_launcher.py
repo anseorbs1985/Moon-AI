@@ -587,6 +587,9 @@ INV_DLG_WAIT  = 3.5               # 누른 뒤 창이 뜨기를 기다리는 시
 INV_GAP       = (0.7, 1.3)        # 하나 깐 뒤 다음까지
 INV_WHEEL_GAP = (0.75, 1.05)      # 휠 한 칸 뒤 (목록이 멈추기를)
 INV_UP_N      = 4                 # (안 쓴다 — 2026-11-19 '위아래 왔다갔다 하지 마')
+INV_STALL_TRY = 3                 # 휠을 굴렸는데 목록이 그대로면 이만큼 더 굴려본 뒤에야 '맨 아래'
+#   🚨 2026-11-19 #08 — 선물 상자를 깐 직후 휠 한 칸이 안 먹어 '맨 아래' 로 보고 끝냈다.
+#      그 아래 카드 7장(빨간·초록 카드·보석 상자·금색 구슬)이 그대로 남았다.
 INV_TOP_GAP   = (0.30, 0.50)      # 맨 위로 올라갈 때 휠 한 칸 뒤 (누르지 않고 올라가기만)
 #   🧭 2026-11-19 사용자: *"뭐 이리 왔다 갔다 하냐 그냥 한번 훑어서 클릭할 거만 클릭하고 끝내"*
 #      → 가방을 열면 맨 위로 올라간 뒤 **위에서 아래로 한 번만** 훑는다. 끝에 닿으면 ✕.
@@ -3324,7 +3327,7 @@ NW = 5                         # 슬롯 버튼 너비 (전 6)
 NF_NUM = 9                     # 슬롯 번호는 크게 — NF(6) 에서 40% 키움 (6×1.4≈8.4→9)
 NIGHT_SHOW_MODE = False
 HIDE_LAUNCHERS = ("귀환주문서", "카매사오기")
-BACK_NOT_MIN = ("fix", "jakwi")   # 최소화하지 않고 맨 뒤로만 (작위는 보면서 돌린다)
+BACK_NOT_MIN = ("fix", "jakwi", "item")   # 최소화하지 않고 맨 뒤로만 (작위는 보면서 돌린다)
 # 실행 버튼을 눌러도 곧바로 클릭하지 않고 잠깐 뜸을 들인다 (창이 정리될 시간).
 # 2026-09-20 사용자: "즉각적인 반응을 해줬으면 좋겠어, 조금 느리면 답답하다"
 #   → 0.20~0.45 에서 0.08~0.16 으로. 버튼 누른 뒤 스레드를 띄우는 뜸(300ms)도 60ms 로 줄였다.
@@ -31422,7 +31425,7 @@ class App(tk.Tk):
     def _test_item(self, idx):
         if self._is_busy():
             return self._test_go("아이템정리", None, None)
-        self._minimize_all()
+        self._send_behind_only()
         self._test_go(f"아이템정리 #{idx + 1:02d}", "_item_stop", self._run_item, idx)
 
     def _start_item(self):
@@ -31430,7 +31433,7 @@ class App(tk.Tk):
         self._item_stop = False
         self._set_btn("btn_item_run", state="disabled", bg="#f39c12", text="⏳ 실행중...")
         self._set_btn("btn_item_stop", state="normal")
-        self._minimize_all()
+        self._send_behind_only()          # 최소화하지 않는다 (2026-11-19 사용자 지시)
         self.after(60, lambda: threading.Thread(target=self._run_task, args=("아이템정리", self._run_item), daemon=True).start())
 
     def _inv_hand_wait(self, tag):
@@ -31573,14 +31576,22 @@ class App(tk.Tk):
         skip = set()
         fails = {}
         oks = {}
-        # 🥇 먼저 쓸 것 — `first` 를 펼친 차례 (빨강 물병 → 노랑 물병 → … → 다이아몬드)
-        order = []
-        for _gs in (inv_meta().get("first") or []):
-            for _g in (_gs if isinstance(_gs, list) else [_gs]):
-                if _g not in order:
-                    order.append(_g)
-        rank = {g: i for i, g in enumerate(order)}
-        pick = None                  # 이번 실행에서 쓸 '먼저 쓸 것' 한 가지
+        # 🥇 먼저 쓸 것 — `first` 의 **한 칸 = 한 종류**(같은 물건의 그림 여러 장).
+        #    이번 실행에는 그중 **한 종류만** 다 쓴다 (2026-11-19 사용자: *"한 종류만 그냥
+        #    다 먹으라니까 이리저리 먹지 말고"*). 안 눌리면(99999 가 찼다) 다른 종류로
+        #    옮기지 않고, **다음 실행**에 다음 종류부터 본다 (`inv_first.json`).
+        fams = [(_gs if isinstance(_gs, list) else [_gs]) for _gs in (inv_meta().get("first") or [])]
+        rank = {g: i for i, f in enumerate(fams) for g in f}
+        _nf = len(fams)
+        _stp = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI", "inv_first.json")
+        try:
+            _stt = json.load(io.open(_stp, encoding="utf-8"))
+        except Exception:
+            _stt = {}
+        _start = int(_stt.get(str(si), 0) or 0) % _nf if _nf else 0
+        _pos = {(_start + k) % _nf: k for k in range(_nf)}     # 종류 → 이번 차례
+        pick = None                  # 이번 실행에서 쓸 종류 (fams 의 번호)
+        capped = False
         ups = 0
         while not self._item_stop and ups < INV_DOWN_MAX:
             if not self._inv_hand_wait(tag):
@@ -31614,7 +31625,7 @@ class App(tk.Tk):
                 return done
             hits = inv_find(big, skip)
             # 🥇 먼저 쓸 것은 한 가지만 — 처음 보일 때 차례가 가장 앞선 것을 고른다
-            if pick is None:
+            if pick is None and not capped:
                 _pr = [h for h in hits if h[2] in rank]
                 # 아래 두 줄 안에만 보이면 아직 고르지 않는다 — 한 칸 내리면 바로 아랫줄
                 # (더 앞선 차례가 있을 수 있다)까지 보인다. 되돌아 올라가지 않으려고.
@@ -31624,10 +31635,11 @@ class App(tk.Tk):
                     _pr = []
                     hits = [h for h in hits if h[2] not in rank]
                 if _pr:
-                    pick = min(_pr, key=lambda h: rank[h[2]])[2]
-                    click_log(f"[아이템정리] {tag} 🥇 이번에는 **{pick}** 한 가지만 쓴다 "
-                              f"(나머지 먼저 쓸 것은 다음 실행에)")
-            hits = [h for h in hits if h[2] not in rank or h[2] == pick]
+                    pick = rank[min(_pr, key=lambda h: _pos[rank[h[2]]])[2]]
+                    click_log(f"[아이템정리] {tag} 🥇 이번에는 **{'/'.join(fams[pick])}** 한 종류만 쓴다 "
+                              f"(차례 {_start + 1}번부터 · 나머지는 다음 실행에)")
+            hits = [h for h in hits if h[2] not in rank or (pick is not None and rank[h[2]] == pick
+                                                            and h[2] not in skip and not capped)]
             hits.sort(key=lambda h: (h[0], h[1]))       # 화면 위 → 아래
             if hits:
                 cy, cx, g, v, col = hits[0]
@@ -31647,9 +31659,12 @@ class App(tk.Tk):
                     if fails[g] >= 2:
                         skip.add(g)
                         click_log(f"[아이템정리] {tag} ⏭ {g} 는 이 클라에서 더 누르지 않는다")
-                        # 먼저 쓸 것이 **한 번도 안 눌렸으면**(99999 가 찼다) 다음 차례를 고른다
-                        if g == pick and not oks.get(g):
-                            pick = None
+                        # 먼저 쓸 것이 **한 번도 안 눌렸으면**(99999 가 찼다) — 다른 종류로
+                        # 옮기지 않는다. 다음 실행이 다음 종류부터 본다.
+                        if g in rank and rank[g] == pick and not any(oks.get(x) for x in fams[pick]):
+                            capped = True
+                            click_log(f"[아이템정리] {tag} 🥇 {'/'.join(fams[pick])} 가 안 눌린다 (가득 찬 듯) — "
+                                      f"이번에는 다른 종류를 쓰지 않는다 · 다음 실행에 다음 종류")
                 else:
                     done += 1
                     oks[g] = oks.get(g, 0) + 1
@@ -31665,15 +31680,33 @@ class App(tk.Tk):
             if not self._inv_hand_wait(tag):
                 break
             prev = inv_list(big)
-            wheel_at(lx, ly, -1)
-            downs += 1
-            nap(random.uniform(*INV_WHEEL_GAP))
-            b2 = grab()
-            if b2 is None:
+            moved = False
+            for _st in range(1 + INV_STALL_TRY):
+                if _st and not self._inv_hand_wait(tag):
+                    break
+                wheel_at(lx, ly, -1)
+                if not _st:
+                    downs += 1
+                nap(random.uniform(*INV_WHEEL_GAP))
+                b2 = grab()
+                if b2 is None:
+                    break
+                if float(abs(inv_list(b2) - prev).mean()) >= 1.5:
+                    moved = True
+                    if _st:
+                        click_log(f"[아이템정리] {tag} 🔁 휠이 {_st}번 안 먹었다 — 다시 굴려 내려갔다")
+                    break
+            if not moved:
+                click_log(f"[아이템정리] {tag} 휠을 굴려도 안 움직인다 — 맨 아래 "
+                          f"(휠 {downs}번 · {1 + INV_STALL_TRY}번 굴려봤다)")
                 break
-            if float(abs(inv_list(b2) - prev).mean()) < 1.5:
-                click_log(f"[아이템정리] {tag} 휠을 굴려도 안 움직인다 — 맨 아래 (휠 {downs}번)")
-                break
+        if pick is not None and _nf:
+            try:
+                _stt[str(si)] = (pick + 1) % _nf if capped else pick
+                os.makedirs(os.path.dirname(_stp), exist_ok=True)
+                io.open(_stp, "w", encoding="utf-8").write(json.dumps(_stt))
+            except Exception:
+                pass
         # ③ 다 깠으면 가방 ✕ (사용자: *"전부 다 깠다고 판단되면 x를 한번 눌러줘 그게 마무리"*)
         b = grab()
         if b is not None and tab_open(b) and not self._item_stop:
@@ -31776,7 +31809,7 @@ class App(tk.Tk):
         return kind or "open"
 
     def _run_item(self, slot_idx=None):
-        self._start_pause()
+        self._start_pause("item")
         try:
             self.status.set("2초 후 아이템정리 실행...")
             self.after(0, self._send_to_back)
