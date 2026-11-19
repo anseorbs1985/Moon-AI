@@ -172,5 +172,16 @@
   },
   "min": {
     "chest_silver": 0.84
-  }
+  },
+  "first": [
+    [
+      "bead_red2",
+      "bead_red",
+      "bead_gold2"
+    ],
+    [
+      "gem_pink2",
+      "gem_silver"
+    ]
+  ]
 }

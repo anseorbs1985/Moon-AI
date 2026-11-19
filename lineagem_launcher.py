@@ -31547,6 +31547,28 @@ class App(tk.Tk):
         phase = "down"
         skip = set()
         fails = {}
+        # 🥇 **먼저 쓸 것** — `inv_meta.json` 의 "first" (단계별 목록). 1판은 그것만 찾고,
+        #    2판에서 나머지를 깐다 (2026-11-19 사용자: *"10번 11번 먼저이고 그 다음이 7번 8번 순"*
+        #    — 빨강·노랑 물병 → 주황·푸른 드래곤의 다이아몬드. 99999 가 차면 안 눌린다 →
+        #    두 번 보고 건너뛴다(`skip`) — *"다음번에 실행할 때 눌러주면 돼"*)
+        rank = {}
+        for _i, _gs in enumerate(inv_meta().get("first") or []):
+            for _g in (_gs if isinstance(_gs, list) else [_gs]):
+                rank[_g] = _i
+        nlev = (max(rank.values()) + 1) if rank else 0
+        stage = 0                     # 0 ~ nlev-1 = 그 단계 것만 · nlev = 나머지 전부
+        up_lim = INV_UP_N
+
+        def _next_stage():
+            nonlocal stage, phase, downs, ups, up_lim
+            if stage < nlev:
+                # 다음 판은 앞 판이 지나온 자리를 다시 다 본다 — 끝까지 내렸다가, 내려온 만큼 + 4칸 위로
+                up_lim = max(up_lim, downs + INV_UP_N)
+                stage, phase, downs, ups = stage + 1, "down", 0, 0
+                click_log(f"[아이템정리] {tag} 🥇 {stage}단계 끝 → "
+                          + (f"{stage + 1}단계" if stage < nlev else "나머지") + " 를 깐다")
+                return True
+            return False
         while not self._item_stop and done < INV_OPEN_MAX:
             big = grab()
             if big is None:
@@ -31562,6 +31584,9 @@ class App(tk.Tk):
                           f"모르는 창이라 아무것도 누르지 않고 멈춘다 · 화면 {p}")
                 return done
             hits = inv_find(big, skip)
+            if stage < nlev:
+                hits = [h for h in hits if rank.get(h[2]) == stage]
+            hits.sort(key=lambda h: (rank.get(h[2], 99), h[0], h[1]))
             if hits:
                 cy, cx, g, v, col = hits[0]
                 if not self._inv_hand_wait(tag):
@@ -31589,7 +31614,9 @@ class App(tk.Tk):
             if phase == "down" and inv_bottom_empty(big):
                 click_log(f"[아이템정리] {tag} 맨 아랫줄이 빈칸 — 아이템 끝 (휠 {downs}번 내렸다) → 위로 {INV_UP_N}칸 확인")
                 phase = "up"
-            if phase == "up" and ups >= INV_UP_N:
+            if phase == "up" and ups >= up_lim:
+                if _next_stage():
+                    continue
                 break
             if downs >= INV_DOWN_MAX:
                 break
@@ -31611,6 +31638,8 @@ class App(tk.Tk):
                     phase = "up"
                 else:
                     click_log(f"[아이템정리] {tag} 위로 굴려도 안 움직인다 — 맨 위")
+                    if _next_stage():
+                        continue
                     break
         # ③ 다 깠으면 가방 ✕ (사용자: *"전부 다 깠다고 판단되면 x를 한번 눌러줘 그게 마무리"*)
         b = grab()
