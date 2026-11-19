@@ -31566,6 +31566,15 @@ class App(tk.Tk):
             targets = [slot_idx]
         else:
             targets = [i for i, s in enumerate(slots) if any((s or {}).get("coords", []))]
+            if not targets:
+                # 🧭 가방 정리는 **좌표를 쓰지 않는다** (그 슬롯의 클라 창을 직접 찾는다).
+                #    아이템정리 좌표를 한 번도 안 찍은 컴퓨터는 예전 규칙('좌표가 있는 슬롯만')으로는
+                #    대상이 0개라 눌러도 아무 일이 없었다 → 그때는 16클라 전부를 본다 (2026-11-19 —
+                #    사용자: "여기 컴퓨터랑 다른 컴퓨터랑 동일하게"). 좌표를 일부 슬롯에만 찍어둔
+                #    컴퓨터는 예전 그대로 그 슬롯만 돈다.
+                targets = list(range(SCHED_SLOTS))
+                click_log("[아이템정리] 🧭 아이템정리 좌표가 하나도 없는 컴퓨터다 — 16클라 전부를 본다 "
+                          "(가방 정리는 좌표를 쓰지 않는다)")
             random.shuffle(targets)
         click_log(f"[아이템정리] 🎴 시작 — 클라 {[t + 1 for t in targets]} (등록 그림 {len(inv_items())}장)")
         tot = 0
