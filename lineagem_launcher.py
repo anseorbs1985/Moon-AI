@@ -1257,6 +1257,14 @@ SUBC_LABELS   = ("절전해제", "7번혈귀", "≡ 메뉴", "재접속", "캐�
                  "보조3", "보조4", "보조5", "메인줄", "입장하기", "서커스퀘", "이동확인", "AUTO")
 SUBC_CYCLE    = (65 * 60, 68 * 60)     # 서커스(1시간) → 다음 캐릭까지
 SUBC_TICK_MS  = 15000
+SUBC_KICK_SEC = 40.0       # ▶ 를 누른 뒤 이 안에는 '마우스 조용 10초' 를 기다리지 않고 첫 클라를 바로 바꾼다
+SUBC_SOON_SEC = 120.0      # 이 안에 바꿀 클라가 남아 있으면 내린 창을 되살리지 않는다 (클라를 가린다)
+#   2026-11-19 사용자: *"보조서커스 이거 개별로 실행해도 최소화 해주던지 해야 할 것 같은데 이게 클라를 가린다"*
+#   예전: ▶ 를 눌러도 차례에만 올리고, 15초 틱이 '마우스 조용 10초' 를 본 뒤에야 시작하며 창을 내렸다.
+#         그동안 [🎪 보조 서커스] 창이 클라 위에 그대로 있었고, 클라 하나가 끝나면 다음 클라까지(25~60초)
+#         또 올라왔다.
+#   지금: 누르는 즉시 내리고(`_minimize_all`), 곧 바꿀 클라가 남아 있는 동안은 내려둔 채로 둔다.
+#         전부 첫 보조로 바꾸고 나면(다음 차례는 1시간 뒤) 평소처럼 맨 뒤로 되살린다.
 SUBC_SWITCH_GAP = (25.0, 60.0)         # 한 클라를 바꾼 뒤 다음 클라를 바꾸기까지 (부하 흩기)
 SUBC_RETRY    = (180, 300)             # 바꾸다 실패하면 다시 해보기까지
 SUBC_FAIL_MAX = 3                      # 이만큼 실패하면 그 슬롯은 그만둔다 (기록을 남긴다)
@@ -19746,8 +19754,59 @@ class App(tk.Tk):
             + " (순서 섞음 · 하나씩 바꾼다)")
         self.status.set(f"🎪 보조 서커스 시작 — {len(tg)}개 클라를 하나씩 첫 보조로 바꿉니다 "
                         f"(1시간 5분마다 다음 보조 · 끝나면 메인 사냥)")
-        if not getattr(self, "_subc_ticking", False):
+        # 🙈 누르는 즉시 창을 내린다 — [🎪 보조 서커스] 창과 런처가 클라를 가린다 (개별 ▶ 도 같다)
+        self._subc_kick = time.time() + SUBC_KICK_SEC
+        try:
+            self._minimize_all()
+        except Exception as e:
+            click_log(f"[보조서커스] ⚠ 창 내리기 실패 — {e}")
+        if getattr(self, "_subc_ticking", False):
+            # 이미 틱이 돌고 있다(다음 확인이 최대 15초 뒤) → 한 번 더 바로 본다
+            self.after(1500, self._subc_kick_tick)
+        else:
             self.after(1500, self._subc_tick)
+
+    def _subc_kick_tick(self):
+        """▶ 직후 한 번 — 돌고 있는 15초 틱을 기다리지 않고 지금 차례를 본다 (틱을 새로 걸지는 않는다)."""
+        try:
+            self._subc_try_start()
+        except Exception as e:
+            click_log(f"[보조서커스] ⚠ 차례 확인 오류 — {e}")
+
+    def _subc_soon(self, sec=None):
+        """🎪 곧(`SUBC_SOON_SEC` 안에) 바꿀 클라가 남아 있나 — 그동안은 내린 창을 되살리지 않는다."""
+        try:
+            st = getattr(self, "_subc_st", None)
+            if not st or not st.get("on"):
+                return False
+            lim = time.time() + float(SUBC_SOON_SEC if sec is None else sec)
+            return any(float(v.get("next", 0)) <= lim for v in (st.get("slots") or {}).values())
+        except Exception:
+            return False
+
+    def _subc_try_start(self):
+        """차례가 된 클라가 있으면 하나 시작한다 → 시작했으면 True."""
+        st = getattr(self, "_subc_st", None)
+        if not st or not st.get("on"):
+            return False
+        sl = st.get("slots") or {}
+        now = time.time()
+        # ▶ 를 방금 눌렀으면 '마우스 조용 10초' 는 기다리지 않는다 (누를 때마다 손은 따로 기다린다)
+        _kick = now < float(getattr(self, "_subc_kick", 0))
+        if (now >= float(st.get("gap_until", 0)) or _kick) \
+                and not self._is_busy() and (_kick or not self._human_busy()):
+            due = sorted((float(v.get("next", 0)), int(k)) for k, v in sl.items()
+                         if float(v.get("next", 0)) <= now)
+            if due:
+                si = due[0][1]
+                self._subc_kick = 0
+                self._busy_task = "보조서커스"
+                self._subc_cur = si
+                threading.Thread(target=self._run_task,
+                                 args=("보조서커스", self._subc_job, si),
+                                 daemon=True).start()
+                return True
+        return False
 
     def _subc_tick(self):
         self._subc_ticking = False
@@ -19764,18 +19823,7 @@ class App(tk.Tk):
                 self.status.set("🎪 보조 서커스 — 전부 끝났습니다")
                 self._subc_ticking = False
                 return
-            now = time.time()
-            if (now >= float(st.get("gap_until", 0))
-                    and not self._is_busy() and not self._human_busy()):
-                due = sorted((float(v.get("next", 0)), int(k)) for k, v in sl.items()
-                             if float(v.get("next", 0)) <= now)
-                if due:
-                    si = due[0][1]
-                    self._busy_task = "보조서커스"
-                    self._subc_cur = si
-                    threading.Thread(target=self._run_task,
-                                     args=("보조서커스", self._subc_job, si),
-                                     daemon=True).start()
+            self._subc_try_start()
         except Exception as e:
             click_log(f"[보조서커스] ⚠ 차례 확인 오류 — {e}")
         self.after(SUBC_TICK_MS, self._subc_tick)
@@ -40275,6 +40323,7 @@ class App(tk.Tk):
         try:
             if (getattr(self, "_min_by_us", False)
                     and not self._is_busy()
+                    and not self._subc_soon()      # 🎪 곧 바꿀 클라가 남아 있다 — 창이 클라를 가린다
                     and time.time() - getattr(self, "_min_at", 0) > 3.0):
                 self._min_by_us = False
                 click_log("[복원] 작업이 끝났는데 최소화가 남아 있어 맨 뒤로 되살림")
@@ -41561,7 +41610,10 @@ class App(tk.Tk):
         finally:
             self._clear_busy(name)
             try:
-                self.after(0, self._restore_back)
+                # 🎪 보조서커스 — 곧 바꿀 클라가 남아 있으면 내려둔 채로 둔다 (2026-11-19).
+                #    다 끝나면 `_minauto_tick` 이 맨 뒤로 되살린다 (`_min_by_us` 가 남아 있다).
+                if not (name == "보조서커스" and self._subc_soon()):
+                    self.after(0, self._restore_back)
             except Exception:
                 pass
 
