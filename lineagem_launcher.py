@@ -582,7 +582,10 @@ INV_COLOR_MAX = 12.0              # 평균 색 차이 (📏 고른 칸 ≤3.6 ·
 INV_WIN_MATCH = 0.85              # 가방 탭·결과·수량 창 (📏 그 창 1.00 · 아닐 때 ≤0.61)
 INV_OK_MATCH  = 0.80              # [모두 확인] (📏 그 창 1.00 · 아닐 때 0.61)
 INV_EMPTY_V   = 8.0               # 빈칸 = 평균 밝기 < 8 이고 밝은 점이 거의 없다 (📏 빈칸 2.5 · 아이템 ≥20.9)
-INV_DBL_GAP   = (0.08, 0.14)      # 두 번 누를 때 사이
+INV_DBL_GAP   = (0.10, 0.17)      # 두 번 누를 때 사이 (뗀 뒤 다음 누름까지)
+INV_DBL_HOLD  = (0.05, 0.09)      # 누르고 있다 떼는 시간 (사람 손 — 2026-11-19 실측 72ms)
+#   🚨 2026-11-19 #15 깃발 초록 카드 — 순간 클릭(누름·뗌 동시) 두 번에는 **고른 표시조차 안 생겼다.**
+#      사용자는 손으로 두 번 눌러 바로 열었다. 그래서 누름을 사람처럼 잠깐 유지한다.
 INV_DLG_WAIT  = 3.5               # 누른 뒤 창이 뜨기를 기다리는 시간
 INV_GAP       = (0.7, 1.3)        # 하나 깐 뒤 다음까지
 INV_WHEEL_GAP = (0.75, 1.05)      # 휠 한 칸 뒤 (목록이 멈추기를)
@@ -31758,9 +31761,7 @@ class App(tk.Tk):
                     continue
                 before = big
                 x, y = L + cx, T + cy
-                click_at(x, y)
-                nap(random.uniform(*INV_DBL_GAP))
-                click_at(x, y)
+                self._inv_dbl(x, y)
                 r = self._inv_after(anc, tag, P, before, cx, cy)
                 if r == "stop":
                     return done
@@ -31833,6 +31834,31 @@ class App(tk.Tk):
                 click_at(*P(INV_CLOSE))
         click_log(f"[아이템정리] ✔ {tag} 끝 — {done}번 깠다" + (f" · 건너뛴 것 {sorted(skip)}" if skip else ""))
         return done
+
+    def _inv_dbl(self, x, y):
+        """🖱 두 번 누르기 — 사람 손처럼 (누르고 50~90ms 있다 떼고, 100~170ms 뒤 다시)."""
+        down = False
+        try:
+            pyautogui.moveTo(x, y)
+            nap(random.uniform(0.04, 0.08))
+            for i in range(2):
+                pyautogui.mouseDown()
+                down = True
+                nap(random.uniform(*INV_DBL_HOLD))
+                pyautogui.mouseUp()
+                down = False
+                if i == 0:
+                    nap(random.uniform(*INV_DBL_GAP))
+        except Exception:
+            click_at(x, y)
+            nap(random.uniform(*INV_DBL_GAP))
+            click_at(x, y)
+        finally:
+            if down:
+                try:
+                    pyautogui.mouseUp()
+                except Exception:
+                    pass
 
     def _inv_qs_place(self, tag, P, anc, cx, cy, g):
         """🧺 가방 칸 한 번 클릭(고름) → 아래 빠른 칸 클릭(올림) → 그 칸을 아래로 끌기(자동 켬)."""
