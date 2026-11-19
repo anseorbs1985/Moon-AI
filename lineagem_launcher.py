@@ -590,6 +590,21 @@ INV_UP_N      = 4                 # (안 쓴다 — 2026-11-19 '위아래 왔다
 INV_STALL_TRY = 3                 # 휠을 굴렸는데 목록이 그대로면 이만큼 더 굴려본 뒤에야 '맨 아래'
 #   🚨 2026-11-19 #08 — 선물 상자를 깐 직후 휠 한 칸이 안 먹어 '맨 아래' 로 보고 끝냈다.
 #      그 아래 카드 7장(빨간·초록 카드·보석 상자·금색 구슬)이 그대로 남았다.
+# 🧺 먼저 쓸 것(물병·다이아몬드)은 가방에서 두 번 누르지 않고 **아래 빠른 칸 첫째에 올려 자동 사용**
+#    (2026-11-19 사용자: *"아래 첫 번째 칸에 클릭하고 내리면 되거든 … 그럼 자동으로 알아서 먹거든.
+#     하나 다 먹었으면 다른 거 남아 있으면 다음에 또 실행했을 때 다른 거 저 자리에 놔주면 되거든"*)
+#    📏 #12 시범 (546x307 창 기준) — 가방 칸 한 번 클릭(고름) → 빠른 칸 (211,274) 클릭(올림)
+#       → 그 칸을 아래로 14px 끌기 218ms (자동 켬) → 가방 ✕
+INV_QS_ON       = True
+INV_QS          = (211, 274)      # 아래 빠른 칸 — 아랫줄 첫째
+INV_QS_SWIPE    = 14              # 그 칸에서 아래로 이만큼 끈다 (= 자동 사용 켬)
+INV_QS_AUTO_BOX = (216, 256, 230, 268)   # 그 칸 오른쪽 위 — 자동 사용 표시(파란 화살표)
+INV_QS_AUTO_MIN = 10              # 📏 파란 점 — 켬 19·22·32 / 끔 0
+INV_QS_CNT_BOX  = (208, 276, 232, 292)   # 그 칸 오른쪽 아래 — 남은 개수 숫자(노란 글씨)
+INV_QS_CNT_MIN  = 5               # 📏 노란 점 — 남아 있음 11·15 / 다 먹어 회색(숫자 없음) 0
+#   🚨 자동 표시는 **다 먹은 뒤에도 남는다** (#04·#08·#12 실측 — 회색 다이아몬드 + 파란 표시 + 숫자 없음).
+#      그래서 '자동이 켜져 있나' 가 아니라 **'숫자가 남아 있나'** 로 다 먹었는지 본다.
+INV_SEL_RING    = 45              # 📏 고른 가방 칸 테두리 밝기 — 고름 65.5 / 평소 22~27
 INV_DOWN_BURST = (1, 2, 2, 3)     # 한 번에 이만큼 이어서 내린다 (사람처럼 — 매번 한 칸은 기계 같다)
 INV_UP_BURST   = (3, 4, 4, 5)     # 맨 위로 갈 때 (누르지 않으니 더 크게)
 INV_BURST_GAP  = (0.06, 0.16)     # 이어 굴릴 때 칸 사이
@@ -4750,6 +4765,44 @@ def inv_dim(big):
         kx, ky = _inv_k(big)
         x0, y0, x1, y1 = INV_DIM_BOX
         return float(big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].mean())
+    except Exception:
+        return -1.0
+
+
+def inv_qs_auto(big):
+    """아래 빠른 칸 첫째의 '자동 사용' 표시 (파란 점 수 · -1 = 못 봄)."""
+    try:
+        kx, ky = _inv_k(big)
+        x0, y0, x1, y1 = INV_QS_AUTO_BOX
+        c = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
+        return int(((c[:, :, 0] - c[:, :, 2] > 60) & (c[:, :, 0] > 150)).sum())
+    except Exception:
+        return -1
+
+
+def inv_qs_count(big):
+    """아래 빠른 칸 첫째의 남은 개수 숫자 (노란 점 수 · -1 = 못 봄)."""
+    try:
+        kx, ky = _inv_k(big)
+        x0, y0, x1, y1 = INV_QS_CNT_BOX
+        c = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
+        return int(((c[:, :, 2] > 170) & (c[:, :, 1] > 120) & (c[:, :, 0] < 100)).sum())
+    except Exception:
+        return -1
+
+
+def inv_sel_ring(big, cx, cy):
+    """가방 칸 테두리 밝기 — 골랐으면 금색 테두리로 밝아진다 (-1 = 못 봄)."""
+    import numpy as np
+    try:
+        kx, ky = _inv_k(big)
+        r0, r1 = int(round(15 * kx)), int(round(18 * kx))
+        c = big[cy - r1:cy + r1, cx - r1:cx + r1].astype(np.float32)
+        if c.shape[0] != 2 * r1 or c.shape[1] != 2 * r1:
+            return -1.0
+        m = np.ones(c.shape[:2], bool)
+        m[r1 - r0:r1 + r0, r1 - r0:r1 + r0] = False
+        return float(c[m].mean())
     except Exception:
         return -1.0
 
@@ -31618,6 +31671,24 @@ class App(tk.Tk):
             big = b2
             if float(abs(inv_list(big) - prev).mean()) < 1.5:
                 break
+        # 🧺 빠른 칸이 이미 자동으로 먹고 있으면 먼저 쓸 것은 건드리지 않는다
+        qs_busy = False
+        qs_done = False
+        if INV_QS_ON and fams:
+            _qa = inv_qs_auto(big)
+            _qc = inv_qs_count(big)
+            if _qc >= INV_QS_CNT_MIN and _qa >= INV_QS_AUTO_MIN:
+                qs_busy = True
+                click_log(f"[아이템정리] {tag} 🧺 아래 빠른 칸이 아직 **자동으로 먹는 중** (남은 숫자 {_qc} · "
+                          f"자동 {_qa}) — 물병·다이아몬드는 건드리지 않는다")
+            elif _qc >= INV_QS_CNT_MIN:
+                qs_busy = True
+                _qa2 = self._inv_qs_swipe(tag, P, anc)
+                click_log(f"[아이템정리] {tag} 🧺 빠른 칸에 남은 게 있는데 자동이 꺼져 있었다 → 켰다 "
+                          f"(자동 {_qa} → {_qa2})")
+            else:
+                click_log(f"[아이템정리] {tag} 🧺 아래 빠른 칸을 **다 먹었다/비었다** (남은 숫자 {_qc} · 자동 {_qa}) — "
+                          f"물병·다이아몬드가 보이면 그 칸에 올린다")
         if ups > 1:
             click_log(f"[아이템정리] {tag} ⬆ 맨 위로 올라왔다 (휠 약 {ups}칸) — 여기서부터 아래로 한 번 훑는다")
             nap(random.uniform(0.3, 0.6))
@@ -31638,7 +31709,7 @@ class App(tk.Tk):
             hits = inv_find(big, skip)
             # 🥇 먼저 쓸 것은 한 가지만 — 처음 보일 때 차례가 가장 앞선 것을 고른다
             deferred = False
-            if pick is None and not capped:
+            if pick is None and not capped and not qs_busy and not qs_done:
                 _pr = [h for h in hits if h[2] in rank and rank[h[2]] not in fam_done]
                 # 아래 두 줄 안에만 보이면 아직 고르지 않는다 — 한 칸 내리면 바로 아랫줄
                 # (더 앞선 차례가 있을 수 있다)까지 보인다. 되돌아 올라가지 않으려고.
@@ -31653,7 +31724,8 @@ class App(tk.Tk):
                     click_log(f"[아이템정리] {tag} 🥇 이번에는 **{'/'.join(fams[pick])}** 한 종류만 쓴다 "
                               f"(차례 {_start + 1}번부터 · 나머지는 다음 실행에)")
             hits = [h for h in hits if h[2] not in rank or (pick is not None and rank[h[2]] == pick
-                                                            and h[2] not in skip and not capped)]
+                                                            and h[2] not in skip and not capped
+                                                            and not qs_busy and not qs_done)]
             hits.sort(key=lambda h: (h[0], h[1]))       # 화면 위 → 아래
             # 🎯 누르기 시작한 칸이 아직 있으면 **그 칸부터** (2026-11-19 사용자: *"하나 누르고 다른 거
             #    눌렀다가 또 있으니까 하나 누르고 이러지 말고 하나씩 끝까지 완벽하게"*)
@@ -31676,6 +31748,14 @@ class App(tk.Tk):
                 cy, cx, g, v, col = hits[0]
                 if not self._inv_hand_wait(tag):
                     break
+                if INV_QS_ON and g in rank:
+                    # 🧺 두 번 누르지 않고 아래 빠른 칸에 올린다 — 이번 실행은 이것으로 끝
+                    qs_done = True
+                    stick = None
+                    if self._inv_qs_place(tag, P, anc, cx, cy, g):
+                        done += 1
+                    nap(random.uniform(*INV_GAP))
+                    continue
                 before = big
                 x, y = L + cx, T + cy
                 click_at(x, y)
@@ -31753,6 +31833,75 @@ class App(tk.Tk):
                 click_at(*P(INV_CLOSE))
         click_log(f"[아이템정리] ✔ {tag} 끝 — {done}번 깠다" + (f" · 건너뛴 것 {sorted(skip)}" if skip else ""))
         return done
+
+    def _inv_qs_place(self, tag, P, anc, cx, cy, g):
+        """🧺 가방 칸 한 번 클릭(고름) → 아래 빠른 칸 클릭(올림) → 그 칸을 아래로 끌기(자동 켬)."""
+        L, T = P((0, 0))
+        click_at(L + cx, T + cy)
+        nap(random.uniform(0.45, 0.75))
+        b = grab_window(anc)
+        ring = inv_sel_ring(b, cx, cy) if b is not None else -1
+        if ring < INV_SEL_RING:
+            p = self._inv_shot(b, tag, "qsel") if b is not None else ""
+            click_log(f"[아이템정리] 🚫 {tag} 🧺 {g} 를 눌렀는데 **고른 표시가 안 보인다** (테두리 {ring:.0f} · "
+                      f"기준 {INV_SEL_RING}) — 빠른 칸을 누르지 않는다 (그 칸 것을 먹어버린다) · 화면 {p}")
+            return False
+        if not self._inv_hand_wait(tag):
+            return False
+        qx, qy = P(INV_QS)
+        click_at(qx, qy)
+        nap(random.uniform(0.6, 1.0))
+        if not self._inv_hand_wait(tag):
+            return False
+        self._inv_qs_swipe(tag, P, anc, do_check=False)
+        nap(random.uniform(0.6, 1.0))
+        b = grab_window(anc)
+        qa = inv_qs_auto(b) if b is not None else -1
+        if qa >= INV_QS_AUTO_MIN:
+            click_log(f"[아이템정리] {tag} 🧺 **{g}** 를 아래 빠른 칸에 올리고 자동 사용을 켰다 (파란 점 {qa})")
+            return True
+        p = self._inv_shot(b, tag, "qauto") if b is not None else ""
+        click_log(f"[아이템정리] ⚠ {tag} 🧺 {g} 를 빠른 칸에 올렸는데 **자동 표시가 안 보인다** (파란 점 {qa}) · 화면 {p}")
+        return False
+
+    def _inv_qs_swipe(self, tag, P, anc, do_check=True):
+        """빠른 칸 첫째를 아래로 짧게 끈다 (= 자동 사용 켬) → 자동 표시 파란 점 수."""
+        if not self._inv_hand_wait(tag):
+            return -1
+        L, T = P((0, 0))
+        qx, qy = P(INV_QS)
+        # 그 칸을 아래로 짧게 끈다 (사용자 시범 14px · 218ms · 21점)
+        down = False
+        try:
+            kx = (P((546, 0))[0] - L) / 546.0
+            x0 = qx + random.randint(-2, 2)
+            y0 = qy + random.randint(-1, 1)
+            y1 = y0 + int(round((INV_QS_SWIPE + random.uniform(-2, 3)) * kx))
+            n = random.randint(14, 20)
+            pyautogui.moveTo(x0, y0)
+            nap(random.uniform(0.06, 0.10))
+            pyautogui.mouseDown()
+            down = True
+            nap(random.uniform(0.03, 0.06))
+            for i in range(1, n + 1):
+                pyautogui.moveTo(x0 + random.choice((0, 0, -1)), int(y0 + (y1 - y0) * i / float(n)))
+                nap(random.uniform(0.009, 0.014))
+            nap(random.uniform(0.02, 0.04))
+            pyautogui.mouseUp()
+            down = False
+        except Exception as e:
+            click_log(f"[아이템정리] ⚠ {tag} 🧺 빠른 칸 끌기 오류 — {type(e).__name__}: {e}")
+        finally:
+            if down:
+                try:
+                    pyautogui.mouseUp()
+                except Exception:
+                    pass
+        if not do_check:
+            return 0
+        nap(random.uniform(0.6, 1.0))
+        b = grab_window(anc)
+        return inv_qs_auto(b) if b is not None else -1
 
     def _inv_after(self, anc, tag, P, before, cx, cy):
         """두 번 누른 뒤 → 'result' · 'qty' · 'open' · 'same' · 'stop'."""
