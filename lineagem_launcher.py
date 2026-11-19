@@ -576,6 +576,16 @@ INV_COLS      = (406, 440, 474, 509)  # 칸 가로 중심
 INV_TAB_BOX   = (380, 34, 522, 64)    # 가방 탭 줄을 찾는 자리 (열려 있나)
 INV_RES_BOX   = (150, 0, 400, 80)     # 「뽑기 결과」 글자를 찾는 자리
 INV_QTY_BOX   = (140, 170, 245, 240)  # 「아이템 수량 선택」
+INV_CHOICE_BOX  = (200, 50, 350, 95)  # 「원하는 보상을 선택해 주세요.」 제목 (Choice 상자)
+INV_CHOICE_PICK = (185, 160)          # 그 창의 **맨 앞 카드**
+INV_CHOICE_MAX  = (275, 209)          # [Max]
+INV_CHOICE_N    = 3                   # 한 번 열 때 이 창을 몇 번까지 처리하나 (끝없이 돌지 않게)
+#   🎁 2026-11-19 사용자 #16 — *"초이스 상자 … 세 장 카드가 나오면 맨 앞에 카드를 선택해서 확인"* ·
+#      *"맨 앞에 카드 선택하고 아래 맥스 누르고 확인"*
+#   📏 #16 에서 실제로 눌러 잰 자리 (546x307): 맨 앞 카드 (185,160) · [Max] (275,209) ·
+#      [모두 확인 (n)] (311,234 — 그림으로 찾는다). 카드를 고르기 전에는 [모두 확인] 이 회색이다.
+#      제목 그림 `inv_choice.png` — 선택 창 4장 1.00 · 다른 화면 450여 장 최고 0.49.
+#   ⚠ 이 창에도 '아이템 수량 선택' 글자가 있다 → **수량 창보다 먼저** 본다.
 INV_OK_BOX    = (255, 215, 370, 285)  # [모두 확인] 을 찾는 자리
 #   📏 2026-11-19 #14 — 상자를 2개 이상 까면 **「보상」 제목 + 확정/확률 보상** 이 붙은 큰 수량 창이 뜬다.
 #      글자·버튼이 평소보다 **30px 아래**(수량 선택 y215 · [모두 확인 (2)] y256)라 범위 밖이었다
@@ -32244,8 +32254,9 @@ class App(tk.Tk):
         return inv_qs_auto(b) if b is not None else -1
 
     def _inv_after(self, anc, tag, P, before, cx, cy):
-        """두 번 누른 뒤 → 'result' · 'qty' · 'open' · 'same' · 'stop'."""
+        """두 번 누른 뒤 → 'result' · 'qty' · 'choice' · 'open' · 'same' · 'stop'."""
         import numpy as np
+        self._inv_choice_n = 0
         kind = None
         try:
             m0 = float(before.mean())
@@ -32264,6 +32275,9 @@ class App(tk.Tk):
                     continue
                 if inv_win_score(b, "inv_result", INV_RES_BOX) >= INV_WIN_MATCH:
                     seen = "result"
+                    break
+                if inv_win_score(b, "inv_choice", INV_CHOICE_BOX) >= INV_WIN_MATCH:
+                    seen = "choice"
                     break
                 if inv_win_score(b, "inv_qty", INV_QTY_BOX) >= INV_WIN_MATCH:
                     seen = "qty"
@@ -32294,6 +32308,36 @@ class App(tk.Tk):
                     return "stop"
                 click_at(*P(QUEST_REW_CLICK))
                 nap(random.uniform(*INV_SHUT_NAP))
+                continue
+            if seen == "choice":
+                kind = kind or "choice"
+                _chn = getattr(self, "_inv_choice_n", 0) + 1
+                self._inv_choice_n = _chn
+                if _chn > INV_CHOICE_N:
+                    p = self._inv_shot(b, tag, "choice")
+                    click_log(f"[아이템정리] 🚫 {tag} 보상 선택 창이 {INV_CHOICE_N}번 넘게 다시 떴다 — "
+                              f"아무것도 더 누르지 않고 멈춘다 · 화면 {p}")
+                    return "stop"
+                nap(random.uniform(*INV_SEE_NAP))
+                if not self._inv_hand_wait(tag):
+                    return "stop"
+                click_at(*P(INV_CHOICE_PICK))                 # 맨 앞 카드
+                nap(random.uniform(0.35, 0.55))
+                click_at(*P(INV_CHOICE_MAX))                  # [Max]
+                nap(random.uniform(0.30, 0.50))
+                b2 = grab_window(anc)
+                x, y, v = inv_ok_find(b2 if b2 is not None else b)
+                if x is None:
+                    p = self._inv_shot(b2 if b2 is not None else b, tag, "nochok")
+                    click_log(f"[아이템정리] 🚫 {tag} 보상 선택 창인데 [모두 확인] 을 못 찾았다 ({v:.2f}) — "
+                              f"아무것도 누르지 않고 멈춘다 · 화면 {p}")
+                    return "stop"
+                if not self._inv_hand_wait(tag):
+                    return "stop"
+                L, T = P((0, 0))
+                click_at(L + x, T + y)
+                click_log(f"[아이템정리] {tag} 🎁 보상 선택 창 — 맨 앞 카드 → Max → 모두 확인 ({v:.2f})")
+                nap(random.uniform(0.45, 0.70))
                 continue
             if seen == "qty":
                 kind = kind or "qty"
