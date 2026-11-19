@@ -168,7 +168,8 @@
       "v8"
     ],
     "card_blue2": [
-      "v8"
+      "v8",
+      "v11"
     ],
     "card_red2": [
       "v8"
@@ -199,7 +200,8 @@
   },
   "first": [
     [
-      "gem_pink2"
+      "gem_pink2",
+      "gem_pink"
     ],
     [
       "gem_silver"

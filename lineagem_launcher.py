@@ -587,8 +587,15 @@ INV_DBL_HOLD  = (0.05, 0.09)      # 누르고 있다 떼는 시간 (사람 손 �
 #   🚨 2026-11-19 #15 깃발 초록 카드 — 순간 클릭(누름·뗌 동시) 두 번에는 **고른 표시조차 안 생겼다.**
 #      사용자는 손으로 두 번 눌러 바로 열었다. 그래서 누름을 사람처럼 잠깐 유지한다.
 INV_DLG_WAIT  = 3.5               # 누른 뒤 창이 뜨기를 기다리는 시간
-INV_GAP       = (0.7, 1.3)        # 하나 깐 뒤 다음까지
-INV_WHEEL_GAP = (0.75, 1.05)      # 휠 한 칸 뒤 (목록이 멈추기를)
+INV_GAP       = (0.25, 0.55)      # 하나 깐 뒤 다음까지 (2026-11-19 사용자: "속도가 너무 늦어 카드 빨리 좀 까고")
+INV_POLL      = 0.12              # 누른 뒤 창이 떴나 보는 간격
+INV_SEE_NAP   = (0.22, 0.42)      # 결과·보상 창을 본 뒤 닫기까지
+INV_SHUT_NAP  = (0.30, 0.50)      # 닫은 뒤
+INV_CNT_DIFF  = 6.0               # 칸 오른쪽 아래 '개수 숫자' 가 이만큼 바뀌면 먹은 것 (겹친 물약은 숫자만 바뀐다)
+#   ⏱ 한 장 약 4초 → 약 2초. 줄인 것은 **기다림뿐** — 창 확인·모르는 창 멈춤·어두워짐 확인은 그대로다.
+#   🚫 `1.6초`(창이 안 뜨는 상자인지 기다리는 시간)는 줄이지 않았다 — 줄이면 늦게 뜬 결과 창을
+#      '가방이 안 보인다' 로 보고 멈춘다.
+INV_WHEEL_GAP = (0.40, 0.62)      # 휠 한 칸 뒤 (목록이 멈추기를)
 INV_UP_N      = 4                 # (안 쓴다 — 2026-11-19 '위아래 왔다갔다 하지 마')
 INV_STALL_TRY = 3                 # 휠을 굴렸는데 목록이 그대로면 이만큼 더 굴려본 뒤에야 '맨 아래'
 #   🚨 2026-11-19 #08 — 선물 상자를 깐 직후 휠 한 칸이 안 먹어 '맨 아래' 로 보고 끝냈다.
@@ -613,6 +620,14 @@ INV_UP_BURST   = (3, 4, 4, 5)     # 맨 위로 갈 때 (누르지 않으니 더 
 INV_BURST_GAP  = (0.06, 0.16)     # 이어 굴릴 때 칸 사이
 #   📏 한 칸 = 목록 30px · 다 보이는 칸이 들어가는 높이 약 120px → 3칸(90px)까지는 칸을 건너뛰지 않는다.
 #   ⚠ 휠은 여전히 **한 칸짜리 신호**를 여러 번 보낸다 (3칸을 한 신호로 보내면 게임이 무시한다 — 실측).
+INV_START_NAP = (0.5, 1.2)        # 가방이 열린 뒤 훑기 시작까지 (사용자: "0.5초~2초 사이에 그냥 바로")
+INV_UP_IDLE   = 10                # 위로 훑을 때 — 깔 것이 이만큼(휠 칸) 안 나오면 끝
+#   🧭 2026-11-19 사용자: *"인벤토리 들어가면 바로 휠로 내려야 하는데 너가 그때 너무 오래 끌어"*
+#      예전엔 가방을 열면 **맨 위까지 올라간 뒤**(#12 — 79칸 · 37초) 내려왔다.
+#      가방은 닫을 때의 자리로 다시 열리고, 깔 것(새로 얻은 것)은 **맨 뒤**에 모인다. 그래서:
+#        · 열린 자리가 맨 아래가 아니다 → 그 자리에서 **아래로** 끝까지
+#        · 열린 자리가 맨 아래다(맨 아랫줄이 빈칸) → 그 자리에서 **위로**, 깔 것이 10칸째 안 나오면 끝
+#      어느 쪽이든 **한 방향 한 번**이다. 되돌아가지 않는다.
 INV_TOP_GAP   = (0.30, 0.50)      # 맨 위로 올라갈 때 휠 한 칸 뒤 (누르지 않고 올라가기만)
 #   🧭 2026-11-19 사용자: *"뭐 이리 왔다 갔다 하냐 그냥 한번 훑어서 클릭할 거만 클릭하고 끝내"*
 #      → 가방을 열면 맨 위로 올라간 뒤 **위에서 아래로 한 번만** 훑는다. 끝에 닿으면 ✕.
@@ -31600,7 +31615,7 @@ class App(tk.Tk):
             self._focus_client_at(anc)
         except Exception:
             pass
-        nap(random.uniform(0.6, 1.0))
+        nap(random.uniform(0.3, 0.5))
         big = grab()
         if big is None:
             click_log(f"[아이템정리] 🚫 {tag} 화면을 못 찍었다")
@@ -31612,7 +31627,7 @@ class App(tk.Tk):
             ok = False
             t0 = time.time()
             while time.time() - t0 < 4.0:
-                nap(0.4)
+                nap(0.2)
                 big = grab()
                 if big is not None and tab_open(big):
                     ok = True
@@ -31656,24 +31671,16 @@ class App(tk.Tk):
         fam_done = set()             # 이번 실행에서 다 먹은 종류 (없어졌다)
         stick = None                 # (종류, x, y) — 누르기 시작한 칸. 없어질 때까지 그 칸만
         deferred = False
-        ups = 0
-        while not self._item_stop and ups < INV_DOWN_MAX:
-            if not self._inv_hand_wait(tag):
-                break
-            prev = inv_list(big)
-            _k = random.choice(INV_UP_BURST)
-            for _i in range(_k):
-                if _i:
-                    nap(random.uniform(*INV_BURST_GAP))
-                wheel_at(lx, ly, 1)
-            ups += _k
-            nap(random.uniform(*INV_TOP_GAP))
-            b2 = grab()
-            if b2 is None:
-                break
-            big = b2
-            if float(abs(inv_list(big) - prev).mean()) < 1.5:
-                break
+        nap(random.uniform(*INV_START_NAP))
+        sdir = -1                    # -1 = 아래로 · +1 = 위로
+        since = 0                    # 마지막으로 깔 것을 본 뒤 굴린 칸 수
+        moved_any = False            # 한 번이라도 목록이 움직였나
+        if inv_bottom_empty(big):
+            sdir = 1
+            click_log(f"[아이템정리] {tag} 🧭 가방이 **맨 아래**에서 열렸다 — 여기서 위로 훑는다 "
+                      f"(깔 것이 {INV_UP_IDLE}칸째 안 나오면 끝)")
+        else:
+            click_log(f"[아이템정리] {tag} 🧭 열린 자리에서 **아래로** 끝까지 훑는다")
         # 🧺 빠른 칸이 이미 자동으로 먹고 있으면 먼저 쓸 것은 건드리지 않는다
         qs_busy = False
         qs_done = False
@@ -31692,9 +31699,6 @@ class App(tk.Tk):
             else:
                 click_log(f"[아이템정리] {tag} 🧺 아래 빠른 칸을 **다 먹었다/비었다** (남은 숫자 {_qc} · 자동 {_qa}) — "
                           f"물병·다이아몬드가 보이면 그 칸에 올린다")
-        if ups > 1:
-            click_log(f"[아이템정리] {tag} ⬆ 맨 위로 올라왔다 (휠 약 {ups}칸) — 여기서부터 아래로 한 번 훑는다")
-            nap(random.uniform(0.3, 0.6))
         while not self._item_stop and done < INV_OPEN_MAX:
             big = grab()
             if big is None:
@@ -31718,7 +31722,7 @@ class App(tk.Tk):
                 # (더 앞선 차례가 있을 수 있다)까지 보인다. 되돌아 올라가지 않으려고.
                 _ky = big.shape[0] / float(INV_BASE_H)
                 _bot = (INV_LIST[3] - 70) * _ky        # 바로 아랫줄이 통째로 보여야 고른다
-                if _pr and not inv_bottom_empty(big) and all(h[0] > _bot for h in _pr):
+                if sdir < 0 and _pr and not inv_bottom_empty(big) and all(h[0] > _bot for h in _pr):
                     _pr = []
                     deferred = True
                     hits = [h for h in hits if h[2] not in rank]
@@ -31749,6 +31753,7 @@ class App(tk.Tk):
                         continue
             if hits:
                 cy, cx, g, v, col = hits[0]
+                since = 0
                 if not self._inv_hand_wait(tag):
                     break
                 if INV_QS_ON and g in rank:
@@ -31786,8 +31791,11 @@ class App(tk.Tk):
                     self.status.set(f"🎴 {tag} {done}번째 — {g}")
                 nap(random.uniform(*INV_GAP))
                 continue
-            if inv_bottom_empty(big):
+            if sdir < 0 and inv_bottom_empty(big):
                 click_log(f"[아이템정리] {tag} 맨 아랫줄이 빈칸 — 아이템 끝 (휠 {downs}번 내렸다)")
+                break
+            if sdir > 0 and since >= INV_UP_IDLE:
+                click_log(f"[아이템정리] {tag} 위로 {since}칸 동안 깔 것이 없다 — 끝 (휠 {downs}번 올렸다)")
                 break
             if downs >= INV_DOWN_MAX:
                 break
@@ -31795,7 +31803,8 @@ class App(tk.Tk):
                 break
             prev = inv_list(big)
             moved = False
-            for _st in range(1 + INV_STALL_TRY):
+            # 아직 한 번도 안 움직였으면(맨 아래에서 열렸을 수 있다) 한 번만 더 굴려보고 방향을 바꾼다
+            for _st in range(1 + (INV_STALL_TRY if (moved_any or sdir > 0) else 1)):
                 if _st and not self._inv_hand_wait(tag):
                     break
                 # 첫 번은 1~3칸을 이어서 (사람처럼) · 다시 굴릴 때는 한 칸
@@ -31804,21 +31813,30 @@ class App(tk.Tk):
                 for _i in range(_k):
                     if _i:
                         nap(random.uniform(*INV_BURST_GAP))
-                    wheel_at(lx, ly, -1)
+                    wheel_at(lx, ly, sdir)
                 if not _st:
                     downs += _k
+                    since += _k
                 nap(random.uniform(*INV_WHEEL_GAP))
                 b2 = grab()
                 if b2 is None:
                     break
                 if float(abs(inv_list(b2) - prev).mean()) >= 1.5:
                     moved = True
+                    moved_any = True
                     if _st:
-                        click_log(f"[아이템정리] {tag} 🔁 휠이 {_st}번 안 먹었다 — 다시 굴려 내려갔다")
+                        click_log(f"[아이템정리] {tag} 🔁 휠이 {_st}번 안 먹었다 — 다시 굴렸다")
                     break
+            if not moved and sdir < 0 and not moved_any:
+                # 처음부터 아래로 안 움직인다 = 가방이 **맨 아래**에서 열렸다 (마지막 줄까지 꽉 찬 가방)
+                sdir = 1
+                since = 0
+                click_log(f"[아이템정리] {tag} 🧭 아래로 안 움직인다 — 가방이 맨 아래에서 열렸다 → 위로 훑는다 "
+                          f"(깔 것이 {INV_UP_IDLE}칸째 안 나오면 끝)")
+                continue
             if not moved:
-                click_log(f"[아이템정리] {tag} 휠을 굴려도 안 움직인다 — 맨 아래 "
-                          f"(휠 {downs}번 · {1 + INV_STALL_TRY}번 굴려봤다)")
+                click_log(f"[아이템정리] {tag} 휠을 굴려도 안 움직인다 — 맨 " + ("아래" if sdir < 0 else "위")
+                          + f" (휠 {downs}번 · {1 + INV_STALL_TRY}번 굴려봤다)")
                 break
         if pick is not None and _nf:
             try:
@@ -31944,7 +31962,7 @@ class App(tk.Tk):
             while time.time() - t0 < INV_DLG_WAIT:
                 if self._item_stop:
                     return "stop"
-                nap(0.25)
+                nap(INV_POLL)
                 b = grab_window(anc)
                 if b is None:
                     continue
@@ -31966,20 +31984,20 @@ class App(tk.Tk):
                         break
             if seen == "result":
                 kind = kind or "result"
-                nap(random.uniform(0.5, 0.9))
+                nap(random.uniform(*INV_SEE_NAP))
                 if not self._inv_hand_wait(tag):
                     return "stop"
                 m = inv_meta().get("result") or {}
                 click_at(*P(tuple(m.get("close") or (526, 19))))
-                nap(random.uniform(0.6, 1.0))
+                nap(random.uniform(*INV_SHUT_NAP))
                 continue
             if seen == "reward":
                 kind = kind or "reward"
-                nap(random.uniform(0.5, 0.9))
+                nap(random.uniform(*INV_SEE_NAP))
                 if not self._inv_hand_wait(tag):
                     return "stop"
                 click_at(*P(QUEST_REW_CLICK))
-                nap(random.uniform(0.6, 1.0))
+                nap(random.uniform(*INV_SHUT_NAP))
                 continue
             if seen == "qty":
                 kind = kind or "qty"
@@ -31989,12 +32007,12 @@ class App(tk.Tk):
                     click_log(f"[아이템정리] 🚫 {tag} 수량 창인데 [모두 확인] 을 못 찾았다 ({v:.2f}) — "
                               f"아무것도 누르지 않고 멈춘다 · 화면 {p}")
                     return "stop"
-                nap(random.uniform(0.4, 0.8))
+                nap(random.uniform(0.25, 0.45))
                 if not self._inv_hand_wait(tag):
                     return "stop"
                 L, T = P((0, 0))
                 click_at(L + x, T + y)
-                nap(random.uniform(0.8, 1.2))
+                nap(random.uniform(0.45, 0.70))
                 continue
             if seen == "inv":
                 _bs = getattr(self, "_inv_base", -1)
@@ -32015,7 +32033,16 @@ class App(tk.Tk):
                     d = float(np.abs(a1 - a2).mean())
                 except Exception:
                     d = 99.0
-                return "open" if d >= 6.0 else "same"
+                # 🔢 겹쳐 있는 것(물약 등)은 하나 먹어도 그림은 그대로고 **개수 숫자만** 바뀐다
+                try:
+                    n1 = before[cy + int(4 * kx):cy + int(17 * kx), cx - int(3 * kx):cx + int(17 * kx)].astype(np.float32)
+                    n2 = b[cy + int(4 * kx):cy + int(17 * kx), cx - int(3 * kx):cx + int(17 * kx)].astype(np.float32)
+                    dn = float(np.abs(n1 - n2).mean())
+                except Exception:
+                    dn = 0.0
+                if d >= 6.0:
+                    return "open"
+                return "count" if dn >= INV_CNT_DIFF else "same"
             # 아무것도 못 봤다 = 모르는 창
             p = self._inv_shot(b, tag, "unknown") if b is not None else ""
             click_log(f"[아이템정리] 🚫 {tag} **모르는 창**이 떴다 — 아무것도 누르지 않고 멈춘다 · 화면 {p}")
