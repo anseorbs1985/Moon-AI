@@ -590,6 +590,11 @@ INV_UP_N      = 4                 # (안 쓴다 — 2026-11-19 '위아래 왔다
 INV_STALL_TRY = 3                 # 휠을 굴렸는데 목록이 그대로면 이만큼 더 굴려본 뒤에야 '맨 아래'
 #   🚨 2026-11-19 #08 — 선물 상자를 깐 직후 휠 한 칸이 안 먹어 '맨 아래' 로 보고 끝냈다.
 #      그 아래 카드 7장(빨간·초록 카드·보석 상자·금색 구슬)이 그대로 남았다.
+INV_DOWN_BURST = (1, 2, 2, 3)     # 한 번에 이만큼 이어서 내린다 (사람처럼 — 매번 한 칸은 기계 같다)
+INV_UP_BURST   = (3, 4, 4, 5)     # 맨 위로 갈 때 (누르지 않으니 더 크게)
+INV_BURST_GAP  = (0.06, 0.16)     # 이어 굴릴 때 칸 사이
+#   📏 한 칸 = 목록 30px · 다 보이는 칸이 들어가는 높이 약 120px → 3칸(90px)까지는 칸을 건너뛰지 않는다.
+#   ⚠ 휠은 여전히 **한 칸짜리 신호**를 여러 번 보낸다 (3칸을 한 신호로 보내면 게임이 무시한다 — 실측).
 INV_TOP_GAP   = (0.30, 0.50)      # 맨 위로 올라갈 때 휠 한 칸 뒤 (누르지 않고 올라가기만)
 #   🧭 2026-11-19 사용자: *"뭐 이리 왔다 갔다 하냐 그냥 한번 훑어서 클릭할 거만 클릭하고 끝내"*
 #      → 가방을 열면 맨 위로 올라간 뒤 **위에서 아래로 한 번만** 훑는다. 끝에 닿으면 ✕.
@@ -597,7 +602,7 @@ INV_TOP_GAP   = (0.30, 0.50)      # 맨 위로 올라갈 때 휠 한 칸 뒤 (�
 #      목록 차례대로 처음 보이는 것 하나를 골라 다 누른다. 나머지 먼저 쓸 것은 다음 실행에.
 INV_DOWN_MAX  = 80                # 내려갈 때 최대 휠 칸
 INV_OPEN_MAX  = 150               # 한 클라에서 최대 몇 번 까나
-INV_SLOT_GAP  = (2.0, 4.0)        # 클라 사이
+INV_SLOT_GAP  = (5.0, 20.0)        # 클라와 클라 사이 (2026-11-19 사용자: "5~20초 사이 랜덤 · 넌 사람이야")
 INV_DIM_BOX   = (0, 230, 180, 300) # 가방 밖 게임 화면 (왼쪽 아래) — 창이 덮으면 어두워진다
 INV_DIM_RATIO = 0.55              # 처음 밝기의 이만큼 밑이면 '무언가 화면을 덮었다'
 #   📏 실측 — 평소 90~102 · 수량 창이 덮으면 24.7 (0.25배). 가방 목록은 빈칸이 있으면 33 까지
@@ -31592,13 +31597,20 @@ class App(tk.Tk):
         _pos = {(_start + k) % _nf: k for k in range(_nf)}     # 종류 → 이번 차례
         pick = None                  # 이번 실행에서 쓸 종류 (fams 의 번호)
         capped = False
+        fam_done = set()             # 이번 실행에서 다 먹은 종류 (없어졌다)
+        stick = None                 # (종류, x, y) — 누르기 시작한 칸. 없어질 때까지 그 칸만
+        deferred = False
         ups = 0
         while not self._item_stop and ups < INV_DOWN_MAX:
             if not self._inv_hand_wait(tag):
                 break
             prev = inv_list(big)
-            wheel_at(lx, ly, 1)
-            ups += 1
+            _k = random.choice(INV_UP_BURST)
+            for _i in range(_k):
+                if _i:
+                    nap(random.uniform(*INV_BURST_GAP))
+                wheel_at(lx, ly, 1)
+            ups += _k
             nap(random.uniform(*INV_TOP_GAP))
             b2 = grab()
             if b2 is None:
@@ -31607,7 +31619,7 @@ class App(tk.Tk):
             if float(abs(inv_list(big) - prev).mean()) < 1.5:
                 break
         if ups > 1:
-            click_log(f"[아이템정리] {tag} ⬆ 맨 위로 올라왔다 (휠 {ups - 1}칸) — 여기서부터 아래로 한 번 훑는다")
+            click_log(f"[아이템정리] {tag} ⬆ 맨 위로 올라왔다 (휠 약 {ups}칸) — 여기서부터 아래로 한 번 훑는다")
             nap(random.uniform(0.3, 0.6))
         while not self._item_stop and done < INV_OPEN_MAX:
             big = grab()
@@ -31625,14 +31637,16 @@ class App(tk.Tk):
                 return done
             hits = inv_find(big, skip)
             # 🥇 먼저 쓸 것은 한 가지만 — 처음 보일 때 차례가 가장 앞선 것을 고른다
+            deferred = False
             if pick is None and not capped:
-                _pr = [h for h in hits if h[2] in rank]
+                _pr = [h for h in hits if h[2] in rank and rank[h[2]] not in fam_done]
                 # 아래 두 줄 안에만 보이면 아직 고르지 않는다 — 한 칸 내리면 바로 아랫줄
                 # (더 앞선 차례가 있을 수 있다)까지 보인다. 되돌아 올라가지 않으려고.
                 _ky = big.shape[0] / float(INV_BASE_H)
                 _bot = (INV_LIST[3] - 70) * _ky        # 바로 아랫줄이 통째로 보여야 고른다
                 if _pr and not inv_bottom_empty(big) and all(h[0] > _bot for h in _pr):
                     _pr = []
+                    deferred = True
                     hits = [h for h in hits if h[2] not in rank]
                 if _pr:
                     pick = rank[min(_pr, key=lambda h: _pos[rank[h[2]]])[2]]
@@ -31641,6 +31655,23 @@ class App(tk.Tk):
             hits = [h for h in hits if h[2] not in rank or (pick is not None and rank[h[2]] == pick
                                                             and h[2] not in skip and not capped)]
             hits.sort(key=lambda h: (h[0], h[1]))       # 화면 위 → 아래
+            # 🎯 누르기 시작한 칸이 아직 있으면 **그 칸부터** (2026-11-19 사용자: *"하나 누르고 다른 거
+            #    눌렀다가 또 있으니까 하나 누르고 이러지 말고 하나씩 끝까지 완벽하게"*)
+            if stick:
+                _kx = big.shape[1] / float(INV_BASE_W)
+                _same = [h for h in hits if h[2] == stick[0] and abs(h[1] - stick[1]) < 14 * _kx
+                         and abs(h[0] - stick[2]) < 24 * _kx]
+                if _same:
+                    hits = _same + [h for h in hits if h not in _same]
+                else:
+                    _sg = stick[0]
+                    stick = None
+                    if _sg in rank and pick is not None and rank[_sg] == pick and not capped:
+                        fam_done.add(pick)
+                        click_log(f"[아이템정리] {tag} 🥇 {'/'.join(fams[pick])} 를 **다 먹었다** — "
+                                  f"다른 종류가 보이면 그걸 쓴다")
+                        pick = None
+                        continue
             if hits:
                 cy, cx, g, v, col = hits[0]
                 if not self._inv_hand_wait(tag):
@@ -31658,6 +31689,7 @@ class App(tk.Tk):
                     click_log(f"[아이템정리] {tag} ⚠ {g} 를 두 번 눌렀는데 아무 변화가 없다 ({fails[g]}번째)")
                     if fails[g] >= 2:
                         skip.add(g)
+                        stick = None
                         click_log(f"[아이템정리] {tag} ⏭ {g} 는 이 클라에서 더 누르지 않는다")
                         # 먼저 쓸 것이 **한 번도 안 눌렸으면**(99999 가 찼다) — 다른 종류로
                         # 옮기지 않는다. 다음 실행이 다음 종류부터 본다.
@@ -31668,6 +31700,7 @@ class App(tk.Tk):
                 else:
                     done += 1
                     oks[g] = oks.get(g, 0) + 1
+                    stick = (g, cx, cy)
                     click_log(f"[아이템정리] {tag} ✅ {g} 깠다 ({r} · 일치도 {v:.2f} · 색차 {col:.1f})")
                     self.status.set(f"🎴 {tag} {done}번째 — {g}")
                 nap(random.uniform(*INV_GAP))
@@ -31684,9 +31717,15 @@ class App(tk.Tk):
             for _st in range(1 + INV_STALL_TRY):
                 if _st and not self._inv_hand_wait(tag):
                     break
-                wheel_at(lx, ly, -1)
+                # 첫 번은 1~3칸을 이어서 (사람처럼) · 다시 굴릴 때는 한 칸
+                #   ⚠ '먼저 쓸 것' 을 보려고 미룬 화면은 한 칸만 — 3칸이면 그 줄이 위로 잘린다
+                _k = 1 if (_st or deferred) else random.choice(INV_DOWN_BURST)
+                for _i in range(_k):
+                    if _i:
+                        nap(random.uniform(*INV_BURST_GAP))
+                    wheel_at(lx, ly, -1)
                 if not _st:
-                    downs += 1
+                    downs += _k
                 nap(random.uniform(*INV_WHEEL_GAP))
                 b2 = grab()
                 if b2 is None:
