@@ -4768,21 +4768,30 @@ def _inv_fit(t, kx, ky):
 
 
 def inv_win_score(big, name, box):
-    """그 자리에서 그 창 그림의 점수 (-1 = 못 봄)."""
+    """그 자리에서 그 창 그림의 점수 (-1 = 못 봄).
+
+    `<name>_2.png` 가 있으면 그것도 대어 **높은 쪽**을 쓴다 (2026-11-19).
+    📏 「뽑기 결과」 는 팩에 따라 제목이 **빛나며** 뜬다(상급 변신 뽑기팩 — 카드 11장) —
+       평소 그림으로는 0.81(기준 0.85)이라 못 알아보고 '가방이 안 보인다' 로 멈췄다(#14).
+       빛나는 판을 `inv_result_2.png` 로 넣었다: 그 화면 1.00 · 평소 결과 창 0.81 ·
+       결과 창이 아닌 화면 453장 최고 0.31."""
     import cv2
-    try:
-        t = inv_tpl(name)
-        if big is None or t is None:
-            return -1.0
-        kx, ky = _inv_k(big)
-        t = _inv_fit(t, kx, ky)
-        x0, y0, x1, y1 = box
-        a = big[max(0, int(y0 * ky)):int(y1 * ky), max(0, int(x0 * kx)):int(x1 * kx)]
-        if a.shape[0] < t.shape[0] or a.shape[1] < t.shape[1]:
-            return -1.0
-        return float(cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED).max())
-    except Exception:
-        return -1.0
+    best = -1.0
+    for nm in (name, name + "_2"):
+        try:
+            t = inv_tpl(nm)
+            if big is None or t is None:
+                continue
+            kx, ky = _inv_k(big)
+            t = _inv_fit(t, kx, ky)
+            x0, y0, x1, y1 = box
+            a = big[max(0, int(y0 * ky)):int(y1 * ky), max(0, int(x0 * kx)):int(x1 * kx)]
+            if a.shape[0] < t.shape[0] or a.shape[1] < t.shape[1]:
+                continue
+            best = max(best, float(cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED).max()))
+        except Exception:
+            continue
+    return best
 
 
 def inv_ok_find(big):
@@ -31961,14 +31970,25 @@ class App(tk.Tk):
             else:
                 click_log(f"[아이템정리] {tag} 🧺 아래 빠른 칸을 **다 먹었다/비었다** (남은 숫자 {_qc} · 자동 {_qa}) — "
                           f"물병·다이아몬드가 보이면 그 칸에 올린다")
+        late_n = 0                   # 🕐 늦게 뜬 창을 닫아준 횟수 (끝없이 돌지 않게)
         while not self._item_stop and done < INV_OPEN_MAX:
             big = grab()
             if big is None:
                 break
             if not tab_open(big):
-                p = self._inv_shot(big, tag, "noinv")
-                click_log(f"[아이템정리] 🚫 {tag} 가방 창이 안 보인다 — 아무것도 누르지 않고 멈춘다 · 화면 {p}")
-                return done
+                # 🕐 **늦게 뜬 창**일 수 있다 (2026-11-19 #14 — 11장짜리 뽑기팩은 결과 창이
+                #    카드를 깐 '다음' 바퀴에야 떴다). 아는 창(결과·수량·보상)이면 닫고 이어서 한다.
+                #    🚫 그래도 모르는 창이면 예전처럼 아무것도 누르지 않고 멈춘다 (_inv_after 가 남긴다).
+                _late = self._inv_after(anc, tag, P, big,
+                                        big.shape[1] // 2, big.shape[0] // 2)
+                late_n += 1
+                if _late == "stop" or late_n > 3:
+                    if not self._item_stop:
+                        p = self._inv_shot(big, tag, "noinv")
+                        click_log(f"[아이템정리] 🚫 {tag} 가방 창이 안 보인다 — 아무것도 누르지 않고 멈춘다 · 화면 {p}")
+                    return done
+                click_log(f"[아이템정리] {tag} 🕐 늦게 뜬 창({_late})을 닫았다 — 이어서 한다")
+                continue
             _dm, _dv, _db = dimmed(big)
             if _dm:
                 nap(random.uniform(*INV_DIM_AGAIN))          # 순간 이펙트일 수 있다 — 한 번 더 본다
