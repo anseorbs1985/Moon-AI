@@ -6977,7 +6977,7 @@ def itemreg_zero_price(coord):
         return None, f"확인 실패 {e!r}"
 
 
-def itemreg_img_seen(k, coord):
+def itemreg_img_seen(k, coord, big=None):
     """그 칸의 🖼 이 지금 보이나 — (보임?, 점수).
 
     **창을 직접 캡처(PrintWindow)** 한다. 일반 `find_image` 는 화면을 긁어서
@@ -6989,7 +6989,8 @@ def itemreg_img_seen(k, coord):
         paths = img_list("itemreg", k)
         if not paths:
             return False, -1.0
-        big = grab_window(coord)
+        if big is None:
+            big = grab_window(coord)
         if big is None:
             return False, 0.0
         _k = itemreg_geom(big)[0]
@@ -7566,9 +7567,13 @@ def itemreg_hit_area():
 #      후보 셋을 쟀다 — 판매 버튼만 0.46 · 글자만 0.41 · **두 버튼 0.24** ← 가장 깨끗하다
 #   🚫 **못 봐도 누른다** (ITEMREG_SELL_MAX 뒤) — 그림은 더 잘 누르기 위한 것이지
 #      안 누르기 위한 것이 아니다 (2026-11-08 교훈). 못 본 것은 기록에 남긴다.
-#   🚫 그림을 자른 창 크기와 다르면(확대한 창 등) **판정하지 않는다** — 늘린 그림은
-#      흐려져 점수가 떨어지고, 그러면 매번 한도까지 기다려 **지금보다 느려진다.**
-#      그 크기에서 쓰려면 그 창에서 한 장 더 받아야 한다.
+#   🔍 **확대한 창도 판정한다** (2026-11-19 사용자: *"화면 확대했을 때 아이템 등록 빠릿빠릿하게"*)
+#      예전엔 '늘린 그림은 흐려진다' 고 보고 확대 창은 판정하지 않았다(판매버튼 판정없음) →
+#      버튼을 안 보고 0.16~0.22초 뒤 '4' 를 눌렀고, 씹히면 1.6초 + 다시 1.6초를 기다렸다.
+#   📏 실측 (2504x1352 창 · 저장 화면 24장): 패널 있음 — 작은 그림을 늘려서 **0.918** ·
+#      그 창에서 자른 그림 **1.000** / 패널 없음 23장(각성·수호성·접속·등록창) 최고 **0.36**
+#      → 그 크기에서 자른 그림(`itemreg_sell_2.png`)이 있으면 그것을, 없으면 작은 그림을 늘려 쓴다.
+#   🚫 기준보다 **작은** 창(6% 넘게)은 아직 판정하지 않는다 — 재보지 않았다.
 ITEMREG_SELL_MATCH  = 0.70
 ITEMREG_SELL_MAX    = 0.80           # 이만큼 기다려도 안 보이면 그냥 누른다(초)
 ITEMREG_SELL_PAD    = 12             # 그 자리 둘레로 이만큼 더 본다(px)
@@ -7587,57 +7592,82 @@ ITEMREG_DLG_MAX     = 0.9            # 버튼을 **보고** 누른 '4' — 이�
 #   (버튼을 판정하지 못한 창 — 확대한 창 등 — 은 예전처럼 ITEMREG_SEE_MAX 1.6초)
 #   🚫 ITEMREG_DLG_MAX 를 0.5 밑으로 내리지 말 것 — 뜨는 중인 등록창 위에 '4' 가 또 들어간다.
 ITEMREG_PEND_SEC    = 2.0            # 도는 중에 누른 클릭 — 이 안이면 끝난 뒤 이어서 본다
-_ITEMREG_SELL = {"mt": None, "tpl": None, "meta": None}
+_ITEMREG_SELL = {"mt": None, "tpl": None, "meta": None, "all": []}
+ITEMREG_SELL_FILES = ("itemreg_sell", "itemreg_sell_2")   # 작은 창 · 확대 창(2504x1352)
+
+
+def itemreg_sell_all():
+    """[검색][판매] 그림들 → [(그림, meta), …] (자른 창 크기마다 한 장). 파일이 바뀌면 다시 읽는다."""
+    paths = []
+    for nm in ITEMREG_SELL_FILES:
+        p = os.path.join(IMG_DIR, nm + ".png")
+        j = os.path.join(IMG_DIR, nm + ".json")
+        if os.path.exists(p) and os.path.exists(j):
+            paths.append((p, j))
+    try:
+        mt = tuple((os.path.getmtime(p), os.path.getmtime(j)) for p, j in paths)
+    except Exception:
+        return []
+    if _ITEMREG_SELL["mt"] != mt:
+        out = []
+        try:
+            import cv2, numpy as np
+            for p, j in paths:
+                try:
+                    with open(j, encoding="utf-8") as f:
+                        meta = json.load(f) or {}
+                    tpl = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+                    if (tpl is not None and int(meta.get("w", 0)) > 0
+                            and int(meta.get("h", 0)) > 0):
+                        out.append((tpl, meta))
+                except Exception:
+                    continue
+        except Exception:
+            out = []
+        _ITEMREG_SELL.update(mt=mt, all=out,
+                             tpl=(out[0][0] if out else None),
+                             meta=(out[0][1] if out else None))
+    return list(_ITEMREG_SELL["all"])
 
 
 def itemreg_sell_load():
-    """[검색][판매] 그림과 그 자리 → (그림, meta) 또는 (None, None). 파일이 바뀌면 다시 읽는다."""
-    p = os.path.join(IMG_DIR, "itemreg_sell.png")
-    j = os.path.join(IMG_DIR, "itemreg_sell.json")
-    try:
-        mt = (os.path.getmtime(p), os.path.getmtime(j))
-    except Exception:
-        return None, None
-    if _ITEMREG_SELL["mt"] != mt:
-        try:
-            import cv2, numpy as np
-            with open(j, encoding="utf-8") as f:
-                meta = json.load(f) or {}
-            tpl = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
-            if tpl is None or int(meta.get("w", 0)) <= 0 or int(meta.get("h", 0)) <= 0:
-                tpl, meta = None, None
-        except Exception:
-            tpl, meta = None, None
-        _ITEMREG_SELL.update(mt=mt, tpl=tpl, meta=meta)
-    return _ITEMREG_SELL["tpl"], _ITEMREG_SELL["meta"]
+    """첫(작은 창) 그림과 그 자리 → (그림, meta) 또는 (None, None)."""
+    a = itemreg_sell_all()
+    return (a[0][0], a[0][1]) if a else (None, None)
 
 
-def itemreg_sell_seen(coord):
+def itemreg_sell_seen(coord, big=None):
     """아이템 설명 패널의 [검색][판매] 버튼이 보이나 → (상태, 점수).
 
     상태 — True 보인다 / False 안 보인다 / **None 판정할 수 없다**
-    (그림이 없다 · 창 크기가 그림을 자른 창과 다르다 · 못 찍었다)."""
-    tpl, meta = itemreg_sell_load()
-    if tpl is None:
+    (그림이 없다 · 창이 그림을 자른 창보다 작다 · 못 찍었다).
+    `big` 을 주면 그 화면을 쓴다 (캡처를 한 번 줄인다 — 확대 창은 한 번에 약 0.1초)."""
+    allt = itemreg_sell_all()
+    if not allt:
         return None, -1.0
     try:
         import cv2
-        big = grab_window(coord)
+        if big is None:
+            big = grab_window(coord)
         if big is None:
             return None, -1.0
+        # 그 창 높이에 **가장 가까운** 그림을 고른다 (확대 창은 확대 창에서 자른 것)
+        tpl, meta = min(allt, key=lambda tm: abs(
+            big.shape[0] / float(tm[1]["h"]) - 1.0))
         k = big.shape[0] / float(meta["h"])
-        if abs(k - 1.0) > ITEMREG_SELL_NEAR:
-            return None, -1.0
+        if k < 1.0 - ITEMREG_SELL_NEAR:
+            return None, -1.0             # 그림보다 작은 창 — 재보지 않았다
         t = tpl
         if abs(k - 1.0) > 0.02:
             t = cv2.resize(tpl, (max(3, int(round(tpl.shape[1] * k))),
                                  max(3, int(round(tpl.shape[0] * k)))),
                            interpolation=cv2.INTER_CUBIC if k > 1 else cv2.INTER_AREA)
+        _pad = int(round(ITEMREG_SELL_PAD * max(1.0, k)))
         ox = (big.shape[1] - float(meta["w"]) * k) / 2.0
-        x1 = int(round(ox + float(meta["dx"]) * k)) - ITEMREG_SELL_PAD
-        y1 = int(round(float(meta["dy"]) * k)) - ITEMREG_SELL_PAD
-        x2 = x1 + t.shape[1] + ITEMREG_SELL_PAD * 2
-        y2 = y1 + t.shape[0] + ITEMREG_SELL_PAD * 2
+        x1 = int(round(ox + float(meta["dx"]) * k)) - _pad
+        y1 = int(round(float(meta["dy"]) * k)) - _pad
+        x2 = x1 + t.shape[1] + _pad * 2
+        y2 = y1 + t.shape[0] + _pad * 2
         sub = big[max(0, y1):min(big.shape[0], y2), max(0, x1):min(big.shape[1], x2)]
         if t.shape[0] > sub.shape[0] or t.shape[1] > sub.shape[1]:
             return None, -1.0
@@ -7671,7 +7701,7 @@ def itemreg_keep_shot(coord, tag, keep=8):
         return ""
 
 
-def itemreg_shop_seen(coord):
+def itemreg_shop_seen(coord, big=None):
     """지금 그 창이 **거래소 화면인지**. (보임?, 점수)
 
     창을 직접 캡처하므로 런처가 앞에 있어도 정확하다.
@@ -7681,7 +7711,8 @@ def itemreg_shop_seen(coord):
         return False, -1.0
     try:
         import cv2, numpy as np
-        big = grab_window(coord)
+        if big is None:
+            big = grab_window(coord)
         if big is None:
             return False, 0.0
         _k = itemreg_geom(big)[0]
@@ -34998,7 +35029,13 @@ class App(tk.Tk):
                     return
             # 🛒 **거래소 화면일 때만** 누른다. 다른 화면에서는 조용히 아무 일도 안 한다.
             #    (사용자: "거래소에 클릭하면 자동으로 켜지는 거야")
-            seen, sc = itemreg_shop_seen(xy)
+            # 📷 한 번 찍어 거래소 확인과 '등록창이 이미 열렸나' 를 같이 본다 (2026-11-19)
+            #    확대 창은 한 번 찍는 데 약 0.1초라 둘이 따로 찍으면 그만큼 늦다.
+            try:
+                _big0 = grab_window(xy)
+            except Exception:
+                _big0 = None
+            seen, sc = itemreg_shop_seen(xy, big=_big0)
             if sc < 0:
                 self.after(0, lambda: self.status.set(
                     "🛒 거래소 그림이 없습니다 — [🏷 아이템 등록] 창에서 등록해주세요 "
@@ -35030,7 +35067,7 @@ class App(tk.Tk):
             #   ⚠ 확인 비용은 창 캡처 한 번(약 62ms)뿐이다.
             #   🚫 클로드는 이 관문을 없애지 말 것 — 없애면 고친 값이 또 날아간다.
             try:
-                _wo, _wv = itemreg_img_seen(ITEMREG_PRICE_STEP, xy)
+                _wo, _wv = itemreg_img_seen(ITEMREG_PRICE_STEP, xy, big=_big0)
             except Exception:
                 _wo, _wv = False, -1.0
             if _wo:
@@ -35068,12 +35105,17 @@ class App(tk.Tk):
             #       최저가('5')부터 간다 (떠 있는 등록창에 '4' 를 또 누르지 않는다).
             _t_s, _sn, _dlg_first = time.time(), 0, False
             while True:
-                _ss, _sv = itemreg_sell_seen(xy)
+                try:
+                    _bs = grab_window(xy)
+                except Exception:
+                    _bs = None
+                _ss, _sv = itemreg_sell_seen(xy, big=_bs)
                 _sn += 1
                 if _ss is not False:
                     break
                 try:
-                    _dlg_first = bool(itemreg_img_seen(ITEMREG_PRICE_STEP, xy)[0])
+                    _dlg_first = bool(itemreg_img_seen(ITEMREG_PRICE_STEP, xy,
+                                                       big=_bs)[0])
                 except Exception:
                     _dlg_first = False
                 if _dlg_first or time.time() - _t_s >= ITEMREG_SELL_MAX:
