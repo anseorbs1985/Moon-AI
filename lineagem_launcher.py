@@ -31624,7 +31624,11 @@ class App(tk.Tk):
         """두 번 누른 뒤 → 'result' · 'qty' · 'open' · 'same' · 'stop'."""
         import numpy as np
         kind = None
-        for _round in range(4):
+        try:
+            m0 = float(before.mean())
+        except Exception:
+            m0 = None
+        for _round in range(6):
             t0 = time.time()
             seen = None
             b = None
@@ -31641,6 +31645,12 @@ class App(tk.Tk):
                 if inv_win_score(b, "inv_qty", INV_QTY_BOX) >= INV_WIN_MATCH:
                     seen = "qty"
                     break
+                # 🎁 「보 상」 알림 창 (상자를 열면 받은 것을 보여준다 — 퀘스트 보상 창과 같은 창)
+                #    📏 2026-11-19 #04 — 흰 점 47 · 밝기 25.6 (평소 90) → `quest_reward_open` 그대로
+                _w, _m = quest_reward_seen(b)
+                if quest_reward_open(_w, _m, m0):
+                    seen = "reward"
+                    break
                 if inv_win_score(b, "inv_open", INV_TAB_BOX) >= INV_WIN_MATCH:
                     seen = "inv"
                     if _round > 0 or time.time() - t0 > 1.6:
@@ -31652,6 +31662,14 @@ class App(tk.Tk):
                     return "stop"
                 m = inv_meta().get("result") or {}
                 click_at(*P(tuple(m.get("close") or (526, 19))))
+                nap(random.uniform(0.6, 1.0))
+                continue
+            if seen == "reward":
+                kind = kind or "reward"
+                nap(random.uniform(0.5, 0.9))
+                if not self._inv_hand_wait(tag):
+                    return "stop"
+                click_at(*P(QUEST_REW_CLICK))
                 nap(random.uniform(0.6, 1.0))
                 continue
             if seen == "qty":
