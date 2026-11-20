@@ -11087,64 +11087,64 @@ class App(tk.Tk):
         #    ⚠ 섹션행(`fixed`)에 있던 같은 버튼은 **지웠다** — 두 군데 있으면
         #      접었을 때와 펼쳤을 때가 달라 보인다 (2026-11-04 규칙).
         pr0 = tk.Frame(dc_col); pr0.pack(anchor="n", pady=(0, 2))
-        tk.Button(pr0, text="🏝 과거의\n말하는섬",
+        tk.Button(pr0, text="🏝 과거섬",
             font=("맑은 고딕", 9, "bold"), bg="#c0392b", fg="white",
-            activebackground="#922b21", width=7, height=2,
+            activebackground="#922b21", width=7, height=1, pady=2,
             command=self._open_past_win).pack(side="left")
-        tk.Button(pr0, text="▶\n실행",
+        tk.Button(pr0, text="▶실행",
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
-            activebackground="#1e8449", width=4, height=2,
+            activebackground="#1e8449", width=4, height=1, pady=2,
             command=self._start_past).pack(side="left", padx=(2, 0))
         # 던전끝! 흑기사!! — [과거섬] 바로 아래
         kr = tk.Frame(dc_col); kr.pack(anchor="n", pady=(0, 2))
-        tk.Button(kr, text="🖤 던전끝!\n흑기사!!",
+        tk.Button(kr, text="🖤 흑기사!!",
             font=("맑은 고딕", 9, "bold"), bg="#212f3d", fg="white",
-            activebackground="#17202a", width=7, height=2,
+            activebackground="#17202a", width=7, height=1, pady=2,
             command=self._open_knight_win).pack(side="left")
-        tk.Button(kr, text="▶\n실행",
+        tk.Button(kr, text="▶실행",
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
-            activebackground="#1e8449", width=4, height=2,
+            activebackground="#1e8449", width=4, height=1, pady=2,
             command=lambda: self._start_dgn2("knight")).pack(side="left", padx=(2, 0))
         r1 = tk.Frame(dc_col); r1.pack(anchor="n")
-        self._dc_open_btn = tk.Button(r1, text="🎯 일반\n던전충전",
+        self._dc_open_btn = tk.Button(r1, text="🎯 던전충전",
             font=("맑은 고딕", 9, "bold"), bg="#6c3483", fg="white",
-            activebackground="#512e6f", width=7, height=2,
+            activebackground="#512e6f", width=7, height=1, pady=2,
             command=self._open_dc_win)
         self._dc_open_btn.pack(side="left")
-        tk.Button(r1, text="▶\n실행",
+        tk.Button(r1, text="▶실행",
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
-            activebackground="#1e8449", width=4, height=2,
+            activebackground="#1e8449", width=4, height=1, pady=2,
             command=self._start_dc).pack(side="left", padx=(2,0))
         r2 = tk.Frame(dc_col); r2.pack(anchor="n", pady=(2,0))
-        tk.Button(r2, text="🧸 인형\n탐험",
+        tk.Button(r2, text="🧸 인형탐험",
             font=("맑은 고딕", 9, "bold"), bg="#b9770e", fg="white",
-            activebackground="#8a5809", width=7, height=2,
+            activebackground="#8a5809", width=7, height=1, pady=2,
             command=self._open_doll_win).pack(side="left")
-        tk.Button(r2, text="▶\n실행",
+        tk.Button(r2, text="▶실행",
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
-            activebackground="#1e8449", width=4, height=2,
+            activebackground="#1e8449", width=4, height=1, pady=2,
             command=self._start_doll).pack(side="left", padx=(2,0))
         # 인형탐험 아래: 매일매일 스케줄 (자주 쓰는 기능이라 앞으로 이동)
         # 스케줄은 위쪽 [매일] 박스로 옮겼다 (2026-08-16)
         # 아이템정리 (스케줄과 동일 구조 + 단축키)
         r4 = tk.Frame(dc_col); r4.pack(anchor="n", pady=(2,0))
-        tk.Button(r4, text="🧹 아이템\n정리",
+        tk.Button(r4, text="🧹 아이템정리",
             font=("맑은 고딕", 9, "bold"), bg="#7d6608", fg="white",
-            activebackground="#5d4c06", width=7, height=2,
+            activebackground="#5d4c06", width=7, height=1, pady=2,
             command=self._open_item_win).pack(side="left")
-        tk.Button(r4, text="▶\n실행",
+        tk.Button(r4, text="▶실행",
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
-            activebackground="#1e8449", width=4, height=2,
+            activebackground="#1e8449", width=4, height=1, pady=2,
             command=self._start_item).pack(side="left", padx=(2,0))
         # 아이템정리 아래(이 줄 끝): 🎣 낚시녹임 — 변신확인용과 동일 구조(dgn2)
         r5 = tk.Frame(dc_col); r5.pack(anchor="n", pady=(2,0))
-        tk.Button(r5, text="🎣 낚시" + chr(10) + "녹임",
+        tk.Button(r5, text="🎣 낚시녹임",
             font=("맑은 고딕", 9, "bold"), bg="#1a5276", fg="white",
-            activebackground="#123c56", width=7, height=2,
+            activebackground="#123c56", width=7, height=1, pady=2,
             command=self._open_fish_win).pack(side="left")
-        tk.Button(r5, text="▶" + chr(10) + "실행",
+        tk.Button(r5, text="▶실행",
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
-            activebackground="#1e8449", width=4, height=2,
+            activebackground="#1e8449", width=4, height=1, pady=2,
             command=lambda: self._start_dgn2("fish")).pack(side="left", padx=(2,0))
 
         # 📬 **우편 지금 받기 — 낚시녹임 1cm 아래 고정 자리** (2026-11-04 사용자:
@@ -11431,21 +11431,21 @@ class App(tk.Tk):
         _oc = tk.Frame(dc_col)
         _oc.pack(anchor="n", pady=(2, 0), before=self._warn_toprow)
         self._fold_daya_var = tk.StringVar(
-            value="💰 다야" + chr(10) + "수량")
+            value="💰 다야 수량")
         # 🎣 **낚시녹임과 같은 모양** (2026-11-07 사용자: *"낚시녹임처럼
         #    다야수량 (실행) 이렇게"*) — width=7 + [▶실행] width=4.
         self._daya_btn = tk.Button(_oc, textvariable=self._fold_daya_var,
                                    font=("맑은 고딕", 9, "bold"),
                                    bg="#27ae60", fg="white",
                                    activebackground="#1e8449",
-                                   width=7, height=2,
+                                   width=7, height=1, pady=2,
                                    command=self._open_daya_win)
         self._daya_btn.pack(side="left")
         # ▶ **수량을 새로 잰다** (OCR). 판은 왼쪽 버튼을 누르면 펼쳐진다.
-        tk.Button(_oc, text="▶" + chr(10) + "실행",
+        tk.Button(_oc, text="▶실행",
                   font=("맑은 고딕", 8, "bold"),
                   bg="#1e8449", fg="white", activebackground="#145a32",
-                  width=4, height=2,
+                  width=4, height=1, pady=2,
                   command=self._open_ocr_scan).pack(side="left", padx=(2, 0))
         self._fold_daya_sync()
         # 🔢 합계가 바뀌면 **저절로 따라간다** (폴링 없음 · 비용 0).
@@ -11483,11 +11483,11 @@ class App(tk.Tk):
         #    😴 자고 있으면 깨어날 때까지 깨우고, 깨어 있으면 칸1 을 건너뛰고 칸2 만.
         _rrw = tk.Frame(_dun); _rrw.pack(anchor="n", padx=3, pady=(1, 0))
         tk.Button(_rrw, text="귀환주문서", font=("맑은 고딕", 9, "bold"),
-                  bg="#6c3483", fg="white", width=7, height=2,
+                  bg="#6c3483", fg="white", width=7, height=1, pady=2,
                   command=self._open_resc_win).pack(side="left")
-        tk.Button(_rrw, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
+        tk.Button(_rrw, text="▶실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
-                  width=4, height=2,
+                  width=4, height=1, pady=2,
                   command=lambda: self._start_dgn2("resc")).pack(side="left", padx=(2, 0))
         for _i, (_nm, _bg) in enumerate((("오만의탑", "#8e44ad"), ("악몽의섬", "#2471a3"),
                                          ("잊혀진섬", "#16a085"), ("에카", "#d35400"))):
@@ -11506,13 +11506,13 @@ class App(tk.Tk):
                            command=lambda x=_i: self._open_past_slot(x))
             # ⚠ Tk 버튼은 **그림이 있으면 width/height 가 픽셀**이다 (글자 수가 아니다)
             if _im is not None:
-                _b.config(image=_im, compound="right", width=72, height=34, padx=1)
+                _b.config(image=_im, compound="right", width=72, height=22, padx=1)
             else:
-                _b.config(width=7, height=2)
+                _b.config(width=7, height=1, pady=2)
             _b.pack(side="left")
-            tk.Button(_rw, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
+            tk.Button(_rw, text="▶실행", font=("맑은 고딕", 8, "bold"),
                       bg="#27ae60", fg="white", activebackground="#1e8449",
-                      width=4, height=2,
+                      width=4, height=1, pady=2,
                       command=lambda x=_i: self._run_island_slot(x)).pack(side="left", padx=(2, 0))
         # 🏴 **해적섬 — 던전 상자 안, 에카 바로 아래** (2026-11-07 사용자:
         #    *"해적섬을 따로 만들어서 던전 안으로 넣어주라니까"*)
@@ -11523,7 +11523,7 @@ class App(tk.Tk):
         #       (`REPEAT_NONE_VER`). 던전 이름 버튼은 악몽의섬 좌표 창을 연다.
         _prw = tk.Frame(_dun); _prw.pack(anchor="n", padx=3, pady=(1, 0))
         _pb = tk.Button(_prw, text="해적섬", font=("맑은 고딕", 9, "bold"),
-                        bg="#1a5276", fg="white", width=7, height=2,
+                        bg="#1a5276", fg="white", width=7, height=1, pady=2,
                         command=lambda: self._open_past_slot(1))
         _pim = self._dun_imgs.get("해적섬")
         if _pim is None:
@@ -11535,11 +11535,11 @@ class App(tk.Tk):
             except Exception:
                 _pim = None
         if _pim is not None:
-            _pb.config(image=_pim, compound="right", width=72, height=34, padx=1)
+            _pb.config(image=_pim, compound="right", width=72, height=22, padx=1)
         _pb.pack(side="left")
-        tk.Button(_prw, text="▶\n실행", font=("맑은 고딕", 8, "bold"),
+        tk.Button(_prw, text="▶실행", font=("맑은 고딕", 8, "bold"),
                   bg="#27ae60", fg="white", activebackground="#1e8449",
-                  width=4, height=2,
+                  width=4, height=1, pady=2,
                   command=lambda: self._run_island_card(1, "해적섬")).pack(
                       side="left", padx=(2, 0))
 
@@ -11550,8 +11550,8 @@ class App(tk.Tk):
         #       새로 만들면 `self._night_*` 위젯이 두 벌이 되어 엉킨다.
         self._night_wbtn = tk.Button(
             _dun, text="🏝 섬/던전 미니!  ◀", font=("맑은 고딕", 8, "bold"),
-            bg="#117864", fg="white", activebackground="#0e6251", pady=0,
-            width=11, height=2, command=self._night_win_toggle)
+            bg="#117864", fg="white", activebackground="#0e6251", 
+            width=11, height=1, pady=2, command=self._night_win_toggle)
         self._night_wbtn.pack(anchor="n", pady=(4, 0))
         tk.Frame(_dun, height=3).pack()
 
@@ -11897,7 +11897,7 @@ class App(tk.Tk):
                 elif cls == "Button":
                     try:
                         if ch.cget("image"):
-                            ch.config(height=38)          # 그림 버튼은 픽셀
+                            ch.config(height=20)          # 그림 버튼은 픽셀 (2026-11-20 38→20 · 글자 버튼과 같은 높이)
                     except Exception:
                         pass
         # 🚫 **버튼 높이는 키우지 않는다** — 펼쳤을 때 이 열이 쓸 수 있는 세로는
@@ -15705,8 +15705,7 @@ class App(tk.Tk):
         바뀔 때마다 불린다. 🚫 여기서 무거운 일을 하지 말 것 (글자만 만든다)."""
         try:
             t = (self._cnt_total_var.get() or "").replace("합계:", "").strip()
-            self._fold_daya_var.set("💰 다야" + chr(10)
-                                    + (t or "수량"))
+            self._fold_daya_var.set("💰 " + (t or "다야 수량"))   # 한 줄 (2026-11-20 높이 2/3)
         except Exception:
             pass
 
