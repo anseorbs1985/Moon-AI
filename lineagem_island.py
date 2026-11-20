@@ -778,6 +778,25 @@ CARD_SWAP = {"토요일_악몽의섬": {
 # 🔁 바꿔 끼울 칸 — 두 프리셋이 **갈리는 구간**만 (앞은 공용이라 안 건드린다).
 #    📏 실측 2026-11-05: 악몽의섬은 27·28 좌표 · 라스타바드는 27~34.
 CARD_SWAP_CELLS = (27, 34)
+# 🗡 **라바 슬롯도 테베 → 아틀 → 티칼을 먼저 돌고 마지막에 라바** (2026-11-21 사용자:
+#    *"라바 왜 라바부터 도냐고 테베부터 돌고 마지막에 라바 돌아야지"* ·
+#    *"악몽의섬처럼 테베 아틀 티칼 돌고 라바 돌아야지"*)
+#    이 중 **열린 카드가 하나라도 있으면** 그 판은 짝 악몽의섬 프리셋으로 바꿔 타고(`auto_home`)
+#    그 카드로 간다(2시간). 셋 다 없거나 끝났으면 라스타바드로 되돌아간다(4시간).
+#    🚫 악몽의섬·해적섬은 넣지 않는다 — 사용자가 말한 것은 테베·아틀·티칼이다.
+RASTA_BEFORE = ("테베라스사막", "아틀란티스", "티칼사원")
+
+
+def rasta_before_open(slot, anchor):
+    """🗡 라바 전에 먼저 갈 카드 중 **열린 첫 카드** → (이름 또는 None, 설명).
+    그 캐릭이 '안 감' 으로 뺀 던전은 빼고 본다. 모르면(None) 라바로 간다 (예전 그대로)."""
+    try:
+        names = [n for n in RASTA_BEFORE if n not in card_no(slot)]
+        if not names or not anchor:
+            return None, u"먼저 갈 카드 없음"
+        return card_pick_open(names, anchor)
+    except Exception as e:
+        return None, u"확인 실패 %s" % type(e).__name__
 
 
 def cell_mode(key, slot, j):
@@ -9209,7 +9228,14 @@ class IslandApp(tk.Tk):
         if _home and anchor0 and not getattr(self, "_card_force", None):
             _hc = (CARD_BY_VER.get(key) or {}).get(
                 "라스타바드" if _home.startswith("라스타바드") else "") or ""
-            if _hc:
+            _pre = None
+            if _hc == "라스타바드":
+                # 🗡 테베·아틀·티칼이 아직 열려 있으면 라바로 돌아가지 않는다 (2026-11-21)
+                _pre, _pw = rasta_before_open(slot, anchor0)
+                if _pre:
+                    self._rlog(u"[카드] %s #%02d 🗡 아직 '%s' 가 열려 있어 라바로 안 돌아간다 "
+                               u"(테베→아틀→티칼 먼저 · %s)" % (key, si + 1, _pre, _pw))
+            if _hc and not _pre:
                 _ho, _hw = card_open_one(_hc, anchor0)
                 if _ho is True:
                     _lo, _hi = CARD_SWAP_CELLS
@@ -9251,7 +9277,24 @@ class IslandApp(tk.Tk):
             # 🔁 **잠겼으면 악몽의섬 프리셋으로 바꿔 끼운다** (2026-11-05 사용자 요청).
             #    칸27~34 만 바꾼다 — 앞 칸·이름·⏰·ON/OFF 는 그대로.
             #    원래 프리셋 이름을 `auto_home` 에 적어두고, 다시 열리면 되돌린다.
-            if anchor0:
+            # 🗡 **테베 → 아틀 → 티칼이 열려 있으면 그쪽 먼저** — 라바는 마지막 (2026-11-21)
+            _pre2, _pw2 = (rasta_before_open(slot, anchor0) if (anchor0 and cname == "라스타바드")
+                           else (None, u""))
+            if _pre2:
+                _pair = (CARD_SWAP.get(key) or {}).get((slot.get("name") or "").strip())
+                _lo, _hi = CARD_SWAP_CELLS
+                if _pair and self._swap_cells(key, si, slot, _pair, _lo, _hi):
+                    slot["auto_home"] = (slot.get("name") or "").strip()
+                    save_cfg(self.cfg)
+                    self._rlog(u"[전환] 🗡 %s #%02d 라바 전에 **'%s' 먼저** → '%s' 로 바꿔 돈다 "
+                               u"(%s · 테베·아틀·티칼이 끝나면 라바로 돌아온다)"
+                               % (key, si + 1, _pre2, _pair, _pw2))
+                    cname, _why_c = _pre2, u"라바 전에 먼저"
+                else:
+                    self._rlog(u"[카드] %s #%02d 🗡 '%s' 가 열려 있지만 바꿔 탈 짝이 없어 "
+                               u"라바로 간다 (슬롯 이름 '%s')"
+                               % (key, si + 1, _pre2, (slot.get("name") or "").strip()))
+            if anchor0 and _why_c != u"라바 전에 먼저":    # 먼저 갈 카드는 방금 열린 것을 봤다
                 _ok2, _why2 = card_open_one(cname, anchor0)
                 if _ok2 is False:
                     _pair = (CARD_SWAP.get(key) or {}).get(
