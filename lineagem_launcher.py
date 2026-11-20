@@ -1294,7 +1294,12 @@ SUBC_HERE_WAIT  = 15.0     # 그때 퀘스트 목록에서 서커스 줄을 찾�
 #          → 1시간 5분 쉼 → ① 보조(고른 줄 2·3·4·5 순서) … → 마지막에 메인으로 들어가 사냥
 #   메인 서커스 줄을 못 찾으면(이미 했다 등) 기다리지 않고 바로 보조로 넘어간다 ("skip").
 #   🚫 고른 보조 줄이 없는 슬롯은 예전처럼 아무것도 하지 않는다 (메인만 돌리는 기능이 아니다).
-SUBC_SWITCH_GAP = (25.0, 60.0)         # 한 클라를 바꾼 뒤 다음 클라를 바꾸기까지 (부하 흩기)
+SUBC_SWITCH_GAP = (3.0, 7.0)           # 한 클라를 바꾼 뒤 다음 클라를 바꾸기까지
+#   2026-11-20 사용자: *"서커스 실행하는 게 너무 느린데 … 클라 간격을 3~7초 사이로"* (전 25~60초)
+#   ⚠ 15초 틱으로는 3~7초를 못 지킨다 — 클라가 끝나면 그 간격 뒤에 **바로** 다음 클라를 본다
+#     (`_subc_chain_at`). 이어서 바꾸는 동안은 '마우스 조용 10초' 를 기다리지 않는다
+#     (누를 때마다 사람 손은 `_subc_hand_wait` 가 따로 기다린다).
+SUBC_CHAIN_POLL = 500                  # 간격이 끝났나 보는 주기(ms) — 이어서 바꿀 클라가 있을 때만 돈다
 SUBC_INSIDE_POLL = (10 * 60, 15 * 60)  # 🎪 이미 서커스에서 사냥 중 → 이만큼마다 끝났나 본다
 SUBC_INSIDE_MAX  = 70 * 60              #    그래도 이만큼 지나면 끝난 것으로 보고 다음으로
 #   🎪 2026-11-20 사용자 — *"이미 서커스 안에서 사냥중인것들 냅두고 … 서커스에서 안 돌고 있는 것들만
@@ -20342,8 +20347,9 @@ class App(tk.Tk):
         now = time.time()
         # ▶ 를 방금 눌렀으면 '마우스 조용 10초' 는 기다리지 않는다 (누를 때마다 손은 따로 기다린다)
         _kick = now < float(getattr(self, "_subc_kick", 0))
+        _chain = now < float(getattr(self, "_subc_chain_until", 0))
         if (now >= float(st.get("gap_until", 0)) or _kick) \
-                and not self._is_busy() and (_kick or not self._human_busy()):
+                and not self._is_busy() and (_kick or _chain or not self._human_busy()):
             due = sorted((float(v.get("next", 0)), int(k)) for k, v in sl.items()
                          if float(v.get("next", 0)) <= now)
             if due:
@@ -20376,7 +20382,10 @@ class App(tk.Tk):
             self._subc_try_start()
         except Exception as e:
             click_log(f"[보조서커스] ⚠ 차례 확인 오류 — {e}")
-        self.after(SUBC_TICK_MS, self._subc_tick)
+        _fast = (getattr(self, "_busy_task", None) == "보조서커스"
+                 or (getattr(self, "_subc_chain_on", False) and time.time() < float(
+                     getattr(self, "_subc_chain_until", 0))))
+        self.after(SUBC_CHAIN_POLL if _fast else SUBC_TICK_MS, self._subc_tick)
 
     def _subc_job(self, si):
         st0 = self._subc_load()
@@ -20437,8 +20446,15 @@ class App(tk.Tk):
                         vv["next"] = time.time() + random.uniform(*SUBC_RETRY)
                         click_log(f"[보조서커스] 🔁 #{si + 1:02d} 실패 {vv['fail']}/{SUBC_FAIL_MAX} — "
                                   f"몇 분 뒤 다시 해본다")
-                st["gap_until"] = time.time() + random.uniform(*SUBC_SWITCH_GAP)
+                _gap = random.uniform(*SUBC_SWITCH_GAP)
+                st["gap_until"] = time.time() + _gap
                 self._subc_save(st)
+                # 곧 바꿀 클라가 남았으면 간격이 끝나는 대로 바로 이어간다 (15초 틱을 기다리지 않는다)
+                if self._subc_soon(_gap + 3):
+                    self._subc_chain_until = time.time() + _gap + 20
+                    self._subc_chain_on = True
+                else:
+                    self._subc_chain_on = False
             else:
                 self._subc_st = st
             self.after(0, self._subc_btn_paint)
