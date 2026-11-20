@@ -1300,6 +1300,15 @@ SUBC_SWITCH_GAP = (3.0, 7.0)           # 한 클라를 바꾼 뒤 다음 클라�
 #     (`_subc_chain_at`). 이어서 바꾸는 동안은 '마우스 조용 10초' 를 기다리지 않는다
 #     (누를 때마다 사람 손은 `_subc_hand_wait` 가 따로 기다린다).
 SUBC_CHAIN_POLL = 500                  # 간격이 끝났나 보는 주기(ms) — 이어서 바꿀 클라가 있을 때만 돈다
+SUBC_DONE_ON   = True               # ✅ 오늘 서커스를 끝낸 캐릭은 다시 안 돈다
+SUBC_DAY_HOUR  = 5                  #    하루의 시작 (서커스 일일 퀘스트가 다시 열리는 시각)
+#   2026-11-20 사용자: *"보조까지 다 돌았는데 또 서커스 들어갈려고 해 … 완료가 된 클라는 체크를 해서
+#      다시 안 돌 수 있게"* — 실측: #02·#06 은 16:31~18:54 에 메인·보조를 다 돌았는데 19:16 ▶ 에
+#      다시 올라가 19:30 에 보조로 또 바꿨다.
+#   기록 %LOCALAPPDATA%/MoonAI/subc_done.json  {"day": "2026-11-20", "done": {"<슬롯>": [0, 2]}}
+#        0 = 메인 · 2~5 = 보조 줄.  AUTO 를 켰거나 · 이미 서커스에서 사냥 중이었거나 ·
+#        (메인) 서커스 퀘스트가 안 보이면(이미 했다) 적는다.
+#   ▶ 를 누르면 — 메인을 했으면 메인 서커스를 건너뛰고 · 한 보조 줄은 빼고 · 다 했으면 그 슬롯은 안 올린다.
 SUBC_INSIDE_POLL = (10 * 60, 15 * 60)  # 🎪 이미 서커스에서 사냥 중 → 이만큼마다 끝났나 본다
 SUBC_INSIDE_MAX  = 70 * 60              #    그래도 이만큼 지나면 끝난 것으로 보고 다음으로
 #   🎪 2026-11-20 사용자 — *"이미 서커스 안에서 사냥중인것들 냅두고 … 서커스에서 안 돌고 있는 것들만
@@ -20028,6 +20037,10 @@ class App(tk.Tk):
         run = self._subc_running()
         look = getattr(self, "_subc_look", None) or {}
         run = run | {si for si, x in look.items() if x.get("circus")}
+        # ✅ 오늘 메인·보조를 다 돈 슬롯도 뺀다
+        _all = self._subc_done_all() if SUBC_DONE_ON else {}
+        run = run | {si for si, dn in _all.items()
+                     if 0 in dn and not [x for x in self._subc_rows(si) if x not in dn]}
         try:
             hw = self._client_hwnds_by_slot() or []
         except Exception:
@@ -20123,6 +20136,11 @@ class App(tk.Tk):
                     b.config(text="▶", bg="#1e8449", activebackground="#145a32")
                     lk = (getattr(self, "_subc_look", None) or {}).get(si) or {}
                     base = "메인만" if not self._subc_rows(si) else "대기"
+                    _dn = self._subc_done(si)
+                    if _dn and 0 in _dn and not [x for x in self._subc_rows(si) if x not in _dn]:
+                        base = "✅ 오늘 다 함"
+                    elif _dn:
+                        base += " ✅" + "·".join("메인" if x == 0 else f"보조{x}" for x in sorted(_dn))
                     if lb:
                         if lk.get("circus"):
                             lb.config(text=f"🎪 서커스 안 · {base}", fg="#8e44ad")
@@ -20203,6 +20221,58 @@ class App(tk.Tk):
             os.replace(tmp, p)
         except Exception as e:
             click_log(f"[보조서커스] ⚠ 상태 저장 실패 — {e}")
+
+    def _subc_day(self, t=None):
+        t = time.time() if t is None else t
+        return time.strftime("%Y-%m-%d", time.localtime(t - SUBC_DAY_HOUR * 3600))
+
+    def _subc_done_path(self):
+        return os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI", "subc_done.json")
+
+    def _subc_done_all(self):
+        """오늘 끝낸 것 → {슬롯(0부터): {0(메인), 2·3·4·5(보조 줄)}}. 날이 바뀌면 빈 것."""
+        try:
+            d = json.load(io.open(self._subc_done_path(), encoding="utf-8"))
+            if d.get("day") != self._subc_day():
+                return {}
+            return {int(k): set(int(x) for x in v) for k, v in (d.get("done") or {}).items()}
+        except Exception:
+            return {}
+
+    def _subc_done(self, si):
+        return self._subc_done_all().get(int(si), set()) if SUBC_DONE_ON else set()
+
+    def _subc_done_mark(self, si, row, why=""):
+        """오늘 그 캐릭(0=메인 · 2~5=보조 줄)은 서커스를 했다."""
+        if not SUBC_DONE_ON:
+            return
+        try:
+            al = self._subc_done_all()
+            al.setdefault(int(si), set()).add(int(row))
+            p = self._subc_done_path()
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            tmp = p + ".tmp"
+            io.open(tmp, "w", encoding="utf-8").write(json.dumps(
+                {"day": self._subc_day(), "done": {str(k): sorted(v) for k, v in al.items()}},
+                ensure_ascii=False))
+            os.replace(tmp, p)
+            click_log(f"[보조서커스] ✅ #{int(si) + 1:02d} 오늘 "
+                      + ("메인" if int(row) == 0 else f"보조({int(row)}번째 줄)")
+                      + f" 서커스 끝 — 기록했다{(' (' + why + ')') if why else ''}")
+        except Exception as e:
+            click_log(f"[보조서커스] ⚠ 끝낸 것 기록 실패 — {e}")
+
+    def _subc_stage_row(self, v, r):
+        """r 번째 단계의 캐릭 → 0(메인 서커스) · 2~5(보조 줄) · None(마지막 메인 사냥)."""
+        try:
+            rows = list(v.get("rows") or [])
+            off = 1 if v.get("mf") else 0
+            if off and r == 0:
+                return 0
+            rr = r - off
+            return int(rows[rr]) if rr < len(rows) else None
+        except Exception:
+            return None
 
     def _subc_rows(self, si):
         """🎪 그 슬롯(0부터)에서 서커스를 돌릴 **보조 줄 번호** (2~5) — 위에서부터 차례로."""
@@ -20294,15 +20364,36 @@ class App(tk.Tk):
             if not tg:
                 self.status.set(f"🎪 슬롯 {[x + 1 for x in _keep]} 는 이미 보조 서커스 중입니다")
                 return
+        # ✅ 오늘 끝낸 캐릭은 다시 안 돈다
+        _plan, _gone, _part = {}, [], []
         for si in tg:
-            st["slots"][str(si)] = {"r": 0, "n": len(self._subc_rows(si)),
-                                    "rows": self._subc_rows(si), "next": now, "fail": 0,
-                                    "mf": bool(SUBC_MAIN_FIRST)}
+            _dn = self._subc_done(si)
+            _rw = [x for x in self._subc_rows(si) if x not in _dn]
+            _mf = bool(SUBC_MAIN_FIRST) and 0 not in _dn
+            if bool(SUBC_MAIN_FIRST) and not _mf and not _rw:
+                _gone.append(si)
+                continue
+            if _dn:
+                _part.append(f"#{si + 1:02d}" + ("(메인 끝)" if 0 in _dn else "")
+                             + "".join(f"(보조{x} 끝)" for x in sorted(_dn) if x))
+            _plan[si] = (_rw, _mf)
+        if _gone:
+            click_log(f"[보조서커스] ✅ 오늘 메인·보조를 다 돈 슬롯 {[x + 1 for x in sorted(_gone)]} 는 올리지 않는다")
+        if _part:
+            click_log(f"[보조서커스] ✅ 오늘 한 것은 건너뛴다 — " + " ".join(_part))
+        tg = [si for si in tg if si in _plan]
+        if not tg:
+            self.status.set(f"🎪 고른 슬롯 {[x + 1 for x in sorted(_gone)]} 는 오늘 서커스를 다 했습니다")
+            return
+        for si in tg:
+            _rw, _mf = _plan[si]
+            st["slots"][str(si)] = {"r": 0, "n": len(_rw), "rows": _rw, "next": now, "fail": 0,
+                                    "mf": _mf}
         self._subc_save(st)
         self._subc_btn_paint()
         click_log(f"[보조서커스] ▶ 켬 — " + " · ".join(
-            (f"#{si + 1:02d} 줄{self._subc_rows(si)}" if self._subc_rows(si)
-             else f"#{si + 1:02d} 메인만") for si in sorted(tg))
+            (f"#{si + 1:02d} " + ("" if _plan[si][1] else "메인건너뜀 ")
+             + (f"줄{_plan[si][0]}" if _plan[si][0] else "메인만")) for si in sorted(tg))
             + (" (지금 캐릭(메인) 서커스부터 · 순서 섞음 · 하나씩)" if SUBC_MAIN_FIRST
                else " (순서 섞음 · 하나씩 바꾼다)"))
         self.status.set(f"🎪 보조 서커스 시작 — {len(tg)}개 클라를 하나씩 "
@@ -20405,6 +20496,14 @@ class App(tk.Tk):
                 vv = st["slots"][str(si)]
                 n = int(vv.get("n", 0))
                 _off = 1 if vv.get("mf") else 0
+                _row = self._subc_stage_row(vv, r)
+                if _row is not None:
+                    if ok == "inside":
+                        self._subc_done_mark(si, _row, "이미 서커스에서 사냥 중")
+                    elif ok == "skip" and _row == 0:
+                        self._subc_done_mark(si, 0, "서커스 퀘스트가 안 보인다 — 이미 했다")
+                    elif ok is True:
+                        self._subc_done_mark(si, _row, "AUTO")
                 if ok == "inside":
                     # 이미 서커스에서 사냥 중 — 그 판을 ⓪ 으로 친다. 끝나기를 기다린다
                     _w = random.uniform(*SUBC_INSIDE_POLL)
@@ -20808,6 +20907,12 @@ class App(tk.Tk):
             if here:
                 click_log(f"[보조서커스] ⏭ {tag} 지금 캐릭에서 서커스 퀘스트가 안 보인다 "
                           f"(이미 했거나 목록에 없다) — 건너뛰고 보조로 간다")
+                return "skip"
+            _v = ((self._subc_load().get("slots") or {}).get(str(si))) or {}
+            _rw = self._subc_stage_row(_v, int(_v.get("r", 0))) if _v else None
+            if _rw is not None and _rw in self._subc_done(si):
+                click_log(f"[보조서커스] ⏭ {tag} 서커스 퀘스트가 안 보인다 — 이 캐릭은 **오늘 이미 했다** "
+                          f"(기록) → 실패가 아니다, 다음으로 간다")
                 return "skip"
             click_log(f"[보조서커스] ✘ {tag} 서커스 퀘스트를 못 찾았다 (칸13 좌표도 없다)")
             return False
