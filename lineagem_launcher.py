@@ -4906,6 +4906,10 @@ INVX_POLL = (0.08, 0.16)          # 창이 떴나 보는 간격
 #    너무 기계처럼 해버리면 오해받아"*) — 누를 때마다 이 확률로 1~4초를 더 쉰다.
 INVX_PAUSE_P = 0.25
 INVX_PAUSE   = (1.0, 4.0)
+# ⏳ **버퍼링 구간** — 창이 뜨거나 화면이 넘어간 뒤 **늘 1~3초 더** 쉰다 (2026-11-20 사용자:
+#    *"버퍼링 구간에서는 시간을 확실하게 1~3초 랜덤으로 더 주란 말이야"*).
+#    `_invx_wait` 가 그림을 찾은 뒤 · [일괄 등록] 뒤 · 가방을 다시 연 뒤. 쉰 뒤 화면을 **다시 찍어** 쓴다.
+INVX_BUFFER  = (1.0, 3.0)
 
 
 def invx_human_nap(step):
@@ -33015,6 +33019,12 @@ class App(tk.Tk):
                 last = b
                 x, y, v = invx_find(b, name, box, thr)
                 if x is not None:
+                    nap(random.uniform(*INVX_BUFFER))          # ⏳ 버퍼링 구간 — 1~3초 더
+                    b2 = grab_window(anc)
+                    if b2 is not None:
+                        x2, y2, v2 = invx_find(b2, name, box, thr)
+                        if x2 is not None:
+                            return x2, y2, v2, b2
                     return x, y, v, b
                 best = max(best, v)
             nap(random.uniform(*INVX_POLL))
@@ -33302,7 +33312,7 @@ class App(tk.Tk):
                     return self._invx_unknown(tag, b, "✔고급 이 안 켜진다", float(chk(b) if b is not None else -1))
             # ④ [일괄 등록] → 등록 칸 확인
             self._melt_tap(tag, L, T, kx, ky, MELT_BULK)
-            nap(random.uniform(0.3, 0.6))
+            nap(random.uniform(*INVX_BUFFER))                  # ⏳ 등록되는 동안 1~3초
             b = grab_window(anc)
             ok, bad, note = self._melt_slots(b) if b is not None else (0, 0, [])
             if bad:
@@ -33369,6 +33379,8 @@ class App(tk.Tk):
                 b = grab_window(anc)
                 if b is not None and tab_open(b):
                     click_log(f"[아이템정리] {tag} 🎒 가방을 다시 열었다 — 이어서 훑는다")
+                    nap(random.uniform(*INVX_BUFFER))          # ⏳ 가방이 다 그려지게 1~3초
+                    b = grab_window(anc) or b
                     self._inv_base = inv_dim(b)
                     return True
         p = self._inv_shot(b, tag, "noreopen") if b is not None else ""
