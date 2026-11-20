@@ -4910,6 +4910,13 @@ INVX_PAUSE   = (1.0, 4.0)
 #    *"버퍼링 구간에서는 시간을 확실하게 1~3초 랜덤으로 더 주란 말이야"*).
 #    `_invx_wait` 가 그림을 찾은 뒤 · [일괄 등록] 뒤 · 가방을 다시 연 뒤. 쉰 뒤 화면을 **다시 찍어** 쓴다.
 INVX_BUFFER  = (1.0, 3.0)
+# 🎴 **중간에 끊으면 한 클라는 빼고 이어서** (2026-11-20 사용자: *"실행을 했던 클라는 넘기고 안 된 클라들을
+#    해줘. 전부 다 돌았고 내가 다시 누르면 전체를 다 하지만, 내가 중간에 끊으면 했던 거는 제외시켜줘"*)
+#    %LOCALAPPDATA%/MoonAI/inv_progress.json  {"day": "2026-11-20", "done": [슬롯(0부터)]}
+#    · 끝까지 돈 클라만 적는다 (■ 멈춤으로 끊긴 그 클라는 안 적는다 → 다음에 다시 한다)
+#    · 전부 했으면 다음 ▶ 는 처음부터 전부 · 하루(05시)가 바뀌어도 처음부터
+#    · 슬롯 개별 ▶ 는 이 기록과 상관없이 그 클라를 한다
+INV_DAY_HOUR = 5
 
 
 def invx_human_nap(step):
@@ -32630,6 +32637,42 @@ class App(tk.Tk):
                 click_log("[아이템정리] 🧭 아이템정리 좌표가 하나도 없는 컴퓨터다 — 16클라 전부를 본다 "
                           "(가방 정리는 좌표를 쓰지 않는다)")
             random.shuffle(targets)
+        # 🎴 중간에 끊었으면 — 한 클라는 빼고 이어서
+        _pp = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "MoonAI", "inv_progress.json")
+        _day = time.strftime("%Y-%m-%d", time.localtime(time.time() - INV_DAY_HOUR * 3600))
+        _done = []
+        if slot_idx is None:
+            try:
+                _d = json.load(io.open(_pp, encoding="utf-8"))
+                if _d.get("day") == _day:
+                    _done = [int(x) for x in (_d.get("done") or [])]
+            except Exception:
+                _done = []
+            _left = [t for t in targets if t not in _done]
+            if _done and _left and len(_left) < len(targets):
+                click_log(f"[아이템정리] ⏭ 지난번에 중간에 끊었다 — 한 클라 {sorted(x + 1 for x in _done if x in targets)} 는 "
+                          f"건너뛰고 남은 {len(_left)}개만 한다")
+                targets = _left
+            else:
+                _done = []          # 전부 했거나 처음 — 처음부터 전부
+
+        def _mark(si):
+            if slot_idx is not None:
+                return
+            try:
+                if si not in _done:
+                    _done.append(si)
+                os.makedirs(os.path.dirname(_pp), exist_ok=True)
+                io.open(_pp, "w", encoding="utf-8").write(json.dumps({"day": _day, "done": _done}))
+            except Exception as e:
+                click_log(f"[아이템정리] ⚠ 진행 기록 실패 — {e}")
+        if slot_idx is None:
+            _mark_reset = [] if not _done else _done
+            try:
+                os.makedirs(os.path.dirname(_pp), exist_ok=True)
+                io.open(_pp, "w", encoding="utf-8").write(json.dumps({"day": _day, "done": _mark_reset}))
+            except Exception:
+                pass
         click_log(f"[아이템정리] 🎴 시작 — 클라 {[t + 1 for t in targets]} (등록 그림 {len(inv_items())}장)")
         tot = 0
         for n, si in enumerate(targets):
@@ -32639,6 +32682,8 @@ class App(tk.Tk):
                 tot += self._inv_slot(si)
             except Exception as e:
                 click_log(f"[아이템정리] ⚠ #{si + 1:02d} 오류 — {type(e).__name__}: {e} (이 클라는 넘어간다)")
+            if not self._item_stop:
+                _mark(si)           # 끝까지 돈 클라만 (■ 멈춤으로 끊긴 클라는 다음에 다시)
             if n < len(targets) - 1 and not self._item_stop:
                 nap(random.uniform(*INV_SLOT_GAP))
         click_log(f"[아이템정리] 🎴 끝 — 모두 {tot}번 깠다" + (" (■ 멈춤)" if self._item_stop else ""))
