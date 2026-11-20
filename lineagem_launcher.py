@@ -1295,6 +1295,13 @@ SUBC_HERE_WAIT  = 15.0     # 그때 퀘스트 목록에서 서커스 줄을 찾�
 #   메인 서커스 줄을 못 찾으면(이미 했다 등) 기다리지 않고 바로 보조로 넘어간다 ("skip").
 #   🚫 고른 보조 줄이 없는 슬롯은 예전처럼 아무것도 하지 않는다 (메인만 돌리는 기능이 아니다).
 SUBC_SWITCH_GAP = (25.0, 60.0)         # 한 클라를 바꾼 뒤 다음 클라를 바꾸기까지 (부하 흩기)
+SUBC_INSIDE_POLL = (10 * 60, 15 * 60)  # 🎪 이미 서커스에서 사냥 중 → 이만큼마다 끝났나 본다
+SUBC_INSIDE_MAX  = 70 * 60              #    그래도 이만큼 지나면 끝난 것으로 보고 다음으로
+#   🎪 2026-11-20 사용자 — *"이미 서커스 안에서 사냥중인것들 냅두고 … 서커스에서 안 돌고 있는 것들만
+#      돌게 해죠 · 사냥중인것들은 냅두고 끝나면 다음꺼 진행"*
+#   판정 = 서커스 광장(SUBC_PLACE_MATCH) **그리고** AUTO 켜짐(_auto_on) — 둘 다여야 '사냥 중'.
+#   끝났다 = 광장을 벗어났다 · 서커스 [완료] 줄이 떴다 · SUBC_INSIDE_MAX 가 지났다.
+#   ⚠ 클라가 자고 있으면 절전 화면이 퀘스트 목록을 덮으므로 볼 때마다 깨운다 (10~15분에 한 번).
 SUBC_RETRY    = (180, 300)             # 바꾸다 실패하면 다시 해보기까지
 SUBC_FAIL_MAX = 3                      # 이만큼 실패하면 그 슬롯은 그만둔다 (기록을 남긴다)
 SUBC_HUNT     = True                   # 보조를 다 돌면 메인으로 들어가 사냥을 보낸다
@@ -19700,7 +19707,7 @@ class App(tk.Tk):
                  font=("맑은 고딕", 9, "bold")).pack(anchor="w", padx=8, pady=(6, 0))
         tk.Label(p, text=("지금 접속한 캐릭(메인) 서커스부터 돌고, " if SUBC_MAIN_FIRST else "")
                           + "고른 줄을 위에서부터 차례로 1시간 5분씩 돌리고, 끝나면 메인으로 들어가 "
-                          "사냥을 보냅니다 · 잠긴 줄은 고르지 마세요",
+                          "사냥을 보냅니다 · 아무 줄도 안 고르면 메인 서커스만 돌고 사냥 · 잠긴 줄은 고르지 마세요",
                  font=("맑은 고딕", 8), fg="#888").pack(anchor="w", padx=8)
         try:
             hw = self._client_hwnds_by_slot() or []
@@ -19848,9 +19855,24 @@ class App(tk.Tk):
         self._subc_start(None)
 
     def _subc_start(self, only=None):
-        """▶ — 보조 줄을 고른 슬롯을 차례에 올린다 (`only` = 그 슬롯들만, 0부터)."""
+        """▶ — 슬롯을 차례에 올린다 (`only` = 그 슬롯들만, 0부터).
+
+        🎪 2026-11-20 사용자 — *"보조케릭 없으면 메인케릭만 돌려줘야지"* ·
+           *"2,3 뭐 선택 안 하면 메인케릭만 돌려줘 그리고 사냥 보내주면 되자나"*
+           → 보조 줄을 안 고른 슬롯도 올린다: **지금 캐릭(메인) 서커스 → 1시간 5분 →
+              캐릭을 바꾸지 않고 보상 받고 사냥**. (SUBC_MAIN_FIRST 일 때만)"""
         pick = list(only) if only else list(range(16))
-        tg = [si for si in pick if self._subc_rows(si)]
+        if SUBC_MAIN_FIRST:
+            tg = list(pick)
+            if not only:                       # 전체 ▶ — 클라 창이 있는 슬롯만
+                try:
+                    hw = self._client_hwnds_by_slot() or []
+                    if hw:
+                        tg = [si for si in tg if si < len(hw) and hw[si] and hw[si][4]]
+                except Exception:
+                    pass
+        else:
+            tg = [si for si in pick if self._subc_rows(si)]
         if not tg:
             self.status.set("🎪 보조 줄을 고른 슬롯이 없습니다 — [🎪 보조서커스] 에서 "
                             "슬롯마다 2·3·4·5 를 눌러 고르세요")
@@ -19860,6 +19882,14 @@ class App(tk.Tk):
         if not st.get("on"):
             st = {"on": True, "slots": {}}
         now = time.time()
+        # 🚫 이미 차례에 올라 돌고 있는 슬롯은 처음부터 다시 걸지 않는다 (사용자 2026-11-20)
+        _keep = [si for si in tg if str(si) in (st.get("slots") or {})]
+        if _keep:
+            tg = [si for si in tg if si not in _keep]
+            click_log(f"[보조서커스] ⏭ 이미 돌고 있는 슬롯 {[x + 1 for x in _keep]} 는 그대로 둔다")
+            if not tg:
+                self.status.set(f"🎪 슬롯 {[x + 1 for x in _keep]} 는 이미 보조 서커스 중입니다")
+                return
         for si in tg:
             st["slots"][str(si)] = {"r": 0, "n": len(self._subc_rows(si)),
                                     "rows": self._subc_rows(si), "next": now, "fail": 0,
@@ -19867,7 +19897,8 @@ class App(tk.Tk):
         self._subc_save(st)
         self._subc_btn_paint()
         click_log(f"[보조서커스] ▶ 켬 — " + " · ".join(
-            f"#{si + 1:02d} 줄{self._subc_rows(si)}" for si in sorted(tg))
+            (f"#{si + 1:02d} 줄{self._subc_rows(si)}" if self._subc_rows(si)
+             else f"#{si + 1:02d} 메인만") for si in sorted(tg))
             + (" (지금 캐릭(메인) 서커스부터 · 순서 섞음 · 하나씩)" if SUBC_MAIN_FIRST
                else " (순서 섞음 · 하나씩 바꾼다)"))
         self.status.set(f"🎪 보조 서커스 시작 — {len(tg)}개 클라를 하나씩 "
@@ -19965,15 +19996,31 @@ class App(tk.Tk):
                 vv = st["slots"][str(si)]
                 n = int(vv.get("n", 0))
                 _off = 1 if vv.get("mf") else 0
-                if ok == "skip":
+                if ok == "inside":
+                    # 이미 서커스에서 사냥 중 — 그 판을 ⓪ 으로 친다. 끝나기를 기다린다
+                    _w = random.uniform(*SUBC_INSIDE_POLL)
+                    vv.update(r=r + 1, fail=0, next=time.time() + _w, chk=True, chk_at=time.time())
+                    click_log(f"[보조서커스] ⏸ #{si + 1:02d} 사냥 중이라 그대로 둔다 — "
+                              f"{_w / 60:.0f}분 뒤에 끝났나 본다 → 끝나면 "
+                              f"{self._subc_stage_name(vv, r + 1)}")
+                elif ok == "wait":
+                    _w = random.uniform(*SUBC_INSIDE_POLL)
+                    vv.update(next=time.time() + _w)
+                    click_log(f"[보조서커스] ⏸ #{si + 1:02d} 아직 서커스에서 사냥 중 — "
+                              f"{_w / 60:.0f}분 뒤에 다시 본다")
+                elif ok == "skip":
                     # 지금 캐릭(메인)에서 서커스를 못 찾았다 — 기다리지 않고 다음 캐릭으로
                     vv.update(r=r + 1, fail=0, next=time.time())
                     click_log(f"[보조서커스] ⏭ #{si + 1:02d} 지금 캐릭 서커스는 건너뛰고 바로 "
                               f"{self._subc_stage_name(vv, r + 1)} 로 간다")
                 elif ok:
+                    vv.pop("chk", None)
+                    vv.pop("chk_at", None)
                     if r >= n + _off:
                         st["slots"].pop(str(si), None)
-                        click_log(f"[보조서커스] ✔ #{si + 1:02d} 보조를 다 돌고 메인으로 돌아왔다")
+                        click_log(f"[보조서커스] ✔ #{si + 1:02d} "
+                                  + ("메인 서커스를 마치고 사냥 보냈다" if n == 0
+                                     else "보조를 다 돌고 메인으로 돌아왔다"))
                     else:
                         _c = random.uniform(*SUBC_CYCLE)
                         vv.update(r=r + 1, fail=0, next=time.time() + _c)
@@ -19995,6 +20042,29 @@ class App(tk.Tk):
             else:
                 self._subc_st = st
             self.after(0, self._subc_btn_paint)
+
+    def _subc_still_in(self, anc, tag, v):
+        """🎪 '이미 사냥 중' 이던 클라가 아직 그 서커스 안인가 → True(더 기다린다) · False(끝났다)."""
+        try:
+            age = time.time() - float(v.get("chk_at", 0) or 0)
+            if age >= SUBC_INSIDE_MAX:
+                click_log(f"[보조서커스] ⏰ {tag} 서커스 사냥을 {age / 60:.0f}분 기다렸다 — 끝난 것으로 보고 다음으로")
+                return False
+            big = grab_window(anc)
+            if big is None:
+                return True
+            pv = subc_place_score(big)
+            if pv < SUBC_PLACE_MATCH:
+                click_log(f"[보조서커스] ✔ {tag} 서커스 광장을 벗어났다 (광장 {pv:.2f}) — 다음으로 간다")
+                return False
+            for y, n in (quest_done_rows(big) or []):
+                if subc_done_score(big, y) >= SUBC_DONE_MATCH:
+                    click_log(f"[보조서커스] ✔ {tag} 서커스가 끝났다 ([완료] 줄 y{y}) — 다음으로 간다")
+                    return False
+            return True
+        except Exception as e:
+            click_log(f"[보조서커스] ⚠ {tag} 서커스가 끝났나 보다가 오류 — {type(e).__name__}: {e} (다음으로 간다)")
+            return False
 
     def _subc_stage_name(self, v, r):
         """r 번째 단계가 무엇인지 — '지금 캐릭(메인) 서커스' · '보조(3번째 줄)' · '메인(사냥)'."""
@@ -20130,8 +20200,10 @@ class App(tk.Tk):
         here = bool(_off) and r == 0           # ⓪ 지금 캐릭(메인) — 캐릭을 바꾸지 않는다
         rr = r - _off                          # 보조 몇 번째인가 (0 부터)
         main = (not here) and rr >= n
+        stay = main and n == 0 and bool(_off)  # 보조가 없다 → 캐릭을 바꾸지 않고 사냥만
         row_no = 1 if (main or here) else int(rows[rr])
-        what = ("지금 캐릭(메인)" if here else "메인" if main else f"보조({row_no}번째 줄)")
+        what = ("지금 캐릭(메인)" if here else "메인(그대로)" if stay
+                else "메인" if main else f"보조({row_no}번째 줄)")
         hw = None
         try:
             hw = (self._client_hwnds_by_slot() or [])[si][4]
@@ -20178,7 +20250,50 @@ class App(tk.Tk):
             except Exception:
                 pass
             nap(random.uniform(0.6, 1.0))
+            # 🎪 이미 서커스 광장에서 AUTO 중 → 아무것도 누르지 않는다 (끝나면 다음으로)
+            try:
+                _pv = subc_place_score(grab_window(anc))
+            except Exception:
+                _pv = -1.0
+            if _pv >= SUBC_PLACE_MATCH:
+                _on, _cn = self._auto_on(anc)
+                if _on:
+                    click_log(f"[보조서커스] 🟢 {tag} **이미 서커스에서 사냥 중**이다 (광장 {_pv:.2f} · "
+                              f"AUTO 빛 {_cn}) — 아무것도 누르지 않는다 · 끝나면 다음으로 간다")
+                    return "inside"
             return self._subc_circus(si, anc, L, T, W, H, tag, what, cs, _ck, _hk, _P, here=True)
+        if (not here) and _sv.get("chk") and not at_sel:
+            self._subc_hand_wait(tag)
+            self._wake_hard("subc", anc, name, si + 1)
+            nap(random.uniform(0.8, 1.4))
+            if self._subc_still_in(anc, tag, _sv):
+                return "wait"
+        if stay:
+            # 🎪 보조를 안 고른 슬롯 — 메인 서커스가 끝났다. 캐릭은 그대로 · 보상 받고 사냥
+            if not at_sel:
+                self._subc_hand_wait(tag)
+                self._wake_hard("subc", anc, name, si + 1)
+                try:
+                    self._focus_client_at(anc)
+                except Exception:
+                    pass
+                nap(random.uniform(0.6, 1.0))
+                if SUBC_DONE_ON:
+                    try:
+                        self._subc_reward(si, anc, L, T, W, H, tag, _ck)
+                    except Exception as e:
+                        click_log(f"[보조서커스] ⚠ {tag} 보상 받기 오류 — {type(e).__name__}: {e} (그대로 넘어간다)")
+                    if getattr(self, "_subc_stop", False):
+                        return False
+            else:
+                click_log(f"[보조서커스] ⚠ {tag} 캐릭터 선택 화면이다 — 사냥은 게임 안일 때만 보낸다")
+            if SUBC_HUNT:
+                try:
+                    self._run_hunt(only=si)
+                    click_log(f"[보조서커스] 🏹 {tag} 메인 그대로 사냥 보냄 (보조 없음)")
+                except Exception as e:
+                    click_log(f"[보조서커스] ⚠ {tag} 사냥 보내기 실패 — {e}")
+            return True
         if not at_sel:
             self._subc_hand_wait(tag)
             self._wake_hard("subc", anc, name, si + 1)
