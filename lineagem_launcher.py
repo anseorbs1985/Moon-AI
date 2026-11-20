@@ -11309,7 +11309,8 @@ class App(tk.Tk):
                   command=self._open_subc_win).pack(side="left")
         self._subc_btn = tk.Button(_sc, text="▶실행", font=("맑은 고딕", 8, "bold"),
                                    bg="#af601a", fg="white", activebackground="#935116",
-                                   width=4, height=1, pady=2, command=self._subc_toggle)
+                                   width=4, height=1, pady=2,
+                                   command=lambda: self._subc_start(None))
         self._subc_btn.pack(side="left", padx=(2, 0))
         self.after(2500, self._subc_boot)
 
@@ -19708,7 +19709,8 @@ class App(tk.Tk):
         tk.Label(p, text=("지금 접속한 캐릭(메인) 서커스부터 돌고, " if SUBC_MAIN_FIRST else "")
                           + "고른 줄을 위에서부터 차례로 1시간 5분씩 돌리고, 끝나면 메인으로 들어가 "
                           "사냥을 보냅니다 · 아무 줄도 안 고르면 메인 서커스만 돌고 사냥 · 잠긴 줄은 고르지 마세요",
-                 font=("맑은 고딕", 8), fg="#888").pack(anchor="w", padx=8)
+                 font=("맑은 고딕", 8), fg="#888", wraplength=600,
+                 justify="left").pack(anchor="w", padx=8)
         try:
             hw = self._client_hwnds_by_slot() or []
         except Exception:
@@ -19716,6 +19718,8 @@ class App(tk.Tk):
         g = tk.Frame(p)
         g.pack(padx=6, pady=6)
         self._subc_pbtn = {}
+        self._subc_sbtn = {}
+        self._subc_slbl = {}
         for si in range(16):
             c = tk.Frame(g, bd=1, relief="groove")
             c.grid(row=si % 4, column=si // 4, padx=3, pady=3, sticky="nw")
@@ -19728,9 +19732,14 @@ class App(tk.Tk):
             top.pack(fill="x")
             tk.Label(top, text=f"#{si + 1:02d} {nm}", font=("맑은 고딕", 8, "bold"),
                      width=11, anchor="w").pack(side="left")
-            tk.Button(top, text="▶", font=("맑은 고딕", 7, "bold"), bg="#1e8449",
-                      fg="white", width=2, pady=0,
-                      command=lambda x=si: self._subc_start([x])).pack(side="right")
+            _rb = tk.Button(top, text="▶", font=("맑은 고딕", 7, "bold"), bg="#1e8449",
+                            fg="white", width=2, pady=0,
+                            command=lambda x=si: self._subc_slot_btn(x))
+            _rb.pack(side="right")
+            self._subc_sbtn[si] = _rb
+            _sl = tk.Label(c, text="", font=("맑은 고딕", 7), fg="#888", anchor="w", width=16)
+            _sl.pack(fill="x", padx=2)
+            self._subc_slbl[si] = _sl
             row = tk.Frame(c)
             row.pack(padx=2, pady=(0, 2))
             for k in SUBC_PICKABLE:
@@ -19741,13 +19750,80 @@ class App(tk.Tk):
                 self._subc_pbtn[(si, k)] = b
         bot = tk.Frame(p)
         bot.pack(fill="x", padx=8, pady=(0, 6))
-        tk.Button(bot, text="▶ 고른 클라 전부 시작 / ■ 끄기", font=("맑은 고딕", 9, "bold"),
-                  bg="#7d3c98", fg="white", command=self._subc_toggle).pack(side="left")
+        tk.Button(bot, text="▶ 안 돌고 있는 클라 전부 시작", font=("맑은 고딕", 9, "bold"),
+                  bg="#7d3c98", fg="white",
+                  command=lambda: self._subc_start(None)).pack(side="left")
+        tk.Button(bot, text="■ 전부 끄기", font=("맑은 고딕", 8, "bold"),
+                  bg="#922b21", fg="white", command=self._subc_off_all).pack(side="left", padx=(6, 0))
         tk.Button(bot, text="고른 것 전부 지우기", font=("맑은 고딕", 8),
                   command=self._subc_pick_clear).pack(side="right")
         self._subc_pick_paint()
 
+    def _subc_slot_btn(self, si):
+        """창의 슬롯 ▶/✕ — 안 돌고 있으면 그 슬롯만 시작 · 돌고 있으면 그 슬롯만 뺀다."""
+        st = getattr(self, "_subc_st", None) or self._subc_load()
+        if st.get("on") and str(si) in (st.get("slots") or {}):
+            self._subc_off_slot(si)
+        else:
+            self._subc_start([si])
+
+    def _subc_off_slot(self, si):
+        """🎪 그 슬롯만 차례에서 뺀다 (다른 슬롯은 그대로) — 그 캐릭은 지금 상태 그대로 둔다."""
+        st = self._subc_load()
+        if str(si) not in (st.get("slots") or {}):
+            return
+        st["slots"].pop(str(si), None)
+        if getattr(self, "_subc_cur", None) == int(si):
+            self._subc_stop = True             # 지금 그 슬롯을 바꾸는 중이면 거기서 멈춘다
+        self._subc_save(st)
+        self._subc_btn_paint()
+        click_log(f"[보조서커스] ✕ #{si + 1:02d} 만 뺐다 (사용자) — 그 캐릭은 지금 상태 그대로 · "
+                  f"남은 슬롯 {sorted(int(k) + 1 for k in st.get('slots', {}))}")
+        self.status.set(f"🎪 #{si + 1:02d} 를 보조 서커스에서 뺐습니다 (지금 캐릭 그대로)")
+
+    def _subc_off_all(self):
+        st = getattr(self, "_subc_st", None) or self._subc_load()
+        if not st.get("on"):
+            self.status.set("🎪 보조 서커스는 이미 꺼져 있습니다")
+            return
+        if not messagebox.askyesno("보조 서커스", "돌고 있는 보조 서커스를 전부 끌까요? "
+                                   "(각 캐릭은 지금 상태 그대로 둡니다)", default="no"):
+            return
+        self._subc_toggle()
+
+    def _subc_slot_paint(self):
+        """창의 슬롯마다 — ▶(안 돎) / ✕(돌고 있음) 와 다음 차례."""
+        st = getattr(self, "_subc_st", None) or {}
+        sl = (st.get("slots") or {}) if st.get("on") else {}
+        cur = getattr(self, "_subc_cur", None)
+        for si, b in list(getattr(self, "_subc_sbtn", {}).items()):
+            try:
+                if not b.winfo_exists():
+                    continue
+                v = sl.get(str(si))
+                lb = self._subc_slbl.get(si)
+                if v:
+                    b.config(text="✕", bg="#c0392b", activebackground="#922b21")
+                    nm = self._subc_stage_name(v, int(v.get("r", 0)))
+                    nm = (nm.replace("지금 캐릭(메인) 서커스", "메인서커스").replace("메인(사냥)", "사냥")
+                          .replace("번째 줄)", "").replace("보조(", "보조"))
+                    if cur == si:
+                        t = f"🔄 바꾸는 중 {nm}"
+                    elif v.get("chk"):
+                        t = f"⏸ 사냥 중 → {nm}"
+                    else:
+                        t = f"🕐 {time.strftime('%H:%M', time.localtime(float(v.get('next', 0))))} {nm}"
+                    if lb:
+                        lb.config(text=t, fg="#e67e22")
+                else:
+                    b.config(text="▶", bg="#1e8449", activebackground="#145a32")
+                    if lb:
+                        lb.config(text=("메인만" if not self._subc_rows(si) else "대기"), fg="#888")
+            except Exception:
+                pass
+
     def _subc_pick_paint(self):
+        self._subc_slot_paint()
         for (si, k), b in list(getattr(self, "_subc_pbtn", {}).items()):
             try:
                 on = k in self._subc_rows(si)
@@ -19827,12 +19903,13 @@ class App(tk.Tk):
             st = getattr(self, "_subc_st", None) or {}
             on = bool(st.get("on"))
             n = len(st.get("slots") or {})
-            self._subc_btn.config(text=("■끄기" if on else "▶실행"),
-                                  bg=("#c0392b" if on else "#af601a"))
-            if on:
-                self._subc_btn.config(text="■끄기")
+            # ▶ 는 늘 '추가' 다 — 돌고 있는 슬롯은 그대로 두고 안 돌고 있는 것만 올린다
+            #   (2026-11-20 사용자: *"끄기로 있으면 기존 게 꺼지잖아"*). 끄기는 창의 ✕ / ■ 전부 끄기.
+            self._subc_btn.config(text=(f"▶{n}중" if on and n else "▶실행"),
+                                  bg=("#1e8449" if on and n else "#af601a"))
         except Exception:
             pass
+        self._subc_slot_paint()
 
     def _subc_boot(self):
         self._subc_st = self._subc_load()
@@ -19952,6 +20029,7 @@ class App(tk.Tk):
                 self._subc_kick = 0
                 self._busy_task = "보조서커스"
                 self._subc_cur = si
+                self._subc_slot_paint()
                 threading.Thread(target=self._run_task,
                                  args=("보조서커스", self._subc_job, si),
                                  daemon=True).start()
