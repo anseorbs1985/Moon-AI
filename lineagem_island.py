@@ -230,6 +230,16 @@ WAVE_HEAVY_HOLD  = (16.0, 22.0)   # 그 뒤 다른 클라의 **무거운 칸**�
 WAVE_HEAVY_QUIET = (5.0, 8.0)     # 그 뒤 다른 클라의 **모든 클릭**을 미루는 시간(초)
 WAVE_CALM_TERM   = (0.9, 1.7)     # 클릭 사이 텀 (평소 0.35~0.7)
 WAVE_STAGGER     = (0.15, 0.22)   # 둘째 클라 출발 = 한 슬롯 예상시간 × 이 비율 (약 30~45초)
+# 🧘 **부하가 걸리는 자리는 5~15% 더** (2026-11-21 사용자: *"부하가 걸리는 부분이 있으면 충분히 시간을
+#    5~15프로까지 줘 팅기지 않는 게 정말 중요하다"* · *"동시에 클릭했을 때 특히 조심해"*)
+#    맵을 불러오는 칸 · 슬롯 첫 클릭 · 다른 클라로 넘어가는 클릭 · 슬롯 사이 — 매번 새로 뽑는다.
+LOAD_EXTRA       = (1.05, 1.15)
+WAVE_SWITCH_GAP  = (2.2, 3.0)     # 다른 클라로 넘어갈 때 **앞 클릭과** 최소 이만큼 띄운다 (× LOAD_EXTRA)
+
+
+def load_x():
+    """부하 자리 여유 배수 — 1.05~1.15 (매번 다르다 · 사람처럼)."""
+    return random.uniform(*LOAD_EXTRA)
 #   📏 흉내(가짜 시계 · 실제 등록 간격 · 16슬롯 8판) — 옛 코드 32.2분이 실측 33.3분과 맞는다:
 #        무거운 칸이 12초 안에 겹친 횟수   옛 21.8회(최대 34) → 새 **0회**
 #        무거운 칸 사이 최소 간격          옛 1.7초          → 새 **16.4초**
@@ -10229,8 +10239,8 @@ class IslandApp(tk.Tk):
 
         def _hold(_si):
             _t = time.time()
-            _hv["until"] = _t + random.uniform(*WAVE_HEAVY_HOLD)
-            _hv["quiet"] = _t + random.uniform(*WAVE_HEAVY_QUIET)
+            _hv["until"] = _t + random.uniform(*WAVE_HEAVY_HOLD) * load_x()
+            _hv["quiet"] = _t + random.uniform(*WAVE_HEAVY_QUIET) * load_x()
             _hv["si"] = _si
 
         if _calm:
@@ -10248,13 +10258,14 @@ class IslandApp(tk.Tk):
             state[active[0]]["due"] = time.time() + random.uniform(0.0, 3.0)
             for _k, _a in enumerate(active[1:], 1):
                 state[_a]["due"] = (time.time() + _est * _k * 2.0 / LANES
-                                    * random.uniform(*WAVE_STAGGER))
+                                    * random.uniform(*WAVE_STAGGER) * load_x())
             self._rlog(f"🧘 {key} 차분한 웨이브 — 동시 {LANES}슬롯 · 둘째 클라는 "
                        f"{state[active[1]]['due'] - time.time():.0f}초 뒤 출발 "
                        f"(한 슬롯 예상 {_est:.0f}초) · 무거운 칸은 서로 "
                        f"{WAVE_HEAVY_HOLD[0]:.0f}~{WAVE_HEAVY_HOLD[1]:.0f}초 띄운다")
         done_cnt = 0
         last_si  = None                # 직전에 클릭한 슬롯 (창 전환 여유 판단용)
+        _last_t  = 0.0                 # 직전 클릭 시각 (다른 클라로 넘어갈 때 띄우는 기준)
         while not self._stop_flag:
             # 끝난 슬롯 자리에 대기 중인 슬롯을 채워 넣는다
             fin = [si for si in active if state[si]["j"] >= total]
@@ -10274,7 +10285,7 @@ class IslandApp(tk.Tk):
                           else waiting.pop(random.randrange(len(waiting))))
                     # 1슬롯씩 돌 때(⏰ 반복)는 앞 클라가 가라앉을 시간을 길게 준다
                     _sg = random.uniform(*(SLOT_GAP_SOLO if LANES <= 1
-                                           else SLOT_GAP_AFTER))
+                                           else SLOT_GAP_AFTER)) * load_x()
                     state[nx]["due"] = time.time() + _sg
                     active.append(nx)
                     self._status.set(f"➡ #{si+1:02d} 완료 — {_sg:.0f}초 쉬고 "
@@ -10324,7 +10335,12 @@ class IslandApp(tk.Tk):
             if si != last_si:
                 # 다른 클라로 넘어가는 첫 클릭은 '창 활성화'로만 먹히고 사라질 수 있다
                 # → 그 창을 먼저 앞으로 올려두고 잠깐 뒤에 누른다 (2026-08-22)
-                time.sleep(random.uniform(0.6, 1.1))
+                # 🧘 **두 클라가 붙어서 눌리지 않게** — 앞 클릭과 최소 2.2~3.0초(×5~15%) (2026-11-21)
+                if last_si is not None and _last_t:
+                    _need = random.uniform(*WAVE_SWITCH_GAP) * load_x() - (time.time() - _last_t)
+                    if _need > 0:
+                        time.sleep(_need)
+                time.sleep(random.uniform(0.6, 1.1) * load_x())
                 try:
                     _cs = st["slot"].get("coords") or []
                     self._focus_client(si, _cs[j] if j < len(_cs) else None)
@@ -10341,6 +10357,7 @@ class IslandApp(tk.Tk):
                                             move_set, _ronly, stop_fn,
                                             status_fn, pace)
                 last_si = si
+                _last_t = time.time()
                 continue
             if not wait_mouse_idle(stop_fn, status_fn): return
             if self._stop_flag: break
@@ -10368,6 +10385,7 @@ class IslandApp(tk.Tk):
                            f"이 슬롯 중단 (다른 슬롯은 계속)")
                 continue
             st["j"] = j + 1
+            _last_t = time.time()
             if did:
                 done_cnt += 1
                 if _hvy:
@@ -10377,7 +10395,9 @@ class IslandApp(tk.Tk):
                 # 매 클릭마다 큰 편차(0.7~1.7배) — 슬롯마다 시간이 제각각 흘러
                 # 어떤 슬롯은 연달아 두세 번, 어떤 슬롯은 한참 쉬었다 눌린다
                 st["due"] = (time.time() + self._gap_seconds(g) * st["sp"] * pace
-                             * random.uniform(*WAVE_GAP_MULT))
+                             * random.uniform(*WAVE_GAP_MULT)
+                             * (load_x() if _hvy or gap_low(g) >= WAVE_HEAVY_GAP_BY.get(key, WAVE_HEAVY_GAP)
+                                else 1.0))
             else:
                 st["due"] = time.time()        # 빈 자리는 기다리지 않고 바로 다음으로
             # 마우스는 하나 — 클릭끼리 최소 간격을 둬서 씹힘 방지
@@ -10779,7 +10799,9 @@ class IslandApp(tk.Tk):
                 gl = slot.get("gap_list") or []
                 g = gl[j] if j < len(gl) else None
                 time.sleep(self._gap_seconds(g) * st["sp"] * pace
-                           * random.uniform(*WAVE_GAP_MULT))
+                           * random.uniform(*WAVE_GAP_MULT)
+                           * (load_x() if gap_low(g) >= WAVE_HEAVY_GAP_BY.get(key, WAVE_HEAVY_GAP)
+                              else 1.0))
         st["j"] = total           # 이 슬롯은 여기서 끝 (웨이브가 다음 슬롯 투입)
         return done
 
@@ -11086,12 +11108,18 @@ class IslandApp(tk.Tk):
                     # 좌표 간 간격 10~25% 랜덤 증가 (× 녹화 없는 슬롯은 _slow 추가 완화)
                     _mult = (random.uniform(1.10, 1.25) * _slow * 1.05
                              * slow_factor())      # 전체 12~17% 추가 지연
+                    # 🧘 절전이 풀리는 첫 칸 · 맵을 불러오는 칸은 5~15% 더 (2026-11-21)
+                    _hvl = (j == 0 or gap_low(g) >= WAVE_HEAVY_GAP_BY.get(key, WAVE_HEAVY_GAP))
+                    if _hvl:
+                        _mult *= load_x()
                     if g is None or g == "":
                         time.sleep(CLICK_INTERVAL * _mult)
                     elif isinstance(g, (int, float)):
                         time.sleep(float(g) * _mult)
                     else:
                         self._do_gap_spec(str(g), name)   # 대기 토큰에 10~25% 증가 적용됨
+                        if _hvl:
+                            time.sleep(max(0.0, gap_mid(g)) * (load_x() - 1.0))
                 else:
                     _fin_ok = True    # break 없이 마지막 칸까지 갔다
                 self._add_count(si)
@@ -11104,7 +11132,7 @@ class IslandApp(tk.Tk):
                 #      '개별은 되는데 전체는 안 된다' 가 또 생긴다.
                 self._rep_touch_once(key, si)
                 if self._stop_flag: break
-                time.sleep(5)
+                time.sleep(5 * load_x())
             if not self._stop_flag:
                 # (2026-08-09) 마지막 번호를 누르자마자 끝내지 않고 2초 뒤에 마무리
                 time.sleep(2)
