@@ -188,6 +188,12 @@
   "x_coin": [
    "x01",
    "c03"
+  ],
+  "melt_legs": [
+   "06 강철각반"
+  ],
+  "melt_elm": [
+   "06 엘름의 축복"
   ]
  },
  "from": "#04 aaoo / #03 고주파 2026-11-19",
@@ -211,7 +217,9 @@
   ]
  },
  "min": {
-  "chest_silver": 0.84
+  "chest_silver": 0.84,
+  "melt_legs": 0.93,
+  "melt_elm": 0.93
  },
  "first": [
   [
