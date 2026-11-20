@@ -4880,11 +4880,34 @@ MELT_SLOT_X   = tuple(205 + 34 * k for k in range(5))
 MELT_SLOT_Y   = (182, 216)
 MELT_SLOT_DARK = 30             # 등록 칸이 이보다 어두우면 비어 있다
 MELT_STEP     = (0.35, 0.70)
+# 2026-11-20 사용자 바로잡음: *"그 두 아이템이 있으면 고급 장비만 녹여줘 … 다른 녹템은 괜찮아 ·
+#   착용중인 장비는 냅두고 · + 없는 강철각반·엘름을 말하는 거야 · 희귀 그런 거 녹이면 절대 안 되고
+#   무조건 고급 아이템만"* → 신호는 **+ 없는** 두 아이템 · 녹이는 것은 **고급 전부**.
+MELT_RARE_CHK = (253, 245)      # '희귀' 칸 — **절대 켜져 있으면 안 된다**
+MELT_RARE_BOX = (249, 239, 261, 251)
+MELT_HERO_CHK = (322, 245)      # '영웅' 칸
+MELT_HERO_BOX = (318, 239, 330, 251)
+# 칸 모서리의 파란 표시 — 왼쪽 위 [E](장착) · 오른쪽 아래 +N(강화)
+#   📏 #16 장착 +6 각반 (48, 20) · #06 강철각반·엘름 (0, 0) · 등록 칸 (0, 0)
+MELT_MARK_E   = 15
+MELT_MARK_P   = 8
 MELT_SEE      = 4.0
 INVX_MATCH = 0.85                 # 📏 그 화면 1.00 · 다른 화면 187장 최고 0.64
 INVX_HOLD = (1.05, 1.30)          # 꾹 누르기 (사용자 1.09~1.17초)
 INVX_STEP = (0.18, 0.40)          # 누른 뒤 사람처럼 쉬기 (빠르게 · 랜덤)
 INVX_POLL = (0.08, 0.16)          # 창이 떴나 보는 간격
+# 🧍 제작·교환·낚시 녹이기 — **가끔 한 박자 멈칫** (2026-11-20 사용자: *"제작하고 낚시 녹이고 이건
+#    각각 들어갈 때 너가 랜덤으로 항상 시간을 부여해줘. 가끔은 1초~4초 이렇게 사람이 하는 것처럼.
+#    너무 기계처럼 해버리면 오해받아"*) — 누를 때마다 이 확률로 1~4초를 더 쉰다.
+INVX_PAUSE_P = 0.25
+INVX_PAUSE   = (1.0, 4.0)
+
+
+def invx_human_nap(step):
+    """누른 뒤 쉬기 — 늘 랜덤 + 가끔(INVX_PAUSE_P) 1~4초 멈칫."""
+    nap(random.uniform(*step))
+    if random.random() < INVX_PAUSE_P:
+        nap(random.uniform(*INVX_PAUSE))
 INVX_SEE = 3.0                    # 창이 뜨기를 기다리는 한도
 INVX_CRAFT_MAX = 30.0             # 제작이 끝나기를 기다리는 한도
 INVX_BLUE = 100                   # 📏 [제작] 켜짐 파란 점 420 · 꺼짐 0
@@ -4954,6 +4977,22 @@ def invx_blue(big, box):
         return int(((B - R > 40) & (B > 90)).sum())
     except Exception:
         return -1
+
+
+def inv_cell_mark(big, tlx, tly):
+    """🎣 칸 모서리의 파란 표시 → ([E] 장착 점 수, +N 강화 점 수) · 칸 왼쪽 위(창 안 픽셀) 기준.
+    546 창 기준 칸 30px — [E] 는 (1~11, 1~11), +N 은 (19~31, 20~31)."""
+    try:
+        kx, ky = _inv_k(big)
+
+        def bl(x0, y0, x1, y1):
+            a = big[int(tly + y0 * ky):int(tly + y1 * ky), int(tlx + x0 * kx):int(tlx + x1 * kx)].astype(int)
+            if a.size == 0:
+                return -1
+            return int(((a[..., 0] > 140) & (a[..., 0] - a[..., 2] > 60)).sum())
+        return bl(1, 1, 11, 11), bl(19, 20, 31, 31)
+    except Exception:
+        return None
 
 
 def inv_items():
@@ -32666,6 +32705,7 @@ class App(tk.Tk):
         downs = 0
         skip = set()
         melt_need = False
+        melt_seen = set()
         fails = {}
         oks = {}
         # 🥇 먼저 쓸 것 — `first` 의 **한 칸 = 한 종류**(같은 물건의 그림 여러 장).
@@ -32747,6 +32787,25 @@ class App(tk.Tk):
                           f"모르는 창이라 아무것도 누르지 않고 멈춘다 · 화면 {p}")
                 return done
             hits = inv_find(big, skip)
+            # 🎣 녹일 신호(+ 없는 강철각반·엘름) — 누르지 않는다. 장착(E)·강화(+) 는 신호가 아니다
+            if MELT_ON and hits:
+                _kx0, _ky0 = _inv_k(big)
+                _keep = []
+                for _h in hits:
+                    if _h[2] not in MELT_GROUPS:
+                        _keep.append(_h)
+                        continue
+                    _mk = inv_cell_mark(big, _h[1] - 14 * _kx0, _h[0] - 14 * _ky0)
+                    if _mk is None or _mk[0] >= MELT_MARK_E or _mk[1] >= MELT_MARK_P:
+                        if ("mk", _h[2]) not in melt_seen:
+                            melt_seen.add(("mk", _h[2]))
+                            click_log(f"[아이템정리] {tag} 🎣 {_h[2]} 가 있지만 **장착(E)·강화(+)** 표시가 있다 "
+                                      f"{_mk} — 녹일 신호로 보지 않는다")
+                    elif not melt_need:
+                        melt_need = True
+                        click_log(f"[아이템정리] {tag} 🎣 + 없는 {_h[2]} 가 있다 (일치도 {_h[3]:.2f}) — "
+                                  f"끝나면 낚시에서 **고급**을 녹인다")
+                hits = _keep
             # 🥇 먼저 쓸 것은 한 가지만 — 처음 보일 때 차례가 가장 앞선 것을 고른다
             deferred = False
             if pick is None and not capped and not qs_busy and not qs_done:
@@ -32931,13 +32990,13 @@ class App(tk.Tk):
         if not self._inv_hand_wait(tag):
             raise RuntimeError("멈춤")
         click_at(L + int(rel[0] * kx), T + int(rel[1] * ky))
-        nap(random.uniform(*INVX_STEP))
+        invx_human_nap(INVX_STEP)
 
     def _invx_tap_px(self, tag, L, T, x, y):
         if not self._inv_hand_wait(tag):
             raise RuntimeError("멈춤")
         click_at(L + int(x), T + int(y))
-        nap(random.uniform(*INVX_STEP))
+        invx_human_nap(INVX_STEP)
 
     def _invx_wait(self, anc, name, tmax=None, box=None, thr=None):
         """그 그림이 뜰 때까지 → (x, y, 점수, 화면) · 못 보면 (None, None, 최고점수, 마지막 화면)."""
@@ -33116,7 +33175,7 @@ class App(tk.Tk):
         if not self._inv_hand_wait(tag):
             raise RuntimeError("멈춤")
         click_at(L + int(rel[0] * kx), T + int(rel[1] * ky))
-        nap(random.uniform(*MELT_STEP))
+        invx_human_nap(MELT_STEP)
 
     def _melt_close(self, anc, tag, L, T):
         """낚시 창 → 메뉴 순서로 닫는다 — **그 창이 보일 때만** ✕ (아니면 ≡ 메뉴를 연다)."""
@@ -33135,7 +33194,8 @@ class App(tk.Tk):
                 return
 
     def _melt_slots(self, b):
-        """등록 칸 10개 → (녹일 것 수, 다른 것 수, 기록)."""
+        """등록 칸 10개 → (등록된 수, 장착·강화 표시가 있는 수, 기록).
+        '고급' 만 켜 두었으므로 들어간 것은 고급이다 — 다만 장착(E)·강화(+) 가 보이면 막는다."""
         import cv2
         kx, ky = _inv_k(b)
         g = cv2.cvtColor(b, cv2.COLOR_BGR2GRAY)
@@ -33147,13 +33207,12 @@ class App(tk.Tk):
                 h = max(6, int(10 * kx))
                 if float(g[Y - h:Y + h, X - h:X + h].mean()) < MELT_SLOT_DARK:
                     continue
-                box = (x - 17, y - 17, x + 17, y + 17)
-                v = max(invx_find(b, n, box=box, thr=0.0)[2] for n in MELT_REG)
-                if v >= INVX_MATCH:
-                    ok += 1
-                else:
+                mk = inv_cell_mark(b, (x - 15) * kx, (y - 15) * ky)
+                if mk is None or mk[0] >= MELT_MARK_E or mk[1] >= MELT_MARK_P:
                     bad += 1
-                note.append(f"{v:.2f}")
+                    note.append(f"{x},{y}:E{mk and mk[0]}+{mk and mk[1]}")
+                else:
+                    ok += 1
         return ok, bad, note
 
     def _inv_melt(self, anc, tag, L, T):
@@ -33192,6 +33251,20 @@ class App(tk.Tk):
                 a = bb[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
                 B, G, R = a[..., 0], a[..., 1], a[..., 2]
                 return int(((R > 170) & (G > 90) & (B < 90)).sum())
+            def chk_box(bb, box):
+                x0, y0, x1, y1 = box
+                a = bb[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
+                B, G, R = a[..., 0], a[..., 1], a[..., 2]
+                return int(((R > 170) & (G > 90) & (B < 90)).sum())
+            # 🚫 희귀·영웅은 **절대** — 켜져 있으면 끄고, 그래도 켜져 있으면 녹이지 않는다
+            for _nm, _xy, _bx in (("희귀", MELT_RARE_CHK, MELT_RARE_BOX), ("영웅", MELT_HERO_CHK, MELT_HERO_BOX)):
+                if chk_box(b, _bx) >= MELT_CHK_MIN:
+                    click_log(f"[아이템정리] {tag} 🎣 '{_nm}' 칸이 켜져 있다 — 끈다")
+                    self._melt_tap(tag, L, T, kx, ky, _xy)
+                    b = grab_window(anc)
+                    if b is None or chk_box(b, _bx) >= MELT_CHK_MIN:
+                        self._melt_close(anc, tag, L, T)
+                        return self._invx_unknown(tag, b, f"'{_nm}' 칸이 안 꺼진다 — 녹이지 않는다", -1.0)
             if chk(b) < MELT_CHK_MIN:
                 self._melt_tap(tag, L, T, kx, ky, MELT_CHK)
                 b = grab_window(anc)
@@ -33205,8 +33278,8 @@ class App(tk.Tk):
             ok, bad, note = self._melt_slots(b) if b is not None else (0, 0, [])
             if bad:
                 p = self._inv_shot(b, tag, "melt")
-                click_log(f"[아이템정리] 🚫 {tag} 🎣 **녹일 것이 아닌 고급 아이템이 같이 등록됐다** "
-                          f"(녹일 것 {ok} · 다른 것 {bad} · {note}) — [초기화] 하고 녹이지 않는다 · 화면 {p}")
+                click_log(f"[아이템정리] 🚫 {tag} 🎣 **장착(E)·강화(+) 표시가 있는 아이템이 같이 등록됐다** "
+                          f"(고급 {ok} · 표시 있음 {bad} · {note}) — [초기화] 하고 녹이지 않는다 · 화면 {p}")
                 self._melt_tap(tag, L, T, kx, ky, MELT_RESET)
                 self._melt_close(anc, tag, L, T)
                 return "skip"
@@ -33229,7 +33302,7 @@ class App(tk.Tk):
             self._melt_tap(tag, L, T, kx, ky, MELT_OK)
             r = self._invx_wait(anc, "mlt_done", tmax=MELT_SEE)
             if r[0] is not None:
-                click_log(f"[아이템정리] ✅ {tag} 🎣 **{ok}개 녹였다** (교환에 성공하였습니다)")
+                click_log(f"[아이템정리] ✅ {tag} 🎣 **고급 {ok}개 녹였다** (교환에 성공하였습니다)")
                 self._melt_tap(tag, L, T, kx, ky, MELT_TOAST)
             else:
                 click_log(f"[아이템정리] ⚠ {tag} 🎣 '교환에 성공' 을 못 봤다 ({r[2]:.2f}) — 창만 닫는다")
