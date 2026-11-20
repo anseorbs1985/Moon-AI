@@ -19720,6 +19720,9 @@ class App(tk.Tk):
         self._subc_pbtn = {}
         self._subc_sbtn = {}
         self._subc_slbl = {}
+        self._subc_plus = {}
+        if not isinstance(getattr(self, "_subc_sel", None), set):
+            self._subc_sel = set()
         for si in range(16):
             c = tk.Frame(g, bd=1, relief="groove")
             c.grid(row=si % 4, column=si // 4, padx=3, pady=3, sticky="nw")
@@ -19737,6 +19740,11 @@ class App(tk.Tk):
                             command=lambda x=si: self._subc_slot_btn(x))
             _rb.pack(side="right")
             self._subc_sbtn[si] = _rb
+            _pb = tk.Button(top, text="+", font=("맑은 고딕", 7, "bold"), width=2, pady=0,
+                            bg="#dfe3e6", fg="#e67e22",
+                            command=lambda x=si: self._subc_sel_toggle(x))
+            _pb.pack(side="right", padx=(0, 2))
+            self._subc_plus[si] = _pb
             _sl = tk.Label(c, text="", font=("맑은 고딕", 7), fg="#888", anchor="w", width=16)
             _sl.pack(fill="x", padx=2)
             self._subc_slbl[si] = _sl
@@ -19750,11 +19758,14 @@ class App(tk.Tk):
                 self._subc_pbtn[(si, k)] = b
         bot = tk.Frame(p)
         bot.pack(fill="x", padx=8, pady=(0, 6))
-        tk.Button(bot, text="▶ 안 돌고 있는 클라 전부 시작", font=("맑은 고딕", 9, "bold"),
-                  bg="#7d3c98", fg="white",
-                  command=lambda: self._subc_start(None)).pack(side="left")
+        tk.Button(bot, text="✔ 전체선택", font=("맑은 고딕", 8, "bold"),
+                  bg="#e67e22", fg="white", command=self._subc_sel_all).pack(side="left")
+        tk.Button(bot, text="해제", font=("맑은 고딕", 8),
+                  command=self._subc_sel_clear).pack(side="left", padx=(4, 0))
         tk.Button(bot, text="■ 전부 끄기", font=("맑은 고딕", 8, "bold"),
                   bg="#922b21", fg="white", command=self._subc_off_all).pack(side="left", padx=(6, 0))
+        tk.Button(bot, text="▶ 선택실행", font=("맑은 고딕", 9, "bold"),
+                  bg="#7d3c98", fg="white", command=self._subc_sel_run).pack(side="left", padx=(4, 0))
         tk.Button(bot, text="고른 것 전부 지우기", font=("맑은 고딕", 8),
                   command=self._subc_pick_clear).pack(side="right")
         self._subc_pick_paint()
@@ -19766,6 +19777,50 @@ class App(tk.Tk):
             self._subc_off_slot(si)
         else:
             self._subc_start([si])
+
+    def _subc_running(self):
+        st = getattr(self, "_subc_st", None) or {}
+        return {int(k) for k in (st.get("slots") or {})} if st.get("on") else set()
+
+    def _subc_sel_toggle(self, si):
+        """+ — 이 슬롯을 고른다/뺀다. 돌고 있는 슬롯은 고르지 않는다 (이미 차례에 있다)."""
+        sel = self._subc_sel = getattr(self, "_subc_sel", None) or set()
+        if si in self._subc_running():
+            self.status.set(f"🎪 #{si + 1:02d} 는 이미 돌고 있습니다 — 빼려면 ✕")
+            return
+        sel.symmetric_difference_update({si})
+        self._subc_slot_paint()
+        self.status.set(f"🎪 고른 슬롯 {sorted(x + 1 for x in sel)}" if sel else "🎪 고른 슬롯 없음")
+
+    def _subc_sel_all(self):
+        """✔ 전체선택 — 클라 창이 있고 **안 돌고 있는** 슬롯 전부 (다시 누르면 해제)."""
+        run = self._subc_running()
+        try:
+            hw = self._client_hwnds_by_slot() or []
+        except Exception:
+            hw = []
+        cand = {si for si in range(16) if si not in run
+                and (not hw or (si < len(hw) and hw[si] and hw[si][4]))}
+        sel = getattr(self, "_subc_sel", None) or set()
+        self._subc_sel = set() if (cand and sel >= cand) else cand
+        self._subc_slot_paint()
+        self.status.set(f"🎪 {len(self._subc_sel)}개 선택"
+                        + (f" — 돌고 있는 {sorted(x + 1 for x in run)} 는 제외" if run else ""))
+
+    def _subc_sel_clear(self):
+        self._subc_sel = set()
+        self._subc_slot_paint()
+        self.status.set("🎪 선택을 지웠습니다")
+
+    def _subc_sel_run(self):
+        """▶ 선택실행 — + 로 고른 슬롯만 차례에 올린다 (돌던 슬롯은 그대로)."""
+        sel = sorted(getattr(self, "_subc_sel", None) or set())
+        if not sel:
+            self.status.set("🎪 고른 슬롯이 없습니다 — 슬롯의 + 로 고르거나 ✔ 전체선택")
+            return
+        self._subc_sel = set()
+        self._subc_start(sel)
+        self._subc_slot_paint()
 
     def _subc_off_slot(self, si):
         """🎪 그 슬롯만 차례에서 뺀다 (다른 슬롯은 그대로) — 그 캐릭은 지금 상태 그대로 둔다."""
@@ -19796,6 +19851,20 @@ class App(tk.Tk):
         st = getattr(self, "_subc_st", None) or {}
         sl = (st.get("slots") or {}) if st.get("on") else {}
         cur = getattr(self, "_subc_cur", None)
+        _sel = getattr(self, "_subc_sel", None) or set()
+        for si, pb in list(getattr(self, "_subc_plus", {}).items()):
+            try:
+                if not pb.winfo_exists():
+                    continue
+                if str(si) in sl:
+                    _sel.discard(si)
+                    pb.config(text="·", bg="#7f8c8d", fg="white")
+                elif si in _sel:
+                    pb.config(text="✔", bg="#e67e22", fg="white")
+                else:
+                    pb.config(text="+", bg="#dfe3e6", fg="#e67e22")
+            except Exception:
+                pass
         for si, b in list(getattr(self, "_subc_sbtn", {}).items()):
             try:
                 if not b.winfo_exists():
