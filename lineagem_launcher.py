@@ -1307,6 +1307,10 @@ WAKE_FIX_ON    = True    # 😴 어떤 실행이든 **절전을 풀면 그 클�
 #    지금은 실행 눌러도 십자가 안 보여서 힘듦"*). `_wake_until` 이 깨우면 `_after_wake_fix` 를 건다
 #   — 보는 것뿐(클릭 0) · 목록에만 올린다 · 복구는 사용자가 누를 때. 깨운 뒤 화면이 그려질 틈을 준다.
 WAKE_FIX_DELAY = (1.2, 1.8)
+SUBC_TWO_STEP  = True   # ▶ 두 번 — 첫 번째는 **메인 서커스만**, 두 번째(메인을 오늘 했으면)는 **보조 → 끝에 메인 사냥**
+#   2026-11-20 사용자: *"첫 번째 실행을 누르면 메인캐릭만 서커스를 돌고 한 번 더 누르면 그때 보조캐릭들이
+#      하는 거야 · 끝에는 메인캐릭에 접속해서 사냥 … 첫 번째 돌리고 다음 걸 뭔가 하려는데 보조캐릭에
+#      들어가버리니까 머리가 아프네"*
 SUBC_DONE_ON   = True               # ✅ 오늘 서커스를 끝낸 캐릭은 다시 안 돈다
 SUBC_DAY_HOUR  = 5                  #    하루의 시작 (서커스 일일 퀘스트가 다시 열리는 시각)
 #   2026-11-20 사용자: *"보조까지 다 돌았는데 또 서커스 들어갈려고 해 … 완료가 된 클라는 체크를 해서
@@ -20394,18 +20398,26 @@ class App(tk.Tk):
             return
         for si in tg:
             _rw, _mf = _plan[si]
+            _one = bool(SUBC_TWO_STEP and _mf and _rw)   # 보조가 있는 슬롯만 두 번 (메인만은 예전 그대로)
+            if _one:
+                _rw = []                      # 첫 번째 ▶ — 메인 서커스만 (보조는 두 번째 ▶ 에)
+                _plan[si] = (_rw, _mf)
             st["slots"][str(si)] = {"r": 0, "n": len(_rw), "rows": _rw, "next": now, "fail": 0,
-                                    "mf": _mf, "away": False}
+                                    "mf": _mf, "away": False, "one": _one}
         self._subc_save(st)
         self._subc_btn_paint()
         click_log(f"[보조서커스] ▶ 켬 — " + " · ".join(
-            (f"#{si + 1:02d} " + ("" if _plan[si][1] else "메인건너뜀 ")
-             + (f"줄{_plan[si][0]}" if _plan[si][0] else "메인만")) for si in sorted(tg))
-            + (" (지금 캐릭(메인) 서커스부터 · 순서 섞음 · 하나씩)" if SUBC_MAIN_FIRST
-               else " (순서 섞음 · 하나씩 바꾼다)"))
-        self.status.set(f"🎪 보조 서커스 시작 — {len(tg)}개 클라를 하나씩 "
-                        + ("지금 캐릭(메인) 서커스부터 돌립니다 " if SUBC_MAIN_FIRST else "첫 보조로 바꿉니다 ")
-                        + "(1시간 5분마다 다음 캐릭 · 끝나면 메인 사냥)")
+            (f"#{si + 1:02d} " + (("메인 서커스만 (보조는 ▶ 한 번 더)" if st["slots"][str(si)].get("one")
+                                    else (f"줄{_plan[si][0]}" if _plan[si][0] else "메인만 → 사냥"))
+                                   if _plan[si][1] else f"보조 줄{_plan[si][0]} → 메인 사냥"))
+            for si in sorted(tg))
+            + " (순서 섞음 · 하나씩)")
+        _n1 = sum(1 for _x in tg if _plan[_x][1])
+        _n2 = len(tg) - _n1
+        self.status.set(f"🎪 서커스 시작 — "
+                        + (f"메인 서커스 {_n1}개 " if _n1 else "")
+                        + (f"· 보조 서커스 {_n2}개(1시간 5분마다 다음 보조 · 끝나면 메인 사냥) " if _n2 else "")
+                        + "· 하나씩")
         # 🙈 누르는 즉시 창을 내린다 — [🎪 보조 서커스] 창과 런처가 클라를 가린다 (개별 ▶ 도 같다)
         self._subc_kick = time.time() + SUBC_KICK_SEC
         try:
@@ -20537,7 +20549,12 @@ class App(tk.Tk):
                         self._subc_done_mark(si, 0, "서커스 퀘스트가 안 보인다 — 이미 했다")
                     elif ok is True:
                         self._subc_done_mark(si, _row, "AUTO")
-                if ok == "inside":
+                if vv.get("one") and r == 0 and ok in (True, "inside", "skip"):
+                    # 첫 번째 ▶ — 메인 서커스만 하고 끝 (보조는 ▶ 를 한 번 더 누를 때)
+                    st["slots"].pop(str(si), None)
+                    click_log(f"[보조서커스] ✔ #{si + 1:02d} 메인 서커스 끝 — 이 슬롯은 여기까지 "
+                              f"(보조 서커스는 ▶ 를 한 번 더 누르면 한다)")
+                elif ok == "inside":
                     # 이미 서커스에서 사냥 중 — 그 판을 ⓪ 으로 친다. 끝나기를 기다린다
                     _w = random.uniform(*SUBC_INSIDE_POLL)
                     vv.update(r=r + 1, fail=0, next=time.time() + _w, chk=True, chk_at=time.time())
