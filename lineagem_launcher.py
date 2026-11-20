@@ -1300,6 +1300,13 @@ SUBC_SWITCH_GAP = (3.0, 7.0)           # 한 클라를 바꾼 뒤 다음 클라�
 #     (`_subc_chain_at`). 이어서 바꾸는 동안은 '마우스 조용 10초' 를 기다리지 않는다
 #     (누를 때마다 사람 손은 `_subc_hand_wait` 가 따로 기다린다).
 SUBC_CHAIN_POLL = 500                  # 간격이 끝났나 보는 주기(ms) — 이어서 바꿀 클라가 있을 때만 돈다
+DONE_LBL_ON    = False   # '완료' 큰 글씨 — 2026-11-20 사용자: *"메인런처 길이가 너무 길어서 복구가 안 보여
+#                          완료 이거 삭제해죠 굳이 필요없네"* (변수는 남겨 둔다 — 쓰는 곳이 많다)
+WAKE_FIX_ON    = True    # 😴 어떤 실행이든 **절전을 풀면 그 클라의 십자가를 본다** (2026-11-20 사용자:
+#   *"모든 실행버튼을 누르면 자동 절전모드를 해제하잖아 그러면 십자가 떠있는지 확인이 가능하게 해줘 …
+#    지금은 실행 눌러도 십자가 안 보여서 힘듦"*). `_wake_until` 이 깨우면 `_after_wake_fix` 를 건다
+#   — 보는 것뿐(클릭 0) · 목록에만 올린다 · 복구는 사용자가 누를 때. 깨운 뒤 화면이 그려질 틈을 준다.
+WAKE_FIX_DELAY = (1.2, 1.8)
 SUBC_DONE_ON   = True               # ✅ 오늘 서커스를 끝낸 캐릭은 다시 안 돈다
 SUBC_DAY_HOUR  = 5                  #    하루의 시작 (서커스 일일 퀘스트가 다시 열리는 시각)
 #   2026-11-20 사용자: *"보조까지 다 돌았는데 또 서커스 들어갈려고 해 … 완료가 된 클라는 체크를 해서
@@ -11172,7 +11179,8 @@ class App(tk.Tk):
                                   font=("맑은 고딕", 16, "bold"), fg="#c0392b",
                                   bg=self.cget("bg"), width=11, height=1,
                                   anchor="center")
-        self._done_lbl.pack(anchor="n", pady=(3, 0))
+        if DONE_LBL_ON:
+            self._done_lbl.pack(anchor="n", pady=(3, 0))
 
         # ⚠ 경고 목록 — F11 때 확인해서 뜬 것들. 내가 X를 누르기 전엔 안 사라진다
         self._warn_box = tk.Frame(dc_col)
@@ -12238,7 +12246,7 @@ class App(tk.Tk):
             #    *"완료는 열기 바로 위로 배치시켜주고"*).
             #    ⚠ `side="bottom"` 은 **먼저 붙인 것이 더 아래**다 —
             #      [열기] 다음에 붙여야 그 '위' 에 온다.
-            _dl = getattr(self, "_done_lbl", None)
+            _dl = getattr(self, "_done_lbl", None) if DONE_LBL_ON else None
             if _dl is not None:
                 try: _dl.pack(side="bottom", anchor="s", pady=(0, 2))
                 except Exception: _dl = None
@@ -20388,7 +20396,7 @@ class App(tk.Tk):
         for si in tg:
             _rw, _mf = _plan[si]
             st["slots"][str(si)] = {"r": 0, "n": len(_rw), "rows": _rw, "next": now, "fail": 0,
-                                    "mf": _mf}
+                                    "mf": _mf, "away": False}
         self._subc_save(st)
         self._subc_btn_paint()
         click_log(f"[보조서커스] ▶ 켬 — " + " · ".join(
@@ -20485,6 +20493,30 @@ class App(tk.Tk):
             self._subc_cur = None
             return
         r = int(v.get("r", 0))
+        # ✅ 오늘 이미 한 보조 차례는 **캐릭을 바꾸지 않고** 건너뛴다
+        if SUBC_DONE_ON:
+            try:
+                _dn = self._subc_done(si)
+                _sk = []
+                while True:
+                    _rw = self._subc_stage_row(v, r)
+                    if _rw is None or _rw == 0 or _rw not in _dn:
+                        break
+                    _sk.append(_rw)
+                    r += 1
+                if _sk:
+                    if self._subc_stage_row(v, r) is None and v.get("away") is False:
+                        # 메인에서 한 번도 안 나갔다 → 다시 접속하지 않고 그대로 사냥만
+                        v.update(rows=[], n=0, mf=True, r=1)
+                        r = 1
+                    else:
+                        v["r"] = r
+                    st0.setdefault("slots", {})[str(si)] = v
+                    self._subc_save(st0)
+                    click_log(f"[보조서커스] ⏭ #{si + 1:02d} 오늘 이미 한 보조 {_sk} 는 캐릭을 바꾸지 않고 "
+                              f"건너뛴다 → {self._subc_stage_name(v, r)}")
+            except Exception as e:
+                click_log(f"[보조서커스] ⚠ #{si + 1:02d} 건너뛰기 확인 오류 — {e}")
         ok = False
         try:
             self._start_pause("subc")
@@ -20497,6 +20529,8 @@ class App(tk.Tk):
                 n = int(vv.get("n", 0))
                 _off = 1 if vv.get("mf") else 0
                 _row = self._subc_stage_row(vv, r)
+                if _row and ok in (True, "inside", "skip", "wait"):
+                    vv["away"] = True                   # 보조로 나가 있다
                 if _row is not None:
                     if ok == "inside":
                         self._subc_done_mark(si, _row, "이미 서커스에서 사냥 중")
@@ -25857,6 +25891,19 @@ class App(tk.Tk):
         #    🛟 사슬이 어떤 이유로 잠금을 못 풀어도 멈추지 않게 **보험 틱**만 둔다
         #       (잠겨 있으면 그냥 다시 기다린다).
         self.after(int(FIX_HOLD_TTL * 1000) + 2000, self._fix_run_next)
+    def _wake_fix_spawn(self, anchor, tag=""):
+        """😴 깨운 클라의 십자가를 **따로** 본다 (기다리지 않는다 — 돌던 작업은 그대로 간다).
+        🚫 복구(fix)·F11 스캔(경고확인)은 스스로 보므로 건너뛴다."""
+        if not WAKE_FIX_ON or str(tag) in ("fix", "경고확인"):
+            return
+        def _go():
+            try:
+                nap(random.uniform(*WAKE_FIX_DELAY))   # 깨어난 화면이 다 그려질 틈
+                self._after_wake_fix(anchor, f"{tag} 깨움")
+            except Exception as e:
+                click_log(f"[깨움확인] 실패 {e!r}")
+        threading.Thread(target=_go, daemon=True).start()
+
     def _after_wake_fix(self, anchor, why=""):
         """😴 **깨운 직후 그 클라 하나만** 십자가를 본다 — 확인만 한다 (2026-09-29).
 
@@ -27113,6 +27160,7 @@ class App(tk.Tk):
                 if find_sleep_img(fkey, anchor)[0] is None:
                     click_log(f"[{tag}] {_who}깨어남 — {_how} ({w+1}번째)")
                     nap(random.uniform(0.25, 0.45))    # 화면 안정화
+                    self._wake_fix_spawn(anchor, tag)
                     return True
         click_log(f"[{tag}] {_who}⚠ {SLEEP_WAKE_TRIES}번(Z + 글자 클릭) 해도 안 깨어남")
         return False
