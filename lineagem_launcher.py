@@ -1236,6 +1236,196 @@ def herox_loading_seen(coord):
         return float(cv2.matchTemplate(band, tpl, cv2.TM_CCOEFF_NORMED).max())
     except Exception:
         return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 💱 거래소등록! (2026-11-21 사용자 지시 — 낚시녹임 자리)
+#    *"내가 저장하는 것들을 최저가에 너가 등록을 해주면 되고 최저가가 없으면은 그건 취소하고
+#      최저가가 있는 이미지가 등록되어 있는 걸 등록해주면 돼"* ·
+#    *"메뉴 거래소 월드가 아닌 서버 거래소를 선택하면 되고 판매등록에 들어가면 되거든"*
+#    📏 2026-11-21 #01 기록으로 잰 자리 (창 546x307 기준 — 창 크기 비율로 늘린다)
+# ══════════════════════════════════════════════════════════════════════════════
+XREG_ON         = True
+XREG_W, XREG_H  = 546, 307
+XREG_MENU       = (525, 18)      # ≡ 메뉴 — 🚫 거래소가 떠 있으면 같은 자리가 ✕ 다 (보고 누른다)
+XREG_XCHG       = (428, 49)      # 메뉴의 [거래소]
+XREG_SERVER_TAB = (388, 20)      # 거래소 위 [서버 거래소] 탭  (🚫 월드 거래소 (475,18) 아님)
+XREG_SELL_TAB   = (135, 46)      # [판매 등록] 탭
+XREG_SELL_BTN   = (508, 259)     # 아이템 설명 패널의 [판매]
+XREG_PANEL_X    = (520, 106)     # 아이템 설명 패널 ✕
+XREG_QTY_NO     = (226, 231)     # '판매 수량 / 금액 입력' [취소]
+XREG_QTY_OK     = (318, 231)     #                        [확인]
+XREG_ASK_NO     = (228, 240)     # '판매 등록하시겠습니까?' [취소]
+XREG_ASK_OK     = (316, 240)     #                        [확인]
+XREG_CLOSE      = (526, 24)      # 거래소 ✕ — **거래소가 보일 때만**
+XREG_INV_BOX    = (385, 92, 535, 285)   # 판매 등록 화면 오른쪽 소지품 (4열 × 5줄 · 칸 30px)
+XREG_INV_MID    = (460, 190)
+XREG_BOXES      = {"xreg_menu": (394, 16, 462, 82), "xreg_title": (330, 0, 440, 40),
+                   "xreg_soji": (420, 45, 500, 85), "xreg_qty": (200, 35, 340, 80),
+                   "xreg_ask": (200, 150, 345, 195)}
+XREG_MATCH      = 0.85           # 화면 그림 — 📏 그 화면 1.00 · 아닐 때 ≤0.47 (133장)
+XREG_ITEM_MATCH = 0.86           # 아이템 모양 — 📏 같은 칸 1.00 · 다른 아이템 ≤0.82(색차 28)
+XREG_ITEM_COLOR = 12.0           #   + 평균 색 차이 (모양만 보면 비슷한 다른 아이템이 걸린다)
+XREG_GOLD_MATCH = 0.72           # 방금 누른 칸(금색으로 골라진 채)은 색이 바뀐다 — 모양만 본다
+                                 #   📏 골라진 체력 각반 0.795 · 골라진 체력 장갑 <0.60
+XREG_PRICE_SPAN = 16             # '최저 거래 단가' 숫자 폭(px) — 74.00 은 18~19 · 9.00 이하 ≈14
+XREG_TOTAL_BOX  = (200, 182, 263, 198)  # '총 판매 금액' 노란 숫자
+XREG_MIN_BOX    = (210, 148, 264, 164)  # '최저 거래 단가' 숫자 (아이콘 빼고)
+XREG_STEP       = (0.35, 0.75)   # 누른 뒤 쉼 (+ 가끔 1~4초 — invx_human_nap)
+XREG_POLL       = (0.12, 0.22)
+XREG_WHEEL_MAX  = 40             # 소지품을 한 칸씩 내리는 최대 횟수
+XREG_SLOT_GAP   = (3.0, 8.0)     # 클라 사이
+XREG_TRY_MAX    = 2              # 한 아이템을 몇 번까지 해보나
+XREG_FAIL_MAX   = 4              # 한 클라에서 이만큼 실패하면 그 클라는 끝
+
+
+def xreg_tpl(name):
+    try:
+        import cv2, numpy as np
+        p = os.path.join(IMG_DIR, name + ".png")
+        if not os.path.exists(p):
+            return None
+        return cv2.imdecode(np.fromfile(p, dtype=np.uint8), cv2.IMREAD_COLOR)
+    except Exception:
+        return None
+
+
+def xreg_items():
+    """등록한 아이템 그림 → [(이름, 그림)] (click_templates/xreg_item_*.png — 로컬에도 배포된다)."""
+    out = []
+    try:
+        import glob
+        for p in sorted(glob.glob(os.path.join(IMG_DIR, "xreg_item_*.png"))):
+            t = xreg_tpl(os.path.basename(p)[:-4])
+            if t is not None:
+                out.append((os.path.basename(p)[len("xreg_item_"):-4], t))
+    except Exception:
+        pass
+    return out
+
+
+def _xreg_k(big):
+    return big.shape[1] / float(XREG_W), big.shape[0] / float(XREG_H)
+
+
+def _xreg_fit(t, kx, ky):
+    import cv2
+    if abs(kx - 1.0) < 0.02 and abs(ky - 1.0) < 0.02:
+        return t
+    return cv2.resize(t, (max(4, int(round(t.shape[1] * kx))), max(4, int(round(t.shape[0] * ky)))),
+                      interpolation=(cv2.INTER_AREA if kx < 1 else cv2.INTER_LINEAR))
+
+
+def xreg_score(big, name):
+    """화면 그림 점수 (못 보면 -1)."""
+    try:
+        import cv2
+        t = xreg_tpl(name)
+        if t is None or big is None:
+            return -1.0
+        kx, ky = _xreg_k(big)
+        t = _xreg_fit(t, kx, ky)
+        x0, y0, x1, y1 = XREG_BOXES[name]
+        b = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)]
+        if b.shape[0] < t.shape[0] or b.shape[1] < t.shape[1]:
+            return -1.0
+        return float(cv2.matchTemplate(b, t, cv2.TM_CCOEFF_NORMED).max())
+    except Exception:
+        return -1.0
+
+
+def xreg_server(big):
+    """[서버 거래소] 탭이 골라져 있나 → True / False(월드) / None(모른다).
+    📏 골라진 탭 글자 밝은 점 106~107 · 안 골라진 탭 0 (2026-11-21 #01)."""
+    try:
+        import cv2
+        kx, ky = _xreg_k(big)
+        g = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
+        sv = int((g[int(11 * ky):int(27 * ky), int(372 * kx):int(412 * kx)] > 170).sum() / (kx * ky))
+        wd = int((g[int(11 * ky):int(27 * ky), int(452 * kx):int(505 * kx)] > 170).sum() / (kx * ky))
+        if sv >= 60 and wd < 30:
+            return True
+        if wd >= 60 and sv < 30:
+            return False
+        return None
+    except Exception:
+        return None
+
+
+def xreg_find(big, skip=(), gold=None):
+    """소지품에서 등록한 아이템 → [(cy, cx, 이름, 점수)] 위에서 아래·왼쪽에서 오른쪽 (창 안 픽셀).
+    gold = 방금 누른 칸 가운데(546 기준) — 그 칸은 금색으로 골라져 색이 바뀌므로 모양만 본다."""
+    out = []
+    try:
+        import cv2, numpy as np
+        kx, ky = _xreg_k(big)
+        x0, y0, x1, y1 = XREG_INV_BOX
+        X0, Y0 = int(x0 * kx), int(y0 * ky)
+        b = big[Y0:int(y1 * ky), X0:int(x1 * kx)]
+        for nm, t0 in xreg_items():
+            if nm in skip:
+                continue
+            t = _xreg_fit(t0, kx, ky)
+            if b.shape[0] < t.shape[0] or b.shape[1] < t.shape[1]:
+                continue
+            r = cv2.matchTemplate(b, t, cv2.TM_CCOEFF_NORMED)
+            tc = t.reshape(-1, 3).mean(0)
+            th, tw = t.shape[:2]
+            ys, xs = np.where(r >= min(XREG_ITEM_MATCH, XREG_GOLD_MATCH))
+            seen = []
+            for y, x in sorted(zip(ys.tolist(), xs.tolist()), key=lambda v: -r[v[0], v[1]]):
+                if any(abs(y - a) < th // 2 and abs(x - c) < tw // 2 for a, c in seen):
+                    continue
+                v = float(r[y, x])
+                cx, cy = X0 + x + tw // 2, Y0 + y + th // 2
+                ok = False
+                if v >= XREG_ITEM_MATCH:
+                    d = float(np.abs(b[y:y + th, x:x + tw].reshape(-1, 3).mean(0) - tc).mean())
+                    ok = d <= XREG_ITEM_COLOR
+                if not ok and gold and v >= XREG_GOLD_MATCH:
+                    gx, gy = gold[0] * kx, gold[1] * ky
+                    ok = abs(cx - gx) <= 9 * kx and abs(cy - gy) <= 9 * ky
+                if ok:
+                    seen.append((y, x))
+                    out.append((cy, cx, nm, v))
+        out.sort(key=lambda h: (round(h[0] / (12 * ky)), h[1]))
+    except Exception:
+        pass
+    return out
+
+
+def _xreg_groups(m):
+    c = m.any(0)
+    g, s0 = [], None
+    for i, v in enumerate(c.tolist()):
+        if v and s0 is None:
+            s0 = i
+        if not v and s0 is not None:
+            g.append((s0, i)); s0 = None
+    if s0 is not None:
+        g.append((s0, len(c)))
+    return g
+
+
+def xreg_price(big):
+    """'판매 수량 / 금액 입력' 창의 최저가 → (ok, 기록).
+    ok = **최저 거래 단가가 10 이상**이고 **총 판매 금액이 두 자리 이상**일 때만 True.
+    📏 74.00 → 숫자 폭 18 · 총 74 → 두 덩어리 / 9.00·0.00 은 폭 ≈14 → 취소 (10 미만은 등록도 안 된다)."""
+    try:
+        kx, ky = _xreg_k(big)
+        a = big.astype(int)
+        x0, y0, x1, y1 = XREG_TOTAL_BOX
+        t = a[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)]
+        B, G, R = t[..., 0], t[..., 1], t[..., 2]
+        tg = _xreg_groups((R > 150) & (G > 110) & (B < 100))
+        x0, y0, x1, y1 = XREG_MIN_BOX
+        m = a[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].mean(2) > 130
+        mg = _xreg_groups(m)
+        span = int(round((mg[-1][1] - mg[0][0]) / kx)) if mg else 0
+        ok = len(tg) >= 2 and span >= XREG_PRICE_SPAN
+        return ok, f"최저가 숫자폭 {span}(기준 {XREG_PRICE_SPAN}) · 총액 자리 {len(tg)}"
+    except Exception as e:
+        return False, f"읽기 실패 {type(e).__name__}"
 # 📐 **창 기준 좌표 한 벌** — 로컬이 [📐 좌표맞추기] 한 번으로 넣는다.
 #    🚫 **좌표 배포가 아니다** (2026-08-29 절대 규칙 — 좌표는 push 하지 않는다).
 #       코드에 두고 **사용자가 누를 때만** 그 컴퓨터 창 자리에 맞춰 넣는다.
@@ -11227,14 +11417,15 @@ class App(tk.Tk):
             command=self._start_item).pack(side="left", padx=(2,0))
         # 아이템정리 아래(이 줄 끝): 🎣 낚시녹임 — 변신확인용과 동일 구조(dgn2)
         r5 = tk.Frame(dc_col); r5.pack(anchor="n", pady=(2,0))
-        tk.Button(r5, text="🎣 낚시녹임",
+        # 💱 **거래소등록!** — 낚시녹임 자리 (2026-11-21 사용자: "낚시녹임 거래소등록 이걸로 이름 변경")
+        tk.Button(r5, text="💱 거래소등록!",
             font=("맑은 고딕", 9, "bold"), bg="#1a5276", fg="white",
             activebackground="#123c56", width=7, height=1, pady=5,
-            command=self._open_fish_win).pack(side="left")
+            command=self._open_xreg_win).pack(side="left")
         tk.Button(r5, text="▶실행",
             font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
             activebackground="#1e8449", width=4, height=1, pady=5,
-            command=lambda: self._start_dgn2("fish")).pack(side="left", padx=(2,0))
+            command=lambda: self._xreg_start(None)).pack(side="left", padx=(2,0))
 
         # 📬 **우편 지금 받기 — 낚시녹임 1cm 아래 고정 자리** (2026-11-04 사용자:
         #   *"우편지금받기랑 전부복구 위치 위아래 바꿔줘"*).
@@ -32620,6 +32811,455 @@ class App(tk.Tk):
         except Exception:
             return ""
 
+    # ══════════════════════════════════════════════════════════════════════
+    # 💱 거래소등록! (2026-11-21)
+    # ══════════════════════════════════════════════════════════════════════
+    def _open_xreg_win(self):
+        self._open_section_win("_xreg_win", "💱 거래소등록!", self._build_xreg,
+                               w=640, h=640, pinnable=True)
+
+    def _build_xreg(self, p):
+        self._xreg_sel = getattr(self, "_xreg_sel", set())
+        tk.Label(p, text="서버 거래소 → 판매 등록 → 등록해 둔 아이템을 **최저가**로 올립니다 "
+                          "(최저가가 없으면 취소하고 다음 것)",
+                 font=("맑은 고딕", 9, "bold")).pack(anchor="w", padx=8, pady=(6, 0))
+        tk.Label(p, text="등록할 아이템이 하나도 없는 클라는 거래소만 열어보고 닫습니다 · "
+                          "🚫 그림이 없으면 아무것도 누르지 않습니다",
+                 font=("맑은 고딕", 8), fg="#888").pack(anchor="w", padx=8)
+        top = tk.Frame(p); top.pack(anchor="w", padx=8, pady=(6, 2))
+        tk.Button(top, text="▶ 16클라 전체 실행", font=("맑은 고딕", 9, "bold"), bg="#27ae60",
+                  fg="white", command=lambda: self._xreg_start(None)).pack(side="left")
+        tk.Button(top, text="✔ 전체선택", font=("맑은 고딕", 9), bg="#5d6d7e", fg="white",
+                  command=self._xreg_sel_all).pack(side="left", padx=(6, 0))
+        tk.Button(top, text="▶ 선택실행", font=("맑은 고딕", 9, "bold"), bg="#1f618d", fg="white",
+                  command=lambda: self._xreg_start(sorted(self._xreg_sel))).pack(side="left", padx=(6, 0))
+        grid = tk.Frame(p); grid.pack(anchor="w", padx=8, pady=(4, 2))
+        names = {}
+        try:
+            for i, v in enumerate(self._client_hwnds_by_slot() or []):
+                names[i] = (win32gui.GetWindowText(v[4]) or "").replace("리니지M l ", "")
+        except Exception:
+            pass
+        self._xreg_plus = {}
+        for c in range(4):
+            col = tk.Frame(grid); col.pack(side="left", anchor="n", padx=(0, 6))
+            for r in range(4):
+                si = c * 4 + r
+                f = tk.Frame(col, bd=1, relief="groove"); f.pack(anchor="w", pady=1, fill="x")
+                tk.Label(f, text=f"#{si + 1:02d} {names.get(si, '')[:6]}", width=11, anchor="w",
+                         font=("맑은 고딕", 9)).pack(side="left")
+                b = tk.Button(f, text="+", width=2, font=("맑은 고딕", 8, "bold"),
+                              command=lambda i=si: self._xreg_toggle(i))
+                b.pack(side="left")
+                self._xreg_plus[si] = b
+                tk.Button(f, text="▶", width=2, font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
+                          command=lambda i=si: self._xreg_one(i)).pack(side="left", padx=(2, 0))
+        self._xreg_paint()
+        box = tk.LabelFrame(p, text=" 🖼 등록할 아이템 (서버 거래소 판매 등록 화면의 소지품 칸) ",
+                            font=("맑은 고딕", 9, "bold"))
+        box.pack(fill="x", padx=8, pady=(8, 4))
+        br = tk.Frame(box); br.pack(anchor="w", padx=4, pady=4)
+        tk.Button(br, text="🖼 아이템 추가 (드래그)", font=("맑은 고딕", 9, "bold"), bg="#6c3483",
+                  fg="white", command=self._xreg_grab).pack(side="left")
+        tk.Label(br, text="판매 등록 화면을 띄우고 아이콘 **안쪽만** 작게 (개수 숫자·테두리 빼고)",
+                 font=("맑은 고딕", 8), fg="#888").pack(side="left", padx=(6, 0))
+        self._xreg_list = tk.Frame(box); self._xreg_list.pack(anchor="w", padx=4, pady=(0, 4), fill="x")
+        self._xreg_list_paint()
+
+    def _xreg_paint(self):
+        for si, b in (getattr(self, "_xreg_plus", {}) or {}).items():
+            try:
+                on = si in self._xreg_sel
+                b.config(text=("✔" if on else "+"), bg=("#f39c12" if on else "SystemButtonFace"))
+            except Exception:
+                pass
+
+    def _xreg_toggle(self, si):
+        self._xreg_sel ^= {si}
+        self._xreg_paint()
+
+    def _xreg_sel_all(self):
+        self._xreg_sel = set() if len(self._xreg_sel) == 16 else set(range(16))
+        self._xreg_paint()
+
+    def _xreg_list_paint(self):
+        fr = getattr(self, "_xreg_list", None)
+        if not fr or not fr.winfo_exists():
+            return
+        for w in fr.winfo_children():
+            w.destroy()
+        self._xreg_photos = []
+        items = xreg_items()
+        if not items:
+            tk.Label(fr, text="아직 없습니다 — [🖼 아이템 추가] 로 넣어주세요", fg="#c0392b",
+                     font=("맑은 고딕", 9)).pack(anchor="w")
+            return
+        row = None
+        for n, (nm, t) in enumerate(items):
+            if n % 6 == 0:
+                row = tk.Frame(fr); row.pack(anchor="w")
+            cell = tk.Frame(row, bd=1, relief="groove"); cell.pack(side="left", padx=2, pady=2)
+            try:
+                import cv2
+                from PIL import Image, ImageTk
+                im = Image.fromarray(cv2.cvtColor(cv2.resize(t, (t.shape[1] * 2, t.shape[0] * 2),
+                                                             interpolation=cv2.INTER_NEAREST),
+                                                  cv2.COLOR_BGR2RGB))
+                ph = ImageTk.PhotoImage(im)
+                self._xreg_photos.append(ph)
+                tk.Label(cell, image=ph).pack(side="left")
+            except Exception:
+                pass
+            tk.Label(cell, text=nm[:8], font=("맑은 고딕", 8)).pack(side="left", padx=(2, 0))
+            tk.Button(cell, text="✕", font=("맑은 고딕", 7), fg="#c0392b",
+                      command=lambda x=nm: self._xreg_del(x)).pack(side="left")
+
+    def _xreg_del(self, nm):
+        try:
+            from tkinter import messagebox
+            if not messagebox.askyesno("💱 거래소등록!", f"'{nm}' 그림을 지울까요?"):
+                return
+            p = os.path.join(IMG_DIR, f"xreg_item_{nm}.png")
+            if os.path.exists(p):
+                os.remove(p)
+            click_log(f"[거래소등록] 🖼 아이템 그림 지움 — {nm}")
+        except Exception as e:
+            self.status.set(f"💱 지우기 실패: {e}")
+        self._xreg_list_paint()
+
+    def _xreg_grab(self):
+        self.status.set("💱 판매 등록 화면 소지품에서 **아이콘 안쪽만** 작게 드래그 (ESC 취소)")
+        for w in self._section_wins():
+            try: w.withdraw()
+            except Exception: pass
+        self.withdraw()
+        self.after(250, lambda: _PotionAreaOverlay(self, self._xreg_grab_done))
+
+    def _xreg_grab_done(self, x, y, w, h):
+        self.deiconify()
+        for wn in self._section_wins():
+            try: wn.deiconify()
+            except Exception: pass
+        if w < 8 or h < 8:
+            self.status.set("💱 너무 작습니다 — 다시 드래그해주세요"); return
+        try:
+            import cv2, numpy as np
+            rc = None
+            for (l0, t0, r0, b0, h0) in (self._client_hwnds_by_slot() or []):
+                if l0 <= x <= r0 and t0 <= y <= b0:
+                    rc = (l0, t0, r0, b0)
+                    break
+            if not rc:
+                self.status.set("💱 리니지M 창 안을 드래그해주세요"); return
+            big = grab_window(((rc[0] + rc[2]) // 2, (rc[1] + rc[3]) // 2))
+            if big is None:
+                self.status.set("💱 화면을 못 찍었습니다"); return
+            kx, ky = _xreg_k(big)
+            a = big[y - rc[1]:y - rc[1] + h, x - rc[0]:x - rc[0] + w]
+            if a.size == 0:
+                self.status.set("💱 자른 자리가 비었습니다"); return
+            if abs(kx - 1.0) > 0.02 or abs(ky - 1.0) > 0.02:   # 546 기준으로 저장한다
+                a = cv2.resize(a, (max(4, int(round(w / kx))), max(4, int(round(h / ky)))),
+                               interpolation=cv2.INTER_AREA)
+            if float(cv2.cvtColor(a, cv2.COLOR_BGR2GRAY).std()) < 3.0:
+                self.status.set("💱 ⚠ 무늬가 없는 자리입니다 (저장 안 함)"); return
+            from tkinter import simpledialog
+            nm = simpledialog.askstring("💱 거래소등록!", "아이템 이름 (비워두면 번호)", parent=self) or ""
+            nm = "".join(ch for ch in nm.strip() if ch not in '\\/:*?"<>| ')[:16]
+            if not nm:
+                k = 1
+                while os.path.exists(os.path.join(IMG_DIR, f"xreg_item_{k:02d}.png")):
+                    k += 1
+                nm = f"{k:02d}"
+            p = os.path.join(IMG_DIR, f"xreg_item_{nm}.png")
+            os.makedirs(IMG_DIR, exist_ok=True)
+            cv2.imencode(".png", a)[1].tofile(p)
+            click_log(f"[거래소등록] 🖼 아이템 그림 등록 — {nm} {a.shape[1]}x{a.shape[0]}")
+            self.status.set(f"💱 '{nm}' 등록 ({a.shape[1]}×{a.shape[0]}) — 다음 실행부터 최저가로 올립니다")
+        except Exception as e:
+            self.status.set(f"💱 저장 실패: {e}")
+        self._xreg_list_paint()
+
+    def _xreg_start(self, sel=None):
+        if not xreg_items():
+            self.status.set("💱 등록할 아이템 그림이 없습니다 — [💱 거래소등록!] 창에서 [🖼 아이템 추가]")
+            return
+        if sel is not None and not sel:
+            self.status.set("💱 고른 클라가 없습니다 — [+] 로 고르세요")
+            return
+        name = "거래소등록"
+        if not self._try_busy_or_queue(name, lambda: self._xreg_start(sel)):
+            return
+        self._xreg_stop = False
+        threading.Thread(target=self._run_task, args=(name, self._xreg_run, sel), daemon=True).start()
+
+    def _xreg_one(self, si):
+        if not xreg_items():
+            self.status.set("💱 등록할 아이템 그림이 없습니다 — [🖼 아이템 추가]")
+            return
+        self._test_go(f"거래소등록 #{si + 1:02d}", "_xreg_stop", self._xreg_run, [si])
+
+    def _xreg_run(self, sel=None):
+        self._start_pause("xreg")
+        targets = list(sel) if sel else list(range(16))
+        if len(targets) > 1:
+            random.shuffle(targets)
+        click_log(f"[거래소등록] 💱 시작 — 클라 {[t + 1 for t in targets]} (아이템 그림 "
+                  f"{[n for n, _ in xreg_items()]})")
+        tot = 0
+        for n, si in enumerate(targets):
+            if getattr(self, "_xreg_stop", False):
+                break
+            try:
+                tot += self._xreg_slot(si)
+            except Exception as e:
+                click_log(f"[거래소등록] ⚠ #{si + 1:02d} 오류 — {type(e).__name__}: {e} (이 클라는 넘어간다)")
+            if n < len(targets) - 1 and not getattr(self, "_xreg_stop", False):
+                nap(random.uniform(*XREG_SLOT_GAP))
+        click_log(f"[거래소등록] 💱 끝 — 모두 {tot}개 올렸다"
+                  + (" (■ 멈춤)" if getattr(self, "_xreg_stop", False) else ""))
+        self.status.set(f"✔ 거래소등록 끝 — {tot}개 올렸습니다")
+
+    def _xreg_slot(self, si):
+        """한 클라 → 올린 개수. 🚫 모르는 화면이면 아무것도 더 누르지 않고 끝낸다."""
+        tag = f"#{si + 1:02d}"
+        try:
+            hw = (self._client_hwnds_by_slot() or [])[si][4]
+        except Exception:
+            hw = None
+        if not hw:
+            click_log(f"[거래소등록] 🚫 {tag} 클라 창을 못 찾았다")
+            return 0
+        if self._win_odd_skip(si, "거래소등록"):
+            return 0
+        L, T, R, B = win32gui.GetWindowRect(hw)
+        kx, ky = (R - L) / float(XREG_W), (B - T) / float(XREG_H)
+        anc = (L + (R - L) // 2, T + (B - T) // 2)
+        name = (win32gui.GetWindowText(hw) or tag).replace("리니지M l ", "")
+        stop = lambda: getattr(self, "_xreg_stop", False)
+
+        def P(xy):
+            return L + int(xy[0] * kx), T + int(xy[1] * ky)
+
+        def tap(xy):
+            click_at(*P(xy))
+            invx_human_nap(XREG_STEP)
+
+        def g():
+            return grab_window(anc)
+
+        def wait(nm, tmax, gone=False):
+            t0 = time.time()
+            b = None
+            while not stop() and time.time() - t0 < tmax:
+                b = g()
+                if b is not None:
+                    v = xreg_score(b, nm)
+                    if (v < XREG_MATCH) if gone else (v >= XREG_MATCH):
+                        return b
+                nap(random.uniform(*XREG_POLL))
+            return None
+
+        def loaded():
+            t0, clear = time.time(), 0
+            while not stop() and time.time() - t0 < HEROX_LOAD_MAX:
+                v = herox_loading_seen(anc)
+                if v is None or v < HEROX_LOAD_MATCH:
+                    clear += 1
+                    if clear >= 2:
+                        break
+                else:
+                    clear = 0
+                nap(random.uniform(*XREG_POLL))
+            nap(random.uniform(*INVX_BUFFER))   # ⏳ 버퍼링 구간은 1~3초 더 (2026-11-20 사용자 지시)
+
+        def shot(b, why):
+            try:
+                return self._inv_shot(b, tag, "xreg_" + why) if b is not None else ""
+            except Exception:
+                return ""
+
+        def close(b):
+            for _ in range(3):
+                if b is None or stop():
+                    return
+                if itemreg_sell_seen(anc, big=b)[0]:
+                    tap(XREG_PANEL_X); b = g(); continue
+                if xreg_score(b, "xreg_ask") >= XREG_MATCH:
+                    tap(XREG_ASK_NO); b = g(); continue
+                if xreg_score(b, "xreg_qty") >= XREG_MATCH:
+                    tap(XREG_QTY_NO); b = g(); continue
+                if xreg_score(b, "xreg_title") >= XREG_MATCH:      # 🚫 거래소가 보일 때만 ✕
+                    tap(XREG_CLOSE); nap(random.uniform(0.4, 0.7)); b = g(); continue
+                return
+
+        self.status.set(f"💱 {tag} {name} 거래소 등록 중...")
+        click_log(f"[거래소등록] ▶ {tag} [{name}]")
+        self._wake_hard("xreg", anc, name, si + 1, icon="💱")
+        try:
+            self._focus_client_at(anc)
+        except Exception:
+            pass
+        nap(random.uniform(0.3, 0.6))
+        b = g()
+        if b is None:
+            click_log(f"[거래소등록] 🚫 {tag} 화면을 못 찍었다"); return 0
+        # ① 거래소 열기 — 메뉴 → [거래소]
+        if xreg_score(b, "xreg_title") < XREG_MATCH:
+            if xreg_score(b, "xreg_menu") < XREG_MATCH:
+                tap(XREG_MENU)
+                b = wait("xreg_menu", 3.5)
+                if b is None and not stop():
+                    tap(XREG_MENU)
+                    b = wait("xreg_menu", 3.0)
+                if b is None:
+                    bb = g()
+                    click_log(f"[거래소등록] 🚫 {tag} 메뉴가 안 떴다 — 아무것도 더 누르지 않는다 · 화면 {shot(bb, 'nomenu')}")
+                    return 0
+            tap(XREG_XCHG)
+            b = wait("xreg_title", 8.0)
+            if b is None:
+                bb = g()
+                click_log(f"[거래소등록] 🚫 {tag} 거래소가 안 열렸다 · 화면 {shot(bb, 'noxchg')}")
+                return 0
+        loaded()
+        # ② 서버 거래소
+        b = g()
+        if xreg_server(b) is not True:
+            tap(XREG_SERVER_TAB)
+            loaded()
+            t0 = time.time()
+            while not stop() and time.time() - t0 < 4.0:
+                b = g()
+                if xreg_server(b) is True:
+                    break
+                nap(random.uniform(*XREG_POLL))
+            if xreg_server(b) is not True:
+                click_log(f"[거래소등록] 🚫 {tag} [서버 거래소] 가 안 골라진다 — 월드에는 올리지 않는다 · 화면 {shot(b, 'noserver')}")
+                close(b); return 0
+        # ③ 판매 등록 탭
+        if xreg_score(b, "xreg_soji") < XREG_MATCH:
+            tap(XREG_SELL_TAB)
+            loaded()
+            b = wait("xreg_soji", 5.0)
+            if b is None:
+                bb = g()
+                click_log(f"[거래소등록] 🚫 {tag} [판매 등록] 화면이 안 보인다 · 화면 {shot(bb, 'nosell')}")
+                close(bb); return 0
+        # ④ 소지품을 훑으며 올린다
+        done, fails, wheels, pan = 0, 0, 0, 0
+        tries, skip, gold = {}, set(), None
+        while not stop():
+            b = g()
+            if b is None:
+                break
+            if itemreg_sell_seen(anc, big=b)[0]:          # 설명 패널이 떠 있으면 닫고 본다
+                pan += 1
+                if pan > 3:
+                    click_log(f"[거래소등록] 🚫 {tag} 설명 패널이 안 닫힌다 — 멈춘다 · 화면 {shot(b, 'panel')}")
+                    break
+                tap(XREG_PANEL_X); continue
+            pan = 0
+            if xreg_score(b, "xreg_soji") < XREG_MATCH:
+                click_log(f"[거래소등록] 🚫 {tag} 판매 등록 화면이 아니다 — 멈춘다 · 화면 {shot(b, 'lost')}")
+                break
+            hits = xreg_find(b, skip, gold)
+            if not hits:
+                if wheels >= XREG_WHEEL_MAX:
+                    break
+                x0, y0, x1, y1 = XREG_INV_BOX
+                pre = b[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
+                wheel_at(*P(XREG_INV_MID), -1)
+                wheels += 1
+                gold = None
+                nap(random.uniform(0.45, 0.7))
+                b2 = g()
+                if b2 is None:
+                    break
+                post = b2[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
+                if pre.shape == post.shape and float(abs(pre - post).mean()) < 2.0:
+                    break                                   # 맨 아래
+                continue
+            cy, cx, nm, v = hits[0]
+            tries[nm] = tries.get(nm, 0) + 1
+            if tries[nm] > XREG_TRY_MAX:
+                skip.add(nm); continue
+            cell = ((cx) / kx, (cy) / ky)
+            click_at(L + cx, T + cy)
+            invx_human_nap(XREG_STEP)
+            okp, t0 = False, time.time()
+            while not stop() and time.time() - t0 < 2.5:
+                if itemreg_sell_seen(anc)[0]:
+                    okp = True; break
+                nap(random.uniform(*XREG_POLL))
+            if not okp:
+                fails += 1
+                click_log(f"[거래소등록] {tag} ⚠ '{nm}' 를 눌렀는데 설명 패널이 안 떴다 (일치도 {v:.2f})")
+                if fails >= XREG_FAIL_MAX: break
+                continue
+            tap(XREG_SELL_BTN)
+            b = wait("xreg_qty", 3.0)
+            if b is None and not stop():
+                tap(XREG_SELL_BTN)
+                b = wait("xreg_qty", 3.0)
+            if b is None:
+                fails += 1
+                bb = g()
+                click_log(f"[거래소등록] {tag} ⚠ '{nm}' [판매] 를 눌렀는데 금액 창이 안 떴다 · 화면 {shot(bb, 'noqty')}")
+                close_p = bb is not None and itemreg_sell_seen(anc, big=bb)[0]
+                if close_p:
+                    tap(XREG_PANEL_X)
+                if fails >= XREG_FAIL_MAX: break
+                continue
+            # 최저가 '5' — 키는 맨 앞 창으로 간다
+            try:
+                if win32gui.GetForegroundWindow() != hw:
+                    self._focus_client_at(anc); nap(random.uniform(0.25, 0.4))
+                pyautogui.keyDown("5"); nap(random.uniform(0.07, 0.11)); pyautogui.keyUp("5")
+            except Exception as e:
+                click_log(f"[거래소등록] {tag} ⚠ 최저가 키 실패 {e!r}")
+            ok, info, prev = False, "", None
+            t0 = time.time()
+            nap(random.uniform(0.6, 0.9))               # 최저가가 칸에 들어갈 시간
+            while not stop() and time.time() - t0 < 2.8:
+                bb = g()
+                if bb is None:
+                    break
+                o, inf = xreg_price(bb)
+                if inf == prev:
+                    ok, info = o, inf
+                    break
+                prev = inf
+                nap(random.uniform(0.2, 0.3))
+            b = g()
+            if not ok:
+                click_log(f"[거래소등록] {tag} 🚫 '{nm}' **최저가가 없다** ({info or prev}) → 취소하고 다음 것 · 화면 {shot(b, 'zero')}")
+                tap(XREG_QTY_NO)
+                wait("xreg_qty", 2.5, gone=True)
+                skip.add(nm)
+                continue
+            tap(XREG_QTY_OK)
+            b = wait("xreg_ask", 3.0)
+            if b is None:
+                fails += 1
+                bb = g()
+                click_log(f"[거래소등록] {tag} ⚠ '{nm}' 확인을 눌렀는데 '판매 등록하시겠습니까?' 가 안 떴다 · 화면 {shot(bb, 'noask')}")
+                if bb is not None and xreg_score(bb, "xreg_qty") >= XREG_MATCH:
+                    tap(XREG_QTY_NO)
+                skip.add(nm)
+                if fails >= XREG_FAIL_MAX: break
+                continue
+            tap(XREG_ASK_OK)
+            b = wait("xreg_ask", 4.0, gone=True)
+            done += 1
+            tries[nm] = 0                                # 같은 아이템이 여러 개면 계속 올린다
+            gold = cell
+            click_log(f"[거래소등록] ✅ {tag} '{nm}' 최저가로 올렸다 ({info})")
+            nap(random.uniform(0.4, 0.8))
+        close(g())
+        click_log(f"[거래소등록] {tag} 끝 — {done}개 올렸다" + (f" · 건너뛴 것 {sorted(skip)}" if skip else ""))
+        return done
+
     def _inv_run(self, slot_idx=None):
         """🎴 가방을 열어 등록한 카드·상자를 깐다 (아이템정리 슬롯 = 그 클라)."""
         slots = self.cfg.get("item_slots", [])
@@ -46456,6 +47096,7 @@ class App(tk.Tk):
         self._knight_stop    = True
         self._eventshop_stop = True
         self._fish_stop      = True
+        self._xreg_stop      = True
         self._circus_stop    = True
         self._circus2_stop   = True
         self._circus3_stop   = True
