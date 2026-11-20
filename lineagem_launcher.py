@@ -5146,9 +5146,54 @@ INVX_BUFFER  = (1.0, 3.0)
 INV_DAY_HOUR = 5
 
 
+# 🧘 화면이 바뀔 때는 **지금보다 20~50% 더** 쉬고, 누르기 직전에 **그 자리가 가라앉은 것을 보고** 누른다
+#    (2026-11-21 사용자: *"화면 전환이 될 때 랜덤으로 지금보다 시간을 20~50프로 좀 더 줘 · 모두 똑같아 —
+#     아이템정리에 제작하는 것도 거래소 등록하는 것도 · 부하가 최대한 조용할 때 하나씩 클릭해"*)
+CALM_MULT = (1.2, 1.5)            # 쉬는 시간에 곱한다 (매번 다시 뽑는다)
+CALM_DIFF = 2.0                   # 누를 자리 둘레(120x80)가 0.2초 사이 이만큼 안 바뀌면 '가라앉았다'
+#   📏 2026-11-21 #01 메뉴·거래소 자리 — 가라앉으면 0.06~0.5 · 넘어가는 중 1.4~2.4 이상 ·
+#      게임 화면 한가운데는 늘 17~24 (그래서 한도를 둔다)
+CALM_MAX = 2.0                    # 그래도 안 가라앉으면 이만큼만 기다리고 누른다 (멈춰 서지 않는다)
+CALM_GAP = (0.18, 0.26)
+
+
+def calm_nap(rng):
+    nap(random.uniform(*rng) * random.uniform(*CALM_MULT))
+
+
+def screen_calm(x, y, tmax=None):
+    """🧘 (x, y) 둘레가 가라앉을 때까지 본다 → 기다린 초. 못 찍으면 바로 돌아간다."""
+    t0 = time.time()
+    try:
+        import cv2, numpy as np
+        rc = client_rect_at(int(x), int(y))
+        if not rc:
+            return 0.0
+        lx, ly = int(x) - rc[0], int(y) - rc[1]
+
+        def box():
+            b = grab_window((int(x), int(y)))
+            if b is None:
+                return None
+            g = cv2.cvtColor(b, cv2.COLOR_BGR2GRAY)
+            return g[max(0, ly - 40):ly + 40, max(0, lx - 60):lx + 60].astype(np.int16)
+        prev = box()
+        while prev is not None and time.time() - t0 < (CALM_MAX if tmax is None else tmax):
+            nap(random.uniform(*CALM_GAP))
+            cur = box()
+            if cur is None or cur.shape != prev.shape:
+                break
+            if float(np.abs(cur - prev).mean()) < CALM_DIFF:
+                break
+            prev = cur
+    except Exception:
+        pass
+    return time.time() - t0
+
+
 def invx_human_nap(step):
-    """누른 뒤 쉬기 — 늘 랜덤 + 가끔(INVX_PAUSE_P) 1~4초 멈칫."""
-    nap(random.uniform(*step))
+    """누른 뒤 쉬기 — 늘 랜덤(+20~50%) + 가끔(INVX_PAUSE_P) 1~4초 멈칫."""
+    calm_nap(step)
     if random.random() < INVX_PAUSE_P:
         nap(random.uniform(*INVX_PAUSE))
 INVX_SEE = 3.0                    # 창이 뜨기를 기다리는 한도
@@ -33086,6 +33131,7 @@ class App(tk.Tk):
             return L + int(xy[0] * kx), T + int(xy[1] * ky)
 
         def tap(xy):
+            screen_calm(*P(xy))                          # 🧘 그 자리가 가라앉은 뒤에
             click_at(*P(xy))
             invx_human_nap(XREG_STEP)
 
@@ -33115,7 +33161,7 @@ class App(tk.Tk):
                 else:
                     clear = 0
                 nap(random.uniform(*XREG_POLL))
-            nap(random.uniform(*INVX_BUFFER))   # ⏳ 버퍼링 구간은 1~3초 더 (2026-11-20 사용자 지시)
+            calm_nap(INVX_BUFFER)   # ⏳ 버퍼링 구간은 1~3초 더 (2026-11-20 사용자 지시)
 
         def shot(b, why):
             try:
@@ -33124,7 +33170,7 @@ class App(tk.Tk):
                 return ""
 
         def close(b):
-            for _ in range(3):
+            for _ in range(5):
                 if b is None or stop():
                     return
                 if itemreg_sell_seen(anc, big=b)[0]:
@@ -33135,6 +33181,10 @@ class App(tk.Tk):
                     tap(XREG_QTY_NO); b = g(); continue
                 if xreg_score(b, "xreg_title") >= XREG_MATCH:      # 🚫 거래소가 보일 때만 ✕
                     tap(XREG_CLOSE); nap(random.uniform(0.4, 0.7)); b = g(); continue
+                # 거래소를 닫으면 **메뉴 판이 남는다** — 그 ✕ 도 누른다 (2026-11-21 사용자:
+                #   "거래소 나왔으면 저 화면에서 한번 더 x 를 누르든 esc 를 눌러야지")
+                if xreg_score(b, "xreg_menu") >= XREG_MATCH:       # 🚫 메뉴가 보일 때만
+                    tap(XREG_MENU); nap(random.uniform(0.4, 0.7)); b = g(); continue
                 return
 
         self.status.set(f"💱 {tag} {name} 거래소 등록 중...")
@@ -33239,6 +33289,7 @@ class App(tk.Tk):
             if tries[nm] > XREG_TRY_MAX:
                 skip.add(nm); continue
             cell = ((cx) / kx, (cy) / ky)
+            screen_calm(L + cx, T + cy)
             click_at(L + cx, T + cy)
             invx_human_nap(XREG_STEP)
             okp, t0 = False, time.time()
@@ -33738,12 +33789,14 @@ class App(tk.Tk):
         """창 안 546 기준 자리를 누르고 사람처럼 잠깐 쉰다."""
         if not self._inv_hand_wait(tag):
             raise RuntimeError("멈춤")
+        screen_calm(L + int(rel[0] * kx), T + int(rel[1] * ky))
         click_at(L + int(rel[0] * kx), T + int(rel[1] * ky))
         invx_human_nap(INVX_STEP)
 
     def _invx_tap_px(self, tag, L, T, x, y):
         if not self._inv_hand_wait(tag):
             raise RuntimeError("멈춤")
+        screen_calm(L + int(x), T + int(y))
         click_at(L + int(x), T + int(y))
         invx_human_nap(INVX_STEP)
 
@@ -33759,7 +33812,7 @@ class App(tk.Tk):
                 last = b
                 x, y, v = invx_find(b, name, box, thr)
                 if x is not None:
-                    nap(random.uniform(*INVX_BUFFER))          # ⏳ 버퍼링 구간 — 1~3초 더
+                    calm_nap(INVX_BUFFER)          # ⏳ 버퍼링 구간 — 1~3초 더
                     b2 = grab_window(anc)
                     if b2 is not None:
                         x2, y2, v2 = invx_find(b2, name, box, thr)
@@ -33936,6 +33989,7 @@ class App(tk.Tk):
     def _melt_tap(self, tag, L, T, kx, ky, rel):
         if not self._inv_hand_wait(tag):
             raise RuntimeError("멈춤")
+        screen_calm(L + int(rel[0] * kx), T + int(rel[1] * ky))
         click_at(L + int(rel[0] * kx), T + int(rel[1] * ky))
         invx_human_nap(MELT_STEP)
 
@@ -34052,7 +34106,7 @@ class App(tk.Tk):
                     return self._invx_unknown(tag, b, "✔고급 이 안 켜진다", float(chk(b) if b is not None else -1))
             # ④ [일괄 등록] → 등록 칸 확인
             self._melt_tap(tag, L, T, kx, ky, MELT_BULK)
-            nap(random.uniform(*INVX_BUFFER))                  # ⏳ 등록되는 동안 1~3초
+            calm_nap(INVX_BUFFER)                  # ⏳ 등록되는 동안 1~3초
             b = grab_window(anc)
             ok, bad, note = self._melt_slots(b) if b is not None else (0, 0, [])
             if bad:
@@ -34119,7 +34173,7 @@ class App(tk.Tk):
                 b = grab_window(anc)
                 if b is not None and tab_open(b):
                     click_log(f"[아이템정리] {tag} 🎒 가방을 다시 열었다 — 이어서 훑는다")
-                    nap(random.uniform(*INVX_BUFFER))          # ⏳ 가방이 다 그려지게 1~3초
+                    calm_nap(INVX_BUFFER)          # ⏳ 가방이 다 그려지게 1~3초
                     b = grab_window(anc) or b
                     self._inv_base = inv_dim(b)
                     return True
