@@ -1262,7 +1262,8 @@ XREG_INV_BOX    = (385, 92, 535, 285)   # 판매 등록 화면 오른쪽 소지�
 XREG_INV_MID    = (460, 190)
 XREG_BOXES      = {"xreg_menu": (394, 16, 462, 82), "xreg_title": (330, 0, 440, 40),
                    "xreg_soji": (420, 45, 500, 85), "xreg_qty": (200, 35, 340, 80),
-                   "xreg_ask": (200, 150, 345, 195)}
+                   "xreg_ask": (200, 150, 345, 195),
+                   "xreg_unit": (85, 120, 170, 160)}   # '개당 판매 금액' — 수량이 있는 아이템 창에만
 XREG_MATCH      = 0.85           # 화면 그림 — 📏 그 화면 1.00 · 아닐 때 ≤0.47 (133장)
 XREG_ITEM_MATCH = 0.86           # 아이템 모양 — 📏 같은 칸 1.00 · 다른 아이템 ≤0.82(색차 28)
 XREG_ITEM_COLOR = 12.0           #   + 평균 색 차이 (모양만 보면 비슷한 다른 아이템이 걸린다)
@@ -1271,6 +1272,15 @@ XREG_GOLD_MATCH = 0.72           # 방금 누른 칸(금색으로 골라진 채)
 XREG_PRICE_SPAN = 16             # '최저 거래 단가' 숫자 폭(px) — 74.00 은 18~19 · 9.00 이하 ≈14
 XREG_TOTAL_BOX  = (200, 182, 263, 198)  # '총 판매 금액' 노란 숫자
 XREG_MIN_BOX    = (210, 148, 264, 164)  # '최저 거래 단가' 숫자 (아이콘 빼고)
+# 📦 **수량이 있는 아이템**(축복 부여 주문서 등) — 2026-11-21 사용자 녹화 · *"판매 누르고 수량에 맥스 누르고
+#    최저가 누르고 등록 순"*. 창에 '개당 판매 금액' 줄이 더 있다 (📏 그 창 1.00 · 장비 창 ≤0.38).
+#    🚫 수량 칸이 골라진 채라 **'5' 키를 누르지 않는다** (숫자 5 가 수량에 들어갈 수 있다) — 최저가 칸을 누른다.
+XREG_MAX_BTN    = (305, 162)     # 숫자판 [Max]
+XREG_MIN_ROW    = (243, 156)     # '최저 거래 단가' 칸 — 누르면 개당 금액이 최저가가 된다
+XREG_UNIT_VAL   = (200, 133, 263, 146)  # '개당 판매 금액' 숫자
+XREG_MIN_VAL    = (200, 149, 263, 162)  # '최저 거래 단가' 숫자 (같은 폭)
+XREG_SAME_XOR   = 14             # 두 숫자가 같은가 — 📏 같을 때 7 · 15.00↔60.00 28
+XREG_SAME_SUM   = 12             #   + 밝은 점 수 차이 — 📏 같을 때 5 · 다를 때 16
 # 🧍 2026-11-21 사용자: *"무작정 엄청나게 빨리빨리 올리지 말고 1개 올리고 다음꺼 올릴 때 1~2초 시간 간격을
 #    주고 또 등록도 좀 천천히"* → 누를 때마다 0.7~1.3초 · 하나 올린 뒤 1~2초 더
 XREG_STEP       = (0.7, 1.3)     # 누른 뒤 쉼 (+ 가끔 1~4초 — invx_human_nap)
@@ -1463,6 +1473,39 @@ def xreg_price(big):
         return ok, f"최저가 숫자폭 {span}(기준 {XREG_PRICE_SPAN}) · 총액 자리 {len(tg)}"
     except Exception as e:
         return False, f"읽기 실패 {type(e).__name__}"
+def xreg_price_stack(big):
+    """수량 창 — (ok, 기록). ok = **개당 금액 = 최저 거래 단가** 이고 **총 판매 금액이 두 자리 이상**(노란 숫자).
+    개당 금액은 10 밑일 수 있다(2.80 등) — 그래서 숫자 폭은 보지 않는다. 0원이면 총액이 노랗게 안 된다."""
+    try:
+        kx, ky = _xreg_k(big)
+        a = big.astype(int)
+        x0, y0, x1, y1 = XREG_TOTAL_BOX
+        t = a[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)]
+        B, G, R = t[..., 0], t[..., 1], t[..., 2]
+        tg = _xreg_groups((R > 150) & (G > 110) & (B < 100))
+        g = a.mean(2)
+        mx0, my0, mx1, my1 = [int(v * k) for v, k in zip(XREG_MIN_VAL, (kx, ky, kx, ky))]
+        m = g[my0:my1, mx0:mx1] > 130
+        h, w = m.shape
+        best = None
+        ux0, uy0 = int(XREG_UNIT_VAL[0] * kx), int(XREG_UNIT_VAL[1] * ky)
+        for dy in (-2, -1, 0, 1, 2):
+            for dx in (-1, 0, 1):
+                u = g[uy0 + dy:uy0 + dy + h, ux0 + dx:ux0 + dx + w] > 130
+                if u.shape != m.shape:
+                    continue
+                x = int((u ^ m).sum())
+                if best is None or x < best[0]:
+                    best = (x, abs(int(u.sum()) - int(m.sum())))
+        if best is None or int(m.sum()) < 20:
+            return False, f"최저가 칸을 못 읽었다 (점 {int(m.sum())}) · 총액 자리 {len(tg)}"
+        same = best[0] <= XREG_SAME_XOR * kx * ky and best[1] <= XREG_SAME_SUM * kx * ky
+        ok = same and len(tg) >= 2
+        return ok, f"개당=최저 {'같다' if same else '다르다'}(차이 {best[0]}·{best[1]}) · 총액 자리 {len(tg)}"
+    except Exception as e:
+        return False, f"읽기 실패 {type(e).__name__}"
+
+
 # 📐 **창 기준 좌표 한 벌** — 로컬이 [📐 좌표맞추기] 한 번으로 넣는다.
 #    🚫 **좌표 배포가 아니다** (2026-08-29 절대 규칙 — 좌표는 push 하지 않는다).
 #       코드에 두고 **사용자가 누를 때만** 그 컴퓨터 창 자리에 맞춰 넣는다.
@@ -33316,21 +33359,36 @@ class App(tk.Tk):
                     tap(XREG_PANEL_X)
                 if fails >= XREG_FAIL_MAX: break
                 continue
-            # 최저가 '5' — 키는 맨 앞 창으로 간다
-            try:
-                if win32gui.GetForegroundWindow() != hw:
-                    self._focus_client_at(anc); nap(random.uniform(0.25, 0.4))
-                pyautogui.keyDown("5"); nap(random.uniform(0.07, 0.11)); pyautogui.keyUp("5")
-            except Exception as e:
-                click_log(f"[거래소등록] {tag} ⚠ 최저가 키 실패 {e!r}")
+            stack = xreg_score(b, "xreg_unit") >= XREG_MATCH
+            if stack:
+                # 📦 수량이 있는 아이템 — 판매 → 수량 Max → 최저가 칸 → 등록 (2026-11-21 사용자 순서)
+                invx_human_nap(XREG_STEP)
+                tap(XREG_MAX_BTN)
+                invx_human_nap(XREG_STEP)
+                tap(XREG_MIN_ROW)
+                pf = xreg_price_stack
+            else:
+                # 최저가 '5' — 키는 맨 앞 창으로 간다
+                try:
+                    if win32gui.GetForegroundWindow() != hw:
+                        self._focus_client_at(anc); nap(random.uniform(0.25, 0.4))
+                    pyautogui.keyDown("5"); nap(random.uniform(0.07, 0.11)); pyautogui.keyUp("5")
+                except Exception as e:
+                    click_log(f"[거래소등록] {tag} ⚠ 최저가 키 실패 {e!r}")
+                pf = xreg_price
             ok, info, prev = False, "", None
             t0 = time.time()
             nap(random.uniform(0.6, 0.9))               # 최저가가 칸에 들어갈 시간
+            again = stack
             while not stop() and time.time() - t0 < 2.8:
                 bb = g()
                 if bb is None:
                     break
-                o, inf = xreg_price(bb)
+                o, inf = pf(bb)
+                if stack and not o and again and inf == prev:
+                    again = False                        # 최저가 칸이 한 번 씹혔으면 한 번 더
+                    tap(XREG_MIN_ROW); t0 = time.time(); prev = None
+                    nap(random.uniform(0.6, 0.9)); continue
                 if inf == prev:
                     ok, info = o, inf
                     break
@@ -33360,7 +33418,7 @@ class App(tk.Tk):
             done += 1
             tries[nm] = 0                                # 같은 아이템이 여러 개면 계속 올린다
             gold = cell
-            click_log(f"[거래소등록] ✅ {tag} '{nm}' 최저가로 올렸다 ({info})")
+            click_log(f"[거래소등록] ✅ {tag} '{nm}' 최저가로 올렸다" + (" 📦 수량 Max" if stack else "") + f" ({info})")
             invx_human_nap(XREG_ITEM_GAP)                # 🧍 하나 올리고 1~2초 (가끔 더)
         close(g())
         click_log(f"[거래소등록] {tag} 끝 — {done}개 올렸다" + (f" · 건너뛴 것 {sorted(skip)}" if skip else ""))
