@@ -1512,6 +1512,59 @@ def auto_glow(big):
         return -1
 
 
+# 🔎 보조서커스 창의 '지금 어디서 뭘 하나' (2026-11-20 사용자 — *"다른 곳에서 사냥하는 놈들도 있잖아 …
+#    사냥중 이렇게 표시해주면 … 선택은 되더라도 내가 사냥터를 보고 보낼지 말지 결정 ·
+#    전체선택은 서커스 안에 없으면 선택될 수 있게"*)
+#   📏 HP 막대 밑 주황 글씨 **'자동 전투 중'** — 깜빡인다(실측 6장: 0·31~83 · 안 하는 클라는 전부 0).
+#      그래서 여러 장을 보고 **켜졌다 꺼졌다** 할 때만 사냥 중으로 친다 (주황 배경이 계속 보이면 아님).
+#   📏 왼쪽 위 지역 이름 '서커스 광장' (subc_hud_circus.png 37x12) — 그 클라 1.00 · 다른 곳 ≤0.49
+#      (16클라 + 저장 화면 165장). 절전 화면에서도 보인다.
+SUBC_HUNT_BOX   = (24, 34, 64, 46)      # 546x307 기준 — '자동 전투 중' 글씨
+SUBC_HUNT_ON    = 25                    # 한 장이라도 이만큼 주황이면 '켜진 박자'
+SUBC_HUNT_OFF   = 5                     # 그리고 이 밑인 장이 있어야 (깜빡임)
+SUBC_HUD_BAND   = (12, 58, 115, 88)     # 지역 이름 줄
+SUBC_HUD_MATCH  = 0.80
+SUBC_PLACE_CUT  = (12, 64, 100, 79)     # 창에 보여줄 지역 이름 그림
+SUBC_LOOK_N     = 6                     # 몇 바퀴 보나 (16클라 한 바퀴 약 0.8초)
+SUBC_LOOK_TTL   = 40                    # 본 지 이만큼 지났으면 전체선택이 먼저 다시 본다
+
+
+def _subc_k(big):
+    return big.shape[1] / float(SUBC_BASE_W), big.shape[0] / float(SUBC_BASE_H)
+
+
+def subc_hunt_ink(big):
+    """HP 막대 밑 '자동 전투 중' 주황 점 수 (-1 = 못 봄)."""
+    try:
+        kx, ky = _subc_k(big)
+        x0, y0, x1, y1 = SUBC_HUNT_BOX
+        b = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
+        B, G, R = b[..., 0], b[..., 1], b[..., 2]
+        n = int(((R - B >= 45) & (R >= 90) & (G >= B) & (R > G)).sum())
+        return int(n / max(kx * ky, 0.01))
+    except Exception:
+        return -1
+
+
+def subc_hud_circus(big):
+    """왼쪽 위 지역 이름이 '서커스 광장' 인가 → 점수 (-1 = 못 봄)."""
+    try:
+        import cv2
+        t = subc_tpl("subc_hud_circus")
+        if big is None or t is None:
+            return -1.0
+        kx, ky = _subc_k(big)
+        if abs(kx - 1) > 0.02 or abs(ky - 1) > 0.02:
+            t = cv2.resize(t, (max(4, int(t.shape[1] * kx)), max(4, int(t.shape[0] * ky))))
+        x0, y0, x1, y1 = SUBC_HUD_BAND
+        band = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)]
+        if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
+            return -1.0
+        return float(cv2.matchTemplate(band, t, cv2.TM_CCOEFF_NORMED).max())
+    except Exception:
+        return -1.0
+
+
 def subc_place_score(big):
     """🎪 미니맵 아래 지역 이름이 '서커스 광장' 인가 → 점수 (-1 = 못 봄)."""
     try:
@@ -19700,7 +19753,7 @@ class App(tk.Tk):
         레벨 80 이상만 고르면 된다 (사용자 지시). 잠긴 줄은 고르지 말 것.
         자리는 코드에 한 벌(창 546x307 기준)이라 좌표를 찍을 필요가 없다."""
         self._open_section_win("_subc_win", "🎪 보조 서커스",
-                               self._build_subc_pick, w=630, h=340, pinnable=True)
+                               self._build_subc_pick, w=630, h=600, pinnable=True)
 
     def _build_subc_pick(self, p):
         tk.Label(p, text="슬롯마다 서커스를 돌릴 보조 캐릭 줄을 누르세요 "
@@ -19721,6 +19774,7 @@ class App(tk.Tk):
         self._subc_sbtn = {}
         self._subc_slbl = {}
         self._subc_plus = {}
+        self._subc_ilbl = {}
         if not isinstance(getattr(self, "_subc_sel", None), set):
             self._subc_sel = set()
         for si in range(16):
@@ -19748,6 +19802,9 @@ class App(tk.Tk):
             _sl = tk.Label(c, text="", font=("맑은 고딕", 7), fg="#888", anchor="w", width=16)
             _sl.pack(fill="x", padx=2)
             self._subc_slbl[si] = _sl
+            _il = tk.Label(c, text="", font=("맑은 고딕", 7), fg="#666", anchor="w", height=1)
+            _il.pack(fill="x", padx=2)
+            self._subc_ilbl[si] = _il
             row = tk.Frame(c)
             row.pack(padx=2, pady=(0, 2))
             for k in SUBC_PICKABLE:
@@ -19762,6 +19819,8 @@ class App(tk.Tk):
                   bg="#e67e22", fg="white", command=self._subc_sel_all).pack(side="left")
         tk.Button(bot, text="해제", font=("맑은 고딕", 8),
                   command=self._subc_sel_clear).pack(side="left", padx=(4, 0))
+        tk.Button(bot, text="🔎 다시 보기", font=("맑은 고딕", 8),
+                  command=lambda: self._subc_look_scan(quiet=False)).pack(side="left", padx=(4, 0))
         tk.Button(bot, text="■ 전부 끄기", font=("맑은 고딕", 8, "bold"),
                   bg="#922b21", fg="white", command=self._subc_off_all).pack(side="left", padx=(6, 0))
         tk.Button(bot, text="▶ 선택실행", font=("맑은 고딕", 9, "bold"),
@@ -19769,6 +19828,83 @@ class App(tk.Tk):
         tk.Button(bot, text="고른 것 전부 지우기", font=("맑은 고딕", 8),
                   command=self._subc_pick_clear).pack(side="right")
         self._subc_pick_paint()
+        self.after(400, lambda: self._subc_look_scan(quiet=True))
+
+    def _subc_look_scan(self, quiet=False, then=None):
+        """🔎 16클라를 몇 바퀴 찍어 슬롯마다 '서커스 안' · '사냥중' · 지역 이름 그림 (백그라운드).
+
+        🚫 아무것도 누르지 않는다 (창을 찍기만 한다). 겹쳐 돌지 않는다."""
+        if getattr(self, "_subc_looking", False):
+            return
+        self._subc_looking = True
+        if not quiet:
+            self.status.set("🔎 16클라를 보는 중... (5초쯤)")
+        try:
+            hw = self._client_hwnds_by_slot() or []
+        except Exception:
+            hw = []
+        ancs = {}
+        for si in range(16):
+            try:
+                l, t, r, b, h = hw[si]
+                ancs[si] = ((l + r) // 2, (t + b) // 2)
+            except Exception:
+                pass
+
+        def _work():
+            out = {}
+            try:
+                ink = {si: [] for si in ancs}
+                cir = {si: -1.0 for si in ancs}
+                last = {}
+                for _k in range(SUBC_LOOK_N):
+                    t0 = time.time()
+                    for si, anc in ancs.items():
+                        big = grab_window(anc)
+                        if big is None:
+                            continue
+                        last[si] = big
+                        ink[si].append(subc_hunt_ink(big))
+                        if cir[si] < SUBC_HUD_MATCH:
+                            cir[si] = max(cir[si], subc_hud_circus(big), subc_place_score(big))
+                    if _k < SUBC_LOOK_N - 1:
+                        time.sleep(max(0.0, 0.35 - (time.time() - t0)))
+                for si in ancs:
+                    v = [x for x in ink[si] if x >= 0]
+                    img = None
+                    try:
+                        b = last.get(si)
+                        if b is not None:
+                            kx, ky = _subc_k(b)
+                            x0, y0, x1, y1 = SUBC_PLACE_CUT
+                            img = b[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].copy()
+                    except Exception:
+                        img = None
+                    out[si] = {"circus": cir[si] >= SUBC_HUD_MATCH,
+                               "hunt": bool(v) and max(v) >= SUBC_HUNT_ON and min(v) <= SUBC_HUNT_OFF,
+                               "ink": v, "cir": round(cir[si], 2), "img": img}
+                hs = sorted(si + 1 for si, x in out.items() if x["hunt"] and not x["circus"])
+                cs = sorted(si + 1 for si, x in out.items() if x["circus"])
+                click_log(f"[보조서커스] 🔎 슬롯 상태 — 🎪 서커스 안 {cs} · ⚔ 사냥중 {hs} "
+                          f"(자동 전투 글씨 " + " ".join(f"{si + 1:02d}:{max(x['ink'] or [-1])}"
+                                                    for si, x in sorted(out.items())) + ")")
+            except Exception as e:
+                click_log(f"[보조서커스] ⚠ 슬롯 상태 보기 오류 — {type(e).__name__}: {e}")
+
+            def _done():
+                self._subc_looking = False
+                if out:
+                    self._subc_look = out
+                    self._subc_look_at = time.time()
+                self._subc_slot_paint()
+                if not quiet:
+                    cs = sorted(si + 1 for si, x in out.items() if x["circus"])
+                    hs = sorted(si + 1 for si, x in out.items() if x["hunt"] and not x["circus"])
+                    self.status.set(f"🔎 🎪 서커스 안 {cs or '없음'} · ⚔ 사냥중 {hs or '없음'}")
+                if then:
+                    then()
+            self.after(0, _done)
+        threading.Thread(target=_work, daemon=True).start()
 
     def _subc_slot_btn(self, si):
         """창의 슬롯 ▶/✕ — 안 돌고 있으면 그 슬롯만 시작 · 돌고 있으면 그 슬롯만 뺀다."""
@@ -19792,9 +19928,18 @@ class App(tk.Tk):
         self._subc_slot_paint()
         self.status.set(f"🎪 고른 슬롯 {sorted(x + 1 for x in sel)}" if sel else "🎪 고른 슬롯 없음")
 
-    def _subc_sel_all(self):
-        """✔ 전체선택 — 클라 창이 있고 **안 돌고 있는** 슬롯 전부 (다시 누르면 해제)."""
+    def _subc_sel_all(self, _after=False):
+        """✔ 전체선택 — 클라 창이 있고 **안 돌고 있고 서커스 안이 아닌** 슬롯 전부 (다시 누르면 해제).
+        ⚔ 다른 곳에서 사냥 중인 슬롯도 고른다 — 대신 알려준다 (보낼지는 사용자가 정한다)."""
+        sel0 = getattr(self, "_subc_sel", None) or set()
+        if (not _after and not sel0
+                and time.time() - float(getattr(self, "_subc_look_at", 0) or 0) > SUBC_LOOK_TTL):
+            self._subc_look_scan(quiet=True, then=lambda: self._subc_sel_all(True))
+            self.status.set("🔎 16클라를 먼저 보는 중... (5초쯤)")
+            return
         run = self._subc_running()
+        look = getattr(self, "_subc_look", None) or {}
+        run = run | {si for si, x in look.items() if x.get("circus")}
         try:
             hw = self._client_hwnds_by_slot() or []
         except Exception:
@@ -19804,8 +19949,10 @@ class App(tk.Tk):
         sel = getattr(self, "_subc_sel", None) or set()
         self._subc_sel = set() if (cand and sel >= cand) else cand
         self._subc_slot_paint()
+        _h = sorted(si + 1 for si in self._subc_sel if (look.get(si) or {}).get("hunt"))
         self.status.set(f"🎪 {len(self._subc_sel)}개 선택"
-                        + (f" — 돌고 있는 {sorted(x + 1 for x in run)} 는 제외" if run else ""))
+                        + (f" — 돌고 있거나 서커스 안인 {sorted(x + 1 for x in run)} 는 제외" if run else "")
+                        + (f" · ⚔ 사냥중 {_h} 도 골랐습니다 — 사냥터를 보고 빼려면 +" if _h else ""))
 
     def _subc_sel_clear(self):
         self._subc_sel = set()
@@ -19886,10 +20033,33 @@ class App(tk.Tk):
                         lb.config(text=t, fg="#e67e22")
                 else:
                     b.config(text="▶", bg="#1e8449", activebackground="#145a32")
+                    lk = (getattr(self, "_subc_look", None) or {}).get(si) or {}
+                    base = "메인만" if not self._subc_rows(si) else "대기"
                     if lb:
-                        lb.config(text=("메인만" if not self._subc_rows(si) else "대기"), fg="#888")
+                        if lk.get("circus"):
+                            lb.config(text=f"🎪 서커스 안 · {base}", fg="#8e44ad")
+                        elif lk.get("hunt"):
+                            lb.config(text=f"⚔ 사냥중 · {base}", fg="#c0392b")
+                        else:
+                            lb.config(text=base, fg="#888")
             except Exception:
                 pass
+        # 🗺 지역 이름 그림 (본 것이 있을 때)
+        try:
+            from PIL import Image as _I, ImageTk as _IT
+            ph = self._subc_ph = getattr(self, "_subc_ph", None) or {}
+            for si, il in list(getattr(self, "_subc_ilbl", {}).items()):
+                if not il.winfo_exists():
+                    continue
+                img = ((getattr(self, "_subc_look", None) or {}).get(si) or {}).get("img")
+                if img is None:
+                    il.config(image="", text="")
+                    continue
+                pim = _I.fromarray(img[:, :, ::-1])
+                ph[si] = _IT.PhotoImage(pim, master=il)
+                il.config(image=ph[si], text="")
+        except Exception:
+            pass
 
     def _subc_pick_paint(self):
         self._subc_slot_paint()
