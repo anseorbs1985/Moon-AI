@@ -1271,9 +1271,15 @@ XREG_GOLD_MATCH = 0.72           # 방금 누른 칸(금색으로 골라진 채)
 XREG_PRICE_SPAN = 16             # '최저 거래 단가' 숫자 폭(px) — 74.00 은 18~19 · 9.00 이하 ≈14
 XREG_TOTAL_BOX  = (200, 182, 263, 198)  # '총 판매 금액' 노란 숫자
 XREG_MIN_BOX    = (210, 148, 264, 164)  # '최저 거래 단가' 숫자 (아이콘 빼고)
-XREG_STEP       = (0.35, 0.75)   # 누른 뒤 쉼 (+ 가끔 1~4초 — invx_human_nap)
+# 🧍 2026-11-21 사용자: *"무작정 엄청나게 빨리빨리 올리지 말고 1개 올리고 다음꺼 올릴 때 1~2초 시간 간격을
+#    주고 또 등록도 좀 천천히"* → 누를 때마다 0.7~1.3초 · 하나 올린 뒤 1~2초 더
+XREG_STEP       = (0.7, 1.3)     # 누른 뒤 쉼 (+ 가끔 1~4초 — invx_human_nap)
+XREG_ITEM_GAP   = (1.0, 2.0)     # 하나 올리고 다음 것까지
+XREG_EQ_BLUE    = 40             # 🚫 착용 중 [E] 표시 — 칸 왼쪽 위 12px 의 파란 점
+XREG_EQ_WHITE   = 6              #    + 흰 글자 점 (📏 [E] 64·68/14·22 · 파란 구슬 아이템 33/0)
 XREG_POLL       = (0.12, 0.22)
-XREG_WHEEL_MAX  = 40             # 소지품을 한 칸씩 내리는 최대 횟수
+XREG_WHEEL_MAX  = 0              # 🚫 휠로 내리지 않는다 (2026-11-21 사용자: "휠로 내리지 말고 저 상태
+                                 #    위에서부터 하나씩") — 올리면 아래 것이 위로 올라온다
 XREG_SLOT_GAP   = (3.0, 8.0)     # 클라 사이
 XREG_TRY_MAX    = 2              # 한 아이템을 몇 번까지 해보나
 XREG_FAIL_MAX   = 4              # 한 클라에서 이만큼 실패하면 그 클라는 끝
@@ -1290,18 +1296,27 @@ def xreg_tpl(name):
         return None
 
 
+_XREG_CACHE = {"key": None, "items": []}
+
+
 def xreg_items():
-    """등록한 아이템 그림 → [(이름, 그림)] (click_templates/xreg_item_*.png — 로컬에도 배포된다)."""
-    out = []
+    """등록한 아이템 그림 → [(이름, 그림)] (click_templates/xreg_item_*.png — 로컬에도 배포된다).
+    ⏱ 그림이 170장이 넘어 매번 읽으면 한 번 찾는 데 0.6초 — 파일 목록·시각이 같으면 읽어둔 것을 쓴다."""
     try:
         import glob
-        for p in sorted(glob.glob(os.path.join(IMG_DIR, "xreg_item_*.png"))):
+        ps = sorted(glob.glob(os.path.join(IMG_DIR, "xreg_item_*.png")))
+        key = tuple((p, os.path.getmtime(p)) for p in ps)
+        if _XREG_CACHE["key"] == key:
+            return list(_XREG_CACHE["items"])
+        out = []
+        for p in ps:
             t = xreg_tpl(os.path.basename(p)[:-4])
             if t is not None:
                 out.append((os.path.basename(p)[len("xreg_item_"):-4], t))
+        _XREG_CACHE.update(key=key, items=out)
+        return list(out)
     except Exception:
-        pass
-    return out
+        return []
 
 
 def _xreg_k(big):
@@ -1362,11 +1377,16 @@ def xreg_find(big, skip=(), gold=None):
         x0, y0, x1, y1 = XREG_INV_BOX
         X0, Y0 = int(x0 * kx), int(y0 * ky)
         b = big[Y0:int(y1 * ky), X0:int(x1 * kx)]
+        bg = cv2.cvtColor(b, cv2.COLOR_BGR2GRAY)
         for nm, t0 in xreg_items():
             if nm in skip:
                 continue
             t = _xreg_fit(t0, kx, ky)
             if b.shape[0] < t.shape[0] or b.shape[1] < t.shape[1]:
+                continue
+            # ⏱ 흑백으로 먼저 거른다 (컬러 비교는 한 장 3.7ms · 흑백 0.6ms — 그림이 170장이 넘는다)
+            if float(cv2.matchTemplate(bg, cv2.cvtColor(t, cv2.COLOR_BGR2GRAY),
+                                       cv2.TM_CCOEFF_NORMED).max()) < XREG_GOLD_MATCH - 0.08:
                 continue
             r = cv2.matchTemplate(b, t, cv2.TM_CCOEFF_NORMED)
             tc = t.reshape(-1, 3).mean(0)
@@ -1392,6 +1412,23 @@ def xreg_find(big, skip=(), gold=None):
     except Exception:
         pass
     return out
+
+
+def xreg_equipped(big, cx, cy):
+    """🚫 그 칸이 **착용 중**([E] 표시)인가 → True/False (못 재면 True — 모르면 올리지 않는다).
+    cx·cy = 찾은 그림 가운데(창 안 픽셀) · 칸은 30px 이고 그림은 칸 안쪽 22px 이라 칸 왼쪽 위 = 가운데 − 15."""
+    try:
+        kx, ky = _xreg_k(big)
+        x0, y0 = int(cx - 16 * kx), int(cy - 16 * ky)
+        c = big[max(0, y0):y0 + int(14 * ky), max(0, x0):x0 + int(14 * kx)].astype(int)
+        if c.size == 0:
+            return True
+        B, G, R = c[..., 0], c[..., 1], c[..., 2]
+        blue = int(((B > 140) & (B - R > 60)).sum() / (kx * ky))
+        white = int(((R > 200) & (G > 200) & (B > 200)).sum() / (kx * ky))
+        return blue >= XREG_EQ_BLUE and white >= XREG_EQ_WHITE
+    except Exception:
+        return True
 
 
 def _xreg_groups(m):
@@ -32820,7 +32857,7 @@ class App(tk.Tk):
 
     def _build_xreg(self, p):
         self._xreg_sel = getattr(self, "_xreg_sel", set())
-        tk.Label(p, text="서버 거래소 → 판매 등록 → 등록해 둔 아이템을 **최저가**로 올립니다 "
+        tk.Label(p, text="서버 거래소 → 판매 등록 → 등록해 둔 아이템을 최저가로 올립니다 "
                           "(최저가가 없으면 취소하고 다음 것)",
                  font=("맑은 고딕", 9, "bold")).pack(anchor="w", padx=8, pady=(6, 0))
         tk.Label(p, text="등록할 아이템이 하나도 없는 클라는 거래소만 열어보고 닫습니다 · "
@@ -32861,7 +32898,7 @@ class App(tk.Tk):
         br = tk.Frame(box); br.pack(anchor="w", padx=4, pady=4)
         tk.Button(br, text="🖼 아이템 추가 (드래그)", font=("맑은 고딕", 9, "bold"), bg="#6c3483",
                   fg="white", command=self._xreg_grab).pack(side="left")
-        tk.Label(br, text="판매 등록 화면을 띄우고 아이콘 **안쪽만** 작게 (개수 숫자·테두리 빼고)",
+        tk.Label(br, text="판매 등록 화면을 띄우고 아이콘 안쪽만 작게 (개수 숫자·테두리 빼고)",
                  font=("맑은 고딕", 8), fg="#888").pack(side="left", padx=(6, 0))
         self._xreg_list = tk.Frame(box); self._xreg_list.pack(anchor="w", padx=4, pady=(0, 4), fill="x")
         self._xreg_list_paint()
@@ -32883,6 +32920,7 @@ class App(tk.Tk):
         self._xreg_paint()
 
     def _xreg_list_paint(self):
+        """🖼 등록한 아이템 — 작은 그림으로 한 줄에 18장 · **오른쪽 클릭 = 지우기** (그림이 170장이 넘는다)."""
         fr = getattr(self, "_xreg_list", None)
         if not fr or not fr.winfo_exists():
             return
@@ -32894,25 +32932,31 @@ class App(tk.Tk):
             tk.Label(fr, text="아직 없습니다 — [🖼 아이템 추가] 로 넣어주세요", fg="#c0392b",
                      font=("맑은 고딕", 9)).pack(anchor="w")
             return
+        grp = {}
+        for nm, _t in items:
+            k = "".join(ch for ch in nm if not ch.isdigit()) or "번호"
+            grp[k] = grp.get(k, 0) + 1
+        tk.Label(fr, text=f"모두 {len(items)}장 — " + " · ".join(f"{k} {v}" for k, v in grp.items())
+                 + "   (그림에 마우스를 올리면 이름 · 오른쪽 클릭 = 지우기)",
+                 font=("맑은 고딕", 8), fg="#888").pack(anchor="w")
         row = None
+        try:
+            import cv2
+            from PIL import Image, ImageTk
+        except Exception:
+            return
         for n, (nm, t) in enumerate(items):
-            if n % 6 == 0:
+            if n % 18 == 0:
                 row = tk.Frame(fr); row.pack(anchor="w")
-            cell = tk.Frame(row, bd=1, relief="groove"); cell.pack(side="left", padx=2, pady=2)
             try:
-                import cv2
-                from PIL import Image, ImageTk
-                im = Image.fromarray(cv2.cvtColor(cv2.resize(t, (t.shape[1] * 2, t.shape[0] * 2),
-                                                             interpolation=cv2.INTER_NEAREST),
-                                                  cv2.COLOR_BGR2RGB))
-                ph = ImageTk.PhotoImage(im)
+                ph = ImageTk.PhotoImage(Image.fromarray(cv2.cvtColor(t, cv2.COLOR_BGR2RGB)))
                 self._xreg_photos.append(ph)
-                tk.Label(cell, image=ph).pack(side="left")
+                lb = tk.Label(row, image=ph, bd=1, relief="solid")
+                lb.pack(side="left", padx=1, pady=1)
+                lb.bind("<Button-3>", lambda e, x=nm: self._xreg_del(x))
+                lb.bind("<Enter>", lambda e, x=nm: self.status.set(f"💱 {x}"))
             except Exception:
                 pass
-            tk.Label(cell, text=nm[:8], font=("맑은 고딕", 8)).pack(side="left", padx=(2, 0))
-            tk.Button(cell, text="✕", font=("맑은 고딕", 7), fg="#c0392b",
-                      command=lambda x=nm: self._xreg_del(x)).pack(side="left")
 
     def _xreg_del(self, nm):
         try:
@@ -32928,7 +32972,7 @@ class App(tk.Tk):
         self._xreg_list_paint()
 
     def _xreg_grab(self):
-        self.status.set("💱 판매 등록 화면 소지품에서 **아이콘 안쪽만** 작게 드래그 (ESC 취소)")
+        self.status.set("💱 판매 등록 화면 소지품에서 아이콘 안쪽만 작게 드래그 (ESC 취소)")
         for w in self._section_wins():
             try: w.withdraw()
             except Exception: pass
@@ -33164,6 +33208,16 @@ class App(tk.Tk):
                 click_log(f"[거래소등록] 🚫 {tag} 판매 등록 화면이 아니다 — 멈춘다 · 화면 {shot(b, 'lost')}")
                 break
             hits = xreg_find(b, skip, gold)
+            # 🚫 착용 중([E])은 올리지 않는다 (2026-11-21 사용자)
+            _h2 = []
+            for _h in hits:
+                if xreg_equipped(b, _h[1], _h[0]):
+                    if ("eq", _h[2]) not in tries:
+                        tries[("eq", _h[2])] = 1
+                        click_log(f"[거래소등록] {tag} 🚫 '{_h[2]}' **착용 중**([E]) — 올리지 않는다")
+                    continue
+                _h2.append(_h)
+            hits = _h2
             if not hits:
                 if wheels >= XREG_WHEEL_MAX:
                     break
@@ -33238,6 +33292,7 @@ class App(tk.Tk):
                 wait("xreg_qty", 2.5, gone=True)
                 skip.add(nm)
                 continue
+            nap(random.uniform(0.4, 0.9))                # 최저가가 들어간 것을 한 박자 보고
             tap(XREG_QTY_OK)
             b = wait("xreg_ask", 3.0)
             if b is None:
@@ -33255,7 +33310,7 @@ class App(tk.Tk):
             tries[nm] = 0                                # 같은 아이템이 여러 개면 계속 올린다
             gold = cell
             click_log(f"[거래소등록] ✅ {tag} '{nm}' 최저가로 올렸다 ({info})")
-            nap(random.uniform(0.4, 0.8))
+            invx_human_nap(XREG_ITEM_GAP)                # 🧍 하나 올리고 1~2초 (가끔 더)
         close(g())
         click_log(f"[거래소등록] {tag} 끝 — {done}개 올렸다" + (f" · 건너뛴 것 {sorted(skip)}" if skip else ""))
         return done
