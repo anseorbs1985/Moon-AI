@@ -1,217 +1,225 @@
 {
-  "w": 546,
-  "h": 307,
-  "groups": {
-    "chest_silver": [
-      4,
-      5,
-      "v",
-      "v",
-      "v",
-      "v",
-      "v",
-      "v"
-    ],
-    "gem_pink": [
-      6,
-      17,
-      "v",
-      "v",
-      "v"
-    ],
-    "card_blue": [
-      8,
-      19,
-      "v",
-      "v",
-      "v",
-      "v",
-      "v",
-      "v"
-    ],
-    "chest_green": [
-      9,
-      20,
-      "v",
-      "v",
-      "v"
-    ],
-    "card_face": [
-      13,
-      25,
-      "v",
-      "v"
-    ],
-    "jewel_box": [
-      14,
-      "v",
-      "v",
-      "now04"
-    ],
-    "card_person": [
-      15,
-      24,
-      "v",
-      "v",
-      "now04"
-    ],
-    "bead_gold": [
-      16,
-      "v",
-      "v",
-      "now04",
-      "v8"
-    ],
-    "bead_red": [
-      18
-    ],
-    "card_red": [
-      26,
-      "v",
-      "v",
-      "v",
-      "v8"
-    ],
-    "gift_box": [
-      27
-    ],
-    "gem_pink2": [
-      123,
-      "v",
-      "v",
-      "v"
-    ],
-    "gem_silver": [
-      124,
-      "v",
-      "v",
-      "v"
-    ],
-    "box_coin": [
-      125,
-      "v",
-      "v",
-      "v"
-    ],
-    "box_paper": [
-      126,
-      "v",
-      "v",
-      "v"
-    ],
-    "bead_red2": [
-      127,
-      "v",
-      "v",
-      "v"
-    ],
-    "bead_gold2": [
-      128,
-      "v",
-      "v",
-      "v"
-    ],
-    "box_pile": [
-      130,
-      "v",
-      "v",
-      "v"
-    ],
-    "card_dark": [
-      131,
-      "v",
-      "v",
-      "v"
-    ],
-    "chest_white": [
-      132,
-      "v",
-      "v",
-      "v"
-    ],
-    "pend_green": [
-      134,
-      "v",
-      "v",
-      "v"
-    ],
-    "pend_red": [
-      135,
-      "v",
-      "v",
-      "v"
-    ],
-    "pend_gold": [
-      136,
-      "v",
-      "v",
-      "v"
-    ],
-    "card_green": [
-      "v",
-      "v8"
-    ],
-    "card_green2": [
-      "v",
-      "v8"
-    ],
-    "box_crystal": [
-      "v8"
-    ],
-    "potion_blue": [
-      "v8"
-    ],
-    "orb_orange": [
-      "v8"
-    ],
-    "bottle_red": [
-      "v8"
-    ],
-    "card_blue2": [
-      "v8",
-      "v11"
-    ],
-    "card_red2": [
-      "v8"
-    ],
-    "chest_gold": [
-      "now14",
-      "now14"
-    ],
-    "choice_box": [
-      "now16"
-    ]
-  },
-  "from": "#04 aaoo / #03 고주파 2026-11-19",
-  "result": {
-    "img": "inv_result.png",
-    "close": [
-      526,
-      19
-    ]
-  },
-  "qty": {
-    "img": "inv_qty.png",
-    "ok": "inv_okall.png",
-    "ok_xy": [
-      312,
-      234
-    ],
-    "cancel_xy": [
-      232,
-      234
-    ]
-  },
-  "min": {
-    "chest_silver": 0.84
-  },
-  "first": [
-    [
-      "gem_pink2",
-      "gem_pink"
-    ],
-    [
-      "gem_silver"
-    ]
+ "w": 546,
+ "h": 307,
+ "groups": {
+  "chest_silver": [
+   4,
+   5,
+   "v",
+   "v",
+   "v",
+   "v",
+   "v",
+   "v"
+  ],
+  "gem_pink": [
+   6,
+   17,
+   "v",
+   "v",
+   "v"
+  ],
+  "card_blue": [
+   8,
+   19,
+   "v",
+   "v",
+   "v",
+   "v",
+   "v",
+   "v"
+  ],
+  "chest_green": [
+   9,
+   20,
+   "v",
+   "v",
+   "v"
+  ],
+  "card_face": [
+   13,
+   25,
+   "v",
+   "v"
+  ],
+  "jewel_box": [
+   14,
+   "v",
+   "v",
+   "now04"
+  ],
+  "card_person": [
+   15,
+   24,
+   "v",
+   "v",
+   "now04"
+  ],
+  "bead_gold": [
+   16,
+   "v",
+   "v",
+   "now04",
+   "v8"
+  ],
+  "bead_red": [
+   18
+  ],
+  "card_red": [
+   26,
+   "v",
+   "v",
+   "v",
+   "v8"
+  ],
+  "gift_box": [
+   27
+  ],
+  "gem_pink2": [
+   123,
+   "v",
+   "v",
+   "v"
+  ],
+  "gem_silver": [
+   124,
+   "v",
+   "v",
+   "v"
+  ],
+  "box_coin": [
+   125,
+   "v",
+   "v",
+   "v"
+  ],
+  "box_paper": [
+   126,
+   "v",
+   "v",
+   "v"
+  ],
+  "bead_red2": [
+   127,
+   "v",
+   "v",
+   "v"
+  ],
+  "bead_gold2": [
+   128,
+   "v",
+   "v",
+   "v"
+  ],
+  "box_pile": [
+   130,
+   "v",
+   "v",
+   "v"
+  ],
+  "card_dark": [
+   131,
+   "v",
+   "v",
+   "v"
+  ],
+  "chest_white": [
+   132,
+   "v",
+   "v",
+   "v"
+  ],
+  "pend_green": [
+   134,
+   "v",
+   "v",
+   "v"
+  ],
+  "pend_red": [
+   135,
+   "v",
+   "v",
+   "v"
+  ],
+  "pend_gold": [
+   136,
+   "v",
+   "v",
+   "v"
+  ],
+  "card_green": [
+   "v",
+   "v8"
+  ],
+  "card_green2": [
+   "v",
+   "v8"
+  ],
+  "box_crystal": [
+   "v8"
+  ],
+  "potion_blue": [
+   "v8"
+  ],
+  "orb_orange": [
+   "v8"
+  ],
+  "bottle_red": [
+   "v8"
+  ],
+  "card_blue2": [
+   "v8",
+   "v11"
+  ],
+  "card_red2": [
+   "v8"
+  ],
+  "chest_gold": [
+   "now14",
+   "now14"
+  ],
+  "choice_box": [
+   "now16"
+  ],
+  "craft_seal": [
+   "now07",
+   "now01"
+  ],
+  "x_coin": [
+   "x01",
+   "c03"
   ]
+ },
+ "from": "#04 aaoo / #03 고주파 2026-11-19",
+ "result": {
+  "img": "inv_result.png",
+  "close": [
+   526,
+   19
+  ]
+ },
+ "qty": {
+  "img": "inv_qty.png",
+  "ok": "inv_okall.png",
+  "ok_xy": [
+   312,
+   234
+  ],
+  "cancel_xy": [
+   232,
+   234
+  ]
+ },
+ "min": {
+  "chest_silver": 0.84
+ },
+ "first": [
+  [
+   "gem_pink2",
+   "gem_pink"
+  ],
+  [
+   "gem_silver"
+  ]
+ ]
 }

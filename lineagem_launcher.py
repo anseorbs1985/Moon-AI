@@ -4818,6 +4818,89 @@ def inv_tpl(name):
     return t
 
 
+# 🛠 가방에서 **꾹 눌러** 다른 창으로 가는 것 (2026-11-20 사용자 시범 #01 · #07)
+#   'craft' 봉인된 축복 부여 주문서 → [제작 재료] → 축복 부여 주문서 → ▼(최대) → 제작 → [확인] → ✕
+#   'shop'  영광의 주화 → [시즌 상점] → 일반 → (왼쪽으로 끌기) → 취향 선택 상자 → MAX → 확인
+#   끝나면 창을 닫으며 가방도 닫히므로 **가방을 다시 열고 하던 데서 이어서** 훑는다.
+#   🚫 모르는 화면이면 아무것도 더 누르지 않고 그 클라를 끝낸다 (그 화면을 남긴다).
+#   🚫 상점은 구매 가격 옆이 **주화 그림(톱니)** 일 때만 확인을 누른다 — 아니면 취소.
+INVX_ON = True
+INVX_GROUPS = {"craft_seal": "craft", "x_coin": "shop"}
+INVX_MATCH = 0.85                 # 📏 그 화면 1.00 · 다른 화면 187장 최고 0.64
+INVX_HOLD = (1.05, 1.30)          # 꾹 누르기 (사용자 1.09~1.17초)
+INVX_STEP = (0.18, 0.40)          # 누른 뒤 사람처럼 쉬기 (빠르게 · 랜덤)
+INVX_POLL = (0.08, 0.16)          # 창이 떴나 보는 간격
+INVX_SEE = 3.0                    # 창이 뜨기를 기다리는 한도
+INVX_CRAFT_MAX = 30.0             # 제작이 끝나기를 기다리는 한도
+INVX_BLUE = 100                   # 📏 [제작] 켜짐 파란 점 420 · 꺼짐 0
+#   546x307 창 기준 자리 (사용자가 누른 자리)
+INVX_CRAFT_DOWN = (476, 109)      # 수량 ▼ — 1 에서 누르면 **최대**로 간다
+INVX_CRAFT_GO = (487, 289)        # [제작]
+INVX_CRAFT_GO_BOX = (455, 280, 520, 298)
+INVX_CRAFT_X = (526, 18)          # 제작 창 ✕
+INVX_SHOP_TAB = (243, 69)         # 시즌 상점 '일반' 칸
+INVX_SHOP_DRAG = ((485, 181), (321, 185))   # 목록을 왼쪽으로 끈다
+INVX_SHOP_CARD = (9, 38)          # 상자 이름 가운데 → 누를 자리
+INVX_SHOP_MAX = (276, 134)
+INVX_SHOP_OK = (318, 222)
+INVX_SHOP_NO = (227, 222)         # 취소
+INVX_SHOP_TOAST = (272, 103)      # '구매 성공' 알림 닫기 (알림이 보일 때만)
+INVX_SHOP_X = (525, 19)           # 상점 ✕ · 시즌 던전 ✕
+INVX_INFO_X = (523, 48)           # 아이템 정보 ✕
+
+
+def invx_find(big, name, box=None, thr=None):
+    """click_templates/<name>.png 를 찾는다 → (창 안 x, y 가운데, 점수) · 못 찾으면 (None, None, 점수)."""
+    import cv2
+    try:
+        t0 = inv_tpl(name)
+        if big is None or t0 is None:
+            return None, None, -1.0
+        kx, ky = _inv_k(big)
+        t = _inv_fit(t0, kx, ky)
+        if box is None:
+            box = (inv_meta_x().get(name) or [0, 0, INV_BASE_W, INV_BASE_H])
+        x0, y0, x1, y1 = box
+        X0, Y0 = max(0, int(x0 * kx)), max(0, int(y0 * ky))
+        a = big[Y0:int(y1 * ky), X0:int(x1 * kx)]
+        if a.shape[0] < t.shape[0] or a.shape[1] < t.shape[1]:
+            return None, None, -1.0
+        r = cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED)
+        _, v, _, (x, y) = cv2.minMaxLoc(r)
+        if v < (INVX_MATCH if thr is None else thr):
+            return None, None, float(v)
+        return X0 + x + t.shape[1] // 2, Y0 + y + t.shape[0] // 2, float(v)
+    except Exception:
+        return None, None, -1.0
+
+
+def inv_meta_x():
+    """click_templates/invx_meta.json — 그림마다 찾을 범위 (546x307 기준)."""
+    try:
+        p = os.path.join(IMG_DIR, "invx_meta.json")
+        m = os.path.getmtime(p)
+        c = _INV_TPL.get("__invx_meta")
+        if c and c[0] == m:
+            return c[1]
+        d = json.load(io.open(p, encoding="utf-8"))
+        _INV_TPL["__invx_meta"] = (m, d)
+        return d
+    except Exception:
+        return {}
+
+
+def invx_blue(big, box):
+    """그 칸의 파란 점 수 — [제작] 버튼이 켜졌나."""
+    try:
+        kx, ky = _inv_k(big)
+        x0, y0, x1, y1 = box
+        a = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
+        B, R = a[..., 0], a[..., 2]
+        return int(((B - R > 40) & (B > 90)).sum())
+    except Exception:
+        return -1
+
+
 def inv_items():
     """등록한 아이템 그림 → [(종류, 그림)]."""
     out = []
@@ -32490,6 +32573,19 @@ class App(tk.Tk):
                 since = 0
                 if not self._inv_hand_wait(tag):
                     break
+                if INVX_ON and g in INVX_GROUPS:
+                    # 🛠 꾹 눌러 제작·교환 — 한 클라에 한 번 (끝나면 가방을 다시 연다)
+                    skip.add(g)
+                    stick = None
+                    _xr = self._invx_run(INVX_GROUPS[g], anc, tag, L, T, cx, cy)
+                    if _xr == "stop":
+                        return done
+                    if _xr == "ok":
+                        done += 1
+                    if not self._invx_reopen(anc, tag, P, tab_open):
+                        return done
+                    nap(random.uniform(*INVX_STEP))
+                    continue
                 if INV_QS_ON and g in rank:
                     # 🧺 두 번 누르지 않고 아래 빠른 칸에 올린다 — 이번 실행은 이것으로 끝
                     qs_done = True
@@ -32586,6 +32682,228 @@ class App(tk.Tk):
                 click_at(*P(INV_CLOSE))
         click_log(f"[아이템정리] ✔ {tag} 끝 — {done}번 깠다" + (f" · 건너뛴 것 {sorted(skip)}" if skip else ""))
         return done
+
+    def _invx_run(self, kind, anc, tag, L, T, cx, cy):
+        """🛠 꾹 눌러 제작('craft') · 시즌 상점 교환('shop') → 'ok' · 'skip'(아무것도 안 바뀜) · 'stop'."""
+        try:
+            return (self._invx_craft if kind == "craft" else self._invx_shop)(anc, tag, L, T, cx, cy)
+        except Exception as e:
+            click_log(f"[아이템정리] ⚠ {tag} {kind} 오류 — {type(e).__name__}: {e} — 이 클라는 여기서 끝낸다")
+            return "stop"
+
+    def _invx_k(self, big):
+        return _inv_k(big) if big is not None else (1.0, 1.0)
+
+    def _invx_tap(self, tag, L, T, kx, ky, rel, nm=""):
+        """창 안 546 기준 자리를 누르고 사람처럼 잠깐 쉰다."""
+        if not self._inv_hand_wait(tag):
+            raise RuntimeError("멈춤")
+        click_at(L + int(rel[0] * kx), T + int(rel[1] * ky))
+        nap(random.uniform(*INVX_STEP))
+
+    def _invx_tap_px(self, tag, L, T, x, y):
+        if not self._inv_hand_wait(tag):
+            raise RuntimeError("멈춤")
+        click_at(L + int(x), T + int(y))
+        nap(random.uniform(*INVX_STEP))
+
+    def _invx_wait(self, anc, name, tmax=None, box=None, thr=None):
+        """그 그림이 뜰 때까지 → (x, y, 점수, 화면) · 못 보면 (None, None, 최고점수, 마지막 화면)."""
+        t0 = time.time()
+        best, last = -1.0, None
+        while time.time() - t0 < (INVX_SEE if tmax is None else tmax):
+            if self._item_stop:
+                break
+            b = grab_window(anc)
+            if b is not None:
+                last = b
+                x, y, v = invx_find(b, name, box, thr)
+                if x is not None:
+                    return x, y, v, b
+                best = max(best, v)
+            nap(random.uniform(*INVX_POLL))
+        return None, None, best, last
+
+    def _invx_hold(self, tag, L, T, cx, cy):
+        """가방 칸을 **꾹** 누른다 (사용자: *"재료를 꾹 눌러야 해 그래야 제작이 떠"*)."""
+        if not self._inv_hand_wait(tag):
+            raise RuntimeError("멈춤")
+        x, y = L + int(cx), T + int(cy)
+        pyautogui.moveTo(x, y)
+        nap(random.uniform(0.05, 0.10))
+        pyautogui.mouseDown(x, y)
+        try:
+            nap(random.uniform(*INVX_HOLD))
+        finally:
+            pyautogui.mouseUp(x, y)
+
+    def _invx_open_info(self, anc, tag, L, T, cx, cy, link):
+        """칸을 꾹 눌러 정보 창의 그 글자(link)를 찾는다 — 첫 누름이 창 띄우기로만 먹으면 한 번 더."""
+        for _t in range(2):
+            self._invx_hold(tag, L, T, cx, cy)
+            r = self._invx_wait(anc, link, tmax=2.0)
+            if r[0] is not None:
+                return r
+            click_log(f"[아이템정리] {tag} 🛠 꾹 눌렀는데 '{link}' 가 안 보인다 ({r[2]:.2f}) — "
+                      + ("한 번 더 누른다" if _t == 0 else "그만둔다"))
+        return r
+
+    def _invx_craft(self, anc, tag, L, T, cx, cy):
+        x, y, v, b = self._invx_open_info(anc, tag, L, T, cx, cy, "invx_link_craft")
+        if x is None:
+            return self._invx_info_close(anc, tag, L, T, b)
+        kx, ky = self._invx_k(b)
+        self._invx_tap_px(tag, L, T, x, y)                      # [제작 재료]
+        x, y, v, b = self._invx_wait(anc, "invx_cl_title")
+        if x is None:
+            return self._invx_unknown(tag, b, "제작 가능 아이템 창이 안 떴다", v)
+        rx, ry, rv = invx_find(b, "invx_cl_row")
+        if rx is None:
+            return self._invx_unknown(tag, b, "목록에 '축복 부여 주문서' 가 없다", rv)
+        self._invx_tap_px(tag, L, T, rx, ry)                    # 축복 부여 주문서
+        x, y, v, b = self._invx_wait(anc, "invx_cw_name")
+        if x is None:
+            return self._invx_unknown(tag, b, "제작 창이 안 떴다", v)
+        self._invx_tap(tag, L, T, kx, ky, INVX_CRAFT_DOWN)     # ▼ → 최대
+        b = grab_window(anc)
+        n = invx_blue(b, INVX_CRAFT_GO_BOX)
+        if n < INVX_BLUE:
+            click_log(f"[아이템정리] {tag} 🛠 [제작] 이 꺼져 있다 (파란 점 {n}) — 재료가 모자란 듯 · 창을 닫는다")
+            self._invx_tap(tag, L, T, kx, ky, INVX_CRAFT_X)
+            return "skip"
+        self._invx_tap(tag, L, T, kx, ky, INVX_CRAFT_GO)       # [제작]
+        x, y, v, b = self._invx_wait(anc, "invx_cw_result", tmax=INVX_CRAFT_MAX)
+        if x is None:
+            return self._invx_unknown(tag, b, f"{INVX_CRAFT_MAX:.0f}초 안에 제작 결과가 안 떴다", v)
+        ox, oy, ov = invx_find(b, "invx_cw_ok")
+        if ox is None:
+            nap(random.uniform(0.6, 1.0))                       # [확인] 은 결과가 다 나온 뒤에 뜬다
+            ox, oy, ov, b = self._invx_wait(anc, "invx_cw_ok", tmax=4.0)
+        if ox is None:
+            return self._invx_unknown(tag, b, "제작 결과의 [확인] 이 안 보인다", ov)
+        self._invx_tap_px(tag, L, T, ox, oy)                    # [확인]
+        x, y, v, b = self._invx_wait(anc, "invx_cw_name", tmax=3.0)
+        if x is not None:
+            self._invx_tap(tag, L, T, kx, ky, INVX_CRAFT_X)    # 제작 창 ✕
+        click_log(f"[아이템정리] {tag} 🛠 ✅ 봉인된 축복 부여 주문서 → **축복 부여 주문서 제작** (최대)")
+        self.status.set(f"🎴 {tag} 축복 부여 주문서 제작")
+        return "ok"
+
+    def _invx_shop(self, anc, tag, L, T, cx, cy):
+        x, y, v, b = self._invx_open_info(anc, tag, L, T, cx, cy, "invx_link_shop")
+        if x is None:
+            return self._invx_info_close(anc, tag, L, T, b)
+        kx, ky = self._invx_k(b)
+        self._invx_tap_px(tag, L, T, x, y)                      # [시즌 상점]
+        x, y, v, b = self._invx_wait(anc, "invx_sh_title")
+        if x is None:
+            return self._invx_unknown(tag, b, "시즌 상점이 안 떴다", v)
+        self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_TAB)       # 일반
+        f = (None, None, -1.0)
+        for _t in range(4):
+            b = grab_window(anc)
+            f = invx_find(b, "invx_sh_item")
+            if f[0] is not None:
+                break
+            if _t == 3:
+                break
+            # 목록을 왼쪽으로 끈다 (사용자 시범 — 164px)
+            (sx, sy), (ex, ey) = INVX_SHOP_DRAG
+            self._invx_drag(tag, L, T, kx, ky, sx, sy + random.uniform(-3, 3), ex, ey + random.uniform(-3, 3))
+        if f[0] is None:
+            click_log(f"[아이템정리] {tag} 🛒 상점에서 '취향 선택 상자' 를 못 찾았다 ({f[2]:.2f}) — 상점을 닫는다")
+            self._invx_shop_close(anc, tag, L, T, kx, ky)
+            return "skip"
+        self._invx_tap_px(tag, L, T, f[0] + INVX_SHOP_CARD[0] * kx, f[1] + INVX_SHOP_CARD[1] * ky)
+        x, y, v, b = self._invx_wait(anc, "invx_sh_pop")
+        if x is None:
+            return self._invx_unknown(tag, b, "상품 정보 창이 안 떴다 (또는 다른 상품)", v)
+        gx, gy, gv = invx_find(b, "invx_sh_gear")
+        if gx is None:
+            click_log(f"[아이템정리] {tag} 🚫 구매 가격 옆이 **주화 그림이 아니다** ({gv:.2f}) — "
+                      f"사지 않고 취소한다")
+            self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_NO)
+            self._invx_shop_close(anc, tag, L, T, kx, ky)
+            return "skip"
+        self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_MAX)       # MAX
+        self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_OK)        # 확인
+        x, y, v, b = self._invx_wait(anc, "invx_sh_done", tmax=3.0)
+        if x is None:
+            # 주화가 모자라 안 산 것 — 상품 창이 남아 있으면 취소
+            if invx_find(grab_window(anc), "invx_sh_pop")[0] is not None:
+                self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_NO)
+            click_log(f"[아이템정리] {tag} 🛒 '구매 성공' 을 못 봤다 ({v:.2f}) — 주화가 모자란 듯 · 상점을 닫는다")
+            self._invx_shop_close(anc, tag, L, T, kx, ky)
+            return "skip"
+        self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_TOAST)     # 알림 닫기
+        nap(random.uniform(0.3, 0.5))
+        self._invx_shop_close(anc, tag, L, T, kx, ky)
+        click_log(f"[아이템정리] {tag} 🛒 ✅ 영광의 주화 → **취향 선택 상자** (MAX)")
+        self.status.set(f"🎴 {tag} 영광의 주화 → 취향 선택 상자")
+        return "ok"
+
+    def _invx_drag(self, tag, L, T, kx, ky, sx, sy, ex, ey):
+        if not self._inv_hand_wait(tag):
+            raise RuntimeError("멈춤")
+        x0, y0 = L + int(sx * kx), T + int(sy * ky)
+        x1, y1 = L + int(ex * kx), T + int(ey * ky)
+        n = random.randint(12, 18)
+        pyautogui.moveTo(x0, y0)
+        nap(random.uniform(0.06, 0.10))
+        pyautogui.mouseDown(x0, y0)
+        try:
+            nap(random.uniform(0.04, 0.07))
+            for i in range(1, n + 1):
+                pyautogui.moveTo(int(x0 + (x1 - x0) * i / n), int(y0 + (y1 - y0) * i / n))
+                nap(random.uniform(0.02, 0.035))
+            nap(random.uniform(0.05, 0.09))
+        finally:
+            pyautogui.mouseUp(x1, y1)
+        nap(random.uniform(0.35, 0.55))
+
+    def _invx_shop_close(self, anc, tag, L, T, kx, ky):
+        """시즌 상점 ✕ → 시즌 던전 ✕ — **그 창이 보일 때만** 누른다."""
+        for nm in ("invx_sh_title", "invx_sd_title"):
+            for _t in range(3):
+                b = grab_window(anc)
+                if invx_find(b, nm)[0] is None:
+                    break
+                self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_X)
+                nap(random.uniform(0.2, 0.4))
+
+    def _invx_info_close(self, anc, tag, L, T, b):
+        """정보 창이 열려 있으면 닫는다 (링크가 없는 아이템) → 'skip'."""
+        kx, ky = self._invx_k(b)
+        if b is not None and (invx_find(b, "invx_link_craft", thr=0.6)[0] is not None
+                              or invx_find(b, "invx_link_shop", thr=0.6)[0] is not None):
+            self._invx_tap(tag, L, T, kx, ky, INVX_INFO_X)
+        return "skip"
+
+    def _invx_unknown(self, tag, b, why, v):
+        p = self._inv_shot(b, tag, "invx") if b is not None else ""
+        click_log(f"[아이템정리] 🚫 {tag} 🛠 {why} ({v:.2f}) — 아무것도 더 누르지 않고 이 클라는 끝낸다 · 화면 {p}")
+        return "stop"
+
+    def _invx_reopen(self, anc, tag, P, tab_open):
+        """제작·교환 창을 닫으면 가방도 닫힌다 — 다시 연다 (사용자: *"끝에 인벤토리를 다시 켜주면 돼"*)."""
+        for _t in range(2):
+            b = grab_window(anc)
+            if b is not None and tab_open(b):
+                return True
+            if not self._inv_hand_wait(tag):
+                return False
+            click_at(*P(INV_BAG))
+            t0 = time.time()
+            while time.time() - t0 < 3.0:
+                nap(random.uniform(*INVX_POLL))
+                b = grab_window(anc)
+                if b is not None and tab_open(b):
+                    click_log(f"[아이템정리] {tag} 🎒 가방을 다시 열었다 — 이어서 훑는다")
+                    self._inv_base = inv_dim(b)
+                    return True
+        p = self._inv_shot(b, tag, "noreopen") if b is not None else ""
+        click_log(f"[아이템정리] 🚫 {tag} 가방을 다시 못 열었다 — 이 클라는 여기서 끝낸다 · 화면 {p}")
+        return False
 
     def _inv_dbl(self, x, y):
         """🖱 두 번 누르기 — 따닥 (누르고 40~60ms 있다 떼고, 60~100ms 뒤 다시).
