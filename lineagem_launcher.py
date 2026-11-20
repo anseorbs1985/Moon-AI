@@ -4891,6 +4891,11 @@ MELT_HERO_BOX = (318, 239, 330, 251)
 #   📏 #16 장착 +6 각반 (48, 20) · #06 강철각반·엘름 (0, 0) · 등록 칸 (0, 0)
 MELT_MARK_E   = 15
 MELT_MARK_P   = 8
+# ⏳ 버튼은 **서서히 켜진다** — 한 장만 보면 '꺼져 있다' 로 오판한다 (2026-11-20 #11 실측:
+#    꺼짐 0 · 켜지는 중 77 · 다 켜짐 1633). 켜질 때까지 이만큼 본다.
+MELT_EX_WAIT  = 3.0
+MELT_TRIES    = 2               # 녹이기 — 실패하면 창을 닫고 처음부터 한 번 더
+INVX_GO_WAIT  = 2.5             # 🛠 [제작] 이 켜질 때까지
 MELT_SEE      = 4.0
 INVX_MATCH = 0.85                 # 📏 그 화면 1.00 · 다른 화면 187장 최고 0.64
 INVX_HOLD = (1.05, 1.30)          # 꾹 누르기 (사용자 1.09~1.17초)
@@ -33058,6 +33063,13 @@ class App(tk.Tk):
         self._invx_tap(tag, L, T, kx, ky, INVX_CRAFT_DOWN)     # ▼ → 최대
         b = grab_window(anc)
         n = invx_blue(b, INVX_CRAFT_GO_BOX)
+        _t0 = time.time()
+        while n < INVX_BLUE and time.time() - _t0 < INVX_GO_WAIT:    # 서서히 켜진다 — 기다린다
+            nap(random.uniform(*INVX_POLL))
+            b2 = grab_window(anc)
+            if b2 is not None:
+                b = b2
+                n = invx_blue(b, INVX_CRAFT_GO_BOX)
         if n < INVX_BLUE:
             click_log(f"[아이템정리] {tag} 🛠 [제작] 이 꺼져 있다 (파란 점 {n}) — 재료가 모자란 듯 · 창을 닫는다")
             self._invx_tap(tag, L, T, kx, ky, INVX_CRAFT_X)
@@ -33216,6 +33228,22 @@ class App(tk.Tk):
         return ok, bad, note
 
     def _inv_melt(self, anc, tag, L, T):
+        """🎣 실패하면 창을 닫고 처음부터 한 번 더 (MELT_TRIES) — 한 번 실패로 그 클라를 끝내지 않는다."""
+        r = "stop"
+        for _n in range(MELT_TRIES):
+            self._melt_reached = False
+            r = self._inv_melt_once(anc, tag, L, T)
+            if r != "stop" or self._item_stop or not self._melt_reached:
+                return r            # 낚시 창까지도 못 갔으면 모르는 화면이다 — 다시 하지 않는다
+            b = grab_window(anc)
+            if b is None or invx_find(b, "mlt_title")[0] is not None or invx_find(b, "mlt_menu_fish")[0] is not None:
+                return r            # 창이 아직 남아 있다 — 모르는 상태라 더 하지 않는다
+            if _n + 1 < MELT_TRIES:
+                click_log(f"[아이템정리] {tag} 🎣 🔁 녹이기를 처음부터 한 번 더 한다 ({_n + 2}/{MELT_TRIES})")
+                nap(random.uniform(1.0, 2.0))
+        return r
+
+    def _inv_melt_once(self, anc, tag, L, T):
         """🎣 ≡ → 낚시 → 낚시 교환 → ✔고급 → 일괄 등록 → 교환 → 확인 → 닫기 → 'ok'·'skip'·'stop'."""
         import cv2
         b = grab_window(anc)
@@ -33238,6 +33266,7 @@ class App(tk.Tk):
             if r[0] is None:
                 self._melt_close(anc, tag, L, T)
                 return self._invx_unknown(tag, r[3], "낚시 창이 안 떴다", r[2])
+            self._melt_reached = True
             # ② [낚시 교환]
             self._melt_tap(tag, L, T, kx, ky, MELT_TAB)
             r = self._invx_wait(anc, "mlt_bulk", tmax=MELT_SEE)
@@ -33287,9 +33316,18 @@ class App(tk.Tk):
                 click_log(f"[아이템정리] {tag} 🎣 등록된 것이 없다 (고급 등급이 아니었나 보다) — 그대로 닫는다")
                 self._melt_close(anc, tag, L, T)
                 return "skip"
-            x0, y0, x1, y1 = MELT_EX_BOX
-            a = b[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
-            blue = int(((a[..., 0] > 150) & (a[..., 0] - a[..., 2] > 60)).sum())
+            def ex_blue(bb):
+                x0, y0, x1, y1 = MELT_EX_BOX
+                a = bb[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
+                return int(((a[..., 0] > 150) & (a[..., 0] - a[..., 2] > 60)).sum())
+            blue = ex_blue(b)
+            _t0 = time.time()
+            while blue < MELT_EX_BLUE and time.time() - _t0 < MELT_EX_WAIT:
+                nap(random.uniform(*INVX_POLL))
+                b2 = grab_window(anc)
+                if b2 is not None:
+                    b = b2
+                    blue = ex_blue(b)
             if blue < MELT_EX_BLUE:
                 self._melt_close(anc, tag, L, T)
                 return self._invx_unknown(tag, b, "[교환 하기] 가 꺼져 있다", float(blue))
