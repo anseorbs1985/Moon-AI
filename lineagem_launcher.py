@@ -13244,6 +13244,10 @@ class App(tk.Tk):
                     if _rh not in (1, 2, 3, 4):
                         _rh = int(self.REPEAT_H_VER.get("라스타바드", 4))
                     return _rh, (n or (fx[1] if fx else 8))
+                # ⏰ 라바가 아니면(테베·아틀·티칼·악몽의섬·해적섬) **2시간** — repeat_h 에
+                #    라바 시절 4 가 남아 있어도 (2026-11-21 사용자: 꼭 기억해)
+                if fx:
+                    return int(fx[0]), (n or fx[1])
         except Exception:
             pass
         if fx:
@@ -15836,6 +15840,13 @@ class App(tk.Tk):
                     if k in st:
                         st.pop(k, None); changed = True
                     continue
+                # ⏰ 악몽의섬 던전은 **지금 가는 곳**이 간격을 정한다 — 라바 4시간 · 그 밖 2시간
+                #    (2026-11-21 사용자: "라바 안에서만 4시간 · 악몽의섬일 때는 2시간 6회 · 꼭 기억해")
+                if key == "토요일_악몽의섬":
+                    try:
+                        h = self._rep_hn(key, slot)[0] or h
+                    except Exception:
+                        pass
                 e = st.get(k)
                 if not e:
                     # 설정만 있고 예약이 없으면 '꺼진 것'이다 — 여기서 켜지 않는다.

@@ -7773,6 +7773,24 @@ class IslandApp(tk.Tk):
             return "해적섬"
         return "악몽의섬"
 
+    def _ver_h(self, key, slot):
+        """⏰ **그 슬롯이 지금 가는 곳의 간격(시간)** — 악몽의섬 던전에서만 (그 밖은 None).
+        2026-11-21 사용자: *"악몽의섬은 2시간 6회 반복이야 · **라바 안에서만 4시간**이고
+        악몽의섬일 때(테베·아틀·티칼·악몽의섬·해적섬)는 2시간 6회야 · 꼭 기억해"*
+          라스타바드  → 슬롯에서 고른 간격(`rasta_h` · 안 고르면 4시간)
+          그 밖 전부  → 2시간 (`REPEAT_FIXED`)
+        🚫 `repeat_h` 로 판단하지 않는다 — 라바로 돌던 슬롯이 잠겨서/해적섬 실행으로
+           악몽의섬 칸을 바꿔 탄 동안 4 가 남아 있어 **악몽의섬을 4시간마다** 돌았다."""
+        fx = self.REPEAT_FIXED.get(key)
+        if key != RASTA_KEY or not fx:
+            return None
+        try:
+            if self._slot_ver(key, slot or {}) == "라스타바드":
+                return int(self._rasta_h(slot or {}))
+        except Exception:
+            pass
+        return int(fx[0])
+
     def _rep_extra_sec(self, key, slot):
         """반복 간격에 더 주는 여유(초). 랜덤 폭은 없애지 않는다 — 사람처럼."""
         lo, hi = self.REPEAT_EXTRA_MIN.get(self._slot_ver(key, slot), (1, 7))
@@ -7832,6 +7850,9 @@ class IslandApp(tk.Tk):
                 return int(self.REPEAT_H_VER[_v]), (n or (fx[1] if fx else 8))
         except Exception:
             pass
+        _vh = self._ver_h(key, slot)
+        if _vh:
+            return _vh, (n or (fx[1] if fx else 6))
         if fx:
             return (h or fx[0]), (n or fx[1])
         return (h or 2), (n or 8)
@@ -8099,6 +8120,12 @@ class IslandApp(tk.Tk):
             slots = self.cfg.get(key) or []
             slot = slots[si] if si < len(slots) else {}
             h = float(cur.get("h") or self._rep_hn(key, slot)[0] or 2)
+            _vh = self._ver_h(key, slot)      # ⏰ 라바 4시간 · 악몽의섬(테베·아틀·티칼·해적섬) 2시간
+            if _vh and _vh != h:
+                self._rlog(f"[반복] {key} #{si+1:02d} 이번에 간 곳({self._slot_ver(key, slot)}) 간격 "
+                           f"{h:g}시간 → **{_vh}시간** 으로 다음 회차를 잡는다")
+                h = float(_vh)
+                cur["h"] = _vh
             nxt = time.time() + h * 3600 + self._rep_extra_sec(key, slot)
             if nxt <= float(cur.get("next") or 0) + 30:
                 return                      # 이미 그만큼 뒤면 그대로 둔다
@@ -9644,6 +9671,16 @@ class IslandApp(tk.Tk):
                 done.append(u"%d↗" % (j + 1))
         if not ra:
             slot.pop("rasta", None)
+        # ⏰ 바꿔 탄 곳의 간격으로 (라바 4시간 ↔ 악몽의섬 2시간 · 2026-11-21 사용자 — 꼭 기억)
+        #    🚫 ⏰ 가 꺼진 슬롯(repeat_h 0)은 켜지 않는다
+        try:
+            _vh = self._ver_h(key, slot)
+            if _vh and int(slot.get("repeat_h") or 0) and int(slot.get("repeat_h") or 0) != _vh:
+                self._rlog(u"[반복] %s #%02d 칸을 바꿔 타서 ⏰ 간격 %s시간 → %d시간"
+                           % (key, si + 1, slot.get("repeat_h"), _vh))
+                slot["repeat_h"] = _vh
+        except Exception:
+            pass
         save_cfg(self.cfg)
         self._rlog(u"[전환] %s #%02d → '%s' 의 칸%d~%d 적용: %s"
                    % (key, si + 1, pname, lo, hi, u" ".join(done) or u"바뀐 칸 없음"))
