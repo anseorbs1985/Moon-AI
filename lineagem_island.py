@@ -4276,27 +4276,13 @@ class IslandApp(tk.Tk):
         tk.Label(b4, text="먼저 슬롯에서 [복사] · ON/OFF·⏰ 는 그대로",
                  font=("맑은 고딕", 7), fg="#7f8c8d").pack(side="left", padx=(6, 0))
 
-        # ── 번호 지정 일괄 적용 — 지정한 클릭 번호만 전 슬롯에 복사/삭제 ──
-        nb = tk.LabelFrame(parent, text="번호 지정 일괄 (예: 3,7,12-14)",
+        # ── ⚙ 프리셋 설정 ──
+        #    (2026-11-21 사용자: 버튼 지워죠) '번호 지정 일괄' [📋 전 슬롯에 적용] [× 번호 삭제] 는
+        #    2026-08-08 에 기능(_nums_apply)을 지운 뒤 버튼만 남아 누르면 오류가 났다 → 칸째 뺐다.
+        #    🚫 되살리지 말 것 — 프리셋 편집기가 그 일을 한다.
+        nb = tk.LabelFrame(parent, text="프리셋",
                            font=("맑은 고딕", 7), fg="#7d6608", padx=3, pady=2)
         nb.pack(fill="x", padx=4, pady=(0, 3))
-        r1 = tk.Frame(nb); r1.pack(fill="x")
-        tk.Label(r1, text="번호", font=("맑은 고딕", 7)).pack(side="left")
-        nv = tk.StringVar(value="")
-        tk.Entry(r1, textvariable=nv, font=("맑은 고딕", 8), width=12).pack(side="left", padx=2)
-        tk.Label(r1, text="기준", font=("맑은 고딕", 7)).pack(side="left", padx=(4, 0))
-        sv = tk.StringVar(value="1")
-        tk.Spinbox(r1, from_=1, to=SLOTS, textvariable=sv, width=3,
-                   font=("맑은 고딕", 8)).pack(side="left", padx=2)
-        self._numsel[key] = {"nums": nv, "src": sv}
-        r2 = tk.Frame(nb); r2.pack(fill="x", pady=(2, 0))
-        tk.Button(r2, text="📋 전 슬롯에 적용", font=("맑은 고딕", 7, "bold"),
-                  bg="#2980b9", fg="white",
-                  command=lambda k=key: self._nums_apply(k)).pack(side="left", fill="x", expand=True)
-        tk.Button(r2, text="× 번호 삭제", font=("맑은 고딕", 7, "bold"),
-                  bg="#c0392b", fg="white",
-                  command=lambda k=key: self._nums_delete(k)).pack(side="left", fill="x",
-                                                                   expand=True, padx=(3, 0))
         r3 = tk.Frame(nb); r3.pack(fill="x", pady=(3, 0))
         tk.Button(r3, text="⚙ 프리셋 P1~P5 설정 (이름·삭제번호·이동번호)",
                   font=("맑은 고딕", 7, "bold"), bg="#7d6608", fg="white",
