@@ -5654,6 +5654,146 @@ def inv_cnt_digits2(big, cx, cy):
         return None
 
 
+# 🎯 던전충전 = 가방을 열어 **충전석**을 빠르게 누른다 (2026-11-22 사용자 지시)
+#    예전에는 16슬롯 좌표를 7~9번 연달아 눌렀다. 이제 아이템정리처럼 가방을 열고
+#    충전석 세 가지를 찾아 정한 개수만큼 **빠르게 연달아** 누른다 (하나 누르고 확인하지 않는다).
+#    📏 2026-11-22 #02 실측 — 누르면 확인 창 없이 바로 쓰인다 · 화면 위에 이름이 뜬다:
+#       은색 = '일반 던전' · 초록 = '몽환의 섬' · 갈색 = '고대 거인의 무덤'
+#       (빨강 = 버림받은 자들의 땅 · 은빛 파랑 = 고대 정령의 무덤 — **누르지 않는다**)
+#    🖱 처음 한 번은 칸을 **고르는** 클릭이고, 그다음부터 한 번에 하나씩 쓰인다.
+DCS_ON = True
+DCS_STONES = (("normal", "일반 던전", (2, 4)),
+              ("dream", "몽환의 섬", (5, 7)),
+              ("giant", "고대 거인의 무덤", (4, 6)))
+DCS_TOTAL = (10, 14)          # 합쳐서 이만큼 (12개 안팎 — 사용자: 정확히 맞출 필요 없다)
+DCS_MIN = 7                   # 이보다 적으면 기록에 남긴다 (사용자: 7개 이상은 꼭)
+DCS_BATCH = 9                 # 10개 이상 쌓인 칸에서 한 번에 연달아 쓰는 최대 —
+                              #   칸이 다 비면 옆 아이템이 그 자리로 밀려와 **다른 것을 쓴다.**
+                              #   9개 쓴 뒤 다시 숫자를 보고 아직 두 자리면 이어서 쓴다.
+DCS_FEW = 1                   # 숫자가 한 자리(10개 미만)거나 못 읽으면 **1개만** (같은 이유)
+DCS_MATCH = 0.80              # 모양 (📏 같은 돌 0.84~1.00)
+DCS_COLOR_MAX = 8.0           # 평균 색 차이 (📏 같은 돌 ≤2.3 · 은색↔은빛파랑 10.1~14.6)
+DCS_TINT_TOL = 10.0           # 푸른기(B-R)·초록기(G-R) 차이
+                              #   📏 은색 B-R +1.5 · 은빛파랑 +21.5 · 갈색 -48.8 · 빨강 -72.6
+DCS_SEL_RING = 45.0           # 칸 테두리가 이보다 밝으면 이미 골라져 있다 (고르는 클릭을 안 한다)
+DCS_TAP_HOLD = (0.04, 0.06)   # 누르고 떼기까지
+DCS_TAP_GAP = (0.07, 0.11)    # 다음 누름까지 (📏 이 빠르기로 4번 눌러 4개가 다 쓰였다)
+DCS_STONE_GAP = (0.25, 0.45)  # 돌을 바꿀 때
+DCS_SCAN_MAX = 60             # 찾느라 휠을 굴리는 최대 칸 수
+DCS_SLOT_GAP = (2.0, 5.0)     # 클라 사이
+DCS_CHG_MIN = 4               # 누른 뒤 개수 숫자가 이만큼 바뀌어야 '먹었다'
+                              #   📏 81→80 · 25→24 에서 14 · 10 / 안 바뀐 칸 0
+                              #   안 바뀌면 **한계(더 충전 못 함)** → 그 클라는 그만하고 다음 클라로
+
+_DCS_CACHE = {}
+
+
+def dcs_tpls():
+    """충전석 그림 → {종류: (그림, 평균색, B-R, G-R)} (파일이 바뀌면 다시 읽는다)."""
+    import numpy as np
+    out = {}
+    for k, nm, rng in DCS_STONES:
+        p = os.path.join(BASE, "click_templates", f"dcs_{k}.png")
+        try:
+            mt = os.path.getmtime(p)
+        except Exception:
+            continue
+        c = _DCS_CACHE.get(k)
+        if c and c[0] == mt:
+            out[k] = c[1]
+            continue
+        try:
+            import cv2
+            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+        except Exception:
+            t = None
+        if t is None:
+            continue
+        m = t.astype(np.float32).mean((0, 1))
+        v = (t, m, float(m[0] - m[2]), float(m[1] - m[2]))
+        _DCS_CACHE[k] = (mt, v)
+        out[k] = v
+    return out
+
+
+def dcs_find(big):
+    """보이는 가방 칸에서 충전석 → {종류: (cy, cx, 점수, 색차)} (창 안 픽셀 · 칸 가운데).
+    종류마다 가장 잘 맞는 칸 하나 (같은 돌은 한 칸에 쌓인다)."""
+    import cv2
+    import numpy as np
+    out = {}
+    try:
+        kx, ky = _inv_k(big)
+        x0, y0, x1, y1 = INV_LIST
+        X0, Y0 = int(x0 * kx), int(y0 * ky)
+        a = big[Y0:int(y1 * ky), X0:int(x1 * kx)]
+        for k, (t0, tm, tbr, tgr) in dcs_tpls().items():
+            t = _inv_fit(t0, kx, ky)
+            if a.shape[0] < t.shape[0] or a.shape[1] < t.shape[1]:
+                continue
+            r = cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED)
+            ys, xs = np.where(r >= DCS_MATCH)
+            best = None
+            for y, x in zip(ys.tolist(), xs.tolist()):
+                cx, cy = X0 + x + int(12 * kx), Y0 + y + int(12 * ky)
+                if cy - 15 * ky < Y0 or cy + 15 * ky > Y0 + a.shape[0]:
+                    continue                    # 반쯤 잘린 칸은 다음 화면에서
+                p = a[y:y + t.shape[0], x:x + t.shape[1]].astype(np.float32).mean((0, 1))
+                col = float(np.abs(p - tm).max())
+                if col > DCS_COLOR_MAX:
+                    continue
+                if abs(float(p[0] - p[2]) - tbr) > DCS_TINT_TOL or abs(float(p[1] - p[2]) - tgr) > DCS_TINT_TOL:
+                    continue
+                v = float(r[y, x])
+                if best is None or v > best[2]:
+                    best = (cy, cx, v, col)
+            if best:
+                out[k] = best
+    except Exception:
+        return out
+    return out
+
+
+def dcs_cnt_mask(big, cx, cy):
+    """칸 오른쪽 아래 노란 개수 숫자 (바뀌었나 비교용 · None = 못 봄)."""
+    try:
+        kx, ky = _inv_k(big)
+        a = big[int(cy + 6 * ky):int(cy + 16 * ky), int(cx - 8 * kx):int(cx + 18 * kx)].astype(int)
+        if a.size == 0:
+            return None
+        return (a[:, :, 2] >= 140) & (a[:, :, 2] - a[:, :, 0] >= 60)
+    except Exception:
+        return None
+
+
+def dcs_plan(found, few=()):
+    """종류별 쓸 개수 → {종류: 개수}. found = 가방에 있는 종류들 · few = 1개만 쓸 종류.
+    정한 범위에서 무작위로 뽑고, 합이 12개 안팎이 되게 맞추고, 없는 돌 몫은 있는 돌로 옮긴다."""
+    rng = {k: r for k, _n, r in DCS_STONES}
+    q = {k: random.randint(*rng[k]) for k in rng}
+    T = random.randint(*DCS_TOTAL)
+    while sum(q.values()) > T:
+        c = [k for k in q if q[k] > rng[k][0]] or [k for k in q if q[k] > 1]
+        if not c:
+            break
+        q[random.choice(c)] -= 1
+    while sum(q.values()) < T:
+        q[random.choice([k for k in q if q[k] < rng[k][1]] or list(q))] += 1
+    out = {k: q[k] for k in q if k in found}
+    if not out:
+        return {}
+    left = sum(q[k] for k in q if k not in found)
+    for k in few:
+        if k in out and out[k] > DCS_FEW:
+            left += out[k] - DCS_FEW
+            out[k] = DCS_FEW
+    room = [k for k in out if k not in few]
+    while left > 0 and room:
+        out[random.choice(room)] += 1
+        left -= 1
+    return out
+
+
 def inv_sel_ring(big, cx, cy):
     """가방 칸 테두리 밝기 — 골랐으면 금색 테두리로 밝아진다 (-1 = 못 봄)."""
     import numpy as np
@@ -33078,7 +33218,7 @@ class App(tk.Tk):
         self._send_behind_only()          # 최소화하지 않는다 (2026-11-19 사용자 지시)
         self.after(60, lambda: threading.Thread(target=self._run_task, args=("아이템정리", self._run_item), daemon=True).start())
 
-    def _inv_hand_wait(self, tag):
+    def _inv_hand_wait(self, tag, stop="_item_stop"):
         """✋ 사람이 마우스를 만지는 중이면 손을 뗄 때까지 → 멈춤이면 False."""
         try:
             import precise_click as _pc
@@ -33088,7 +33228,7 @@ class App(tk.Tk):
         t0 = time.time()
         shown = False
         while True:
-            if getattr(self, "_item_stop", False):
+            if getattr(self, stop, False):
                 return False
             if f is None:
                 return True
@@ -36706,12 +36846,17 @@ class App(tk.Tk):
 
     # ── 일반던전충전 (연속클릭 복제 — 각 좌표를 7~9회 랜덤 연속 클릭) ──
     def _open_dc_win(self):
+        if DCS_ON:
+            self._open_section_win("_dc_win", "🎯 던전충전", self._build_dc, w=470, h=420)
+            return
         self._open_section_win("_dc_win", "🎯 일반던전충전", self._build_dc, w=300, h=680)
 
     def _dc_hotkey_label(self):
         return f"단축키: {self._vk_name(self.cfg.get('dc_hotkey'))}"
 
     def _build_dc(self, parent):
+        if DCS_ON:
+            return self._build_dcs(parent)
         dc = self.cfg.get("dc_slots") or [None] * DC_SLOTS
 
         tk.Label(parent,
@@ -36792,6 +36937,57 @@ class App(tk.Tk):
 
         self._refresh_dc_toggle()
 
+    def _build_dcs(self, parent):
+        """🎯 던전충전 창 — 아이템정리와 같은 모양 (실행·멈춤 / 단축키 / 16칸 개별 실행)."""
+        tk.Label(parent, text="던전충전 — 가방을 열어 충전석을 빠르게 씁니다",
+                 font=("맑은 고딕", 9, "bold"), fg="#6c3483").pack(anchor="w", padx=4, pady=(4, 2))
+        tk.Label(parent, font=("맑은 고딕", 8), fg="#888", justify="left",
+                 text="일반 던전 2~4개 · 몽환의 섬 5~7개 · 고대 거인의 무덤 4~6개 (합쳐서 12개 안팎)\n"
+                      "없는 돌은 다른 돌로 채웁니다 · 더 안 먹히면(한계) 그 클라는 그만하고 다음 클라로"
+                 ).pack(anchor="w", padx=4)
+        pr = tk.Frame(parent); pr.pack(pady=4)
+        self.btn_dc_run = tk.Button(pr, text="▶  실행",
+            font=("맑은 고딕", 9, "bold"), bg="#6c3483", fg="white",
+            activebackground="#512e6f", width=13, height=2,
+            command=self._start_dc)
+        self.btn_dc_run.pack(side="left", padx=(0, 3))
+        self.btn_dc_stop = tk.Button(pr, text="■ 멈춤",
+            font=("맑은 고딕", 8, "bold"), bg="#7f8c8d", fg="white", width=6, height=2,
+            command=lambda: setattr(self, "_dc_stop", True) or self.status.set("멈추는 중..."),
+            state="normal" if self._is_busy() else "disabled")
+        self.btn_dc_stop.pack(side="left")
+        hk = tk.Frame(parent); hk.pack(pady=2)
+        self._dc_toggle_btn = tk.Button(hk, text="OFF", font=("맑은 고딕", 9, "bold"),
+                                        bg="#7f8c8d", fg="white", width=6, command=self._toggle_dc)
+        self._dc_toggle_btn.pack(side="left", padx=(0, 3))
+        tk.Button(hk, text="⌨ 단축키", font=("맑은 고딕", 8), bg="#2c3e50", fg="white",
+                  command=self._assign_dc_hotkey).pack(side="left", padx=3)
+        self._dc_hotkey_var = tk.StringVar(value=self._dc_hotkey_label())
+        tk.Label(hk, textvariable=self._dc_hotkey_var, font=("맑은 고딕", 8),
+                 fg="#34495e").pack(side="left", padx=(6, 0))
+        tk.Frame(parent, height=1, bg="#ddd").pack(fill="x", padx=4, pady=2)
+        names = {}
+        try:
+            for _i, _w in enumerate(self._client_hwnds_by_slot() or []):
+                _t = win32gui.GetWindowText(_w[4]) or ""
+                names[_i] = _t.split(" l ", 1)[1].strip() if " l " in _t else ""
+        except Exception:
+            names = {}
+        g = tk.Frame(parent); g.pack(padx=4, pady=2)
+        # 화면 배치와 같게 — 세로로 01 02 03 04 (열 우선)
+        for c in range(4):
+            for r in range(4):
+                si = c * 4 + r
+                cell = tk.Frame(g, bd=1, relief="groove")
+                cell.grid(row=r, column=c, padx=2, pady=2, sticky="nsew")
+                tk.Label(cell, text=f"#{si + 1:02d}", font=("맑은 고딕", 8, "bold"),
+                         fg="#6c3483").pack(side="left", padx=(3, 1))
+                tk.Label(cell, text=(names.get(si) or "")[:6], font=("맑은 고딕", 8),
+                         width=7, anchor="w").pack(side="left")
+                tk.Button(cell, text="▶", font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
+                          width=2, command=lambda x=si: self._start_dc_one(x)).pack(side="right", padx=2, pady=2)
+        self._refresh_dc_toggle()
+
     def _refresh_dc_toggle(self):
         if hasattr(self, "_dc_toggle_btn") and self._dc_toggle_btn.winfo_exists():
             on = getattr(self, "_dc_on", False)
@@ -36850,9 +37046,28 @@ class App(tk.Tk):
         self.status.set(f"일반던전충전 #{idx+1} 삭제")
 
     def _start_dc(self):
+        if DCS_ON:
+            # 🎯 아이템정리와 같은 틀 — 작업으로 잡고 ■ 멈춤·버튼 색이 따라온다 (2026-11-22)
+            if not self._try_busy_or_queue("던전충전", self._start_dc):
+                return
+            self._dc_stop = False
+            self._set_btn("btn_dc_run", state="disabled", bg="#f39c12", text="⏳ 실행중...")
+            self._set_btn("btn_dc_stop", state="normal")
+            self.after(60, lambda: threading.Thread(target=self._run_task,
+                                                    args=("던전충전", self._dcs_work), daemon=True).start())
+            return
         threading.Thread(target=self._run_dc, daemon=True).start()
 
+    def _start_dc_one(self, si):
+        """▶ 그 클라만 (개별 실행)."""
+        if self._is_busy():
+            return self._test_go("던전충전", None, None)
+        self._test_go(f"던전충전 #{si + 1:02d}", "_dc_stop", self._dcs_work, si)
+
     def _run_dc(self):
+        if DCS_ON:
+            self.after(0, self._start_dc)          # 단축키도 같은 길로
+            return
         self._start_pause()
         if getattr(self, "_dc_running", False):
             return
@@ -36899,6 +37114,225 @@ class App(tk.Tk):
             self._dc_running = False
             self._clear_busy("일반던전충전")
             self.after(0, self._restore_back)   # 완료 후 런처/서브창 복원
+
+    # ── 🎯 던전충전 (가방 충전석) — 2026-11-22 ──
+    def _dcs_work(self, slot_idx=None):
+        self._start_pause("dc")
+        self._dc_stop = False
+        tot = 0
+        n = 0
+        try:
+            if slot_idx is not None:
+                targets = [slot_idx]
+            else:
+                targets = list(range(SCHED_SLOTS))
+                random.shuffle(targets)
+            click_log(f"[던전충전] 🎯 시작 — 클라 {[t + 1 for t in targets]}")
+            for i, si in enumerate(targets):
+                if self._dc_stop:
+                    break
+                try:
+                    u = self._dcs_slot(si)
+                    tot += u
+                    n += 1 if u else 0
+                except Exception as e:
+                    import traceback as _tb
+                    _w = _tb.extract_tb(e.__traceback__)[-1]
+                    click_log(f"[던전충전] ⚠ #{si + 1:02d} 오류 — {type(e).__name__}: {e} "
+                              f"({os.path.basename(_w.filename)}:{_w.lineno} {_w.name}) — 이 클라는 넘어간다")
+                if i < len(targets) - 1 and not self._dc_stop:
+                    nap(random.uniform(*DCS_SLOT_GAP))
+            click_log(f"[던전충전] 🎯 끝 — 클라 {n}개에서 충전석 {tot}개" + (" (■ 멈춤)" if self._dc_stop else ""))
+            self.after(0, lambda: self.status.set(f"✔ 던전충전 끝 — 충전석 {tot}개 썼습니다"))
+        finally:
+            self._set_btn("btn_dc_run", state="normal", bg="#6c3483", text="▶  실행")
+            self._set_btn("btn_dc_stop", state="disabled")
+
+    def _dcs_slot(self, si):
+        """한 클라 → 쓴 충전석 개수."""
+        tag = f"#{si + 1:02d}"
+        try:
+            hw = (self._client_hwnds_by_slot() or [])[si][4]
+        except Exception:
+            hw = None
+        if not hw:
+            click_log(f"[던전충전] 🚫 {tag} 클라 창을 못 찾았다")
+            return 0
+        if self._win_odd_skip(si, "던전충전"):
+            return 0
+        L, T, R, B = win32gui.GetWindowRect(hw)
+        W, H = R - L, B - T
+        kx, ky = W / float(INV_BASE_W), H / float(INV_BASE_H)
+
+        def P(rel):
+            return L + int(rel[0] * kx), T + int(rel[1] * ky)
+        anc = (L + W // 2, T + H // 2)
+        name = win32gui.GetWindowText(hw) or tag
+        self.status.set(f"🎯 {tag} {name} 충전석 쓰는 중...")
+        stop = "_dc_stop"
+
+        def grab():
+            return grab_window(anc)
+
+        def tab_open(b):
+            return b is not None and inv_win_score(b, "inv_open", INV_TAB_BOX) >= INV_WIN_MATCH
+        if not self._inv_hand_wait(tag, stop):
+            return 0
+        self._wake_hard("dc", anc, name, si + 1, icon="🎯")
+        try:
+            self._focus_client_at(anc)
+        except Exception:
+            pass
+        nap(random.uniform(0.3, 0.5))
+        big = grab()
+        if big is None:
+            click_log(f"[던전충전] 🚫 {tag} 화면을 못 찍었다")
+            return 0
+        if not tab_open(big):
+            if not self._inv_hand_wait(tag, stop):
+                return 0
+            click_at(*P(INV_BAG))
+            t0 = time.time()
+            while time.time() - t0 < 4.0:
+                nap(0.2)
+                big = grab()
+                if tab_open(big):
+                    break
+            if not tab_open(big):
+                p = self._inv_shot(big, tag, "dcs_nobag") if big is not None else ""
+                click_log(f"[던전충전] 🚫 {tag} 가방을 눌렀는데 가방 창이 안 보인다 — 이 클라는 넘어간다 · 화면 {p}")
+                return 0
+        lx, ly = P(((INV_LIST[0] + INV_LIST[2]) // 2, (INV_LIST[1] + INV_LIST[3]) // 2))
+        state = {"off": 0}           # 처음 연 자리에서 휠을 몇 칸 내렸나 (위로 올리면 -)
+
+        def wheel1(d):
+            """휠 한 칸 → 움직였으면 새 화면, 끝이면 None."""
+            prev = inv_list(big_[0])
+            for _st in range(1 + INV_STALL_TRY):
+                if not self._inv_hand_wait(tag, stop):
+                    return None
+                wheel_at(lx, ly, d)
+                nap(random.uniform(*INV_WHEEL_GAP))
+                b2 = grab()
+                if b2 is None:
+                    return None
+                if float(abs(inv_list(b2) - prev).mean()) >= 1.5:
+                    state["off"] += -d
+                    big_[0] = b2
+                    return b2
+            return None
+        big_ = [big]
+        found = {}                   # 종류 → (휠 자리, 10개 이상인가)
+
+        def look(b):
+            for k, (cy, cx, v, col) in dcs_find(b).items():
+                if k not in found:
+                    found[k] = (state["off"], inv_cnt_digits2(b, cx, cy) is True)
+        look(big)
+        # ① 찾는다 — 지금 자리 → 아래 끝 → 위 끝 (셋 다 보이면 바로 멈춘다)
+        steps = 0
+        for d in (-1, 1):
+            while len(found) < len(DCS_STONES) and steps < DCS_SCAN_MAX and not getattr(self, stop):
+                if d < 0 and inv_tail_seen(big_[0]):
+                    break
+                b2 = wheel1(d)
+                steps += 1
+                if b2 is None:
+                    break
+                look(b2)
+            if len(found) == len(DCS_STONES):
+                break
+        nm = {k: n for k, n, _r in DCS_STONES}
+        if not found:
+            click_log(f"[던전충전] {tag} 충전석이 가방에 없다 (휠 {steps}칸 훑음) — 가방을 닫는다")
+        few = [k for k, (o, many) in found.items() if not many]
+        plan = dcs_plan(found, few)
+        if plan:
+            click_log(f"[던전충전] {tag} 🎯 계획 — " + " · ".join(f"{nm[k]} {plan[k]}개" for k in plan)
+                      + f" (합 {sum(plan.values())}개"
+                      + (f" · 없는 돌 {[nm[k] for k in nm if k not in found]}" if len(found) < len(nm) else "")
+                      + (f" · 10개 미만이라 1개만 {[nm[k] for k in few]}" if few else "") + ")")
+        used = 0
+        limit = None
+        # ② 쓴다 — 지금 자리에서 가까운 돌부터
+        for k in sorted(plan, key=lambda z: abs(found[z][0] - state["off"])):
+            if getattr(self, stop):
+                break
+            want = plan[k]
+            tgt = found[k][0]
+            ok = True
+            while state["off"] != tgt:
+                if wheel1(-1 if tgt > state["off"] else 1) is None:
+                    ok = False
+                    break
+            hit = dcs_find(big_[0]).get(k) if ok else None
+            if not hit:
+                # 휠이 한 칸 어긋났을 수 있다 — 위아래 한 칸씩 더 본다
+                for d in (-1, 1, 1):
+                    b2 = wheel1(d)
+                    if b2 is not None:
+                        hit = dcs_find(b2).get(k)
+                        if hit:
+                            break
+            if not hit:
+                click_log(f"[던전충전] {tag} ⚠ {nm[k]} 를 다시 못 찾았다 — 건너뛴다")
+                continue
+            cy, cx, v, col = hit
+            X, Y = L + int(cx), T + int(cy)
+            if not self._inv_hand_wait(tag, stop):
+                break
+            sel = inv_sel_ring(big_[0], int(cx), int(cy)) >= DCS_SEL_RING
+            got = 0
+            first = True
+            m0 = dcs_cnt_mask(big_[0], int(cx), int(cy))
+            while got < want and not getattr(self, stop):
+                n_ = min(want - got, DCS_BATCH if found[k][1] else DCS_FEW)
+                taps = n_ + (0 if (sel or not first) else 1)
+                # 🖱 빠르게 연달아 — 하나 누르고 확인하지 않는다 (사용자 지시)
+                for _t in range(taps):
+                    pyautogui.mouseDown(X, Y)
+                    nap(random.uniform(*DCS_TAP_HOLD))
+                    pyautogui.mouseUp(X, Y)
+                    if _t < taps - 1:
+                        nap(random.uniform(*DCS_TAP_GAP))
+                first = False
+                # 먹었나 — 개수 숫자가 바뀌었나 (안 바뀌면 한계 · 사용자: 다른 클라로 넘어가면 된다)
+                nap(random.uniform(0.3, 0.45))
+                b2 = grab()
+                m1 = dcs_cnt_mask(b2, int(cx), int(cy)) if b2 is not None else None
+                if b2 is not None:
+                    big_[0] = b2
+                if m0 is not None and m1 is not None and m0.shape == m1.shape:
+                    _x = int((m0 ^ m1).sum())
+                    if _x < DCS_CHG_MIN:
+                        limit = nm[k]
+                        click_log(f"[던전충전] {tag} 🛑 [{nm[k]}] 눌렀는데 **개수가 안 바뀐다** (숫자 변화 {_x}) "
+                                  f"— 충전 한계로 본다 → 이 클라는 그만하고 다음 클라로")
+                        break
+                m0 = m1
+                got += n_
+                if got >= want or not found[k][1]:
+                    break
+                # 9개를 썼다 — 아직 두 자리면 이어서 (칸이 비면 옆 아이템이 밀려온다)
+                if b2 is None or inv_cnt_digits2(b2, int(cx), int(cy)) is not True:
+                    break
+            used += got
+            if got:
+                click_log(f"[던전충전] {tag} ✅ {nm[k]} {got}개 (일치도 {v:.2f} · 색차 {col:.1f}"
+                          + (" · 이미 골라져 있었다" if sel else "") + ")")
+            if limit:
+                break
+            nap(random.uniform(*DCS_STONE_GAP))
+        if plan and used < DCS_MIN and not limit:
+            click_log(f"[던전충전] {tag} ⚠ {used}개밖에 못 썼다 (7개 이상이 목표) — 충전석이 모자란다")
+        # ③ 가방 닫기
+        nap(random.uniform(0.3, 0.5))
+        b = grab()
+        if tab_open(b) and not getattr(self, stop):
+            if self._inv_hand_wait(tag, stop):
+                click_at(*P(INV_CLOSE))
+        click_log(f"[던전충전] ✔ {tag} [{name}] 끝 — {used}개")
+        return used
 
     def _assign_dc_hotkey(self):
         self.status.set("지정할 키를 누르세요... (5초 안에, ESC=취소)")
@@ -47592,6 +48026,7 @@ class App(tk.Tk):
         self._dungeon_stop   = True
         self._pass_stop      = True
         self._item_stop      = True
+        self._dc_stop        = True
         self._dollchk_stop   = True
         self._relic_stop     = True
         self._coupon_stop    = True
