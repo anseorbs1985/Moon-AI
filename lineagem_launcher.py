@@ -1273,6 +1273,8 @@ XREG_ITEM_MATCH = 0.86           # 아이템 모양 — 📏 같은 칸 1.00 · 
 XREG_ITEM_COLOR = 12.0           #   + 평균 색 차이 (모양만 보면 비슷한 다른 아이템이 걸린다)
 XREG_GOLD_MATCH = 0.72           # 방금 누른 칸(금색으로 골라진 채)은 색이 바뀐다 — 모양만 본다
                                  #   📏 골라진 체력 각반 0.795 · 골라진 체력 장갑 <0.60
+XREG_NO10       = True            # 🚫 최저가가 10.00 이면 등록하지 않는다 (2026-11-22 사용자)
+XREG_MIN_ROWBOX = (226, 145, 264, 160)  # '최저 거래 단가' 줄 (숫자 · '.00' 을 찾는 자리)
 XREG_PRICE_SPAN = 16             # '최저 거래 단가' 숫자 폭(px) — 74.00 은 18~19 · 9.00 이하 ≈14
 XREG_TOTAL_BOX  = (200, 182, 263, 198)  # '총 판매 금액' 노란 숫자
 XREG_MIN_BOX    = (210, 148, 264, 164)  # '최저 거래 단가' 숫자 (아이콘 빼고)
@@ -1458,6 +1460,46 @@ def _xreg_groups(m):
     return g
 
 
+def xreg_min_is10(big):
+    """'최저 거래 단가' 가 **정확히 10.00** 인가 → (True/False/None, 기록).
+    (2026-11-22 사용자: *"10다야로는 등록하지마"*)
+    숫자는 기울어진 작은 글씨라 붙어 있다 → 늘 같은 '.00' 을 찾고(click_templates/xreg_dot00.png)
+    그 왼쪽 두 자리를 본다: 끝자리 = '0' 그림 · 앞자리 = 가는 '1'(윗줄 점 2개 이하) · 그 앞은 비어 있음.
+    📏 저장 화면 14장(74·44·39·60·65) 전부 10 아님 · 흉내 10.00 → 10 · 흉내 110.00 → 10 아님."""
+    import cv2
+    import numpy as np
+    try:
+        t = cv2.imdecode(np.fromfile(os.path.join(IMG_DIR, "xreg_dot00.png"), np.uint8), 0)
+        if t is None or big is None:
+            return None, "'.00' 그림 없음"
+        DOT = t.astype(np.float32)
+        ZERO = DOT[:, 3:7].copy()
+        kx, ky = _xreg_k(big)
+        x0, y0, x1, y1 = XREG_MIN_ROWBOX
+        a = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)]
+        if abs(kx - 1) > 0.02 or abs(ky - 1) > 0.02:
+            a = cv2.resize(a, (x1 - x0, y1 - y0), interpolation=cv2.INTER_AREA)
+        g = a.astype(np.float32).mean(2)
+        r = cv2.matchTemplate(g, DOT, cv2.TM_CCOEFF_NORMED)
+        _a, mv, _b, (dx, dy) = cv2.minMaxLoc(r)
+        if mv < 0.8:
+            return None, f"'.00' 못 찾음 {mv:.2f}"
+        hh = DOT.shape[0]
+        if dx - 8 < 0:
+            return None, "자리 부족"
+        u = g[dy:dy + hh, dx - 4:dx]
+        tt = g[dy:dy + hh, dx - 8:dx - 4]
+        h = g[dy:dy + hh, max(0, dx - 12):dx - 8]
+        us = float(cv2.matchTemplate(u, ZERO, cv2.TM_CCOEFF_NORMED).max())
+        tb = tt > 130
+        top, tink = int(tb[1].sum()), int(tb.sum())
+        hink = int((h > 130).sum()) if h.size else 0
+        ten = us >= 0.85 and hink == 0 and tink >= 4 and (top <= 2 or tink <= 8)
+        return ten, f"끝자리0 {us:.2f} · 앞자리 점{tink} 윗줄{top} · 백의자리 점{hink}"
+    except Exception as e:
+        return None, f"읽기 실패 {type(e).__name__}"
+
+
 def xreg_price(big):
     """'판매 수량 / 금액 입력' 창의 최저가 → (ok, 기록).
     ok = **최저 거래 단가가 10 이상**이고 **총 판매 금액이 두 자리 이상**일 때만 True.
@@ -1474,7 +1516,10 @@ def xreg_price(big):
         mg = _xreg_groups(m)
         span = int(round((mg[-1][1] - mg[0][0]) / kx)) if mg else 0
         ok = len(tg) >= 2 and span >= XREG_PRICE_SPAN
-        return ok, f"최저가 숫자폭 {span}(기준 {XREG_PRICE_SPAN}) · 총액 자리 {len(tg)}"
+        t10, w10 = xreg_min_is10(big)
+        if ok and t10 and XREG_NO10:
+            return False, f"🚫 최저가가 **10다야**다 — 등록하지 않는다 ({w10})"
+        return ok, f"최저가 숫자폭 {span}(기준 {XREG_PRICE_SPAN}) · 총액 자리 {len(tg)} · 10다야? {t10} ({w10})"
     except Exception as e:
         return False, f"읽기 실패 {type(e).__name__}"
 def xreg_price_stack(big):
@@ -1505,6 +1550,9 @@ def xreg_price_stack(big):
             return False, f"최저가 칸을 못 읽었다 (점 {int(m.sum())}) · 총액 자리 {len(tg)}"
         same = best[0] <= XREG_SAME_XOR * kx * ky and best[1] <= XREG_SAME_SUM * kx * ky
         ok = same and len(tg) >= 2
+        t10, w10 = xreg_min_is10(big)
+        if ok and t10 and XREG_NO10:
+            return False, f"🚫 최저가가 **10다야**다 — 등록하지 않는다 ({w10})"
         return ok, f"개당=최저 {'같다' if same else '다르다'}(차이 {best[0]}·{best[1]}) · 총액 자리 {len(tg)}"
     except Exception as e:
         return False, f"읽기 실패 {type(e).__name__}"
