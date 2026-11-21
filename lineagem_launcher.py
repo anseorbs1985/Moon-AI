@@ -5678,11 +5678,19 @@ DCS_TINT_TOL = 10.0           # 푸른기(B-R)·초록기(G-R) 차이
 DCS_SEL_RING = 45.0           # 칸 테두리가 이보다 밝으면 이미 골라져 있다 (고르는 클릭을 안 한다)
 DCS_TAP_HOLD = (0.04, 0.06)   # 누르고 떼기까지
 DCS_TAP_GAP = (0.07, 0.11)    # 다음 누름까지 (📏 이 빠르기로 4번 눌러 4개가 다 쓰였다)
+DCS_DBL_GAP = (0.06, 0.14)    # 더블클릭과 더블클릭 사이 최소 (📏 0.05 · 0.15 둘 다 3번에 3개)
+DCS_SEE_MIN = 0.35            # 더블클릭 뒤 숫자를 보기 전 최소 (📏 0.4초에 숫자가 바뀌어 있다)
+DCS_EAT_SEC = (2.0, 4.0)      # 🧍 돌 하나를 먹는 데 걸리는 시간 — 그 안에 더블클릭을 무작위로 흩는다
+                              #   (2026-11-22 사용자: *"빠른 편으로 하면서 2~4초 정도 — 사람이 먹는 것처럼"*)
+DCS_CLEAR_ESC = 4             # 가방이 안 열려 있으면 ESC 로 다른 창을 닫는다 — 최대 이만큼
+                              #   '게임을 종료 하시겠습니까?' 가 뜨면 **다 닫힌 것** → ESC 로 취소하고 멈춘다
 DCS_STONE_GAP = (0.25, 0.45)  # 돌을 바꿀 때
 DCS_SCAN_MAX = 60             # 찾느라 휠을 굴리는 최대 칸 수
 DCS_SLOT_GAP = (2.0, 5.0)     # 클라 사이
-DCS_CHG_MIN = 4               # 누른 뒤 개수 숫자가 이만큼 바뀌어야 '먹었다'
-                              #   📏 81→80 · 25→24 에서 14 · 10 / 안 바뀐 칸 0
+DCS_CHG_MIN = 1               # 누른 뒤 개수 숫자가 조금이라도 바뀌면 '먹었다'
+                              #   📏 81→80 · 25→24 에서 14 · 10 · 243→242 는 **3** (그래서 4 는 너무 컸다)
+                              #   안 바뀐 칸은 몇 번 찍어도 **정확히 0** (골라져 있어도)
+                              #   📏 한계면 화면 위에 '일반 던전 충전 제한시간을 초과하였습니다.' 가 뜨고 숫자가 그대로다
                               #   안 바뀌면 **한계(더 충전 못 함)** → 그 클라는 그만하고 다음 클라로
 
 _DCS_CACHE = {}
@@ -37148,6 +37156,47 @@ class App(tk.Tk):
             self._set_btn("btn_dc_run", state="normal", bg="#6c3483", text="▶  실행")
             self._set_btn("btn_dc_stop", state="disabled")
 
+    def _dcs_clear(self, anc, tag):
+        """🚪 가방이 안 열려 있을 때 — 떠 있는 다른 창을 **ESC 로 닫는다** → ESC 를 눌렀나.
+
+        ESC 를 누를 때마다 '게임을 종료 하시겠습니까?' 가 떴나 본다.
+        뜨면 **다 닫힌 것**이다 → ESC 로 그 창을 취소하고 멈춘다 (ESC = 취소라 안전하다).
+        🚫 종료창 그림이 없거나 그 클라가 맨 앞이 아니면 **ESC 를 누르지 않는다**
+           (키는 맨 앞 창으로 간다 — 다른 클라를 건드린다)."""
+        try:
+            if not fix_quit_list():
+                return False
+            n = 0
+            for _i in range(DCS_CLEAR_ESC):
+                if self._client_is_front(anc) is not True:
+                    try:
+                        self._focus_client_at(anc)
+                    except Exception:
+                        pass
+                    nap(random.uniform(0.15, 0.25))
+                    if self._client_is_front(anc) is not True:
+                        click_log(f"[던전충전] {tag} 🚪 그 창을 맨 앞으로 못 올려 ESC 를 누르지 않는다")
+                        return n > 0
+                press_esc(1)
+                n += 1
+                nap(random.uniform(0.45, 0.7))
+                op, sc, _wh = fix_quit_open(anc)
+                if op:
+                    press_esc(1)            # 종료창 취소
+                    nap(random.uniform(0.35, 0.55))
+                    if n > 1:
+                        click_log(f"[던전충전] {tag} 🚪 열려 있던 창 {n - 1}개를 ESC 로 닫았다 "
+                                  f"(종료창 {sc:.2f} 은 취소)")
+                    if fix_quit_open(anc)[0]:
+                        press_esc(1)
+                        nap(random.uniform(0.35, 0.55))
+                    return True
+            click_log(f"[던전충전] {tag} 🚪 ESC 를 {n}번 눌렀는데 종료창이 안 떴다 — 그대로 가방을 연다")
+            return n > 0
+        except Exception as e:
+            click_log(f"[던전충전] {tag} 🚪 창 닫기 건너뜀: {e}")
+            return False
+
     def _dcs_slot(self, si):
         """한 클라 → 쓴 충전석 개수."""
         tag = f"#{si + 1:02d}"
@@ -37190,6 +37239,9 @@ class App(tk.Tk):
             return 0
         if not tab_open(big):
             if not self._inv_hand_wait(tag, stop):
+                return 0
+            # 🚪 다른 창이 열려 있으면 먼저 닫는다 (2026-11-22 사용자 지시)
+            if self._dcs_clear(anc, tag) and getattr(self, stop):
                 return 0
             click_at(*P(INV_BAG))
             t0 = time.time()
@@ -37283,21 +37335,34 @@ class App(tk.Tk):
                 break
             sel = inv_sel_ring(big_[0], int(cx), int(cy)) >= DCS_SEL_RING
             got = 0
-            first = True
+            # 🔎 누르기 **바로 전** 화면의 개수 숫자 (가방이 막 열린 화면은 덜 그려졌을 수 있다)
+            nap(random.uniform(0.15, 0.25))
+            _b0 = grab()
+            if _b0 is not None:
+                big_[0] = _b0
             m0 = dcs_cnt_mask(big_[0], int(cx), int(cy))
-            while got < want and not getattr(self, stop):
-                n_ = min(want - got, DCS_BATCH if found[k][1] else DCS_FEW)
-                taps = n_ + (0 if (sel or not first) else 1)
-                # 🖱 빠르게 연달아 — 하나 누르고 확인하지 않는다 (사용자 지시)
-                for _t in range(taps):
+            # 🔒 칸이 비면 옆 아이템이 밀려온다 — 10개 미만(한 자리)이면 1개만
+            want = want if found[k][1] else min(want, DCS_FEW)
+            # 🧍 돌 하나 2~4초 — 더블클릭 사이를 무작위 비중으로 나눈다 (가끔 길게 멈칫)
+            _wt = [random.uniform(0.4, 1.6) * (2.2 if random.random() < 0.15 else 1.0)
+                   for _ in range(max(1, want))]
+            _room = max(0.0, random.uniform(*DCS_EAT_SEC) - want * 0.22)
+            _gaps = [max(DCS_SEE_MIN, _room * w / (sum(_wt) or 1.0)) for w in _wt]
+            for _t in range(want):
+                if getattr(self, stop):
+                    break
+                # 🖱 **한 개 = 더블클릭 한 번** (📏 2026-11-22 #02 — 쓰고 나면 칸이 풀려
+                #    따닥따닥 누르면 두 번에 하나만 먹었다 · 더블클릭 3번 → 정확히 3개)
+                for _z in range(2):
                     pyautogui.mouseDown(X, Y)
                     nap(random.uniform(*DCS_TAP_HOLD))
                     pyautogui.mouseUp(X, Y)
-                    if _t < taps - 1:
+                    if _z == 0:
                         nap(random.uniform(*DCS_TAP_GAP))
-                first = False
-                # 먹었나 — 개수 숫자가 바뀌었나 (안 바뀌면 한계 · 사용자: 다른 클라로 넘어가면 된다)
-                nap(random.uniform(0.3, 0.45))
+                # 먹었나 — 다음 더블클릭까지 쉬는 동안 숫자를 본다 (안 바뀌면 한계 → 다음 클라)
+                #   📏 한계면 화면 위에 '○○ 충전 제한시간을 초과하였습니다.' 가 뜨고 숫자가 그대로다
+                #      (#02 — 거인은 4번 눌러 2개만 먹었다 · 일반은 하나도 안 먹었다)
+                nap(_gaps[_t])
                 b2 = grab()
                 m1 = dcs_cnt_mask(b2, int(cx), int(cy)) if b2 is not None else None
                 if b2 is not None:
@@ -37306,16 +37371,15 @@ class App(tk.Tk):
                     _x = int((m0 ^ m1).sum())
                     if _x < DCS_CHG_MIN:
                         limit = nm[k]
-                        click_log(f"[던전충전] {tag} 🛑 [{nm[k]}] 눌렀는데 **개수가 안 바뀐다** (숫자 변화 {_x}) "
-                                  f"— 충전 한계로 본다 → 이 클라는 그만하고 다음 클라로")
+                        click_log(f"[던전충전] {tag} 🛑 [{nm[k]}] {_t + 1}번째 더블클릭에 **개수가 안 바뀐다** "
+                                  f"(숫자 변화 {_x}) — 충전 한계로 본다 → 이 클라는 그만하고 다음 클라로")
                         break
                 m0 = m1
-                got += n_
-                if got >= want or not found[k][1]:
-                    break
-                # 9개를 썼다 — 아직 두 자리면 이어서 (칸이 비면 옆 아이템이 밀려온다)
-                if b2 is None or inv_cnt_digits2(b2, int(cx), int(cy)) is not True:
-                    break
+                got += 1
+                # 9개마다 — 아직 두 자리인가 (칸이 비면 옆 아이템이 밀려온다)
+                if got % DCS_BATCH == 0 and got < want:
+                    if b2 is None or inv_cnt_digits2(b2, int(cx), int(cy)) is not True:
+                        break
             used += got
             if got:
                 click_log(f"[던전충전] {tag} ✅ {nm[k]} {got}개 (일치도 {v:.2f} · 색차 {col:.1f}"
