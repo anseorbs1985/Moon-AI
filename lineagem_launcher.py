@@ -5240,6 +5240,9 @@ def invx_human_nap(step):
     if random.random() < INVX_PAUSE_P:
         nap(random.uniform(*INVX_PAUSE))
 INVX_SEE = 3.0                    # 창이 뜨기를 기다리는 한도
+INVX_SEE_SLOW = 7.0               # 시즌 상점·상품 창·제작 창 — 느린 컴퓨터는 버퍼링이 길다 (2026-11-21)
+INVX_RECOVER = True               # 막히면 **아는 창만** 닫고 가방으로 돌아가 이어서 한다
+INVX_RECOVER_N = 6
 INVX_CRAFT_MAX = 30.0             # 제작이 끝나기를 기다리는 한도
 INVX_BLUE = 100                   # 📏 [제작] 켜짐 파란 점 420 · 꺼짐 0
 #   546x307 창 기준 자리 (사용자가 누른 자리)
@@ -33892,11 +33895,14 @@ class App(tk.Tk):
 
     def _invx_run(self, kind, anc, tag, L, T, cx, cy):
         """🛠 꾹 눌러 제작('craft') · 시즌 상점 교환('shop') → 'ok' · 'skip'(아무것도 안 바뀜) · 'stop'."""
+        self._invx_ctx = (anc, L, T)
         try:
             return (self._invx_craft if kind == "craft" else self._invx_shop)(anc, tag, L, T, cx, cy)
         except Exception as e:
-            click_log(f"[아이템정리] ⚠ {tag} {kind} 오류 — {type(e).__name__}: {e} — 이 클라는 여기서 끝낸다")
-            return "stop"
+            click_log(f"[아이템정리] ⚠ {tag} {kind} 오류 — {type(e).__name__}: {e}")
+            if str(e) == "멈춤":
+                return "stop"
+            return "skip" if self._invx_recover(anc, tag, L, T) else "stop"
 
     def _invx_k(self, big):
         return _inv_k(big) if big is not None else (1.0, 1.0)
@@ -33969,14 +33975,14 @@ class App(tk.Tk):
             return self._invx_info_close(anc, tag, L, T, b)
         kx, ky = self._invx_k(b)
         self._invx_tap_px(tag, L, T, x, y)                      # [제작 재료]
-        x, y, v, b = self._invx_wait(anc, "invx_cl_title")
+        x, y, v, b = self._invx_wait(anc, "invx_cl_title", tmax=INVX_SEE_SLOW)
         if x is None:
             return self._invx_unknown(tag, b, "제작 가능 아이템 창이 안 떴다", v)
         rx, ry, rv = invx_find(b, "invx_cl_row")
         if rx is None:
             return self._invx_unknown(tag, b, "목록에 '축복 부여 주문서' 가 없다", rv)
         self._invx_tap_px(tag, L, T, rx, ry)                    # 축복 부여 주문서
-        x, y, v, b = self._invx_wait(anc, "invx_cw_name")
+        x, y, v, b = self._invx_wait(anc, "invx_cw_name", tmax=INVX_SEE_SLOW)
         if x is None:
             return self._invx_unknown(tag, b, "제작 창이 안 떴다", v)
         self._invx_tap(tag, L, T, kx, ky, INVX_CRAFT_DOWN)     # ▼ → 최대
@@ -34017,7 +34023,7 @@ class App(tk.Tk):
             return self._invx_info_close(anc, tag, L, T, b)
         kx, ky = self._invx_k(b)
         self._invx_tap_px(tag, L, T, x, y)                      # [시즌 상점]
-        x, y, v, b = self._invx_wait(anc, "invx_sh_title")
+        x, y, v, b = self._invx_wait(anc, "invx_sh_title", tmax=INVX_SEE_SLOW)
         if x is None:
             return self._invx_unknown(tag, b, "시즌 상점이 안 떴다", v)
         self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_TAB)       # 일반
@@ -34039,7 +34045,7 @@ class App(tk.Tk):
             self._invx_shop_close(anc, tag, L, T, kx, ky)
             return "skip"
         self._invx_tap_px(tag, L, T, f[0] + INVX_SHOP_CARD[0] * kx, f[1] + INVX_SHOP_CARD[1] * ky)
-        x, y, v, b = self._invx_wait(anc, "invx_sh_pop")
+        x, y, v, b = self._invx_wait(anc, "invx_sh_pop", tmax=INVX_SEE_SLOW)
         if x is None:
             # 🛒 상품 정보 창은 떴는데 **다른 상품**이면 — [취소] 하고 상점을 닫고 이어서 간다
             #    (예전엔 창을 띄운 채 그 클라를 끝냈다 — 2026-11-21 #10)
@@ -34282,9 +34288,54 @@ class App(tk.Tk):
             return "stop"
 
     def _invx_unknown(self, tag, b, why, v):
+        """제작·교환이 중간에 막혔다 → **아는 창만** 닫고 가방으로 돌아가 이어서 한다.
+        (2026-11-21 사용자: *"영광의 주화 제작에서 계속 멈추는데"* — 예전엔 창을 띄운 채 그 클라를 끝냈다)"""
         p = self._inv_shot(b, tag, "invx") if b is not None else ""
-        click_log(f"[아이템정리] 🚫 {tag} 🛠 {why} ({v:.2f}) — 아무것도 더 누르지 않고 이 클라는 끝낸다 · 화면 {p}")
+        ctx = getattr(self, "_invx_ctx", None)
+        if INVX_RECOVER and ctx and self._invx_recover(ctx[0], tag, ctx[1], ctx[2]):
+            click_log(f"[아이템정리] ⚠ {tag} 🛠 {why} ({v:.2f}) — **열린 창을 닫고 이어서 한다** "
+                      f"(이번에는 건너뜀) · 화면 {p}")
+            return "skip"
+        click_log(f"[아이템정리] 🚫 {tag} 🛠 {why} ({v:.2f}) — 모르는 화면이라 아무것도 더 누르지 않고 이 클라는 끝낸다 · 화면 {p}")
         return "stop"
+
+    def _invx_recover(self, anc, tag, L, T):
+        """제작·교환 창이 남아 있으면 **그 창이 보일 때만** 닫는다 → 다 닫혔으면 True.
+        🚫 모르는 창이면 아무것도 누르지 않는다 (False)."""
+        did = []
+        for _t in range(INVX_RECOVER_N):
+            if getattr(self, "_item_stop", False):
+                return False
+            b = grab_window(anc)
+            if b is None:
+                return False
+            kx, ky = self._invx_k(b)
+            if invx_find(b, "invx_sh_pop")[0] is not None or invx_find(b, "invx_sh_info")[0] is not None:
+                self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_NO); did.append("상품창 취소")
+            elif invx_find(b, "invx_sh_done")[0] is not None:
+                self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_TOAST); did.append("구매 알림")
+            elif invx_find(b, "invx_cw_ok")[0] is not None and invx_find(b, "invx_cw_result")[0] is not None:
+                ox, oy, _ov = invx_find(b, "invx_cw_ok")
+                self._invx_tap_px(tag, L, T, ox, oy); did.append("제작 결과 확인")
+            elif (invx_find(b, "invx_sh_title")[0] is not None or invx_find(b, "invx_sd_title")[0] is not None):
+                self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_X); did.append("상점 ✕")
+            elif invx_find(b, "invx_cw_name")[0] is not None or invx_find(b, "invx_cl_title")[0] is not None:
+                self._invx_tap(tag, L, T, kx, ky, INVX_CRAFT_X); did.append("제작 창 ✕")
+            elif (invx_find(b, "invx_link_craft", thr=0.6)[0] is not None
+                  or invx_find(b, "invx_link_shop", thr=0.6)[0] is not None):
+                self._invx_tap(tag, L, T, kx, ky, INVX_INFO_X); did.append("정보 창 ✕")
+            else:
+                if did:
+                    click_log(f"[아이템정리] {tag} 🧹 남은 창을 닫았다 — {' → '.join(did)}")
+                    return True
+                # 🚫 아무 창도 못 알아봤다 — 가방이 보일 때만 이어서 한다 (모르는 창 위에 가방 버튼을 누르지 않는다)
+                try:
+                    return inv_win_score(b, "inv_open", INV_TAB_BOX) >= INV_WIN_MATCH
+                except Exception:
+                    return False
+            nap(random.uniform(0.35, 0.6))
+        click_log(f"[아이템정리] {tag} 🧹 {INVX_RECOVER_N}번 닫아도 창이 남았다 — {' → '.join(did)}")
+        return False
 
     def _invx_reopen(self, anc, tag, P, tab_open):
         """제작·교환 창을 닫으면 가방도 닫힌다 — 다시 연다 (사용자: *"끝에 인벤토리를 다시 켜주면 돼"*)."""
