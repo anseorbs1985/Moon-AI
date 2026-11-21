@@ -1273,6 +1273,9 @@ XREG_ITEM_MATCH = 0.86           # 아이템 모양 — 📏 같은 칸 1.00 · 
 XREG_ITEM_COLOR = 12.0           #   + 평균 색 차이 (모양만 보면 비슷한 다른 아이템이 걸린다)
 XREG_GOLD_MATCH = 0.72           # 방금 누른 칸(금색으로 골라진 채)은 색이 바뀐다 — 모양만 본다
                                  #   📏 골라진 체력 각반 0.795 · 골라진 체력 장갑 <0.60
+XREG_TOT_CHG    = 12.0            # '5' 뒤 총 판매 금액 칸이 이만큼 안 바뀌면 키가 안 먹은 것 (기본값 10 그대로)
+XREG_HAND_QUIET = 0.8             # 사람이 마우스를 놓은 뒤 이만큼 조용해야 '5' 를 누른다
+XREG_HAND_MAX   = 20.0
 XREG_NO10       = True            # 🚫 최저가가 10.00 이면 등록하지 않는다 (2026-11-22 사용자)
 XREG_MIN_ROWBOX = (226, 145, 264, 160)  # '최저 거래 단가' 줄 (숫자 · '.00' 을 찾는 자리)
 XREG_PRICE_SPAN = 16             # '최저 거래 단가' 숫자 폭(px) — 74.00 은 18~19 · 9.00 이하 ≈14
@@ -1498,6 +1501,36 @@ def xreg_min_is10(big):
         return ten, f"끝자리0 {us:.2f} · 앞자리 점{tink} 윗줄{top} · 백의자리 점{hink}"
     except Exception as e:
         return None, f"읽기 실패 {type(e).__name__}"
+
+
+def xreg_total_crop(big):
+    """'총 판매 금액' 칸 (546 기준으로 맞춘 회색) — '5' 를 누르기 전·후를 견준다."""
+    import cv2
+    import numpy as np
+    try:
+        kx, ky = _xreg_k(big)
+        x0, y0, x1, y1 = XREG_TOTAL_BOX
+        a = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)]
+        if abs(kx - 1) > 0.02 or abs(ky - 1) > 0.02:
+            a = cv2.resize(a, (x1 - x0, y1 - y0), interpolation=cv2.INTER_AREA)
+        a = a.astype(int)
+        # 숫자 모양만 — 흰 숫자·노란 숫자 둘 다 (빨강·초록이 높다). 칸이 파랗게 골라지는 것은 무시한다
+        return (a[:, :, 2] > 140) & (a[:, :, 1] > 110)
+    except Exception:
+        return None
+
+
+def xreg_total_diff(a0, big):
+    """누르기 전 금액 칸과 지금 금액 칸의 **숫자 모양** 차이 (다른 점 수 · None = 못 봄).
+    📏 같은 숫자 0 (흰/노랑·골라짐 상관없이) · 10↔60·74·44 는 수십."""
+    import numpy as np
+    try:
+        a1 = xreg_total_crop(big)
+        if a0 is None or a1 is None or a0.shape != a1.shape:
+            return None
+        return float((a1 ^ a0).sum())
+    except Exception:
+        return None
 
 
 def xreg_price(big):
@@ -33284,6 +33317,42 @@ class App(tk.Tk):
                   + (" (■ 멈춤)" if getattr(self, "_xreg_stop", False) else ""))
         self.status.set(f"✔ 거래소등록 끝 — {tot}개 올렸습니다")
 
+    def _xreg_key5(self, tag, hw, anc):
+        """'5'(최저가)를 **그 클라에만** 보낸다 → 보냈으면 True.
+        사람이 마우스를 쓰는 중이면 놓을 때까지 기다리고, 누르기 **바로 직전**에 맨 앞 창이 그 클라인지 본다."""
+        try:
+            import precise_click as _pc
+            f = getattr(_pc, "human_idle_seconds", None)
+        except Exception:
+            f = None
+        t0 = time.time()
+        while f is not None and time.time() - t0 < XREG_HAND_MAX:
+            if getattr(self, "_xreg_stop", False):
+                return False
+            try:
+                if float(f()) >= XREG_HAND_QUIET:
+                    break
+            except Exception:
+                break
+            nap(0.15)
+        for _t in range(3):
+            if win32gui.GetForegroundWindow() != hw:
+                try:
+                    self._focus_client_at(anc)
+                except Exception:
+                    pass
+                nap(random.uniform(0.25, 0.4))
+            if win32gui.GetForegroundWindow() != hw:
+                continue
+            try:
+                if f is not None and float(f()) < XREG_HAND_QUIET:
+                    continue                             # 그 사이 사람이 만졌다 — 다시
+            except Exception:
+                pass
+            pyautogui.keyDown("5"); nap(random.uniform(0.07, 0.11)); pyautogui.keyUp("5")
+            return True
+        return False
+
     def _xreg_slot(self, si):
         """한 클라 → 올린 개수. 🚫 모르는 화면이면 아무것도 더 누르지 않고 끝낸다."""
         tag = f"#{si + 1:02d}"
@@ -33500,14 +33569,20 @@ class App(tk.Tk):
                 tap(XREG_MIN_ROW)
                 pf = xreg_price_stack
             else:
-                # 최저가 '5' — 키는 맨 앞 창으로 간다
-                try:
-                    if win32gui.GetForegroundWindow() != hw:
-                        self._focus_client_at(anc); nap(random.uniform(0.25, 0.4))
-                    pyautogui.keyDown("5"); nap(random.uniform(0.07, 0.11)); pyautogui.keyUp("5")
-                except Exception as e:
-                    click_log(f"[거래소등록] {tag} ⚠ 최저가 키 실패 {e!r}")
+                # 최저가 '5' — 키는 **맨 앞 창**으로 간다.
+                # 🚨 2026-11-21 #05 리자드맨 영웅의 장갑이 **10다야**에 팔렸다 — 사용자가 다른 클라를 누르는 중이라
+                #    '5' 가 다른 창으로 갔고, 가격이 기본값 10 그대로 남았다. 그래서 세 겹으로 막는다:
+                #    ① 사람이 마우스를 놓을 때까지 기다린다 ② 누르기 **바로 직전**에 맨 앞 창을 확인한다
+                #    ③ 누른 뒤 '총 판매 금액' 이 **실제로 바뀌었나** 본다 (안 바뀌면 키가 안 먹은 것 → 취소)
                 pf = xreg_price
+                tot0 = xreg_total_crop(b)
+                key_ok = self._xreg_key5(tag, hw, anc)
+                if not key_ok:
+                    click_log(f"[거래소등록] {tag} 🚫 '{nm}' 최저가 키를 이 클라에 못 보냈다 (다른 창이 앞에 있다) → 취소")
+                    tap(XREG_QTY_NO)
+                    wait("xreg_qty", 2.5, gone=True)
+                    skip.add(nm)
+                    continue
             ok, info, prev = False, "", None
             t0 = time.time()
             nap(random.uniform(0.6, 0.9))               # 최저가가 칸에 들어갈 시간
@@ -33527,6 +33602,26 @@ class App(tk.Tk):
                 prev = inf
                 nap(random.uniform(0.2, 0.3))
             b = g()
+            if ok and not stack:
+                # ③ '5' 를 누른 뒤 총 판매 금액이 그대로면(기본값 10) 키가 안 먹은 것이다 — 한 번 더, 그래도면 취소
+                for _k in range(2):
+                    dif = xreg_total_diff(tot0, b)
+                    if dif is None or dif >= XREG_TOT_CHG:
+                        break
+                    if _k == 0:
+                        click_log(f"[거래소등록] {tag} ⚠ '{nm}' 최저가 키를 눌렀는데 금액이 그대로다 (차이 {dif:.1f}) — 한 번 더")
+                        if not self._xreg_key5(tag, hw, anc):
+                            break
+                        nap(random.uniform(0.8, 1.1))
+                        b = g()
+                else:
+                    pass
+                dif = xreg_total_diff(tot0, b)
+                if dif is None or dif < XREG_TOT_CHG:
+                    ok = False
+                    info = f"🚫 최저가 키가 안 먹었다 — 금액이 기본값 그대로 (차이 {dif})"
+                else:
+                    ok, info = pf(b)
             if not ok:
                 click_log(f"[거래소등록] {tag} 🚫 '{nm}' **최저가가 없다** ({info or prev}) → 취소하고 다음 것 · 화면 {shot(b, 'zero')}")
                 tap(XREG_QTY_NO)
