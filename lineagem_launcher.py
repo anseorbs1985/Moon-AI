@@ -1276,6 +1276,9 @@ XREG_GOLD_MATCH = 0.72           # 방금 누른 칸(금색으로 골라진 채)
 XREG_TOT_CHG    = 12.0            # '5' 뒤 총 판매 금액 칸이 이만큼 안 바뀌면 키가 안 먹은 것 (기본값 10 그대로)
 XREG_HAND_QUIET = 0.8             # 사람이 마우스를 놓은 뒤 이만큼 조용해야 '5' 를 누른다
 XREG_HAND_MAX   = 20.0
+XREG_ONE_CAP    = {"축복갑옷마법주문서": 2, "축복무기마법주문서": 2}   # 한 장씩 · 한 번에 최대 2번
+XREG_STRICT     = ("축복갑옷마법주문서", "축복무기마법주문서")
+XREG_STRICT_GOLD_COLOR = 22.0     # 금색으로 골라진 칸에서도 색 차이가 이만큼 안이어야 (일반 39.6 · 저주 55.7)
 XREG_NO10       = True            # 🚫 최저가가 10.00 이면 등록하지 않는다 (2026-11-22 사용자)
 XREG_MIN_ROWBOX = (226, 145, 264, 160)  # '최저 거래 단가' 줄 (숫자 · '.00' 을 찾는 자리)
 XREG_PRICE_SPAN = 16             # '최저 거래 단가' 숫자 폭(px) — 74.00 은 18~19 · 9.00 이하 ≈14
@@ -1424,6 +1427,11 @@ def xreg_find(big, skip=(), gold=None):
                 if not ok and gold and v >= XREG_GOLD_MATCH:
                     gx, gy = gold[0] * kx, gold[1] * ky
                     ok = abs(cx - gx) <= 9 * kx and abs(cy - gy) <= 9 * ky
+                    if ok and xreg_strict(nm):
+                        # 🎯 축복받은 주문서는 일반·저주받은 것과 **모양이 같다**(0.93~0.95) — 색으로만 갈린다.
+                        #    금색 칸이어도 색을 본다 (📏 일반 39.6 · 저주 55.7)
+                        d = float(np.abs(b[y:y + th, x:x + tw].reshape(-1, 3).mean(0) - tc).mean())
+                        ok = d <= XREG_STRICT_GOLD_COLOR
                 if ok:
                     seen.append((y, x))
                     out.append((cy, cx, nm, v))
@@ -1531,6 +1539,20 @@ def xreg_total_diff(a0, big):
         return float((a1 ^ a0).sum())
     except Exception:
         return None
+
+
+def xreg_one_cap(nm):
+    """🎯 **한 장씩** 올리고 한 번에 최대 몇 번까지 올리나 (0 = 보통 아이템 — Max 로 한 번에).
+    (2026-11-22 사용자: *"한 장씩 올려줘 … 2장이면 각각 한 번씩 · 3장 이상이면 한 번에 최대 2장만 · 다음 번에 또"*)"""
+    for k, n in XREG_ONE_CAP.items():
+        if nm.startswith(k):
+            return n
+    return 0
+
+
+def xreg_strict(nm):
+    """색까지 꼭 맞아야 하는 아이템 (일반·저주받은 것과 모양이 같다)."""
+    return any(nm.startswith(k) for k in XREG_STRICT)
 
 
 def xreg_price(big):
@@ -33487,6 +33509,7 @@ class App(tk.Tk):
         # ④ 소지품을 훑으며 올린다
         done, fails, wheels, pan = 0, 0, 0, 0
         tries, skip, gold = {}, set(), None
+        listed = {}                                  # 🎯 이번 실행에서 아이템별로 몇 번 올렸나
         while not stop():
             b = g()
             if b is None:
@@ -33529,6 +33552,10 @@ class App(tk.Tk):
                     break                                   # 맨 아래
                 continue
             cy, cx, nm, v = hits[0]
+            _cap = xreg_one_cap(nm)
+            if _cap and listed.get(nm, 0) >= _cap:
+                click_log(f"[거래소등록] {tag} ✋ '{nm}' 이번에는 {_cap}장 올렸다 — 나머지는 다음 실행에")
+                skip.add(nm); continue
             tries[nm] = tries.get(nm, 0) + 1
             if tries[nm] > XREG_TRY_MAX:
                 skip.add(nm); continue
@@ -33564,7 +33591,10 @@ class App(tk.Tk):
             if stack:
                 # 📦 수량이 있는 아이템 — 판매 → 수량 Max → 최저가 칸 → 등록 (2026-11-21 사용자 순서)
                 invx_human_nap(XREG_STEP)
-                tap(XREG_MAX_BTN)
+                if xreg_one_cap(nm):
+                    pass                                 # 🎯 한 장씩 — Max 를 누르지 않는다 (수량 기본값 1)
+                else:
+                    tap(XREG_MAX_BTN)
                 invx_human_nap(XREG_STEP)
                 tap(XREG_MIN_ROW)
                 pf = xreg_price_stack
@@ -33643,6 +33673,7 @@ class App(tk.Tk):
             tap(XREG_ASK_OK)
             b = wait("xreg_ask", 4.0, gone=True)
             done += 1
+            listed[nm] = listed.get(nm, 0) + 1
             tries[nm] = 0                                # 같은 아이템이 여러 개면 계속 올린다
             gold = cell
             click_log(f"[거래소등록] ✅ {tag} '{nm}' 최저가로 올렸다" + (" 📦 수량 Max" if stack else "") + f" ({info})")
