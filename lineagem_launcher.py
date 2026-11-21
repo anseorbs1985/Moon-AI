@@ -33130,16 +33130,12 @@ class App(tk.Tk):
     # ══════════════════════════════════════════════════════════════════════
     def _open_xreg_win(self):
         self._open_section_win("_xreg_win", "💱 거래소등록!", self._build_xreg,
-                               w=640, h=640, pinnable=True)
+                               w=600, h=190, pinnable=True)
 
     def _build_xreg(self, p):
+        # 🧹 필요한 것만 (2026-11-22 사용자: *"확실히 줄여서 필요한 내용만 · 사진이랑 글씨는 너가 가지고 있으면 되잖아"*)
+        #    예전엔 등록 그림 200장 가까이를 창에 펼쳐 창이 화면 가로를 다 덮었다 → 그림 목록·설명 글을 뺐다
         self._xreg_sel = getattr(self, "_xreg_sel", set())
-        tk.Label(p, text="서버 거래소 → 판매 등록 → 등록해 둔 아이템을 최저가로 올립니다 "
-                          "(최저가가 없으면 취소하고 다음 것)",
-                 font=("맑은 고딕", 9, "bold")).pack(anchor="w", padx=8, pady=(6, 0))
-        tk.Label(p, text="등록할 아이템이 하나도 없는 클라는 거래소만 열어보고 닫습니다 · "
-                          "🚫 그림이 없으면 아무것도 누르지 않습니다",
-                 font=("맑은 고딕", 8), fg="#888").pack(anchor="w", padx=8)
         top = tk.Frame(p); top.pack(anchor="w", padx=8, pady=(6, 2))
         tk.Button(top, text="▶ 16클라 전체 실행", font=("맑은 고딕", 9, "bold"), bg="#27ae60",
                   fg="white", command=lambda: self._xreg_start(None)).pack(side="left")
@@ -33169,16 +33165,7 @@ class App(tk.Tk):
                 tk.Button(f, text="▶", width=2, font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
                           command=lambda i=si: self._xreg_one(i)).pack(side="left", padx=(2, 0))
         self._xreg_paint()
-        box = tk.LabelFrame(p, text=" 🖼 등록할 아이템 (서버 거래소 판매 등록 화면의 소지품 칸) ",
-                            font=("맑은 고딕", 9, "bold"))
-        box.pack(fill="x", padx=8, pady=(8, 4))
-        br = tk.Frame(box); br.pack(anchor="w", padx=4, pady=4)
-        tk.Button(br, text="🖼 아이템 추가 (드래그)", font=("맑은 고딕", 9, "bold"), bg="#6c3483",
-                  fg="white", command=self._xreg_grab).pack(side="left")
-        tk.Label(br, text="판매 등록 화면을 띄우고 아이콘 안쪽만 작게 (개수 숫자·테두리 빼고)",
-                 font=("맑은 고딕", 8), fg="#888").pack(side="left", padx=(6, 0))
-        self._xreg_list = tk.Frame(box); self._xreg_list.pack(anchor="w", padx=4, pady=(0, 4), fill="x")
-        self._xreg_list_paint()
+        self._xreg_list = None                       # 그림 목록은 창에 펼치지 않는다
 
     def _xreg_paint(self):
         for si, b in (getattr(self, "_xreg_plus", {}) or {}).items():
