@@ -37306,11 +37306,14 @@ class App(tk.Tk):
                       + (f" · 10개 미만이라 1개만 {[nm[k] for k in few]}" if few else "") + ")")
         used = 0
         limit = None
+        capped = []                  # 한계에 걸린 돌 (그 돌만 빼고 나머지는 계속 — 2026-11-22 사용자 지시)
+        carry = 0                    # 한계로 못 먹은 몫 → 다음 돌로
         # ② 쓴다 — 지금 자리에서 가까운 돌부터
         for k in sorted(plan, key=lambda z: abs(found[z][0] - state["off"])):
             if getattr(self, stop):
                 break
-            want = plan[k]
+            want = plan[k] + carry
+            carry = 0
             tgt = found[k][0]
             ok = True
             while state["off"] != tgt:
@@ -37341,6 +37344,7 @@ class App(tk.Tk):
             if _b0 is not None:
                 big_[0] = _b0
             m0 = dcs_cnt_mask(big_[0], int(cx), int(cy))
+            s0 = inv_sel_ring(big_[0], int(cx), int(cy)) >= DCS_SEL_RING
             # 🔒 칸이 비면 옆 아이템이 밀려온다 — 10개 미만(한 자리)이면 1개만
             want = want if found[k][1] else min(want, DCS_FEW)
             # 🧍 돌 하나 2~4초 — 더블클릭 사이를 무작위 비중으로 나눈다 (가끔 길게 멈칫)
@@ -37367,14 +37371,25 @@ class App(tk.Tk):
                 m1 = dcs_cnt_mask(b2, int(cx), int(cy)) if b2 is not None else None
                 if b2 is not None:
                     big_[0] = b2
-                if m0 is not None and m1 is not None and m0.shape == m1.shape:
+                s1 = (inv_sel_ring(b2, int(cx), int(cy)) >= DCS_SEL_RING) if b2 is not None else s0
+                # 🟨 **먹으면 칸 선택이 풀린다** — 더블클릭 뒤에도 금색으로 골라져 있으면 안 먹은 것
+                #    📏 #02 — 한계인 거인 칸: 골라짐 65 · 평소 23~26. 골라지면 칸 전체가 금색이 돼서
+                #       숫자 비교가 '바뀌었다' 로 속는다 (17 그대로인데 4개 먹었다고 적었다)
+                if s1 and not s0:
+                    _x = 0
+                elif m0 is not None and m1 is not None and m0.shape == m1.shape:
                     _x = int((m0 ^ m1).sum())
+                else:
+                    _x = DCS_CHG_MIN
+                if True:
                     if _x < DCS_CHG_MIN:
                         limit = nm[k]
+                        capped.append(nm[k])
+                        carry += max(0, want - got)
                         click_log(f"[던전충전] {tag} 🛑 [{nm[k]}] {_t + 1}번째 더블클릭에 **개수가 안 바뀐다** "
-                                  f"(숫자 변화 {_x}) — 충전 한계로 본다 → 이 클라는 그만하고 다음 클라로")
+                                  f"(숫자 변화 {_x}) — 충전 한계로 본다 → **이 돌만 빼고** 남은 {carry}개는 다른 돌로")
                         break
-                m0 = m1
+                m0, s0 = m1, s1
                 got += 1
                 # 9개마다 — 아직 두 자리인가 (칸이 비면 옆 아이템이 밀려온다)
                 if got % DCS_BATCH == 0 and got < want:
@@ -37384,10 +37399,11 @@ class App(tk.Tk):
             if got:
                 click_log(f"[던전충전] {tag} ✅ {nm[k]} {got}개 (일치도 {v:.2f} · 색차 {col:.1f}"
                           + (" · 이미 골라져 있었다" if sel else "") + ")")
-            if limit:
-                break
+            limit = None
             nap(random.uniform(*DCS_STONE_GAP))
-        if plan and used < DCS_MIN and not limit:
+        if capped:
+            click_log(f"[던전충전] {tag} 🛑 한계라 뺀 돌 {capped}" + (f" · 못 채운 {carry}개" if carry else ""))
+        if plan and used < DCS_MIN and not capped:
             click_log(f"[던전충전] {tag} ⚠ {used}개밖에 못 썼다 (7개 이상이 목표) — 충전석이 모자란다")
         # ③ 가방 닫기
         nap(random.uniform(0.3, 0.5))
