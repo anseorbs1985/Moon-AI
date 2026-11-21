@@ -5283,6 +5283,46 @@ def invx_find(big, name, box=None, thr=None):
         return None, None, -1.0
 
 
+INVX_HEAD_PX  = 18      # 상품 이름 그림의 앞 글자 폭 — '취향' (546 기준)
+INVX_HEAD_MIN = 0.75    # 앞 글자도 이만큼 맞아야 그 상품이다 · 📏 진짜 1.00 · '…반지 선택 상자' 0.37
+
+
+def invx_find_named(big, name, head_px=INVX_HEAD_PX, head_min=INVX_HEAD_MIN):
+    """🛒 이름이 비슷한 상품이 여럿일 때 — 전체가 맞고 **앞 글자도** 맞는 자리 → (x, y, 점수, 앞점수).
+    2026-11-21 #10 — '취향 선택 상자' 그림이 '스냅퍼의 반지 선택 상자' 에 걸려 다른 상품을 눌렀다
+    (끝 '선택 상자' 0.85 · 앞 '취향' 0.37)."""
+    import cv2, numpy as np
+    try:
+        t0 = inv_tpl(name)
+        if big is None or t0 is None:
+            return None, None, -1.0, -1.0
+        kx, ky = _inv_k(big)
+        t = _inv_fit(t0, kx, ky)
+        x0, y0, x1, y1 = (inv_meta_x().get(name) or [0, 0, INV_BASE_W, INV_BASE_H])
+        X0, Y0 = max(0, int(x0 * kx)), max(0, int(y0 * ky))
+        a = big[Y0:int(y1 * ky), X0:int(x1 * kx)]
+        if a.shape[0] < t.shape[0] or a.shape[1] < t.shape[1]:
+            return None, None, -1.0, -1.0
+        r = cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED)
+        hw = max(6, int(round(head_px * kx)))
+        hd = t[:, :hw]
+        best = (None, None, float(r.max()), -1.0)
+        for _ in range(6):
+            _, v, _, (x, y) = cv2.minMaxLoc(r)
+            if v < INVX_MATCH:
+                break
+            p = a[y:y + t.shape[0], x:x + hw]
+            hv = float(cv2.matchTemplate(p, hd, cv2.TM_CCOEFF_NORMED).max()) if p.shape == hd.shape else -1.0
+            if hv >= head_min:
+                return X0 + x + t.shape[1] // 2, Y0 + y + t.shape[0] // 2, float(v), hv
+            if best[3] < hv:
+                best = (None, None, float(v), hv)
+            r[max(0, y - 6):y + 7, max(0, x - t.shape[1]):x + t.shape[1]] = -1   # 그 자리는 지우고 다음
+        return best
+    except Exception:
+        return None, None, -1.0, -1.0
+
+
 def inv_meta_x():
     """click_templates/invx_meta.json — 그림마다 찾을 범위 (546x307 기준)."""
     try:
@@ -33493,11 +33533,17 @@ class App(tk.Tk):
         for n, si in enumerate(targets):
             if self._item_stop:
                 break
+            _err = False
             try:
                 tot += self._inv_slot(si)
             except Exception as e:
-                click_log(f"[아이템정리] ⚠ #{si + 1:02d} 오류 — {type(e).__name__}: {e} (이 클라는 넘어간다)")
-            if not self._item_stop:
+                _err = True
+                import traceback as _tb
+                _w = _tb.extract_tb(e.__traceback__)[-1]
+                click_log(f"[아이템정리] ⚠ #{si + 1:02d} 오류 — {type(e).__name__}: {e} "
+                          f"({os.path.basename(_w.filename)}:{_w.lineno} {_w.name}) "
+                          f"(이 클라는 넘어간다 · 다음 실행에 다시 본다)")
+            if not self._item_stop and not _err:
                 _mark(si)           # 끝까지 돈 클라만 (■ 멈춤으로 끊긴 클라는 다음에 다시)
             if n < len(targets) - 1 and not self._item_stop:
                 nap(random.uniform(*INV_SLOT_GAP))
@@ -33974,12 +34020,14 @@ class App(tk.Tk):
         if x is None:
             return self._invx_unknown(tag, b, "시즌 상점이 안 떴다", v)
         self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_TAB)       # 일반
-        f = (None, None, -1.0)
+        f = (None, None, -1.0, -1.0)
         for _t in range(4):
             b = grab_window(anc)
-            f = invx_find(b, "invx_sh_item")
+            f = invx_find_named(b, "invx_sh_item")
             if f[0] is not None:
                 break
+            if f[3] >= 0:
+                click_log(f"[아이템정리] {tag} 🛒 이름 끝만 같은 다른 상자다 (전체 {f[2]:.2f} · 앞 글자 {f[3]:.2f}) — 누르지 않는다")
             if _t == 3:
                 break
             # 목록을 왼쪽으로 끈다 (사용자 시범 — 164px)
@@ -33992,6 +34040,16 @@ class App(tk.Tk):
         self._invx_tap_px(tag, L, T, f[0] + INVX_SHOP_CARD[0] * kx, f[1] + INVX_SHOP_CARD[1] * ky)
         x, y, v, b = self._invx_wait(anc, "invx_sh_pop")
         if x is None:
+            # 🛒 상품 정보 창은 떴는데 **다른 상품**이면 — [취소] 하고 상점을 닫고 이어서 간다
+            #    (예전엔 창을 띄운 채 그 클라를 끝냈다 — 2026-11-21 #10)
+            if b is not None and invx_find(b, "invx_sh_info")[0] is not None:
+                p = self._inv_shot(b, tag, "invx_other")
+                click_log(f"[아이템정리] {tag} 🛒 상품 정보 창이 **다른 상품**이다 ({v:.2f}) — "
+                          f"사지 않고 [취소] → 상점을 닫고 이어서 한다 · 화면 {p}")
+                self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_NO)
+                nap(random.uniform(0.4, 0.7))
+                self._invx_shop_close(anc, tag, L, T, kx, ky)
+                return "skip"
             return self._invx_unknown(tag, b, "상품 정보 창이 안 떴다 (또는 다른 상품)", v)
         gx, gy, gv = invx_find(b, "invx_sh_gear")
         if gx is None:
@@ -34243,7 +34301,9 @@ class App(tk.Tk):
                 if b is not None and tab_open(b):
                     click_log(f"[아이템정리] {tag} 🎒 가방을 다시 열었다 — 이어서 훑는다")
                     calm_nap(INVX_BUFFER)          # ⏳ 가방이 다 그려지게 1~3초
-                    b = grab_window(anc) or b
+                    _b2 = grab_window(anc)          # 🚫 배열에 `or` 를 쓰면 ValueError (2026-11-21 #04·#06·#09)
+                    if _b2 is not None:
+                        b = _b2
                     self._inv_base = inv_dim(b)
                     return True
         p = self._inv_shot(b, tag, "noreopen") if b is not None else ""
