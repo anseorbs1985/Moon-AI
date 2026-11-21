@@ -1279,6 +1279,8 @@ XREG_HAND_MAX   = 20.0
 XREG_ONE_CAP    = {"축복갑옷마법주문서": 2, "축복무기마법주문서": 2}   # 한 장씩 · 한 번에 최대 2번
 XREG_STRICT     = ("축복갑옷마법주문서", "축복무기마법주문서")
 XREG_STRICT_GOLD_COLOR = 22.0     # 금색으로 골라진 칸에서도 색 차이가 이만큼 안이어야 (일반 39.6 · 저주 55.7)
+XREG_LOOK_N     = 4               # 처음에 하나도 못 찾으면 이만큼 더 본다
+XREG_LOOK_GAP   = (0.5, 0.8)
 XREG_NO10       = True            # 🚫 최저가가 10.00 이면 등록하지 않는다 (2026-11-22 사용자)
 XREG_MIN_ROWBOX = (226, 145, 264, 160)  # '최저 거래 단가' 줄 (숫자 · '.00' 을 찾는 자리)
 XREG_PRICE_SPAN = 16             # '최저 거래 단가' 숫자 폭(px) — 74.00 은 18~19 · 9.00 이하 ≈14
@@ -33510,6 +33512,7 @@ class App(tk.Tk):
         done, fails, wheels, pan = 0, 0, 0, 0
         tries, skip, gold = {}, set(), None
         listed = {}                                  # 🎯 이번 실행에서 아이템별로 몇 번 올렸나
+        looks = 0                                    # 🔎 처음에 아무것도 못 찾으면 몇 번 더 본다
         while not stop():
             b = g()
             if b is None:
@@ -33535,6 +33538,15 @@ class App(tk.Tk):
                     continue
                 _h2.append(_h)
             hits = _h2
+            if not hits and done == 0 and looks < XREG_LOOK_N:
+                # 🔎 소지품 그림이 덜 그려진 순간일 수 있다 — 몇 번 더 보고 판단한다
+                #    (2026-11-22 #02 — 주문서가 있었는데 한 번 보고 "0개" 로 끝났다)
+                looks += 1
+                nap(random.uniform(*XREG_LOOK_GAP))
+                continue
+            if not hits and done == 0 and looks >= XREG_LOOK_N and looks < 99:
+                looks = 99
+                click_log(f"[거래소등록] {tag} 🔎 등록한 아이템이 소지품 첫 화면에 없다 ({XREG_LOOK_N + 1}번 봤다) · 화면 {shot(b, 'none')}")
             if not hits:
                 if wheels >= XREG_WHEEL_MAX:
                     break
