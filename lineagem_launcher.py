@@ -610,6 +610,10 @@ INV_GAP       = (0.12, 0.28)      # 하나 깐 뒤 다음까지 (2026-11-19 사�
 INV_POLL      = 0.12              # 누른 뒤 창이 떴나 보는 간격
 INV_SEE_NAP   = (0.14, 0.26)      # 결과·보상 창을 본 뒤 닫기까지
 INV_SHUT_NAP  = (0.30, 0.50)      # 닫은 뒤
+INV_CNT_R     = 140               # 🪙 개수 숫자(노랑) — 빨강 채널
+INV_CNT_RB    = 60                # 〃 빨강 − 파랑
+INV_CNT_TENS  = 2                 # 십의 자리 칸에 노란 점이 이만큼 있으면 10개 이상
+INVX_COIN_MIN = True              # 🪙 영광의 주화 **10개 미만**이면 교환하지 않고 넘어간다 (2026-11-22 사용자)
 INV_CNT_DIFF  = 6.0               # 칸 오른쪽 아래 '개수 숫자' 가 이만큼 바뀌면 먹은 것 (겹친 물약은 숫자만 바뀐다)
 #   ⏱ 한 장 약 4초 → 약 2초. 줄인 것은 **기다림뿐** — 창 확인·모르는 창 멈춤·어두워짐 확인은 그대로다.
 #   🚫 `1.6초`(창이 안 뜨는 상자인지 기다리는 시간)는 줄이지 않았다 — 줄이면 늦게 뜬 결과 창을
@@ -5518,6 +5522,31 @@ def inv_qs_count(big):
         return int(((c[:, :, 2] > 170) & (c[:, :, 1] > 120) & (c[:, :, 0] < 100)).sum())
     except Exception:
         return -1
+
+
+def inv_cnt_digits2(big, cx, cy):
+    """가방 칸 오른쪽 아래 **노란 개수 숫자**가 두 자리 이상(10개 이상)인가
+    → True / False(한 자리 = 10개 미만) / None(못 봄).
+    숫자는 오른쪽 끝에 붙는다 → 맨 오른쪽 숫자 왼쪽(십의 자리 칸)에 노란 점이 있나만 본다.
+    📏 2026-11-22 영광의 주화 칸 38장(전부 100) — 37장 두 자리 · 1장은 툴팁이 칸을 덮음.
+       앞 숫자를 지운 흉내(한 자리) 38장 전부 한 자리."""
+    import numpy as np
+    try:
+        kx, ky = _inv_k(big)
+        x0, y0 = cx + int(round(3 * kx)), cy + int(round(8 * ky))
+        a = big[y0:cy + int(round(14 * ky)), x0:cx + int(round(18 * kx))].astype(int)
+        if a.size == 0:
+            return None
+        R, B = a[:, :, 2], a[:, :, 0]
+        m = (R >= INV_CNT_R) & (R - B >= INV_CNT_RB)
+        cols = np.where(m.any(0))[0]
+        if len(cols) == 0:
+            return None
+        r = int(cols.max())
+        z0, z1 = max(0, r - int(round(7 * kx))), max(0, r - int(round(4 * kx)))
+        return int(m[:, z0:z1 + 1].sum()) >= INV_CNT_TENS
+    except Exception:
+        return None
 
 
 def inv_sel_ring(big, cx, cy):
@@ -33779,6 +33808,18 @@ class App(tk.Tk):
                     # 🛠 꾹 눌러 제작·교환 — 한 클라에 한 번 (끝나면 가방을 다시 연다)
                     skip.add(g)
                     stick = None
+                    if INVX_COIN_MIN and INVX_GROUPS[g] == "shop":
+                        # 🪙 10개 미만이면 어차피 못 산다 — 상점을 열지 않고 넘어간다
+                        #    (사용자: *"10개 미만이면 제작하지마 그냥 넘어가 어차피 안만들어져 막혀"*)
+                        _d2 = inv_cnt_digits2(big, cx, cy)
+                        if _d2 is False:
+                            nap(random.uniform(0.3, 0.5))           # 툴팁 등이 덮었을 수 있다 — 한 번 더 본다
+                            _b2 = grab()
+                            if _b2 is not None:
+                                _d2 = inv_cnt_digits2(_b2, cx, cy)
+                        if _d2 is False:
+                            click_log(f"[아이템정리] {tag} 🪙 영광의 주화가 **10개 미만**이다 — 교환하지 않고 넘어간다")
+                            continue
                     _xr = self._invx_run(INVX_GROUPS[g], anc, tag, L, T, cx, cy)
                     if _xr == "stop":
                         return done
