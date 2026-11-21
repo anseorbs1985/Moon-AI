@@ -6176,10 +6176,11 @@ def fix_quit_open(anchor):
         return False, -1.0, ""
     try:
         import cv2, numpy as np
-        got = grab_window(anchor)
-        if not got:
+        # 🚨 런처의 grab_window 는 **그림(배열)** 을 돌려준다 (섬 실행기는 (그림, 자리) 튜플).
+        #    `if not got:` 가 ValueError 로 늘 except 에 빠져 **종료창을 한 번도 못 봤다** (2026-11-21 발견).
+        big = grab_window(anchor)
+        if big is None:
             return False, 0.0, ""
-        big = got[0]
         _base = fix_quit_meta() or IMG_BASE_W
         best, who = 0.0, ""
         for p in ps:
@@ -13068,7 +13069,7 @@ class App(tk.Tk):
             nx = win.winfo_x()
             ny = win.winfo_y()
             self.cfg[pos_key] = [nx, ny]
-            self._save_cfg()
+            save_cfg(self.cfg)          # 🚨 `self._save_cfg` 는 없다 — 옮긴 자리가 저장 안 됐다 (2026-11-21)
 
         for w in (bar, lbl):
             w.bind("<ButtonPress-1>", _start)
