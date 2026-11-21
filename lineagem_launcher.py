@@ -1297,14 +1297,14 @@ XREG_SAME_XOR   = 14             # 두 숫자가 같은가 — 📏 같을 때 7
 XREG_SAME_SUM   = 12             #   + 밝은 점 수 차이 — 📏 같을 때 5 · 다를 때 16
 # 🧍 2026-11-21 사용자: *"무작정 엄청나게 빨리빨리 올리지 말고 1개 올리고 다음꺼 올릴 때 1~2초 시간 간격을
 #    주고 또 등록도 좀 천천히"* → 누를 때마다 0.7~1.3초 · 하나 올린 뒤 1~2초 더
-XREG_STEP       = (0.7, 1.3)     # 누른 뒤 쉼 (+ 가끔 1~4초 — invx_human_nap)
-XREG_ITEM_GAP   = (1.0, 2.0)     # 하나 올리고 다음 것까지
+XREG_STEP       = (0.5, 1.0)     # 누른 뒤 쉼 (+ 가끔 1~4초 — invx_human_nap) · 2026-11-22 25% 당김 (전 0.7~1.3)
+XREG_ITEM_GAP   = (0.75, 1.5)    # 하나 올리고 다음 것까지 · 2026-11-22 25% 당김 (전 1.0~2.0)
 XREG_EQ_BLUE    = 40             # 🚫 착용 중 [E] 표시 — 칸 왼쪽 위 12px 의 파란 점
 XREG_EQ_WHITE   = 6              #    + 흰 글자 점 (📏 [E] 64·68/14·22 · 파란 구슬 아이템 33/0)
 XREG_POLL       = (0.12, 0.22)
 XREG_WHEEL_MAX  = 0              # 🚫 휠로 내리지 않는다 (2026-11-21 사용자: "휠로 내리지 말고 저 상태
                                  #    위에서부터 하나씩") — 올리면 아래 것이 위로 올라온다
-XREG_SLOT_GAP   = (3.0, 8.0)     # 클라 사이
+XREG_SLOT_GAP   = (2.3, 6.0)     # 클라 사이 · 2026-11-22 25% 당김 (전 3~8)
 XREG_TRY_MAX    = 2              # 한 아이템을 몇 번까지 해보나
 XREG_FAIL_MAX   = 4              # 한 클라에서 이만큼 실패하면 그 클라는 끝
 
@@ -33675,7 +33675,7 @@ class App(tk.Tk):
             listed[nm] = listed.get(nm, 0) + 1
             tries[nm] = 0                                # 같은 아이템이 여러 개면 계속 올린다
             gold = cell
-            click_log(f"[거래소등록] ✅ {tag} '{nm}' 최저가로 올렸다" + (" 📦 수량 Max" if stack else "") + f" ({info})")
+            click_log(f"[거래소등록] ✅ {tag} '{nm}' 최저가로 올렸다" + ((" 📦 1장" if xreg_one_cap(nm) else " 📦 수량 Max") if stack else "") + f" ({info})")
             invx_human_nap(XREG_ITEM_GAP)                # 🧍 하나 올리고 1~2초 (가끔 더)
         close(g())
         click_log(f"[거래소등록] {tag} 끝 — {done}개 올렸다" + (f" · 건너뛴 것 {sorted(skip)}" if skip else ""))
