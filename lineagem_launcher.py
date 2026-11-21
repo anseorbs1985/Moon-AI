@@ -37372,9 +37372,19 @@ class App(tk.Tk):
                 if b2 is not None:
                     big_[0] = b2
                 s1 = (inv_sel_ring(b2, int(cx), int(cy)) >= DCS_SEL_RING) if b2 is not None else s0
-                # 🟨 **먹으면 칸 선택이 풀린다** — 더블클릭 뒤에도 금색으로 골라져 있으면 안 먹은 것
-                #    📏 #02 — 한계인 거인 칸: 골라짐 65 · 평소 23~26. 골라지면 칸 전체가 금색이 돼서
-                #       숫자 비교가 '바뀌었다' 로 속는다 (17 그대로인데 4개 먹었다고 적었다)
+                if s1 and not s0:
+                    # 더블클릭하면 칸이 **잠깐(0.15초쯤)** 골라졌다가 0.3초쯤 풀린다 (📏 #02 실측)
+                    #   → 아직 골라져 있으면 조금 더 기다렸다 다시 본다
+                    nap(random.uniform(0.3, 0.4))
+                    _b3 = grab()
+                    if _b3 is not None:
+                        b2 = _b3
+                        big_[0] = b2
+                        m1 = dcs_cnt_mask(b2, int(cx), int(cy))
+                        s1 = inv_sel_ring(b2, int(cx), int(cy)) >= DCS_SEL_RING
+                # 🟨 그래도 금색으로 **골라진 채**면 안 먹은 것 — 골라지면 칸 전체가 금색이 돼
+                #    숫자 비교가 '바뀌었다' 로 속는다 (📏 한계인 거인 17 그대로인데 4개 먹었다고 적었다 ·
+                #    골라짐 테두리 65 · 평소 23~26)
                 if s1 and not s0:
                     _x = 0
                 elif m0 is not None and m1 is not None and m0.shape == m1.shape:
