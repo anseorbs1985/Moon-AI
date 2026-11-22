@@ -37386,22 +37386,30 @@ class App(tk.Tk):
         lx, ly = P(((INV_LIST[0] + INV_LIST[2]) // 2, (INV_LIST[1] + INV_LIST[3]) // 2))
         state = {"off": 0}           # 처음 연 자리에서 휠을 몇 칸 내렸나 (위로 올리면 -)
 
-        def wheel1(d):
-            """휠 한 칸 → 움직였으면 새 화면, 끝이면 None."""
+        def wheelk(d, k=1):
+            """휠 k칸을 **이어서** 굴린다 (아이템정리처럼 — 한 칸짜리 신호를 0.06~0.16초 간격으로)
+            → 움직였으면 새 화면, 끝이면 None.  🚫 여러 칸을 한 신호로 보내면 게임이 무시한다."""
             prev = inv_list(big_[0])
+            k = max(1, int(k))
             for _st in range(1 + INV_STALL_TRY):
                 if not self._inv_hand_wait(tag, stop):
                     return None
-                wheel_at(lx, ly, d)
+                for _i in range(k):
+                    wheel_at(lx, ly, d)
+                    if _i < k - 1:
+                        nap(random.uniform(*INV_BURST_GAP))
                 nap(random.uniform(*INV_WHEEL_GAP))
                 b2 = grab()
                 if b2 is None:
                     return None
                 if float(abs(inv_list(b2) - prev).mean()) >= 1.5:
-                    state["off"] += -d
+                    state["off"] += -d * k
                     big_[0] = b2
                     return b2
             return None
+
+        def wheel1(d):
+            return wheelk(d, 1)
         big_ = [big]
         found = {}                   # 종류 → (휠 자리, 10개 이상인가)
 
@@ -37416,8 +37424,9 @@ class App(tk.Tk):
             while len(found) < len(DCS_STONES) and steps < DCS_SCAN_MAX and not getattr(self, stop):
                 if d < 0 and inv_tail_seen(big_[0]):
                     break
-                b2 = wheel1(d)
-                steps += 1
+                _k = random.choice(INV_DOWN_BURST)
+                b2 = wheelk(d, _k)
+                steps += _k
                 if b2 is None:
                     break
                 look(b2)
@@ -37445,19 +37454,33 @@ class App(tk.Tk):
             carry = 0
             tgt = found[k][0]
             ok = True
-            while state["off"] != tgt:
-                if wheel1(-1 if tgt > state["off"] else 1) is None:
-                    ok = False
+            # 📏 2026-11-22 #06·#10 — 훑을 때 찾은 돌을 되돌아가서 **다시 못 찾았다**
+            #    (한 칸이 늦게 먹혀 두 칸 움직이면 센 칸 수가 어긋난다) → 가는 동안 매 화면을 본다
+            hit = dcs_find(big_[0]).get(k)
+            while not hit and state["off"] != tgt:
+                _left = abs(tgt - state["off"])
+                if wheelk(-1 if tgt > state["off"] else 1,
+                          min(_left, random.choice(INV_DOWN_BURST))) is None:
                     break
-            hit = dcs_find(big_[0]).get(k) if ok else None
+                hit = dcs_find(big_[0]).get(k)
             if not hit:
-                # 휠이 한 칸 어긋났을 수 있다 — 위아래 한 칸씩 더 본다
-                for d in (-1, 1, 1):
-                    b2 = wheel1(d)
-                    if b2 is not None:
-                        hit = dcs_find(b2).get(k)
-                        if hit:
+                # 그래도 없으면 — 아래 끝까지 → 위 끝까지 한 칸씩 훑어 찾는다
+                _n = 0
+                for d in (-1, 1):
+                    while not hit and _n < DCS_SCAN_MAX * 2 and not getattr(self, stop):
+                        if d < 0 and inv_tail_seen(big_[0]):
                             break
+                        if wheel1(d) is None:
+                            break
+                        _n += 1
+                        hit = dcs_find(big_[0]).get(k)
+                    if hit:
+                        break
+                if hit:
+                    click_log(f"[던전충전] {tag} 🔎 {nm[k]} 자리가 어긋나 다시 훑어 찾았다 (휠 {_n}칸)")
+                else:
+                    _p = self._inv_shot(big_[0], tag, "dcs_lost")
+                    click_log(f"[던전충전] {tag} 🔎 {nm[k]} 를 가방 끝에서 끝까지 훑어도 못 찾았다 · 화면 {_p}")
             if not hit:
                 click_log(f"[던전충전] {tag} ⚠ {nm[k]} 를 다시 못 찾았다 — 건너뛴다")
                 continue
