@@ -5802,6 +5802,42 @@ def dcs_plan(found, few=()):
     return out
 
 
+DCS_HUD_MATCH = 0.60          # 📏 보통 화면 0.79~1.00 · 창에 덮임/절전 0.28~0.39
+DCS_HUD_BOX = (420, 0, 546, 42)   # 546 창 기준 — 오른쪽 위 단추 줄
+_DCS_HUD = [None, 0.0]
+
+
+def dcs_hud_seen(big):
+    """🖥 오른쪽 위 '스킬' 단추가 보이나 → True(아무 창도 없다) · False(덮였다) · None(모른다).
+
+    2026-11-22 사용자: *"먼가 화면이 떠잇을때만 누르라니까 아무것도 없는데 왜눌르냐고"* —
+    이 단추가 보이면 화면을 덮은 창이 **없다** → ESC 를 누르지 않는다."""
+    try:
+        import cv2, numpy as np
+        p = os.path.join(IMG_DIR, "dcs_hud.png")
+        if not os.path.exists(p) or big is None:
+            return None
+        mt = os.path.getmtime(p)
+        if _DCS_HUD[0] is None or _DCS_HUD[1] != mt:
+            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            if t is None:
+                return None
+            _DCS_HUD[0] = cv2.cvtColor(t, cv2.COLOR_BGR2GRAY)
+            _DCS_HUD[1] = mt
+        tg = _DCS_HUD[0]
+        b = big
+        if b.shape[1] != INV_BASE_W:
+            k = INV_BASE_W / float(b.shape[1])
+            b = cv2.resize(b, (INV_BASE_W, max(1, int(round(b.shape[0] * k)))))
+        x0, y0, x1, y1 = DCS_HUD_BOX
+        r = cv2.cvtColor(b[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY)
+        if r.shape[0] < tg.shape[0] or r.shape[1] < tg.shape[1]:
+            return None
+        return float(cv2.matchTemplate(r, tg, cv2.TM_CCOEFF_NORMED).max()) >= DCS_HUD_MATCH
+    except Exception:
+        return None
+
+
 def inv_sel_ring(big, cx, cy):
     """가방 칸 테두리 밝기 — 골랐으면 금색 테두리로 밝아진다 (-1 = 못 봄)."""
     import numpy as np
@@ -36981,6 +37017,15 @@ class App(tk.Tk):
                 names[_i] = _t.split(" l ", 1)[1].strip() if " l " in _t else ""
         except Exception:
             names = {}
+        sr = tk.Frame(parent); sr.pack(pady=(0, 2))
+        tk.Button(sr, text="✔ 전체선택", font=("맑은 고딕", 8, "bold"), bg="#5d6d7e", fg="white",
+                  command=self._dc_sel_all).pack(side="left", padx=2)
+        tk.Button(sr, text="▶ 선택실행", font=("맑은 고딕", 8, "bold"), bg="#e67e22", fg="white",
+                  command=self._start_dc_sel).pack(side="left", padx=2)
+        self._dc_sel_var = tk.StringVar(value="")
+        tk.Label(sr, textvariable=self._dc_sel_var, font=("맑은 고딕", 8),
+                 fg="#555").pack(side="left", padx=(6, 0))
+        self._dc_selbtn = {}
         g = tk.Frame(parent); g.pack(padx=4, pady=2)
         # 화면 배치와 같게 — 세로로 01 02 03 04 (열 우선)
         for c in range(4):
@@ -36988,12 +37033,17 @@ class App(tk.Tk):
                 si = c * 4 + r
                 cell = tk.Frame(g, bd=1, relief="groove")
                 cell.grid(row=r, column=c, padx=2, pady=2, sticky="nsew")
+                _sb = tk.Button(cell, text="+", font=("맑은 고딕", 8, "bold"), width=2,
+                                command=lambda x=si: self._dc_sel_toggle(x))
+                _sb.pack(side="left", padx=(2, 0), pady=2)
+                self._dc_selbtn[si] = _sb
                 tk.Label(cell, text=f"#{si + 1:02d}", font=("맑은 고딕", 8, "bold"),
                          fg="#6c3483").pack(side="left", padx=(3, 1))
                 tk.Label(cell, text=(names.get(si) or "")[:6], font=("맑은 고딕", 8),
                          width=7, anchor="w").pack(side="left")
                 tk.Button(cell, text="▶", font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
                           width=2, command=lambda x=si: self._start_dc_one(x)).pack(side="right", padx=2, pady=2)
+        self._dc_sel_paint()
         self._refresh_dc_toggle()
 
     def _refresh_dc_toggle(self):
@@ -37066,6 +37116,51 @@ class App(tk.Tk):
             return
         threading.Thread(target=self._run_dc, daemon=True).start()
 
+    def _dc_sel_toggle(self, si):
+        sel = getattr(self, "_dc_sel", None)
+        if sel is None:
+            sel = self._dc_sel = set()
+        if si in sel:
+            sel.discard(si)
+        else:
+            sel.add(si)
+        self._dc_sel_paint()
+
+    def _dc_sel_all(self):
+        sel = getattr(self, "_dc_sel", None)
+        if sel is None:
+            sel = self._dc_sel = set()
+        if len(sel) >= SCHED_SLOTS:
+            sel.clear()
+        else:
+            sel.update(range(SCHED_SLOTS))
+        self._dc_sel_paint()
+
+    def _dc_sel_paint(self):
+        sel = getattr(self, "_dc_sel", None) or set()
+        for si, b in list((getattr(self, "_dc_selbtn", None) or {}).items()):
+            try:
+                if b.winfo_exists():
+                    on = si in sel
+                    b.config(text="✔" if on else "+", bg="#e67e22" if on else "#bdc3c7",
+                             fg="white" if on else "#2c3e50")
+            except Exception:
+                pass
+        try:
+            self._dc_sel_var.set(f"고른 클라 {len(sel)}개")
+        except Exception:
+            pass
+
+    def _start_dc_sel(self):
+        """▶ 선택실행 — [+] 로 고른 클라만."""
+        sel = sorted(getattr(self, "_dc_sel", None) or [])
+        if not sel:
+            self.status.set("🎯 던전충전 — 먼저 [+] 로 클라를 고르세요")
+            return
+        if self._is_busy():
+            return self._test_go("던전충전", None, None)
+        self._test_go(f"던전충전 선택 {len(sel)}개", "_dc_stop", self._dcs_work, list(sel))
+
     def _start_dc_one(self, si):
         """▶ 그 클라만 (개별 실행)."""
         if self._is_busy():
@@ -37130,7 +37225,10 @@ class App(tk.Tk):
         tot = 0
         n = 0
         try:
-            if slot_idx is not None:
+            if isinstance(slot_idx, (list, tuple)):
+                targets = [int(x) for x in slot_idx]
+                random.shuffle(targets)
+            elif slot_idx is not None:
                 targets = [slot_idx]
             else:
                 targets = list(range(SCHED_SLOTS))
@@ -37156,7 +37254,7 @@ class App(tk.Tk):
             self._set_btn("btn_dc_run", state="normal", bg="#6c3483", text="▶  실행")
             self._set_btn("btn_dc_stop", state="disabled")
 
-    def _dcs_clear(self, anc, tag):
+    def _dcs_clear(self, anc, tag, first=False):
         """🚪 가방이 안 열려 있을 때 — 떠 있는 다른 창을 **ESC 로 닫는다** → ESC 를 눌렀나.
 
         ESC 를 누를 때마다 '게임을 종료 하시겠습니까?' 가 떴나 본다.
@@ -37168,6 +37266,20 @@ class App(tk.Tk):
                 return False
             n = 0
             for _i in range(DCS_CLEAR_ESC):
+                # 🖥 아무 창도 없으면(오른쪽 위 단추가 보이면) ESC 를 누르지 않는다
+                #    first=True 면 첫 번에도 본다 · 아니면 한 번 누른 뒤부터 본다
+                if first or _i > 0:
+                    _b = grab_window(anc)
+                    if dcs_hud_seen(_b) is True:
+                        if n:
+                            click_log(f"[던전충전] {tag} 🚪 떠 있던 창 {n}개를 ESC 로 닫았다")
+                        return n > 0
+                    try:
+                        if find_sleep_img("dc", anc)[0] is not None:
+                            click_log(f"[던전충전] {tag} 😴 절전 화면이다 — ESC 를 누르지 않는다")
+                            return n > 0
+                    except Exception:
+                        pass
                 if self._client_is_front(anc) is not True:
                     try:
                         self._focus_client_at(anc)
@@ -37240,16 +37352,33 @@ class App(tk.Tk):
         if not tab_open(big):
             if not self._inv_hand_wait(tag, stop):
                 return 0
-            # 🚪 다른 창이 열려 있으면 먼저 닫는다 (2026-11-22 사용자 지시)
-            if self._dcs_clear(anc, tag) and getattr(self, stop):
-                return 0
-            click_at(*P(INV_BAG))
-            t0 = time.time()
-            while time.time() - t0 < 4.0:
-                nap(0.2)
-                big = grab()
-                if tab_open(big):
-                    break
+            # 🚪 화면을 덮은 창이 **있을 때만** ESC 로 닫는다 (2026-11-22 사용자 지시)
+            #    오른쪽 위 단추가 보이면 아무 창도 없다 → ESC 없이 바로 가방
+            _hud = dcs_hud_seen(big)
+            if _hud is False:
+                self._dcs_clear(anc, tag, first=True)
+                if getattr(self, stop):
+                    return 0
+
+            def open_bag(sec):
+                click_at(*P(INV_BAG))
+                t0 = time.time()
+                b = None
+                while time.time() - t0 < sec:
+                    nap(0.2)
+                    b = grab()
+                    if tab_open(b):
+                        break
+                return b
+            big = open_bag(4.0)
+            if not tab_open(big) and not getattr(self, stop):
+                # 첫 클릭이 창 올리기로만 먹었을 수 있다 → 한 번 더 (ESC 없이)
+                if dcs_hud_seen(big) is not False:
+                    big = open_bag(3.0)
+                # 그래도 안 열리면 무언가 덮고 있다 → 그제야 ESC
+                if not tab_open(big) and not getattr(self, stop):
+                    if self._dcs_clear(anc, tag):
+                        big = open_bag(4.0)
             if not tab_open(big):
                 p = self._inv_shot(big, tag, "dcs_nobag") if big is not None else ""
                 click_log(f"[던전충전] 🚫 {tag} 가방을 눌렀는데 가방 창이 안 보인다 — 이 클라는 넘어간다 · 화면 {p}")
