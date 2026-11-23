@@ -22,6 +22,11 @@ BUSY_TAGS = ("[퀘스트]", "[사냥]", "[스케줄]", "[절전해제]", "[과�
              "[용던고고]", "[작위]", "[인형탐험]", "[우편]", "[도감]",
              "[각성강화]", "[수호성]", "[클릭]", "[오만의탑]", "fix #",
              "[보조서커스]", "[아이템정리]")
+# ⏳ **오래 쉬면서 도는 작업** — 기다리는 동안(4분 등) 로그가 없어 위 25초 판정으로는 '조용하다' 가 된다
+#    (2026-11-23 📜 서커스주문서). 시작 줄 뒤에 끝 줄도, 그 뒤 런처 재시작도 없으면 **돌고 있다**.
+LONG_TASKS = (("[서커스주문서]", "📜 시작", "📜 끝"),
+              ("[거래소등록]", "💱 시작", "💱 끝"))
+LONG_MAX = 4 * 3600.0
 BUSY_SEC = 25.0        # 이 안에 작업 로그가 있으면 **돌고 있다**
 WAIT_MAX = 600.0       # 최대 이만큼 기다린다
 NO = 0x08000000        # CREATE_NO_WINDOW — 검은 창이 번쩍이지 않게
@@ -69,11 +74,44 @@ def island_alive():
         return 0
 
 
+def long_open():
+    """오래 도는 작업이 아직 안 끝났나 → 그 시작 줄 (없으면 '')"""
+    try:
+        with io.open(LOG, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 400000))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except Exception:
+        return ""
+    now = time.localtime()
+    for tag, st, en in LONG_TASKS:
+        last = None
+        for ln in lines:
+            if "[재시작] 켜짐" in ln:
+                last = None                      # 런처가 다시 켜졌으면 그 작업은 죽었다
+            elif tag in ln and st in ln:
+                last = ln
+            elif tag in ln and en in ln:
+                last = None
+        if last:
+            m = re.match(r"(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)", last)
+            try:
+                mo, d, hh, mm, ss = (int(x) for x in m.groups())
+                if time.time() - time.mktime((now.tm_year, mo, d, hh, mm, ss, 0, 0, -1)) < LONG_MAX:
+                    return last.strip()
+            except Exception:
+                return last.strip()
+    return ""
+
+
 def busy_now():
     """(바쁜가, 이유)"""
     pid = island_alive()
     if pid:
         return True, "🏝 섬/던전 실행기가 돌고 있다 (pid %d)" % pid
+    lo = long_open()
+    if lo:
+        return True, "⏳ 오래 도는 작업이 아직 안 끝났다 — %s" % lo[:90]
     age, ln = last_busy()
     if age is not None and age < BUSY_SEC:
         return True, "⏳ %.0f초 전 작업 로그 — %s" % (age, ln[:90])

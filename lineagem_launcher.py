@@ -5795,7 +5795,7 @@ def dcs_tpls():
 #       가방을 닫으면 미니맵 아래에 그 이름이 보인다 (1.00 · 다른 화면 ≤0.47). 숫자 0 = 귀환(기린 마을).
 CSCR_MATCH    = 0.88          # 주문서 모양 — 📏 그 칸 1.00 · 비슷한 두루마리 ≤0.82(색차 20~26)
 CSCR_COLOR    = 12.0          #   + 평균 색 차이(가장 큰 채널) 이 안이어야
-CSCR_PLACE_MATCH = 0.80       # '서커스단 비밀 장소' 이름
+CSCR_PLACE_MATCH = 0.70       # '서커스단 비밀 장소' 이름
 CSCR_STAY     = (240.0, 260.0)   # 들어가서 이만큼 뒤 귀환 (4분 ~ 4분 20초)
 CSCR_GAP      = (30.0, 44.0)     # 귀환하고 다시 들어가기까지
 CSCR_IN_WAIT  = 15.0          # 두 번 누른 뒤 비밀 장소 이름이 보일 때까지
@@ -5804,6 +5804,26 @@ CSCR_SCAN_MAX = 40            # 가방을 훑는 휠 칸 수 한도
 CSCR_FAIL_MAX = 2             # 한 클라에서 이만큼 못 들어가면 그 클라는 사냥만 보내고 끝
 CSCR_HOME_KEY = "0"
 CSCR_HUNT_CHECK = (6.0, 9.0)  # 사냥 보낸 뒤 AUTO 가 켜졌나 보기까지
+CSCR_CLIENT_GAP = (4.0, 8.0)  # 🧍 클라 사이 · 마을에 닿은 뒤 (2026-11-23 사용자: "엄청나게 빠르다 기계인 것처럼 … 4~8초 랜덤")
+CSCR_STEP     = (1.2, 3.0)    # 🧍 한 클라 안에서 누르기 사이 (가끔 1~3초 더)
+CSCR_PAUSE_P  = 0.20
+CSCR_PAUSE    = (1.0, 3.0)
+CSCR_LOAD     = (3.0, 5.0)    # 주문서를 쓰고 이동(불러오기)
+
+
+# 🚦 부하 나누기 (2026-11-23 사용자: "동시에 클릭하면 부하가 엄청날 텐데 4개씩만 · 랜덤이야 항상")
+#   · 클릭은 원래 한 번에 한 클라뿐이다 (스레드 하나)
+#   · **동시에 돌리는 클라는 4개까지** — 한 클라가 끝나면 기다리던 클라가 (무작위로) 들어온다
+#   · 순간이동(들어가기·귀환 — 맵을 불러오는 무거운 것)끼리는 클라가 달라도 12~20초 띄운다
+CSCR_LANES = 4
+CSCR_HEAVY_GAP = (12.0, 20.0)
+
+
+def cscr_nap(rng=None):
+    """🧍 사람처럼 쉰다 — 범위 안에서 매번 다르게 · 가끔 한 박자 더 (🚫 값 하나로 고정하지 말 것)."""
+    nap(random.uniform(*(rng or CSCR_STEP)))
+    if random.random() < CSCR_PAUSE_P:
+        nap(random.uniform(*CSCR_PAUSE))
 _CSCR_TPL = {}
 
 
@@ -33766,13 +33786,31 @@ class App(tk.Tk):
         click_log(f"[서커스주문서] 📜 시작 — 클라 {[t + 1 for t in targets]} "
                   f"(머무는 시간 {CSCR_STAY[0]:.0f}~{CSCR_STAY[1]:.0f}초 · 다시 들어가기까지 "
                   f"{CSCR_GAP[0]:.0f}~{CSCR_GAP[1]:.0f}초)")
-        st = {si: {"due": 0.0, "ph": "enter", "n": 0, "fail": 0} for si in targets}
+        wait = list(targets)          # 아직 안 들어온 클라 (이미 섞여 있다)
+        st = {}
         stop = lambda: getattr(self, "_cscr_stop", False)
         hunted, used, kept = [], 0, []
-        while st and not stop():
+        heavy = [0.0]                 # 다음 순간이동을 해도 되는 시각
+
+        def fill():
+            while wait and len(st) < CSCR_LANES:
+                k = wait.pop(0)
+                st[k] = {"due": time.time() + (random.uniform(*CSCR_CLIENT_GAP) if st else 0.0),
+                         "ph": "enter", "n": 0, "fail": 0}
+        fill()
+        click_log(f"[서커스주문서] 🚦 한 번에 {CSCR_LANES}클라씩 — 지금 {[k + 1 for k in st]} · "
+                  f"기다리는 클라 {[k + 1 for k in wait]} · 순간이동 사이 "
+                  f"{CSCR_HEAVY_GAP[0]:.0f}~{CSCR_HEAVY_GAP[1]:.0f}초")
+        while (st or wait) and not stop():
+            fill()
+            if not st:
+                break
             now = time.time()
             si = min(st, key=lambda k: st[k]["due"])
             v = st[si]
+            # 순간이동(들어가기·귀환)은 다른 클라의 순간이동과 12~20초 띄운다
+            if v["due"] <= now and heavy[0] > now:
+                v["due"] = heavy[0]
             if v["due"] > now:
                 left = [f"#{k + 1:02d}{'↩' if st[k]['ph'] == 'home' else '▶'}{max(0, int(st[k]['due'] - now))}s"
                         for k in sorted(st, key=lambda k: st[k]["due"])][:6]
@@ -33784,6 +33822,7 @@ class App(tk.Tk):
                 if v["ph"] == "enter":
                     r = self._cscr_enter(si, first=(v["n"] == 0))
                     if r == "in":
+                        heavy[0] = time.time() + random.uniform(*CSCR_HEAVY_GAP)
                         v["n"] += 1
                         used += 1
                         v["ph"] = "home"
@@ -33811,6 +33850,7 @@ class App(tk.Tk):
                             v["due"] = time.time() + random.uniform(*CSCR_GAP)
                 else:
                     self._cscr_home(si)
+                    heavy[0] = time.time() + random.uniform(*CSCR_HEAVY_GAP)
                     v["ph"] = "enter"
                     v["due"] = time.time() + random.uniform(*CSCR_GAP)
                     click_log(f"[서커스주문서] {tag} ↩ 귀환 → {int(v['due'] - time.time())}초 뒤 다시 본다")
@@ -33818,7 +33858,7 @@ class App(tk.Tk):
                 click_log(f"[서커스주문서] ⚠ {tag} 오류 — {type(e).__name__}: {e} (이 클라는 넘어간다)")
                 st.pop(si, None)
             if not stop():
-                nap(random.uniform(1.5, 3.5))           # 🧍 클라 사이 (사람처럼)
+                nap(random.uniform(*CSCR_CLIENT_GAP))   # 🧍 클라 사이 4~8초 (2026-11-23 사용자 지시)
         click_log(f"[서커스주문서] 📜 끝 — 주문서 {used}번 · 사냥 보낸 클라 {hunted} · 주문서가 없어 그대로 둔 클라 {kept}"
                   + (" (■ 멈춤)" if stop() else ""))
         self.status.set(f"✔ 서커스주문서 끝 — 주문서 {used}번 · 사냥 {len(hunted)}클라")
@@ -33853,7 +33893,7 @@ class App(tk.Tk):
             self._focus_client_at(anc)
         except Exception:
             pass
-        nap(random.uniform(0.3, 0.5))
+        cscr_nap()
         big = grab()
         if big is None:
             click_log(f"[서커스주문서] 🚫 {tag} 화면을 못 찍었다")
@@ -33871,6 +33911,7 @@ class App(tk.Tk):
                     return "fail"
 
             def open_bag(sec):
+                cscr_nap()
                 click_at(*P(INV_BAG))
                 t0 = time.time()
                 b = None
@@ -33923,7 +33964,7 @@ class App(tk.Tk):
             if hit:
                 break
         if not hit:
-            nap(random.uniform(0.3, 0.5))
+            cscr_nap()
             if tab_open(grab()):
                 click_at(*P(INV_CLOSE))
             if first:
@@ -33934,14 +33975,14 @@ class App(tk.Tk):
             return "none"
         if first:
             # 🏠 있으면 — 가방을 닫고 숫자 0 으로 마을에 갔다가 쓴다 (사용자 지시)
-            nap(random.uniform(0.3, 0.5))
+            cscr_nap()
             if tab_open(grab()) and self._inv_hand_wait(tag, stop):
                 click_at(*P(INV_CLOSE))
             click_log(f"[서커스주문서] {tag} 📜 주문서가 있다 (일치도 {hit[2]:.2f}) → 가방을 닫고 마을로 귀환한 뒤 쓴다")
-            nap(random.uniform(0.6, 1.0))
+            cscr_nap()
             if not self._cscr_home(si):
                 click_log(f"[서커스주문서] {tag} ⚠ 귀환이 확인되지 않았다 — 그래도 주문서를 써 본다")
-            nap(random.uniform(1.5, 2.5))
+            cscr_nap(CSCR_CLIENT_GAP)                # 마을에 닿고 4~8초
             return self._cscr_enter(si, first=False)
         cy, cx, v, col = hit
         X, Y = L + int(cx), T + int(cy)
@@ -33951,7 +33992,7 @@ class App(tk.Tk):
             self._focus_client_at(anc)
         except Exception:
             pass
-        nap(random.uniform(0.2, 0.4))
+        cscr_nap()
         # 🖱 두 번 누른다 (📏 #01 — 한 번 눌러 '사용' 이 뜬 칸을 또 누르니 '사용할 수 없는 상태' 였고,
         #    두 번 연달아 누르니 바로 갔다)
         for _z in range(2):
@@ -33961,7 +34002,7 @@ class App(tk.Tk):
             if _z == 0:
                 nap(random.uniform(*DCS_TAP_GAP))
         click_log(f"[서커스주문서] {tag} 📜 주문서 두 번 눌렀다 (일치도 {v:.2f} · 색차 {col:.0f} · 창안 {int(cx)},{int(cy)})")
-        nap(random.uniform(2.5, 3.5))                # 이동(불러오기)
+        cscr_nap(CSCR_LOAD)                          # 이동(불러오기)
         # 🎒 가방을 닫는다 — 닫아야 미니맵 아래 지역 이름이 보인다 (사용자: "들어가면 인벤토리를 닫아")
         b = grab()
         if tab_open(b) and self._inv_hand_wait(tag, stop):
@@ -33988,7 +34029,7 @@ class App(tk.Tk):
     def _cscr_auto(self, c, tag):
         """🟢 AUTO — 켜져 있으면 누르지 않는다 (누르면 꺼진다)."""
         anc = c["anc"]
-        nap(random.uniform(0.8, 1.4))
+        cscr_nap()
         _on, _cn = self._auto_on(anc)
         if _on:
             click_log(f"[서커스주문서] {tag} 🟢 이미 AUTO 중이다 (빛 {_cn}) — 누르지 않는다")
@@ -34003,6 +34044,7 @@ class App(tk.Tk):
                 self._focus_client_at(anc)
             except Exception:
                 pass
+            cscr_nap()
             click_at(ax, ay)
             nap(random.uniform(1.2, 1.8))
             _on2, _cn2 = self._auto_on(anc)
@@ -34035,6 +34077,10 @@ class App(tk.Tk):
                 break
         if front is False:
             click_log(f"[서커스주문서] 🚫 {tag} 창을 맨 앞으로 못 올려 **0 을 누르지 않았다** (다른 창에 들어간다)")
+            return False
+        cscr_nap()
+        if self._client_is_front(anc) is False:
+            click_log(f"[서커스주문서] 🚫 {tag} 기다리는 사이 다른 창이 앞에 왔다 — 0 을 누르지 않았다")
             return False
         press_key(CSCR_HOME_KEY)
         nap(random.uniform(*CSCR_HOME_WAIT))
