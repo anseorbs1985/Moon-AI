@@ -5292,7 +5292,16 @@ def inv_tpl(name):
 #   🚫 모르는 화면이면 아무것도 더 누르지 않고 그 클라를 끝낸다 (그 화면을 남긴다).
 #   🚫 상점은 구매 가격 옆이 **주화 그림(톱니)** 일 때만 확인을 누른다 — 아니면 취소.
 INVX_ON = True
-INVX_GROUPS = {"craft_seal": "craft", "x_coin": "shop"}
+INVX_GROUPS = {"craft_seal": "craft", "x_coin": "shop", "x_fest": "craft_fest"}
+# 🎟 리니지 페스티벌 주화 → 룬 선택 상자 **최대로** 제작 (2026-11-24 사용자 · #02 에서 손으로 해 보인 것을 기록)
+#   꾹 → 정보 창의 파란 [제작 재료] → '제작 가능 아이템' 에서 **룬 선택 상자 (이벤트)** → ▼(최대) → [제작]
+#   → 제작 결과 → [Skip] → [확인] → 제작 창 ✕  (자리·창은 축복 부여 주문서 제작과 같다 — 고르는 줄만 다르다)
+#   📏 그림 — 가방의 주화 inv_x_fest_1('1일' 빨간 표시) · _2(표시 없음) — 저장 화면 400여 장에서 주화 칸만 잡힘
+#           invx_cl_rune 목록의 그 줄 1.00 · 다른 줄 ≤0.66 · invx_cw_rune 제작 창 이름 1.00 · invx_cw_skip 1.00
+INVX_KINDS = {
+    "craft": ("invx_cl_row", "invx_cw_name", "봉인된 축복 부여 주문서", "축복 부여 주문서"),
+    "craft_fest": ("invx_cl_rune", "invx_cw_rune", "리니지 페스티벌 주화", "룬 선택 상자"),
+}
 # 🎣 **녹일 아이템** — 가방에 있으면 누르지 않고 기억했다가, 가방을 닫은 뒤 **낚시 교환**으로 녹인다
 #   (2026-11-20 사용자: *"저 두 개 아이템이 있으면 있을 경우에만 저렇게 낚시로 녹이면 되거든"* —
 #    #06 kook 에서 손으로 해 보인 것을 10ms 로 기록해 그대로 옮겼다)
@@ -35065,7 +35074,9 @@ class App(tk.Tk):
         """🛠 꾹 눌러 제작('craft') · 시즌 상점 교환('shop') → 'ok' · 'skip'(아무것도 안 바뀜) · 'stop'."""
         self._invx_ctx = (anc, L, T)
         try:
-            return (self._invx_craft if kind == "craft" else self._invx_shop)(anc, tag, L, T, cx, cy)
+            if kind in INVX_KINDS:
+                return self._invx_craft(anc, tag, L, T, cx, cy, kind)
+            return self._invx_shop(anc, tag, L, T, cx, cy)
         except Exception as e:
             click_log(f"[아이템정리] ⚠ {tag} {kind} 오류 — {type(e).__name__}: {e}")
             if str(e) == "멈춤":
@@ -35137,7 +35148,8 @@ class App(tk.Tk):
                       + ("한 번 더 누른다" if _t == 0 else "그만둔다"))
         return r
 
-    def _invx_craft(self, anc, tag, L, T, cx, cy):
+    def _invx_craft(self, anc, tag, L, T, cx, cy, kind="craft"):
+        row_img, name_img, src_nm, out_nm = INVX_KINDS.get(kind) or INVX_KINDS["craft"]
         x, y, v, b = self._invx_open_info(anc, tag, L, T, cx, cy, "invx_link_craft")
         if x is None:
             return self._invx_info_close(anc, tag, L, T, b)
@@ -35146,11 +35158,11 @@ class App(tk.Tk):
         x, y, v, b = self._invx_wait(anc, "invx_cl_title", tmax=INVX_SEE_SLOW)
         if x is None:
             return self._invx_unknown(tag, b, "제작 가능 아이템 창이 안 떴다", v)
-        rx, ry, rv = invx_find(b, "invx_cl_row")
+        rx, ry, rv = invx_find(b, row_img)
         if rx is None:
-            return self._invx_unknown(tag, b, "목록에 '축복 부여 주문서' 가 없다", rv)
-        self._invx_tap_px(tag, L, T, rx, ry)                    # 축복 부여 주문서
-        x, y, v, b = self._invx_wait(anc, "invx_cw_name", tmax=INVX_SEE_SLOW)
+            return self._invx_unknown(tag, b, f"목록에 '{out_nm}' 가 없다", rv)
+        self._invx_tap_px(tag, L, T, rx, ry)                    # 만들 것 (축복 부여 주문서 · 룬 선택 상자)
+        x, y, v, b = self._invx_wait(anc, name_img, tmax=INVX_SEE_SLOW)
         if x is None:
             return self._invx_unknown(tag, b, "제작 창이 안 떴다", v)
         self._invx_tap(tag, L, T, kx, ky, INVX_CRAFT_DOWN)     # ▼ → 최대
@@ -35174,15 +35186,21 @@ class App(tk.Tk):
         ox, oy, ov = invx_find(b, "invx_cw_ok")
         if ox is None:
             nap(random.uniform(0.6, 1.0))                       # [확인] 은 결과가 다 나온 뒤에 뜬다
-            ox, oy, ov, b = self._invx_wait(anc, "invx_cw_ok", tmax=4.0)
+            # ⏭ 여러 개를 만들면 하나씩 보여주며 [Skip] 이 뜬다 — 있으면 눌러 넘긴다 (같은 자리에 [확인] 이 뜬다)
+            b2 = grab_window(anc)
+            sx, sy, sv = invx_find(b2, "invx_cw_skip")
+            if sx is not None and invx_find(b2, "invx_cw_ok")[0] is None:
+                self._invx_tap_px(tag, L, T, sx, sy)            # [Skip]
+                click_log(f"[아이템정리] {tag} 🛠 제작 결과 [Skip] 눌렀다 ({sv:.2f})")
+            ox, oy, ov, b = self._invx_wait(anc, "invx_cw_ok", tmax=8.0)
         if ox is None:
             return self._invx_unknown(tag, b, "제작 결과의 [확인] 이 안 보인다", ov)
         self._invx_tap_px(tag, L, T, ox, oy)                    # [확인]
-        x, y, v, b = self._invx_wait(anc, "invx_cw_name", tmax=3.0)
+        x, y, v, b = self._invx_wait(anc, name_img, tmax=3.0)
         if x is not None:
             self._invx_tap(tag, L, T, kx, ky, INVX_CRAFT_X)    # 제작 창 ✕
-        click_log(f"[아이템정리] {tag} 🛠 ✅ 봉인된 축복 부여 주문서 → **축복 부여 주문서 제작** (최대)")
-        self.status.set(f"🎴 {tag} 축복 부여 주문서 제작")
+        click_log(f"[아이템정리] {tag} 🛠 ✅ {src_nm} → **{out_nm} 제작** (최대)")
+        self.status.set(f"🎴 {tag} {out_nm} 제작")
         return "ok"
 
     def _invx_shop(self, anc, tag, L, T, cx, cy):
