@@ -1302,8 +1302,11 @@ XREG_ITEM_GAP   = (0.75, 1.5)    # 하나 올리고 다음 것까지 · 2026-11-
 XREG_EQ_BLUE    = 40             # 🚫 착용 중 [E] 표시 — 칸 왼쪽 위 12px 의 파란 점
 XREG_EQ_WHITE   = 6              #    + 흰 글자 점 (📏 [E] 64·68/14·22 · 파란 구슬 아이템 33/0)
 XREG_POLL       = (0.12, 0.22)
-XREG_WHEEL_MAX  = 0              # 🚫 휠로 내리지 않는다 (2026-11-21 사용자: "휠로 내리지 말고 저 상태
-                                 #    위에서부터 하나씩") — 올리면 아래 것이 위로 올라온다
+XREG_WHEEL_MAX  = 60             # 🌀 보이는 것을 위에서부터 다 올린 뒤, 더 없으면 아래로 내려가며 찾는다
+                                 #    (2026-11-23 사용자: "화면만 보고 올릴게 투성인데 꺼버린다" — 소지품이
+                                 #     136/156 칸인데 첫 화면 20칸만 봤다. 첫 화면에 올릴 게 없으면 그대로 끝났다)
+                                 #    🚫 보이는 것이 있으면 내리지 않는다 — 위에서부터 하나씩 (2026-11-21 지시 그대로)
+XREG_WHEEL_BURST = (1, 1, 2, 2)  # 한 번에 이만큼 이어서 내린다 (보이는 줄이 5줄이라 줄을 건너뛰지 않는다)
 XREG_SLOT_GAP   = (2.3, 6.0)     # 클라 사이 · 2026-11-22 25% 당김 (전 3~8)
 XREG_TRY_MAX    = 2              # 한 아이템을 몇 번까지 해보나
 XREG_FAIL_MAX   = 4              # 한 클라에서 이만큼 실패하면 그 클라는 끝
@@ -33717,14 +33720,20 @@ class App(tk.Tk):
                 continue
             if not hits and done == 0 and looks >= XREG_LOOK_N and looks < 99:
                 looks = 99
-                click_log(f"[거래소등록] {tag} 🔎 등록한 아이템이 소지품 첫 화면에 없다 ({XREG_LOOK_N + 1}번 봤다) · 화면 {shot(b, 'none')}")
+                click_log(f"[거래소등록] {tag} 🔎 소지품 첫 화면에는 올릴 것이 없다 ({XREG_LOOK_N + 1}번 봤다) "
+                          f"→ 아래로 내려가며 찾는다 · 화면 {shot(b, 'none')}")
             if not hits:
                 if wheels >= XREG_WHEEL_MAX:
                     break
                 x0, y0, x1, y1 = XREG_INV_BOX
                 pre = b[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
-                wheel_at(*P(XREG_INV_MID), -1)
-                wheels += 1
+                # 🌀 한 칸짜리 신호를 이어서 보낸다 (여러 칸을 한 신호로 보내면 게임이 무시한다)
+                _k = random.choice(XREG_WHEEL_BURST)
+                for _i in range(_k):
+                    wheel_at(*P(XREG_INV_MID), -1)
+                    if _i < _k - 1:
+                        nap(random.uniform(*INV_BURST_GAP))
+                wheels += _k
                 gold = None
                 nap(random.uniform(0.45, 0.7))
                 b2 = g()
@@ -33732,7 +33741,14 @@ class App(tk.Tk):
                     break
                 post = b2[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
                 if pre.shape == post.shape and float(abs(pre - post).mean()) < 2.0:
-                    break                                   # 맨 아래
+                    # 한 번 더 굴려 보고도 그대로면 맨 아래 (휠 한 칸이 늦게 먹을 수 있다)
+                    wheel_at(*P(XREG_INV_MID), -1)
+                    nap(random.uniform(0.45, 0.7))
+                    b3 = g()
+                    p3 = b3[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int) if b3 is not None else None
+                    if p3 is None or (p3.shape == pre.shape and float(abs(pre - p3).mean()) < 2.0):
+                        click_log(f"[거래소등록] {tag} 🌀 소지품 맨 아래까지 봤다 (휠 {wheels}칸)")
+                        break                               # 맨 아래
                 continue
             cy, cx, nm, v = hits[0]
             _cap = xreg_one_cap(nm)
