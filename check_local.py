@@ -632,6 +632,38 @@ try:
 except Exception as _e:
     print("   (아이템정리 항목 오류: %s)" % str(_e)[:80])
 
+# ── ⑨-4 💱 거래소등록 (2026-11-23) ─────────────────────────────
+print(chr(10) + "⑨-4 💱 거래소등록 — 그림 · 새 코드 · 마지막 실행 기록 (칸별 진단 포함)")
+try:
+    _ct = os.path.join(DESK, "click_templates")
+    _xi = glob.glob(os.path.join(_ct, "xreg_item_*.png"))
+    _xs = [f for f in ("xreg_menu", "xreg_title", "xreg_soji", "xreg_qty", "xreg_ask", "xreg_unit", "xreg_dot00")
+           if not os.path.exists(os.path.join(_ct, f + ".png"))]
+    print("   아이템 그림 %d장 · 화면 그림 없는 것 %s" % (len(_xi), _xs or "없음 ✔"))
+    if len(_xi) < 150 or _xs:
+        print("   🚨 그림이 모자라다 → 🔄 업데이트")
+    _src = io.open(os.path.join(DESK, "lineagem_launcher.py"), encoding="utf-8", errors="replace").read()
+    print("   코드: 칸별 진단(xreg_diag) %s" % ("✔" if "def xreg_diag" in _src else "🚨 없다 (옛 코드 — 🔄 업데이트)"))
+    _cl = os.path.join(LA, "click_log.txt")
+    _f = io.open(_cl, "rb")
+    _f.seek(max(0, os.path.getsize(_cl) - 900000))
+    _tx = _f.read().decode("utf-8", "replace").split(chr(10))
+    _f.close()
+    _li = [l.rstrip() for l in _tx if u"[거래소등록]" in l]
+    _k = max([i for i, l in enumerate(_li) if u"💱 시작" in l] or [0])
+    print("   🗒 마지막 실행의 줄 전부 — `🔎 칸별 진단` 줄이 **왜 안 올렸는지** 칸마다 보여준다")
+    print("      (모양미달 = 그림이 덜 닮았다 · 색다름 = 모양은 같은데 색이 다르다 · 없음 = 닮은 그림 자체가 없다)")
+    for l in _li[_k:][-60:]:
+        if u"칸별 진단" in l and u" — " in l:
+            _h, _d = l.split(u" — ", 1)
+            print("     " + _h[:170])
+            for _c in _d.split(" | "):
+                print("        " + _c)
+        else:
+            print("     " + l[:200])
+except Exception as _e:
+    print("   (거래소등록 항목 오류: %s)" % str(_e)[:80])
+
 # ── ⑩ 업데이트 기록 ────────────────────────────────────────────────
 ul = os.path.join(LA, "update_log.txt")
 print("\n⑩ 업데이트 기록 마지막 40줄  (%s)" % ul)

@@ -1464,6 +1464,65 @@ def xreg_equipped(big, cx, cy):
         return True
 
 
+XREG_DIAG_MIN = 0.60     # 🔎 이보다 닮은 그림이 하나도 없으면 '닮은 그림 없음'
+
+
+def xreg_diag(big):
+    """🔎 소지품 20칸을 칸마다 — 가장 닮은 등록 그림 · 모양 점수 · 색 차이 · 왜 안 올렸나.
+    (2026-11-23 사용자: *"실패원인을 파악할 수 있도록 로그 기록을 남기는 걸로"*)
+    → 글 한 줄 ("1-1 축복무기마법주문서 0.93/색42 색다름 | 1-2 없음 0.41 | …")"""
+    try:
+        import cv2, numpy as np
+        kx, ky = _xreg_k(big)
+        x0, y0, x1, y1 = XREG_INV_BOX
+        X0, Y0 = int(x0 * kx), int(y0 * ky)
+        b = big[Y0:int(y1 * ky), X0:int(x1 * kx)]
+        cw, ch = (x1 - x0) / 4.0, (y1 - y0) / 5.0
+        best = {}
+        for nm, t0 in xreg_items():
+            t = _xreg_fit(t0, kx, ky)
+            if b.shape[0] < t.shape[0] or b.shape[1] < t.shape[1]:
+                continue
+            r = cv2.matchTemplate(b, t, cv2.TM_CCOEFF_NORMED)
+            th, tw = t.shape[:2]
+            tc = t.reshape(-1, 3).mean(0)
+            for c in range(4):
+                for rr in range(5):
+                    xa, xb = int(c * cw * kx), int((c + 1) * cw * kx)
+                    ya, yb = int(rr * ch * ky), int((rr + 1) * ch * ky)
+                    # 그림 가운데가 이 칸 안에 오는 자리만
+                    sub = r[max(0, ya - th // 2):max(0, yb - th // 2), max(0, xa - tw // 2):max(0, xb - tw // 2)]
+                    if sub.size == 0:
+                        continue
+                    yy, xx = np.unravel_index(int(sub.argmax()), sub.shape)
+                    v = float(sub[yy, xx])
+                    if (rr, c) in best and best[(rr, c)][1] >= v:
+                        continue
+                    py, px = max(0, ya - th // 2) + yy, max(0, xa - tw // 2) + xx
+                    d = float(np.abs(b[py:py + th, px:px + tw].reshape(-1, 3).mean(0) - tc).mean())
+                    eq = xreg_equipped(big, X0 + px + tw // 2, Y0 + py + th // 2)
+                    best[(rr, c)] = (nm, v, d, eq)
+        out = []
+        for rr in range(5):
+            for c in range(4):
+                k = f"{rr + 1}-{c + 1}"
+                if (rr, c) not in best:
+                    out.append(f"{k} ?")
+                    continue
+                nm, v, d, eq = best[(rr, c)]
+                if v < XREG_DIAG_MIN:
+                    out.append(f"{k} 없음({v:.2f})")
+                    continue
+                why = ("✔올림대상" if (v >= XREG_ITEM_MATCH and d <= XREG_ITEM_COLOR) else
+                       "모양미달" if v < XREG_ITEM_MATCH else "색다름")
+                if eq and why == "✔올림대상":
+                    why = "착용중"
+                out.append(f"{k} {nm} {v:.2f}/색{d:.0f} {why}")
+        return " | ".join(out)
+    except Exception as e:
+        return f"(진단 실패 {type(e).__name__}: {e})"
+
+
 def _xreg_groups(m):
     c = m.any(0)
     g, s0 = [], None
@@ -33501,7 +33560,7 @@ class App(tk.Tk):
         if len(targets) > 1:
             random.shuffle(targets)
         click_log(f"[거래소등록] 💱 시작 — 클라 {[t + 1 for t in targets]} (아이템 그림 "
-                  f"{[n for n, _ in xreg_items()]})")
+                  f"{len(xreg_items())}장 · {IMG_DIR})")
         tot = 0
         for n, si in enumerate(targets):
             if getattr(self, "_xreg_stop", False):
@@ -33725,6 +33784,10 @@ class App(tk.Tk):
                           f"· 화면 {shot(b, 'none')}")
             if not hits:
                 if wheels >= XREG_WHEEL_MAX:
+                    # 🔎 왜 더 안 올렸나 — 칸마다 가장 닮은 그림 (실패 원인을 기록으로 본다)
+                    click_log(f"[거래소등록] {tag} 🔎 칸별 진단 (창 {b.shape[1]}x{b.shape[0]} · "
+                              f"기준 모양 {XREG_ITEM_MATCH} · 색차 {XREG_ITEM_COLOR:.0f} 이내 · 그림 {len(xreg_items())}장"
+                              + (f" · 이번에 건너뛴 것 {sorted(skip)}" if skip else "") + f") — {xreg_diag(b)}")
                     break
                 x0, y0, x1, y1 = XREG_INV_BOX
                 pre = b[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
@@ -33758,6 +33821,7 @@ class App(tk.Tk):
                 skip.add(nm); continue
             tries[nm] = tries.get(nm, 0) + 1
             if tries[nm] > XREG_TRY_MAX:
+                click_log(f"[거래소등록] {tag} ⏭ '{nm}' {XREG_TRY_MAX}번 해도 안 올라가 이번에는 건너뛴다")
                 skip.add(nm); continue
             cell = ((cx) / kx, (cy) / ky)
             screen_calm(L + cx, T + cy)
