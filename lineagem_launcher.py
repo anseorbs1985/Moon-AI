@@ -5809,7 +5809,15 @@ CSCR_STAY     = (240.0, 260.0)   # 들어가서 이만큼 뒤 귀환 (4분 ~ 4�
 CSCR_GAP      = (30.0, 44.0)     # 귀환하고 다시 들어가기까지
 CSCR_IN_WAIT  = 15.0          # 두 번 누른 뒤 비밀 장소 이름이 보일 때까지
 CSCR_HOME_WAIT = (5.0, 7.0)   # 0 을 누르고 마을에 닿기까지
-CSCR_SCAN_MAX = 40            # 가방을 훑는 휠 칸 수 한도
+CSCR_SCAN_MAX = 90            # 가방을 훑는 휠 칸 수 한도 (천천히 1~2칸씩이라 늘렸다)
+# 🐢 주문서 찾기는 **천천히** (2026-11-24 사용자: *"휠을 빠르게 돌려서 놓쳐버린다"*)
+#   예전엔 위로 갈 때 3~5칸(90~150px)을 한 번에 굴려 — 목록 높이(150px)만큼 건너뛰어 그 줄을 못 봤다.
+#   → 위아래 모두 **1~2칸**(≤60px · 한 줄 35px 라 어떤 줄도 건너뛰지 않는다) ·
+#     굴린 뒤 **목록이 멈출 때까지** 보고 나서 찾는다 (움직이는 중에 찍으면 그림이 번진다).
+CSCR_WHEEL_K = (1, 1, 1, 2)          # 한 번에 굴리는 칸 수
+CSCR_WHEEL_GAP = (0.65, 0.95)        # 굴린 뒤 첫 확인까지
+CSCR_SETTLE_DIFF = 0.8               # 연달아 찍은 두 장의 차이가 이 밑이면 멈춘 것
+CSCR_SETTLE_N = 4                    # 멈추기를 최대 몇 번 더 보나 (0.15~0.25초 간격)
 CSCR_FAIL_MAX = 2             # 한 클라에서 이만큼 못 들어가면 그 클라는 사냥만 보내고 끝
 CSCR_HOME_KEY = "0"
 CSCR_HUNT_CHECK = (6.0, 9.0)  # 사냥 보낸 뒤 AUTO 가 켜졌나 보기까지
@@ -34017,7 +34025,7 @@ class App(tk.Tk):
                 if d < 0 and inv_tail_seen(big):
                     break
                 prev = inv_list(big)
-                k = random.choice(INV_DOWN_BURST if d < 0 else INV_UP_BURST)
+                k = random.choice(CSCR_WHEEL_K)
                 moved = False
                 for _st in range(1 + INV_STALL_TRY):
                     if not self._inv_hand_wait(tag, stop):
@@ -34026,7 +34034,7 @@ class App(tk.Tk):
                         wheel_at(lx, ly, d)
                         if _i < k - 1:
                             nap(random.uniform(*INV_BURST_GAP))
-                    nap(random.uniform(*INV_WHEEL_GAP))
+                    nap(random.uniform(*CSCR_WHEEL_GAP))
                     b2 = grab()
                     if b2 is None:
                         break
@@ -34036,7 +34044,20 @@ class App(tk.Tk):
                 if not moved:
                     break
                 steps += k
+                # 🐢 목록이 다 멈춘 뒤에 찾는다 — 그 사이 찍은 화면에서 보이면 그것도 쓴다
                 hit = cscr_find(big)
+                for _w in range(CSCR_SETTLE_N):
+                    if hit:
+                        break
+                    nap(random.uniform(0.15, 0.25))
+                    b3 = grab()
+                    if b3 is None:
+                        break
+                    _still = float(abs(inv_list(b3) - inv_list(big)).mean()) < CSCR_SETTLE_DIFF
+                    big = b3
+                    hit = cscr_find(big)
+                    if _still:
+                        break
             if hit:
                 break
         if not hit:
@@ -49091,6 +49112,41 @@ class App(tk.Tk):
             self._jakwi_halt()
         except Exception:
             pass
+        # 🔗 **이어서 도는 것도 전부 끊는다** (2026-11-24 사용자: *"연속적으로 이어지는 거
+        #    멈춤버튼 누르면 다 꺼지게 해주라니까"*) — 예전엔 돌고 있는 작업만 끊고
+        #    보조서커스 차례·전부복구 대기열·물약 재실행 적어둔 것이 남아 다음 클라를 또 돌렸다.
+        _cut = []
+        try:
+            _sst = getattr(self, "_subc_st", None) or self._subc_load()
+            if _sst.get("on"):
+                _left = sorted(int(k) + 1 for k in (_sst.get("slots") or {}))
+                self._subc_save({"on": False, "slots": {}})
+                _cut.append(f"보조서커스 차례 {_left}")
+                try:
+                    self._subc_btn_paint()
+                except Exception:
+                    pass
+            self._subc_chain_until = 0
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_fix_queue", None):
+                _cut.append(f"전부복구 대기 {len(self._fix_queue)}개")
+            self._fix_queue = []
+            self._fix_only = None
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_p0_pend", None):
+                _cut.append(f"물약 재실행 적어둔 것 {len(self._p0_pend)}개")
+                self._p0_pend.clear()
+        except Exception:
+            pass
+        if _cut:
+            try:
+                click_log("[멈춤] 🔗 이어서 돌던 것도 끊었다 — " + " · ".join(_cut))
+            except Exception:
+                pass
         self._busy_task      = None   # 잠금 해제
         self._task_queue.clear()      # 멈춤 시 대기열도 비움
         # 별도 프로세스(섬/던전 실행기·다야 OCR·던전) 전부 강제 종료 — 재개 없이 완전히 끔
