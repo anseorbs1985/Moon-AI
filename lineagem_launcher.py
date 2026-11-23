@@ -5815,8 +5815,57 @@ CSCR_LOAD     = (3.0, 5.0)    # 주문서를 쓰고 이동(불러오기)
 #   · 클릭은 원래 한 번에 한 클라뿐이다 (스레드 하나)
 #   · **동시에 돌리는 클라는 4개까지** — 한 클라가 끝나면 기다리던 클라가 (무작위로) 들어온다
 #   · 순간이동(들어가기·귀환 — 맵을 불러오는 무거운 것)끼리는 클라가 달라도 12~20초 띄운다
-CSCR_LANES = 4
-CSCR_HEAVY_GAP = (12.0, 20.0)
+CSCR_LANES = 8                  # 2026-11-23 사용자: "8개씩 하자 부하가 걸리지 않도록"
+CSCR_HEAVY_GAP = (15.0, 24.0)   # 8클라면 순간이동이 잦아진다 → 4개씩일 때(12~20초)보다 넉넉히
+
+
+# 🧺 아래 빠른 칸 **5번째** 에 주문서를 두고 그 칸을 눌러 쓴다 (2026-11-23 사용자 제안 —
+#    "아래 슬롯 5번째에 배치하자 · 마을에 오면 그걸 누르고 … 인벤토리를 또다시 안 열어도 되잖아")
+#    📏 #06 (546x307) — 아랫줄 5번째 칸 가운데 (338,270) · 그림 cscr_qs.png 24x15 (개수 숫자는 뺐다)
+#       그 칸 1.00/색차 0 · 윗줄의 흐린 같은 주문서 0.87/색차 44 · 다른 두루마리 0.83/색차 27
+CSCR_QS_ON = True
+CSCR_QS = (338, 270)                 # 누를 자리 (546 창 기준)
+CSCR_QS_BOX = (318, 252, 358, 292)   # 찾을 범위
+CSCR_QS_MATCH = 0.85
+CSCR_QS_COLOR = 15.0
+_CSCR_QS = [None, 0.0]
+
+
+def cscr_qs_state(big):
+    """빠른 칸 5번째 → ("have", 점수, 색차) 주문서가 밝게 있다 · ("dim", …) 흐리다(다 썼다) ·
+    ("other", …) 다른 것 · (None, …) 못 봄."""
+    try:
+        import cv2, numpy as np
+        p = os.path.join(IMG_DIR, "cscr_qs.png")
+        if big is None or not os.path.exists(p):
+            return None, -1.0, -1.0
+        mt = os.path.getmtime(p)
+        if _CSCR_QS[0] is None or _CSCR_QS[1] != mt:
+            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            if t is None:
+                return None, -1.0, -1.0
+            _CSCR_QS[0] = t
+            _CSCR_QS[1] = mt
+        t = _CSCR_QS[0]
+        b = big
+        if b.shape[1] != INV_BASE_W:
+            k = INV_BASE_W / float(b.shape[1])
+            b = cv2.resize(b, (INV_BASE_W, max(1, int(round(b.shape[0] * k)))))
+        x0, y0, x1, y1 = CSCR_QS_BOX
+        r = b[y0:y1, x0:x1]
+        if r.shape[0] < t.shape[0] or r.shape[1] < t.shape[1]:
+            return None, -1.0, -1.0
+        res = cv2.matchTemplate(r, t, cv2.TM_CCOEFF_NORMED)
+        _, v, _, pt = cv2.minMaxLoc(res)
+        cut = r[pt[1]:pt[1] + t.shape[0], pt[0]:pt[0] + t.shape[1]].astype(float)
+        col = float(abs(cut.mean((0, 1)) - t.astype(float).mean((0, 1))).mean())
+        if v >= CSCR_QS_MATCH and col <= CSCR_QS_COLOR:
+            return "have", float(v), col
+        if v >= CSCR_QS_MATCH - 0.05:
+            return "dim", float(v), col
+        return "other", float(v), col
+    except Exception:
+        return None, -1.0, -1.0
 
 
 def cscr_nap(rng=None):
@@ -33904,6 +33953,24 @@ class App(tk.Tk):
             click_log(f"[서커스주문서] {tag} 이미 **서커스단 비밀 장소** 안이다 ({_pv:.2f}) — 들어간 것으로 본다")
             self._cscr_auto(c, tag)
             return "in"
+        if CSCR_QS_ON:
+            if tab_open(big) and self._inv_hand_wait(tag, stop):
+                cscr_nap()
+                click_at(*P(INV_CLOSE))                  # 가방이 열려 있으면 닫고 본다
+                cscr_nap()
+                big = grab()
+            q = cscr_qs_state(big)
+            if q[0] == "have":
+                click_log(f"[서커스주문서] {tag} 🧺 빠른 칸 5번째에 주문서가 있다 (일치도 {q[1]:.2f} · 색차 {q[2]:.0f})"
+                          + (" → 마을로 귀환한 뒤 그 칸을 누른다" if first else " → 그 칸을 누른다"))
+                if first:
+                    cscr_nap()
+                    if not self._cscr_home(si):
+                        click_log(f"[서커스주문서] {tag} ⚠ 귀환이 확인되지 않았다 — 그래도 주문서를 써 본다")
+                    cscr_nap(CSCR_CLIENT_GAP)            # 마을에 닿고 4~8초
+                return self._cscr_qs_use(c, si, tag)
+            click_log(f"[서커스주문서] {tag} 🧺 빠른 칸 5번째: {q[0] or '못 봄'} "
+                      f"(일치도 {q[1]:.2f} · 색차 {q[2]:.0f}) → 가방에서 찾는다")
         if not tab_open(big):
             if dcs_hud_seen(big) is False:
                 self._dcs_clear(anc, tag, first=True)    # 🚪 화면을 덮은 창이 있을 때만 ESC
@@ -33973,6 +34040,16 @@ class App(tk.Tk):
                 return "skip"
             click_log(f"[서커스주문서] {tag} 🔎 가방에 주문서가 더 없다 (휠 {steps}칸 훑음)")
             return "none"
+        if CSCR_QS_ON and self._cscr_qs_place(c, si, tag, hit):
+            cscr_nap()
+            if tab_open(grab()) and self._inv_hand_wait(tag, stop):
+                click_at(*P(INV_CLOSE))
+            if first:
+                cscr_nap()
+                if not self._cscr_home(si):
+                    click_log(f"[서커스주문서] {tag} ⚠ 귀환이 확인되지 않았다 — 그래도 주문서를 써 본다")
+                cscr_nap(CSCR_CLIENT_GAP)
+            return self._cscr_qs_use(c, si, tag)
         if first:
             # 🏠 있으면 — 가방을 닫고 숫자 0 으로 마을에 갔다가 쓴다 (사용자 지시)
             cscr_nap()
@@ -34002,6 +34079,20 @@ class App(tk.Tk):
             if _z == 0:
                 nap(random.uniform(*DCS_TAP_GAP))
         click_log(f"[서커스주문서] {tag} 📜 주문서 두 번 눌렀다 (일치도 {v:.2f} · 색차 {col:.0f} · 창안 {int(cx)},{int(cy)})")
+        return self._cscr_arrive(c, tag)
+
+    def _cscr_arrive(self, c, tag):
+        """누른 뒤 — 가방을 닫고 비밀 장소 이름이 뜨기를 본다 → AUTO → "in" / "fail"."""
+        anc, stop = c["anc"], "_cscr_stop"
+
+        def P(rel):
+            return c["L"] + int(rel[0] * c["kx"]), c["T"] + int(rel[1] * c["ky"])
+
+        def grab():
+            return grab_window(anc)
+
+        def tab_open(b):
+            return b is not None and inv_win_score(b, "inv_open", INV_TAB_BOX) >= INV_WIN_MATCH
         cscr_nap(CSCR_LOAD)                          # 이동(불러오기)
         # 🎒 가방을 닫는다 — 닫아야 미니맵 아래 지역 이름이 보인다 (사용자: "들어가면 인벤토리를 닫아")
         b = grab()
@@ -34025,6 +34116,65 @@ class App(tk.Tk):
         click_log(f"[서커스주문서] {tag} 🎪 **서커스단 비밀 장소** 도착 ({pv:.2f} · {time.time() - t0:.1f}초)")
         self._cscr_auto(c, tag)
         return "in"
+
+    def _cscr_qs_place(self, c, si, tag, hit):
+        """🧺 가방에서 찾은 주문서를 **한 번 눌러 고르고** → 빠른 칸 5번째를 눌러 올린다.
+        🚫 고른 표시가 안 보이면 빠른 칸을 누르지 않는다 (그 칸에 든 것을 써버린다).
+        🚫 자동 사용은 켜지 않는다 (끌지 않는다)."""
+        anc = c["anc"]
+        cy, cx, v, col = hit
+        X, Y = c["L"] + int(cx), c["T"] + int(cy)
+        if not self._inv_hand_wait(tag, "_cscr_stop"):
+            return False
+        cscr_nap()
+        click_at(X, Y)
+        nap(random.uniform(0.45, 0.75))
+        b = grab_window(anc)
+        ring = inv_sel_ring(b, cx, cy) if b is not None else -1
+        if ring < INV_SEL_RING:
+            p = self._inv_shot(b, tag, "cscr_qsel") if b is not None else ""
+            click_log(f"[서커스주문서] 🚫 {tag} 🧺 주문서를 눌렀는데 **고른 표시가 안 보인다** (테두리 {ring:.0f}) — "
+                      f"빠른 칸을 누르지 않는다 → 가방에서 두 번 눌러 쓴다 · 화면 {p}")
+            return False
+        if not self._inv_hand_wait(tag, "_cscr_stop"):
+            return False
+        cscr_nap()
+        qx, qy = c["L"] + int(CSCR_QS[0] * c["kx"]), c["T"] + int(CSCR_QS[1] * c["ky"])
+        click_at(qx, qy)
+        nap(random.uniform(0.7, 1.1))
+        q = cscr_qs_state(grab_window(anc))
+        if q[0] == "have":
+            click_log(f"[서커스주문서] {tag} 🧺 주문서를 **빠른 칸 5번째**에 올렸다 (일치도 {q[1]:.2f} · 색차 {q[2]:.0f})")
+            return True
+        p = self._inv_shot(grab_window(anc), tag, "cscr_qsput")
+        click_log(f"[서커스주문서] ⚠ {tag} 🧺 빠른 칸에 올렸는데 그 칸에 주문서가 안 보인다 "
+                  f"({q[0]} {q[1]:.2f} · 색차 {q[2]:.0f}) → 가방에서 두 번 눌러 쓴다 · 화면 {p}")
+        return False
+
+    def _cscr_qs_use(self, c, si, tag):
+        """🧺 빠른 칸 5번째를 **한 번** 누른다 → 도착 확인."""
+        anc = c["anc"]
+        if not self._inv_hand_wait(tag, "_cscr_stop"):
+            return "fail"
+        try:
+            self._focus_client_at(anc)
+        except Exception:
+            pass
+        cscr_nap()
+        b = grab_window(anc)
+        if b is not None and cscr_place_score(b) >= CSCR_PLACE_MATCH:
+            click_log(f"[서커스주문서] {tag} 이미 비밀 장소 안이다 — 빠른 칸을 누르지 않는다")
+            self._cscr_auto(c, tag)
+            return "in"
+        q = cscr_qs_state(b)
+        if q[0] != "have":
+            click_log(f"[서커스주문서] {tag} 🧺 누르려는데 빠른 칸 5번째에 주문서가 없다 "
+                      f"({q[0]} {q[1]:.2f}) — 누르지 않는다")
+            return "fail"
+        qx, qy = c["L"] + int(CSCR_QS[0] * c["kx"]), c["T"] + int(CSCR_QS[1] * c["ky"])
+        click_at(qx, qy)
+        click_log(f"[서커스주문서] {tag} 🧺 빠른 칸 5번째를 눌렀다 ({qx},{qy})")
+        return self._cscr_arrive(c, tag)
 
     def _cscr_auto(self, c, tag):
         """🟢 AUTO — 켜져 있으면 누르지 않는다 (누르면 꺼진다)."""
