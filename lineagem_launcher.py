@@ -33768,7 +33768,7 @@ class App(tk.Tk):
                   f"{CSCR_GAP[0]:.0f}~{CSCR_GAP[1]:.0f}초)")
         st = {si: {"due": 0.0, "ph": "enter", "n": 0, "fail": 0} for si in targets}
         stop = lambda: getattr(self, "_cscr_stop", False)
-        hunted, used = [], 0
+        hunted, used, kept = [], 0, []
         while st and not stop():
             now = time.time()
             si = min(st, key=lambda k: st[k]["due"])
@@ -33782,7 +33782,7 @@ class App(tk.Tk):
             tag = f"#{si + 1:02d}"
             try:
                 if v["ph"] == "enter":
-                    r = self._cscr_enter(si)
+                    r = self._cscr_enter(si, first=(v["n"] == 0))
                     if r == "in":
                         v["n"] += 1
                         used += 1
@@ -33790,6 +33790,11 @@ class App(tk.Tk):
                         v["due"] = time.time() + random.uniform(*CSCR_STAY)
                         click_log(f"[서커스주문서] {tag} ✅ {v['n']}번째로 들어갔다 → "
                                   f"{int(v['due'] - time.time())}초 뒤 귀환")
+                    elif r == "skip":
+                        # 🚫 처음부터 주문서가 없는 클라는 **그대로 둔다** — 귀환도 사냥도 안 한다
+                        #    (2026-11-23 사용자: "굳이 마을에 귀환할 필요가 없잖아")
+                        kept.append(si + 1)
+                        del st[si]
                     elif r == "none":
                         click_log(f"[서커스주문서] {tag} 주문서가 더 없다 ({v['n']}번 썼다) → 사냥 보낸다")
                         self._cscr_hunt(si)
@@ -33814,12 +33819,14 @@ class App(tk.Tk):
                 st.pop(si, None)
             if not stop():
                 nap(random.uniform(1.5, 3.5))           # 🧍 클라 사이 (사람처럼)
-        click_log(f"[서커스주문서] 📜 끝 — 주문서 {used}번 · 사냥 보낸 클라 {hunted}"
+        click_log(f"[서커스주문서] 📜 끝 — 주문서 {used}번 · 사냥 보낸 클라 {hunted} · 주문서가 없어 그대로 둔 클라 {kept}"
                   + (" (■ 멈춤)" if stop() else ""))
         self.status.set(f"✔ 서커스주문서 끝 — 주문서 {used}번 · 사냥 {len(hunted)}클라")
 
-    def _cscr_enter(self, si):
-        """가방을 열어 주문서를 찾아 두 번 눌러 들어간다 → "in" · "none"(주문서 없음) · "fail"."""
+    def _cscr_enter(self, si, first=False):
+        """가방을 열어 주문서를 찾아 두 번 눌러 들어간다 → "in" · "none"(주문서 없음) · "skip" · "fail".
+        first=True (그 클라 처음) — 주문서가 **있으면** 가방을 닫고 숫자 0 으로 마을에 갔다가 쓴다 ·
+        **없으면** 가방만 닫고 "skip" (그 클라는 그대로 둔다 — 2026-11-23 사용자 지시)."""
         c = self._cscr_ctx(si)
         tag = f"#{si + 1:02d}"
         if not c:
@@ -33852,7 +33859,7 @@ class App(tk.Tk):
             click_log(f"[서커스주문서] 🚫 {tag} 화면을 못 찍었다")
             return "fail"
         # 이미 비밀 장소 안이면 (가방이 닫혀 있을 때만 보인다)
-        _pv = cscr_place_score(big)
+        _pv = cscr_place_score(big) if first else -1.0
         if _pv >= CSCR_PLACE_MATCH:
             click_log(f"[서커스주문서] {tag} 이미 **서커스단 비밀 장소** 안이다 ({_pv:.2f}) — 들어간 것으로 본다")
             self._cscr_auto(c, tag)
@@ -33919,8 +33926,23 @@ class App(tk.Tk):
             nap(random.uniform(0.3, 0.5))
             if tab_open(grab()):
                 click_at(*P(INV_CLOSE))
-            click_log(f"[서커스주문서] {tag} 🔎 가방에 주문서가 없다 (휠 {steps}칸 훑음)")
+            if first:
+                click_log(f"[서커스주문서] {tag} 🔎 가방에 주문서가 없다 (휠 {steps}칸 훑음) — "
+                          f"**그대로 둔다** (귀환·사냥 안 함) → 다음 클라")
+                return "skip"
+            click_log(f"[서커스주문서] {tag} 🔎 가방에 주문서가 더 없다 (휠 {steps}칸 훑음)")
             return "none"
+        if first:
+            # 🏠 있으면 — 가방을 닫고 숫자 0 으로 마을에 갔다가 쓴다 (사용자 지시)
+            nap(random.uniform(0.3, 0.5))
+            if tab_open(grab()) and self._inv_hand_wait(tag, stop):
+                click_at(*P(INV_CLOSE))
+            click_log(f"[서커스주문서] {tag} 📜 주문서가 있다 (일치도 {hit[2]:.2f}) → 가방을 닫고 마을로 귀환한 뒤 쓴다")
+            nap(random.uniform(0.6, 1.0))
+            if not self._cscr_home(si):
+                click_log(f"[서커스주문서] {tag} ⚠ 귀환이 확인되지 않았다 — 그래도 주문서를 써 본다")
+            nap(random.uniform(1.5, 2.5))
+            return self._cscr_enter(si, first=False)
         cy, cx, v, col = hit
         X, Y = L + int(cx), T + int(cy)
         if not self._inv_hand_wait(tag, stop):
