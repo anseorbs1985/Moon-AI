@@ -5787,6 +5787,93 @@ def dcs_tpls():
     return out
 
 
+# 📜 **서커스주문서** (2026-11-23 사용자 지시)
+#    *"비밀 장소 이동 주문서 … 1장이면 한 번만 · 2장이면 4~6분 사이로 반복 … 다 끝나면 사냥 보내고
+#     주문서가 없으면 그냥 사냥 보내면 되거든"* · *"들어가면 인벤토리를 닫아 그리고 4분~4분20초 후에
+#     마을에 다시 귀환주문서를 하고 인벤토리를 열고 다시 가면 되는데 30~44초 간격을 줘"*
+#    📏 #01 실측 — 가방에서 두 번 누르면(오만의 탑 안에서도) 바로 **서커스단 비밀 장소** 로 간다.
+#       가방을 닫으면 미니맵 아래에 그 이름이 보인다 (1.00 · 다른 화면 ≤0.47). 숫자 0 = 귀환(기린 마을).
+CSCR_MATCH    = 0.88          # 주문서 모양 — 📏 그 칸 1.00 · 비슷한 두루마리 ≤0.82(색차 20~26)
+CSCR_COLOR    = 12.0          #   + 평균 색 차이(가장 큰 채널) 이 안이어야
+CSCR_PLACE_MATCH = 0.80       # '서커스단 비밀 장소' 이름
+CSCR_STAY     = (240.0, 260.0)   # 들어가서 이만큼 뒤 귀환 (4분 ~ 4분 20초)
+CSCR_GAP      = (30.0, 44.0)     # 귀환하고 다시 들어가기까지
+CSCR_IN_WAIT  = 15.0          # 두 번 누른 뒤 비밀 장소 이름이 보일 때까지
+CSCR_HOME_WAIT = (5.0, 7.0)   # 0 을 누르고 마을에 닿기까지
+CSCR_SCAN_MAX = 40            # 가방을 훑는 휠 칸 수 한도
+CSCR_FAIL_MAX = 2             # 한 클라에서 이만큼 못 들어가면 그 클라는 사냥만 보내고 끝
+CSCR_HOME_KEY = "0"
+CSCR_HUNT_CHECK = (6.0, 9.0)  # 사냥 보낸 뒤 AUTO 가 켜졌나 보기까지
+_CSCR_TPL = {}
+
+
+def _cscr_tpl(nm):
+    try:
+        import cv2, numpy as np
+        p = os.path.join(IMG_DIR, nm + ".png")
+        if not os.path.exists(p):
+            return None
+        mt = os.path.getmtime(p)
+        c = _CSCR_TPL.get(nm)
+        if c and c[1] == mt:
+            return c[0]
+        t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+        _CSCR_TPL[nm] = (t, mt)
+        return t
+    except Exception:
+        return None
+
+
+def cscr_find(big):
+    """📜 가방 목록에서 비밀 장소 이동 주문서 → (cy, cx, 점수, 색차) 창 안 픽셀 · 없으면 None."""
+    try:
+        import cv2, numpy as np
+        t0 = _cscr_tpl("cscr_scroll")
+        if t0 is None or big is None:
+            return None
+        kx, ky = _inv_k(big)
+        t = _inv_fit(t0, kx, ky)
+        tm = t.reshape(-1, 3).astype(np.float32).mean(0)
+        x0, y0, x1, y1 = INV_LIST
+        X0, Y0 = int(x0 * kx), int(y0 * ky)
+        a = big[Y0:int(y1 * ky), X0:int(x1 * kx)]
+        if a.shape[0] < t.shape[0] or a.shape[1] < t.shape[1]:
+            return None
+        r = cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED)
+        ys, xs = np.where(r >= CSCR_MATCH)
+        best = None
+        for y, x in zip(ys.tolist(), xs.tolist()):
+            p = a[y:y + t.shape[0], x:x + t.shape[1]].reshape(-1, 3).astype(np.float32).mean(0)
+            col = float(np.abs(p - tm).max())
+            if col > CSCR_COLOR:
+                continue
+            v = float(r[y, x])
+            if best is None or v > best[2]:
+                best = (Y0 + y + t.shape[0] // 2, X0 + x + t.shape[1] // 2, v, col)
+        return best
+    except Exception:
+        return None
+
+
+def cscr_place_score(big):
+    """📜 미니맵 아래 지역 이름이 '서커스단 비밀 장소' 인가 → 점수 (-1 = 못 봄 · 가방이 열려 있으면 가려진다)."""
+    try:
+        import cv2
+        t = _cscr_tpl("cscr_place")
+        if big is None or t is None:
+            return -1.0
+        H, W = big.shape[:2]
+        k = W / float(INV_BASE_W)
+        if abs(k - 1) > 0.02:
+            t = cv2.resize(t, (max(4, int(t.shape[1] * k)), max(4, int(t.shape[0] * k))))
+        band = big[int(H * 0.28):int(H * 0.55), int(W * 0.70):W]
+        if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
+            return -1.0
+        return float(cv2.matchTemplate(band, t, cv2.TM_CCOEFF_NORMED).max())
+    except Exception:
+        return -1.0
+
+
 def dcs_find(big):
     """보이는 가방 칸에서 충전석 → {종류: (cy, cx, 점수, 색차)} (창 안 픽셀 · 칸 가운데).
     종류마다 가장 잘 맞는 칸 하나 (같은 돌은 한 칸에 쌓인다)."""
@@ -12301,6 +12388,17 @@ class App(tk.Tk):
                                    command=lambda: self._subc_start(None))
         self._subc_btn.pack(side="left", padx=(2, 0))
         self.after(2500, self._subc_boot)
+        # 📜 **서커스주문서 — 보조서커스 밑** (2026-11-23 사용자 지시)
+        _cs = tk.Frame(dc_col)
+        _cs.pack(anchor="n", pady=(2, 0), before=self._warn_toprow)
+        tk.Button(_cs, text="📜 서커스주문서", font=("맑은 고딕", 8, "bold"),
+                  bg="#9a7d0a", fg="white", activebackground="#7d6608",
+                  width=10, height=1, pady=2,
+                  command=self._open_cscr_win).pack(side="left")
+        tk.Button(_cs, text="▶실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#27ae60", fg="white", activebackground="#1e8449",
+                  width=4, height=1, pady=2,
+                  command=lambda: self._cscr_start(None)).pack(side="left", padx=(2, 0))
 
         _dun = tk.LabelFrame(dc_col, text=" 던전 ", font=("맑은 고딕", 9, "bold"),
                              fg="#a04000", bd=2, relief="groove")
@@ -33575,6 +33673,370 @@ class App(tk.Tk):
                   + (" (■ 멈춤)" if getattr(self, "_xreg_stop", False) else ""))
         self.status.set(f"✔ 거래소등록 끝 — {tot}개 올렸습니다")
 
+    # 📜 서커스주문서 (2026-11-23)
+    def _open_cscr_win(self):
+        self._open_section_win("_cscr_win", "📜 서커스주문서", self._build_cscr,
+                               w=600, h=190, pinnable=True)
+
+    def _build_cscr(self, p):
+        self._cscr_sel = getattr(self, "_cscr_sel", set())
+        top = tk.Frame(p); top.pack(anchor="w", padx=8, pady=(6, 2))
+        tk.Button(top, text="▶ 16클라 전체 실행", font=("맑은 고딕", 9, "bold"), bg="#27ae60",
+                  fg="white", command=lambda: self._cscr_start(None)).pack(side="left")
+        tk.Button(top, text="✔ 전체선택", font=("맑은 고딕", 9), bg="#5d6d7e", fg="white",
+                  command=self._cscr_sel_all).pack(side="left", padx=(6, 0))
+        tk.Button(top, text="▶ 선택실행", font=("맑은 고딕", 9, "bold"), bg="#1f618d", fg="white",
+                  command=lambda: self._cscr_start(sorted(self._cscr_sel))).pack(side="left", padx=(6, 0))
+        grid = tk.Frame(p); grid.pack(anchor="w", padx=8, pady=(4, 2))
+        names = {}
+        try:
+            for i, v in enumerate(self._client_hwnds_by_slot() or []):
+                names[i] = (win32gui.GetWindowText(v[4]) or "").replace("리니지M l ", "")
+        except Exception:
+            pass
+        self._cscr_plus = {}
+        for c in range(4):
+            col = tk.Frame(grid); col.pack(side="left", anchor="n", padx=(0, 6))
+            for r in range(4):
+                si = c * 4 + r
+                f = tk.Frame(col, bd=1, relief="groove"); f.pack(anchor="w", pady=1, fill="x")
+                tk.Label(f, text=f"#{si + 1:02d} {names.get(si, '')[:6]}", width=11, anchor="w",
+                         font=("맑은 고딕", 9)).pack(side="left")
+                b = tk.Button(f, text="+", width=2, font=("맑은 고딕", 8, "bold"),
+                              command=lambda i=si: self._cscr_toggle(i))
+                b.pack(side="left")
+                self._cscr_plus[si] = b
+                tk.Button(f, text="▶", width=2, font=("맑은 고딕", 8, "bold"), bg="#27ae60", fg="white",
+                          command=lambda i=si: self._cscr_one(i)).pack(side="left", padx=(2, 0))
+        self._cscr_paint()
+
+    def _cscr_paint(self):
+        for si, b in (getattr(self, "_cscr_plus", {}) or {}).items():
+            try:
+                on = si in self._cscr_sel
+                b.config(text=("✔" if on else "+"), bg=("#f39c12" if on else "SystemButtonFace"))
+            except Exception:
+                pass
+
+    def _cscr_toggle(self, si):
+        self._cscr_sel ^= {si}
+        self._cscr_paint()
+
+    def _cscr_sel_all(self):
+        self._cscr_sel = set() if len(self._cscr_sel) == 16 else set(range(16))
+        self._cscr_paint()
+
+    def _cscr_start(self, sel=None):
+        if _cscr_tpl("cscr_scroll") is None:
+            self.status.set("📜 주문서 그림(cscr_scroll.png)이 없습니다 — 🔄 업데이트를 해주세요")
+            return
+        if sel is not None and not sel:
+            self.status.set("📜 고른 클라가 없습니다 — [+] 로 고르세요")
+            return
+        name = "서커스주문서"
+        if not self._try_busy_or_queue(name, lambda: self._cscr_start(sel)):
+            return
+        self._cscr_stop = False
+        threading.Thread(target=self._run_task, args=(name, self._cscr_run, sel), daemon=True).start()
+
+    def _cscr_one(self, si):
+        self._test_go(f"서커스주문서 #{si + 1:02d}", "_cscr_stop", self._cscr_run, [si])
+
+    def _cscr_ctx(self, si):
+        """그 클라의 창 자리 → dict (못 찾으면 None)."""
+        try:
+            hw = (self._client_hwnds_by_slot() or [])[si][4]
+        except Exception:
+            hw = None
+        if not hw:
+            return None
+        L, T, R, B = win32gui.GetWindowRect(hw)
+        W, H = R - L, B - T
+        return {"hw": hw, "L": L, "T": T, "W": W, "H": H,
+                "kx": W / float(INV_BASE_W), "ky": H / float(INV_BASE_H),
+                "anc": (L + W // 2, T + H // 2),
+                "name": (win32gui.GetWindowText(hw) or "").replace("리니지M l ", "") or f"#{si + 1:02d}"}
+
+    def _cscr_run(self, sel=None):
+        """📜 **번갈아** 돈다 — 클라마다 들어가 AUTO 를 켠 뒤 다음 클라로, 4분~4분20초가 된 클라부터
+        돌아가 귀환 → 30~44초 뒤 다시 들어간다. 주문서가 없으면 사냥 보내고 그 클라는 끝."""
+        self._start_pause("cscr")
+        targets = list(sel) if sel else list(range(16))
+        random.shuffle(targets)
+        click_log(f"[서커스주문서] 📜 시작 — 클라 {[t + 1 for t in targets]} "
+                  f"(머무는 시간 {CSCR_STAY[0]:.0f}~{CSCR_STAY[1]:.0f}초 · 다시 들어가기까지 "
+                  f"{CSCR_GAP[0]:.0f}~{CSCR_GAP[1]:.0f}초)")
+        st = {si: {"due": 0.0, "ph": "enter", "n": 0, "fail": 0} for si in targets}
+        stop = lambda: getattr(self, "_cscr_stop", False)
+        hunted, used = [], 0
+        while st and not stop():
+            now = time.time()
+            si = min(st, key=lambda k: st[k]["due"])
+            v = st[si]
+            if v["due"] > now:
+                left = [f"#{k + 1:02d}{'↩' if st[k]['ph'] == 'home' else '▶'}{max(0, int(st[k]['due'] - now))}s"
+                        for k in sorted(st, key=lambda k: st[k]["due"])][:6]
+                self.status.set("📜 기다리는 중 — " + " ".join(left))
+                nap(min(1.0, v["due"] - now))
+                continue
+            tag = f"#{si + 1:02d}"
+            try:
+                if v["ph"] == "enter":
+                    r = self._cscr_enter(si)
+                    if r == "in":
+                        v["n"] += 1
+                        used += 1
+                        v["ph"] = "home"
+                        v["due"] = time.time() + random.uniform(*CSCR_STAY)
+                        click_log(f"[서커스주문서] {tag} ✅ {v['n']}번째로 들어갔다 → "
+                                  f"{int(v['due'] - time.time())}초 뒤 귀환")
+                    elif r == "none":
+                        click_log(f"[서커스주문서] {tag} 주문서가 더 없다 ({v['n']}번 썼다) → 사냥 보낸다")
+                        self._cscr_hunt(si)
+                        hunted.append(si + 1)
+                        del st[si]
+                    else:
+                        v["fail"] += 1
+                        if v["fail"] >= CSCR_FAIL_MAX:
+                            click_log(f"[서커스주문서] {tag} 🚫 {v['fail']}번 못 들어갔다 — 이 클라는 사냥만 보내고 끝")
+                            self._cscr_hunt(si)
+                            hunted.append(si + 1)
+                            del st[si]
+                        else:
+                            v["due"] = time.time() + random.uniform(*CSCR_GAP)
+                else:
+                    self._cscr_home(si)
+                    v["ph"] = "enter"
+                    v["due"] = time.time() + random.uniform(*CSCR_GAP)
+                    click_log(f"[서커스주문서] {tag} ↩ 귀환 → {int(v['due'] - time.time())}초 뒤 다시 본다")
+            except Exception as e:
+                click_log(f"[서커스주문서] ⚠ {tag} 오류 — {type(e).__name__}: {e} (이 클라는 넘어간다)")
+                st.pop(si, None)
+            if not stop():
+                nap(random.uniform(1.5, 3.5))           # 🧍 클라 사이 (사람처럼)
+        click_log(f"[서커스주문서] 📜 끝 — 주문서 {used}번 · 사냥 보낸 클라 {hunted}"
+                  + (" (■ 멈춤)" if stop() else ""))
+        self.status.set(f"✔ 서커스주문서 끝 — 주문서 {used}번 · 사냥 {len(hunted)}클라")
+
+    def _cscr_enter(self, si):
+        """가방을 열어 주문서를 찾아 두 번 눌러 들어간다 → "in" · "none"(주문서 없음) · "fail"."""
+        c = self._cscr_ctx(si)
+        tag = f"#{si + 1:02d}"
+        if not c:
+            click_log(f"[서커스주문서] 🚫 {tag} 클라 창을 못 찾았다")
+            return "fail"
+        if self._win_odd_skip(si, "서커스주문서"):
+            return "fail"
+        L, T, kx, ky, anc, name = c["L"], c["T"], c["kx"], c["ky"], c["anc"], c["name"]
+        stop = "_cscr_stop"
+
+        def P(rel):
+            return L + int(rel[0] * kx), T + int(rel[1] * ky)
+
+        def grab():
+            return grab_window(anc)
+
+        def tab_open(b):
+            return b is not None and inv_win_score(b, "inv_open", INV_TAB_BOX) >= INV_WIN_MATCH
+        self.status.set(f"📜 {tag} {name} 주문서 찾는 중...")
+        if not self._inv_hand_wait(tag, stop):
+            return "fail"
+        self._wake_hard("cscr", anc, name, si + 1, icon="📜")
+        try:
+            self._focus_client_at(anc)
+        except Exception:
+            pass
+        nap(random.uniform(0.3, 0.5))
+        big = grab()
+        if big is None:
+            click_log(f"[서커스주문서] 🚫 {tag} 화면을 못 찍었다")
+            return "fail"
+        # 이미 비밀 장소 안이면 (가방이 닫혀 있을 때만 보인다)
+        _pv = cscr_place_score(big)
+        if _pv >= CSCR_PLACE_MATCH:
+            click_log(f"[서커스주문서] {tag} 이미 **서커스단 비밀 장소** 안이다 ({_pv:.2f}) — 들어간 것으로 본다")
+            self._cscr_auto(c, tag)
+            return "in"
+        if not tab_open(big):
+            if dcs_hud_seen(big) is False:
+                self._dcs_clear(anc, tag, first=True)    # 🚪 화면을 덮은 창이 있을 때만 ESC
+                if getattr(self, stop):
+                    return "fail"
+
+            def open_bag(sec):
+                click_at(*P(INV_BAG))
+                t0 = time.time()
+                b = None
+                while time.time() - t0 < sec:
+                    nap(0.2)
+                    b = grab()
+                    if tab_open(b):
+                        break
+                return b
+            big = open_bag(4.0)
+            if not tab_open(big) and not getattr(self, stop):
+                if dcs_hud_seen(big) is not False:
+                    big = open_bag(3.0)
+                if not tab_open(big) and not getattr(self, stop):
+                    if self._dcs_clear(anc, tag):
+                        big = open_bag(4.0)
+            if not tab_open(big):
+                p = self._inv_shot(big, tag, "cscr_nobag") if big is not None else ""
+                click_log(f"[서커스주문서] 🚫 {tag} 가방이 안 열린다 · 화면 {p}")
+                return "fail"
+        # 🔎 찾는다 — 지금 자리 → 아래 끝 → 위 끝
+        lx, ly = P(((INV_LIST[0] + INV_LIST[2]) // 2, (INV_LIST[1] + INV_LIST[3]) // 2))
+        hit = cscr_find(big)
+        steps = 0
+        for d in (-1, 1):
+            while not hit and steps < CSCR_SCAN_MAX and not getattr(self, stop):
+                if d < 0 and inv_tail_seen(big):
+                    break
+                prev = inv_list(big)
+                k = random.choice(INV_DOWN_BURST if d < 0 else INV_UP_BURST)
+                moved = False
+                for _st in range(1 + INV_STALL_TRY):
+                    if not self._inv_hand_wait(tag, stop):
+                        return "fail"
+                    for _i in range(k):
+                        wheel_at(lx, ly, d)
+                        if _i < k - 1:
+                            nap(random.uniform(*INV_BURST_GAP))
+                    nap(random.uniform(*INV_WHEEL_GAP))
+                    b2 = grab()
+                    if b2 is None:
+                        break
+                    if float(abs(inv_list(b2) - prev).mean()) >= 1.5:
+                        big, moved = b2, True
+                        break
+                if not moved:
+                    break
+                steps += k
+                hit = cscr_find(big)
+            if hit:
+                break
+        if not hit:
+            nap(random.uniform(0.3, 0.5))
+            if tab_open(grab()):
+                click_at(*P(INV_CLOSE))
+            click_log(f"[서커스주문서] {tag} 🔎 가방에 주문서가 없다 (휠 {steps}칸 훑음)")
+            return "none"
+        cy, cx, v, col = hit
+        X, Y = L + int(cx), T + int(cy)
+        if not self._inv_hand_wait(tag, stop):
+            return "fail"
+        try:
+            self._focus_client_at(anc)
+        except Exception:
+            pass
+        nap(random.uniform(0.2, 0.4))
+        # 🖱 두 번 누른다 (📏 #01 — 한 번 눌러 '사용' 이 뜬 칸을 또 누르니 '사용할 수 없는 상태' 였고,
+        #    두 번 연달아 누르니 바로 갔다)
+        for _z in range(2):
+            pyautogui.mouseDown(X, Y)
+            nap(random.uniform(*DCS_TAP_HOLD))
+            pyautogui.mouseUp(X, Y)
+            if _z == 0:
+                nap(random.uniform(*DCS_TAP_GAP))
+        click_log(f"[서커스주문서] {tag} 📜 주문서 두 번 눌렀다 (일치도 {v:.2f} · 색차 {col:.0f} · 창안 {int(cx)},{int(cy)})")
+        nap(random.uniform(2.5, 3.5))                # 이동(불러오기)
+        # 🎒 가방을 닫는다 — 닫아야 미니맵 아래 지역 이름이 보인다 (사용자: "들어가면 인벤토리를 닫아")
+        b = grab()
+        if tab_open(b) and self._inv_hand_wait(tag, stop):
+            click_at(*P(INV_CLOSE))
+        t0, pv = time.time(), -1.0
+        while time.time() - t0 < CSCR_IN_WAIT and not getattr(self, stop):
+            nap(random.uniform(0.6, 1.0))
+            b = grab()
+            if tab_open(b):
+                click_at(*P(INV_CLOSE))
+                continue
+            pv = cscr_place_score(b)
+            if pv >= CSCR_PLACE_MATCH:
+                break
+        if pv < CSCR_PLACE_MATCH:
+            p = self._inv_shot(b, tag, "cscr_noin") if b is not None else ""
+            click_log(f"[서커스주문서] {tag} ⚠ {CSCR_IN_WAIT:.0f}초 안에 **비밀 장소 이름이 안 보인다** "
+                      f"(최고 {pv:.2f}) — 못 들어간 것으로 본다 · 화면 {p}")
+            return "fail"
+        click_log(f"[서커스주문서] {tag} 🎪 **서커스단 비밀 장소** 도착 ({pv:.2f} · {time.time() - t0:.1f}초)")
+        self._cscr_auto(c, tag)
+        return "in"
+
+    def _cscr_auto(self, c, tag):
+        """🟢 AUTO — 켜져 있으면 누르지 않는다 (누르면 꺼진다)."""
+        anc = c["anc"]
+        nap(random.uniform(0.8, 1.4))
+        _on, _cn = self._auto_on(anc)
+        if _on:
+            click_log(f"[서커스주문서] {tag} 🟢 이미 AUTO 중이다 (빛 {_cn}) — 누르지 않는다")
+            return
+        ax = c["L"] + int(SUBC_AUTO_REL[0] * c["W"] / SUBC_BASE_W)
+        ay = c["T"] + int(SUBC_AUTO_REL[1] * c["H"] / SUBC_BASE_H)
+        _on2, _cn2 = None, []
+        for _t in range(2):
+            if not self._inv_hand_wait(tag, "_cscr_stop"):
+                return
+            try:
+                self._focus_client_at(anc)
+            except Exception:
+                pass
+            click_at(ax, ay)
+            nap(random.uniform(1.2, 1.8))
+            _on2, _cn2 = self._auto_on(anc)
+            if _on2 or _on2 is None:
+                break
+        click_log(f"[서커스주문서] {tag} AUTO 눌렀다 · 누르기 전 빛 {_cn} → "
+                  + ("**켜졌다** ✔" if _on2 else "⚠ 켜졌는지 모르겠다" if _on2 is None else "⚠ 아직 꺼져 보인다")
+                  + f" (빛 {_cn2})")
+
+    def _cscr_home(self, si):
+        """↩ 숫자 0 으로 귀환 — 🚫 그 클라가 맨 앞일 때만 누른다 (키는 맨 앞 창으로 간다)."""
+        c = self._cscr_ctx(si)
+        tag = f"#{si + 1:02d}"
+        if not c:
+            click_log(f"[서커스주문서] 🚫 {tag} 클라 창을 못 찾아 귀환 못 했다")
+            return False
+        anc = c["anc"]
+        if not self._inv_hand_wait(tag, "_cscr_stop"):
+            return False
+        self._wake_hard("cscr", anc, c["name"], si + 1, icon="📜")
+        front = None
+        for _t in range(3):
+            try:
+                self._focus_client_at(anc)
+            except Exception:
+                pass
+            nap(random.uniform(0.3, 0.5))
+            front = self._client_is_front(anc)
+            if front is not False:
+                break
+        if front is False:
+            click_log(f"[서커스주문서] 🚫 {tag} 창을 맨 앞으로 못 올려 **0 을 누르지 않았다** (다른 창에 들어간다)")
+            return False
+        press_key(CSCR_HOME_KEY)
+        nap(random.uniform(*CSCR_HOME_WAIT))
+        pv = cscr_place_score(grab_window(anc))
+        click_log(f"[서커스주문서] {tag} ↩ 숫자 {CSCR_HOME_KEY} 귀환 · 비밀 장소 이름 {pv:.2f} "
+                  + ("(벗어났다 ✔)" if pv < CSCR_PLACE_MATCH else "⚠ 아직 비밀 장소로 보인다"))
+        return pv < CSCR_PLACE_MATCH
+
+    def _cscr_hunt(self, si):
+        """🏹 사냥 보내고 AUTO 가 켜졌나 본다."""
+        tag = f"#{si + 1:02d}"
+        try:
+            self._run_hunt(only=si)
+        except Exception as e:
+            click_log(f"[서커스주문서] ⚠ {tag} 사냥 보내기 오류 — {type(e).__name__}: {e}")
+            return
+        c = self._cscr_ctx(si)
+        if not c:
+            return
+        nap(random.uniform(*CSCR_HUNT_CHECK))
+        _on, _cn = self._auto_on(c["anc"])
+        click_log(f"[서커스주문서] {tag} 🏹 사냥 보냈다 · AUTO "
+                  + ("켜져 있다 ✔" if _on else "모르겠다" if _on is None else "⚠ 꺼져 보인다") + f" (빛 {_cn})")
+
     def _xreg_key5(self, tag, hw, anc):
         """'5'(최저가)를 **그 클라에만** 보낸다 → 보냈으면 True.
         사람이 마우스를 쓰는 중이면 놓을 때까지 기다리고, 누르기 **바로 직전**에 맨 앞 창이 그 클라인지 본다."""
@@ -48368,6 +48830,7 @@ class App(tk.Tk):
         self._eventshop_stop = True
         self._fish_stop      = True
         self._xreg_stop      = True
+        self._cscr_stop      = True
         self._circus_stop    = True
         self._circus2_stop   = True
         self._circus3_stop   = True
