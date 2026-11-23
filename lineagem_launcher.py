@@ -33747,6 +33747,9 @@ class App(tk.Tk):
         tries, skip, gold = {}, set(), None
         listed = {}                                  # 🎯 이번 실행에서 아이템별로 몇 번 올렸나
         looks = 0                                    # 🔎 처음에 아무것도 못 찾으면 몇 번 더 본다
+        t_inv = time.time()                          # ⏱ 소지품을 보기 시작한 때 (늦게 올리는 이유를 기록으로 본다)
+        t_last = t_inv                               #    직전에 하나 올린 때
+        ft_sum, ft_n = 0.0, 0
         while not stop():
             b = g()
             if b is None:
@@ -33761,7 +33764,9 @@ class App(tk.Tk):
             if xreg_score(b, "xreg_soji") < XREG_MATCH:
                 click_log(f"[거래소등록] 🚫 {tag} 판매 등록 화면이 아니다 — 멈춘다 · 화면 {shot(b, 'lost')}")
                 break
+            _ft = time.time()
             hits = xreg_find(b, skip, gold)
+            ft_sum += time.time() - _ft; ft_n += 1
             # 🚫 착용 중([E])은 올리지 않는다 (2026-11-21 사용자)
             _h2 = []
             for _h in hits:
@@ -33940,7 +33945,11 @@ class App(tk.Tk):
             listed[nm] = listed.get(nm, 0) + 1
             tries[nm] = 0                                # 같은 아이템이 여러 개면 계속 올린다
             gold = cell
-            click_log(f"[거래소등록] ✅ {tag} '{nm}' 최저가로 올렸다" + ((" 📦 1장" if xreg_one_cap(nm) else " 📦 수량 Max") if stack else "") + f" ({info})")
+            _now = time.time()
+            click_log(f"[거래소등록] ✅ {tag} '{nm}' 최저가로 올렸다" + ((" 📦 1장" if xreg_one_cap(nm) else " 📦 수량 Max") if stack else "") + f" ({info})"
+                      + f" · ⏱ 앞 것에서 {_now - t_last:.1f}초 · 소지품을 본 지 {_now - t_inv:.1f}초"
+                      + f" · 그림 찾기 평균 {ft_sum / max(1, ft_n):.2f}초 × {ft_n}번" + (f" · 처음에 {looks if looks < 99 else XREG_LOOK_N}번 더 봤다" if looks else ""))
+            t_last, ft_sum, ft_n = _now, 0.0, 0
             invx_human_nap(XREG_ITEM_GAP)                # 🧍 하나 올리고 1~2초 (가끔 더)
         close(g())
         click_log(f"[거래소등록] {tag} 끝 — {done}개 올렸다" + (f" · 건너뛴 것 {sorted(skip)}" if skip else ""))
