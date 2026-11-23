@@ -5848,39 +5848,42 @@ CSCR_QS_COLOR = 15.0
 _CSCR_QS = [None, 0.0]
 
 
+CSCR_QS_IMGS = ("cscr_qs", "cscr_qs_2", "cscr_qs_3")
+
+
 def cscr_qs_state(big):
     """빠른 칸 5번째 → ("have", 점수, 색차) 주문서가 밝게 있다 · ("dim", …) 흐리다(다 썼다) ·
-    ("other", …) 다른 것 · (None, …) 못 봄."""
+    ("other", …) 다른 것 · (None, …) 못 봄.  그림이 여러 장이면(`CSCR_QS_IMGS`) 전부 본다
+    ('1일' 빨간 표시가 붙은 주문서는 빠른 칸에서도 모양이 다르다 — 2026-11-24)."""
     try:
         import cv2, numpy as np
-        p = os.path.join(IMG_DIR, "cscr_qs.png")
-        if big is None or not os.path.exists(p):
+        if big is None:
             return None, -1.0, -1.0
-        mt = os.path.getmtime(p)
-        if _CSCR_QS[0] is None or _CSCR_QS[1] != mt:
-            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
-            if t is None:
-                return None, -1.0, -1.0
-            _CSCR_QS[0] = t
-            _CSCR_QS[1] = mt
-        t = _CSCR_QS[0]
         b = big
         if b.shape[1] != INV_BASE_W:
             k = INV_BASE_W / float(b.shape[1])
             b = cv2.resize(b, (INV_BASE_W, max(1, int(round(b.shape[0] * k)))))
         x0, y0, x1, y1 = CSCR_QS_BOX
         r = b[y0:y1, x0:x1]
-        if r.shape[0] < t.shape[0] or r.shape[1] < t.shape[1]:
-            return None, -1.0, -1.0
-        res = cv2.matchTemplate(r, t, cv2.TM_CCOEFF_NORMED)
-        _, v, _, pt = cv2.minMaxLoc(res)
-        cut = r[pt[1]:pt[1] + t.shape[0], pt[0]:pt[0] + t.shape[1]].astype(float)
-        col = float(abs(cut.mean((0, 1)) - t.astype(float).mean((0, 1))).mean())
-        if v >= CSCR_QS_MATCH and col <= CSCR_QS_COLOR:
-            return "have", float(v), col
-        if v >= CSCR_QS_MATCH - 0.05:
-            return "dim", float(v), col
-        return "other", float(v), col
+        out = None
+        for nm in CSCR_QS_IMGS:
+            t = _cscr_tpl(nm)
+            if t is None or r.shape[0] < t.shape[0] or r.shape[1] < t.shape[1]:
+                continue
+            res = cv2.matchTemplate(r, t, cv2.TM_CCOEFF_NORMED)
+            _, v, _, pt = cv2.minMaxLoc(res)
+            cut = r[pt[1]:pt[1] + t.shape[0], pt[0]:pt[0] + t.shape[1]].astype(float)
+            col = float(abs(cut.mean((0, 1)) - t.astype(float).mean((0, 1))).mean())
+            if v >= CSCR_QS_MATCH and col <= CSCR_QS_COLOR:
+                st = ("have", float(v), col)
+            elif v >= CSCR_QS_MATCH - 0.05:
+                st = ("dim", float(v), col)
+            else:
+                st = ("other", float(v), col)
+            rank = {"have": 2, "dim": 1, "other": 0}
+            if out is None or (rank[st[0]], st[1]) > (rank[out[0]], out[1]):
+                out = st
+        return out or (None, -1.0, -1.0)
     except Exception:
         return None, -1.0, -1.0
 
@@ -5910,11 +5913,27 @@ def _cscr_tpl(nm):
         return None
 
 
+CSCR_SCROLL_IMGS = ("cscr_scroll", "cscr_scroll_2", "cscr_scroll_3")
+# 📜 2026-11-24 사용자: *"주문서에 1일 < 가운데 빨갛게 적혀 있어서 놓치는 것 같다"* —
+#    곧 지워질 주문서엔 가운데 빨간 '1일' 이 붙는다. 모양 0.88 · 색차 16(기준 12)으로 버려졌다.
+#    → '1일' 붙은 판을 cscr_scroll_2 로 (#14 에서 자름 · 그 칸 1.00 · 그냥 주문서와 색차 16~17 · 다른 아이템 0)
+
+
 def cscr_find(big):
-    """📜 가방 목록에서 비밀 장소 이동 주문서 → (cy, cx, 점수, 색차) 창 안 픽셀 · 없으면 None."""
+    """📜 가방 목록에서 비밀 장소 이동 주문서 → (cy, cx, 점수, 색차) 창 안 픽셀 · 없으면 None.
+    그림이 여러 장이면(`CSCR_SCROLL_IMGS`) 전부 보고 가장 잘 맞는 것."""
+    best = None
+    for nm in CSCR_SCROLL_IMGS:
+        r = _cscr_find_one(big, nm)
+        if r and (best is None or r[2] > best[2]):
+            best = r
+    return best
+
+
+def _cscr_find_one(big, nm):
     try:
         import cv2, numpy as np
-        t0 = _cscr_tpl("cscr_scroll")
+        t0 = _cscr_tpl(nm)
         if t0 is None or big is None:
             return None
         kx, ky = _inv_k(big)
