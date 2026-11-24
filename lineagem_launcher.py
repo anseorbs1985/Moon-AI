@@ -664,6 +664,13 @@ INV_TOP_GAP   = (0.30, 0.50)      # 맨 위로 올라갈 때 휠 한 칸 뒤 (�
 #   → 열면 **누르지 않고 맨 위까지 빠르게** 올라간 뒤(한 칸 신호를 이어서 · 약 10초) 아래로 끝까지.
 #     예전(11-19)의 맨 위로 오르기는 한 칸마다 0.3~0.5초를 쉬어 37초가 걸렸다 — 그래서 뺐던 것이다.
 INV_CLIMB_ON = True
+# 🥇 **먼저 다 먹을 것** — `inv_meta.json` 의 `eat_first` (2026-11-24 사용자: *"서커스 비약 … 저거 있으면
+#    먼저 저거부터 먹어 전부 다 먹고 다른 거 먹어 · 안 먹어지면 다른 거 해야 할 일 하면 된다"*)
+#    맨 위로 올라갈 때 **눈을 뜨고** 올라가며(줄을 건너뛰지 않게 1~3칸씩) 그것만 먹는다 →
+#    맨 위에서 아래로 평소처럼 훑는다. 두 번 눌러 변화가 없으면(안 먹어진다) 그 클라에서는 건너뛴다.
+#    가방은 보통 맨 아래(지난번 끝)에서 열리므로 '눈 뜨고 올라가기' 가 곧 먼저 먹기다.
+#    맨 위에서 열렸으면 내려가며 보이는 화면마다 그것부터 먹는다.
+INV_EATF_ON = True
 INV_CLIMB_BURST = (4, 5, 5, 6)     # 한 번에 이어서 올리는 칸 (누르지 않으니 크게)
 INV_CLIMB_GAP = (0.30, 0.45)       # 한 묶음 올린 뒤 멈췄나 보기까지
 INV_CLIMB_MAX = 160                # 최대 칸
@@ -5665,7 +5672,7 @@ def inv_find(big, skip=()):
             for y, x in sorted(zip(ys.tolist(), xs.tolist()), key=lambda p: -r[p[0], p[1]]):
                 # 그림 = 칸 가운데 기준 (x-12..x+12, y-12..y+4) → 칸 가운데
                 cx, cy = X0 + x + int(12 * kx), Y0 + y + int(12 * ky)
-                if any(abs(cx - o[1]) < 14 * kx and abs(cy - o[0]) < 14 * ky for o in out):
+                if any(abs(cx - o[1]) < 14 * kx and abs(cy - o[0]) < 14 * ky and o[2] == g for o in out):
                     continue
                 # 칸이 목록 안에 다 들어와 있어야 한다 (반쯤 잘린 칸은 다음 화면에서)
                 if cy - 15 * ky < Y0 or cy + 15 * ky > Y0 + a.shape[0]:
@@ -5676,8 +5683,19 @@ def inv_find(big, skip=()):
                     continue
                 out.append((cy, cx, g, float(r[y, x]), col))
     except Exception:
-        return out
-    return sorted(out)
+        pass
+    # 🏷 같은 칸에 여러 종류가 걸리면 **점수가 높은 종류**로 정한다 (2026-11-24 — 예전엔 목록에서
+    #    먼저 읽은 종류가 이겼다. '1일' 붙은 노랑 물병 그림이 빨강 물병 칸에도 0.81 로 걸렸다)
+    keep = []
+    try:
+        kx, ky = _inv_k(big)
+    except Exception:
+        kx = ky = 1.0
+    for o in sorted(out, key=lambda o: -o[3]):
+        if any(abs(o[1] - k[1]) < 14 * kx and abs(o[0] - k[0]) < 14 * ky for k in keep):
+            continue
+        keep.append(o)
+    return sorted(keep)
 
 
 def inv_dim(big):
@@ -34899,19 +34917,62 @@ class App(tk.Tk):
         since = 0                    # 마지막으로 깔 것을 본 뒤 굴린 칸 수
         moved_any = False            # 한 번이라도 목록이 움직였나
         _climbed = False
+        eatf = set(inv_meta().get("eat_first") or []) if INV_EATF_ON else set()
+        eat_n = [0]
+
+        def _eat_here():
+            """🥇 지금 화면의 '먼저 먹을 것' 을 없어질 때까지 (안 먹어지면 건너뜀) → 'stop' | None."""
+            nonlocal done, big
+            for _e in range(60):
+                if self._item_stop:
+                    return "stop"
+                b = grab()
+                if b is None:
+                    return None
+                big = b
+                if not tab_open(b):
+                    return None                    # 가방이 아니면 평소 길(_inv_after)이 본다
+                hs = sorted([h for h in inv_find(b, skip) if h[2] in eatf], key=lambda h: (h[0], h[1]))
+                if not hs:
+                    return None
+                cy, cx, g, v, col = hs[0]
+                if not self._inv_hand_wait(tag):
+                    return "stop"
+                self._inv_dbl(L + cx, T + cy)
+                r = self._inv_after(anc, tag, P, b, cx, cy)
+                if r == "stop":
+                    return "stop"
+                if r == "same":
+                    fails[g] = fails.get(g, 0) + 1
+                    click_log(f"[아이템정리] {tag} 🥇 {g} 를 두 번 눌렀는데 안 먹어진다 ({fails[g]}번째)")
+                    if fails[g] >= 2:
+                        skip.add(g)
+                        click_log(f"[아이템정리] {tag} 🥇 {g} 는 **안 먹어진다** — 이 클라에서는 건너뛰고 다른 것을 한다")
+                else:
+                    done += 1
+                    eat_n[0] += 1
+                    oks[g] = oks.get(g, 0) + 1
+                    click_log(f"[아이템정리] {tag} 🥇 ✅ {g} **먼저** 먹었다 ({r} · 일치도 {v:.2f} · 색차 {col:.1f})")
+                    self.status.set(f"🎴 {tag} {done}번째 — {g} (먼저)")
+                nap(random.uniform(*INV_GAP))
+            return None
+
         if INV_CLIMB_ON:
             _tc, _cl, _miss = time.time(), 0, 0
             while _cl < INV_CLIMB_MAX and not self._item_stop:
+                if eatf and _eat_here() == "stop":
+                    return done
                 if not self._inv_hand_wait(tag):
                     break
                 _pv = inv_list(big)
-                _k = random.choice(INV_CLIMB_BURST)
+                # 🥇 먼저 먹을 것이 있으면 **줄을 건너뛰지 않게** 1~3칸씩 · 없으면 빠르게
+                _k = random.choice(INV_DOWN_BURST if eatf else INV_CLIMB_BURST)
                 for _i in range(_k):
                     if _i:
                         nap(random.uniform(*INV_BURST_GAP))
                     wheel_at(lx, ly, 1)
                 _cl += _k
-                nap(random.uniform(*INV_CLIMB_GAP))
+                nap(random.uniform(*(INV_WHEEL_GAP if eatf else INV_CLIMB_GAP)))
                 _b2 = grab()
                 if _b2 is None:
                     break
@@ -34924,9 +34985,12 @@ class App(tk.Tk):
                 else:
                     _miss = 0
                     big = _b2
+            if _climbed and eatf and _eat_here() == "stop":
+                return done
             if _climbed:
-                click_log(f"[아이템정리] {tag} 🧭 **맨 위**까지 올라갔다 (휠 {_cl}칸 · {time.time() - _tc:.1f}초) "
-                          f"→ 위에서 아래로 끝까지 한 번 훑는다")
+                click_log(f"[아이템정리] {tag} 🧭 **맨 위**까지 올라갔다 (휠 {_cl}칸 · {time.time() - _tc:.1f}초"
+                          + (f" · 🥇 먼저 먹은 것 {eat_n[0]}번" if eatf else "")
+                          + ") → 위에서 아래로 끝까지 한 번 훑는다")
         if _climbed:
             pass
         elif inv_tail_seen(big):
@@ -35023,7 +35087,7 @@ class App(tk.Tk):
             hits = [h for h in hits if h[2] not in rank or (pick is not None and rank[h[2]] == pick
                                                             and h[2] not in skip and not capped
                                                             and not qs_busy and not qs_done)]
-            hits.sort(key=lambda h: (h[0], h[1]))       # 화면 위 → 아래
+            hits.sort(key=lambda h: (h[2] not in eatf, h[0], h[1]))   # 🥇 먼저 먹을 것 → 화면 위 → 아래
             # 🎯 누르기 시작한 칸이 아직 있으면 **그 칸부터** (2026-11-19 사용자: *"하나 누르고 다른 거
             #    눌렀다가 또 있으니까 하나 누르고 이러지 말고 하나씩 끝까지 완벽하게"*)
             if stick:
@@ -35883,6 +35947,18 @@ class App(tk.Tk):
                     if _b2 is not None:
                         b = _b2
                         _v = inv_dim(b)
+                if _bs > 20 and 0 <= _v < _bs * INV_DIM_RATIO and b is not None and _round < 5:
+                    # 🕐 그 창이 **늦게 뜬 아는 창**(보상·결과·수량·선택)이면 멈추지 않는다 —
+                    #    2026-11-24 #04: 카드를 깐 뒤 1.6초 동안 가방만 보이다가 「보 상」(6칸)이 떠
+                    #    '모르는 창' 으로 멈췄다 (흰 점 42 · 밝기 14.5 — 보상 창 판정은 통과하는 화면).
+                    _w3, _m3 = quest_reward_seen(b)
+                    if (quest_reward_open(_w3, _m3, m0)
+                            or inv_win_score(b, "inv_result", INV_RES_BOX) >= INV_WIN_MATCH
+                            or inv_win_score(b, "inv_qty", INV_QTY_BOX) >= INV_WIN_MATCH
+                            or inv_win_score(b, "inv_choice", INV_CHOICE_BOX) >= INV_WIN_MATCH):
+                        click_log(f"[아이템정리] {tag} 🕐 가방 위로 **늦게 뜬 창**이다 (흰 점 {_w3} · 밝기 {_m3:.0f}) "
+                                  f"— 닫고 이어서 한다")
+                        continue
                 if _bs > 20 and 0 <= _v < _bs * INV_DIM_RATIO:
                     p = self._inv_shot(b, tag, "dim")
                     click_log(f"[아이템정리] 🚫 {tag} 두 번 누른 뒤 **화면을 덮는 창**이 떴다 (밝기 {_v:.0f} · "

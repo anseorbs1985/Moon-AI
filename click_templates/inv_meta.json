@@ -60,7 +60,8 @@
    "v",
    "v",
    "now04",
-   "v8"
+   "v8",
+   "now04 1일 서커스 비약"
   ],
   "bead_red": [
    18
@@ -234,5 +235,8 @@
   [
    "gem_silver"
   ]
+ ],
+ "eat_first": [
+  "bead_gold"
  ]
 }
