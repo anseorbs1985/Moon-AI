@@ -656,6 +656,17 @@ INV_TOP_GAP   = (0.30, 0.50)      # 맨 위로 올라갈 때 휠 한 칸 뒤 (�
 #      → 가방을 열면 맨 위로 올라간 뒤 **위에서 아래로 한 번만** 훑는다. 끝에 닿으면 ✕.
 #   🥇 먼저 쓸 것(`first` — 물병·다이아몬드)은 **한 번 실행에 한 가지만** —
 #      목록 차례대로 처음 보이는 것 하나를 골라 다 누른다. 나머지 먼저 쓸 것은 다음 실행에.
+# 🧭 **맨 위로 빠르게 올라간 뒤 → 위에서 아래로 한 번** (2026-11-24 사용자: *"가끔은 제대로 하고
+#    가끔은 그냥 안 까는 것들이 생기더라"*)
+#   원인 — 가방은 닫을 때의 자리로 다시 열린다. 정리가 끝나면 **맨 아래(빈칸)** 에서 닫히므로
+#   다음에 열면 맨 아래에서 시작해 위로 훑다가 깔 것이 10칸 안 나오면 끝냈다 →
+#   그보다 **위에 쌓인 상자·카드**(이미 있던 묶음에 더해진 것)는 영영 안 봤다.
+#   → 열면 **누르지 않고 맨 위까지 빠르게** 올라간 뒤(한 칸 신호를 이어서 · 약 10초) 아래로 끝까지.
+#     예전(11-19)의 맨 위로 오르기는 한 칸마다 0.3~0.5초를 쉬어 37초가 걸렸다 — 그래서 뺐던 것이다.
+INV_CLIMB_ON = True
+INV_CLIMB_BURST = (4, 5, 5, 6)     # 한 번에 이어서 올리는 칸 (누르지 않으니 크게)
+INV_CLIMB_GAP = (0.30, 0.45)       # 한 묶음 올린 뒤 멈췄나 보기까지
+INV_CLIMB_MAX = 160                # 최대 칸
 INV_DOWN_MAX  = 80                # 내려갈 때 최대 휠 칸
 INV_OPEN_MAX  = 150               # 한 클라에서 최대 몇 번 까나
 INV_SLOT_GAP  = (5.0, 20.0)        # 클라와 클라 사이 (2026-11-19 사용자: "5~20초 사이 랜덤 · 넌 사람이야")
@@ -5832,6 +5843,23 @@ CSCR_LOAD     = (3.0, 5.0)    # 주문서를 쓰고 이동(불러오기)
 #   · 클릭은 원래 한 번에 한 클라뿐이다 (스레드 하나)
 #   · **동시에 돌리는 클라는 4개까지** — 한 클라가 끝나면 기다리던 클라가 (무작위로) 들어온다
 #   · 순간이동(들어가기·귀환 — 맵을 불러오는 무거운 것)끼리는 클라가 달라도 12~20초 띄운다
+# 🌙 **작업이 끝나면 클라를 절전으로 돌려놓는다** (2026-11-24 사용자: "1번")
+#   📏 16클라가 전부 깨어 있으면 CPU 100% (24코어 — 클라 하나 4~7% · 런처 1.7%) → 팅긴다.
+#      절전 중에는 화면을 거의 안 그려 가볍고, 사냥(AUTO)은 그대로 돈다.
+#   · 서커스주문서 — 비밀 장소에서 AUTO 를 켠 **바로 뒤** · 사냥 보낸 뒤 그 클라를 재운다
+#   · 그 밖의 작업 — 끝나고 사람이 손을 놓으면, 깨어 있는 클라를 재운다
+#   🚫 재우지 않는 것: 사람이 보고 있는 창(맨 앞) · 최근 5분 안에 사람이 누른 클라 ·
+#      확대한 창 · 화면을 덮은 창이 있는 클라(가방·거래소·캐릭선택 — '스킬' 단추가 안 보임) ·
+#      절전해제(F11)·영웅템·각성·변신확정·접속 작업 뒤
+#   절전 단추 = 왼쪽 아래 파란 단추 (창 546x307 기준 (15,273) — 사용자가 등록한 절전모드 좌표와 같은 자리)
+SLEEP_AFTER_ON = True
+SLEEP_BTN_REL = (15, 273)
+SLEEP_BTN_BASE = (546, 307)
+SLEEP_AFTER_DELAY = (6.0, 10.0)      # 작업이 끝나고 이만큼 뒤에 (AUTO 등이 자리 잡게)
+SLEEP_AFTER_WAIT = 600               # 사람이 쓰는 중이면 이만큼까지 기다린다 (그 뒤엔 그만)
+SLEEP_SKIP_HUMAN = 300               # 사람이 이 안에 누른 클라는 재우지 않는다
+SLEEP_AFTER_SKIP = ("절전", "영웅", "각성", "변신확정", "계정", "접속")
+SLEEP_VERIFY = 3.0                   # 누른 뒤 절전 화면이 뜨기를 기다리는 시간
 CSCR_LANES = 8                  # 2026-11-23 사용자: "8개씩 하자 부하가 걸리지 않도록"
 CSCR_HEAVY_GAP = (15.0, 24.0)   # 8클라면 순간이동이 잦아진다 → 4개씩일 때(12~20초)보다 넉넉히
 
@@ -28263,6 +28291,15 @@ class App(tk.Tk):
                 if n == seen:
                     continue
                 seen = n
+                # 🌙 사람이 누른 클라 — 5분 동안은 재우지 않는다 (보고 있는 것이다)
+                try:
+                    _hs = self._slot_of_anchor(xy)
+                    if _hs:
+                        if not hasattr(self, "_human_slot_at"):
+                            self._human_slot_at = {}
+                        self._human_slot_at[int(_hs)] = time.time()
+                except Exception:
+                    pass
                 if self._is_busy():
                     continue
                 # ✨ 각성 화면이면 각성강화 창을 띄운다 (띄우기만 · 2026-10-01).
@@ -33914,6 +33951,9 @@ class App(tk.Tk):
                         v["due"] = time.time() + random.uniform(*CSCR_STAY)
                         click_log(f"[서커스주문서] {tag} ✅ {v['n']}번째로 들어갔다 → "
                                   f"{int(v['due'] - time.time())}초 뒤 귀환")
+                        # 🌙 머무는 4분 동안 깨어 있을 이유가 없다 — 바로 재운다 (귀환할 때 다시 깨운다)
+                        self._sleep_one(si, "서커스주문서",
+                                        stop=lambda: getattr(self, "_cscr_stop", False), front_ok=True)
                     elif r == "skip":
                         # 🚫 처음부터 주문서가 없는 클라는 **그대로 둔다** — 귀환도 사냥도 안 한다
                         #    (2026-11-23 사용자: "굳이 마을에 귀환할 필요가 없잖아")
@@ -34303,6 +34343,9 @@ class App(tk.Tk):
         _on, _cn = self._auto_on(c["anc"])
         click_log(f"[서커스주문서] {tag} 🏹 사냥 보냈다 · AUTO "
                   + ("켜져 있다 ✔" if _on else "모르겠다" if _on is None else "⚠ 꺼져 보인다") + f" (빛 {_cn})")
+        if _on:
+            self._sleep_one(si, "서커스주문서",
+                            stop=lambda: getattr(self, "_cscr_stop", False), front_ok=True)
 
     def _xreg_key5(self, tag, hw, anc):
         """'5'(최저가)를 **그 클라에만** 보낸다 → 보냈으면 True.
@@ -34855,7 +34898,38 @@ class App(tk.Tk):
         sdir = -1                    # -1 = 아래로 · +1 = 위로
         since = 0                    # 마지막으로 깔 것을 본 뒤 굴린 칸 수
         moved_any = False            # 한 번이라도 목록이 움직였나
-        if inv_tail_seen(big):
+        _climbed = False
+        if INV_CLIMB_ON:
+            _tc, _cl, _miss = time.time(), 0, 0
+            while _cl < INV_CLIMB_MAX and not self._item_stop:
+                if not self._inv_hand_wait(tag):
+                    break
+                _pv = inv_list(big)
+                _k = random.choice(INV_CLIMB_BURST)
+                for _i in range(_k):
+                    if _i:
+                        nap(random.uniform(*INV_BURST_GAP))
+                    wheel_at(lx, ly, 1)
+                _cl += _k
+                nap(random.uniform(*INV_CLIMB_GAP))
+                _b2 = grab()
+                if _b2 is None:
+                    break
+                if float(abs(inv_list(_b2) - _pv).mean()) < 1.5:
+                    _miss += 1
+                    big = _b2
+                    if _miss >= 2:
+                        _climbed = True
+                        break
+                else:
+                    _miss = 0
+                    big = _b2
+            if _climbed:
+                click_log(f"[아이템정리] {tag} 🧭 **맨 위**까지 올라갔다 (휠 {_cl}칸 · {time.time() - _tc:.1f}초) "
+                          f"→ 위에서 아래로 끝까지 한 번 훑는다")
+        if _climbed:
+            pass
+        elif inv_tail_seen(big):
             sdir = 1
             click_log(f"[아이템정리] {tag} 🧭 가방이 **끝(빈칸이 보이는 자리)**에서 열렸다 — 여기서 위로 훑는다 "
                       f"(깔 것이 {INV_UP_IDLE}칸째 안 나오면 끝)")
@@ -35234,6 +35308,19 @@ class App(tk.Tk):
                 click_log(f"[아이템정리] {tag} 🛠 제작 결과 [Skip] 눌렀다 ({sv:.2f})")
             ox, oy, ov, b = self._invx_wait(anc, "invx_cw_ok", tmax=8.0)
         if ox is None:
+            # ⏭ [Skip] 으로 결과 창이 **바로 닫히고 제작 창으로 돌아온** 경우 — 제작은 끝났다
+            #    (2026-11-24 #05 실측: 결과 창 0.35 · 제작 창의 그 이름 1.00 · 주화 500 남음)
+            try:
+                _nx = invx_find(b, name_img)[0] if b is not None else None
+                _rx = invx_find(b, "invx_cw_result")[0] if b is not None else None
+            except Exception:
+                _nx = _rx = None
+            if _nx is not None and _rx is None:
+                click_log(f"[아이템정리] {tag} 🛠 [Skip] 뒤 결과 창이 바로 닫히고 제작 창으로 돌아왔다 — [확인] 없이 닫는다")
+                self._invx_tap(tag, L, T, kx, ky, INVX_CRAFT_X)    # 제작 창 ✕
+                click_log(f"[아이템정리] {tag} 🛠 ✅ {src_nm} → **{out_nm} 제작** (최대)")
+                self.status.set(f"🎴 {tag} {out_nm} 제작")
+                return "ok"
             return self._invx_unknown(tag, b, "제작 결과의 [확인] 이 안 보인다", ov)
         self._invx_tap_px(tag, L, T, ox, oy)                    # [확인]
         x, y, v, b = self._invx_wait(anc, name_img, tmax=3.0)
@@ -45703,6 +45790,14 @@ class App(tk.Tk):
         except Exception:
             pass
         try:
+            # 🌙 섬/던전 실행기가 막 끝났으면 — 깨어 있는 클라를 재운다
+            _ir = self._island_running()
+            if getattr(self, "_isl_was_run", False) and not _ir:
+                self._sleep_after_spawn("섬/던전")
+            self._isl_was_run = _ir
+        except Exception:
+            pass
+        try:
             if self._task_queue and not self._is_busy():
                 label, fn = self._task_queue.pop(0)
                 self.status.set(f"▶ 예약 작업 실행: {label}")
@@ -45761,6 +45856,149 @@ class App(tk.Tk):
                 return
             nap(0.01)      # 0.05 면 짧은 뜸을 넘겨버려 실제론 더 오래 쉰다
 
+    def _sleep_one(self, si, who, stop=None, front_ok=False):
+        """🌙 그 클라(si — 0부터)를 절전으로 → "slept" · "asleep"(이미 잠) · "cover"(화면을 덮은 창) ·
+        "nochange"(눌렀는데 안 잠) · "skip" · "fail".
+        🚫 '스킬' 단추가 보이는 **보통 게임 화면**일 때만 누른다 — 가방·거래소·캐릭선택 위에는 안 누른다."""
+        tag = f"#{si + 1:02d}"
+        try:
+            if not (SLEEP_AFTER_ON and self.cfg.get("sleep_after_on", True)):
+                return "skip"
+            hw = (self._client_hwnds_by_slot() or [])
+            if si >= len(hw) or not hw[si]:
+                return "fail"
+            l, t, r, b, h = hw[si]
+            W, H = r - l, b - t
+            anc = (l + W // 2, t + H // 2)
+            if self._win_odd_size(si + 1)[0]:
+                return "skip"
+            x, _y, v = find_sleep_img("fix", anc)
+            if x is not None:
+                return "asleep"
+            big = grab_window(anc)
+            if big is None:
+                return "fail"
+            hud = dcs_hud_seen(big)
+            if hud is not True:
+                click_log(f"[절전] {who} {tag} 화면을 덮은 창이 있어 재우지 않는다 ('스킬' 단추 {hud})")
+                return "cover"
+            # 누를 자리 — 사용자가 등록한 절전모드 좌표가 그 창 안이면 그것, 아니면 창 기준 자리
+            bx = by = None
+            try:
+                c0 = (self.cfg.get("slp_slots") or [])[si]
+                if c0 and l <= c0[0] < r and t <= c0[1] < b:
+                    bx, by = int(c0[0]), int(c0[1])
+            except Exception:
+                pass
+            if bx is None:
+                bx = l + int(SLEEP_BTN_REL[0] * W / SLEEP_BTN_BASE[0])
+                by = t + int(SLEEP_BTN_REL[1] * H / SLEEP_BTN_BASE[1])
+            if self._human_busy():
+                return "skip"
+            if stop and stop():
+                return "skip"
+            try:
+                self._focus_client_at(anc)
+            except Exception:
+                pass
+            nap(random.uniform(0.3, 0.55))
+            if not front_ok and self._human_busy():
+                return "skip"
+            click_at(bx, by)
+            t0 = time.time()
+            while time.time() - t0 < SLEEP_VERIFY:
+                nap(0.4)
+                x, _y, v = find_sleep_img("fix", anc)
+                if x is not None:
+                    click_log(f"[절전] 🌙 {who} {tag} 절전으로 보냈다 ({time.time() - t0:.1f}초 · {v:.2f})")
+                    return "slept"
+            click_log(f"[절전] ⚠ {who} {tag} 절전 단추 ({bx},{by}) 를 눌렀는데 절전 화면이 안 보인다 ({v:.2f})")
+            return "nochange"
+        except Exception as e:
+            click_log(f"[절전] ⚠ {who} {tag} 오류 — {type(e).__name__}: {e}")
+            return "fail"
+
+    def _sleep_after_spawn(self, name):
+        """🌙 작업 '{name}' 이 끝났다 → 잠시 뒤 깨어 있는 클라를 재운다 (스레드)."""
+        if not (SLEEP_AFTER_ON and self.cfg.get("sleep_after_on", True)):
+            return
+        if any(k in str(name) for k in SLEEP_AFTER_SKIP):
+            return
+        if getattr(self, "_sleep_after_busy", False):
+            return
+        threading.Thread(target=self._sleep_after_run, args=(str(name),), daemon=True).start()
+
+    def _sleep_after_run(self, name):
+        self._sleep_after_busy = True
+        try:
+            time.sleep(random.uniform(*SLEEP_AFTER_DELAY))
+            t0 = time.time()
+            while True:
+                # 다른 작업이 시작했으면 그 작업이 끝날 때 다시 한다
+                if self._is_busy() or self._island_running():
+                    return
+                try:
+                    if self._subc_soon():
+                        return
+                except Exception:
+                    pass
+                if not self._human_busy():
+                    break
+                if time.time() - t0 > SLEEP_AFTER_WAIT:
+                    click_log(f"[절전] '{name}' 끝 — 사람이 {SLEEP_AFTER_WAIT // 60}분 내내 컴퓨터를 써서 재우지 않았다")
+                    return
+                time.sleep(5)
+            if not self._try_busy("절전 돌려놓기"):
+                return
+            try:
+                self._sleep_clients(name)
+            finally:
+                self._clear_busy("절전 돌려놓기")
+        except Exception as e:
+            click_log(f"[절전] ⚠ '{name}' 뒤 재우기 오류 — {type(e).__name__}: {e}")
+        finally:
+            self._sleep_after_busy = False
+
+    def _sleep_clients(self, name):
+        """깨어 있는 클라를 재운다 — 사람이 보고 있는 창 · 최근에 누른 클라는 뺀다."""
+        import win32gui
+        t_start = time.time()
+        hw = self._client_hwnds_by_slot() or []
+        if not hw:
+            click_log(f"[절전] '{name}' 끝 — 리니지M 창 16개를 못 찾아 재우지 않았다")
+            return
+        try:
+            fg = win32gui.GetForegroundWindow()
+        except Exception:
+            fg = 0
+        hs = getattr(self, "_human_slot_at", {}) or {}
+        out = {"slept": [], "asleep": [], "cover": [], "nochange": [], "skip": [], "fail": []}
+        kept = []
+        order = list(range(len(hw)))
+        random.shuffle(order)
+        for si in order:
+            if _STOP_AT[0] > t_start:
+                break
+            if self._is_busy(exclude="절전 돌려놓기"):
+                break
+            if hw[si] and hw[si][4] == fg:
+                kept.append(f"#{si + 1:02d}(보던 창)")
+                continue
+            if time.time() - hs.get(si + 1, 0.0) < SLEEP_SKIP_HUMAN:
+                kept.append(f"#{si + 1:02d}(방금 누름)")
+                continue
+            r = self._sleep_one(si, name)
+            out.setdefault(r, []).append(si + 1)
+            if r == "slept":
+                nap(random.uniform(0.6, 1.4))
+        msg = (f"[절전] 🌙 '{name}' 끝 — 재운 클라 {sorted(out['slept'])} · 이미 자던 {len(out['asleep'])}개"
+               + (f" · 창이 떠 있어 둔 {sorted(out['cover'])}" if out["cover"] else "")
+               + (f" · 안 잠든 {sorted(out['nochange'])}" if out["nochange"] else "")
+               + (f" · 그대로 둔 {kept}" if kept else ""))
+        click_log(msg)
+        if out["slept"]:
+            self.after(0, lambda n=len(out["slept"]): self.status.set(f"🌙 클라 {n}개를 절전으로 돌려놓았습니다"))
+
     def _run_task(self, name, fn, *args):
         """작업 스레드 래퍼 — 끝나면 잠금 해제 + **런처를 '맨 뒤'로 되살린다.**
 
@@ -45797,6 +46035,10 @@ class App(tk.Tk):
                 pass
         finally:
             self._clear_busy(name)
+            try:
+                self._sleep_after_spawn(name)      # 🌙 끝나면 깨어 있는 클라를 재운다
+            except Exception:
+                pass
             try:
                 # 🎪 보조서커스 — 곧 바꿀 클라가 남아 있으면 내려둔 채로 둔다 (2026-11-19).
                 #    다 끝나면 `_minauto_tick` 이 맨 뒤로 되살린다 (`_min_by_us` 가 남아 있다).
