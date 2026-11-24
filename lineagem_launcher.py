@@ -34150,7 +34150,9 @@ class App(tk.Tk):
                     b2 = grab()
                     if b2 is None:
                         break
-                    if float(abs(inv_list(b2) - prev).mean()) >= 1.5:
+                    # 🧭 2026-11-24 — 평균 차이로 보면 맨 위 줄의 **반짝이는 동전** 때문에 늘 '움직였다' 가 되어
+                    #    맨 위를 영영 몰랐다 → 가방을 연 채 90칸을 다 굴렸다(약 2분 반). 밀린 거리로 본다.
+                    if inv_moved(prev, inv_list(b2)):
                         big, moved = b2, True
                         break
                 if not moved:
@@ -34165,7 +34167,7 @@ class App(tk.Tk):
                     b3 = grab()
                     if b3 is None:
                         break
-                    _still = float(abs(inv_list(b3) - inv_list(big)).mean()) < CSCR_SETTLE_DIFF
+                    _still = not inv_moved(inv_list(big), inv_list(b3))
                     big = b3
                     hit = cscr_find(big)
                     if _still:
@@ -34204,7 +34206,6 @@ class App(tk.Tk):
             cscr_nap(CSCR_CLIENT_GAP)                # 마을에 닿고 4~8초
             return self._cscr_enter(si, first=False)
         cy, cx, v, col = hit
-        X, Y = L + int(cx), T + int(cy)
         if not self._inv_hand_wait(tag, stop):
             return "fail"
         try:
@@ -34212,6 +34213,29 @@ class App(tk.Tk):
         except Exception:
             pass
         cscr_nap()
+        # 🔎 누르기 **직전에** 다시 본다 — 빠른 칸을 누른 사이 이미 들어갔거나(비밀 장소)·가방이 닫혔거나·
+        #    목록이 밀렸으면 그 자리는 **다른 아이템**이다 (2026-11-24 사용자: "다른 걸 누르는 문제")
+        _b = grab()
+        if _b is not None and cscr_place_score(_b) >= CSCR_PLACE_MATCH:
+            click_log(f"[서커스주문서] {tag} 이미 **서커스단 비밀 장소** 안이다 — 가방에서 누르지 않는다")
+            return self._cscr_arrive(c, tag)
+        if not tab_open(_b):
+            p = self._inv_shot(_b, tag, "cscr_nobag2") if _b is not None else ""
+            click_log(f"[서커스주문서] 🚫 {tag} 누르려는데 **가방이 안 보인다** — 아무것도 누르지 않는다 · 화면 {p}")
+            return "fail"
+        _hn = cscr_find(_b)
+        if not _hn or abs(_hn[0] - cy) > 8 or abs(_hn[1] - cx) > 8:
+            if _hn:
+                cy, cx, v, col = _hn
+                click_log(f"[서커스주문서] {tag} 🔎 주문서 자리가 바뀌었다 → 새 자리 창안 {int(cx)},{int(cy)} 를 누른다")
+            else:
+                p = self._inv_shot(_b, tag, "cscr_gone")
+                click_log(f"[서커스주문서] 🚫 {tag} 누르려는데 그 자리에 **주문서가 안 보인다** — "
+                          f"다른 것을 누르지 않게 아무것도 안 누른다 · 화면 {p}")
+                if tab_open(_b):
+                    click_at(*P(INV_CLOSE))
+                return "fail"
+        X, Y = L + int(cx), T + int(cy)
         # 🖱 두 번 누른다 (📏 #01 — 한 번 눌러 '사용' 이 뜬 칸을 또 누르니 '사용할 수 없는 상태' 였고,
         #    두 번 연달아 누르니 바로 갔다)
         for _z in range(2):
