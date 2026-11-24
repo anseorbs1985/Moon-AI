@@ -5649,6 +5649,41 @@ def inv_list(big):
     return cv2.cvtColor(a, cv2.COLOR_BGR2GRAY).astype(np.float32)
 
 
+def inv_moved(a, b, maxd=110):
+    """🧭 가방 목록이 **실제로 위아래로 밀렸나** — 두 목록(흑백)을 가장 잘 맞추는 밀린 거리로 본다.
+
+    2026-11-24 #04 실측 — 맨 위 두 줄의 **반짝이는 동전**(아데나·주화) 때문에 가만히 있어도
+    평균 차이가 2~16 이 나와, '차이 < 1.5' 로는 맨 위에 닿은 것을 영영 몰랐다
+    (그래서 맨 위로 오르기가 160칸을 다 굴리고 실패했다). 밀린 거리는 맨 위에서 **늘 0**,
+    움직일 때는 6~110 이었다. 못 재면 예전 방식(평균 차이 ≥ 1.5)."""
+    import numpy as np
+    try:
+        H = min(a.shape[0], b.shape[0])
+        a, b = a[:H], b[:H]
+        d0 = float(np.abs(a - b).mean())
+        if d0 < 1.5:
+            return False
+        best, bdy = d0, 0
+        for dy in range(-maxd, maxd + 1):
+            if dy == 0:
+                continue
+            if dy > 0:
+                x, y = a[dy:], b[:H - dy]
+            else:
+                x, y = a[:H + dy], b[-dy:]
+            if x.shape[0] < 30:
+                continue
+            m = float(np.abs(x - y).mean())
+            if m < best:
+                best, bdy = m, dy
+        return bdy != 0 and best < d0 - 0.5
+    except Exception:
+        try:
+            return float(abs(a - b).mean()) >= 1.5
+        except Exception:
+            return True
+
+
 def inv_find(big, skip=()):
     """보이는 칸에서 등록한 아이템 → [(y, x, 종류, 점수, 색차)] 위에서부터 (창 안 픽셀 · 칸 가운데)."""
     import cv2
@@ -34976,7 +35011,7 @@ class App(tk.Tk):
                 _b2 = grab()
                 if _b2 is None:
                     break
-                if float(abs(inv_list(_b2) - _pv).mean()) < 1.5:
+                if not inv_moved(_pv, inv_list(_b2)):
                     _miss += 1
                     big = _b2
                     if _miss >= 2:
@@ -35208,7 +35243,7 @@ class App(tk.Tk):
                 b2 = grab()
                 if b2 is None:
                     break
-                if float(abs(inv_list(b2) - prev).mean()) >= 1.5:
+                if inv_moved(prev, inv_list(b2)):
                     moved = True
                     moved_any = True
                     if _st:
