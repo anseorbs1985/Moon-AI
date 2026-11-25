@@ -1732,6 +1732,40 @@ def xreg_price(big):
         return ok, f"최저가 숫자폭 {span}(기준 {XREG_PRICE_SPAN}) · 총액 자리 {len(tg)} · 10다야? {t10} ({w10})"
     except Exception as e:
         return False, f"읽기 실패 {type(e).__name__}"
+def xreg_total_is10(big):
+    """📦 수량 창의 **총 판매 금액이 정확히 10** 인가 → True/False (못 읽으면 False — 두 자리 확인이 따로 있다).
+    (2026-11-26 사용자: *"검은빛 비늘이랑 망자의 영혼석은 … 맥스로 해서 올리면 된다 다만 그 총합이 10다야 이하면
+    올리지 말고 냅둬"*) — 10 미만(한 자리)은 '총액 자리 2' 확인이 이미 막는다. 여기서는 **10** 만 본다.
+    총액은 정수 노란 숫자 · 📏 '1' 은 폭 2px · 다른 숫자는 4px · '0' 그림(click_templates/xreg_tot0.png)과
+    끝자리를 겹쳐 다른 점 ≤1 (📏 0↔0 0 · 6↔0 4 · 2↔0 9 · 4↔0 20)."""
+    import cv2
+    import numpy as np
+    try:
+        z = cv2.imdecode(np.fromfile(os.path.join(IMG_DIR, "xreg_tot0.png"), np.uint8), 0)
+        if z is None or big is None:
+            return False
+        z = z > 127
+        kx, ky = _xreg_k(big)
+        x0, y0, x1, y1 = XREG_TOTAL_BOX
+        t = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)]
+        if abs(kx - 1) > 0.02 or abs(ky - 1) > 0.02:
+            t = cv2.resize(t, (x1 - x0, y1 - y0), interpolation=cv2.INTER_AREA)
+        t = t.astype(int)
+        m = (t[..., 2] > 150) & (t[..., 1] > 110) & (t[..., 0] < 100)
+        g = _xreg_groups(m)
+        if len(g) != 2:
+            return False
+        (a0, a1), (b0, b1) = g
+        if a1 - a0 > 2 or b1 - b0 != z.shape[1]:
+            return False
+        d = m[:z.shape[0], b0:b1]
+        if d.shape != z.shape:
+            return False
+        return int((d ^ z).sum()) <= 1
+    except Exception:
+        return False
+
+
 def xreg_price_stack(big):
     """수량 창 — (ok, 기록). ok = **개당 금액 = 최저 거래 단가** 이고 **총 판매 금액이 두 자리 이상**(노란 숫자).
     개당 금액은 10 밑일 수 있다(2.80 등) — 그래서 숫자 폭은 보지 않는다. 0원이면 총액이 노랗게 안 된다."""
@@ -1763,6 +1797,8 @@ def xreg_price_stack(big):
         t10, w10 = xreg_min_is10(big)
         if ok and t10 and XREG_NO10:
             return False, f"🚫 최저가가 **10다야**다 — 등록하지 않는다 ({w10})"
+        if ok and XREG_NO10 and xreg_total_is10(big):
+            return False, "🚫 **총 판매 금액이 10다야**다 — 10다야 이하는 올리지 않는다 (그대로 둔다)"
         return ok, f"개당=최저 {'같다' if same else '다르다'}(차이 {best[0]}·{best[1]}) · 총액 자리 {len(tg)}"
     except Exception as e:
         return False, f"읽기 실패 {type(e).__name__}"
