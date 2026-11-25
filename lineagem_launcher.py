@@ -34003,6 +34003,30 @@ class App(tk.Tk):
         self._send_behind_only()          # 최소화하지 않는다 (2026-11-19 사용자 지시)
         self.after(60, lambda: threading.Thread(target=self._run_task, args=("아이템정리", self._run_item), daemon=True).start())
 
+    def _inv_front(self, tag):
+        """🪟 아이템정리 중 누르기 직전 — **그 클라가 맨 앞이 아니면 다시 올린다** (2026-11-25 사용자:
+        *"카드를 까다가 멈추거나 다른창을 누르거나 그런다"* · *"카드 깐 상태로 멈출때도 많아"*).
+        가방을 열 때 한 번만 앞으로 올리고 그 뒤로는 안 봤다 → 그 사이 사람이 다른 클라를 누르면
+        다음 클릭(두 번 누르기 · 결과 창 ✕)이 **'창 띄우기' 로만 먹고 사라져** 결과 창이 열린 채 남았다.
+        `self._inv_anc` 가 있을 때(아이템정리 한 클라를 도는 동안)만 본다 · 모르면(None) 그냥 둔다."""
+        anc = getattr(self, "_inv_anc", None)
+        if not anc:
+            return
+        try:
+            if self._client_is_front(anc) is not False:
+                return
+            for k in range(3):
+                self._focus_client_at(anc)
+                nap(random.uniform(0.30, 0.50))
+                if self._client_is_front(anc) is not False:
+                    self._inv_refocus = getattr(self, "_inv_refocus", 0) + 1
+                    click_log(f"[아이템정리] 🪟 {tag} 다른 창이 앞에 있었다 → 이 클라를 다시 앞으로 올렸다"
+                              + (f" ({k + 1}번째)" if k else ""))
+                    return
+            click_log(f"[아이템정리] ⚠ {tag} 이 클라를 맨 앞으로 못 올렸다 (3번) — 그래도 누른다")
+        except Exception:
+            pass
+
     def _inv_hand_wait(self, tag, stop="_item_stop"):
         """✋ 사람이 마우스를 만지는 중이면 손을 뗄 때까지 → 멈춤이면 False."""
         try:
@@ -34016,14 +34040,17 @@ class App(tk.Tk):
             if getattr(self, stop, False):
                 return False
             if f is None:
+                self._inv_front(tag)
                 return True
             try:
                 idle = float(f())
             except Exception:
+                self._inv_front(tag)
                 return True
             if idle >= INV_HAND_QUIET:
                 if shown:
                     click_log(f"[아이템정리] ✋ {tag} 손을 떼서 이어서 한다 ({time.time() - t0:.0f}초 기다렸다)")
+                self._inv_front(tag)
                 return True
             if not shown:
                 shown = True
@@ -35249,7 +35276,10 @@ class App(tk.Tk):
                 break
             _err = False
             try:
-                tot += self._inv_slot(si)
+                try:
+                    tot += self._inv_slot(si)
+                finally:
+                    self._inv_anc = None
             except Exception as e:
                 _err = True
                 import traceback as _tb
@@ -35283,6 +35313,7 @@ class App(tk.Tk):
         def P(rel):
             return L + int(rel[0] * kx), T + int(rel[1] * ky)
         anc = (L + W // 2, T + H // 2)
+        self._inv_anc = anc                  # 🪟 누르기 전마다 이 클라가 맨 앞인지 본다
         name = win32gui.GetWindowText(hw) or tag
         self.status.set(f"🎴 {tag} {name} 가방 정리 중...")
         click_log(f"[아이템정리] ▶ {tag} [{name}]")
