@@ -1105,6 +1105,17 @@ CIRCUS_PICK_WHEEL  = (190, 230)             # 리스트 위에서 휠
 CIRCUS_PICK_MATCH  = 0.80
 CIRCUS_PICK_SCROLL = 15                      # 안 보이면 몇 칸까지 내려보나 (리스트가 더 안 움직이면 거기서 멈춘다)
 CIRCUS_PICK_LOOK   = 3                       # 처음에 리스트가 뜨기를 몇 번 보나
+# 📜 **오른쪽 스케줄 목록을 맨 위로 — 휠이 아니라 끌어내린다** (2026-11-25 #06 사고:
+#    *"2번째에 놔야하는데 왜 4번째에 넣어버린거지"*). 휠은 한 번에 3칸씩 보내 게임이 덜 먹었고,
+#    목록이 4번째 줄부터 보이는 채로 '2번째 자리' 를 눌러 4번째에 들어갔다.
+#    사용자가 녹화에서 한 그대로 — 목록을 잡고 아래로 끈다(약 110px · 0.6초) · **안 움직일 때까지** 되풀이.
+CIRCUS_TOP_CELL  = 4
+CIRCUS_TOP_FROM  = (430, 125)                # 끌기 시작 (546 기준)
+CIRCUS_TOP_DY    = 115
+CIRCUS_TOP_BAND  = (290, 95, 540, 290)       # 오른쪽 스케줄 목록
+CIRCUS_TOP_MAX   = 8
+CIRCUS_TOP_STILL = 1.5                       # 이보다 덜 바뀌면 '안 움직였다'
+CIRCUS_TOP_GAP   = (0.7, 1.1)
 WHEEL_UP_NOTCH  = 3    # 한 번에 굴릴 칸 수
 WHEEL_UP_TIMES  = 3    # 몇 번 굴릴지
 DOLL_SLOTS     = 16    # 인형 탐험 슬롯 수
@@ -24511,6 +24522,59 @@ class App(tk.Tk):
         self.status.set(f"🚫 [{nm}] 이벤트 사냥터를 못 찾았다")
         return "이미지없음"
 
+    def _circus_list_top(self, coord, slot):
+        """📜 오른쪽 스케줄 목록을 **끌어내려** 맨 위로 — 안 움직일 때까지 → "끌기"."""
+        import numpy as _np
+        nm = (slot or {}).get("name", "?")
+        rc = client_rect_at(*coord)
+        if not rc:
+            click_log(f"circus [{nm}] 📜 목록 맨 위로 — 어느 클라인지 모른다 → 이 슬롯 중단")
+            return "이미지없음"
+        Lx, Ty, W, H = rc[0], rc[1], rc[2] - rc[0], rc[3] - rc[1]
+        kx, ky = W / 546.0, H / 307.0
+
+        def band():
+            b = grab_window(coord)
+            if b is None:
+                return None
+            x0, y0, x1, y1 = CIRCUS_TOP_BAND
+            bh, bw = b.shape[:2]
+            return b[int(y0 * bh / 307.0):int(y1 * bh / 307.0),
+                     int(x0 * bw / 546.0):int(x1 * bw / 546.0)].astype(_np.int16)
+
+        try:
+            self._focus_client_at(coord)
+        except Exception:
+            pass
+        prev = band()
+        n, moved = 0, 0
+        for n in range(1, CIRCUS_TOP_MAX + 1):
+            if getattr(self, "_stop_flag", False):
+                return "이미지없음"
+            sx = Lx + int((CIRCUS_TOP_FROM[0] + random.randint(-8, 8)) * kx)
+            sy = Ty + int((CIRCUS_TOP_FROM[1] + random.randint(-6, 6)) * ky)
+            ey = sy + int((CIRCUS_TOP_DY + random.randint(-6, 6)) * ky)
+            pyautogui.mouseDown(sx, sy)
+            nap(random.uniform(0.08, 0.14))
+            steps = random.randint(9, 13)
+            for k in range(1, steps + 1):
+                pyautogui.moveTo(sx + random.randint(-1, 1), sy + int((ey - sy) * k / steps))
+                nap(random.uniform(0.035, 0.06))
+            pyautogui.mouseUp(sx, ey)
+            nap(random.uniform(*CIRCUS_TOP_GAP))
+            cur = band()
+            if prev is None or cur is None or prev.shape != cur.shape:
+                prev = cur
+                continue
+            d = float(_np.abs(cur - prev).mean())
+            prev = cur
+            if d < CIRCUS_TOP_STILL:
+                break                                   # 더 안 움직인다 = 맨 위
+            moved += 1
+        click_log(f"circus [{nm}] 📜 오른쪽 스케줄 목록을 끌어서 **맨 위로** 올렸다 "
+                  f"({n}번 끌었다 · 움직인 것 {moved}번)")
+        return "끌기"
+
     def _click_log(self, fkey, j, coord, slot, act):
         """이 클릭이 '리니지M 창'에 제대로 갔는지 기록한다 (씹힘 찾기용)."""
         if fkey not in self.LOG_FKEYS:
@@ -25308,6 +25372,8 @@ class App(tk.Tk):
         # 🎪 **이벤트등록 — 사냥터 리스트에서 그림으로 찾는다** (2026-11-25)
         if fkey == "circus" and j == CIRCUS_PICK_CELL and circus_pick_tpls():
             return self._circus_pick(coord, slot)
+        if fkey == "circus" and j == CIRCUS_TOP_CELL and coord:
+            return self._circus_list_top(coord, slot)
         # 🖱 **복구의 확인 칸** — 왼쪽부터 여러 자리를 눌러본다 (2026-11-08).
         #    ⚠ 이 처리가 **탭 흐름에만** 있어서 예전 좌표 흐름(로컬이 쓰는 길)은
         #      칸5 를 **그냥 눌렀다.** 🚫 복구(fix)의 그 칸에서만 동작한다.
@@ -46356,8 +46422,15 @@ class App(tk.Tk):
             click_log(f"[절전] ⚠ {who} {tag} 오류 — {type(e).__name__}: {e}")
             return "fail"
 
-    def _sleep_after_spawn(self, name):
-        """🌙 작업 '{name}' 이 끝났다 → 잠시 뒤 깨어 있는 클라를 재운다 (스레드)."""
+    def _sleep_after_spawn(self, name, t0=None):
+        """🌙 작업 '{name}' 이 끝났다 → 잠시 뒤 깨어 있는 클라를 재운다 (스레드).
+
+        ⏹ **■ 멈춤으로 끝난 작업이면 아무것도 하지 않는다** (2026-11-25 사용자:
+           *"멈춤을 하면 … 이어지는게 잇으면 전부 멈춰야해 이거 항상 말햇는데"*) —
+           멈춘 뒤에 절전 단추를 누르러 가면 '계속 돈다' 로 보인다."""
+        if t0 and _STOP_AT[0] >= t0:
+            click_log(f"[절전] '{name}' 은 ■ 멈춤으로 끝났다 — 절전 돌려놓기도 하지 않는다")
+            return
         if not (SLEEP_AFTER_ON and self.cfg.get("sleep_after_on", True)):
             return
         if any(k in str(name) for k in SLEEP_AFTER_SKIP):
@@ -46368,10 +46441,14 @@ class App(tk.Tk):
 
     def _sleep_after_run(self, name):
         self._sleep_after_busy = True
+        _ts = time.time()
         try:
             time.sleep(random.uniform(*SLEEP_AFTER_DELAY))
             t0 = time.time()
             while True:
+                if _STOP_AT[0] >= _ts:                  # ⏹ 기다리는 사이 ■ 멈춤 — 하지 않는다
+                    click_log(f"[절전] '{name}' 끝 — 기다리는 사이 ■ 멈춤이 눌려 재우지 않았다")
+                    return
                 # 다른 작업이 시작했으면 그 작업이 끝날 때 다시 한다
                 if self._is_busy() or self._island_running():
                     return
@@ -46449,6 +46526,7 @@ class App(tk.Tk):
           만들어도 자동으로 적용된다 (`_stop()` 을 '아는 런처 전부' 로 바꾼 것과
           같은 이유 — 손으로 나열하면 반드시 빠진다)."""
         nap_clear()               # 새 작업 — 멈춤 깃발을 내린다 (2026-11-03)
+        _rt0 = time.time()
         # ⏹ **`_stop_flag` 도 여기서 내린다** (2026-11-15). ■ 멈춤이 세운 이 깃발은
         #    [전체 자동실행]·F11 만 내렸다 → 그 전까지 `_stop_flag` 를 보는 작업
         #    (퀘스트 받기 등)이 **시작하자마자 '멈춤' 으로 끝났다.**
@@ -46474,7 +46552,7 @@ class App(tk.Tk):
         finally:
             self._clear_busy(name)
             try:
-                self._sleep_after_spawn(name)      # 🌙 끝나면 깨어 있는 클라를 재운다
+                self._sleep_after_spawn(name, _rt0)    # 🌙 끝나면 깨어 있는 클라를 재운다
             except Exception:
                 pass
             try:
