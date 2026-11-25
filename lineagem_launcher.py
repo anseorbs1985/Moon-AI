@@ -571,6 +571,9 @@ INV_OPEN_ON   = True              # False 면 예전 아이템정리(좌표 클�
 INV_BASE_W, INV_BASE_H = 546, 307 # 아래 자리의 기준 창 크기
 INV_BAG       = (428, 17)         # 가방 버튼 (오른쪽 위 왼쪽에서 두 번째 — 예전 아이템정리 클릭2 자리)
 INV_CLOSE     = (523, 48)         # 가방 창 ✕
+INV_REPASS    = 1                 # 🔁 상자를 깠으면 **아래쪽을 한 번 더** 훑는다 (2026-11-25 사용자)
+INV_REPASS_UP = (5, 7)            #    끝에서 휠 이만큼 올라갔다(약 4~6줄) 다시 내려간다 — 맨 위로는 안 간다
+INV_REPASS_WAIT = (0.8, 1.3)      #    나온 물건이 가방에 그려질 틈
 INV_LIST      = (388, 64, 528, 214)   # 가방 목록 칸 (x0, y0, x1, y1)
 INV_COLS      = (406, 440, 474, 509)  # 칸 가로 중심
 INV_TAB_BOX   = (380, 34, 522, 64)    # 가방 탭 줄을 찾는 자리 (열려 있나)
@@ -35492,214 +35495,250 @@ class App(tk.Tk):
             else:
                 click_log(f"[아이템정리] {tag} 🧺 아래 빠른 칸을 **다 먹었다/비었다** (남은 숫자 {_qc} · 자동 {_qa}) — "
                           f"물병·다이아몬드가 보이면 그 칸에 올린다")
-        late_n = 0                   # 🕐 늦게 뜬 창을 닫아준 횟수 (끝없이 돌지 않게)
-        while not self._item_stop and done < INV_OPEN_MAX:
-            big = grab()
-            if big is None:
-                break
-            if not tab_open(big):
-                # 🕐 **늦게 뜬 창**일 수 있다 (2026-11-19 #14 — 11장짜리 뽑기팩은 결과 창이
-                #    카드를 깐 '다음' 바퀴에야 떴다). 아는 창(결과·수량·보상)이면 닫고 이어서 한다.
-                #    🚫 그래도 모르는 창이면 예전처럼 아무것도 누르지 않고 멈춘다 (_inv_after 가 남긴다).
-                _late = self._inv_after(anc, tag, P, big,
-                                        big.shape[1] // 2, big.shape[0] // 2)
-                late_n += 1
-                if _late == "stop" or late_n > 3:
-                    if not self._item_stop:
-                        p = self._inv_shot(big, tag, "noinv")
-                        click_log(f"[아이템정리] 🚫 {tag} 가방 창이 안 보인다 — 아무것도 누르지 않고 멈춘다 · 화면 {p}")
-                    return done
-                click_log(f"[아이템정리] {tag} 🕐 늦게 뜬 창({_late})을 닫았다 — 이어서 한다")
-                continue
-            _dm, _dv, _db = dimmed(big)
-            if _dm:
-                nap(random.uniform(*INV_DIM_AGAIN))          # 순간 이펙트일 수 있다 — 한 번 더 본다
-                _b2 = grab()
-                if _b2 is not None:
-                    big = _b2
-                    _dm, _dv, _db = dimmed(big)
-            if _dm:
-                p = self._inv_shot(big, tag, "dim")
-                click_log(f"[아이템정리] 🚫 {tag} **무언가 화면을 덮었다** (밝기 {_dv:.0f} · 처음 {_db:.0f}) — "
-                          f"모르는 창이라 아무것도 누르지 않고 멈춘다 · 화면 {p}")
-                return done
-            hits = inv_find(big, skip)
-            # 🎣 녹일 신호(+ 없는 강철각반·엘름) — 누르지 않는다. 장착(E)·강화(+) 는 신호가 아니다
-            if MELT_ON and hits:
-                _kx0, _ky0 = _inv_k(big)
-                _keep = []
-                for _h in hits:
-                    if _h[2] not in MELT_GROUPS:
-                        _keep.append(_h)
-                        continue
-                    _mk = inv_cell_mark(big, _h[1] - 14 * _kx0, _h[0] - 14 * _ky0)
-                    if _mk is None or _mk[0] >= MELT_MARK_E or _mk[1] >= MELT_MARK_P:
-                        if ("mk", _h[2]) not in melt_seen:
-                            melt_seen.add(("mk", _h[2]))
-                            click_log(f"[아이템정리] {tag} 🎣 {_h[2]} 가 있지만 **장착(E)·강화(+)** 표시가 있다 "
-                                      f"{_mk} — 녹일 신호로 보지 않는다")
-                    elif not melt_need:
-                        melt_need = True
-                        click_log(f"[아이템정리] {tag} 🎣 + 없는 {_h[2]} 가 있다 (일치도 {_h[3]:.2f}) — "
-                                  f"끝나면 낚시에서 **고급**을 녹인다")
-                hits = _keep
-            # 🥇 먼저 쓸 것은 한 가지만 — 처음 보일 때 차례가 가장 앞선 것을 고른다
-            deferred = False
-            if pick is None and not capped and not qs_busy and not qs_done:
-                _pr = [h for h in hits if h[2] in rank and rank[h[2]] not in fam_done]
-                # 아래 두 줄 안에만 보이면 아직 고르지 않는다 — 한 칸 내리면 바로 아랫줄
-                # (더 앞선 차례가 있을 수 있다)까지 보인다. 되돌아 올라가지 않으려고.
-                _ky = big.shape[0] / float(INV_BASE_H)
-                _bot = (INV_LIST[3] - 70) * _ky        # 바로 아랫줄이 통째로 보여야 고른다
-                if sdir < 0 and _pr and not inv_tail_seen(big) and all(h[0] > _bot for h in _pr):
-                    _pr = []
-                    deferred = True
-                    hits = [h for h in hits if h[2] not in rank]
-                if _pr:
-                    pick = rank[min(_pr, key=lambda h: _pos[rank[h[2]]])[2]]
-                    click_log(f"[아이템정리] {tag} 🥇 이번에는 **{'/'.join(fams[pick])}** 한 종류만 쓴다 "
-                              f"(차례 {_start + 1}번부터 · 나머지는 다음 실행에)")
-            hits = [h for h in hits if h[2] not in rank or (pick is not None and rank[h[2]] == pick
-                                                            and h[2] not in skip and not capped
-                                                            and not qs_busy and not qs_done)]
-            hits.sort(key=lambda h: (h[2] not in eatf, h[0], h[1]))   # 🥇 먼저 먹을 것 → 화면 위 → 아래
-            # 🎯 누르기 시작한 칸이 아직 있으면 **그 칸부터** (2026-11-19 사용자: *"하나 누르고 다른 거
-            #    눌렀다가 또 있으니까 하나 누르고 이러지 말고 하나씩 끝까지 완벽하게"*)
-            if stick:
-                _kx = big.shape[1] / float(INV_BASE_W)
-                _same = [h for h in hits if h[2] == stick[0] and abs(h[1] - stick[1]) < 14 * _kx
-                         and abs(h[0] - stick[2]) < 24 * _kx]
-                if _same:
-                    hits = _same + [h for h in hits if h not in _same]
-                else:
-                    _sg = stick[0]
-                    stick = None
-                    if _sg in rank and pick is not None and rank[_sg] == pick and not capped:
-                        fam_done.add(pick)
-                        click_log(f"[아이템정리] {tag} 🥇 {'/'.join(fams[pick])} 를 **다 먹었다** — "
-                                  f"다른 종류가 보이면 그걸 쓴다")
-                        pick = None
-                        continue
-            if hits:
-                cy, cx, g, v, col = hits[0]
-                since = 0
-                if not self._inv_hand_wait(tag):
+        # 🔁 **상자를 깠으면 아래쪽을 한 번 더 훑는다** (2026-11-25 사용자: *"6번 클라 왜 하다가 꺼버리냐 ? 왜 마무리를
+        #    제대로 안하냐"*) — 96레벨 상자 등에서 나온 물건(뽑기팩·훈장)은 **아래쪽(끝)에 늦게**
+        #    들어올 수 있다. 한 번만 보면 못 보고 끝난다 → 끝에서 몇 줄 올라가 아래쪽을 한 번 더.
+        _repass = 0
+        got_new = [False]
+        while True:
+            late_n = 0                   # 🕐 늦게 뜬 창을 닫아준 횟수 (끝없이 돌지 않게)
+            while not self._item_stop and done < INV_OPEN_MAX:
+                big = grab()
+                if big is None:
                     break
-                if MELT_ON and g in MELT_GROUPS:
-                    # 🎣 녹일 것 — 누르지 않는다. 가방을 닫은 뒤 낚시 교환으로 녹인다
-                    skip.add(g)
-                    stick = None
-                    if not melt_need:
-                        click_log(f"[아이템정리] {tag} 🎣 {g} 가 있다 (일치도 {v:.2f}) — 끝나면 낚시로 녹인다")
-                    melt_need = True
-                    continue
-                if INVX_ON and g in INVX_GROUPS:
-                    # 🛠 꾹 눌러 제작·교환 — 한 클라에 한 번 (끝나면 가방을 다시 연다)
-                    skip.add(g)
-                    stick = None
-                    if INVX_COIN_MIN and INVX_GROUPS[g] == "shop":
-                        # 🪙 10개 미만이면 어차피 못 산다 — 상점을 열지 않고 넘어간다
-                        #    (사용자: *"10개 미만이면 제작하지마 그냥 넘어가 어차피 안만들어져 막혀"*)
-                        _d2 = inv_cnt_digits2(big, cx, cy)
-                        if _d2 is False:
-                            nap(random.uniform(0.3, 0.5))           # 툴팁 등이 덮었을 수 있다 — 한 번 더 본다
-                            _b2 = grab()
-                            if _b2 is not None:
-                                _d2 = inv_cnt_digits2(_b2, cx, cy)
-                        if _d2 is False:
-                            click_log(f"[아이템정리] {tag} 🪙 영광의 주화가 **10개 미만**이다 — 교환하지 않고 넘어간다")
-                            continue
-                    _xr = self._invx_run(INVX_GROUPS[g], anc, tag, L, T, cx, cy)
-                    if _xr == "stop":
+                if not tab_open(big):
+                    # 🕐 **늦게 뜬 창**일 수 있다 (2026-11-19 #14 — 11장짜리 뽑기팩은 결과 창이
+                    #    카드를 깐 '다음' 바퀴에야 떴다). 아는 창(결과·수량·보상)이면 닫고 이어서 한다.
+                    #    🚫 그래도 모르는 창이면 예전처럼 아무것도 누르지 않고 멈춘다 (_inv_after 가 남긴다).
+                    _late = self._inv_after(anc, tag, P, big,
+                                            big.shape[1] // 2, big.shape[0] // 2)
+                    late_n += 1
+                    if _late == "stop" or late_n > 3:
+                        if not self._item_stop:
+                            p = self._inv_shot(big, tag, "noinv")
+                            click_log(f"[아이템정리] 🚫 {tag} 가방 창이 안 보인다 — 아무것도 누르지 않고 멈춘다 · 화면 {p}")
                         return done
-                    if _xr == "ok":
-                        done += 1
-                    if not self._invx_reopen(anc, tag, P, tab_open):
-                        return done
-                    nap(random.uniform(*INVX_STEP))
+                    click_log(f"[아이템정리] {tag} 🕐 늦게 뜬 창({_late})을 닫았다 — 이어서 한다")
                     continue
-                if INV_QS_ON and g in rank:
-                    # 🧺 두 번 누르지 않고 아래 빠른 칸에 올린다 — 이번 실행은 이것으로 끝
-                    qs_done = True
-                    stick = None
-                    if self._inv_qs_place(tag, P, anc, cx, cy, g):
-                        done += 1
-                    nap(random.uniform(*INV_GAP))
-                    continue
-                before = big
-                x, y = L + cx, T + cy
-                self._inv_dbl(x, y)
-                r = self._inv_after(anc, tag, P, before, cx, cy)
-                if r == "stop":
+                _dm, _dv, _db = dimmed(big)
+                if _dm:
+                    nap(random.uniform(*INV_DIM_AGAIN))          # 순간 이펙트일 수 있다 — 한 번 더 본다
+                    _b2 = grab()
+                    if _b2 is not None:
+                        big = _b2
+                        _dm, _dv, _db = dimmed(big)
+                if _dm:
+                    p = self._inv_shot(big, tag, "dim")
+                    click_log(f"[아이템정리] 🚫 {tag} **무언가 화면을 덮었다** (밝기 {_dv:.0f} · 처음 {_db:.0f}) — "
+                              f"모르는 창이라 아무것도 누르지 않고 멈춘다 · 화면 {p}")
                     return done
-                if r == "same":
-                    fails[g] = fails.get(g, 0) + 1
-                    click_log(f"[아이템정리] {tag} ⚠ {g} 를 두 번 눌렀는데 아무 변화가 없다 ({fails[g]}번째)")
-                    if fails[g] >= 2:
+                hits = inv_find(big, skip)
+                # 🎣 녹일 신호(+ 없는 강철각반·엘름) — 누르지 않는다. 장착(E)·강화(+) 는 신호가 아니다
+                if MELT_ON and hits:
+                    _kx0, _ky0 = _inv_k(big)
+                    _keep = []
+                    for _h in hits:
+                        if _h[2] not in MELT_GROUPS:
+                            _keep.append(_h)
+                            continue
+                        _mk = inv_cell_mark(big, _h[1] - 14 * _kx0, _h[0] - 14 * _ky0)
+                        if _mk is None or _mk[0] >= MELT_MARK_E or _mk[1] >= MELT_MARK_P:
+                            if ("mk", _h[2]) not in melt_seen:
+                                melt_seen.add(("mk", _h[2]))
+                                click_log(f"[아이템정리] {tag} 🎣 {_h[2]} 가 있지만 **장착(E)·강화(+)** 표시가 있다 "
+                                          f"{_mk} — 녹일 신호로 보지 않는다")
+                        elif not melt_need:
+                            melt_need = True
+                            click_log(f"[아이템정리] {tag} 🎣 + 없는 {_h[2]} 가 있다 (일치도 {_h[3]:.2f}) — "
+                                      f"끝나면 낚시에서 **고급**을 녹인다")
+                    hits = _keep
+                # 🥇 먼저 쓸 것은 한 가지만 — 처음 보일 때 차례가 가장 앞선 것을 고른다
+                deferred = False
+                if pick is None and not capped and not qs_busy and not qs_done:
+                    _pr = [h for h in hits if h[2] in rank and rank[h[2]] not in fam_done]
+                    # 아래 두 줄 안에만 보이면 아직 고르지 않는다 — 한 칸 내리면 바로 아랫줄
+                    # (더 앞선 차례가 있을 수 있다)까지 보인다. 되돌아 올라가지 않으려고.
+                    _ky = big.shape[0] / float(INV_BASE_H)
+                    _bot = (INV_LIST[3] - 70) * _ky        # 바로 아랫줄이 통째로 보여야 고른다
+                    if sdir < 0 and _pr and not inv_tail_seen(big) and all(h[0] > _bot for h in _pr):
+                        _pr = []
+                        deferred = True
+                        hits = [h for h in hits if h[2] not in rank]
+                    if _pr:
+                        pick = rank[min(_pr, key=lambda h: _pos[rank[h[2]]])[2]]
+                        click_log(f"[아이템정리] {tag} 🥇 이번에는 **{'/'.join(fams[pick])}** 한 종류만 쓴다 "
+                                  f"(차례 {_start + 1}번부터 · 나머지는 다음 실행에)")
+                hits = [h for h in hits if h[2] not in rank or (pick is not None and rank[h[2]] == pick
+                                                                and h[2] not in skip and not capped
+                                                                and not qs_busy and not qs_done)]
+                hits.sort(key=lambda h: (h[2] not in eatf, h[0], h[1]))   # 🥇 먼저 먹을 것 → 화면 위 → 아래
+                # 🎯 누르기 시작한 칸이 아직 있으면 **그 칸부터** (2026-11-19 사용자: *"하나 누르고 다른 거
+                #    눌렀다가 또 있으니까 하나 누르고 이러지 말고 하나씩 끝까지 완벽하게"*)
+                if stick:
+                    _kx = big.shape[1] / float(INV_BASE_W)
+                    _same = [h for h in hits if h[2] == stick[0] and abs(h[1] - stick[1]) < 14 * _kx
+                             and abs(h[0] - stick[2]) < 24 * _kx]
+                    if _same:
+                        hits = _same + [h for h in hits if h not in _same]
+                    else:
+                        _sg = stick[0]
+                        stick = None
+                        if _sg in rank and pick is not None and rank[_sg] == pick and not capped:
+                            fam_done.add(pick)
+                            click_log(f"[아이템정리] {tag} 🥇 {'/'.join(fams[pick])} 를 **다 먹었다** — "
+                                      f"다른 종류가 보이면 그걸 쓴다")
+                            pick = None
+                            continue
+                if hits:
+                    cy, cx, g, v, col = hits[0]
+                    since = 0
+                    if not self._inv_hand_wait(tag):
+                        break
+                    if MELT_ON and g in MELT_GROUPS:
+                        # 🎣 녹일 것 — 누르지 않는다. 가방을 닫은 뒤 낚시 교환으로 녹인다
                         skip.add(g)
                         stick = None
-                        click_log(f"[아이템정리] {tag} ⏭ {g} 는 이 클라에서 더 누르지 않는다")
-                        # 먼저 쓸 것이 **한 번도 안 눌렸으면**(99999 가 찼다) — 다른 종류로
-                        # 옮기지 않는다. 다음 실행이 다음 종류부터 본다.
-                        if g in rank and rank[g] == pick and not any(oks.get(x) for x in fams[pick]):
-                            capped = True
-                            click_log(f"[아이템정리] {tag} 🥇 {'/'.join(fams[pick])} 가 안 눌린다 (가득 찬 듯) — "
-                                      f"이번에는 다른 종류를 쓰지 않는다 · 다음 실행에 다음 종류")
-                else:
-                    done += 1
-                    oks[g] = oks.get(g, 0) + 1
-                    stick = (g, cx, cy)
-                    click_log(f"[아이템정리] {tag} ✅ {g} 깠다 ({r} · 일치도 {v:.2f} · 색차 {col:.1f})")
-                    self.status.set(f"🎴 {tag} {done}번째 — {g}")
-                nap(random.uniform(*INV_GAP))
-                continue
-            if sdir < 0 and inv_tail_seen(big):
-                click_log(f"[아이템정리] {tag} 빈칸이 보인다 — 아이템 끝, 더 내리지 않는다 (휠 {downs}번 내렸다)")
-                break
-            if sdir > 0 and since >= INV_UP_IDLE:
-                click_log(f"[아이템정리] {tag} 위로 {since}칸 동안 깔 것이 없다 — 끝 (휠 {downs}번 올렸다)")
-                break
-            if downs >= INV_DOWN_MAX:
-                break
-            if not self._inv_hand_wait(tag):
-                break
-            prev = inv_list(big)
-            moved = False
-            # 아직 한 번도 안 움직였으면(맨 아래에서 열렸을 수 있다) 한 번만 더 굴려보고 방향을 바꾼다
-            for _st in range(1 + (INV_STALL_TRY if (moved_any or sdir > 0) else 1)):
-                if _st and not self._inv_hand_wait(tag):
+                        if not melt_need:
+                            click_log(f"[아이템정리] {tag} 🎣 {g} 가 있다 (일치도 {v:.2f}) — 끝나면 낚시로 녹인다")
+                        melt_need = True
+                        continue
+                    if INVX_ON and g in INVX_GROUPS:
+                        # 🛠 꾹 눌러 제작·교환 — 한 클라에 한 번 (끝나면 가방을 다시 연다)
+                        skip.add(g)
+                        stick = None
+                        if INVX_COIN_MIN and INVX_GROUPS[g] == "shop":
+                            # 🪙 10개 미만이면 어차피 못 산다 — 상점을 열지 않고 넘어간다
+                            #    (사용자: *"10개 미만이면 제작하지마 그냥 넘어가 어차피 안만들어져 막혀"*)
+                            _d2 = inv_cnt_digits2(big, cx, cy)
+                            if _d2 is False:
+                                nap(random.uniform(0.3, 0.5))           # 툴팁 등이 덮었을 수 있다 — 한 번 더 본다
+                                _b2 = grab()
+                                if _b2 is not None:
+                                    _d2 = inv_cnt_digits2(_b2, cx, cy)
+                            if _d2 is False:
+                                click_log(f"[아이템정리] {tag} 🪙 영광의 주화가 **10개 미만**이다 — 교환하지 않고 넘어간다")
+                                continue
+                        _xr = self._invx_run(INVX_GROUPS[g], anc, tag, L, T, cx, cy)
+                        if _xr == "stop":
+                            return done
+                        if _xr == "ok":
+                            done += 1
+                            got_new[0] = True
+                        if not self._invx_reopen(anc, tag, P, tab_open):
+                            return done
+                        nap(random.uniform(*INVX_STEP))
+                        continue
+                    if INV_QS_ON and g in rank:
+                        # 🧺 두 번 누르지 않고 아래 빠른 칸에 올린다 — 이번 실행은 이것으로 끝
+                        qs_done = True
+                        stick = None
+                        if self._inv_qs_place(tag, P, anc, cx, cy, g):
+                            done += 1
+                        nap(random.uniform(*INV_GAP))
+                        continue
+                    before = big
+                    x, y = L + cx, T + cy
+                    self._inv_dbl(x, y)
+                    r = self._inv_after(anc, tag, P, before, cx, cy)
+                    if r == "stop":
+                        return done
+                    if r == "same":
+                        fails[g] = fails.get(g, 0) + 1
+                        click_log(f"[아이템정리] {tag} ⚠ {g} 를 두 번 눌렀는데 아무 변화가 없다 ({fails[g]}번째)")
+                        if fails[g] >= 2:
+                            skip.add(g)
+                            stick = None
+                            click_log(f"[아이템정리] {tag} ⏭ {g} 는 이 클라에서 더 누르지 않는다")
+                            # 먼저 쓸 것이 **한 번도 안 눌렸으면**(99999 가 찼다) — 다른 종류로
+                            # 옮기지 않는다. 다음 실행이 다음 종류부터 본다.
+                            if g in rank and rank[g] == pick and not any(oks.get(x) for x in fams[pick]):
+                                capped = True
+                                click_log(f"[아이템정리] {tag} 🥇 {'/'.join(fams[pick])} 가 안 눌린다 (가득 찬 듯) — "
+                                          f"이번에는 다른 종류를 쓰지 않는다 · 다음 실행에 다음 종류")
+                    else:
+                        done += 1
+                        oks[g] = oks.get(g, 0) + 1
+                        stick = (g, cx, cy)
+                        if r in ("reward", "choice", "qty"):
+                            got_new[0] = True
+                        click_log(f"[아이템정리] {tag} ✅ {g} 깠다 ({r} · 일치도 {v:.2f} · 색차 {col:.1f})")
+                        self.status.set(f"🎴 {tag} {done}번째 — {g}")
+                    nap(random.uniform(*INV_GAP))
+                    continue
+                if sdir < 0 and inv_tail_seen(big):
+                    click_log(f"[아이템정리] {tag} 빈칸이 보인다 — 아이템 끝, 더 내리지 않는다 (휠 {downs}번 내렸다)")
                     break
-                # 첫 번은 1~3칸을 이어서 (사람처럼) · 다시 굴릴 때는 한 칸
-                #   ⚠ '먼저 쓸 것' 을 보려고 미룬 화면은 한 칸만 — 3칸이면 그 줄이 위로 잘린다
-                _k = 1 if (_st or deferred) else random.choice(INV_DOWN_BURST)
-                for _i in range(_k):
-                    if _i:
-                        nap(random.uniform(*INV_BURST_GAP))
-                    wheel_at(lx, ly, sdir)
-                if not _st:
-                    downs += _k
-                    since += _k
+                if sdir > 0 and since >= INV_UP_IDLE:
+                    click_log(f"[아이템정리] {tag} 위로 {since}칸 동안 깔 것이 없다 — 끝 (휠 {downs}번 올렸다)")
+                    break
+                if downs >= INV_DOWN_MAX:
+                    break
+                if not self._inv_hand_wait(tag):
+                    break
+                prev = inv_list(big)
+                moved = False
+                # 아직 한 번도 안 움직였으면(맨 아래에서 열렸을 수 있다) 한 번만 더 굴려보고 방향을 바꾼다
+                for _st in range(1 + (INV_STALL_TRY if (moved_any or sdir > 0) else 1)):
+                    if _st and not self._inv_hand_wait(tag):
+                        break
+                    # 첫 번은 1~3칸을 이어서 (사람처럼) · 다시 굴릴 때는 한 칸
+                    #   ⚠ '먼저 쓸 것' 을 보려고 미룬 화면은 한 칸만 — 3칸이면 그 줄이 위로 잘린다
+                    _k = 1 if (_st or deferred) else random.choice(INV_DOWN_BURST)
+                    for _i in range(_k):
+                        if _i:
+                            nap(random.uniform(*INV_BURST_GAP))
+                        wheel_at(lx, ly, sdir)
+                    if not _st:
+                        downs += _k
+                        since += _k
+                    nap(random.uniform(*INV_WHEEL_GAP))
+                    b2 = grab()
+                    if b2 is None:
+                        break
+                    if inv_moved(prev, inv_list(b2)):
+                        moved = True
+                        moved_any = True
+                        if _st:
+                            click_log(f"[아이템정리] {tag} 🔁 휠이 {_st}번 안 먹었다 — 다시 굴렸다")
+                        break
+                if not moved and sdir < 0 and not moved_any:
+                    # 처음부터 아래로 안 움직인다 = 가방이 **맨 아래**에서 열렸다 (마지막 줄까지 꽉 찬 가방)
+                    sdir = 1
+                    since = 0
+                    click_log(f"[아이템정리] {tag} 🧭 아래로 안 움직인다 — 가방이 맨 아래에서 열렸다 → 위로 훑는다 "
+                              f"(깔 것이 {INV_UP_IDLE}칸째 안 나오면 끝)")
+                    continue
+                if not moved:
+                    click_log(f"[아이템정리] {tag} 휠을 굴려도 안 움직인다 — 맨 " + ("아래" if sdir < 0 else "위")
+                              + f" (휠 {downs}번 · {1 + INV_STALL_TRY}번 굴려봤다)")
+                    break
+            if (_repass < INV_REPASS and got_new[0] and not self._item_stop
+                    and done < INV_OPEN_MAX):
+                _repass += 1
+                got_new[0] = False
+                _b0 = grab()
+                if _b0 is None or not tab_open(_b0):
+                    break
+                big = _b0
+                # 🔽 맨 위로 가지 않는다 — **아래쪽만** 다시 본다 (사용자: *"대부분 까야하는 부분이 전부
+                #    아래쪽에 잇어 위로 올리지말고"*). 나온 물건이 그려질 틈을 주고 몇 줄만 올라갔다 다시 내려간다.
+                nap(random.uniform(*INV_REPASS_WAIT))
+                _tc, _cl = time.time(), 0
+                _up = random.randint(*INV_REPASS_UP)
+                while _cl < _up and not self._item_stop:
+                    if not self._inv_hand_wait(tag):
+                        break
+                    wheel_at(lx, ly, 1)
+                    _cl += 1
+                    nap(random.uniform(*INV_BURST_GAP))
                 nap(random.uniform(*INV_WHEEL_GAP))
-                b2 = grab()
-                if b2 is None:
+                if self._item_stop:
                     break
-                if inv_moved(prev, inv_list(b2)):
-                    moved = True
-                    moved_any = True
-                    if _st:
-                        click_log(f"[아이템정리] {tag} 🔁 휠이 {_st}번 안 먹었다 — 다시 굴렸다")
-                    break
-            if not moved and sdir < 0 and not moved_any:
-                # 처음부터 아래로 안 움직인다 = 가방이 **맨 아래**에서 열렸다 (마지막 줄까지 꽉 찬 가방)
-                sdir = 1
-                since = 0
-                click_log(f"[아이템정리] {tag} 🧭 아래로 안 움직인다 — 가방이 맨 아래에서 열렸다 → 위로 훑는다 "
-                          f"(깔 것이 {INV_UP_IDLE}칸째 안 나오면 끝)")
+                sdir, since, stick, deferred, moved_any, downs = -1, 0, None, False, True, 0
+                click_log(f"[아이템정리] {tag} 🔁 상자를 깠다 — **아래쪽을 한 번 더 훑는다** "
+                          f"(끝에서 {_cl}칸 올라갔다 다시 내려간다)")
                 continue
-            if not moved:
-                click_log(f"[아이템정리] {tag} 휠을 굴려도 안 움직인다 — 맨 " + ("아래" if sdir < 0 else "위")
-                          + f" (휠 {downs}번 · {1 + INV_STALL_TRY}번 굴려봤다)")
-                break
+            break
         if pick is not None and _nf:
             try:
                 _stt[str(si)] = (pick + 1) % _nf if capped else pick
