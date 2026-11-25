@@ -1329,6 +1329,25 @@ XREG_HAND_QUIET = 0.8             # 사람이 마우스를 놓은 뒤 이만큼 
 XREG_HAND_MAX   = 20.0
 XREG_ONE_CAP    = {"축복갑옷마법주문서": 2, "축복무기마법주문서": 2}   # 한 장씩 · 한 번에 최대 2번
 XREG_STRICT     = ("축복갑옷마법주문서", "축복무기마법주문서")
+# 🔢 **5개 미만이면 올리지 않는다** (2026-11-26 사용자: *"속성석이랑 오만의 충전석, 해적섬 충전석 이건 5개 미만은
+#    올리지마 5개 이상만 올리고"*) — [Max] 를 누른 뒤 수량 아래 [−] n [+] 의 노란 숫자를 읽는다.
+#    📏 #15 에서 숫자판으로 1~9 를 찍어 모양을 떴다 (4x8 점) · 가장 닮은 두 숫자(6↔8)도 점 2개 차이.
+#    🚫 못 읽으면(창 크기가 다름 · 모양이 애매) **올리지 않는다** (안전한 쪽).
+XREG_MIN5       = ("수령의속성석", "지령의속성석", "풍령의속성석", "화령의속성석",
+                   "충전석_오만과신념", "충전석_해적섬")
+XREG_MIN5_N     = 5
+XREG_QTY_DIGBOX = (330, 186, 398, 202)   # 수량 아래 [−] n [+] 의 숫자 (가운데 맞춤 · 546 창)
+XREG_QTY_GLYPH  = {
+    1: (".##.", "###.", "..#.", "..#.", "..#.", "..#.", "..#.", "..#."),
+    2: ("####", "#..#", "#..#", "..##", ".##.", "##..", "#...", "####"),
+    3: ("####", "#..#", "...#", ".##.", "...#", "#..#", "#..#", "####"),
+    4: ("..#.", ".##.", ".##.", "#.#.", "#.#.", "####", "..#.", "..#."),
+    5: ("####", "#...", "#...", "####", "...#", "...#", "#..#", "####"),
+    6: ("####", "#..#", "#...", "####", "#..#", "#..#", "#..#", "####"),
+    7: ("####", "...#", "..#.", "..#.", ".##.", ".#..", ".#..", ".#.."),
+    8: ("####", "#..#", "#..#", "###.", "#..#", "#..#", "#..#", "####"),
+    9: ("####", "#..#", "#..#", "#..#", "####", "...#", "#..#", "###."),
+}
 XREG_NO_GOLD    = ("충전석_",)    # 🔋 충전석은 **골라진 금색 칸이라도 모양만으로 보지 않는다** (2026-11-26)
                                   #    네 가지(에스카로스·오만과신념·주말월드·해적섬)가 서로·다른 충전석과 모양 0.79~0.93 이라
                                   #    금색 칸에 밀려 들어온 잊혀진섬 충전석 등을 올릴 수 있다 → 늘 모양 0.86 + 색차 12
@@ -1734,6 +1753,52 @@ def xreg_price(big):
         return ok, f"최저가 숫자폭 {span}(기준 {XREG_PRICE_SPAN}) · 총액 자리 {len(tg)} · 10다야? {t10} ({w10})"
     except Exception as e:
         return False, f"읽기 실패 {type(e).__name__}"
+def xreg_min5(nm):
+    """🔢 5개 미만이면 올리지 않는 아이템인가."""
+    return any(nm.startswith(k) for k in XREG_MIN5)
+
+
+def xreg_qty_count(big):
+    """🔢 수량 창의 **판매 수량**을 읽는다 → (n, 설명). n = 1~9 · 10 = 두 자리 이상 · None = 모름."""
+    try:
+        if big is None:
+            return None, "화면 없음"
+        H, W = big.shape[:2]
+        if abs(W - XREG_W) > 3 or abs(H - XREG_H) > 3:
+            return None, f"창 {W}x{H} — {XREG_W}x{XREG_H} 창에서만 읽는다"
+        x0, y0, x1, y1 = XREG_QTY_DIGBOX
+        c = big[y0:y1, x0:x1].astype(int)
+        b, g, r = c[..., 0], c[..., 1], c[..., 2]
+        m = ((r > 150) & (g > 100) & (r - b > 60)).astype(np.uint8)
+        cols = np.where(m.any(0))[0]
+        rows = np.where(m.any(1))[0]
+        if not len(cols):
+            return None, "숫자가 안 보인다"
+        w = int(cols.max() - cols.min() + 1)
+        if w > 6:
+            return 10, f"두 자리 이상 (폭 {w})"
+        m = m[max(0, rows.min() - 1):rows.max() + 2, max(0, cols.min() - 1):cols.max() + 2]
+        sc = []
+        for d, pat in XREG_QTY_GLYPH.items():
+            t = np.array([[1 if ch == "#" else 0 for ch in row] for row in pat], np.uint8)
+            th, tw = t.shape
+            best = 999
+            for y in range(0, m.shape[0] - th + 1):
+                for x in range(0, m.shape[1] - tw + 1):
+                    cv = np.zeros_like(m)
+                    cv[y:y + th, x:x + tw] = t
+                    best = min(best, int((cv ^ m).sum()))
+            sc.append((best, d))
+        sc.sort()
+        (b0, d0), (b1, d1) = sc[0], sc[1]
+        why = f"숫자 {d0} (다른 점 {b0} · 다음 {d1} {b1})"
+        if b0 <= 1 and b1 - b0 >= 2:
+            return d0, why
+        return None, "모양이 애매하다 — " + why
+    except Exception as e:
+        return None, f"판정 실패 {e}"
+
+
 def xreg_total_is10(big):
     """📦 수량 창의 **총 판매 금액이 정확히 10** 인가 → True/False (못 읽으면 False — 두 자리 확인이 따로 있다).
     (2026-11-26 사용자: *"검은빛 비늘이랑 망자의 영혼석은 … 맥스로 해서 올리면 된다 다만 그 총합이 10다야 이하면
@@ -35236,6 +35301,23 @@ class App(tk.Tk):
                     pass                                 # 🎯 한 장씩 — Max 를 누르지 않는다 (수량 기본값 1)
                 else:
                     tap(XREG_MAX_BTN)
+                    if xreg_min5(nm):
+                        # 🔢 5개 미만이면 올리지 않는다 — 두 번 읽어 같을 때만 믿는다
+                        nap(random.uniform(0.5, 0.8))
+                        n1, w1 = xreg_qty_count(g())
+                        nap(random.uniform(0.3, 0.5))
+                        n2, w2 = xreg_qty_count(g())
+                        if n1 is None or n1 != n2 or n1 < XREG_MIN5_N:
+                            if n1 is not None and n1 == n2:
+                                why = f"**{n1}개**뿐이다 ({XREG_MIN5_N}개 미만은 올리지 않는다)"
+                            else:
+                                why = f"수량을 못 읽었다 ({w1} / {w2}) — 모르면 올리지 않는다"
+                            click_log(f"[거래소등록] {tag} 🔢 '{nm}' {why} → 취소하고 그대로 둔다")
+                            tap(XREG_QTY_NO)
+                            wait("xreg_qty", 2.5, gone=True)
+                            skip.add(nm)
+                            continue
+                        click_log(f"[거래소등록] {tag} 🔢 '{nm}' 수량 {'10개 이상' if n1 >= 10 else str(n1) + '개'} — 올린다 ({w1})")
                 invx_human_nap(XREG_STEP)
                 tap(XREG_MIN_ROW)
                 pf = xreg_price_stack
