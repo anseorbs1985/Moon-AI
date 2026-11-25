@@ -35621,6 +35621,7 @@ class App(tk.Tk):
                             if _d2 is False:
                                 click_log(f"[아이템정리] {tag} 🪙 영광의 주화가 **10개 미만**이다 — 교환하지 않고 넘어간다")
                                 continue
+                        click_log(f"[아이템정리] {tag} 🛠 {g} 를 꾹 누른다 (일치도 {v:.2f} · 색차 {col:.1f} · 창안 {cx},{cy})")
                         _xr = self._invx_run(INVX_GROUPS[g], anc, tag, L, T, cx, cy)
                         if _xr == "stop":
                             return done
@@ -35961,8 +35962,12 @@ class App(tk.Tk):
             r = self._invx_wait(anc, link, tmax=2.0)
             if r[0] is not None:
                 return r
+            _p = ""
+            if _t == 1 and r[3] is not None:
+                # 🗂 무엇을 꾹 눌렀는지 남긴다 (2026-11-25 #08 — 다른 칸을 꾹 눌렀는데 원인을 짚을 수 없었다)
+                _p = " · 화면 " + self._inv_shot(r[3], tag, "hold_" + link.replace("invx_link_", ""))
             click_log(f"[아이템정리] {tag} 🛠 꾹 눌렀는데 '{link}' 가 안 보인다 ({r[2]:.2f}) — "
-                      + ("한 번 더 누른다" if _t == 0 else "그만둔다"))
+                      + ("한 번 더 누른다" if _t == 0 else "그만둔다") + _p)
         return r
 
     def _invx_craft(self, anc, tag, L, T, cx, cy, kind="craft"):
