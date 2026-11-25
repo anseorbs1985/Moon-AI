@@ -5310,7 +5310,21 @@ def inv_tpl(name):
 #   🚫 모르는 화면이면 아무것도 더 누르지 않고 그 클라를 끝낸다 (그 화면을 남긴다).
 #   🚫 상점은 구매 가격 옆이 **주화 그림(톱니)** 일 때만 확인을 누른다 — 아니면 취소.
 INVX_ON = True
-INVX_GROUPS = {"craft_seal": "craft", "x_coin": "shop", "x_fest": "craft_fest"}
+INVX_GROUPS = {"craft_seal": "craft", "x_coin": "shop", "x_fest": "craft_fest", "x_medal": "collect"}
+# 🏅 **아이템 컬렉션 등록** (2026-11-25 사용자 — #01 에서 클로드가 손으로 해 보인 순서 그대로)
+#   탑번개의 훈장(96레벨 달성 기념 축하 상자에서 나온다) → 꾹 → 정보 창 [등록 (1)] → 아이템 컬렉션
+#   (그 아이템으로 걸러져 열린다) → 그 줄의 칸 → 오른쪽 파란 [등록] → '등록하시겠습니까?' [확인]
+#   → 줄이 '완성' 으로 바뀜 → 컬렉션 ✕ → 가방을 다시 열고 이어서 훑는다.
+#   🚫 단계마다 **그 그림을 본 뒤에만** 누른다 · 등록하면 그 아이템은 사라진다(게임 규칙 — 사용자가 원한 것).
+#   🧍 단계 사이 **3~5초를 랜덤으로 더** 쉰다 (2026-11-25 사용자: *"시간을 3~5초 정도 더 주고 랜덤시간으로"*)
+#   📏 그림 — 저장 화면 634장에서 그 화면에서만 1.00 (가장 닮은 다른 화면: 이름 0.45 · [등록] 0.73 · 확인 창 0.58)
+#      정보 창의 [등록] 글자(invx_link_coll)는 다른 아이템 정보 창에도 0.93 이라 **다음 단계 그림으로** 확인한다.
+INVX_COLL = {"collect": ("invx_co_medal", "invx_co_name", "탑번개의 훈장")}
+INVX_COLL_EXTRA = (3.0, 5.0)      # 단계 사이 더 쉬는 시간 (랜덤)
+INVX_COLL_SLOT = (-35, 39)        # 컬렉션 줄 이름 가운데 → 그 줄 첫 칸 (546 기준 · #01 실측)
+INVX_COLL_OK = (320, 251)         # 확인 창 [확인]
+INVX_COLL_NO = (225, 251)         # 확인 창 [취소]
+INVX_COLL_X = (526, 18)           # 컬렉션 창 ✕
 # 🎟 리니지 페스티벌 주화 → 룬 선택 상자 **최대로** 제작 (2026-11-24 사용자 · #02 에서 손으로 해 보인 것을 기록)
 #   꾹 → 정보 창의 파란 [제작 재료] → '제작 가능 아이템' 에서 **룬 선택 상자 (이벤트)** → ▼(최대) → [제작]
 #   → 제작 결과 → [Skip] → [확인] → 제작 창 ✕  (자리·창은 축복 부여 주문서 제작과 같다 — 고르는 줄만 다르다)
@@ -35313,6 +35327,8 @@ class App(tk.Tk):
         try:
             if kind in INVX_KINDS:
                 return self._invx_craft(anc, tag, L, T, cx, cy, kind)
+            if kind in INVX_COLL:
+                return self._invx_collect(anc, tag, L, T, cx, cy, kind)
             return self._invx_shop(anc, tag, L, T, cx, cy)
         except Exception as e:
             click_log(f"[아이템정리] ⚠ {tag} {kind} 오류 — {type(e).__name__}: {e}")
@@ -35453,6 +35469,56 @@ class App(tk.Tk):
         self.status.set(f"🎴 {tag} {out_nm} 제작")
         return "ok"
 
+    def _invx_coll_nap(self):
+        """🧍 컬렉션 단계 사이 — 3~5초 랜덤 (사용자 지시)."""
+        nap(random.uniform(*INVX_COLL_EXTRA) * random.uniform(0.95, 1.08))
+
+    def _invx_collect(self, anc, tag, L, T, cx, cy, kind="collect"):
+        """🏅 아이템 컬렉션에 등록 → 'ok' · 'skip' · 'stop'."""
+        row_img, name_img, nm = INVX_COLL[kind]
+        x, y, v, b = self._invx_open_info(anc, tag, L, T, cx, cy, "invx_link_coll")
+        if x is None:
+            return self._invx_info_close(anc, tag, L, T, b)
+        kx, ky = self._invx_k(b)
+        self._invx_coll_nap()
+        self._invx_tap_px(tag, L, T, x, y)                      # 정보 창 [등록 (1)]
+        x, y, v, b = self._invx_wait(anc, "invx_co_title", tmax=INVX_SEE_SLOW)
+        if x is None:
+            return self._invx_unknown(tag, b, "아이템 컬렉션 창이 안 떴다", v)
+        rx, ry, rv, b = self._invx_wait(anc, row_img, tmax=INVX_SEE)
+        if rx is None:
+            return self._invx_unknown(tag, b, f"컬렉션에 '{nm}' 줄이 없다", rv)
+        self._invx_coll_nap()
+        self._invx_tap_px(tag, L, T, rx + INVX_COLL_SLOT[0] * kx, ry + INVX_COLL_SLOT[1] * ky)   # 그 줄의 칸
+        x, y, v, b = self._invx_wait(anc, name_img, tmax=INVX_SEE)
+        if x is None:
+            return self._invx_unknown(tag, b, f"오른쪽에 '{nm}' 정보가 안 떴다", v)
+        gx, gy, gv, b = self._invx_wait(anc, "invx_co_reg", tmax=INVX_SEE)
+        if gx is None:
+            return self._invx_unknown(tag, b, "오른쪽 [등록] 이 안 보인다", gv)
+        self._invx_coll_nap()
+        self._invx_tap_px(tag, L, T, gx, gy)                    # 오른쪽 파란 [등록]
+        x, y, v, b = self._invx_wait(anc, "invx_co_ask", tmax=INVX_SEE)
+        if x is None:
+            return self._invx_unknown(tag, b, "'등록하시겠습니까?' 창이 안 떴다", v)
+        self._invx_coll_nap()
+        self._invx_tap(tag, L, T, kx, ky, INVX_COLL_OK)        # [확인]
+        x, y, v, b = self._invx_wait(anc, "invx_co_done", tmax=INVX_SEE_SLOW)
+        if x is None:
+            click_log(f"[아이템정리] ⚠ {tag} 🏅 [확인] 뒤 '완성' 이 안 보인다 ({v:.2f}) — 창을 닫고 이어서 한다")
+        self._invx_coll_nap()
+        for _t in range(3):                                     # 컬렉션 ✕ — 그 창이 보일 때만
+            b = grab_window(anc)
+            if invx_find(b, "invx_co_title")[0] is None:
+                break
+            self._invx_tap(tag, L, T, kx, ky, INVX_COLL_X)
+            nap(random.uniform(0.4, 0.7))
+        if x is None:
+            return "skip"
+        click_log(f"[아이템정리] {tag} 🏅 ✅ **{nm}** 을(를) 아이템 컬렉션에 등록했다")
+        self.status.set(f"🎴 {tag} {nm} 컬렉션 등록")
+        return "ok"
+
     def _invx_shop(self, anc, tag, L, T, cx, cy):
         x, y, v, b = self._invx_open_info(anc, tag, L, T, cx, cy, "invx_link_shop")
         if x is None:
@@ -35551,7 +35617,8 @@ class App(tk.Tk):
         """정보 창이 열려 있으면 닫는다 (링크가 없는 아이템) → 'skip'."""
         kx, ky = self._invx_k(b)
         if b is not None and (invx_find(b, "invx_link_craft", thr=0.6)[0] is not None
-                              or invx_find(b, "invx_link_shop", thr=0.6)[0] is not None):
+                              or invx_find(b, "invx_link_shop", thr=0.6)[0] is not None
+                              or invx_find(b, "invx_link_coll", thr=0.85)[0] is not None):
             self._invx_tap(tag, L, T, kx, ky, INVX_INFO_X)
         return "skip"
 
@@ -35746,7 +35813,11 @@ class App(tk.Tk):
             if b is None:
                 return False
             kx, ky = self._invx_k(b)
-            if invx_find(b, "invx_sh_pop")[0] is not None or invx_find(b, "invx_sh_info")[0] is not None:
+            if invx_find(b, "invx_co_ask")[0] is not None:
+                self._invx_tap(tag, L, T, kx, ky, INVX_COLL_NO); did.append("컬렉션 확인 창 취소")
+            elif invx_find(b, "invx_co_title")[0] is not None:
+                self._invx_tap(tag, L, T, kx, ky, INVX_COLL_X); did.append("컬렉션 ✕")
+            elif invx_find(b, "invx_sh_pop")[0] is not None or invx_find(b, "invx_sh_info")[0] is not None:
                 self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_NO); did.append("상품창 취소")
             elif invx_find(b, "invx_sh_done")[0] is not None:
                 self._invx_tap(tag, L, T, kx, ky, INVX_SHOP_TOAST); did.append("구매 알림")
