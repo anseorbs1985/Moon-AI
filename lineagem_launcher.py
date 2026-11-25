@@ -25972,8 +25972,27 @@ class App(tk.Tk):
             if j == 0 and not st.get("woke") and fkey in SLEEP_WAKE and _anc:
                 st["woke"] = True
                 _nm0 = st["slot"].get("name", f"#{si+1:02d}")
-                if self._wake_once(fkey, _anc, _nm0, "😴"):
+                # 😴 `SLEEP_HARD` 는 **깨어날 때까지** — 순차 경로와 **짝**이다 (2026-11-25 #07 사고:
+                #    전체 실행이 이 길로 와서 Z 한 번만 누르고, 깨어 있는 화면의 칸1(절전해제 자리)을 눌렀다)
+                if fkey in SLEEP_HARD:
+                    _wk = self._wake_hard(fkey, _anc, _nm0, si + 1)
+                else:
+                    _wk = self._wake_once(fkey, _anc, _nm0, "😴")
+                if _wk:
                     self._after_wake_fix(_anc, f"{fkey} 웨이브")
+            # 😴 칸1(절전해제 자리)은 **누르지 않는다** — 순차 경로의 `SLEEP_SKIP1` 과 같다.
+            #    그 클라를 앞으로 올려두고 바로 다음 칸으로 간다 (깨어 있을 때 첫 클릭이 '창 띄우기' 로 먹히지 않게).
+            if j == 0 and fkey in SLEEP_SKIP1 and _anc:
+                try:
+                    self._focus_client_at(_anc)
+                except Exception:
+                    pass
+                nap(random.uniform(0.35, 0.6))
+                click_log(f"{fkey} [{st['slot'].get('name', '?')}] 😴 칸1(절전해제)은 **누르지 않는다** "
+                          f"(웨이브) — 그 뒤 칸만 누른다")
+                last_si = si
+                st["due"] = time.time()
+                continue
             if j == 0 and not st.get("prekey"):
                 # 슬롯 맨 앞에서 키 한 번 (좌표는 그대로, 키만 먼저)
                 st["prekey"] = True
