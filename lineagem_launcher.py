@@ -1103,7 +1103,7 @@ CIRCUS_PICK_CELL   = 3
 CIRCUS_PICK_BAND   = (105, 100, 285, 295)   # 사냥터 리스트 (546 기준)
 CIRCUS_PICK_WHEEL  = (190, 230)             # 리스트 위에서 휠
 CIRCUS_PICK_MATCH  = 0.80
-CIRCUS_PICK_SCROLL = 6                       # 안 보이면 몇 칸까지 내려보나
+CIRCUS_PICK_SCROLL = 15                      # 안 보이면 몇 칸까지 내려보나 (리스트가 더 안 움직이면 거기서 멈춘다)
 CIRCUS_PICK_LOOK   = 3                       # 처음에 리스트가 뜨기를 몇 번 보나
 WHEEL_UP_NOTCH  = 3    # 한 번에 굴릴 칸 수
 WHEEL_UP_TIMES  = 3    # 몇 번 굴릴지
@@ -24463,12 +24463,24 @@ class App(tk.Tk):
             return "이미지없음"
         Lx, Ty, W, H = rc[0], rc[1], rc[2] - rc[0], rc[3] - rc[1]
         kx, ky = W / 546.0, H / 307.0
-        best, scrolled = -1.0, 0
+        best, scrolled, prev, still = -1.0, 0, None, 0
         for _t in range(CIRCUS_PICK_LOOK + CIRCUS_PICK_SCROLL):
             if getattr(self, "_stop_flag", False):
                 return "이미지없음"
             big = grab_window(anc)
             if big is not None:
+                # 📜 휠을 굴렸는데 리스트가 안 움직였으면 **맨 아래** — 두 번 연달아면 그만
+                try:
+                    import numpy as _np
+                    _x0, _y0, _x1, _y1 = CIRCUS_PICK_BAND
+                    _bh, _bw = big.shape[:2]
+                    cur = big[int(_y0 * _bh / 307.0):int(_y1 * _bh / 307.0),
+                              int(_x0 * _bw / 546.0):int(_x1 * _bw / 546.0)].astype(_np.int16)
+                    if scrolled and prev is not None and prev.shape == cur.shape:
+                        still = still + 1 if float(_np.abs(cur - prev).mean()) < 1.5 else 0
+                    prev = cur
+                except Exception:
+                    pass
                 x, y, v, tn = circus_pick_find(big)
                 best = max(best, v)
                 if x is not None:
@@ -24487,13 +24499,14 @@ class App(tk.Tk):
             if _t + 1 < CIRCUS_PICK_LOOK:
                 nap(random.uniform(0.5, 0.8))             # 리스트가 아직 안 떴을 수 있다
                 continue
-            if scrolled >= CIRCUS_PICK_SCROLL:
+            if scrolled >= CIRCUS_PICK_SCROLL or still >= 2:
                 break
             wheel_at(Lx + int(CIRCUS_PICK_WHEEL[0] * kx), Ty + int(CIRCUS_PICK_WHEEL[1] * ky), -1)
             scrolled += 1
             nap(random.uniform(0.6, 0.9))
         click_log(f"circus [{nm}] 🚫 사냥터 리스트에서 이벤트 사냥터를 못 찾았다 "
-                  f"(최고 {best:.2f} · 기준 {CIRCUS_PICK_MATCH} · {scrolled}칸 내려봤다) — "
+                  f"(최고 {best:.2f} · 기준 {CIRCUS_PICK_MATCH} · {scrolled}칸 내려봤다"
+                  f"{' · 맨 아래까지 봤다' if still >= 2 else ''}) — "
                   f"아무것도 안 누르고 이 슬롯만 끝낸다")
         self.status.set(f"🚫 [{nm}] 이벤트 사냥터를 못 찾았다")
         return "이미지없음"
