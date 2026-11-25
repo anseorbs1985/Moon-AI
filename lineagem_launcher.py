@@ -667,6 +667,8 @@ INV_TOP_GAP   = (0.30, 0.50)      # 맨 위로 올라갈 때 휠 한 칸 뒤 (�
 #   → 열면 **누르지 않고 맨 위까지 빠르게** 올라간 뒤(한 칸 신호를 이어서 · 약 10초) 아래로 끝까지.
 #     예전(11-19)의 맨 위로 오르기는 한 칸마다 0.3~0.5초를 쉬어 37초가 걸렸다 — 그래서 뺐던 것이다.
 INV_CLIMB_ON = True
+INV_UP_SMALL = (3, 5)             # 🔽 아래쪽에서 열렸으면 이만큼만 올라가 아래로 (2026-11-25 사용자 — 맨 위로 안 간다)
+                                  #    중간에서 열렸으면 그 자리에서 아래로. () 로 비우면 예전처럼 맨 위까지 오른다
 # 🥇 **먼저 다 먹을 것** — `inv_meta.json` 의 `eat_first` (2026-11-24 사용자: *"서커스 비약 … 저거 있으면
 #    먼저 저거부터 먹어 전부 다 먹고 다른 거 먹어 · 안 먹어지면 다른 거 해야 할 일 하면 된다"*)
 #    맨 위로 올라갈 때 **눈을 뜨고** 올라가며(줄을 건너뛰지 않게 1~3칸씩) 그것만 먹는다 →
@@ -35438,7 +35440,26 @@ class App(tk.Tk):
                 nap(random.uniform(*INV_GAP))
             return None
 
-        if INV_CLIMB_ON:
+        if INV_CLIMB_ON and INV_UP_SMALL and inv_tail_seen(big):
+            # 🔽 **가방이 아래쪽(끝)에서 열렸으면 3~5칸만 올라가 거기서 아래로** (2026-11-25 사용자:
+            #    *"인벤토리가 아래쪽에잇으면 그냥 한 3~5칸만위로 올리라니까 왜 끝까지 위로 올려서 다시 내리냐고
+            #    대부분 까야할게 전부 아래에 잇으니까 위로 많이 올리지마"*) — 맨 위까지 오르지 않는다.
+            _tc, _up = time.time(), random.randint(*INV_UP_SMALL)
+            for _i in range(_up):
+                if self._item_stop or not self._inv_hand_wait(tag):
+                    break
+                wheel_at(lx, ly, 1)
+                nap(random.uniform(*INV_BURST_GAP))
+            nap(random.uniform(*INV_WHEEL_GAP))
+            _b2 = grab()
+            if _b2 is not None:
+                big = _b2
+            if eatf and _eat_here() == "stop":
+                return done
+            _climbed = True
+            click_log(f"[아이템정리] {tag} 🧭 가방이 **아래쪽**에서 열렸다 → 위로 {_up}칸만 올라가 "
+                      f"거기서 아래로 끝까지 훑는다 ({time.time() - _tc:.1f}초)")
+        elif INV_CLIMB_ON and not INV_UP_SMALL:
             _tc, _cl, _miss = time.time(), 0, 0
             while _cl < INV_CLIMB_MAX and not self._item_stop:
                 if eatf and _eat_here() == "stop":
