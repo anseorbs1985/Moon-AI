@@ -1328,6 +1328,7 @@ XREG_STRICT     = ("축복갑옷마법주문서", "축복무기마법주문서")
 XREG_STRICT_GOLD_COLOR = 22.0     # 금색으로 골라진 칸에서도 색 차이가 이만큼 안이어야 (일반 39.6 · 저주 55.7)
 XREG_LOOK_N     = 4               # 처음에 하나도 못 찾으면 이만큼 더 본다
 XREG_LOOK_GAP   = (0.5, 0.8)
+XREG_ONE_ROWMAX = 2               # '1' 은 한 줄에 점 2개까지 ('4' 는 가로획이 4~5개 — 2026-11-25)
 XREG_NO10       = True            # 🚫 최저가가 10.00 이면 등록하지 않는다 (2026-11-22 사용자)
 XREG_MIN_ROWBOX = (226, 145, 264, 160)  # '최저 거래 단가' 줄 (숫자 · '.00' 을 찾는 자리)
 XREG_PRICE_SPAN = 16             # '최저 거래 단가' 숫자 폭(px) — 74.00 은 18~19 · 9.00 이하 ≈14
@@ -1617,8 +1618,14 @@ def xreg_min_is10(big):
         tb = tt > 130
         top, tink = int(tb[1].sum()), int(tb.sum())
         hink = int((h > 130).sum()) if h.size else 0
-        ten = us >= 0.85 and hink == 0 and tink >= 4 and (top <= 2 or tink <= 8)
-        return ten, f"끝자리0 {us:.2f} · 앞자리 점{tink} 윗줄{top} · 백의자리 점{hink}"
+        # 🚨 '4' 를 '1' 로 읽어 **40.00 을 10.00 으로** 보고 취소했다 (2026-11-25 실측 6건 — 전부 40.00).
+        #    '4' 는 윗줄이 점 1개라 '윗줄 2개 이하' 를 그냥 통과했다. '4' 에는 **가로획**(한 줄에 점 4~5개)이
+        #    있고 '1' 은 기울어진 가는 획이라 한 줄에 점 2개를 넘지 않는다 → 그 줄 폭으로 가른다.
+        wb = g[dy:dy + hh, max(0, dx - 9):dx - 3] > 130
+        rowmax = int(wb.sum(1).max()) if wb.size else 0
+        ten = (us >= 0.85 and hink == 0 and tink >= 4 and (top <= 2 or tink <= 8)
+               and rowmax <= XREG_ONE_ROWMAX)
+        return ten, f"끝자리0 {us:.2f} · 앞자리 점{tink} 윗줄{top} 가장넓은줄{rowmax} · 백의자리 점{hink}"
     except Exception as e:
         return None, f"읽기 실패 {type(e).__name__}"
 
