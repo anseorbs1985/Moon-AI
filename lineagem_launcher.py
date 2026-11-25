@@ -1832,6 +1832,19 @@ SUBC_PICKABLE = (2, 3, 4, 5)        # 보조로 고를 수 있는 줄 (1번째 =
 SUBC_CHSEL_X  = (0.38, 0.62)           # [캐릭터 선택] 은 확인창 **가운데** 버튼 (창 가로 비율)
 SUBC_QUEST_IMG = "subc_quest"          # [일일] 신비한 서커스 유랑단 (글자 · 546 창에서 잘랐다)
 SUBC_PLACE_IMG = "subc_place"          # 서커스 광장 (미니맵 아래 지역 이름)
+# 🏰 **이벤트가 바뀌어도 같은 길로 들어간다** (2026-11-25 사용자 — *"지금은 은기사 마을 주변 몬스터 처치거든 …
+#    이벤트가 다르니까 어차피 하나는 없어지니까 … 잇는걸 던전을 들어가줄래? 들어가는 방식은 서커스랑 똑같아"*)
+#    퀘스트 목록에서 아래 그림 중 **보이는 것**을 누른다 (둘 다 보이면 점수가 높은 것).
+#    📏 '은기사 마을 주변' (subc_quest_2.png 58x12 · #02 에서) — 그 줄 1.00 · 어두운 화면 0.62~0.74 ·
+#       그 밖 저장 화면 700여 장 최고 0.44 · 서커스 화면 123장에서 최고 0.40 → 기준 SUBC_QUEST_MATCH(0.50) 그대로
+#    새 이벤트가 나오면 그 퀘스트 제목 글자를 잘라 `subc_quest_3.png` 로 넣고 여기 한 줄만 더한다.
+SUBC_QUESTS = (("subc_quest", "신비한 서커스 유랑단", "subc_place"),
+               ("subc_quest_2", "은기사 마을 주변", "subc_place_2"))
+#    도착 그림(subc_place_2)이 **없으면** 미니맵 아래 지역 이름 칸이 **바뀌고 가라앉은 것**으로 도착을 본다.
+SUBC_ARRIVE_DIFF  = 25.0    # 누르기 전과 이만큼 달라지면 '다른 곳' (글자 가면 0/255 평균 차이)
+SUBC_ARRIVE_STILL = 8.0     # 연달아 찍은 두 장이 이만큼 안으로 같으면 '가라앉음'
+SUBC_ARRIVE_MIN   = 5.0     # 이동 확인 뒤 최소 이만큼은 기다린다
+SUBC_LAST_Q = ["신비한 서커스 유랑단"]   # 마지막으로 찾은 퀘스트 이름 (기록용)
 SUBC_QUEST_MATCH = 0.50   # 퀘스트 목록에서 서커스 제목 (전 0.75)
 #   📏 2026-11-19 화면 453장 — 서커스 줄 있음 0.85~0.96(평소) · **0.73~0.75(서커스 광장의 밝은 바닥)** ·
 #      0.54~0.62(창이 위를 덮어 어두움) / 서커스 줄 없음 최고 0.347 · 다른 퀘스트 줄 최고 0.353.
@@ -1868,28 +1881,33 @@ def subc_quest_find(big):
     배경이 밝으면 색 대조가 0.49 까지 떨어진다 → **초록 글자 가면**으로도 본다(0.87~)."""
     try:
         import cv2
-        t = subc_tpl(SUBC_QUEST_IMG)
-        if big is None or t is None:
+        if big is None:
             return None, None, -1.0
         H, W = big.shape[:2]
         k = W / float(SUBC_BASE_W)
-        if abs(k - 1) > 0.02:
-            t = cv2.resize(t, (max(4, int(t.shape[1] * k)), max(4, int(t.shape[0] * k))))
         x0, y0, x1, y1 = 0, int(H * 0.22), int(W * 0.40), int(H * 0.62)
         band = big[y0:y1, x0:x1]
-        if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
-            return None, None, -1.0
-        best, loc = -1.0, None
-        for a, b in ((band, t), (_subc_green(band), _subc_green(t))):
-            if b.max() == 0:
+        gb = _subc_green(band)
+        best, loc, tsz, nm = -1.0, None, None, None
+        for img, qn, _pl in SUBC_QUESTS:
+            t = subc_tpl(img)
+            if t is None:
                 continue
-            r = cv2.matchTemplate(a, b, cv2.TM_CCOEFF_NORMED)
-            _mn, mx, _ml, ml = cv2.minMaxLoc(r)
-            if mx > best:
-                best, loc = float(mx), ml
+            if abs(k - 1) > 0.02:
+                t = cv2.resize(t, (max(4, int(t.shape[1] * k)), max(4, int(t.shape[0] * k))))
+            if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
+                continue
+            for a, b in ((band, t), (gb, _subc_green(t))):
+                if b.max() == 0:
+                    continue
+                r = cv2.matchTemplate(a, b, cv2.TM_CCOEFF_NORMED)
+                _mn, mx, _ml, ml = cv2.minMaxLoc(r)
+                if mx > best:
+                    best, loc, tsz, nm = float(mx), ml, t.shape, qn
         if best < SUBC_QUEST_MATCH or loc is None:
             return None, None, best
-        return x0 + loc[0] + t.shape[1] // 2, y0 + loc[1] + t.shape[0] // 2, best
+        SUBC_LAST_Q[0] = nm
+        return x0 + loc[0] + tsz[1] // 2, y0 + loc[1] + tsz[0] // 2, best
     except Exception:
         return None, None, -1.0
 
@@ -1900,24 +1918,27 @@ def subc_done_score(big, y):
     완료되면 글자 색이 바뀔 수 있어 **흑백 모양**으로도 보고 색·초록 가면과 큰 쪽을 쓴다."""
     try:
         import cv2
-        t = subc_tpl(SUBC_QUEST_IMG)
-        if big is None or t is None:
+        if big is None:
             return -1.0
         H, W = big.shape[:2]
         k, ky = W / float(SUBC_BASE_W), H / float(SUBC_BASE_H)
-        if abs(k - 1) > 0.02:
-            t = cv2.resize(t, (max(4, int(t.shape[1] * k)), max(4, int(t.shape[0] * k))))
         y0, y1 = max(0, int((y - 11) * ky)), min(H, int((y + 11) * ky))
         band = big[y0:y1, 0:int(W * 0.40)]
-        if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
-            return -1.0
         best = -1.0
-        prs = [(cv2.cvtColor(band, cv2.COLOR_BGR2GRAY), cv2.cvtColor(t, cv2.COLOR_BGR2GRAY)),
-               (band, t), (_subc_green(band), _subc_green(t))]
-        for a, b in prs:
-            if b.max() == 0:
+        for img, _qn, _pl in SUBC_QUESTS:            # 🏰 이벤트 퀘스트 전부
+            t = subc_tpl(img)
+            if t is None:
                 continue
-            best = max(best, float(cv2.matchTemplate(a, b, cv2.TM_CCOEFF_NORMED).max()))
+            if abs(k - 1) > 0.02:
+                t = cv2.resize(t, (max(4, int(t.shape[1] * k)), max(4, int(t.shape[0] * k))))
+            if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
+                continue
+            prs = [(cv2.cvtColor(band, cv2.COLOR_BGR2GRAY), cv2.cvtColor(t, cv2.COLOR_BGR2GRAY)),
+                   (band, t), (_subc_green(band), _subc_green(t))]
+            for a, b in prs:
+                if b.max() == 0:
+                    continue
+                best = max(best, float(cv2.matchTemplate(a, b, cv2.TM_CCOEFF_NORMED).max()))
         return best
     except Exception:
         return -1.0
@@ -2051,22 +2072,47 @@ def subc_hud_circus(big):
 
 
 def subc_place_score(big):
-    """🎪 미니맵 아래 지역 이름이 '서커스 광장' 인가 → 점수 (-1 = 못 봄)."""
+    """🎪 미니맵 아래 지역 이름이 이벤트 장소(서커스 광장 · 등록된 다른 이벤트 장소)인가 → 점수 (-1 = 못 봄)."""
     try:
         import cv2
-        t = subc_tpl(SUBC_PLACE_IMG)
-        if big is None or t is None:
+        if big is None:
             return -1.0
         H, W = big.shape[:2]
         k = W / float(SUBC_BASE_W)
-        if abs(k - 1) > 0.02:
-            t = cv2.resize(t, (max(4, int(t.shape[1] * k)), max(4, int(t.shape[0] * k))))
         band = big[int(H * 0.28):int(H * 0.55), int(W * 0.70):W]
-        if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
-            return -1.0
-        return float(cv2.matchTemplate(band, t, cv2.TM_CCOEFF_NORMED).max())
+        best = -1.0
+        for _img, _qn, pl in SUBC_QUESTS:
+            t = subc_tpl(pl)
+            if t is None:
+                continue
+            if abs(k - 1) > 0.02:
+                t = cv2.resize(t, (max(4, int(t.shape[1] * k)), max(4, int(t.shape[0] * k))))
+            if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
+                continue
+            best = max(best, float(cv2.matchTemplate(band, t, cv2.TM_CCOEFF_NORMED).max()))
+        return best
     except Exception:
         return -1.0
+
+
+def subc_place_band(big):
+    """🏰 미니맵 아래 지역 이름 칸 (흑백 · 546 기준 크기로 맞춤) — 도착 그림이 없을 때 '바뀌었나' 를 본다."""
+    try:
+        import cv2
+        H, W = big.shape[:2]
+        b = big[int(H * 0.388):int(H * 0.430), int(W * 0.815):int(W * 0.962)]   # 이름 한 줄만 (Normal Zone·Kill 빼고)
+        b = cv2.resize(cv2.cvtColor(b, cv2.COLOR_BGR2GRAY), (80, 13))
+        return ((b > 150) * 255.0).astype("float32")        # 밝은 글자만 — 뒤 땅·몹이 움직여도 안 흔들린다
+    except Exception:
+        return None
+
+
+def subc_place_known(name):
+    """그 퀘스트의 도착 그림이 있나."""
+    for _img, qn, pl in SUBC_QUESTS:
+        if qn == name:
+            return subc_tpl(pl) is not None
+    return False
 # 😴 **깨어날 때까지** 깨우는 런처 — Z 한 번이 아니라 `_wake_until`
 #    (Z → '절전모드 해제' 글자 클릭, 최대 `SLEEP_WAKE_TRIES` 번).
 #    클릭이 한두 개뿐이고 **던전이 끝난 뒤** 쓰므로 16클라가 전부 자고 있다.
@@ -22082,9 +22128,16 @@ class App(tk.Tk):
         except Exception:
             pass
         nap(random.uniform(0.4, 0.7))
+        _qn = SUBC_LAST_Q[0] if q else ""
+        _band0 = None
+        try:
+            _b0 = grab_window(anc)
+            _band0 = subc_place_band(_b0) if _b0 is not None else None
+        except Exception:
+            _band0 = None
         if q:
             _ck(L + q[0], T + q[1])
-            click_log(f"[보조서커스] {tag} 퀘스트 [일일] 신비한 서커스 유랑단 (일치도 {q[2]:.2f}) 눌렀다")
+            click_log(f"[보조서커스] {tag} 퀘스트 [일일] {_qn} (일치도 {q[2]:.2f}) 눌렀다")
         elif cs[12]:
             _ck(*cs[12])
             click_log(f"[보조서커스] ⚠ {tag} 퀘스트 그림을 못 찾아 칸13 좌표를 눌렀다")
@@ -22116,10 +22169,13 @@ class App(tk.Tk):
             click_log(f"[보조서커스] {tag} 퀘스트 이동 확인창 (일치도 {_mv:.2f} · 아데나) → [확인]")
         else:
             click_log(f"[보조서커스] {tag} 이동 확인창이 {SUBC_MOVE_WAIT:.0f}초 안에 안 떴다 — 그대로 간다")
-        pv = self._subc_until(lambda: (lambda v: v if v >= SUBC_PLACE_MATCH else None)(
-            subc_place_score(grab_window(anc))), SUBC_PLACE_WAIT, poll=(2.0, 3.0))
+        if _qn and not subc_place_known(_qn) and _band0 is not None:
+            pv = self._subc_arrive_by_change(anc, tag, _qn, _band0)
+        else:
+            pv = self._subc_until(lambda: (lambda v: v if v >= SUBC_PLACE_MATCH else None)(
+                subc_place_score(grab_window(anc))), SUBC_PLACE_WAIT, poll=(2.0, 3.0))
         if pv:
-            click_log(f"[보조서커스] {tag} 서커스 광장 도착 (일치도 {pv:.2f})")
+            click_log(f"[보조서커스] {tag} {_qn or '서커스'} 도착 (일치도 {pv:.2f})")
         else:
             click_log(f"[보조서커스] ⚠ {tag} {SUBC_PLACE_WAIT:.0f}초 안에 서커스 광장을 못 봤다 — "
                       f"그래도 AUTO 를 누른다")
@@ -22151,6 +22207,32 @@ class App(tk.Tk):
                   + ("**켜졌다** ✔" if _on2 else "⚠ 켜졌는지 모르겠다" if _on2 is None else "⚠ 아직 꺼져 보인다")
                   + f" (빛 {_cn2})")
         return True
+
+    def _subc_arrive_by_change(self, anc, tag, qn, band0):
+        """🏰 도착 그림이 없는 이벤트 — 미니맵 아래 지역 이름 칸이 **누르기 전과 달라지고 가라앉으면** 도착.
+        → 점수(1.0) · None(못 봄 — 예전처럼 그래도 AUTO 를 누른다)."""
+        import numpy as np
+        t0 = time.time()
+        prev = None
+        while time.time() - t0 < SUBC_PLACE_WAIT:
+            if getattr(self, "_subc_stop", False):
+                return None
+            nap(random.uniform(1.4, 2.2))
+            b = grab_window(anc)
+            if b is None:
+                continue
+            cur = subc_place_band(b)
+            if cur is None:
+                continue
+            d0 = float(np.abs(cur - band0).mean())
+            still = prev is not None and float(np.abs(cur - prev).mean()) < SUBC_ARRIVE_STILL
+            hud = dcs_hud_seen(b)
+            prev = cur
+            if (time.time() - t0 >= SUBC_ARRIVE_MIN and d0 >= SUBC_ARRIVE_DIFF and still
+                    and hud is not False and int((cur > 0).sum()) >= 20):   # 불러오는 화면(글자 없음)은 아니다
+                click_log(f"[보조서커스] {tag} 🏰 '{qn}' — 지역 이름 칸이 바뀌고 가라앉았다 (차이 {d0:.1f}) → 도착으로 본다")
+                return 1.0
+        return None
 
     def _auto_on(self, anc):
         """🟢 AUTO 가 켜져 있나 → (True/False/None, 장마다 빛) · 2초 동안 6장을 본다 (깜빡이므로).
