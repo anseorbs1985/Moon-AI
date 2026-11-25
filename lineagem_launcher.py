@@ -12622,8 +12622,13 @@ class App(tk.Tk):
         # 🎪 **보조 서커스 — 다야 밑 · 던전 위** (2026-11-18 사용자: *"이거 위치는 다야 밑
         #    던전 위에 넣어주고 … 영웅템 체크 크기로 만들어줘. 자주 쓸 건 아니라서"*)
         #    이름 버튼 = 좌표 창(슬롯마다) · ▶실행 = 켜기 / 켜져 있으면 끄기.
-        _sc = tk.Frame(dc_col)
-        _sc.pack(anchor="n", pady=(2, 0), before=self._warn_toprow)
+        # 🎉 **이벤트 상자** (2026-11-25 사용자: *"이벤트 던전 서커스 주문서 이 아래에 배치시켜주고
+        #    던전처럼 이벤트 < 이렇게 묶어 줬으면"*) — 이벤트 던전!!! · 서커스주문서 · 서커스 이벤트등록
+        _evt = tk.LabelFrame(dc_col, text=" 이벤트 ", font=("맑은 고딕", 9, "bold"),
+                             fg="#7d3c98", bd=2, relief="groove")
+        _evt.pack(anchor="n", pady=(2, 0), padx=1, before=self._warn_toprow)
+        _sc = tk.Frame(_evt)
+        _sc.pack(anchor="n", padx=3, pady=(1, 0))
         tk.Button(_sc, text="이벤트 던전!!!", font=("맑은 고딕", 8, "bold"),
                   bg="#7d3c98", fg="white", activebackground="#5b2c6f",
                   width=10, height=1, pady=2,
@@ -12635,8 +12640,8 @@ class App(tk.Tk):
         self._subc_btn.pack(side="left", padx=(2, 0))
         self.after(2500, self._subc_boot)
         # 📜 **서커스주문서 — 보조서커스 밑** (2026-11-23 사용자 지시)
-        _cs = tk.Frame(dc_col)
-        _cs.pack(anchor="n", pady=(2, 0), before=self._warn_toprow)
+        _cs = tk.Frame(_evt)
+        _cs.pack(anchor="n", padx=3, pady=(1, 0))
         tk.Button(_cs, text="📜 서커스주문서", font=("맑은 고딕", 8, "bold"),
                   bg="#9a7d0a", fg="white", activebackground="#7d6608",
                   width=10, height=1, pady=2,
@@ -12645,6 +12650,17 @@ class App(tk.Tk):
                   bg="#27ae60", fg="white", activebackground="#1e8449",
                   width=4, height=1, pady=2,
                   command=lambda: self._cscr_start(None)).pack(side="left", padx=(2, 0))
+        # 🎪 **서커스 이벤트등록 — 이벤트 상자 맨 아래** (2026-11-25 사용자 — 펼친 화면 줄에서 옮겼다)
+        _ce = tk.Frame(_evt)
+        _ce.pack(anchor="n", padx=3, pady=(1, 2))
+        tk.Button(_ce, text="🎪 이벤트등록", font=("맑은 고딕", 8, "bold"),
+                  bg="#5b2c6f", fg="white", activebackground="#4a235a",
+                  width=10, height=1, pady=2,
+                  command=self._open_circus_win).pack(side="left")
+        tk.Button(_ce, text="▶실행", font=("맑은 고딕", 8, "bold"),
+                  bg="#27ae60", fg="white", activebackground="#1e8449",
+                  width=4, height=1, pady=2,
+                  command=lambda: self._start_dgn2("circus")).pack(side="left", padx=(2, 0))
 
         _dun = tk.LabelFrame(dc_col, text=" 던전 ", font=("맑은 고딕", 9, "bold"),
                              fg="#a04000", bd=2, relief="groove")
@@ -12766,7 +12782,7 @@ class App(tk.Tk):
                 ("🏰 변신\n확인용", "#d35400", self._open_dungeon_win, self._start_dungeon),
                 ("🧸 인형\n확인용", "#b9770e", self._open_dollchk_win, lambda: self._start_dgn2("dollchk")),
                 ("🗿 성물\n확인용", "#117864", self._open_relic_win,   lambda: self._start_dgn2("relic")),
-                ("🎪 서커스\n이벤트등록", "#7d3c98", self._open_circus_win, lambda: self._start_dgn2("circus")),
+                # 🎪 서커스 이벤트등록 → 세로바 '이벤트' 상자로 옮겼다 (2026-11-25 · 두 군데 두지 않는다)
                 ("🎪 서커스\n이벤트실행", "#5b2c6f", self._open_circus2_win, lambda: self._start_dgn2("circus2")),
                 ("🎪 서커스\n이벤트퀘스트", "#4a235a", self._open_circus3_win, lambda: self._start_dgn2("circus3")),
                 # 🔮🗝 좌표만 누르는 런처 둘 — **이 줄 제일 밑** (2026-10-06 사용자 지시:
