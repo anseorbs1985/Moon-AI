@@ -1092,6 +1092,19 @@ def awaken_screen_area():
                        # 안 쓰는 줄은 비워두면 건너뛴다. 더 필요하면 이 숫자만 키운다.
 # 클릭 대신 '마우스 휠 올리기'를 할 자리 (던전키: {0부터 센 클릭번호})
 WHEEL_UP_INDICES = {"circus": {4}}     # 서커스이벤트 클릭5 = 휠 위로
+# 🎪 **이벤트등록 — 스케줄의 사냥터 리스트에서 이벤트 사냥터를 그림으로 찾아 누른다** (2026-11-25 사용자:
+#    *"은기사 마을 주변을 스케줄 리스트 두번째에 넣는게 잇거든 근데 이게 가끔 아래에 있는것들이 있더라고"*)
+#    칸4(0부터 3) 가 그 자리다 — 예전엔 좌표(창 안 173,197)를 그대로 눌러 목록 순서가 바뀌면 엉뚱한 사냥터가 들어갔다.
+#    📏 2026-11-25 사용자가 #02 에서 한 것을 녹화 — 그 줄 0.997~1.00 · 그 밖 녹화 화면·저장 화면 500여 장 최고 0.54.
+#    그림 `click_templates/circus_pick*.png` (사냥터 이름 글자 · 546x307 창 기준). 이벤트가 바뀌면 그 이름을 잘라 넣는다.
+#    안 보이면 사냥터 리스트를 **한 칸씩 내려** 다시 본다. 🚫 끝내 못 찾으면 **아무것도 안 누르고** 그 슬롯만 끝낸다.
+#    그림이 하나도 없으면 예전처럼 등록 좌표를 누른다.
+CIRCUS_PICK_CELL   = 3
+CIRCUS_PICK_BAND   = (105, 100, 285, 295)   # 사냥터 리스트 (546 기준)
+CIRCUS_PICK_WHEEL  = (190, 230)             # 리스트 위에서 휠
+CIRCUS_PICK_MATCH  = 0.80
+CIRCUS_PICK_SCROLL = 6                       # 안 보이면 몇 칸까지 내려보나
+CIRCUS_PICK_LOOK   = 3                       # 처음에 리스트가 뜨기를 몇 번 보나
 WHEEL_UP_NOTCH  = 3    # 한 번에 굴릴 칸 수
 WHEEL_UP_TIMES  = 3    # 몇 번 굴릴지
 DOLL_SLOTS     = 16    # 인형 탐험 슬롯 수
@@ -2116,11 +2129,11 @@ def subc_place_known(name):
 # 😴 **깨어날 때까지** 깨우는 런처 — Z 한 번이 아니라 `_wake_until`
 #    (Z → '절전모드 해제' 글자 클릭, 최대 `SLEEP_WAKE_TRIES` 번).
 #    클릭이 한두 개뿐이고 **던전이 끝난 뒤** 쓰므로 16클라가 전부 자고 있다.
-SLEEP_HARD    = ("resc", "herox")
+SLEEP_HARD    = ("resc", "herox", "circus")   # 🎪 이벤트등록도 (2026-11-25 사용자: "절전 모드 되어잇으면 절전모드 해제하고")
 # 😴 **깨어 있었으면 칸1(절전해제)을 건너뛴다** (사용자: *"안 되어 있으면 그냥 7번"*)
 #    🚫 이 건너뛰기를 없애지 말 것 — 깨어 있는데 칸1 을 누르면 그 자리는
 #       **게임 화면**이라 엉뚱한 것이 눌린다.
-SLEEP_SKIP1   = ("resc", "herox")
+SLEEP_SKIP1   = ("resc", "herox", "circus")
 # ⎋ **그 칸은 좌표를 누르지 않고 ESC 를 누른다** (0부터 센 번호)
 #    2026-10-27 사용자: *"그 **11번에는 esc를 넣어줘**"*
 #    · 좌표를 안 찍어도 된다 — 그 슬롯의 **첫 등록 좌표**로 창을 앞으로 올린 뒤 누른다.
@@ -3619,7 +3632,7 @@ MONDEX_TEMPO   = (0.90, 1.15)
 MAIL_TEMPO     = (0.90, 1.12)    # 클라마다 제 속도 (들어갈 때 한 번 뽑는다)
 MAIL_HOLD      = 0.10            # 10% 확률로 한 박자 더 쉰다 (사람이 화면 보는 시간)
 MAIL_HOLD_T    = (0.4, 1.0)
-SLEEP_WAKE = ("fix", "jakwi", "dragon", "mondex", "resc", "herox")
+SLEEP_WAKE = ("fix", "jakwi", "dragon", "mondex", "resc", "herox", "circus")
 SLEEP_WAKE_KEY = "z"
 SLEEP_MATCH = 0.76      # 절전 화면 판정 기준.
 # 실측 491 창 — 자는 중 0.72~1.00 / 깨어 있을 때 0.39~0.50  → 0.68 이면 넉넉했다.
@@ -9607,6 +9620,47 @@ def area_is_set(fkey, j):
         return True
     except Exception:
         return False
+
+
+def circus_pick_tpls():
+    """🎪 이벤트등록 — 사냥터 리스트에서 찾을 이름 그림들."""
+    out = []
+    try:
+        import cv2, numpy as np, glob as _g
+        for p in sorted(_g.glob(os.path.join(IMG_DIR, "circus_pick*.png"))):
+            t = cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+            if t is not None:
+                out.append((os.path.basename(p), t))
+    except Exception:
+        pass
+    return out
+
+
+def circus_pick_find(big):
+    """🎪 사냥터 리스트에서 이벤트 사냥터 이름 → (창 안 x, y, 점수, 그림이름) / (None, None, 최고, "")."""
+    try:
+        import cv2
+        H, W = big.shape[:2]
+        kx, ky = W / 546.0, H / 307.0
+        x0, y0, x1, y1 = CIRCUS_PICK_BAND
+        band = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)]
+        best, bx, by, bn = -1.0, None, None, ""
+        for nm, t in circus_pick_tpls():
+            if abs(kx - 1) > 0.02 or abs(ky - 1) > 0.02:
+                t = cv2.resize(t, (max(4, int(t.shape[1] * kx)), max(4, int(t.shape[0] * ky))))
+            if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
+                continue
+            r = cv2.matchTemplate(band, t, cv2.TM_CCOEFF_NORMED)
+            _mn, mx, _ml, ml = cv2.minMaxLoc(r)
+            if mx > best:
+                best, bn = float(mx), nm
+                bx = int(x0 * kx) + ml[0] + t.shape[1] // 2
+                by = int(y0 * ky) + ml[1] + t.shape[0] // 2
+        if best < CIRCUS_PICK_MATCH:
+            return None, None, best, bn
+        return bx, by, best, bn
+    except Exception:
+        return None, None, -1.0, ""
 
 
 def client_rect_at(x, y):
@@ -24399,6 +24453,51 @@ class App(tk.Tk):
             pass
         return nm
 
+    def _circus_pick(self, coord, slot):
+        """🎪 스케줄 사냥터 리스트에서 이벤트 사냥터를 찾아 누른다 → "그림" · "이미지없음"."""
+        nm = (slot or {}).get("name", "?")
+        anc = coord or slot_anchor(slot)
+        rc = client_rect_at(*anc) if anc else None
+        if not rc:
+            click_log(f"circus [{nm}] 🎪 사냥터 고르기 — 어느 클라인지 모른다 → 이 슬롯 중단")
+            return "이미지없음"
+        Lx, Ty, W, H = rc[0], rc[1], rc[2] - rc[0], rc[3] - rc[1]
+        kx, ky = W / 546.0, H / 307.0
+        best, scrolled = -1.0, 0
+        for _t in range(CIRCUS_PICK_LOOK + CIRCUS_PICK_SCROLL):
+            if getattr(self, "_stop_flag", False):
+                return "이미지없음"
+            big = grab_window(anc)
+            if big is not None:
+                x, y, v, tn = circus_pick_find(big)
+                best = max(best, v)
+                if x is not None:
+                    try:
+                        self._focus_client_at(anc)
+                    except Exception:
+                        pass
+                    nap(random.uniform(0.25, 0.5))
+                    X = Lx + int(x * W / float(big.shape[1])) + random.randint(-4, 8)
+                    Y = Ty + int(y * H / float(big.shape[0])) + random.randint(-1, 1)
+                    click_at(X, Y)
+                    click_log(f"circus [{nm}] 🎪 사냥터 리스트에서 **{tn[:-4]}** 를 찾아 눌렀다 "
+                              f"(일치도 {v:.2f} · 창안 {x},{y} · 리스트를 {scrolled}칸 내렸다)")
+                    self.status.set(f"🎪 [{nm}] 이벤트 사냥터 골랐다")
+                    return "그림"
+            if _t + 1 < CIRCUS_PICK_LOOK:
+                nap(random.uniform(0.5, 0.8))             # 리스트가 아직 안 떴을 수 있다
+                continue
+            if scrolled >= CIRCUS_PICK_SCROLL:
+                break
+            wheel_at(Lx + int(CIRCUS_PICK_WHEEL[0] * kx), Ty + int(CIRCUS_PICK_WHEEL[1] * ky), -1)
+            scrolled += 1
+            nap(random.uniform(0.6, 0.9))
+        click_log(f"circus [{nm}] 🚫 사냥터 리스트에서 이벤트 사냥터를 못 찾았다 "
+                  f"(최고 {best:.2f} · 기준 {CIRCUS_PICK_MATCH} · {scrolled}칸 내려봤다) — "
+                  f"아무것도 안 누르고 이 슬롯만 끝낸다")
+        self.status.set(f"🚫 [{nm}] 이벤트 사냥터를 못 찾았다")
+        return "이미지없음"
+
     def _click_log(self, fkey, j, coord, slot, act):
         """이 클릭이 '리니지M 창'에 제대로 갔는지 기록한다 (씹힘 찾기용)."""
         if fkey not in self.LOG_FKEYS:
@@ -25193,6 +25292,9 @@ class App(tk.Tk):
             click_log(f"{fkey} [{_en}] 좌표{j+1} ⎋ ESC 를 {_et}번 눌렀다")
             self.status.set(f"⎋ [{_en}] 좌표{j+1} — ESC")
             return "ESC"
+        # 🎪 **이벤트등록 — 사냥터 리스트에서 그림으로 찾는다** (2026-11-25)
+        if fkey == "circus" and j == CIRCUS_PICK_CELL and circus_pick_tpls():
+            return self._circus_pick(coord, slot)
         # 🖱 **복구의 확인 칸** — 왼쪽부터 여러 자리를 눌러본다 (2026-11-08).
         #    ⚠ 이 처리가 **탭 흐름에만** 있어서 예전 좌표 흐름(로컬이 쓰는 길)은
         #      칸5 를 **그냥 눌렀다.** 🚫 복구(fix)의 그 칸에서만 동작한다.
@@ -26256,7 +26358,7 @@ class App(tk.Tk):
                 # 🛒 거래소 열기 — **첫 칸을 누르기 전에 그 클라를 앞으로 올린다**.
                 #    깨어 있던 클라는 `_wake_hard` 가 아무것도 안 하므로, 뒤에 있는
                 #    창의 첫 클릭이 '창 띄우기' 로만 먹히고 메뉴가 안 열린다.
-                if fkey == "herox" and _anchor and order:
+                if fkey in ("herox", "circus") and _anchor and order:   # 🎪 이벤트등록도 (깨어 있으면 첫 클릭이 창 띄우기로 먹힌다)
                     try:
                         self._focus_client_at(_anchor)
                     except Exception:
