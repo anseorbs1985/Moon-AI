@@ -5539,6 +5539,9 @@ CARDX_OK    = (328, 252)                # 두 번째 확인창 [확인]
 CARDX_X     = (527, 19)                 # 카드 교체 창 ✕
 CARDX_STEP  = (1.1, 2.2)                # 누를 때마다 쉬기 (+20~50% · 가끔 멈칫)
 CARDX_SEE   = 6.0                       # 다음 화면이 뜨기를 기다리는 한도
+CARDX_BAG_WAIT = 3.0                    # 가방이 닫히기를 기다리는 한도
+CARDX_LOOK  = 3                         # [카드 교체] 버튼을 몇 번 나눠 보나
+CARDX_LOOK_GAP = (0.35, 0.6)
 
 
 def cardx_tpl(name):
@@ -35809,11 +35812,29 @@ class App(tk.Tk):
                 wait(lambda bb: not seen(bb, "title"), 4.0)
             click_log(f"[아이템정리] {tag} 🃏 {why}")
 
-        b = grab()
-        if b is None:
-            return "none"
-        x, y, v = cardx_find(b, "btn")
+        # 🚨 가방 ✕ 를 누른 **바로 뒤**에 보면 닫히는 중인 가방이 미니맵 쪽(버튼 자리)을 덮고 있다
+        #    (2026-11-25 #08 — 버튼이 1.00 으로 떠 있었는데 확정을 안 했다). 가방이 닫히기를 기다렸다가
+        #    몇 번 나눠 본다.
+        t0 = time.time()
+        while time.time() - t0 < CARDX_BAG_WAIT and not self._item_stop:
+            b = grab()
+            if b is None or inv_win_score(b, "inv_open", INV_TAB_BOX) < INV_WIN_MATCH:
+                break
+            nap(random.uniform(0.25, 0.4))
+        x, best = None, -1.0
+        for _k in range(CARDX_LOOK):
+            if self._item_stop:
+                return "none"
+            nap(random.uniform(*CARDX_LOOK_GAP))
+            b = grab()
+            if b is None:
+                continue
+            x, y, v = cardx_find(b, "btn")
+            if x is not None:
+                break
+            best = max(best, v)
         if x is None:
+            click_log(f"[아이템정리] {tag} 🃏 [카드 교체] 없음 (최고 {best:.2f} · 기준 {CARDX_MATCH})")
             return "none"
         click_log(f"[아이템정리] {tag} 🃏 [카드 교체] 가 떠 있다 ({v:.2f}) → 확정하러 간다")
         self.status.set(f"🃏 {tag} 카드 교체 확정 중...")
