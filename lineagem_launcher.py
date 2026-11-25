@@ -5517,6 +5517,79 @@ def screen_calm(x, y, tmax=None):
     return time.time() - t0
 
 
+# 🃏 **아이템정리 끝에 '카드 교체' 확정** (2026-11-25 사용자 #04 녹화:
+#    *"아이템 정리할때 4번 슬롯 보면은 카드교체 떠잇는데 저것도 확정좀 해줄래"* ·
+#    *"천천히해 각 클릭마다 시간은 넌 사람이야"*)
+#    미니맵 옆 [카드 교체] → 전체 선택 → 선택 확정 → 카드 확정 → 확인 → ✕
+#    🚫 단계마다 **그 화면 그림을 본 뒤에만** 누른다. [다시 뽑기] 는 절대 누르지 않는다.
+#    📏 그림 넷 — 그 화면 1.00 · 녹화·저장 화면 90여 장에서 나머지 최고 0.50
+CARDX_ON    = True
+CARDX_MATCH = 0.85
+CARDX_BOX   = {"btn": (380, 45, 505, 100), "title": (420, 0, 546, 35),
+               "ask1": (140, 55, 420, 100), "ask2": (190, 185, 360, 230)}
+CARDX_ALL   = (477, 67)                 # 전체 선택 네모   (546x307 창 기준)
+CARDX_ALL_BOX = (469, 61, 483, 73)      # 📏 체크됨 주황 26 · 안 됨 0
+CARDX_GO    = (494, 284)                # [선택 확정]
+CARDX_GO_BOX = (458, 276, 524, 293)     # 📏 켜짐 갈색 538 · 꺼짐 0 (총 0개)
+CARDX_FIX   = (331, 261)                # 첫 확인창 [카드 확정]
+CARDX_OK    = (328, 252)                # 두 번째 확인창 [확인]
+CARDX_X     = (527, 19)                 # 카드 교체 창 ✕
+CARDX_STEP  = (1.1, 2.2)                # 누를 때마다 쉬기 (+20~50% · 가끔 멈칫)
+CARDX_SEE   = 6.0                       # 다음 화면이 뜨기를 기다리는 한도
+
+
+def cardx_tpl(name):
+    try:
+        import cv2, numpy as np
+        p = os.path.join(IMG_DIR, "cardx_%s.png" % name)
+        if not os.path.isfile(p):
+            return None
+        return cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
+    except Exception:
+        return None
+
+
+def cardx_find(big, name):
+    """🃏 카드 교체 단계 그림 → (창 안 x, y, 점수) · 못 찾으면 (None, None, 최고)."""
+    try:
+        import cv2
+        t = cardx_tpl(name)
+        if t is None or big is None:
+            return None, None, -1.0
+        H, W = big.shape[:2]
+        kx, ky = W / 546.0, H / 307.0
+        if abs(kx - 1) > 0.02 or abs(ky - 1) > 0.02:
+            t = cv2.resize(t, (max(4, int(t.shape[1] * kx)), max(4, int(t.shape[0] * ky))))
+        x0, y0, x1, y1 = CARDX_BOX[name]
+        bx0, by0 = int(x0 * kx), int(y0 * ky)
+        band = big[by0:int(y1 * ky), bx0:int(x1 * kx)]
+        if band.shape[0] < t.shape[0] or band.shape[1] < t.shape[1]:
+            return None, None, -1.0
+        r = cv2.matchTemplate(band, t, cv2.TM_CCOEFF_NORMED)
+        _mn, mx, _ml, ml = cv2.minMaxLoc(r)
+        if mx < CARDX_MATCH:
+            return None, None, float(mx)
+        return bx0 + ml[0] + t.shape[1] // 2, by0 + ml[1] + t.shape[0] // 2, float(mx)
+    except Exception:
+        return None, None, -1.0
+
+
+def cardx_px(big, box, kind):
+    """체크 주황 / 버튼 갈색 점 수 (546 기준 상자) · 못 재면 -1."""
+    try:
+        import numpy as np
+        H, W = big.shape[:2]
+        kx, ky = W / 546.0, H / 307.0
+        x0, y0, x1, y1 = box
+        a = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)].astype(int)
+        b, r = a[..., 0], a[..., 2]
+        if kind == "check":
+            return int(((r > 150) & (r - b > 70)).sum())
+        return int(((r > 90) & (r - b > 30)).sum())
+    except Exception:
+        return -1
+
+
 def invx_human_nap(step):
     """누른 뒤 쉬기 — 늘 랜덤(+20~50%) + 가끔(INVX_PAUSE_P) 1~4초 멈칫."""
     calm_nap(step)
@@ -35608,6 +35681,13 @@ class App(tk.Tk):
         if b is not None and tab_open(b) and not self._item_stop:
             if self._inv_hand_wait(tag):
                 click_at(*P(INV_CLOSE))
+        # 🃏 [카드 교체] 가 떠 있으면 확정한다 (가방이 닫힌 뒤)
+        if CARDX_ON and not self._item_stop:
+            try:
+                if self._inv_cardx(anc, tag, L, T, W, H) == "ok":
+                    done += 1
+            except Exception as e:
+                click_log(f"[아이템정리] ⚠ {tag} 🃏 카드 교체 오류 — {type(e).__name__}: {e}")
         # 🎣 녹일 것이 있었으면 — 가방이 닫힌 뒤 낚시 교환
         if melt_need and not self._item_stop:
             nap(random.uniform(0.5, 0.9))
@@ -35618,6 +35698,101 @@ class App(tk.Tk):
                 click_log(f"[아이템정리] ⚠ {tag} 🎣 녹이기 오류 — {type(e).__name__}: {e}")
         click_log(f"[아이템정리] ✔ {tag} 끝 — {done}번 깠다" + (f" · 건너뛴 것 {sorted(skip)}" if skip else ""))
         return done
+
+    def _inv_cardx(self, anc, tag, L, T, W, H):
+        """🃏 [카드 교체] → 전체 선택 → 선택 확정 → 카드 확정 → 확인 → ✕ → 'ok' · 'none' · 'stop'.
+        단계마다 그 화면을 **본 뒤에만** 누른다 · 누를 때마다 사람처럼 쉰다."""
+        kx, ky = W / 546.0, H / 307.0
+
+        def grab():
+            return grab_window(anc)
+
+        def tap(rel, what):
+            if self._item_stop or not self._inv_hand_wait(tag):
+                raise RuntimeError("멈춤")
+            x = L + int((rel[0] + random.randint(-3, 3)) * kx)
+            y = T + int((rel[1] + random.randint(-2, 2)) * ky)
+            screen_calm(x, y)
+            click_at(x, y)
+            click_log(f"[아이템정리] {tag} 🃏 {what} 눌렀다 ({x},{y})")
+            invx_human_nap(CARDX_STEP)
+
+        def wait(cond, tmax=CARDX_SEE):
+            t0 = time.time()
+            b = None
+            while time.time() - t0 < tmax:
+                if self._item_stop:
+                    return False, b
+                b = grab()
+                if b is not None and cond(b):
+                    return True, b
+                nap(random.uniform(0.25, 0.45))
+            return False, b
+
+        def seen(b, n):
+            return cardx_find(b, n)[0] is not None
+
+        def close_win(why):
+            b = grab()
+            if b is not None and seen(b, "title") and not seen(b, "ask1") and not seen(b, "ask2"):
+                tap(CARDX_X, "✕(카드 교체 창 닫기)")
+                wait(lambda bb: not seen(bb, "title"), 4.0)
+            click_log(f"[아이템정리] {tag} 🃏 {why}")
+
+        b = grab()
+        if b is None:
+            return "none"
+        x, y, v = cardx_find(b, "btn")
+        if x is None:
+            return "none"
+        click_log(f"[아이템정리] {tag} 🃏 [카드 교체] 가 떠 있다 ({v:.2f}) → 확정하러 간다")
+        self.status.set(f"🃏 {tag} 카드 교체 확정 중...")
+        invx_human_nap(CARDX_STEP)
+        try:
+            tap((x / kx, y / ky - 6), "[카드 교체]")
+            ok, b = wait(lambda bb: seen(bb, "title"))
+            if not ok:
+                p = self._inv_shot(b, tag, "cardx_open") if b is not None else ""
+                click_log(f"[아이템정리] 🚫 {tag} 🃏 [카드 교체] 를 눌렀는데 창이 안 떴다 — "
+                          f"아무것도 더 안 누른다 · 화면 {p}")
+                return "none"
+            calm_nap((0.6, 1.1))                     # 카드가 다 그려질 틈
+            b = grab()
+            if b is not None and cardx_px(b, CARDX_ALL_BOX, "check") < 8:
+                tap(CARDX_ALL, "전체 선택")
+                ok, b = wait(lambda bb: cardx_px(bb, CARDX_ALL_BOX, "check") >= 8, 3.0)
+                if not ok:
+                    tap(CARDX_ALL, "전체 선택 (한 번 더)")
+                    ok, b = wait(lambda bb: cardx_px(bb, CARDX_ALL_BOX, "check") >= 8, 3.0)
+            go = cardx_px(b, CARDX_GO_BOX, "btn") if b is not None else -1
+            if go < 100:
+                close_win(f"[선택 확정] 이 꺼져 있다 (갈색 {go}) — 확정할 카드가 없다 → 창만 닫았다")
+                return "none"
+            tap(CARDX_GO, "[선택 확정]")
+            ok, b = wait(lambda bb: seen(bb, "ask1") and not seen(bb, "ask2"))
+            if not ok:
+                p = self._inv_shot(b, tag, "cardx_ask1") if b is not None else ""
+                close_win(f"🚫 첫 확인창이 안 떴다 — 더 안 누른다 · 화면 {p}")
+                return "none"
+            tap(CARDX_FIX, "[카드 확정]")
+            ok, b = wait(lambda bb: seen(bb, "ask2"))
+            if not ok:
+                p = self._inv_shot(b, tag, "cardx_ask2") if b is not None else ""
+                click_log(f"[아이템정리] 🚫 {tag} 🃏 '정말 카드를 확정하겠습니까?' 가 안 떴다 — "
+                          f"더 안 누른다 · 화면 {p}")
+                return "none"
+            tap(CARDX_OK, "[확인]")
+            ok, b = wait(lambda bb: seen(bb, "title") and not seen(bb, "ask1") and not seen(bb, "ask2"))
+            if not ok:
+                p = self._inv_shot(b, tag, "cardx_done") if b is not None else ""
+                click_log(f"[아이템정리] ⚠ {tag} 🃏 확인 뒤 카드 교체 창으로 안 돌아왔다 · 화면 {p}")
+                return "ok"
+            calm_nap((0.5, 1.0))
+            close_win("✅ 카드를 확정했다 → 창을 닫았다")
+            return "ok"
+        except RuntimeError:
+            click_log(f"[아이템정리] {tag} 🃏 멈춤 — 카드 교체를 거기서 그만둔다")
+            return "stop"
 
     def _invx_run(self, kind, anc, tag, L, T, cx, cy):
         """🛠 꾹 눌러 제작('craft') · 시즌 상점 교환('shop') → 'ok' · 'skip'(아무것도 안 바뀜) · 'stop'."""
