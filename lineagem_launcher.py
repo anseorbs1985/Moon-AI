@@ -1350,6 +1350,8 @@ XREG_UNIT_VAL   = (200, 133, 263, 146)  # '개당 판매 금액' 숫자
 XREG_MIN_VAL    = (200, 149, 263, 162)  # '최저 거래 단가' 숫자 (같은 폭)
 XREG_SAME_XOR   = 14             # 두 숫자가 같은가 — 📏 같을 때 7 · 15.00↔60.00 28
 XREG_SAME_SUM   = 12             #   + 밝은 점 수 차이 — 📏 같을 때 5 · 다를 때 16
+XREG_INT_COLS   = (215, 250)     # 개당·최저 숫자의 **정수 부분** 열 (소수점 왼쪽)
+XREG_INT_XOR    = 3              # 정수 부분이 같은가 — 📏 같을 때 0~3 · 15↔60 24
 # 🧍 2026-11-21 사용자: *"무작정 엄청나게 빨리빨리 올리지 말고 1개 올리고 다음꺼 올릴 때 1~2초 시간 간격을
 #    주고 또 등록도 좀 천천히"* → 누를 때마다 0.7~1.3초 · 하나 올린 뒤 1~2초 더
 XREG_STEP       = (0.5, 1.0)     # 누른 뒤 쉼 (+ 가끔 1~4초 — invx_human_nap) · 2026-11-22 25% 당김 (전 0.7~1.3)
@@ -1793,13 +1795,32 @@ def xreg_price_stack(big):
         if best is None or int(m.sum()) < 20:
             return False, f"최저가 칸을 못 읽었다 (점 {int(m.sum())}) · 총액 자리 {len(tg)}"
         same = best[0] <= XREG_SAME_XOR * kx * ky and best[1] <= XREG_SAME_SUM * kx * ky
+        rnd = ""
+        if not same:
+            # 🔢 게임은 **총액을 정수로 자르고** 개당 금액을 다시 계산한다 (2026-11-26 #15 오만 충전석 —
+            #    6개 × 3.33 = 19.98 → 총 19 → 개당 3.17). 그래서 소수점 아래만 다르다 →
+            #    **정수 부분**이 같으면 최저가가 들어간 것이다 (개당 = ⌊수량×최저⌋÷수량 이라 정수 부분은 늘 같다).
+            #    📏 정수 부분 같음 0~3 · 15↔60 24
+            ib = None
+            ix0, ix1 = int(XREG_INT_COLS[0] * kx), int(XREG_INT_COLS[1] * kx)
+            im = g[my0:my1, ix0:ix1] > 130
+            for dy in (-2, -1, 0, 1, 2):
+                for dx in (-1, 0, 1):
+                    u = g[uy0 + dy:uy0 + dy + (my1 - my0), ix0 + dx:ix1 + dx] > 130
+                    if u.shape != im.shape:
+                        continue
+                    x = int((u ^ im).sum())
+                    if ib is None or x < ib[0]:
+                        ib = (x, abs(int(u.sum()) - int(im.sum())))
+            if ib and int(im.sum()) >= 6 and ib[0] <= XREG_INT_XOR * kx * ky and ib[1] <= XREG_INT_XOR * kx * ky:
+                same = True
+                rnd = f" · 소수점만 다르다(총액을 정수로 자른 것 · 정수부 차이 {ib[0]})"
         ok = same and len(tg) >= 2
-        t10, w10 = xreg_min_is10(big)
-        if ok and t10 and XREG_NO10:
-            return False, f"🚫 최저가가 **10다야**다 — 등록하지 않는다 ({w10})"
+        # 📦 묶음은 **개당 10다야** 가 아니라 **총액**으로 본다 (2026-11-26 사용자: *"다른 충전석은 10다야 넘으면 그냥 올려"*)
+        #    — 최저가 10.00 확인(xreg_min_is10)은 낱개 아이템에만 쓴다.
         if ok and XREG_NO10 and xreg_total_is10(big):
             return False, "🚫 **총 판매 금액이 10다야**다 — 10다야 이하는 올리지 않는다 (그대로 둔다)"
-        return ok, f"개당=최저 {'같다' if same else '다르다'}(차이 {best[0]}·{best[1]}) · 총액 자리 {len(tg)}"
+        return ok, f"개당=최저 {'같다' if same else '다르다'}(차이 {best[0]}·{best[1]}){rnd} · 총액 자리 {len(tg)}"
     except Exception as e:
         return False, f"읽기 실패 {type(e).__name__}"
 
