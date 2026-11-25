@@ -1329,6 +1329,9 @@ XREG_HAND_QUIET = 0.8             # 사람이 마우스를 놓은 뒤 이만큼 
 XREG_HAND_MAX   = 20.0
 XREG_ONE_CAP    = {"축복갑옷마법주문서": 2, "축복무기마법주문서": 2}   # 한 장씩 · 한 번에 최대 2번
 XREG_STRICT     = ("축복갑옷마법주문서", "축복무기마법주문서")
+XREG_NO_GOLD    = ("충전석_",)    # 🔋 충전석은 **골라진 금색 칸이라도 모양만으로 보지 않는다** (2026-11-26)
+                                  #    네 가지(에스카로스·오만과신념·주말월드·해적섬)가 서로·다른 충전석과 모양 0.79~0.93 이라
+                                  #    금색 칸에 밀려 들어온 잊혀진섬 충전석 등을 올릴 수 있다 → 늘 모양 0.86 + 색차 12
 XREG_STRICT_GOLD_COLOR = 22.0     # 금색으로 골라진 칸에서도 색 차이가 이만큼 안이어야 (일반 39.6 · 저주 55.7)
 XREG_LOOK_N     = 4               # 처음에 하나도 못 찾으면 이만큼 더 본다
 XREG_LOOK_GAP   = (0.5, 0.8)
@@ -1484,7 +1487,7 @@ def xreg_find(big, skip=(), gold=None):
                 if v >= XREG_ITEM_MATCH:
                     d = float(np.abs(b[y:y + th, x:x + tw].reshape(-1, 3).mean(0) - tc).mean())
                     ok = d <= XREG_ITEM_COLOR
-                if not ok and gold and v >= XREG_GOLD_MATCH:
+                if not ok and gold and v >= XREG_GOLD_MATCH and not nm.startswith(XREG_NO_GOLD):
                     gx, gy = gold[0] * kx, gold[1] * ky
                     ok = abs(cx - gx) <= 9 * kx and abs(cy - gy) <= 9 * ky
                     if ok and xreg_strict(nm):
