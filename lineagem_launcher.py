@@ -1314,7 +1314,11 @@ XREG_INV_MID    = (460, 190)
 XREG_BOXES      = {"xreg_menu": (394, 16, 462, 82), "xreg_title": (330, 0, 440, 40),
                    "xreg_soji": (420, 45, 500, 85), "xreg_qty": (200, 35, 340, 80),
                    "xreg_ask": (200, 150, 345, 195),
-                   "xreg_unit": (85, 120, 170, 160)}   # '개당 판매 금액' — 수량이 있는 아이템 창에만
+                   "xreg_unit": (85, 120, 170, 160),    # '개당 판매 금액' — 수량이 있는 아이템 창에만
+                   "xreg_adena": (380, 88, 540, 290)}   # 💰 소지품 칸의 아데나 (못 올리니 어둡게 보인다)
+XREG_ADENA_MATCH = 0.80          # 📏 아데나 칸 0.87~1.00 · 그 밖 소지품 화면 25장 ≤0.67
+XREG_DARK_V      = 120           # 칸 위쪽 밝기(가장 밝은 색 성분 98%) 가 이보다 낮으면 어두운 칸
+                                 #   📏 못 올리는 아데나·메달 72~136 · 밝은 아이템 144~255
 XREG_MATCH      = 0.85           # 화면 그림 — 📏 그 화면 1.00 · 아닐 때 ≤0.47 (133장)
 XREG_ITEM_MATCH = 0.86           # 아이템 모양 — 📏 같은 칸 1.00 · 다른 아이템 ≤0.82(색차 28)
 XREG_ITEM_COLOR = 12.0           #   + 평균 색 차이 (모양만 보면 비슷한 다른 아이템이 걸린다)
@@ -1350,8 +1354,8 @@ XREG_ITEM_GAP   = (0.75, 1.5)    # 하나 올리고 다음 것까지 · 2026-11-
 XREG_EQ_BLUE    = 40             # 🚫 착용 중 [E] 표시 — 칸 왼쪽 위 12px 의 파란 점
 XREG_EQ_WHITE   = 6              #    + 흰 글자 점 (📏 [E] 64·68/14·22 · 파란 구슬 아이템 33/0)
 XREG_POLL       = (0.12, 0.22)
-XREG_WHEEL_MAX  = 2              # 🌀 20칸에 올릴 것이 없으면 **휠 2칸까지만** 내려 더 본다 (2026-11-26 사용자:
-                                 #    "20칸 다 보는거 맞지? 없으면 휠로 2번만 까지좀 내려서 봐주라") · 그보다 더는 안 내린다
+XREG_WHEEL_MAX  = 1              # 🌀 20칸에 올릴 것이 없으면 **휠 1칸만** 내려 더 본다 (2026-11-26 사용자 — 2칸 → 1칸)
+                                 #    🚫 아데나가 보이거나 어두운(못 올리는) 칸이 있으면 내리지 않고 끝낸다 (xreg_scroll_why)
                                  # (2026-11-23 에는 0 — "그 위에 아이템이 항상 있으니까 내릴 필요가 없어")
                                  # (잠깐 60 으로 켰다가 되돌렸다) 🌀 보이는 것을 위에서부터 다 올린 뒤, 더 없으면 아래로 내려가며 찾는다
                                  #    (2026-11-23 사용자: "화면만 보고 올릴게 투성인데 꺼버린다" — 소지품이
@@ -1495,6 +1499,33 @@ def xreg_find(big, skip=(), gold=None):
     except Exception:
         pass
     return out
+
+
+def xreg_scroll_why(big):
+    """🌀 휠로 내려도 되나 → 내리면 안 되는 이유(글) · 내려도 되면 "".
+    (2026-11-26 사용자: *"오른쪽 20개가 전부 밝게 활성화 되었을 때 내렸으면 · 아데나가 보이면 휠로 내리지 말고 취소"*)
+    소지품은 올릴 수 있는 것 → 못 올리는 것(어둡게) → 아데나 차례라, 어두운 칸이나 아데나가 보이면 그 아래는 볼 것이 없다."""
+    try:
+        import numpy as np
+        if big is None:
+            return "화면을 못 찍었다"
+        v = xreg_score(big, "xreg_adena")
+        if v >= XREG_ADENA_MATCH:
+            return "아데나가 보인다 (%.2f)" % v
+        kx, ky = _xreg_k(big)
+        mx = big.max(2)
+        dark = []
+        for r in range(5):
+            for c in range(4):
+                x = int((385 + c * 37.5 + 5) * kx); y = int((92 + r * 38.6 + 3) * ky)
+                cell = mx[y:y + int(17 * ky), x:x + int(26 * kx)]
+                if cell.size and float(np.percentile(cell, 98)) < XREG_DARK_V:
+                    dark.append("%d-%d" % (r + 1, c + 1))
+        if dark:
+            return "어두운(못 올리는) 칸이 있다 %s" % " ".join(dark)
+        return ""
+    except Exception as e:
+        return "판정 실패 %s" % type(e).__name__
 
 
 def xreg_equipped(big, cx, cy):
@@ -35066,7 +35097,10 @@ class App(tk.Tk):
                 click_log(f"[거래소등록] {tag} 🔎 소지품 첫 화면에는 올릴 것이 없다 ({XREG_LOOK_N + 1}번 봤다) "
                           f"· 화면 {shot(b, 'none')}")
             if not hits:
-                if wheels >= XREG_WHEEL_MAX:
+                _why = "" if wheels >= XREG_WHEEL_MAX else xreg_scroll_why(b)
+                if _why:
+                    click_log(f"[거래소등록] {tag} 🌀 휠로 내리지 않는다 — {_why}")
+                if wheels >= XREG_WHEEL_MAX or _why:
                     # 🔎 왜 더 안 올렸나 — 칸마다 가장 닮은 그림 (실패 원인을 기록으로 본다)
                     click_log(f"[거래소등록] {tag} 🔎 칸별 진단 (창 {b.shape[1]}x{b.shape[0]} · "
                               f"기준 모양 {XREG_ITEM_MATCH} · 색차 {XREG_ITEM_COLOR:.0f} 이내 · 그림 {len(xreg_items())}장"
