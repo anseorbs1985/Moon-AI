@@ -12624,7 +12624,7 @@ class App(tk.Tk):
         #    이름 버튼 = 좌표 창(슬롯마다) · ▶실행 = 켜기 / 켜져 있으면 끄기.
         _sc = tk.Frame(dc_col)
         _sc.pack(anchor="n", pady=(2, 0), before=self._warn_toprow)
-        tk.Button(_sc, text="🎪 이벤트", font=("맑은 고딕", 8, "bold"),
+        tk.Button(_sc, text="이벤트 던전!!!", font=("맑은 고딕", 8, "bold"),
                   bg="#7d3c98", fg="white", activebackground="#5b2c6f",
                   width=10, height=1, pady=2,
                   command=self._open_subc_win).pack(side="left")
@@ -16219,7 +16219,7 @@ class App(tk.Tk):
         ("badge_slots",    "🎖 휘장 제작!!"),
         ("resc_slots",     "🔮 귀환주문서"),
         ("herox_slots",    "🟣 영웅템체크 좌표!"),
-        ("subc_slots",     "🎪 이벤트"),
+        ("subc_slots",     "🎪 이벤트 던전!!!"),
         ("fish_slots",     "🎣 낚시녹임"),
         ("market_slots",   "🔎 거래소검색"),
         ("coupon_slots",   "🎟 쿠폰등록"),
@@ -19827,7 +19827,7 @@ class App(tk.Tk):
                 "badge":   ("badge_slots",   "휘장 제작!!", "🎖"),
                 "resc":    ("resc_slots",    "귀환주문서",  "🔮"),
                 "herox":   ("herox_slots",   "영웅템체크 좌표!", "🟣"),
-                "subc":    ("subc_slots",    "이벤트", "🎪"),
+                "subc":    ("subc_slots",    "이벤트 던전!!!", "🎪"),
                 "dollchk": ("dollchk_slots", "인형확인용", "🧸"),
                 "relic":   ("relic_slots",   "성물확인용", "🗿"),
                 "coupon":  ("coupon_slots",  "쿠폰등록",   "🎟"),
@@ -21041,7 +21041,7 @@ class App(tk.Tk):
         캐릭터 선택 화면에서 **위에서 몇 번째 줄**인지 — 1번째는 메인이라 2~5 만 고른다.
         레벨 80 이상만 고르면 된다 (사용자 지시). 잠긴 줄은 고르지 말 것.
         자리는 코드에 한 벌(창 546x307 기준)이라 좌표를 찍을 필요가 없다."""
-        self._open_section_win("_subc_win", "🎪 이벤트",
+        self._open_section_win("_subc_win", "🎪 이벤트 던전!!!",
                                self._build_subc_pick, w=630, h=600, pinnable=True)
 
     def _build_subc_pick(self, p):
@@ -21281,7 +21281,7 @@ class App(tk.Tk):
         if not st.get("on"):
             self.status.set("🎪 보조 서커스는 이미 꺼져 있습니다")
             return
-        if not messagebox.askyesno("이벤트", "돌고 있는 이벤트를 전부 끌까요? "
+        if not messagebox.askyesno("이벤트 던전!!!", "돌고 있는 이벤트 던전을 전부 끌까요? "
                                    "(각 캐릭은 지금 상태 그대로 둡니다)", default="no"):
             return
         self._subc_toggle()
@@ -21383,7 +21383,7 @@ class App(tk.Tk):
         self.status.set(f"🎪 #{si + 1:02d} 보조 줄 {sorted(cur) or '없음'}")
 
     def _subc_pick_clear(self):
-        if not messagebox.askyesno("이벤트", "고른 보조 줄을 전부 지울까요?", default="no"):
+        if not messagebox.askyesno("이벤트 던전!!!", "고른 보조 줄을 전부 지울까요?", default="no"):
             return
         self.cfg["subc_pick"] = {}
         save_cfg(self.cfg)
@@ -21597,7 +21597,7 @@ class App(tk.Tk):
         _n2 = len(tg) - _n1
         self.status.set(f"🎪 서커스 시작 — "
                         + (f"메인 서커스 {_n1}개 " if _n1 else "")
-                        + (f"· 이벤트 {_n2}개(1시간 5분마다 다음 보조 · 끝나면 메인 사냥) " if _n2 else "")
+                        + (f"· 이벤트 던전 {_n2}개(1시간 5분마다 다음 보조 · 끝나면 메인 사냥) " if _n2 else "")
                         + "· 하나씩")
         # 🙈 누르는 즉시 창을 내린다 — [🎪 보조 서커스] 창과 런처가 클라를 가린다 (개별 ▶ 도 같다)
         self._subc_kick = time.time() + SUBC_KICK_SEC
@@ -40391,7 +40391,7 @@ class App(tk.Tk):
                             test=lambda i: self._test_dgn2("resc", i),
                             prev=lambda i: self._preview_dgn2("resc", i),
                             delete=lambda i: self._del_dgn2("resc", i)),
-            "subc":    dict(title="이벤트", key="subc_slots",
+            "subc":    dict(title="이벤트 던전!!!", key="subc_slots",
                             clicks=SUBC_CLICKS, color="#7d3c98", enable=True, sel=False,
                             labels=SUBC_LABELS,
                             reg=lambda s, c: self._reg_dgn2_click("subc", s, c),
