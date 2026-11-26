@@ -209,6 +209,15 @@
   ],
   "x_medal": [
    "now01 탑번개의 훈장"
+  ],
+  "holy_water": [
+   "now04 축복의 성수"
+  ],
+  "coin_choice": [
+   "now04 명예 코인 Choice"
+  ],
+  "honor_box": [
+   "rec04 명예 코인 상자"
   ]
  },
  "from": "#04 aaoo / #03 고주파 2026-11-19",
@@ -234,7 +243,8 @@
  "min": {
   "chest_silver": 0.84,
   "melt_legs": 0.93,
-  "melt_elm": 0.93
+  "melt_elm": 0.93,
+  "coin_choice": 0.88
  },
  "first": [
   [

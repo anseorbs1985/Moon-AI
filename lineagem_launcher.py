@@ -583,6 +583,22 @@ INV_CHOICE_BOX  = (200, 50, 350, 95)  # 「원하는 보상을 선택해 주세�
 INV_CHOICE_PICK = (185, 160)          # 그 창의 **맨 앞 카드**
 INV_CHOICE_MAX  = (275, 209)          # [Max]
 INV_CHOICE_N    = 3                   # 한 번 열 때 이 창을 몇 번까지 처리하나 (끝없이 돌지 않게)
+# 🪙 명예 코인 Choice 상자 — **늘 명예 코인 상자만** 고른다 (2026-11-26 사용자 #04 녹화:
+#    *"명예코인을 선택해서 까면 되는데"* · *"항상 명예코인으로만 바꿔야해 다른걸로 바꾸면안된다"* ·
+#    *"저 네개 위치가 바뀔때가 잇을수도잇잖아 색상을 잘 봐야해"*)
+#    네 칸 모두 금색 상자이고 아래 동그란 코인의 **테두리 색만** 다르다 — 초록 = 명예 코인 상자 · 빨강·보라·금색 = 다른 것.
+#    📏 #04 — 초록 점: 명예 칸 32 (두 배 창 93) · 다른 세 칸 0 · 카드 Choice 창 네 장 0.
+#    자리를 믿지 않는다 — 금색 상자를 찾아 칸을 정하고 **초록 테두리 칸**을 누른다 (그 칸이 하나뿐일 때만).
+#    누른 뒤 위에 뜨는 이름표 '명예 코인 상자' 그림까지 본다 (📏 그 화면 1.00 · 다른 화면 599장 최고 0.54/0.63).
+#    🚫 둘 중 하나라도 안 맞으면 [취소] — 다른 것을 고르는 일은 없다.
+INV_COIN_BAND   = (150, 140, 400, 180)  # 보상 칸 줄을 찾는 자리 (546x307)
+INV_COIN_RING   = 17                    # 금색 상자 왼쪽 끝에서 이만큼 왼쪽까지가 코인 테두리
+INV_COIN_Y      = (150, 176)            # 코인 테두리 세로
+INV_COIN_ROW_Y  = 160                   # 누를 세로 (칸 가운데)
+INV_COIN_GREEN  = 15                    # 초록 점이 이 이상이면 명예 코인 칸 (546 창 기준 · 창 넓이만큼 늘린다)
+INV_COIN_TIP_MATCH = 0.85               # 이름표 '명예 코인 상자' · '명예'
+INV_COIN_TIP_WAIT  = 1.8
+INV_COIN_CANCEL = (235, 234)            # [취소]
 #   🎁 2026-11-19 사용자 #16 — *"초이스 상자 … 세 장 카드가 나오면 맨 앞에 카드를 선택해서 확인"* ·
 #      *"맨 앞에 카드 선택하고 아래 맥스 누르고 확인"*
 #   📏 #16 에서 실제로 눌러 잰 자리 (546x307): 맨 앞 카드 (185,160) · [Max] (275,209) ·
@@ -6101,6 +6117,63 @@ def inv_find(big, skip=()):
             continue
         keep.append(o)
     return sorted(keep)
+
+
+def inv_coin_slots(big):
+    """🪙 선택 창의 보상 칸 → [(칸 가운데 x(546 기준), 초록 점, 금색 폭)] 왼쪽부터."""
+    import cv2
+    import numpy as np
+    out = []
+    try:
+        kx, ky = _inv_k(big)
+        x0, y0, x1, y1 = INV_COIN_BAND
+        a = big[int(y0 * ky):int(y1 * ky), int(x0 * kx):int(x1 * kx)]
+        if abs(kx - 1) > 0.02 or abs(ky - 1) > 0.02:
+            a = cv2.resize(a, (x1 - x0, y1 - y0), interpolation=cv2.INTER_AREA)
+        a = a.astype(int)
+        b, g, r = a[..., 0], a[..., 1], a[..., 2]
+        gold = ((r > 150) & (g > 110) & (b < 100)).sum(0).tolist() + [0]
+        runs, st = [], None
+        for i, c in enumerate(gold):
+            if c > 3 and st is None:
+                st = i
+            elif c <= 3 and st is not None:
+                if i - st >= 4:
+                    runs.append((st, i))
+                st = None
+        for st, en in runs:
+            rs = x0 + st
+            p = big[int(INV_COIN_Y[0] * ky):int(INV_COIN_Y[1] * ky),
+                    int((rs - INV_COIN_RING) * kx):int((rs + 1) * kx)].astype(int)
+            B, G, R = p[..., 0], p[..., 1], p[..., 2]
+            sat = (p.max(2) - p.min(2)) > 40
+            gr = int((((G - np.maximum(R, B)) >= 20) & sat).sum())
+            out.append((rs - 1, gr, en - st))
+    except Exception:
+        pass
+    return out
+
+
+def inv_coin_tip(big, x):
+    """🪙 누른 칸 위에 뜬 이름표가 '명예 코인 상자' 인가 → 점수 (두 그림 중 낮은 쪽 · -1 = 못 봄)."""
+    import cv2
+    try:
+        if big is None:
+            return -1.0
+        kx, ky = _inv_k(big)
+        a = big[int(122 * ky):int(155 * ky), max(0, int((x - 95) * kx)):int((x + 95) * kx)]
+        vs = []
+        for nm in ("inv_coin_tipf", "inv_coin_tipm"):
+            t = inv_tpl(nm)
+            if t is None:
+                return -1.0
+            t = _inv_fit(t, kx, ky)
+            if a.shape[0] < t.shape[0] or a.shape[1] < t.shape[1]:
+                return -1.0
+            vs.append(float(cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED).max()))
+        return min(vs)
+    except Exception:
+        return -1.0
 
 
 def inv_dim(big):
@@ -35655,6 +35728,7 @@ class App(tk.Tk):
                 cy, cx, g, v, col = hs[0]
                 if not self._inv_hand_wait(tag):
                     return "stop"
+                self._inv_last_grp = g
                 self._inv_dbl(L + cx, T + cy)
                 r = self._inv_after(anc, tag, P, b, cx, cy)
                 if r == "stop":
@@ -35768,6 +35842,7 @@ class App(tk.Tk):
                     # 🕐 **늦게 뜬 창**일 수 있다 (2026-11-19 #14 — 11장짜리 뽑기팩은 결과 창이
                     #    카드를 깐 '다음' 바퀴에야 떴다). 아는 창(결과·수량·보상)이면 닫고 이어서 한다.
                     #    🚫 그래도 모르는 창이면 예전처럼 아무것도 누르지 않고 멈춘다 (_inv_after 가 남긴다).
+                    self._inv_last_grp = None
                     _late = self._inv_after(anc, tag, P, big,
                                             big.shape[1] // 2, big.shape[0] // 2)
                     late_n += 1
@@ -35897,6 +35972,7 @@ class App(tk.Tk):
                         continue
                     before = big
                     x, y = L + cx, T + cy
+                    self._inv_last_grp = g
                     self._inv_dbl(x, y)
                     r = self._inv_after(anc, tag, P, before, cx, cy)
                     if r == "stop":
@@ -36791,6 +36867,54 @@ class App(tk.Tk):
         b = grab_window(anc)
         return inv_qs_auto(b) if b is not None else -1
 
+    def _inv_coin_pick(self, anc, tag, P, b):
+        """🪙 명예 코인 Choice 창이면 **초록 테두리 칸**을 누르고 이름표까지 본다.
+        → None(카드 Choice — 평소 길) · 'ok' · 'cancel'(취소하고 나왔다) · 'stop'."""
+        sl = inv_coin_slots(b)
+        boxes = [x for x in sl if x[2] >= 6]
+        last = getattr(self, "_inv_last_grp", None)
+        if len(boxes) < 3 and last != "coin_choice":
+            return None
+        try:
+            kx, ky = _inv_k(b)
+        except Exception:
+            kx = ky = 1.0
+        gmin = INV_COIN_GREEN * kx * ky
+        gs = [x for x in boxes if x[1] >= gmin]
+        rest = max([x[1] for x in boxes if x not in gs] or [0])
+        desc = " · ".join(f"x{x[0]} 초록{x[1]}" for x in boxes) or "칸을 못 찾음"
+
+        def cancel(why, img=None):
+            p = self._inv_shot(img if img is not None else b, tag, "coin")
+            click_log(f"[아이템정리] 🚫 {tag} 🪙 명예 코인 Choice — {why} → **[취소]** (다른 것은 고르지 않는다) "
+                      f"· 칸 {desc} · 화면 {p}")
+            b3 = grab_window(anc)
+            if b3 is not None and inv_win_score(b3, "inv_choice", INV_CHOICE_BOX) >= INV_WIN_MATCH:
+                if not self._inv_hand_wait(tag):
+                    return "stop"
+                click_at(*P(INV_COIN_CANCEL))
+                nap(random.uniform(*INV_SHUT_NAP))
+            return "cancel"
+
+        if len(gs) != 1 or rest >= gmin / 3.0:
+            return cancel("초록 테두리 칸이 **하나가 아니다**" if len(gs) != 1 else "다른 칸에도 초록이 있다")
+        x = gs[0][0]
+        if not self._inv_hand_wait(tag):
+            return "stop"
+        click_at(*P((x, INV_COIN_ROW_Y)))
+        t0, v, b2 = time.time(), -1.0, None
+        while time.time() - t0 < INV_COIN_TIP_WAIT:
+            nap(random.uniform(0.08, 0.14))
+            b2 = grab_window(anc)
+            v = inv_coin_tip(b2, x)
+            if v >= INV_COIN_TIP_MATCH:
+                break
+        if v < INV_COIN_TIP_MATCH:
+            return cancel(f"누른 칸 이름이 '명예 코인 상자' 로 안 보인다 ({v:.2f})", b2)
+        click_log(f"[아이템정리] {tag} 🪙 명예 코인 상자를 골랐다 — 초록 테두리 칸 x{x} (초록 {gs[0][1]}) · "
+                  f"이름표 {v:.2f}")
+        return "ok"
+
     def _inv_after(self, anc, tag, P, before, cx, cy):
         """두 번 누른 뒤 → 'result' · 'qty' · 'choice' · 'open' · 'same' · 'stop'."""
         import numpy as np
@@ -36859,7 +36983,13 @@ class App(tk.Tk):
                 nap(random.uniform(*INV_SEE_NAP))
                 if not self._inv_hand_wait(tag):
                     return "stop"
-                click_at(*P(INV_CHOICE_PICK))                 # 맨 앞 카드
+                _coin = self._inv_coin_pick(anc, tag, P, b)    # 🪙 명예 코인 Choice 면 초록 칸만
+                if _coin == "stop":
+                    return "stop"
+                if _coin == "cancel":
+                    return "same"
+                if _coin is None:
+                    click_at(*P(INV_CHOICE_PICK))             # 맨 앞 카드 (카드 Choice)
                 nap(random.uniform(0.35, 0.55))
                 click_at(*P(INV_CHOICE_MAX))                  # [Max]
                 nap(random.uniform(0.30, 0.50))
@@ -36874,7 +37004,8 @@ class App(tk.Tk):
                     return "stop"
                 L, T = P((0, 0))
                 click_at(L + x, T + y)
-                click_log(f"[아이템정리] {tag} 🎁 보상 선택 창 — 맨 앞 카드 → Max → 모두 확인 ({v:.2f})")
+                click_log(f"[아이템정리] {tag} 🎁 보상 선택 창 — "
+                          f"{'🪙 명예 코인 상자' if _coin == 'ok' else '맨 앞 카드'} → Max → 모두 확인 ({v:.2f})")
                 nap(random.uniform(0.45, 0.70))
                 continue
             if seen == "qty":
