@@ -582,6 +582,13 @@ INV_QTY_BOX   = (140, 170, 245, 240)  # 「아이템 수량 선택」
 INV_CHOICE_BOX  = (200, 50, 350, 95)  # 「원하는 보상을 선택해 주세요.」 제목 (Choice 상자)
 INV_CHOICE_PICK = (185, 160)          # 그 창의 **맨 앞 카드**
 INV_CHOICE_MAX  = (275, 209)          # [Max]
+# 🧪 먹는 것(성수)은 한 번 먹으면 잠깐 다음 것이 안 먹어진다 — '변화 없음' 두 번이면 건너뛰던 것을
+#    그 종류만 더 기다리며 더 해본다 (2026-11-26 사용자: *"성수는 2개씩만 먹어버리는 로컬들이 있어 끝까지 먹도록"*)
+#    📏 메인 기록 — 성수가 '변화 없음 1번째' 뒤 다음 번엔 먹어졌다 (#10 14:13 · #02 16:21). 느린 컴퓨터는 두 번 연달아.
+INV_PATIENT     = {"holy_water": 6}   # 종류 → '변화 없음' 이 몇 번이면 건너뛰나 (그 밖은 2)
+INV_PATIENT_NAP = (1.4, 2.4)          # 그 종류가 안 먹어졌으면 이만큼 더 쉬고 다시
+INV_TIDY_N      = 3                   # 🧹 끝날 때 ≡ 메뉴·가방이 남았으면 몇 번까지 닫나
+INV_TIDY_NAP    = (0.6, 1.0)          # 그 전에 화면이 가라앉기를 (닫히는 중인 창을 또 보지 않게)
 INV_CHOICE_N    = 3                   # 한 번 열 때 이 창을 몇 번까지 처리하나 (끝없이 돌지 않게)
 # 🪙 명예 코인 Choice 상자 — **늘 명예 코인 상자만** 고른다 (2026-11-26 사용자 #04 녹화:
 #    *"명예코인을 선택해서 까면 되는데"* · *"항상 명예코인으로만 바꿔야해 다른걸로 바꾸면안된다"* ·
@@ -35743,13 +35750,17 @@ class App(tk.Tk):
                 if r == "same":
                     fails[g] = fails.get(g, 0) + 1
                     click_log(f"[아이템정리] {tag} 🥇 {g} 를 두 번 눌렀는데 안 먹어진다 ({fails[g]}번째)")
-                    if fails[g] >= 2:
+                    if g in INV_PATIENT and fails[g] < INV_PATIENT[g]:
+                        nap(random.uniform(*INV_PATIENT_NAP))
+                    if fails[g] >= INV_PATIENT.get(g, 2):
                         skip.add(g)
                         click_log(f"[아이템정리] {tag} 🥇 {g} 는 **안 먹어진다** — 이 클라에서는 건너뛰고 다른 것을 한다")
                 else:
                     done += 1
                     eat_n[0] += 1
                     oks[g] = oks.get(g, 0) + 1
+                    if g in INV_PATIENT:
+                        fails[g] = 0                  # 🧪 먹어졌으면 '연달아 안 먹어짐' 을 다시 센다
                     click_log(f"[아이템정리] {tag} 🥇 ✅ {g} **먼저** 먹었다 ({r} · 일치도 {v:.2f} · 색차 {col:.1f})")
                     self.status.set(f"🎴 {tag} {done}번째 — {g} (먼저)")
                 nap(random.uniform(*INV_GAP))
@@ -35987,7 +35998,9 @@ class App(tk.Tk):
                     if r == "same":
                         fails[g] = fails.get(g, 0) + 1
                         click_log(f"[아이템정리] {tag} ⚠ {g} 를 두 번 눌렀는데 아무 변화가 없다 ({fails[g]}번째)")
-                        if fails[g] >= 2:
+                        if g in INV_PATIENT and fails[g] < INV_PATIENT[g]:
+                            nap(random.uniform(*INV_PATIENT_NAP))   # 🧪 성수 — 잠깐 쉬고 다시 먹는다
+                        if fails[g] >= INV_PATIENT.get(g, 2):
                             skip.add(g)
                             stick = None
                             click_log(f"[아이템정리] {tag} ⏭ {g} 는 이 클라에서 더 누르지 않는다")
@@ -36000,6 +36013,8 @@ class App(tk.Tk):
                     else:
                         done += 1
                         oks[g] = oks.get(g, 0) + 1
+                        if g in INV_PATIENT:
+                            fails[g] = 0              # 🧪 먹어졌으면 '연달아 안 먹어짐' 을 다시 센다
                         stick = (g, cx, cy)
                         if r in ("reward", "choice", "qty"):
                             got_new[0] = True
@@ -36108,8 +36123,43 @@ class App(tk.Tk):
                     done += 1
             except Exception as e:
                 click_log(f"[아이템정리] ⚠ {tag} 🎣 녹이기 오류 — {type(e).__name__}: {e}")
+        # 🧹 마무리 — 끝에는 **아무 창 없이 사냥 화면**이어야 한다 (2026-11-26 사용자:
+        #    *"왜 저 삼선 누르고 나머지를 안닫는거야? 끝에 바탕화면에 아무것도 없이 사냥만 해야하는데"*)
+        #    결과 창·컬렉션·제작·상점·카드 교체의 ✕ 는 **≡ 메뉴와 같은 자리**(526,19)다 —
+        #    창이 먼저 닫힌 뒤 한 번 더 눌리면 메뉴 판이 열린 채 남는다.
+        if not self._item_stop:
+            try:
+                self._inv_tidy_end(anc, tag, P, grab, tab_open)
+            except Exception as e:
+                click_log(f"[아이템정리] ⚠ {tag} 🧹 마무리 오류 — {type(e).__name__}: {e}")
         click_log(f"[아이템정리] ✔ {tag} 끝 — {done}번 깠다" + (f" · 건너뛴 것 {sorted(skip)}" if skip else ""))
         return done
+
+    def _inv_tidy_end(self, anc, tag, P, grab, tab_open):
+        """🧹 한 클라를 끝낼 때 ≡ 메뉴 판 · 가방이 남아 있으면 닫는다 (보일 때만 누른다)."""
+        for _i in range(INV_TIDY_N):
+            nap(random.uniform(*INV_TIDY_NAP))
+            b = grab()
+            if b is None:
+                return
+            menu = xreg_score(b, "xreg_menu") >= XREG_MATCH
+            bag = bool(tab_open(b))
+            if not menu and not bag:
+                if _i:
+                    click_log(f"[아이템정리] {tag} 🧹 남은 창을 닫았다 — 사냥 화면만 남았다")
+                return
+            if not self._inv_hand_wait(tag):
+                return
+            if menu:
+                click_log(f"[아이템정리] {tag} 🧹 **≡ 메뉴 판이 열려 있다** → ✕ 로 닫는다")
+                click_at(*P(XREG_MENU))
+            else:
+                click_log(f"[아이템정리] {tag} 🧹 가방이 아직 열려 있다 → ✕ 로 닫는다")
+                click_at(*P(INV_CLOSE))
+        b = grab()
+        if b is not None and (xreg_score(b, "xreg_menu") >= XREG_MATCH or tab_open(b)):
+            p = self._inv_shot(b, tag, "tidy")
+            click_log(f"[아이템정리] ⚠ {tag} 🧹 {INV_TIDY_N}번 닫아도 창이 남았다 — 더 누르지 않는다 · 화면 {p}")
 
     def _inv_cardx(self, anc, tag, L, T, W, H):
         """🃏 [카드 교체] → 전체 선택 → 선택 확정 → 카드 확정 → 확인 → ✕ → 'ok' · 'none' · 'stop'.
