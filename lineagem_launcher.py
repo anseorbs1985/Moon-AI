@@ -6081,6 +6081,9 @@ def inv_find(big, skip=()):
         X0, Y0 = int(x0 * kx), int(y0 * ky)
         a = big[Y0:int(y1 * ky), X0:int(x1 * kx)]
         _mins = inv_meta().get("min") or {}      # 종류별 더 높은 기준 (은색 상자 ↔ 은색 카드)
+        # 📐 그림이 칸 가운데 기준(x-12, y-12)으로 잘리지 않은 종류는 그만큼 되돌린다 (2026-11-26 —
+        #    명예 코인 Choice 는 아래 코인 줄만 잘랐다. 안 되돌리면 맨 아래 줄 칸을 '반쯤 잘린 칸' 으로 버린다)
+        _offs = inv_meta().get("off") or {}
         for g, t0 in inv_items():
             if g in skip:
                 continue
@@ -6093,10 +6096,14 @@ def inv_find(big, skip=()):
             for y, x in sorted(zip(ys.tolist(), xs.tolist()), key=lambda p: -r[p[0], p[1]]):
                 # 그림 = 칸 가운데 기준 (x-12..x+12, y-12..y+4) → 칸 가운데
                 cx, cy = X0 + x + int(12 * kx), Y0 + y + int(12 * ky)
+                _o = _offs.get(g)
+                if _o:
+                    cx, cy = cx + int(round(_o[0] * kx)), cy + int(round(_o[1] * ky))
                 if any(abs(cx - o[1]) < 14 * kx and abs(cy - o[0]) < 14 * ky and o[2] == g for o in out):
                     continue
                 # 칸이 목록 안에 다 들어와 있어야 한다 (반쯤 잘린 칸은 다음 화면에서)
-                if cy - 15 * ky < Y0 or cy + 15 * ky > Y0 + a.shape[0]:
+                # (15 → 13 · 2026-11-26 — 맨 아래 줄은 가운데 199~200 · 칸 끝 212 인데 214 를 1칸 넘어 버렸다)
+                if cy - 13 * ky < Y0 or cy + 13 * ky > Y0 + a.shape[0]:
                     continue
                 p = a[y:y + t.shape[0], x:x + t.shape[1]].astype(np.float32)
                 col = float(np.abs(p.mean((0, 1)) - tm).max())

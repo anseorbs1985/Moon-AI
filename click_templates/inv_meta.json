@@ -214,7 +214,8 @@
    "now04 축복의 성수"
   ],
   "coin_choice": [
-   "now04 명예 코인 Choice"
+   "now04 명예 코인 Choice (코인 줄)",
+   "w15 명예 코인 Choice (코인 줄)"
   ],
   "honor_box": [
    "rec04 명예 코인 상자"
@@ -243,8 +244,7 @@
  "min": {
   "chest_silver": 0.84,
   "melt_legs": 0.93,
-  "melt_elm": 0.93,
-  "coin_choice": 0.88
+  "melt_elm": 0.93
  },
  "first": [
   [
@@ -257,5 +257,19 @@
  ],
  "eat_first": [
   "bead_gold"
- ]
+ ],
+ "off": {
+  "coin_choice": [
+   0,
+   -12
+  ],
+  "holy_water": [
+   0,
+   -1
+  ],
+  "honor_box": [
+   0,
+   -1
+  ]
+ }
 }
