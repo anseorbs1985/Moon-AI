@@ -90,6 +90,9 @@ def _minimize_claude():
     ctypes.windll.user32.EnumWindows(WNDENUMPROC(_cb), 0)
 
 def _restore_claude():
+    """🚫 클로드 창은 되살리지 않는다 (2026-11-26 사용자: "다야 OCR 끝나면 왜 클로드창을 띄우는거지").
+    사용자가 작업표시줄에서 직접 꺼낸다 (2026-08-09 규칙). 부르는 곳은 남겨두고 아무것도 안 한다."""
+    return
     SW_RESTORE = 9
     def _cb(hwnd, _):
         buf = ctypes.create_unicode_buffer(256)
@@ -440,16 +443,15 @@ class OCRApp(tk.Tk):
         self.after(20000, self._idle_close_tick)
 
     def _raise_main_launcher(self):
-        """다야 OCR 창이 닫힐 때 메인런처를 앞으로 띄운다."""
+        """다야 OCR 창이 닫힐 때 메인런처를 **맨 뒤에서** 되살린다 (2026-11-26 — 앞으로 올리지 않는다.
+        2026-10-06 규칙: 끝나도 뒤에 둔다 · 최소화만 풀고 포커스를 빼앗지 않는다)."""
         try:
-            import win32gui, win32con
+            import win32gui
             h = win32gui.FindWindow(None, "리니지M 자동 실행")
             if h:
-                win32gui.ShowWindow(h, win32con.SW_RESTORE)
-                try:
-                    win32gui.SetForegroundWindow(h)
-                except Exception:
-                    pass
+                if win32gui.IsIconic(h):
+                    win32gui.ShowWindow(h, 4)          # SW_SHOWNOACTIVATE
+                win32gui.SetWindowPos(h, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)  # HWND_BOTTOM · 크기·자리 그대로 · 포커스 안 뺏음
         except Exception:
             pass
 
