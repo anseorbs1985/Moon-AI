@@ -1761,6 +1761,7 @@ def xreg_min5(nm):
 def xreg_qty_count(big):
     """🔢 수량 창의 **판매 수량**을 읽는다 → (n, 설명). n = 1~9 · 10 = 두 자리 이상 · None = 모름."""
     try:
+        import numpy as np                  # 🚨 런처는 numpy 를 함수 안에서 부른다 (모듈 위에는 없다)
         if big is None:
             return None, "화면 없음"
         H, W = big.shape[:2]
