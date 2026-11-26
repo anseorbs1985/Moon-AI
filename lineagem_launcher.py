@@ -1335,7 +1335,9 @@ XREG_STRICT     = ("축복갑옷마법주문서", "축복무기마법주문서")
 #    🚫 못 읽으면(창 크기가 다름 · 모양이 애매) **올리지 않는다** (안전한 쪽).
 XREG_MIN5       = ("수령의속성석", "지령의속성석", "풍령의속성석", "화령의속성석",
                    "충전석_오만과신념", "충전석_해적섬")
-XREG_MIN5_N     = 5
+XREG_MIN5_N     = 10              # 2026-11-26 사용자 선택 '한 자리는 전부 넘김' — 9개 이하는 올리지 않는다
+XREG_CELL_TENS  = 3               # 칸 숫자 십의 자리 노란 점 — 이 이상이면 10개 이상
+                                  #   📏 4클라 60칸 × 자리 흔들림 9가지 — 한 자리 0 · 두 자리 5 이상 (붙은 것은 폭으로 따로)
 XREG_QTY_DIGBOX = (330, 186, 398, 202)   # 수량 아래 [−] n [+] 의 숫자 (가운데 맞춤 · 546 창)
 XREG_QTY_GLYPH  = {
     1: (".##.", "###.", "..#.", "..#.", "..#.", "..#.", "..#.", "..#."),
@@ -1756,6 +1758,40 @@ def xreg_price(big):
 def xreg_min5(nm):
     """🔢 5개 미만이면 올리지 않는 아이템인가."""
     return any(nm.startswith(k) for k in XREG_MIN5)
+
+
+def xreg_cell_multi(big, cx, cy):
+    """🔢 소지품 칸의 개수 숫자가 **두 자리 이상(10개 이상)** 인가 → (True/False/None, 설명).
+    (2026-11-26 사용자: *"5개 미만이면 판매등록까지 가지말고 그 창에서 확인하고 다음껄로"* → *"한 자리는 전부 넘김"*)
+    칸 오른쪽 아래 노란 숫자(가로 3점 · 세로 6점)는 오른쪽에 붙는다 — 맨 오른쪽 글자에서 5~9점 왼쪽(십의 자리)에
+    노란 점이 있나만 본다. 숫자가 없으면 1개다(게임이 1 은 안 쓴다).
+    📏 4클라 60칸(빨간 칸·종이·보석 위의 11·12·10·20 포함) — 한 자리 0 · 두 자리 5 이상 → 기준 XREG_CELL_TENS 3.
+    cx·cy = 찾은 그림 가운데 (창 안 픽셀). 546 창이 아니면 None (모른다)."""
+    try:
+        import numpy as np
+        H, W = big.shape[:2]
+        if abs(W - XREG_W) > 3 or abs(H - XREG_H) > 3:
+            return None, f"창 {W}x{H} — 칸 숫자는 {XREG_W}x{XREG_H} 창에서만 읽는다"
+        cx, cy = int(round(cx)), int(round(cy))
+        c = big[cy + 6:cy + 14, cx - 2:cx + 18].astype(int)
+        b, g, r = c[..., 0], c[..., 1], c[..., 2]
+        # 숫자 색은 바탕에 섞인다(빨간 칸에선 붉게 · 종이 위에선 어둡게) → 밝기 대신 **색 비율**로 본다
+        m = ((r >= 110) & (g * 100 >= r * 45) & (g * 100 <= r * 85)
+             & (b * 100 >= r * 28) & (b * 100 <= r * 56))
+        cols = [k for k in np.where(m.any(0))[0].tolist() if k >= 10]
+        if not cols:
+            return False, "숫자 없음 (1개)"
+        # 맨 오른쪽 글자 덩어리(일의 자리) → 그 왼쪽 6줄이 십의 자리
+        R = max(cols)
+        left = R
+        while left - 1 >= 0 and m[:, left - 1].any():
+            left -= 1
+        if R - left + 1 > 4:
+            return True, f"글자가 붙어 넓다 (폭 {R - left + 1})"
+        tens = int(m[:, max(0, left - 6):left].sum())
+        return tens >= XREG_CELL_TENS, f"십의 자리 점 {tens} (기준 {XREG_CELL_TENS})"
+    except Exception as e:
+        return None, f"판정 실패 {e}"
 
 
 def xreg_qty_count(big):
@@ -35266,6 +35302,15 @@ class App(tk.Tk):
             if tries[nm] > XREG_TRY_MAX:
                 click_log(f"[거래소등록] {tag} ⏭ '{nm}' {XREG_TRY_MAX}번 해도 안 올라가 이번에는 건너뛴다")
                 skip.add(nm); continue
+            if xreg_min5(nm):
+                # 🔢 판매 창을 열기 **전에** 칸 숫자를 본다 — 한 자리(9개 이하)면 누르지 않고 다음 것으로
+                _mt, _mw = xreg_cell_multi(b, cx, cy)
+                if _mt is False:
+                    click_log(f"[거래소등록] {tag} 🔢 '{nm}' 칸 숫자가 **한 자리**다 ({_mw}) — 10개 미만은 "
+                              f"올리지 않는다 → 누르지 않고 다음 것으로")
+                    skip.add(nm); continue
+                if _mt is None:
+                    click_log(f"[거래소등록] {tag} 🔢 '{nm}' 칸 숫자를 못 읽었다 ({_mw}) — 판매 창에서 수량을 본다")
             cell = ((cx) / kx, (cy) / ky)
             screen_calm(L + cx, T + cy)
             click_at(L + cx, T + cy)
