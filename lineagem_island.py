@@ -2090,9 +2090,30 @@ def place_clock(big):
         cut = big[y:y + ch, x:x + cw]
         if cut.shape[0] < 3 or cut.shape[1] < 6:
             return -1
-        return int(np.count_nonzero(green_mask(cut)))
+        return int(np.count_nonzero(green_mask(cut) | orange_mask(cut)))
     except Exception:
         return -1
+
+
+# 🟧 **주황 시계도 시계다** (2026-11-28 사용자: *"13번 슬롯이 아틀란티스에 있는데 실행으로 뜬다"*).
+#    같은 던전 안이어도 시계가 **주황**(00:51 · 04:20)으로 뜨는 캐릭이 있다 — 초록만 세서
+#    '시계 없음 = 던전 밖' 으로 빠졌다.
+#    📏 13·15번 주황 R 217~223 · G 110~113 · B 0 (점 38~39 · 넓히면 129) · 마을 화면 0.
+#    ⚠ 복구·결과 창처럼 이름칸을 덮는 주황 UI 도 걸리지만, 그때는 이름 점수가 기준을 못 넘어 상관없다.
+def orange_mask(cut):
+    """🟧 주황 시계 자리 (초록과 같이 둘레까지 넓힌다)."""
+    import numpy as np
+    c = cut.astype(np.int16)
+    B, G, R = c[:, :, 0], c[:, :, 1], c[:, :, 2]
+    m = (R >= 150) & ((R - G) >= 45) & (G >= 60) & ((R - B) >= 110)
+    if GREEN_GROW:
+        try:
+            import cv2
+            m = cv2.dilate(m.astype(np.uint8), np.ones((3, 3), np.uint8),
+                           iterations=GREEN_GROW).astype(bool)
+        except Exception:
+            pass
+    return m
 
 
 # 🧭 '실행중' 으로 볼 기준 — **평소(PLACE_MATCH 0.75)보다 엄격하다** (2026-11-10).
