@@ -396,6 +396,34 @@ def slot_is_rasta(slot):
     return False
 
 
+def rasta_pair_name(slot, key=None):
+    """🗡 라바 슬롯이 그 판만 바꿔 탈 **짝 악몽의섬 프리셋 이름**과 되돌아올 **라스타바드 프리셋 이름**
+    → (짝, 원래) — 못 정하면 (None, None).
+
+    예전에는 `CARD_SWAP` 에 **슬롯 이름이 그대로 있을 때만** 바꿔 탔다. 손으로 고친 이름이나
+    다른 이름이면 '바꿔 탈 짝이 없다' 로 **라바부터** 갔다 (2026-11-28 사용자:
+    *"라스타바드 왜 계속 먼저하냐고 … 테베를 먼저 하도록 하라니까"*).
+    → 이름에 82 가 있으면 82%, 48 이면 48%, 둘 다 없으면 기본으로 짝을 정한다.
+    🚫 물약 종류는 늘 **주홍이** 쪽 프리셋으로 간다 (악몽의섬 물약은 주홍이만 — 2026-11-28)."""
+    try:
+        _k = key or RASTA_KEY
+        m = CARD_SWAP.get(_k) or {}
+        nm = ((slot or {}).get("name") or "").strip()
+        if nm in m:
+            return m[nm], nm
+        if not m:
+            return None, None
+        if "82" in nm:
+            home = "라스타바드 주홍이 82%"
+        elif "48" in nm:
+            home = "라스타바드 주홍이 48%"
+        else:
+            home = "라스타바드 기본!!"
+        return m.get(home), (home if m.get(home) else None)
+    except Exception:
+        return None, None
+
+
 def slot_rasta_stuck(slot, key=None):
     """🏴 카드를 집는 실행(해적섬)에서 **정말 못 도는** 슬롯인가 (2026-11-17).
 
@@ -404,8 +432,7 @@ def slot_rasta_stuck(slot, key=None):
     try:
         if not slot_is_rasta(slot):
             return False
-        _k = key or RASTA_KEY
-        return not (CARD_SWAP.get(_k) or {}).get(((slot or {}).get("name") or "").strip())
+        return not rasta_pair_name(slot, key or RASTA_KEY)[0]
     except Exception:
         return False
 
@@ -785,6 +812,13 @@ CARD_SWAP_CELLS = (27, 34)
 #    그 카드로 간다(2시간). 셋 다 없거나 끝났으면 라스타바드로 되돌아간다(4시간).
 #    🚫 악몽의섬·해적섬은 넣지 않는다 — 사용자가 말한 것은 테베·아틀·티칼이다.
 RASTA_BEFORE = ("테베라스사막", "아틀란티스", "티칼사원")
+# 💊 **악몽의섬 물약은 늘 주홍이** (2026-11-28 사용자: *"왜 자꾸 악몽의섬 물약이 업데이트만 하면
+#    빨갱이로 바뀐다 그렇지 않도록 바꾸고"* · 2026-10-27 *"그냥 주홍이로 바꿔줘"*).
+#    실행 직전에 그 슬롯의 물약 칸(칸17)이 상점 목록의 **빨갱이 줄(위쪽)** 을 가리키면
+#    주홍이 줄로 내리고, 이름의 '빨갱이' 도 '주홍이' 로 고친다. 48%/82%(칸18)는 건드리지 않는다.
+#    📏 546x307 창 안 — 주홍이 줄 y 129~133 · 빨갱이 줄 y 91~93 (메인 프리셋 실측) → 가르는 선 110.
+#    `{던전: (칸 0부터, 주홍이 줄 y, 이보다 위면 주홍이가 아니다)}` · 546x307 기준.
+POTION_KEEP_JH = {"토요일_악몽의섬": (16, 129, 110)}
 
 
 def rasta_before_open(slot, anchor):
@@ -9267,10 +9301,10 @@ class IslandApp(tk.Tk):
             _pre2, _pw2 = (rasta_before_open(slot, anchor0) if (anchor0 and cname == "라스타바드")
                            else (None, u""))
             if _pre2:
-                _pair = (CARD_SWAP.get(key) or {}).get((slot.get("name") or "").strip())
+                _pair, _hm = rasta_pair_name(slot, key)
                 _lo, _hi = CARD_SWAP_CELLS
                 if _pair and self._swap_cells(key, si, slot, _pair, _lo, _hi):
-                    slot["auto_home"] = (slot.get("name") or "").strip()
+                    slot["auto_home"] = _hm
                     save_cfg(self.cfg)
                     self._rlog(u"[전환] 🗡 %s #%02d 라바 전에 **'%s' 먼저** → '%s' 로 바꿔 돈다 "
                                u"(%s · 테베·아틀·티칼이 끝나면 라바로 돌아온다)"
@@ -9283,11 +9317,10 @@ class IslandApp(tk.Tk):
             if anchor0 and _why_c != u"라바 전에 먼저":    # 먼저 갈 카드는 방금 열린 것을 봤다
                 _ok2, _why2 = card_open_one(cname, anchor0)
                 if _ok2 is False:
-                    _pair = (CARD_SWAP.get(key) or {}).get(
-                        (slot.get("name") or "").strip())
+                    _pair, _hm = rasta_pair_name(slot, key)
                     _lo, _hi = CARD_SWAP_CELLS
                     if _pair and self._swap_cells(key, si, slot, _pair, _lo, _hi):
-                        slot["auto_home"] = (slot.get("name") or "").strip()
+                        slot["auto_home"] = _hm
                         save_cfg(self.cfg)
                         self._rlog(u"[전환] 🔁 %s #%02d '%s' 가 잠겨 **'%s' 로 바꿔 돈다** "
                                    u"(%s · 칸%d~%d 만 바뀜 · 다시 열리면 되돌아온다)"
@@ -9316,6 +9349,18 @@ class IslandApp(tk.Tk):
                 cname = ""
             if cname:
                 _why_c = u"슬롯 지정"
+            # 🗡 **[🃏] 로 '라스타바드' 를 골라도 테베 → 아틀 → 티칼이 먼저** (2026-11-28 사용자:
+            #    *"라바로 선택해도 테베를 먼저 하도록 하라니까"*). 예전엔 이 길(슬롯 지정)이
+            #    '먼저 갈 카드' 확인을 안 거쳐 **곧장 라바**로 갔다. 이 슬롯은 악몽의섬 칸이라
+            #    그 카드로 그냥 들어가면 된다 (바꿔 탈 필요가 없다).
+            if (cname == "라스타바드" and anchor0 and key in CARD_ORDER
+                    and not getattr(self, "_card_force", None)):
+                _pre5, _pw5 = rasta_before_open(slot, anchor0)
+                if _pre5:
+                    self._rlog(u"[카드] %s #%02d 🗡 [🃏] 는 '라스타바드' 지만 **'%s' 가 열려 있어 그쪽 먼저** "
+                               u"(%s · 테베·아틀·티칼이 끝나면 라바로 간다)"
+                               % (key, si + 1, _pre5, _pw5))
+                    cname, _why_c = _pre5, u"라바 전에 먼저"
         if not cname:
             cname = (CARD_DEFAULT.get(key) or "").strip()      # ③ 갈 곳이 하나뿐인 던전
             if cname:
@@ -9762,6 +9807,52 @@ class IslandApp(tk.Tk):
                 if ra.get(k) or rc.get(k) or (j < len(cs) and cs[j]):
                     out.append(u"칸%d(비어야 한다)" % (j + 1))
         return out
+
+    def _potion_keep_jh(self, key, targets):
+        """💊 악몽의섬 물약 칸이 주홍이 줄이 아니면 주홍이로 맞춘다 (2026-11-28) → 고친 슬롯 수.
+        🚫 그 클라 창 밖을 가리키는 좌표·빈 칸은 건드리지 않는다. 창을 못 찾으면 아무것도 안 한다."""
+        spec = POTION_KEEP_JH.get(key)
+        if not spec or not targets:
+            return 0
+        j, yj, ycut = spec
+        try:
+            rects = self._client_rects_by_slot()
+        except Exception:
+            rects = None
+        if not rects:
+            self._rlog(u"[물약] 💊 %s 리니지M 창을 못 찾아 물약 확인을 건너뛴다" % key)
+            return 0
+        fixed = []
+        for si, slot in targets:
+            try:
+                if si >= len(rects):
+                    continue
+                L_, T_, R_, B_ = rects[si][0], rects[si][1], rects[si][2], rects[si][3]
+                cs = slot.get("coords") or []
+                c = cs[j] if j < len(cs) else None
+                nm = (slot.get("name") or "")
+                why = []
+                if c and L_ <= c[0] < R_ and T_ <= c[1] < B_ and B_ > T_:
+                    ry = (c[1] - T_) * 307.0 / (B_ - T_)
+                    if ry < ycut:
+                        ny = int(round(T_ + yj * (B_ - T_) / 307.0))
+                        why.append(u"칸%d y %d→%d" % (j + 1, c[1], ny))
+                        cs[j] = [c[0], ny]
+                if u"빨갱이" in nm:
+                    slot["name"] = nm.replace(u"빨갱이", u"주홍이")
+                    why.append(u"이름 '%s'→'%s'" % (nm, slot["name"]))
+                if why:
+                    fixed.append(u"#%02d %s" % (si + 1, u" · ".join(why)))
+            except Exception:
+                continue
+        if fixed:
+            try:
+                save_cfg(self.cfg)
+            except Exception:
+                pass
+            self._rlog(u"[물약] 💊 %s 물약이 주홍이가 아니어서 **주홍이로 맞췄다** — %s"
+                       % (key, u" | ".join(fixed)))
+        return len(fixed)
 
     def _rasta_align(self, key, targets):
         """🚢 로컬 — 이번에 돌 **라스타바드 슬롯**이 배포판과 다르면 돌리기 전에 맞춘다 → 맞춘 수.
@@ -10932,12 +11023,10 @@ class IslandApp(tk.Tk):
                 #    🚫 짝이 없거나(이름) 창을 못 찾으면 예전처럼 뺀다.
                 _rs = [(si, _s) for si, _s in targets if slot_is_rasta(_s)]
                 if _rs:
-                    _pairs = CARD_SWAP.get(key) or {}
                     _lo, _hi = CARD_SWAP_CELLS
                     _sw, _stuck = [], []
                     for si, _s in _rs:
-                        _nm = (_s.get("name") or "").strip()
-                        _pair = _pairs.get(_nm)
+                        _pair, _nm = rasta_pair_name(_s, key)
                         if _pair and self._swap_cells(key, si, _s, _pair, _lo, _hi):
                             _s["auto_home"] = _nm
                             _sw.append(si)
@@ -10956,6 +11045,10 @@ class IslandApp(tk.Tk):
                                    f"악몽의섬 프리셋이 없다 — 슬롯 이름이 프리셋 이름이 아니다)")
             # 🚢 로컬 — 라스타바드 슬롯이 옛 구성이면 **돌리기 전에** 배포판으로 맞춘다 (2026-11-14)
             self._rasta_align(key, targets)
+            try:
+                self._potion_keep_jh(key, targets)        # 💊 악몽의섬 물약은 늘 주홍이
+            except Exception:
+                pass
             # 💧 이번에 실제로 돈 슬롯 — 끝난 뒤 '물약 0개' 를 확인할 대상이다
             self._p0_ran = [si for si, _s in targets]
             # 🧭 이 슬롯들을 **이 던전으로 실행했다** 고 적는다 (2026-11-12).
