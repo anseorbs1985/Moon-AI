@@ -3127,6 +3127,11 @@ RASTA_PAIR_TRIES  = 8        # 모르겠으면 이만큼까지 다시 본다 (�
 RASTA_NEXT_WAIT   = (4.5, 6.0)
 RASTA_NEXT_CLICKS = 4
 RASTA_NEXT_POLL   = (0.5, 0.8)
+# 🚪 다음 칸이 **👁 확인(지하 통제실)** 이면 맵을 불러오는 시간까지 기다린다 (2026-11-28 사용자:
+#    *"33번이야 그 앞에서 멈췄어 통제실을 들어가지 못했어"*). 입구를 눌렀는데 못 들어가면
+#    예전엔 다시 누르지 않고 34번이 25초 기다리다 멈췄다 → 이제 입구를 다시 찾아 다시 누른다.
+#    맵을 불러오는 동안은 입구가 안 보이므로 누르지 않는다.
+RASTA_NEXT_WAIT_SEE = (8.0, 10.0)
 
 
 def rasta_short(key, slot, j):
@@ -9037,14 +9042,17 @@ class IslandApp(tk.Tk):
                            + (f" · 🗡 {_pw}" if _pw else ""))
                 time.sleep(random.uniform(*RASTA_AFTER))
                 # 🚶 멀면 걸어간 뒤에 확인창이 뜬다 → **뜰 때까지 기다리고, 안 뜨면 다시 누른다**
+                _nx_mode = cell_mode(key, slot, j + 1)
                 if (rasta_next_wait(j) and os.path.exists(rasta_img_path(j + 1))
-                        and cell_mode(key, slot, j + 1) == RASTA_CLICK):
+                        and _nx_mode in (RASTA_CLICK, RASTA_SEE)
+                        and not rasta_short(key, slot, j + 1)):
                     _nc = 1
                     _t_nx = time.time()
                     while not self._stop_flag:
                         _seen_nx = False
                         _t_w = time.time()
-                        _w_max = random.uniform(*RASTA_NEXT_WAIT)
+                        _w_max = random.uniform(*(RASTA_NEXT_WAIT_SEE if _nx_mode == RASTA_SEE
+                                                  else RASTA_NEXT_WAIT))
                         while time.time() - _t_w < _w_max and not self._stop_flag:
                             _nx, _ny, _nv = rasta_find(j + 1, anchor)
                             if _nx is not None:
@@ -9052,7 +9060,9 @@ class IslandApp(tk.Tk):
                                 break
                             time.sleep(random.uniform(*RASTA_NEXT_POLL))
                         if _seen_nx:
-                            self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번 — 확인창이 떴다 "
+                            self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번 — "
+                                       + ("다음 화면(👁)이 보인다 — 들어갔다 " if _nx_mode == RASTA_SEE
+                                          else "확인창이 떴다 ") +
                                        f"({time.time() - _t_nx:.0f}초 · {_nc}번 눌렀다)")
                             break
                         if _nc >= RASTA_NEXT_CLICKS:
@@ -9068,7 +9078,8 @@ class IslandApp(tk.Tk):
                         if _rx is None:
                             self._status.set(f"🗡 [{name}] {lbl} — 확인창을 기다리는 중…")
                             _nc += 0          # 못 찾았다 → 누르지 않고 한 번 더 기다린다
-                            if time.time() - _t_nx > RASTA_NEXT_WAIT[1] * RASTA_NEXT_CLICKS:
+                            if time.time() - _t_nx > (RASTA_NEXT_WAIT_SEE[1] if _nx_mode == RASTA_SEE
+                                                      else RASTA_NEXT_WAIT[1]) * RASTA_NEXT_CLICKS:
                                 self._rlog(f"[라스타] {key} #{si+1:02d} {j+1}번 — 포털도 확인창도 "
                                            f"안 보인다 ({time.time() - _t_nx:.0f}초)")
                                 break
