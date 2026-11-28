@@ -6372,6 +6372,18 @@ SLEEP_SKIP_HUMAN = 300               # 사람이 이 안에 누른 클라는 재
 #    막 시작된 참이라, 그때 절전 단추를 누르면 녹화가 엇나간다 (2026-11-27 #13 이 녹화 48초 만에 재워졌다).
 #    🚫 이 둘 뒤에는 재우지 않는다 — 녹화가 알아서 사냥(AUTO)까지 간다.
 SLEEP_AFTER_SKIP = ("절전", "영웅", "각성", "변신확정", "계정", "접속", "과거섬", "스케줄")
+# 🩹 **작업이 끝나면 깨어 있는 클라의 십자가를 보고 복구한다** (2026-11-28 사용자:
+#    *"실행하면은 절전해제되니까 복구 뜨니까 너가 스스로 복구를 좀 해줬으면 정말 좋겠어"* ·
+#    *"악몽의섬이나 이게 다 돌고 런처가 안돌고잇으면 너가 복구를 해줬으면"*)
+#    · 섬/던전 실행기·런처 작업이 끝나 조용해지면(사람 손·다른 작업 기다림은 절전 돌려놓기와 같다)
+#      **지금 깨어 있는 클라만** 십자가를 본다 — 🚫 자는 클라는 깨우지 않는다 (실행이 이미 깨웠다)
+#    · 뜬 것이 있으면 ▶ 전부 복구와 **같은 길**로 그것들만 복구 → 다 끝나면 절전으로 돌려놓는다
+#    · 💎 진짜 다야·다 써버린 다야는 건드리지 않는다 (`skip_paid`)
+#    🚫 녹화가 도는 과거섬·스케줄 · 창을 띄워둔 작업(영웅템·각성·변신확정) 뒤에는 하지 않는다
+#    끄려면 FIX_AFTER_RUN = False
+FIX_AFTER_RUN = True
+FIX_AFTER_SKIP = ("복구", "절전", "과거섬", "스케줄", "영웅", "각성", "변신확정")
+FIX_AFTER_MAX = 20 * 60            # 복구가 이보다 오래 걸리면 기다리지 않고 넘어간다
 SLEEP_VERIFY = 3.0                   # 누른 뒤 절전 화면이 뜨기를 기다리는 시간
 CSCR_LANES = 8                  # 2026-11-23 사용자: "8개씩 하자 부하가 걸리지 않도록"
 CSCR_HEAVY_GAP = (15.0, 24.0)   # 8클라면 순간이동이 잦아진다 → 4개씩일 때(12~20초)보다 넉넉히
@@ -17092,6 +17104,10 @@ class App(tk.Tk):
             self.status.set(f"⏰ 반복 {len(due)}개 대기 — '{self._busy_label()}' 끝난 뒤 실행")
             self._rep_log(f"대기 — '{self._busy_label()}' 실행 중 (밀린 {len(due)}개)")
             return
+        if self._fix_chain_on():     # 🩹 복구가 슬롯 사이·확인 중이면 기다린다 (클릭이 엉킨다)
+            self.status.set(f"⏰ 반복 {len(due)}개 대기 — 복구가 끝난 뒤 실행")
+            self._rep_log(f"대기 — 복구 중 (밀린 {len(due)}개)")
+            return
         # 앞 실행이 끝난 지 얼마 안 됐으면 조금 더 기다린다 (겹침 방지 안전장치)
         _last = getattr(self, "_rep_last_start", 0)
         if time.time() - _last < 150:
@@ -18630,7 +18646,7 @@ class App(tk.Tk):
         q = getattr(self, "_night_queue", None)
         if not q:
             return
-        if self._is_busy():
+        if self._is_busy() or self._fix_chain_on():
             self.after(3000, self._night_queue_tick); return
         idx = q.pop(0)
         self._refresh_night_queue()
@@ -47150,15 +47166,82 @@ class App(tk.Tk):
         if t0 and _STOP_AT[0] >= t0:
             click_log(f"[절전] '{name}' 은 ■ 멈춤으로 끝났다 — 절전 돌려놓기도 하지 않는다")
             return
-        if not (SLEEP_AFTER_ON and self.cfg.get("sleep_after_on", True)):
-            return
-        if any(k in str(name) for k in SLEEP_AFTER_SKIP):
+        do_sleep = bool(SLEEP_AFTER_ON and self.cfg.get("sleep_after_on", True)
+                        and not any(k in str(name) for k in SLEEP_AFTER_SKIP))
+        do_fix = bool(FIX_AFTER_RUN and not any(k in str(name) for k in FIX_AFTER_SKIP))
+        if not (do_sleep or do_fix):
             return
         if getattr(self, "_sleep_after_busy", False):
             return
-        threading.Thread(target=self._sleep_after_run, args=(str(name),), daemon=True).start()
+        threading.Thread(target=self._sleep_after_run, args=(str(name), do_sleep, do_fix),
+                         daemon=True).start()
 
-    def _sleep_after_run(self, name):
+    def _fix_chain_on(self):
+        """🩹 복구 사슬(준비·대기열·한 슬롯·확인)이 돌고 있나 — 슬롯 사이 틈에는 `_is_busy()` 가
+        False 라, 그 틈에 섬/던전 실행이 끼면 클릭이 엉킨다 (2026-11-28)."""
+        return bool(getattr(self, "_fix_all_prep", False) or getattr(self, "_fix_queue", None)
+                    or getattr(self, "_fix_hold", None) is not None)
+
+    def _fix_after_run(self, name, ts):
+        """🩹 작업 '{name}' 이 끝났다 → 깨어 있는 클라의 십자가를 보고 있으면 복구한다.
+        → 복구를 돌렸으면 True (다 끝날 때까지 기다린 뒤 돌아온다)."""
+        if (getattr(self, "_fix_all_prep", False) or getattr(self, "_fix_queue", None)
+                or getattr(self, "_fix_hold", None) is not None):
+            return False
+        aw = self._awake_slots()
+        if not aw:
+            if aw is None:
+                click_log(f"[복구확인] '{name}' 끝 — 깨어 있는 클라를 셀 수 없다 → 보지 않는다")
+            return False
+        aw = set(int(x) for x in aw)
+        t1 = time.time()
+        self.after(0, lambda: self._check_scan(quiet=True, wake=False))
+        while time.time() - t1 < FIX_ALL_SCAN_WAIT:
+            if _STOP_AT[0] >= ts:
+                return False
+            _dn = max(float(getattr(self, "_scan_done_at", 0) or 0),
+                      float(getattr(self, "_scan_none_at", 0) or 0))
+            if _dn > t1 and not getattr(self, "_scan_busy", False):
+                break
+            time.sleep(0.4)
+        cand = sorted(set(int(x) for x in self._warn_load()) & aw)
+        if cand:
+            try:
+                _rd, _sk = self._fix_redo_list()
+                _ok = set(int(x) for x in _rd)
+                _paid = [x for x in cand if x not in _ok]
+                cand = [x for x in cand if x in _ok]
+            except Exception:
+                _paid = []
+        else:
+            _paid = []
+        if not cand:
+            click_log(f"[복구확인] '{name}' 끝 — 깨어 있는 클라 {len(aw)}개에 복구할 것이 없다"
+                      + (f" (💎 다야 {_paid} 는 그대로)" if _paid else ""))
+            return False
+        if self._is_busy() or self._island_running() or self._human_busy():
+            click_log(f"[복구확인] '{name}' 끝 — 복구할 것 {cand} 를 봤지만 다른 작업·사람이 "
+                      f"쓰는 중이라 목록에만 둔다 (5분 쉬면 자동복구가 한다)")
+            return False
+        click_log(f"[복구확인] 🩹 '{name}' 끝 — 깨어 있는 클라에 십자가 {cand} → **스스로 복구한다**"
+                  + (f" · 💎 다야 {_paid} 는 그대로" if _paid else ""))
+        self.after(0, lambda: self._fix_all_go(auto=True, only=aw, skip_paid=True))
+        t2 = time.time()
+        idle = 0
+        time.sleep(3.0)
+        while time.time() - t2 < FIX_AFTER_MAX:
+            if _STOP_AT[0] >= ts:
+                click_log(f"[복구확인] '{name}' 뒤 복구 — ■ 멈춤이 눌려 기다리지 않는다")
+                return True
+            idle = idle + 1 if self._dawn_fix_idle() else 0
+            if idle >= 2:
+                break
+            time.sleep(2.0)
+        click_log(f"[복구확인] '{name}' 뒤 복구 끝 ({int(time.time() - t2)}초) · "
+                  f"남은 목록 {sorted(self._warn_load())}")
+        return True
+
+    def _sleep_after_run(self, name, do_sleep=True, do_fix=False):
         self._sleep_after_busy = True
         _ts = time.time()
         try:
@@ -47182,6 +47265,16 @@ class App(tk.Tk):
                     click_log(f"[절전] '{name}' 끝 — 사람이 {SLEEP_AFTER_WAIT // 60}분 내내 컴퓨터를 써서 재우지 않았다")
                     return
                 time.sleep(5)
+            if do_fix:
+                try:
+                    if self._fix_after_run(name, _ts):
+                        # 복구가 클라를 깨웠다 — 다시 조용해진 뒤 재운다
+                        if _STOP_AT[0] >= _ts or self._is_busy() or self._island_running():
+                            return
+                except Exception as _fe:
+                    click_log(f"[복구확인] ⚠ '{name}' 뒤 복구 오류 — {type(_fe).__name__}: {_fe}")
+            if not do_sleep:
+                return
             if not self._try_busy("절전 돌려놓기"):
                 return
             try:
