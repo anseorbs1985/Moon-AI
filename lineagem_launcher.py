@@ -3407,7 +3407,7 @@ FIX_ALL_AWAKE_ONLY = True
 #    *"복구를 새벽 4시에 한번 해주고, 다야복구나 그런 거 그대로 냅두고,
 #      5시 넘어서 과거섬 실행하기 전에 한 번 더 … 5:02~7분 사이에 복구를 한번 돌고,
 #      마지막 복구까지 시행하면 6분 뒤에 과거섬을 돌아줘"*
-#    · 4:00~4:05 (매일)  ·  5:02~5:07 (과거섬을 도는 날만 — 수·토·건너뛰기 날은 안 한다)
+#    · 4:00~4:05 (매일)  ·  5:02~5:07 (**매일** — 2026-11-28 부터. 과거섬 기다림은 과거섬 도는 날만)
 #    · [▶ 전부 복구] 와 **같은 길**이다 — 자는 클라는 F11 로 **전부** 깨워서 본다
 #      (`wake_all`) · 💎 진짜 다야(coin·zone)·다 써버린 다야는 **건드리지 않는다** (`skip_paid`)
 #    · 5시 복구가 **완전히 끝난 뒤 6분**이 지나야 과거섬이 시작한다 (`_dawn_past_gate`).
@@ -43854,8 +43854,10 @@ class App(tk.Tk):
                 now = datetime.datetime.now()
                 day = now.date()
                 for tag, a, b, late in FIX_DAWN_RUNS:
-                    if tag == "d5" and not self._past_day_ok(now):
-                        continue
+                    # 🌅 5시 복구는 **매일** 한다 (2026-11-28 사용자: *"새벽에 과거섬 돌기 전에 복구를
+                    #    한번 돌려주라니까 왜 안해주는거야"*). 예전엔 과거섬을 도는 날만 해서
+                    #    수·토(과거섬을 건너뛰는 날)에는 4시 복구 뒤로 아무도 안 봤다.
+                    #    과거섬을 기다리게 하는 것(`_dawn_past_gate`)은 과거섬 도는 날만 그대로다.
                     t_a = now.replace(hour=a[0], minute=a[1], second=0, microsecond=0)
                     t_b = now.replace(hour=b[0], minute=b[1], second=0, microsecond=0)
                     t_l = now.replace(hour=late[0], minute=late[1], second=0, microsecond=0)
