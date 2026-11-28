@@ -47213,9 +47213,10 @@ class App(tk.Tk):
                 break
             if self._is_busy(exclude="절전 돌려놓기"):
                 break
-            if hw[si] and hw[si][4] == fg:
-                kept.append(f"#{si + 1:02d}(보던 창)")
-                continue
+            # 🌙 **맨 앞 창이라고 빼지 않는다** (2026-11-28 사용자: *"절전을 할려면 다 하던지
+            #    몇개는 빼놓는건 왜그런거냐"*). 작업이 끝난 직후 맨 앞 창은 **런처가 마지막에
+            #    올린 클라**라 사람이 보던 창이 아니었다 — 그래서 매번 하나씩 깨어 있는 채 남았다.
+            #    사람이 실제로 쓰던 클라는 아래 '방금 누름'(5분)이 지킨다.
             if time.time() - hs.get(si + 1, 0.0) < SLEEP_SKIP_HUMAN:
                 kept.append(f"#{si + 1:02d}(방금 누름)")
                 continue
